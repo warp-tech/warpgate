@@ -6,7 +6,7 @@
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
 
-    import { api, ApiAuthState, LoginFailureResponseFromJSON, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
+    import { api, ApiAuthState, LoginFailureResponseFromJSON, PasswordLoginMode, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { stringifyError } from 'common/errors'
     import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
@@ -22,6 +22,10 @@
     let authState: ApiAuthState|undefined = $state()
     let ssoProvidersPromise = api.getSsoProviders()
     let showPasswordLogin = $state(false)
+
+    const passwordLoginMode = $derived($serverInfo?.passwordLoginMode ?? PasswordLoginMode.Enabled)
+    const passwordLoginAllowed = $derived(passwordLoginMode !== PasswordLoginMode.Disabled)
+    const passwordLoginMinimized = $derived(passwordLoginMode === PasswordLoginMode.Minimized)
 
     const nextURL = new URLSearchParams(get(querystring)).get('next') ?? undefined
     const serverErrorMessage = new URLSearchParams(location.search).get('login_error')
@@ -212,7 +216,7 @@
                 </Button>
             </form>
         {/if}
-        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && (!$serverInfo?.minimizePasswordLogin || showPasswordLogin)}
+        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginAllowed && (!passwordLoginMinimized || showPasswordLogin)}
             <!-- eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -->
             {@render localLoginForm()}
         {/if}
@@ -260,7 +264,7 @@
         </Loadable>
     {/if}
 
-    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && $serverInfo?.minimizePasswordLogin && !showPasswordLogin}
+    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginMinimized && !showPasswordLogin}
         <div class="mt-3 text-center">
             <!-- svelte-ignore a11y_invalid_attribute -->
             <a

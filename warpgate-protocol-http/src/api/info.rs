@@ -84,7 +84,7 @@ pub struct Info {
     external_host: Option<String>,
     external_hosts: Option<ExternalHostsInfo>,
     ports: PortsInfo,
-    minimize_password_login: bool,
+    password_login_mode: Parameters::PasswordLoginMode,
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
     own_credential_management_allowed: bool,
@@ -263,7 +263,7 @@ impl Api {
                 .and_then(|auth_ctx| auth_ctx.auth.username().map(ToString::to_string)),
             selected_target: session.get_target_name(),
             external_host,
-            minimize_password_login: parameters.minimize_password_login,
+            password_login_mode: parameters.password_login_mode,
             authorized_via_ticket: matches!(
                 session.get_auth(),
                 Some(SessionAuthorization::Ticket { .. })

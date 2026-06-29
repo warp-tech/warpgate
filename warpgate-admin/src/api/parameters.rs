@@ -20,7 +20,7 @@ struct ParameterValues {
     pub ssh_client_auth_publickey: bool,
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
-    pub minimize_password_login: bool,
+    pub password_login_mode: Parameters::PasswordLoginMode,
     pub ticket_self_service_enabled: bool,
     pub ticket_auto_approve_existing_access: bool,
     pub ticket_max_duration_seconds: Option<i64>,
@@ -54,7 +54,7 @@ struct ParameterUpdate {
     pub ssh_client_auth_publickey: Option<bool>,
     pub ssh_client_auth_password: Option<bool>,
     pub ssh_client_auth_keyboard_interactive: Option<bool>,
-    pub minimize_password_login: Option<bool>,
+    pub password_login_mode: Option<Parameters::PasswordLoginMode>,
     pub ticket_self_service_enabled: Option<bool>,
     pub ticket_auto_approve_existing_access: Option<bool>,
     pub ticket_max_duration_seconds: Option<Option<i64>>,
@@ -112,7 +112,7 @@ impl Api {
             ssh_client_auth_publickey: parameters.ssh_client_auth_publickey,
             ssh_client_auth_password: parameters.ssh_client_auth_password,
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
-            minimize_password_login: parameters.minimize_password_login,
+            password_login_mode: parameters.password_login_mode,
             ticket_self_service_enabled: parameters.ticket_self_service_enabled,
             ticket_auto_approve_existing_access: parameters.ticket_auto_approve_existing_access,
             ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
@@ -166,7 +166,7 @@ impl Api {
         parameters.ssh_client_auth_keyboard_interactive = body
             .ssh_client_auth_keyboard_interactive
             .map_or(NotSet, Set);
-        parameters.minimize_password_login = body.minimize_password_login.map_or(NotSet, Set);
+        parameters.password_login_mode = body.password_login_mode.map_or(NotSet, Set);
         parameters.ticket_self_service_enabled =
             body.ticket_self_service_enabled.map_or(NotSet, Set);
         parameters.ticket_auto_approve_existing_access =

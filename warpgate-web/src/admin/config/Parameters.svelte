@@ -1,7 +1,7 @@
 <script lang="ts">
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { link } from 'svelte-spa-router'
-    import { api, TargetClickAction, type ParameterValues } from 'admin/lib/api'
+    import { api, TargetClickAction, PasswordLoginMode, type ParameterValues } from 'admin/lib/api'
     import { api as gatewayApi } from 'gateway/lib/api'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
@@ -346,19 +346,20 @@
 
                 {#if hasSsoProviders}
                 <Section id="login" title="Login">
-                    <label
-                        for="minimizePasswordLogin"
-                        class="d-flex align-items-center"
-                    >
-                        <Input
-                            id="minimizePasswordLogin"
-                            class="mb-0 me-2"
-                            type="switch"
-                            bind:checked={parameters.minimizePasswordLogin} />
-                        <div>Minimize password login UI</div>
-                    </label>
+                    <FormGroup floating label="Password login">
+                        <select
+                            id="passwordLoginMode"
+                            class="form-select"
+                            value={parameters.passwordLoginMode ?? 'Enabled'}
+                            onchange={e => parameters!.passwordLoginMode = e.currentTarget.value as PasswordLoginMode}
+                        >
+                            <option value="Enabled">Enabled</option>
+                            <option value="Minimized">Minimized (hidden behind a link)</option>
+                            <option value="Disabled">Disabled (SSO only)</option>
+                        </select>
+                    </FormGroup>
                     <InfoBox class="mt-3 mb-3">
-                        When enabled, the username and password fields are hidden behind a link on the login page, with the focus on the SSO buttons.
+                        Minimized hides the username and password fields behind a link, with the focus on the SSO buttons. Disabled removes password login entirely and the server rejects password attempts — make sure all users can sign in via SSO first.
                     </InfoBox>
                 </Section>
                 {/if}

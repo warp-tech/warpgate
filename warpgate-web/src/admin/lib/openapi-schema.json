@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.25.5-19-g63bf4ede-modified"
+    "version": "v0.25.5-25-g131c8c32-modified"
   },
   "servers": [
     {
@@ -5216,8 +5216,8 @@
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
           },
-          "minimize_password_login": {
-            "type": "boolean"
+          "password_login_mode": {
+            "$ref": "#/components/schemas/PasswordLoginMode"
           },
           "ticket_self_service_enabled": {
             "type": "boolean"
@@ -5314,7 +5314,7 @@
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
-          "minimize_password_login",
+          "password_login_mode",
           "ticket_self_service_enabled",
           "ticket_auto_approve_existing_access",
           "ticket_require_description",
@@ -5354,8 +5354,8 @@
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
           },
-          "minimize_password_login": {
-            "type": "boolean"
+          "password_login_mode": {
+            "$ref": "#/components/schemas/PasswordLoginMode"
           },
           "ticket_self_service_enabled": {
             "type": "boolean"
@@ -5443,6 +5443,15 @@
             "type": "boolean"
           }
         }
+      },
+      "PasswordLoginMode": {
+        "type": "string",
+        "description": "How the password login form is presented on the gateway login page.",
+        "enum": [
+          "Enabled",
+          "Minimized",
+          "Disabled"
+        ]
       },
       "PasswordPolicy": {
         "type": "object",
