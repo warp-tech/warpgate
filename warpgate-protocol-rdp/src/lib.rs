@@ -184,6 +184,17 @@ async fn run(
         });
     }
 
+    // Security posture: warn when connecting without TLS certificate verification. This is
+    // the documented default (RDP targets commonly use self-signed certs, and NLA/CredSSP
+    // channel-binds credentials to the server's public key), but it shouldn't be silent.
+    if !options.verify_tls {
+        warn!(
+            "Connecting to RDP target without TLS certificate verification (verify_tls=false); \
+             relying on NLA/CredSSP credential binding. Set `verify_tls: true` on the target to \
+             enforce certificate validation."
+        );
+    }
+
     // Send the connection config as the first line.
     let config = ConnectConfig {
         host: options.host.clone(),

@@ -307,6 +307,13 @@ async fn negotiate_and_authorize(
                 .user_info()
                 .clone();
             let (target, options) = finalize_user_auth(services, &username, &target_name).await?;
+            // Interactive (TOTP / web-approval) auth fully succeeded: clear any failed
+            // attempts, mirroring the password-only `Accepted` path in `authenticate` and
+            // the SSH baseline, which clears counters once 2FA completes. Fail open.
+            let _ = services
+                .login_protection
+                .clear_failed_attempts(&remote_address.ip(), &user_info.username)
+                .await;
             (user_info, target, options)
         }
     };
