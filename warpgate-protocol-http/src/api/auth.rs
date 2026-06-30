@@ -24,6 +24,7 @@ use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::Services;
 use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
+use warpgate_db_entities::Parameters;
 
 use super::common::{emit_unknown_authentication_failed_event, logout};
 use crate::common::{
@@ -192,6 +193,19 @@ impl Api {
                     ApiAuthState::IpBlocked,
                 ))));
             }
+        }
+
+        // Password login can be disabled globally (e.g. SSO-only deployments).
+        if Parameters::Entity::get(&*services.db.lock().await)
+            .await
+            .map_err(WarpgateError::from)?
+            .password_login_mode
+            == Parameters::PasswordLoginMode::Disabled
+        {
+            warn!(username = %body.username, "Password login attempt while disabled");
+            return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                ApiAuthState::Failed,
+            ))));
         }
 
         // Check if user is locked

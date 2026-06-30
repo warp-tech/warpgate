@@ -14,6 +14,21 @@ pub enum TargetClickAction {
     ShowInstructions,
 }
 
+/// How the password login form is presented on the gateway login page.
+#[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
+pub enum PasswordLoginMode {
+    /// Password form shown alongside other methods.
+    #[sea_orm(string_value = "Enabled")]
+    Enabled,
+    /// Password form hidden behind a "Password login" link.
+    #[sea_orm(string_value = "Minimized")]
+    Minimized,
+    /// Password login not offered and rejected by the server.
+    #[sea_orm(string_value = "Disabled")]
+    Disabled,
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "parameters")]
 pub struct Model {
@@ -28,7 +43,7 @@ pub struct Model {
     pub ssh_client_auth_publickey: bool,
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
-    pub minimize_password_login: bool,
+    pub password_login_mode: PasswordLoginMode,
     pub ticket_self_service_enabled: bool,
     pub ticket_auto_approve_existing_access: bool,
     pub ticket_max_duration_seconds: Option<i64>,
@@ -94,7 +109,7 @@ impl Entity {
                     ssh_client_auth_publickey: Set(true),
                     ssh_client_auth_password: Set(true),
                     ssh_client_auth_keyboard_interactive: Set(true),
-                    minimize_password_login: Set(false),
+                    password_login_mode: Set(PasswordLoginMode::Enabled),
                     ticket_self_service_enabled: Set(false),
                     ticket_auto_approve_existing_access: Set(true),
                     ticket_max_duration_seconds: Set(Some(28800)),
