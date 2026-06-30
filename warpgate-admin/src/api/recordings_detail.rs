@@ -14,7 +14,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::error;
 use uuid::Uuid;
-use warpgate_common::AdminPermission;
+use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::recordings::{AsciiCast, TerminalRecordingItem};
 use warpgate_db_entities::Recording::{self, RecordingKind};
@@ -206,11 +206,13 @@ pub async fn api_get_recording_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, WarpgateError> {
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
     let recordings = ctx.services().recordings.lock().await;
     let receiver = recordings.subscribe_live(&id).await;
 
-    ws.on_upgrade(|socket| async move {
+    Ok(ws.on_upgrade(|socket| async move {
         let (mut sink, _) = socket.split();
 
         sink.send(Message::Text(serde_json::to_string(&json!({
@@ -242,5 +244,5 @@ pub async fn api_get_recording_stream(
         }
 
         Ok::<(), anyhow::Error>(())
-    })
+    }))
 }
