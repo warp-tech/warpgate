@@ -29,14 +29,43 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
 
     check_and_migrate_config(&mut store);
 
-    let store: WarpgateConfigStore =
-        serde_yaml::from_value(store).context("Could not load config")?;
+    // Deserialize via serde_ignored so that unknown / misplaced keys are
+    // surfaced instead of silently dropped. Warpgate's config structs do not
+    // use `deny_unknown_fields`, so a typo'd or wrongly-nested key (e.g.
+    // `role_mappings` placed on the sso_providers entry instead of under
+    // `provider`, or `log.retention_days` instead of `log.retention`) would
+    // otherwise parse green and have no effect — and `warpgate check` could not
+    // catch it. We keep loading (non-breaking) but warn with the full path of
+    // each ignored key.
+    let (store, ignored_keys) =
+        deserialize_store_collecting_ignored(store).context("Could not load config")?;
+    for path in &ignored_keys {
+        warn!(
+            "Ignoring unknown config key `{path}` — likely a typo or a misplaced key; it has NO effect"
+        );
+    }
 
     let config = WarpgateConfig { store };
 
     info!("Using config: {:?}", params.config_path());
     config.validate();
     Ok(config)
+}
+
+/// Deserialize the merged config value into the typed store, collecting the
+/// dotted paths of any keys Warpgate does not recognise. Because the config
+/// structs have no `deny_unknown_fields`, such keys are otherwise silently
+/// dropped; we record them so the caller can warn instead.
+fn deserialize_store_collecting_ignored(
+    value: serde_yaml::Value,
+) -> Result<(WarpgateConfigStore, Vec<String>), serde_yaml::Error> {
+    use serde::de::IntoDeserializer;
+    let mut ignored = vec![];
+    let store = serde_ignored::deserialize(
+        IntoDeserializer::<serde_yaml::Error>::into_deserializer(value),
+        |path| ignored.push(path.to_string()),
+    )?;
+    Ok((store, ignored))
 }
 
 fn check_and_migrate_config(store: &mut serde_yaml::Value) {
@@ -117,4 +146,50 @@ pub fn watch_config(
     });
 
     Ok(rx2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(yaml: &str) -> (WarpgateConfigStore, Vec<String>) {
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        deserialize_store_collecting_ignored(value).unwrap()
+    }
+
+    #[test]
+    fn known_keys_produce_no_ignored_paths() {
+        let (_store, ignored) =
+            parse("external_host: bastion.example\nhttp:\n  listen: \"0.0.0.0:8888\"\n");
+        assert!(ignored.is_empty(), "unexpected ignored keys: {ignored:?}");
+    }
+
+    #[test]
+    fn reports_unknown_top_level_key() {
+        let (_store, ignored) = parse("external_host: x\nbogus_key: 1\n");
+        assert_eq!(ignored, vec!["bogus_key".to_string()]);
+    }
+
+    #[test]
+    fn reports_misplaced_nested_key_with_full_path() {
+        // role_mappings belongs UNDER `provider:`, not on the sso_providers entry.
+        // Misplaced here it is silently ignored, so SSO users get no roles.
+        let yaml = "
+sso_providers:
+  - name: keycloak
+    provider:
+      type: custom
+      client_id: warpgate
+      client_secret: secret
+      issuer_url: https://id.example/realms/x
+      scopes: [openid]
+    role_mappings:
+      admins: warpgate:admin
+";
+        let (_store, ignored) = parse(yaml);
+        assert!(
+            ignored.iter().any(|p| p.contains("role_mappings")),
+            "expected the misplaced role_mappings to be reported, got {ignored:?}"
+        );
+    }
 }

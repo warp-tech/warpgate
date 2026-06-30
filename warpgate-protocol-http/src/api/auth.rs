@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use anyhow::bail;
@@ -11,15 +12,18 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_admin::api::AnySecurityScheme;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
+use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
+use warpgate_common_http::logging::get_client_ip;
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::Services;
 use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::login_protection::FailedAttemptInfo;
 
 use super::common::{emit_unknown_authentication_failed_event, logout};
 use crate::common::{
@@ -50,12 +54,38 @@ enum ApiAuthState {
     WebUserApprovalNeeded,
     PublicKeyNeeded,
     Success,
+    IpBlocked,
+    UserLocked,
     IpRejected,
 }
 
 #[derive(Object)]
 struct LoginFailureResponse {
     state: ApiAuthState,
+    /// True when the credential the client just submitted was rejected
+    /// (as opposed to merely needing another factor). Lets the UI show an
+    /// "incorrect credentials" message and avoid auto-advancing to another
+    /// authentication method.
+    credential_rejected: bool,
+}
+
+impl LoginFailureResponse {
+    /// A failure that is not caused by an invalid credential (e.g. blocked IP,
+    /// locked user, or simply a credential still being required).
+    fn state(state: ApiAuthState) -> Self {
+        Self {
+            state,
+            credential_rejected: false,
+        }
+    }
+
+    /// A failure caused by the client submitting an invalid credential.
+    fn credential_rejected(state: ApiAuthState) -> Self {
+        Self {
+            state,
+            credential_rejected: true,
+        }
+    }
 }
 
 #[derive(ApiResponse)]
@@ -145,6 +175,40 @@ impl Api {
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
         let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
+        let services = ctx.services();
+        let client_ip: Option<IpAddr> = get_client_ip(req, services)
+            .await
+            .and_then(|s| s.parse().ok());
+
+        // Check if IP is blocked
+        if let Some(ip) = client_ip {
+            if let Some(block_info) = services.login_protection.check_ip_blocked(&ip).await? {
+                warn!(
+                    ip = %ip,
+                    expires_at = %block_info.expires_at,
+                    "Login attempt from blocked IP"
+                );
+                return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                    ApiAuthState::IpBlocked,
+                ))));
+            }
+        }
+
+        // Check if user is locked
+        if let Some(_lock_info) = services
+            .login_protection
+            .check_user_locked(&body.username)
+            .await?
+        {
+            warn!(
+                username = %body.username,
+                "Login attempt for locked user"
+            );
+            return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                ApiAuthState::UserLocked,
+            ))));
+        }
+
         let state_arc = match get_or_create_auth_state_for_request(req, &body.username, &ctx).await
         {
             Err(WarpgateError::UserNotFound(_)) => {
@@ -156,9 +220,20 @@ impl Api {
                     "password",
                     "unknown user",
                 );
-                return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                    state: ApiAuthState::Failed,
-                })));
+                if let Some(ip) = client_ip {
+                    let _ = services
+                        .login_protection
+                        .record_failed_attempt(FailedAttemptInfo {
+                            username: body.username.clone(),
+                            remote_ip: ip,
+                            protocol: "http".to_string(),
+                            credential_type: "password".to_string(),
+                        })
+                        .await;
+                }
+                return Ok(LoginResponse::Failure(Json(
+                    LoginFailureResponse::credential_rejected(ApiAuthState::Failed),
+                )));
             }
             Err(WarpgateError::IpAddrNotAllowed(..)) => {
                 let session_id = session_id_for_request(req, &ctx).await?;
@@ -169,15 +244,15 @@ impl Api {
                     "password",
                     "IP address not allowed",
                 );
-                return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                    state: ApiAuthState::IpRejected,
-                })));
+                return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                    ApiAuthState::IpRejected,
+                ))));
             }
             x => x,
         }?;
         let mut state = state_arc.lock().await;
 
-        validate_and_add_credential(
+        let credential_valid = validate_and_add_credential(
             &mut state,
             &AuthCredential::Password(Secret::new(body.password.clone())),
             &mut *ctx.services().config_provider.lock().await,
@@ -186,6 +261,7 @@ impl Api {
 
         match state.verify() {
             AuthResult::Accepted { user_info } => {
+                let username = user_info.username.clone();
                 authorize_session(req, &ctx, user_info).await?;
                 state.emit_authenticated_event_once();
                 let state_id = *state.id();
@@ -196,12 +272,35 @@ impl Api {
                     .await
                     .complete(&state_id)
                     .await;
+                // Clear failed attempts on successful login
+                if let Some(ip) = client_ip {
+                    let _ = services
+                        .login_protection
+                        .clear_failed_attempts(&ip, &username)
+                        .await;
+                }
                 Ok(LoginResponse::Success)
             }
             x => {
-                error!("Auth rejected");
+                // Only an invalid password counts as a failed attempt; a valid
+                // password that merely needs a second factor is not a failure.
+                if !credential_valid {
+                    error!("Password authentication failed");
+                    if let Some(ip) = client_ip {
+                        let _ = services
+                            .login_protection
+                            .record_failed_attempt(FailedAttemptInfo {
+                                username: state.user_info().username.clone(),
+                                remote_ip: ip,
+                                protocol: "http".to_string(),
+                                credential_type: "password".to_string(),
+                            })
+                            .await;
+                    }
+                }
                 Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                     state: x.into(),
+                    credential_rejected: !credential_valid,
                 })))
             }
         }
@@ -215,16 +314,48 @@ impl Api {
         body: Json<OtpLoginRequest>,
     ) -> poem::Result<LoginResponse> {
         let services = ctx.services();
+        let client_ip: Option<IpAddr> = get_client_ip(req, services)
+            .await
+            .and_then(|s| s.parse().ok());
+
+        // Check if IP is blocked
+        if let Some(ip) = client_ip {
+            if let Some(block_info) = services.login_protection.check_ip_blocked(&ip).await? {
+                warn!(
+                    ip = %ip,
+                    expires_at = %block_info.expires_at,
+                    "OTP login attempt from blocked IP"
+                );
+                return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                    ApiAuthState::IpBlocked,
+                ))));
+            }
+        }
 
         let Some(state_arc) = get_auth_state_for_request(req, &ctx).await? else {
-            return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                state: ApiAuthState::NotStarted,
-            })));
+            return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                ApiAuthState::NotStarted,
+            ))));
         };
 
         let mut state = state_arc.lock().await;
 
-        validate_and_add_credential(
+        // Check if user is locked
+        if let Some(_lock_info) = services
+            .login_protection
+            .check_user_locked(&state.user_info().username)
+            .await?
+        {
+            warn!(
+                username = %state.user_info().username,
+                "OTP login attempt for locked user"
+            );
+            return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                ApiAuthState::UserLocked,
+            ))));
+        }
+
+        let credential_valid = validate_and_add_credential(
             &mut state,
             &AuthCredential::Otp(body.otp.clone().into()),
             &mut *services.config_provider.lock().await,
@@ -233,6 +364,7 @@ impl Api {
 
         match state.verify() {
             AuthResult::Accepted { user_info } => {
+                let username = user_info.username.clone();
                 authorize_session(req, &ctx, user_info).await?;
                 state.emit_authenticated_event_once();
                 let state_id = *state.id();
@@ -243,11 +375,35 @@ impl Api {
                     .await
                     .complete(&state_id)
                     .await;
+                // Clear failed attempts on successful login
+                if let Some(ip) = client_ip {
+                    let _ = services
+                        .login_protection
+                        .clear_failed_attempts(&ip, &username)
+                        .await;
+                }
                 Ok(LoginResponse::Success)
             }
-            x => Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                state: x.into(),
-            }))),
+            x => {
+                // Only an invalid OTP counts as a failed attempt.
+                if !credential_valid {
+                    if let Some(ip) = client_ip {
+                        let _ = services
+                            .login_protection
+                            .record_failed_attempt(FailedAttemptInfo {
+                                username: state.user_info().username.clone(),
+                                remote_ip: ip,
+                                protocol: "http".to_string(),
+                                credential_type: "otp".to_string(),
+                            })
+                            .await;
+                    }
+                }
+                Ok(LoginResponse::Failure(Json(LoginFailureResponse {
+                    state: x.into(),
+                    credential_rejected: !credential_valid,
+                })))
+            }
         }
     }
 
@@ -445,7 +601,7 @@ async fn get_foreign_auth_state(
 
     {
         let state = state_arc.lock().await;
-        if &state.user_info().username != username {
+        if !username_eq_ci(&state.user_info().username, username) {
             return None;
         }
     }
@@ -506,7 +662,7 @@ pub async fn api_get_web_auth_requests_stream(
             let auth_state_store = auth_state_store.lock().await;
             if let Some(state) = auth_state_store.get(&id) {
                 let state = state.lock().await;
-                if state.user_info().username == username {
+                if username_eq_ci(&state.user_info().username, &username) {
                     sink.send(Message::Text(id.to_string())).await?;
                 }
             }

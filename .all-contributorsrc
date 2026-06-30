@@ -207,6 +207,33 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "theharold",
+      "name": "theharold",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19338240?v=4",
+      "profile": "https://github.com/theharold",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "noammeltzer-ax",
+      "name": "noammeltzer-ax",
+      "avatar_url": "https://avatars.githubusercontent.com/u/240492416?v=4",
+      "profile": "https://github.com/noammeltzer-ax",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "snvtac",
+      "name": "Haoqian",
+      "avatar_url": "https://avatars.githubusercontent.com/u/18233097?v=4",
+      "profile": "https://github.com/snvtac",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

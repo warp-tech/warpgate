@@ -797,6 +797,36 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         call=lambda api, r: api.delete_admin_role_with_http_info(r["admin_role_id"]),
         expected_statuses={204},
     ),
+    AdminApiTestCase(
+        id="get_security_status",
+        permission=None,
+        call=lambda api, r: api.get_security_status_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="list_blocked_ips",
+        permission=None,
+        call=lambda api, r: api.list_blocked_ips_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="unblock_ip",
+        permission="config_edit",
+        call=lambda api, r: api.unblock_ip_with_http_info(sdk.UnblockIpRequest(ip="127.0.0.1")),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="list_locked_users",
+        permission=None,
+        call=lambda api, r: api.list_locked_users_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="unlock_user",
+        permission="config_edit",
+        call=lambda api, r: api.unlock_user_with_http_info("nonexistent-user"),
+        expected_statuses={200, 404},
+    ),
 ]
 
 
@@ -1014,10 +1044,7 @@ def test_admin_api_permission_enforcement(
     if case.permission:
         denied_role = _create_admin_role(
             admin_client,
-            {
-                k: not v if isinstance(v, bool) else v
-                for k, v in allow_payload.items()
-            },
+            {k: not v if isinstance(v, bool) else v for k, v in allow_payload.items()},
         )
         denied_user = _create_user_with_role(admin_client, denied_role.id)
     else:

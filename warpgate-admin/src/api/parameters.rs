@@ -32,11 +32,26 @@ struct ParameterValues {
     pub password_policy: PasswordPolicy,
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
+    pub login_protection_enabled: bool,
+    pub login_protection_retention_seconds: i32,
+    pub lp_ip_max_attempts: i32,
+    pub lp_ip_time_window_seconds: i32,
+    pub lp_ip_base_block_duration_seconds: i32,
+    pub lp_ip_block_duration_multiplier: f64,
+    pub lp_ip_max_block_duration_seconds: i32,
+    pub lp_ip_cooldown_reset_seconds: i32,
+    pub lp_user_max_attempts: i32,
+    pub lp_user_time_window_seconds: i32,
+    pub lp_user_auto_unlock: bool,
+    pub lp_user_lockout_duration_seconds: i32,
+    pub lp_user_exempt_admins: bool,
+    pub ssh_banner: String,
+    pub web_ssh_enabled: bool,
 }
 
 #[derive(Serialize, Object)]
 struct ParameterUpdate {
-    pub allow_own_credential_management: bool,
+    pub allow_own_credential_management: Option<bool>,
     pub rate_limit_bytes_per_second: Option<u32>,
     pub ssh_client_auth_publickey: Option<bool>,
     pub ssh_client_auth_password: Option<bool>,
@@ -53,6 +68,21 @@ struct ParameterUpdate {
     pub password_policy: Option<PasswordPolicy>,
     pub max_api_token_duration_seconds: Option<Option<i64>>,
     pub record_scp: Option<bool>,
+    pub login_protection_enabled: Option<bool>,
+    pub login_protection_retention_seconds: Option<i32>,
+    pub lp_ip_max_attempts: Option<i32>,
+    pub lp_ip_time_window_seconds: Option<i32>,
+    pub lp_ip_base_block_duration_seconds: Option<i32>,
+    pub lp_ip_block_duration_multiplier: Option<f64>,
+    pub lp_ip_max_block_duration_seconds: Option<i32>,
+    pub lp_ip_cooldown_reset_seconds: Option<i32>,
+    pub lp_user_max_attempts: Option<i32>,
+    pub lp_user_time_window_seconds: Option<i32>,
+    pub lp_user_auto_unlock: Option<bool>,
+    pub lp_user_lockout_duration_seconds: Option<i32>,
+    pub lp_user_exempt_admins: Option<bool>,
+    pub ssh_banner: Option<String>,
+    pub web_ssh_enabled: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -98,6 +128,21 @@ impl Api {
             password_policy: parameters.password_policy(),
             max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
             record_scp: parameters.record_scp,
+            login_protection_enabled: parameters.login_protection_enabled,
+            login_protection_retention_seconds: parameters.login_protection_retention_seconds,
+            lp_ip_max_attempts: parameters.lp_ip_max_attempts,
+            lp_ip_time_window_seconds: parameters.lp_ip_time_window_seconds,
+            lp_ip_base_block_duration_seconds: parameters.lp_ip_base_block_duration_seconds,
+            lp_ip_block_duration_multiplier: parameters.lp_ip_block_duration_multiplier,
+            lp_ip_max_block_duration_seconds: parameters.lp_ip_max_block_duration_seconds,
+            lp_ip_cooldown_reset_seconds: parameters.lp_ip_cooldown_reset_seconds,
+            lp_user_max_attempts: parameters.lp_user_max_attempts,
+            lp_user_time_window_seconds: parameters.lp_user_time_window_seconds,
+            lp_user_auto_unlock: parameters.lp_user_auto_unlock,
+            lp_user_lockout_duration_seconds: parameters.lp_user_lockout_duration_seconds,
+            lp_user_exempt_admins: parameters.lp_user_exempt_admins,
+            ssh_banner: parameters.ssh_banner,
+            web_ssh_enabled: parameters.web_ssh_enabled,
         })))
     }
 
@@ -118,7 +163,8 @@ impl Api {
         let db = services.db.lock().await;
         let mut parameters = Parameters::Entity::get(&db).await?.into_active_model();
 
-        parameters.allow_own_credential_management = Set(body.allow_own_credential_management);
+        parameters.allow_own_credential_management =
+            body.allow_own_credential_management.map_or(NotSet, Set);
         parameters.rate_limit_bytes_per_second =
             Set(body.rate_limit_bytes_per_second.map(i64::from));
         parameters.ssh_client_auth_publickey = body.ssh_client_auth_publickey.map_or(NotSet, Set);
@@ -151,6 +197,29 @@ impl Api {
             parameters.password_policy_require_digits = Set(policy.require_digits);
             parameters.password_policy_require_special = Set(policy.require_special);
         }
+
+        parameters.login_protection_enabled = body.login_protection_enabled.map_or(NotSet, Set);
+        parameters.login_protection_retention_seconds =
+            body.login_protection_retention_seconds.map_or(NotSet, Set);
+        parameters.lp_ip_max_attempts = body.lp_ip_max_attempts.map_or(NotSet, Set);
+        parameters.lp_ip_time_window_seconds = body.lp_ip_time_window_seconds.map_or(NotSet, Set);
+        parameters.lp_ip_base_block_duration_seconds =
+            body.lp_ip_base_block_duration_seconds.map_or(NotSet, Set);
+        parameters.lp_ip_block_duration_multiplier =
+            body.lp_ip_block_duration_multiplier.map_or(NotSet, Set);
+        parameters.lp_ip_max_block_duration_seconds =
+            body.lp_ip_max_block_duration_seconds.map_or(NotSet, Set);
+        parameters.lp_ip_cooldown_reset_seconds =
+            body.lp_ip_cooldown_reset_seconds.map_or(NotSet, Set);
+        parameters.lp_user_max_attempts = body.lp_user_max_attempts.map_or(NotSet, Set);
+        parameters.lp_user_time_window_seconds =
+            body.lp_user_time_window_seconds.map_or(NotSet, Set);
+        parameters.lp_user_auto_unlock = body.lp_user_auto_unlock.map_or(NotSet, Set);
+        parameters.lp_user_lockout_duration_seconds =
+            body.lp_user_lockout_duration_seconds.map_or(NotSet, Set);
+        parameters.lp_user_exempt_admins = body.lp_user_exempt_admins.map_or(NotSet, Set);
+        parameters.ssh_banner = body.ssh_banner.clone().map_or(NotSet, Set);
+        parameters.web_ssh_enabled = body.web_ssh_enabled.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);

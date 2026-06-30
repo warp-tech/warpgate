@@ -9,10 +9,12 @@ use delegate::delegate;
 use futures::{StreamExt, TryStreamExt};
 use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
-use http::{HeaderValue, Uri};
+use http::{HeaderValue, StatusCode, Uri};
 use poem::session::Session;
+use poem::web::Data;
 use poem::web::websocket::WebSocket;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
+use tokio::sync::Mutex;
 use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
 use tracing::{debug, error, warn};
 use url::Url;
@@ -22,11 +24,14 @@ use warpgate_common::http_headers::{
 };
 use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
 use warpgate_common_http::logging::{get_client_ip, log_request_result};
-use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
+use warpgate_common_http::{
+    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
+};
 use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
 use crate::common::SessionExt;
+use crate::session::SessionStore;
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
 static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
@@ -181,7 +186,14 @@ fn rewrite_response(
         for value in entry.iter_mut() {
             try_block!({
                 let mut cookie = Cookie::parse(value.to_str()?)?;
-                cookie.set_expires(cookie::Expiration::Session);
+                // Some apps clear a cookie by re-setting it with an expiration
+                // in the past. We keep these as-is
+                // https://github.com/warp-tech/warpgate/issues/2112
+                if let Some(cookie::Expiration::DateTime(expires)) = cookie.expires()
+                    && expires >= cookie::time::OffsetDateTime::now_utc()
+                {
+                    cookie.set_expires(cookie::Expiration::Session);
+                }
                 // the domain set by the target isn't going to match the actual host anyway
                 // https://github.com/warp-tech/warpgate/issues/2048
                 cookie.unset_domain();
@@ -442,6 +454,20 @@ async fn proxy_ws_inner(
     ctx: &AuthenticatedRequestContext,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
+    let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
+        .await?
+        .clone();
+    let session = <&Session>::from_request_without_body(req).await?;
+    let mut close_rx = session_middleware.lock().await.close_receiver_for(session);
+    if close_rx.is_none()
+        && matches!(
+            &ctx.auth,
+            RequestAuthorization::Session(SessionAuthorization::User { .. })
+        )
+    {
+        return Err(poem::Error::from_status(StatusCode::UNAUTHORIZED));
+    }
+
     let (authorization_header, uri) = extract_basic_auth(uri)?;
     let mut client_request = http::request::Builder::new()
         .uri(uri.clone())
@@ -494,7 +520,7 @@ async fn proxy_ws_inner(
             let (server_sink, server_source) = socket.split();
 
             if let Err(error) = {
-                let server_to_client =
+                let mut server_to_client =
                     tokio::spawn(pump_websocket(server_source, client_sink, |msg| {
                         Box::pin(async {
                             tracing::debug!("Server: {:?}", msg);
@@ -502,7 +528,7 @@ async fn proxy_ws_inner(
                         })
                     }));
 
-                let client_to_server =
+                let mut client_to_server =
                     tokio::spawn(pump_websocket(client_source, server_sink, |msg| {
                         Box::pin(async {
                             tracing::debug!("Client: {:?}", msg);
@@ -510,8 +536,47 @@ async fn proxy_ws_inner(
                         })
                     }));
 
-                server_to_client.await??;
-                client_to_server.await??;
+                let (server_finished, pump_result): (
+                    bool,
+                    Option<Result<anyhow::Result<()>, tokio::task::JoinError>>,
+                ) = tokio::select! {
+                    result = &mut server_to_client => {
+                        (true, Some(result))
+                    }
+                    result = &mut client_to_server => {
+                        (false, Some(result))
+                    }
+                    _ = async {
+                        match close_rx.as_mut() {
+                            Some(close_rx) => {
+                                let _ = close_rx.recv().await;
+                            }
+                            None => std::future::pending::<()>().await,
+                        }
+                    } => {
+                        (false, None)
+                    }
+                };
+
+                match pump_result {
+                    Some(result) if server_finished => {
+                        client_to_server.abort();
+                        let _ = client_to_server.await;
+                        result.context("server-to-client WebSocket pump task failed")??;
+                    }
+                    Some(result) => {
+                        server_to_client.abort();
+                        let _ = server_to_client.await;
+                        result.context("client-to-server WebSocket pump task failed")??;
+                    }
+                    None => {
+                        debug!("Closing WebSocket stream after HTTP session ended");
+                        server_to_client.abort();
+                        client_to_server.abort();
+                        let _ = server_to_client.await;
+                        let _ = client_to_server.await;
+                    }
+                }
                 debug!("Closing Websocket stream");
 
                 Ok::<_, anyhow::Error>(())
@@ -569,5 +634,42 @@ mod tests {
         assert_eq!(cookie.path(), Some("/"));
         assert_eq!(cookie.http_only(), Some(true));
         assert_eq!(cookie.secure(), Some(true));
+    }
+
+    fn rewrite_cookie(set_cookie: &str) -> Cookie<'static> {
+        let mut resp = poem::Response::builder()
+            .header(http::header::SET_COOKIE, set_cookie)
+            .body(());
+        let options = make_options("https://100.0.0.1:7080");
+        let source_uri = Uri::try_from("https://100.0.0.1:7080/index.php").unwrap();
+        rewrite_response(&mut resp, &options, &source_uri).unwrap();
+        let cookie_headers: Vec<_> = resp
+            .headers()
+            .get_all(http::header::SET_COOKIE)
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(cookie_headers.len(), 1);
+        Cookie::parse(cookie_headers[0].clone()).unwrap()
+    }
+
+    #[test]
+    fn rewrite_response_keeps_past_expiration() {
+        // A past-dated deletion cookie would otherwise drop the live session
+        // cookie and cause a login loop. https://github.com/warp-tech/warpgate/issues/2112
+        let cookie =
+            rewrite_cookie("lsws_uid=deleted; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+        assert_eq!(cookie.value(), "deleted");
+        assert!(matches!(
+            cookie.expires(),
+            Some(cookie::Expiration::DateTime(_))
+        ));
+    }
+
+    #[test]
+    fn rewrite_response_removes_future_expiration() {
+        // A genuine persistent cookie must keep the expiry the origin set.
+        let cookie = rewrite_cookie("lsws_uid=abc; Path=/; Expires=Tue, 01 Jan 2999 00:00:00 GMT");
+        assert_eq!(cookie.expires(), None);
     }
 }
