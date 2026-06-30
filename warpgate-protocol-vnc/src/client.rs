@@ -65,6 +65,9 @@ fn map_input(input: DesktopInput) -> Vec<X11Event> {
         }
         DesktopInput::Clipboard(text) => vec![X11Event::CopyText(text)],
         DesktopInput::Refresh => vec![X11Event::FullRefresh],
+        // RFB has no raw-scancode input; native-RDP scancodes are meaningless to a
+        // VNC target, so drop them (keysym input is used for VNC instead).
+        DesktopInput::Scancode { .. } => vec![],
     }
 }
 

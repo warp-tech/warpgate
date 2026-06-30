@@ -59,6 +59,7 @@ fn default_height() -> u16 {
 enum InputMessage {
     Pointer { x: u16, y: u16, buttons: u8 },
     Key { keysym: u32, down: bool },
+    Scancode { code: u8, extended: bool, down: bool },
     Wheel { vertical: bool, delta: i16 },
 }
 
@@ -282,6 +283,21 @@ fn translate_input(msg: InputMessage, ops: &mut Vec<Operation>) {
                 is_vertical: vertical,
                 rotation_units: delta,
             }));
+        }
+        InputMessage::Scancode {
+            code,
+            extended,
+            down,
+        } => {
+            // Native RDP viewers already send PC/AT scancodes; forward them verbatim
+            // (no keysym round-trip) so every key — including layout-dependent ones — is
+            // delivered to the target exactly as typed.
+            let scancode = Scancode::from_u8(extended, code);
+            ops.push(if down {
+                Operation::KeyPressed(scancode)
+            } else {
+                Operation::KeyReleased(scancode)
+            });
         }
         InputMessage::Key { keysym, down } => {
             if let Some((extended, code)) = keysym_to_scancode(keysym) {

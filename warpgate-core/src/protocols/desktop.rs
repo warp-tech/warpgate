@@ -64,6 +64,10 @@ pub enum DesktopInput {
     Pointer { x: u16, y: u16, buttons: u8 },
     /// A key was pressed or released, identified by its X11 keysym.
     Key { keysym: u32, down: bool },
+    /// A key was pressed or released, identified by its raw PC/AT scancode
+    /// (set 1 "make" code). Emitted by native RDP viewers, which send scancodes
+    /// rather than keysyms; protocols without scancode input (e.g. VNC) ignore it.
+    Scancode { code: u8, extended: bool, down: bool },
     /// Mouse wheel scrolled at `(x, y)`. `delta` is a signed notch count
     /// (positive = up / right); `vertical` selects the axis.
     Wheel {

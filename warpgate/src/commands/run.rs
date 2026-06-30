@@ -13,6 +13,7 @@ use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_postgres::PostgresProtocolServer;
+use warpgate_protocol_rdp::RdpProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 use warpgate_protocol_vnc::VncProtocolServer;
 
@@ -111,6 +112,16 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             run_protocol_server(
                 VncProtocolServer::new(&services),
                 config.store.vnc.listen.clone(),
+            )
+            .boxed(),
+        );
+    }
+
+    if config.store.rdp.enable {
+        protocol_futures.push(
+            run_protocol_server(
+                RdpProtocolServer::new(&services),
+                config.store.rdp.listen.clone(),
             )
             .boxed(),
         );

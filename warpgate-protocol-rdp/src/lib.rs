@@ -9,7 +9,13 @@
 //! [`DesktopEvent`]/[`DesktopInput`] streams, so the existing web-desktop manager and
 //! browser canvas renderer work unchanged.
 
+mod embedded;
 mod helper;
+mod server;
+mod server_helper;
+mod session_handle;
+
+pub use server::run_server;
 
 use std::process::Stdio;
 
@@ -23,12 +29,44 @@ use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 use tracing::{Instrument, debug, error, info_span, warn};
-use warpgate_common::{ProtocolName, RdpTargetAuth, TargetRdpOptions};
+use warpgate_common::{ListenEndpoint, ProtocolName, RdpTargetAuth, TargetRdpOptions};
 use warpgate_core::{
     DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
+    ProtocolServer, Services,
 };
 
 pub static PROTOCOL_NAME: ProtocolName = "RDP";
+
+/// The native RDP server endpoint. Standard RDP clients (mstsc/FreeRDP) connect
+/// directly to Warpgate's RDP port; per connection it brokers between the viewer-facing
+/// serve helper and the existing target-facing client helper (see [`server`]).
+pub struct RdpProtocolServer {
+    services: Services,
+}
+
+impl RdpProtocolServer {
+    pub fn new(services: &Services) -> Self {
+        Self {
+            services: services.clone(),
+        }
+    }
+}
+
+impl ProtocolServer for RdpProtocolServer {
+    async fn run(self, address: ListenEndpoint) -> anyhow::Result<()> {
+        run_server(self.services, address).await
+    }
+
+    fn name(&self) -> &'static str {
+        "RDP"
+    }
+}
+
+impl std::fmt::Debug for RdpProtocolServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RdpProtocolServer").finish()
+    }
+}
 
 /// Handles for driving a backend RDP client (running in the helper subprocess).
 pub struct RdpClientHandles {
@@ -75,6 +113,7 @@ enum HelperEvent {
 enum HelperInput {
     Pointer { x: u16, y: u16, buttons: u8 },
     Key { keysym: u32, down: bool },
+    Scancode { code: u8, extended: bool, down: bool },
     Wheel { vertical: bool, delta: i16 },
 }
 
@@ -169,6 +208,15 @@ async fn run(
                     Some(HelperInput::Pointer { x, y, buttons })
                 }
                 DesktopInput::Key { keysym, down } => Some(HelperInput::Key { keysym, down }),
+                DesktopInput::Scancode {
+                    code,
+                    extended,
+                    down,
+                } => Some(HelperInput::Scancode {
+                    code,
+                    extended,
+                    down,
+                }),
                 DesktopInput::Wheel {
                     vertical, delta, ..
                 } => Some(HelperInput::Wheel {

@@ -7,6 +7,10 @@ run $RUST_BACKTRACE='1' *ARGS='run':
 build-rdp-helper *ARGS:
     cd warpgate-rdp-helper && cargo build --release {{ARGS}}
 
+# Run before `cargo build` so warpgate-protocol-rdp's build script can embed it into the main binary.
+build-rdp-server-helper *ARGS:
+    cd warpgate-rdp-server-helper && cargo build --release {{ARGS}}
+
 fmt:
     for p in {{projects}}; do cargo fmt -p $p -v; done
 

@@ -97,6 +97,11 @@ jobs:
         env:
           SOURCE_DATE_EPOCH: "0" # for embedded-helper determinism
 
+      - name: Build RDP server helper
+        run: just build-rdp-server-helper --target ${{ matrix.target }}
+        env:
+          SOURCE_DATE_EPOCH: "0" # for embedded-helper determinism
+
       - name: Build
         uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505
         with:

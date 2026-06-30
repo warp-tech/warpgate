@@ -49,10 +49,13 @@ jobs:
           just npm run openapi:tests-sdk
           just npm run build
 
-      # Built separately (own lockfile) so the workspace coverage build embeds it
+      # Built separately (own lockfiles) so the workspace coverage build embeds them
       # and warpgate-protocol-rdp's extraction test runs.
       - name: Build RDP helper
         run: just build-rdp-helper
+
+      - name: Build RDP server helper
+        run: just build-rdp-server-helper
 
       - name: Build images
         working-directory: tests
