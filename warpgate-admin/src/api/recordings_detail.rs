@@ -14,7 +14,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::error;
 use uuid::Uuid;
-use warpgate_common::AdminPermission;
+use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::recordings::{AsciiCast, TerminalRecordingItem};
 use warpgate_db_entities::Recording::{self, RecordingKind};
@@ -287,7 +287,7 @@ pub async fn api_get_recording_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
-) -> poem::Result<impl IntoResponse> {
+) -> Result<impl IntoResponse, WarpgateError> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
     let recordings = ctx.services().recordings.lock().await;

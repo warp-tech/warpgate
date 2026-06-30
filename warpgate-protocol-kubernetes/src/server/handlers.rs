@@ -14,7 +14,7 @@ use tracing::{Instrument, debug, error, warn};
 use url::Url;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::websocket::pump_websocket;
-use warpgate_common::http_headers::DONT_FORWARD_HEADERS;
+use warpgate_common::http_headers::may_forward_header;
 use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
@@ -167,7 +167,7 @@ async fn _handle_normal_request_inner(
     let mut headers = HashMap::new();
     for (name, value) in req.headers() {
         // Still forward Accept-Encoding to allow for chunked encoding
-        if DONT_FORWARD_HEADERS.contains(name) && name != http::header::ACCEPT_ENCODING {
+        if !may_forward_header(name) && name != http::header::ACCEPT_ENCODING {
             continue;
         }
         if let Ok(mut value_str) = value.to_str().map(ToString::to_string) {

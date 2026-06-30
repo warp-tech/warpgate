@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.25.5-26-gbf2fd205-modified"
+    "version": "v0.25.5-58-g270039d4-modified"
   },
   "servers": [
     {
@@ -1868,6 +1868,7 @@
         "title": "Info",
         "required": [
           "ports",
+          "password_login_mode",
           "minimize_password_login",
           "authorized_via_ticket",
           "authorized_via_sso_with_single_logout",
@@ -1898,8 +1899,12 @@
           "ports": {
             "$ref": "#/components/schemas/PortsInfo"
           },
+          "password_login_mode": {
+            "$ref": "#/components/schemas/PasswordLoginMode"
+          },
           "minimize_password_login": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Deprecated in 0.26: superseded by `password_login_mode`"
           },
           "authorized_via_ticket": {
             "type": "boolean"
@@ -2110,6 +2115,15 @@
             "type": "string"
           }
         }
+      },
+      "PasswordLoginMode": {
+        "type": "string",
+        "description": "How the password login form is presented on the gateway login page.",
+        "enum": [
+          "Enabled",
+          "Minimized",
+          "Disabled"
+        ]
       },
       "PasswordPolicy": {
         "type": "object",

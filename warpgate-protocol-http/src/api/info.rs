@@ -88,6 +88,8 @@ pub struct Info {
     external_host: Option<String>,
     external_hosts: Option<ExternalHostsInfo>,
     ports: PortsInfo,
+    password_login_mode: Parameters::PasswordLoginMode,
+    /// Deprecated in 0.26: superseded by `password_login_mode`
     minimize_password_login: bool,
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
@@ -280,7 +282,9 @@ impl Api {
                 .and_then(|auth_ctx| auth_ctx.auth.username().map(ToString::to_string)),
             selected_target: session.get_target_name(),
             external_host,
-            minimize_password_login: parameters.minimize_password_login,
+            password_login_mode: parameters.password_login_mode,
+            minimize_password_login: parameters.password_login_mode
+                == Parameters::PasswordLoginMode::Minimized,
             authorized_via_ticket: matches!(
                 session.get_auth(),
                 Some(SessionAuthorization::Ticket { .. })
