@@ -102,6 +102,7 @@ pub struct Info {
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
     running_on_ec2: Option<bool>,
+    should_prompt_analytics: bool,
 }
 
 #[derive(ApiResponse)]
@@ -259,6 +260,17 @@ impl Api {
             None
         };
 
+        let should_prompt_analytics = {
+            let instance_older_than_a_week = time::OffsetDateTime::now_utc()
+                - parameters.instance_created_at
+                >= time::Duration::weeks(1);
+
+            admin_permissions.as_ref().is_some_and(|p| p.config_edit)
+                && parameters.analytics_consent == Parameters::AnalyticsConsent::Undecided
+                && setup_state.is_none()
+                && instance_older_than_a_week
+        };
+
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: auth_ctx.is_some().then(|| warpgate_version().to_string()),
             username: auth_ctx
@@ -327,6 +339,7 @@ impl Api {
             } else {
                 None
             },
+            should_prompt_analytics,
         })))
     }
 

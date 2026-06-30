@@ -26,6 +26,7 @@ poem-openapi.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true
+reqwest = { workspace = true, features = ["json"] }
 russh.workspace = true
 rustls.workspace = true
 sea-orm.workspace = true

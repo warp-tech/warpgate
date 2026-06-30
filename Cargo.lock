@@ -8044,6 +8044,7 @@ dependencies = [
  "rand 0.10.1",
  "rand_chacha 0.10.0",
  "rand_core 0.10.1",
+ "reqwest 0.13.4",
  "russh",
  "rustls 0.23.41",
  "sea-orm",

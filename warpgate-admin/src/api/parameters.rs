@@ -1,4 +1,5 @@
 use poem::web::Data;
+use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::NotSet;
@@ -49,6 +50,8 @@ struct ParameterValues {
     pub lp_user_exempt_admins: bool,
     pub ssh_banner: String,
     pub web_ssh_enabled: bool,
+    pub analytics_consent: Parameters::AnalyticsConsent,
+    pub analytics_normal: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -85,12 +88,28 @@ struct ParameterUpdate {
     pub lp_user_exempt_admins: Option<bool>,
     pub ssh_banner: Option<String>,
     pub web_ssh_enabled: Option<bool>,
+    pub analytics_consent: Option<Parameters::AnalyticsConsent>,
+    pub analytics_normal: Option<bool>,
+}
+
+#[derive(Serialize, Object)]
+struct AnalyticsPreview {
+    /// The target URL the report would be POSTed to.
+    url: String,
+    /// Pretty-printed JSON request body that would be sent.
+    payload: String,
 }
 
 #[derive(ApiResponse)]
 enum GetParametersResponse {
     #[oai(status = 200)]
     Ok(Json<ParameterValues>),
+}
+
+#[derive(ApiResponse)]
+enum GetAnalyticsPreviewResponse {
+    #[oai(status = 200)]
+    Ok(Json<AnalyticsPreview>),
 }
 
 #[derive(ApiResponse)]
@@ -147,6 +166,30 @@ impl Api {
             lp_user_exempt_admins: parameters.lp_user_exempt_admins,
             ssh_banner: parameters.ssh_banner,
             web_ssh_enabled: parameters.web_ssh_enabled,
+            analytics_consent: parameters.analytics_consent,
+            analytics_normal: parameters.analytics_normal,
+        })))
+    }
+
+    #[oai(
+        path = "/parameters/analytics-preview",
+        method = "get",
+        operation_id = "get_analytics_preview"
+    )]
+    async fn api_analytics_preview(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        normal: Query<bool>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<GetAnalyticsPreviewResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+
+        let (url, payload) =
+            warpgate_core::analytics::preview(&ctx.services().db, normal.0).await?;
+
+        Ok(GetAnalyticsPreviewResponse::Ok(Json(AnalyticsPreview {
+            url,
+            payload: serde_json::to_string_pretty(&payload)?,
         })))
     }
 
@@ -224,6 +267,8 @@ impl Api {
         parameters.lp_user_exempt_admins = body.lp_user_exempt_admins.map_or(NotSet, Set);
         parameters.ssh_banner = body.ssh_banner.clone().map_or(NotSet, Set);
         parameters.web_ssh_enabled = body.web_ssh_enabled.map_or(NotSet, Set);
+        parameters.analytics_consent = body.analytics_consent.map_or(NotSet, Set);
+        parameters.analytics_normal = body.analytics_normal.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
         drop(db);

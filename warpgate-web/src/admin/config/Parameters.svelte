@@ -1,7 +1,7 @@
 <script lang="ts">
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { Button, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { link } from 'svelte-spa-router'
-    import { api, TargetClickAction, PasswordLoginMode, type ParameterValues } from 'admin/lib/api'
+    import { api, TargetClickAction, PasswordLoginMode, AnalyticsConsent, type ParameterValues } from 'admin/lib/api'
     import { api as gatewayApi } from 'gateway/lib/api'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
@@ -17,6 +17,7 @@
     import StickyActionBar from 'common/StickyActionBar.svelte'
     import Subsection from 'admin/lib/Subsection.svelte'
     import HelpText from 'admin/lib/HelpText.svelte'
+    import AnalyticsConsentModal from 'admin/AnalyticsConsentModal.svelte'
 
     let parameters: ParameterValues | undefined = $state()
     let hasSsoProviders = $state(false)
@@ -59,6 +60,26 @@
         } catch (err) {
             updateError = await stringifyError(err)
         }
+    }
+
+    let analyticsModalOpen = $state(false)
+
+    const analyticsLabel = $derived.by(() => {
+        if (!parameters || parameters.analyticsConsent !== AnalyticsConsent.On) {
+            return 'Off'
+        }
+        return parameters.analyticsNormal ? 'Normal' : 'Reduced'
+    })
+
+    // Refresh only the analytics fields after the modal saves, leaving any
+    // other unsaved edits on this page intact.
+    async function refreshAnalytics () {
+        if (!parameters) {
+            return
+        }
+        const latest = await api.getParameters({})
+        parameters.analyticsConsent = latest.analyticsConsent
+        parameters.analyticsNormal = latest.analyticsNormal
     }
 </script>
 
@@ -530,6 +551,17 @@
                     </Subsection>
                     {/if}
                 </Section>
+
+                <Section id="installation-counter" title="Installation counter">
+                    <div class="d-flex align-items-center">
+                        <div>Reporting: <strong>{analyticsLabel}</strong></div>
+                        <Button
+                        class="ms-auto"
+                        color="secondary"
+                            onclick={() => analyticsModalOpen = true}
+                        >Change</Button>
+                    </div>
+                </Section>
             </SectionedForm>
 
             <StickyActionBar>
@@ -541,4 +573,13 @@
         {/if}
         </Loadable>
     </PermissionGate>
+
+    {#if parameters}
+        <AnalyticsConsentModal
+            bind:isOpen={analyticsModalOpen}
+            initialConsent={parameters.analyticsConsent}
+            initialNormal={parameters.analyticsNormal}
+            onsaved={refreshAnalytics}
+        />
+    {/if}
 </div>
