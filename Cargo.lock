@@ -8606,7 +8606,7 @@ dependencies = [
  "getrandom 0.2.17",
  "md-5 0.10.6",
  "num-bigint",
- "rustls 0.23.40",
+ "rustls 0.23.41",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls 0.26.4",
