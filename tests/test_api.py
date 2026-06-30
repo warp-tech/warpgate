@@ -679,6 +679,12 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={201},
     ),
     AdminApiTestCase(
+        id="get_analytics_preview",
+        permission=None,
+        call=lambda api, r: api.get_analytics_preview_with_http_info(normal=True),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
         id="get_ticket_requests",
         permission="ticket_requests_manage",
         call=lambda api, r: api.get_ticket_requests_with_http_info(),
