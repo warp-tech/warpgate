@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-protocol-kubernetes"
-version = "0.25.6"
+version = "0.26.0-beta.1"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
