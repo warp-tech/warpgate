@@ -202,6 +202,87 @@ pub async fn api_get_recording_tcpdump(
 }
 
 #[handler]
+pub async fn api_get_recording_desktop(
+    ctx: Data<&AuthenticatedRequestContext>,
+    id: poem::web::Path<Uuid>,
+) -> poem::Result<poem::Response> {
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+    let db = ctx.services().db.lock().await;
+
+    let recording = Recording::Entity::find_by_id(id.0)
+        .filter(Recording::Column::Kind.eq(RecordingKind::Desktop))
+        .one(&*db)
+        .await
+        .map_err(InternalServerError)?;
+
+    let Some(recording) = recording else {
+        return Err(NotFoundError.into());
+    };
+
+    let path = {
+        ctx.services()
+            .recordings
+            .lock()
+            .await
+            .path_for(&recording.session_id, &recording.name)
+    };
+
+    // Framebuffer recordings can be large, so stream the file instead of
+    // buffering it all in memory.
+    let file = File::open(&path).await.map_err(InternalServerError)?;
+    Ok(poem::Response::builder()
+        .content_type("application/x-ndjson")
+        .body(poem::Body::from_async_read(file)))
+}
+
+#[handler]
+pub async fn api_get_recording_desktop_stream(
+    ws: WebSocket,
+    ctx: Data<&AuthenticatedRequestContext>,
+    id: poem::web::Path<Uuid>,
+) -> poem::Result<impl IntoResponse> {
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+    let recordings = ctx.services().recordings.lock().await;
+    let receiver = recordings.subscribe_live(&id).await;
+
+    Ok(ws.on_upgrade(|socket| async move {
+        let (mut sink, _) = socket.split();
+
+        sink.send(Message::Text(serde_json::to_string(&json!({
+            "start": true,
+            "live": receiver.is_some(),
+        }))?))
+        .await?;
+
+        if let Some(mut receiver) = receiver {
+            tokio::spawn(async move {
+                if let Err(error) = async {
+                    while let Ok(data) = receiver.recv().await {
+                        // Each broadcast line is a serialised DesktopRecordingItem.
+                        let item: serde_json::Value = serde_json::from_slice(&data)?;
+                        let msg = serde_json::to_string(&json!({ "data": item }))?;
+                        sink.send(Message::Text(msg)).await?;
+                    }
+                    sink.send(Message::Text(serde_json::to_string(&json!({
+                        "end": true,
+                    }))?))
+                    .await?;
+                    Ok::<(), anyhow::Error>(())
+                }
+                .await
+                {
+                    error!(%error, "Livestream error:");
+                }
+            });
+        }
+
+        Ok::<(), anyhow::Error>(())
+    }))
+}
+
+#[handler]
 pub async fn api_get_recording_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,

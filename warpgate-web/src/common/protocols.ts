@@ -116,6 +116,7 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
     mysql: new Set([CredentialKind.Password]),
     postgres: new Set([CredentialKind.Password, CredentialKind.WebUserApproval]),
     kubernetes: new Set([CredentialKind.Certificate, CredentialKind.WebUserApproval]),
+    vnc: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.WebUserApproval]),
 }
 
 export function abbreviatePublicKey (key: string): string {

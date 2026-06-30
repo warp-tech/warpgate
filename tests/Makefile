@@ -10,4 +10,7 @@ image-mariadb-server:
 image-postgres-server:
 	cd images/postgres-server && docker build -t warpgate-e2e-postgres-server .
 
-all: image-ssh-server image-mysql-server image-mariadb-server image-postgres-server
+image-vnc-server:
+	cd images/vnc-server && docker build -t warpgate-e2e-vnc-server .
+
+all: image-ssh-server image-mysql-server image-mariadb-server image-postgres-server image-vnc-server

@@ -35,6 +35,18 @@
             description: 'Expose Kubernetes API protocol for tools like kubectl',
             experimental: true,
         },
+        {
+            name: 'VNC',
+            value: TargetKind.Vnc,
+            description: 'Access a remote desktop in the browser',
+            experimental: true,
+        },
+        {
+            name: 'RDP',
+            value: TargetKind.Rdp,
+            description: 'Access a Windows remote desktop in the browser',
+            experimental: true,
+        },
     ]
 </script>
 

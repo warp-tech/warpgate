@@ -1,0 +1,2 @@
+response-property-one-of-added info
+response-property-enum-value-added info

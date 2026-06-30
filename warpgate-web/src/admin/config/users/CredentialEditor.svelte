@@ -47,12 +47,13 @@
 
     const loadPromise = load()
 
-    const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres' | 'kubernetes', name: string }[] = [
+    const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres' | 'kubernetes' | 'vnc', name: string }[] = [
         { id: 'ssh', name: 'SSH' },
         { id: 'http', name: 'HTTP' },
         { id: 'mysql', name: 'MySQL' },
         { id: 'postgres', name: 'PostgreSQL' },
         { id: 'kubernetes', name: 'Kubernetes' },
+        { id: 'vnc', name: 'VNC' },
     ]
 
     // Get effective possible credentials for a protocol, considering global SSH auth settings

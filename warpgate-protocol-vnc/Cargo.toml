@@ -1,0 +1,31 @@
+[package]
+edition = "2024"
+license = "Apache-2.0"
+name = "warpgate-protocol-vnc"
+version = "0.23.4"
+publish = false
+
+[dependencies]
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
+warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
+warpgate-protocol-vnc-ui = { path = "../warpgate-protocol-vnc-ui" }
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+des = { version = "0.8", default-features = false }
+aes = { version = "0.8", default-features = false }
+ecb = { version = "0.1", default-features = false, features = ["block-padding"] }
+md-5 = { version = "0.10", default-features = false }
+num-bigint = { version = "0.4", default-features = false }
+getrandom = "0.2"
+vnc = { package = "vnc-rs", version = "0.5" }

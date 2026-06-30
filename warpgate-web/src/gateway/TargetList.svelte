@@ -25,6 +25,13 @@ async function openWebSsh (target: TargetSnapshot) {
     window.open(`/@warpgate#/web-ssh/${sessionId}`, '_blank')
 }
 
+async function openWebDesktop (target: TargetSnapshot) {
+    const { sessionId } = await api.createWebDesktopSession({
+        createWebDesktopSessionBody: { targetId: target.id },
+    })
+    window.open(`/@warpgate#/web-desktop/${sessionId}`, '_blank')
+}
+
 function loadTargets(
     options: LoadOptions
 ): Observable<PaginatedResponse<TargetSnapshot>> {
@@ -74,6 +81,8 @@ function selectTarget (target: TargetSnapshot) {
         } else {
             openWebSsh(target)
         }
+    } else if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) {
+        openWebDesktop(target)
     } else {
         instructionsTarget = target
     }
@@ -165,6 +174,12 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                 {/if}
                 {#if target.kind === TargetKind.Ssh}
                     SSH
+                {/if}
+                {#if target.kind === TargetKind.Vnc}
+                    VNC
+                {/if}
+                {#if target.kind === TargetKind.Rdp}
+                    RDP
                 {/if}
             </small>
             {#if target.kind === TargetKind.Http}

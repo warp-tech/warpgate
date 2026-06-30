@@ -24,6 +24,8 @@ pub struct PortsInfo {
     mysql: Option<u16>,
     postgres: Option<u16>,
     kubernetes: Option<u16>,
+    vnc: Option<u16>,
+    rdp: Option<u16>,
 }
 
 #[derive(Serialize, Object)]
@@ -33,6 +35,8 @@ pub struct ExternalHostsInfo {
     mysql: Option<String>,
     postgres: Option<String>,
     kubernetes: Option<String>,
+    vnc: Option<String>,
+    rdp: Option<String>,
 }
 
 #[derive(Serialize, Object, Debug)]
@@ -206,6 +210,18 @@ impl Api {
                     .external_host
                     .clone()
                     .or_else(|| fallback_host.clone()),
+                vnc: config
+                    .store
+                    .vnc
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                rdp: config
+                    .store
+                    .rdp
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
             })
         } else {
             None
@@ -300,6 +316,16 @@ impl Api {
                     } else {
                         None
                     },
+                    vnc: if config.store.vnc.enable {
+                        Some(config.store.vnc.external_port())
+                    } else {
+                        None
+                    },
+                    rdp: if config.store.rdp.enable {
+                        Some(config.store.rdp.external_port())
+                    } else {
+                        None
+                    },
                 }
             } else {
                 PortsInfo {
@@ -308,6 +334,8 @@ impl Api {
                     mysql: None,
                     postgres: None,
                     kubernetes: None,
+                    vnc: None,
+                    rdp: None,
                 }
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,

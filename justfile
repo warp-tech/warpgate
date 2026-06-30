@@ -1,7 +1,15 @@
-projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-database-protocols warpgate-protocol-ssh warpgate-protocol-mysql warpgate-protocol-postgres warpgate-protocol-kubernetes warpgate-protocol-http warpgate-core warpgate-sso"
+projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-database-protocols warpgate-protocol-ssh warpgate-protocol-mysql warpgate-protocol-postgres warpgate-protocol-kubernetes warpgate-protocol-http warpgate-protocol-rdp warpgate-protocol-vnc warpgate-core warpgate-sso"
 
 run *ARGS='run':
     RUST_BACKTRACE=1 cargo run --all-features -- --config config.yaml {{ARGS}}
+
+# Run before `cargo build` so warpgate-protocol-rdp's build script can embed it into the main binary.
+build-rdp-helper *ARGS:
+    cd warpgate-rdp-helper && cargo build --release {{ARGS}}
+
+# Run before `cargo build` so warpgate-protocol-rdp's build script can embed it into the main binary.
+build-rdp-server-helper *ARGS:
+    cd warpgate-rdp-server-helper && cargo build --release {{ARGS}}
 
 fmt:
     for p in {{projects}}; do cargo fmt -p $p -v; done

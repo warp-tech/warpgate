@@ -54,7 +54,9 @@ warpgate-protocol-http = { path = "../warpgate-protocol-http" }
 warpgate-protocol-kubernetes = { path = "../warpgate-protocol-kubernetes" }
 warpgate-protocol-mysql = { path = "../warpgate-protocol-mysql" }
 warpgate-protocol-postgres = { path = "../warpgate-protocol-postgres" }
+warpgate-protocol-rdp = { path = "../warpgate-protocol-rdp" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
+warpgate-protocol-vnc = { path = "../warpgate-protocol-vnc" }
 warpgate-tls = { path = "../warpgate-tls" }
 
 [features]
