@@ -680,7 +680,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="get_analytics_preview",
-        permission=None,
+        permission="config_edit",
         call=lambda api, r: api.get_analytics_preview_with_http_info(normal=True),
         expected_statuses={200},
     ),
