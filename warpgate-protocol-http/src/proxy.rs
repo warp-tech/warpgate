@@ -18,7 +18,7 @@ use tracing::{debug, error, warn};
 use url::Url;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::{
-    DONT_FORWARD_HEADERS, X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO,
+    X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO, may_forward_header,
 };
 use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
 use warpgate_common_http::logging::{get_client_ip, log_request_result};
@@ -129,7 +129,7 @@ fn copy_client_response<R: SomeResponse>(
 ) {
     let mut headers = client_response.headers().clone();
     for h in client_response.headers() {
-        if DONT_FORWARD_HEADERS.contains(h.0)
+        if !may_forward_header(h.0)
             && let http::header::Entry::Occupied(e) = headers.entry(h.0)
         {
             e.remove_entry();
@@ -197,7 +197,7 @@ fn rewrite_response(
 
 fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B {
     for k in req.headers().keys() {
-        if DONT_FORWARD_HEADERS.contains(k) {
+        if !may_forward_header(k) {
             continue;
         }
         target = target.header(
