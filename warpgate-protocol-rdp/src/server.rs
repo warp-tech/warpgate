@@ -39,6 +39,8 @@ use warpgate_common::auth::{
 };
 use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::{ListenEndpoint, Secret, Target, TargetOptions, TargetRdpOptions};
+use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
     ConfigProvider, DesktopEvent, DesktopInput, DesktopState, Services, SessionStateInit, State,
@@ -550,6 +552,29 @@ async fn authenticate(
             username,
             target_name,
         } => {
+            let remote_ip = remote_address.ip();
+
+            // Brute-force protection: reject blocked IPs / locked users before
+            // evaluating credentials. Fail closed (propagate lookup errors).
+            if services
+                .login_protection
+                .check_ip_blocked(&remote_ip)
+                .await?
+                .is_some()
+            {
+                warn!(ip = %remote_ip, "RDP auth attempt from blocked IP");
+                return Ok(None);
+            }
+            if services
+                .login_protection
+                .check_user_locked(&username)
+                .await?
+                .is_some()
+            {
+                warn!(username = %username, "RDP auth attempt for locked user");
+                return Ok(None);
+            }
+
             let (state_id, state_arc) = services
                 .auth_state_store
                 .lock()
@@ -565,15 +590,33 @@ async fn authenticate(
 
             {
                 let credential = AuthCredential::Password(Secret::new(password));
-                let mut cp = services.config_provider.lock().await;
-                if !cp.validate_credential(&username, &credential).await? {
+                let mut state = state_arc.lock().await;
+                let credential_valid = validate_and_add_credential(
+                    &mut state,
+                    &credential,
+                    &mut *services.config_provider.lock().await,
+                )
+                .await?;
+                if !credential_valid {
+                    let _ = services
+                        .login_protection
+                        .record_failed_attempt(FailedAttemptInfo {
+                            username: username.clone(),
+                            remote_ip,
+                            protocol: "rdp".to_string(),
+                            credential_type: "password".to_string(),
+                        })
+                        .await;
                     return Ok(None);
                 }
-                state_arc.lock().await.add_valid_credential(credential);
             }
 
             match state_arc.lock().await.verify() {
                 AuthResult::Accepted { user_info } => {
+                    let _ = services
+                        .login_protection
+                        .clear_failed_attempts(&remote_ip, &user_info.username)
+                        .await;
                     services
                         .auth_state_store
                         .lock()

@@ -5,7 +5,7 @@ mod session_handle;
 use std::collections::{HashSet, VecDeque};
 use std::convert::Infallible;
 use std::future::Future;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,6 +29,8 @@ use warpgate_common::{
     ListenEndpoint, Secret, Target, TargetOptions, TargetVncOptions, VncTargetAuth,
 };
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
     ConfigProvider, DesktopEvent, DesktopInput, DesktopState, Services, SessionStateInit, State,
@@ -290,6 +292,7 @@ async fn negotiate_and_authorize(
                 services,
                 state_id,
                 &username,
+                remote_address.ip(),
             )
             .await?;
 
@@ -720,6 +723,7 @@ async fn collect_additional_credentials<W>(
     services: &Services,
     state_id: Uuid,
     username: &str,
+    remote_ip: IpAddr,
 ) -> Result<()>
 where
     W: AsyncWrite + Unpin,
@@ -782,7 +786,9 @@ where
                     if let Some(keysym) = render.note_event(event)
                         && matches!(prompt, ui::AuthPrompt::Otp { ..})
                     {
-                        if handle_otp_keypress(keysym, &mut otp, services, &state, username).await {
+                        if handle_otp_keypress(keysym, &mut otp, services, &state, username, remote_ip)
+                            .await
+                        {
                             otp_failures += 1;
                             if otp_failures >= MAX_OTP_ATTEMPTS {
                                 bail!("too many incorrect one-time passwords");
@@ -817,6 +823,7 @@ async fn handle_otp_keypress(
     services: &Services,
     state: &Arc<tokio::sync::Mutex<AuthState>>,
     username: &str,
+    remote_ip: IpAddr,
 ) -> bool {
     let mut submit = false;
     match keysym {
@@ -837,17 +844,26 @@ async fn handle_otp_keypress(
 
     if submit {
         let credential = AuthCredential::Otp(Secret::new(std::mem::take(otp)));
-        let valid = services
-            .config_provider
-            .lock()
-            .await
-            .validate_credential(username, &credential)
-            .await
-            .unwrap_or(false);
-        if valid {
-            state.lock().await.add_valid_credential(credential);
-        } else {
+        // Route through the shared helper so a bad OTP emits the same
+        // UserAuthenticationFailed1 audit event as the other protocols.
+        let valid = validate_and_add_credential(
+            &mut *state.lock().await,
+            &credential,
+            &mut *services.config_provider.lock().await,
+        )
+        .await
+        .unwrap_or(false);
+        if !valid {
             warn!("Incorrect one-time password");
+            let _ = services
+                .login_protection
+                .record_failed_attempt(FailedAttemptInfo {
+                    username: username.to_string(),
+                    remote_ip,
+                    protocol: "vnc".to_string(),
+                    credential_type: "otp".to_string(),
+                })
+                .await;
             return true;
         }
     }
@@ -883,6 +899,29 @@ async fn authenticate(
             username,
             target_name,
         } => {
+            let remote_ip = remote_address.ip();
+
+            // Brute-force protection: reject blocked IPs / locked users before
+            // evaluating credentials. Fail closed (propagate lookup errors).
+            if services
+                .login_protection
+                .check_ip_blocked(&remote_ip)
+                .await?
+                .is_some()
+            {
+                warn!(ip = %remote_ip, "VNC auth attempt from blocked IP");
+                return Ok(None);
+            }
+            if services
+                .login_protection
+                .check_user_locked(&username)
+                .await?
+                .is_some()
+            {
+                warn!(username = %username, "VNC auth attempt for locked user");
+                return Ok(None);
+            }
+
             let (state_id, state_arc) = services
                 .auth_state_store
                 .lock()
@@ -903,16 +942,34 @@ async fn authenticate(
             // Password is mandatory, we don't want to serve an anon session
             {
                 let credential = AuthCredential::Password(Secret::new(password));
-                let mut cp = services.config_provider.lock().await;
-                if !cp.validate_credential(&username, &credential).await? {
+                let mut state = state_arc.lock().await;
+                let credential_valid = validate_and_add_credential(
+                    &mut state,
+                    &credential,
+                    &mut *services.config_provider.lock().await,
+                )
+                .await?;
+                if !credential_valid {
+                    let _ = services
+                        .login_protection
+                        .record_failed_attempt(FailedAttemptInfo {
+                            username: username.clone(),
+                            remote_ip,
+                            protocol: "vnc".to_string(),
+                            credential_type: "password".to_string(),
+                        })
+                        .await;
                     return Ok(None);
                 }
-                state_arc.lock().await.add_valid_credential(credential);
             }
 
             let result = state_arc.lock().await.verify();
             match result {
                 AuthResult::Accepted { user_info } => {
+                    let _ = services
+                        .login_protection
+                        .clear_failed_attempts(&remote_ip, &user_info.username)
+                        .await;
                     services
                         .auth_state_store
                         .lock()
