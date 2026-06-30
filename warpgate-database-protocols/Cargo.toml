@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-database-protocols"
-version = "0.25.5"
+version = "0.25.6"
 description = "Core of SQLx, the rust SQL toolkit. Just the database protocol parts."
 authors = [
     "Ryan Leckey <leckey.ryan@gmail.com>",
