@@ -467,6 +467,13 @@ async fn record_event(recorder: &DesktopRecorder, event: &DesktopEvent) {
     }
 }
 
+/// Record a viewer input, logging (but not failing on) recorder write errors.
+async fn record_input(recorder: &DesktopRecorder, input: &DesktopInput) {
+    if let Err(error) = recorder.write_input(input).await {
+        warn!(%error, "Failed to record VNC viewer input");
+    }
+}
+
 /// Drain backend events until the first [`DesktopEvent::Resize`] reveals the framebuffer
 /// geometry, recording each consumed event. The backend client always emits `Resize`
 /// before any `RawImage`, so nothing visible is consumed here.
@@ -560,17 +567,23 @@ async fn run_recording_session(session: RecordingSession) -> Result<()> {
                         render.supports_desktop_size = desktop_size;
                     }
                     Some(ClientEvent::Key { down, keysym }) => {
-                        if input_tx.send(DesktopInput::Key { keysym, down }).await.is_err() {
+                        let input = DesktopInput::Key { keysym, down };
+                        record_input(&recorder, &input).await;
+                        if input_tx.send(input).await.is_err() {
                             break Ok(());
                         }
                     }
                     Some(ClientEvent::Pointer { x, y, buttons }) => {
-                        if input_tx.send(DesktopInput::Pointer { x, y, buttons }).await.is_err() {
+                        let input = DesktopInput::Pointer { x, y, buttons };
+                        record_input(&recorder, &input).await;
+                        if input_tx.send(input).await.is_err() {
                             break Ok(());
                         }
                     }
                     Some(ClientEvent::Clipboard(text)) => {
-                        let _ = input_tx.send(DesktopInput::Clipboard(text)).await;
+                        let input = DesktopInput::Clipboard(text);
+                        record_input(&recorder, &input).await;
+                        let _ = input_tx.send(input).await;
                     }
                     None => break Ok(()), // viewer disconnected
                 }

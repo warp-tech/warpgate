@@ -5,7 +5,7 @@ use warpgate_db_entities::Recording::RecordingKind;
 
 use super::writer::RecordingWriter;
 use super::{Error, Recorder, Result};
-use crate::{DesktopEvent, DesktopRect};
+use crate::{DesktopEvent, DesktopInput, DesktopRect};
 
 /// A rectangle as serialised in the recording stream. Matches the shape of the
 /// `rect` field in the web-desktop WebSocket `ServerMessage`, so the browser can
@@ -65,6 +65,24 @@ pub enum DesktopRecordingItem {
         rect: RecordingRect,
         #[serde(with = "warpgate_common::helpers::serde_base64")]
         data: Bytes,
+    },
+    /// A viewer key press/release (client -> server), captured for audit.
+    KeyInput {
+        time: f32,
+        keysym: u32,
+        down: bool,
+    },
+    /// A viewer pointer move / button-state change (client -> server), captured for audit.
+    PointerInput {
+        time: f32,
+        x: u16,
+        y: u16,
+        buttons: u8,
+    },
+    /// A viewer clipboard update (client -> server), captured for audit.
+    ClipboardInput {
+        time: f32,
+        text: String,
     },
 }
 
@@ -128,6 +146,33 @@ impl DesktopRecorder {
             | DesktopEvent::Clipboard(_)
             | DesktopEvent::Bell
             | DesktopEvent::Error(_) => return Ok(()),
+        };
+        self.write_item(&item).await
+    }
+
+    /// Record a viewer input (client -> server). Only the input kinds VNC viewers
+    /// produce (key/pointer/clipboard) are captured; scancode/wheel/refresh are ignored.
+    pub async fn write_input(&self, input: &DesktopInput) -> Result<()> {
+        let time = self.get_time();
+        let item = match input {
+            DesktopInput::Key { keysym, down } => DesktopRecordingItem::KeyInput {
+                time,
+                keysym: *keysym,
+                down: *down,
+            },
+            DesktopInput::Pointer { x, y, buttons } => DesktopRecordingItem::PointerInput {
+                time,
+                x: *x,
+                y: *y,
+                buttons: *buttons,
+            },
+            DesktopInput::Clipboard(text) => DesktopRecordingItem::ClipboardInput {
+                time,
+                text: text.clone(),
+            },
+            DesktopInput::Scancode { .. } | DesktopInput::Wheel { .. } | DesktopInput::Refresh => {
+                return Ok(())
+            }
         };
         self.write_item(&item).await
     }
