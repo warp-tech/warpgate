@@ -19,8 +19,6 @@
         }
     })
 
-    $effect(() => console.log(showAnalyticsModal))
-
     async function init () {
         await reloadServerInfo()
     }
