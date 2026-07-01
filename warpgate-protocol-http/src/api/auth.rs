@@ -223,47 +223,38 @@ impl Api {
             ))));
         }
 
-        let state_arc = match get_or_create_auth_state_for_request(req, &body.username, &ctx).await
-        {
-            Err(WarpgateError::UserNotFound(_)) => {
-                let session_id = session_id_for_request(req, &ctx).await?;
-                emit_unknown_authentication_failed_event(
-                    session_id,
-                    remote_ip,
-                    &body.username,
-                    "password",
-                    "unknown user",
-                );
-                if let Some(ip) = client_ip {
-                    let _ = services
-                        .login_protection
-                        .record_failed_attempt(FailedAttemptInfo {
-                            username: body.username.clone(),
-                            remote_ip: ip,
-                            protocol: "http".to_string(),
-                            credential_type: "password".to_string(),
-                        })
-                        .await;
+        let state_arc =
+            match get_or_create_auth_state_for_request(req, &body.username, &ctx, Some("password"))
+                .await
+            {
+                Err(WarpgateError::UserNotFound(_)) => {
+                    let session_id = session_id_for_request(req, &ctx).await?;
+                    emit_unknown_authentication_failed_event(
+                        session_id,
+                        remote_ip,
+                        &body.username,
+                        "password",
+                        "unknown user",
+                    );
+                    return Ok(LoginResponse::Failure(Json(
+                        LoginFailureResponse::credential_rejected(ApiAuthState::Failed),
+                    )));
                 }
-                return Ok(LoginResponse::Failure(Json(
-                    LoginFailureResponse::credential_rejected(ApiAuthState::Failed),
-                )));
-            }
-            Err(WarpgateError::IpAddrNotAllowed(..)) => {
-                let session_id = session_id_for_request(req, &ctx).await?;
-                emit_unknown_authentication_failed_event(
-                    session_id,
-                    remote_ip,
-                    &body.username,
-                    "password",
-                    "IP address not allowed",
-                );
-                return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
-                    ApiAuthState::IpRejected,
-                ))));
-            }
-            x => x,
-        }?;
+                Err(WarpgateError::IpAddrNotAllowed(..)) => {
+                    let session_id = session_id_for_request(req, &ctx).await?;
+                    emit_unknown_authentication_failed_event(
+                        session_id,
+                        remote_ip,
+                        &body.username,
+                        "password",
+                        "IP address not allowed",
+                    );
+                    return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                        ApiAuthState::IpRejected,
+                    ))));
+                }
+                x => x,
+            }?;
         let mut state = state_arc.lock().await;
 
         let credential_valid = validate_and_add_credential(

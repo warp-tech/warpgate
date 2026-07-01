@@ -196,6 +196,7 @@ pub async fn get_or_create_auth_state_for_request(
     req: &Request,
     username: &str,
     ctx: &UnauthenticatedRequestContext,
+    rate_limit_credential_type: Option<&str>,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
     let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
     let session = <&Session>::from_request_without_body(req)
@@ -221,6 +222,7 @@ pub async fn get_or_create_auth_state_for_request(
                 CredentialKind::Totp,
             ],
             remote_ip,
+            rate_limit_credential_type,
         )
         .await?;
 

@@ -293,7 +293,14 @@ impl ServerSession {
         kinds
     }
 
-    async fn get_auth_state(&mut self, username: &str) -> Result<Arc<Mutex<AuthState>>> {
+    /// `rate_limit_credential_type` is forwarded to `AuthStateStore::create` so
+    /// an unknown username is recorded as a failed attempt for IP blocking —
+    /// `None` for benign contexts (public-key offers) that must not be counted.
+    async fn get_auth_state(
+        &mut self,
+        username: &str,
+        rate_limit_credential_type: Option<&str>,
+    ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
         #[allow(clippy::unwrap_used)]
         if self.auth_state.is_none()
             || !username_eq_ci(
@@ -319,6 +326,7 @@ impl ServerSession {
                     crate::PROTOCOL_NAME,
                     &self.supported_credential_kinds(),
                     Some(self.remote_address.ip()),
+                    rate_limit_credential_type,
                 )
                 .await?
                 .1;
@@ -326,6 +334,30 @@ impl ServerSession {
         }
         #[allow(clippy::unwrap_used)]
         Ok(self.auth_state.clone().unwrap())
+    }
+
+    /// SSH counts only password/OTP guesses toward rate-limiting — public-key
+    /// offers legitimately fail as clients try each agent key in turn, so they
+    /// aren't counted as brute-force attempts.
+    const fn rate_limited_credential_type(credential: &AuthCredential) -> Option<&'static str> {
+        match credential {
+            AuthCredential::Password(_) => Some("password"),
+            AuthCredential::Otp(_) => Some("otp"),
+            _ => None,
+        }
+    }
+
+    async fn record_failed_login_attempt(&self, username: &str, credential_type: &str) {
+        let _ = self
+            .services
+            .login_protection
+            .record_failed_attempt(FailedAttemptInfo {
+                username: username.to_string(),
+                remote_ip: self.remote_address.ip(),
+                protocol: "ssh".to_string(),
+                credential_type: credential_type.to_string(),
+            })
+            .await;
     }
 
     pub fn make_logging_span(&self) -> tracing::Span {
@@ -1950,7 +1982,14 @@ impl ServerSession {
                     return Ok(AuthResult::Rejected);
                 }
 
-                let state_arc = self.get_auth_state(username).await?;
+                let state_arc = self
+                    .get_auth_state(
+                        username,
+                        credential
+                            .as_ref()
+                            .and_then(Self::rate_limited_credential_type),
+                    )
+                    .await?;
                 let mut state = state_arc.lock().await;
 
                 if let Some(credential) = credential {
@@ -1961,27 +2000,12 @@ impl ServerSession {
                     )
                     .await?;
 
-                    // Record failed password/OTP guesses. Public-key offers
-                    // legitimately fail as clients try each agent key in turn, so
-                    // they aren't counted as brute-force attempts.
-                    if !credential_valid {
-                        let credential_type = match &credential {
-                            AuthCredential::Password(_) => Some("password"),
-                            AuthCredential::Otp(_) => Some("otp"),
-                            _ => None,
-                        };
-                        if let Some(credential_type) = credential_type {
-                            let _ = self
-                                .services
-                                .login_protection
-                                .record_failed_attempt(FailedAttemptInfo {
-                                    username: username.clone(),
-                                    remote_ip,
-                                    protocol: "ssh".to_string(),
-                                    credential_type: credential_type.to_string(),
-                                })
-                                .await;
-                        }
+                    if !credential_valid
+                        && let Some(credential_type) =
+                            Self::rate_limited_credential_type(&credential)
+                    {
+                        self.record_failed_login_attempt(username, credential_type)
+                            .await;
                     }
                 }
 

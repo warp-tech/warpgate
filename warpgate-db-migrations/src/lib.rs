@@ -136,10 +136,7 @@ pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbE
 }
 
 /// Apply `steps` pending migrations.
-pub async fn migrate_database_up(
-    connection: &DatabaseConnection,
-    steps: u32,
-) -> Result<(), DbErr> {
+pub async fn migrate_database_up(connection: &DatabaseConnection, steps: u32) -> Result<(), DbErr> {
     Migrator::up(connection, Some(steps)).await
 }
 
