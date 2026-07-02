@@ -4452,9 +4452,9 @@ dependencies = [
 
 [[package]]
 name = "pgwire"
-version = "0.40.3"
+version = "0.40.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdc5af11aa35ec1e23f56699dfd96f70f02822bdac5bddeabfb53795af4cc477"
+checksum = "7981cfde34009be689a05a30c497ad5fbb552531d3d54230b3627264ff1bc384"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
