@@ -7,7 +7,9 @@ use tokio::sync::futures::Notified;
 use tokio::sync::mpsc::{Sender, UnboundedSender};
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
+use tracing::warn;
 use uuid::Uuid;
+use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{DesktopInput, SessionHandle, WarpgateServerHandle};
 use warpgate_db_entities::Target::TargetKind;
 
@@ -44,6 +46,9 @@ pub struct WebDesktopSession {
     input_tx: Sender<DesktopInput>,
     abort_tx: UnboundedSender<()>,
 
+    // shared with the manager's event loop; records viewer input for audit
+    recorder: Option<Arc<DesktopRecorder>>,
+
     // events are buffered so that we can queue and replay them
     // if the WS stream reconnects
     output_buffer: Arc<Mutex<VecDeque<ServerMessage>>>,
@@ -62,6 +67,7 @@ impl WebDesktopSession {
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         input_tx: Sender<DesktopInput>,
         abort_tx: UnboundedSender<()>,
+        recorder: Option<Arc<DesktopRecorder>>,
     ) -> Self {
         Self {
             id,
@@ -71,6 +77,7 @@ impl WebDesktopSession {
             _server_handle: server_handle,
             input_tx,
             abort_tx,
+            recorder,
             output_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(OUTPUT_BUFFER_CAPACITY))),
             output_notify: Arc::new(Notify::new()),
             is_dead: Arc::new(AtomicBool::new(false)),
@@ -120,7 +127,13 @@ impl WebDesktopSession {
         &self.target_kind
     }
 
-    pub fn send_input(&self, input: DesktopInput) {
+    pub async fn send_input(&self, input: DesktopInput) {
+        // Record the viewer's input for audit before forwarding (like native RDP/VNC).
+        if let Some(recorder) = &self.recorder
+            && let Err(error) = recorder.write_input(&input).await
+        {
+            warn!(%error, "Failed to record web-desktop viewer input");
+        }
         // let inputs drop under backpressure
         let _ = self.input_tx.try_send(input);
     }

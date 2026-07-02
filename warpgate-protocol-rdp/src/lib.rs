@@ -12,7 +12,6 @@
 mod embedded;
 mod helper;
 mod server;
-mod server_helper;
 mod session_handle;
 
 pub use server::run_server;
@@ -163,6 +162,7 @@ async fn run(
     let helper = helper::resolve()?;
 
     let mut child = tokio::process::Command::new(helper.path())
+        .arg("connect")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -182,17 +182,6 @@ async fn run(
                 debug!(helper = %line, "RDP helper stderr");
             }
         });
-    }
-
-    // Security posture: warn when connecting without TLS certificate verification. This is
-    // the documented default (RDP targets commonly use self-signed certs, and NLA/CredSSP
-    // channel-binds credentials to the server's public key), but it shouldn't be silent.
-    if !options.verify_tls {
-        warn!(
-            "Connecting to RDP target without TLS certificate verification (verify_tls=false); \
-             relying on NLA/CredSSP credential binding. Set `verify_tls: true` on the target to \
-             enforce certificate validation."
-        );
     }
 
     // Send the connection config as the first line.

@@ -4,16 +4,28 @@ version = "0.23.4"
 edition = "2021"
 license = "Apache-2.0"
 publish = false
-description = "Standalone RDP client helper for Warpgate, isolated from the workspace lockfile because IronRDP's CredSSP/RustCrypto pre-release pins conflict with russh's."
+description = "Standalone RDP helper for Warpgate (client + server subcommands), isolated from the workspace lockfile because IronRDP's CredSSP/RustCrypto pre-release pins conflict with russh's."
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
 base64 = "0.22"
-ironrdp = { version = "0.14.0", features = ["connector", "session", "graphics", "input"] }
-ironrdp-blocking = "0.8.0"
+bytes = "1"
+# Client (`connect`) and server (`serve`) share one IronRDP generation so a single
+# lockfile can resolve them (they pin the same picky/sspi pre-releases).
+ironrdp = { version = "0.15", features = ["connector", "session", "graphics", "input"] }
+ironrdp-blocking = "0.9"
+ironrdp-server = "0.12"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-native-certs = "0.8"
+rustls-pemfile = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sspi = { version = "=0.18.7", features = ["network_client"] }
+sspi = { version = "0.21", features = ["network_client"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+
+# Own lockfile: must NOT join the Warpgate workspace (picky/sspi pre-release clash).
+[workspace]

@@ -5,7 +5,7 @@ import type { ExistingCredential } from './CredentialEditor.svelte'
 import InfoBox from 'common/InfoBox.svelte'
 import { SvelteSet } from 'svelte/reactivity'
 
-type ProtocolID = 'http' | 'ssh' | 'mysql' | 'postgres' | 'kubernetes' | 'vnc'
+type ProtocolID = 'http' | 'ssh' | 'mysql' | 'postgres' | 'kubernetes' | 'vnc' | 'rdp'
 
 interface Props {
     value: UserRequireCredentialsPolicy
@@ -30,7 +30,7 @@ const labels = {
     WebUserApproval: 'In-browser auth',
 }
 
-const requirePassword = $derived(protocolId === 'vnc')
+const requirePassword = $derived(protocolId === 'vnc' || protocolId === 'rdp')
 
 const tips: Record<ProtocolID, Map<[CredentialKind, boolean], string>> = {
     postgres: new Map([
@@ -48,6 +48,7 @@ const tips: Record<ProtocolID, Map<[CredentialKind, boolean], string>> = {
             'The client is shown a link to approve the login in the browser, and is held on a waiting screen until confirmed.',
         ],
     ]),
+    rdp: new Map(),
     kubernetes: new Map([
         [
             [CredentialKind.WebUserApproval, true],

@@ -71,7 +71,7 @@ pub async fn ws_handler(
                         Some(Ok(Message::Text(text))) => {
                             if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text)
                                 && let Some(input) = Option::<DesktopInput>::from(client_msg) {
-                                session.send_input(input);
+                                session.send_input(input).await;
                             }
                         }
                         Some(Ok(Message::Close(_))) | None => break,

@@ -104,39 +104,15 @@ impl WebDesktopClientManager {
             _ => return Err(WarpgateError::InvalidTarget),
         };
 
-        let session = Arc::new(WebDesktopSession::new(
-            session_id,
-            user_id,
-            target_name.to_owned(),
-            target_kind,
-            server_handle,
-            input_tx,
-            abort_tx,
-        ));
-
-        // Admin-initiated close: stop the backend and mark the session dead.
-        tokio::spawn({
-            let session = session.clone();
-            async move {
-                if handle_abort_rx.recv().await.is_some() {
-                    session.abort();
-                    session.close();
-                }
-            }
-        });
-
-        self.sessions
-            .lock()
-            .await
-            .insert(session_id, session.clone());
-
-        // Start a desktop recording (no-op if recording is disabled in config).
+        // Start a desktop recording (no-op if recording is disabled in config). Shared
+        // (Arc) between the session — which records viewer input — and the event loop,
+        // which records framebuffer updates; the recording finalises when both drop.
         let protocol = match &target.options {
             TargetOptions::Vnc(_) => "vnc",
             TargetOptions::Rdp(_) => "rdp",
             _ => "desktop",
         };
-        let recorder = match services
+        let recorder: Option<Arc<DesktopRecorder>> = match services
             .recordings
             .lock()
             .await
@@ -150,13 +126,45 @@ impl WebDesktopClientManager {
             )
             .await
         {
-            Ok(recorder) => Some(recorder),
+            Ok(recorder) => Some(Arc::new(recorder)),
             Err(warpgate_core::recordings::Error::Disabled) => None,
             Err(error) => {
                 warn!(%error, "Failed to start desktop recording");
                 None
             }
         };
+
+        let session = Arc::new(WebDesktopSession::new(
+            session_id,
+            user_id,
+            target_name.to_owned(),
+            target_kind,
+            server_handle,
+            input_tx,
+            abort_tx,
+            recorder.clone(),
+        ));
+
+        // Admin-initiated close: stop the backend and mark the session dead. Holds a
+        // Weak ref so this task never keeps the session — and thus its
+        // WarpgateServerHandle — alive; otherwise the handle would never drop and the
+        // session would never be marked closed (in the DB or the active-session list).
+        tokio::spawn({
+            let session = Arc::downgrade(&session);
+            async move {
+                if handle_abort_rx.recv().await.is_some()
+                    && let Some(session) = session.upgrade()
+                {
+                    session.abort();
+                    session.close();
+                }
+            }
+        });
+
+        self.sessions
+            .lock()
+            .await
+            .insert(session_id, session.clone());
 
         spawn_event_loop(session.clone(), event_rx, self.sessions.clone(), recorder);
 
@@ -181,7 +189,7 @@ fn spawn_event_loop(
     session: Arc<WebDesktopSession>,
     mut event_rx: mpsc::Receiver<warpgate_core::DesktopEvent>,
     sessions: Arc<Mutex<HashMap<Uuid, Arc<WebDesktopSession>>>>,
-    recorder: Option<DesktopRecorder>,
+    recorder: Option<Arc<DesktopRecorder>>,
 ) {
     let session_id = session.id();
     let span = info_span!("web-desktop", session=%session_id);

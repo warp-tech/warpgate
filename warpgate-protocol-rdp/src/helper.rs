@@ -1,20 +1,21 @@
-//! Resolving and materialising the embedded `warpgate-rdp-helper` (client) executable.
+//! Resolving and materialising the embedded `warpgate-rdp-helper` executable.
 //!
-//! The target-facing RDP client helper is embedded into this binary at build time
-//! (see `build.rs`) and materialised on first use. The override env var is
-//! `WARPGATE_RDP_HELPER`. See [`crate::embedded`] for the materialisation strategy.
+//! The RDP helper — spawned as `connect` (target-facing client) or `serve`
+//! (viewer-facing server) — is embedded into this binary at build time (see `build.rs`)
+//! and materialised on first use. The override env var is `WARPGATE_RDP_HELPER`. See
+//! [`crate::embedded`] for the materialisation strategy.
 
 use crate::embedded::{EmbeddedHelper, HelperExecutable};
 use warpgate_common::WarpgateError;
 
-/// The target-facing RDP client helper, embedded by `build.rs`.
+/// The RDP helper (client + server subcommands), embedded by `build.rs`.
 static HELPER: EmbeddedHelper = EmbeddedHelper::new(
     include_bytes!(env!("RDP_HELPER_BLOB")),
     "warpgate-rdp-helper",
     "WARPGATE_RDP_HELPER",
 );
 
-/// Resolve the client helper executable, materialising the embedded copy as needed.
+/// Resolve the helper executable, materialising the embedded copy as needed.
 pub fn resolve() -> Result<HelperExecutable, WarpgateError> {
     HELPER.resolve()
 }

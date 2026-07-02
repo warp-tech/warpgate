@@ -84,6 +84,22 @@ pub enum DesktopRecordingItem {
         time: f32,
         text: String,
     },
+    /// A viewer raw-scancode key press/release (client -> server), captured for audit.
+    /// Emitted by native RDP viewers, which send PC/AT set-1 scancodes rather than keysyms.
+    ScancodeInput {
+        time: f32,
+        code: u8,
+        extended: bool,
+        down: bool,
+    },
+    /// A viewer mouse-wheel scroll (client -> server), captured for audit.
+    WheelInput {
+        time: f32,
+        x: u16,
+        y: u16,
+        vertical: bool,
+        delta: i16,
+    },
 }
 
 /// Recording metadata for a desktop session. Tagged like `SshRecordingMetadata`
@@ -150,8 +166,10 @@ impl DesktopRecorder {
         self.write_item(&item).await
     }
 
-    /// Record a viewer input (client -> server). Only the input kinds VNC viewers
-    /// produce (key/pointer/clipboard) are captured; scancode/wheel/refresh are ignored.
+    /// Record a viewer input (client -> server) for audit. Covers every viewer input
+    /// kind across protocols — keysym (VNC) and scancode (native RDP) keys, pointer,
+    /// wheel and clipboard. `Refresh` is a redraw request, not a user action, so it's
+    /// ignored.
     pub async fn write_input(&self, input: &DesktopInput) -> Result<()> {
         let time = self.get_time();
         let item = match input {
@@ -160,19 +178,39 @@ impl DesktopRecorder {
                 keysym: *keysym,
                 down: *down,
             },
+            DesktopInput::Scancode {
+                code,
+                extended,
+                down,
+            } => DesktopRecordingItem::ScancodeInput {
+                time,
+                code: *code,
+                extended: *extended,
+                down: *down,
+            },
             DesktopInput::Pointer { x, y, buttons } => DesktopRecordingItem::PointerInput {
                 time,
                 x: *x,
                 y: *y,
                 buttons: *buttons,
             },
+            DesktopInput::Wheel {
+                x,
+                y,
+                vertical,
+                delta,
+            } => DesktopRecordingItem::WheelInput {
+                time,
+                x: *x,
+                y: *y,
+                vertical: *vertical,
+                delta: *delta,
+            },
             DesktopInput::Clipboard(text) => DesktopRecordingItem::ClipboardInput {
                 time,
                 text: text.clone(),
             },
-            DesktopInput::Scancode { .. } | DesktopInput::Wheel { .. } | DesktopInput::Refresh => {
-                return Ok(())
-            }
+            DesktopInput::Refresh => return Ok(()),
         };
         self.write_item(&item).await
     }

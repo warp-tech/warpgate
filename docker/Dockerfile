@@ -25,7 +25,6 @@ RUN just npm ci \
     && just openapi \
     && just npm run build \
     && just build-rdp-helper \
-    && just build-rdp-server-helper \
     && cargo build --features mysql,postgres --release
 
 FROM debian:bullseye-20260623@sha256:e7100042ddfd3c1fb9d4a5bf15acbdb1058d7bb3340142916d3413a5c001fc89

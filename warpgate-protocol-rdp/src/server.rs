@@ -1,12 +1,12 @@
 //! Native RDP server endpoint.
 //!
 //! Warpgate accepts a raw TCP connection from a standard RDP client (mstsc/FreeRDP)
-//! and brokers between two out-of-workspace helpers:
+//! and brokers between two subprocesses of the out-of-workspace RDP helper:
 //!
-//! * the viewer-facing **serve helper** ([`crate::server_helper`]) runs the RDP server
+//! * the viewer-facing **serve helper** (`warpgate-rdp-helper serve`) runs the RDP server
 //!   state machine and terminates TLS, and
-//! * the existing target-facing **client helper** ([`crate::connect`]) drives the RDP
-//!   client toward the configured target.
+//! * the target-facing **client helper** (`warpgate-rdp-helper connect`, via
+//!   [`crate::connect`]) drives the RDP client toward the configured target.
 //!
 //! Warpgate keeps ownership of the listener, the session/audit lifecycle, and
 //! authentication. Per connection it binds a private loopback socket, spawns the serve
@@ -48,7 +48,7 @@ use warpgate_core::{
 };
 
 use crate::session_handle::RdpSessionHandle;
-use crate::{PROTOCOL_NAME, server_helper};
+use crate::PROTOCOL_NAME;
 
 /// How long to wait for the serve helper to connect back to our loopback port before
 /// giving up (covers a helper that dies on startup, e.g. bad TLS material).
@@ -110,6 +110,9 @@ struct BackendBridge {
     input_tx: Sender<DesktopInput>,
     abort_tx: UnboundedSender<()>,
     frame_bridge: tokio::task::JoinHandle<()>,
+    /// Shared with `frame_bridge`; used to record viewer input alongside the
+    /// framebuffer. `None` when recording is disabled.
+    recorder: Option<Arc<DesktopRecorder>>,
 }
 
 impl BackendBridge {
@@ -222,8 +225,9 @@ async fn handle_connection(
     let loopback_port = listener.local_addr()?.port();
 
     // Kept in scope until after `spawn` so the Linux memfd stays open across exec.
-    let helper = server_helper::resolve()?;
+    let helper = crate::helper::resolve()?;
     let mut child = Command::new(helper.path())
+        .arg("serve")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -314,7 +318,7 @@ async fn control_loop(
             continue;
         };
 
-        match event {
+        let input = match event {
             ServerHelperEvent::AuthRequest { username, password } => {
                 if backend.is_some() {
                     // Already authenticated; ignore a duplicate request.
@@ -332,19 +336,25 @@ async fn control_loop(
                         info!(target=%target.name, "Authorized");
 
                         let session_id = server_handle.lock().await.id();
-                        let recorder = start_recorder(&services, &session_id, &target.name).await;
+                        let recorder = start_recorder(&services, &session_id, &target.name)
+                            .await
+                            .map(Arc::new);
 
                         let crate::RdpClientHandles {
                             event_rx,
                             input_tx,
                             abort_tx,
                         } = crate::connect(options);
-                        let frame_bridge =
-                            tokio::spawn(frame_bridge(event_rx, helper_in_tx.clone(), recorder));
+                        let frame_bridge = tokio::spawn(frame_bridge(
+                            event_rx,
+                            helper_in_tx.clone(),
+                            recorder.clone(),
+                        ));
                         backend = Some(BackendBridge {
                             input_tx,
                             abort_tx,
                             frame_bridge,
+                            recorder,
                         });
 
                         if helper_in_tx
@@ -365,73 +375,51 @@ async fn control_loop(
                             helper_in_tx.send(ServerHelperInput::AuthResponse { accept: false });
                     }
                 }
+                continue;
             }
-            ServerHelperEvent::Pointer { x, y, buttons } => {
-                if let Some(backend) = &backend
-                    && backend
-                        .input_tx
-                        .send(DesktopInput::Pointer { x, y, buttons })
-                        .await
-                        .is_err()
-                {
-                    break;
-                }
+            ServerHelperEvent::Error { message } => {
+                warn!(%message, "RDP serve helper reported an error");
+                continue;
             }
+            ServerHelperEvent::Disconnected => break,
+
+            // Viewer input: record it for audit (like native VNC) then forward to the
+            // target. `break` once the target client is gone (send fails).
+            ServerHelperEvent::Pointer { x, y, buttons } => DesktopInput::Pointer { x, y, buttons },
             ServerHelperEvent::Scancode {
                 code,
                 extended,
                 down,
-            } => {
-                if let Some(backend) = &backend
-                    && backend
-                        .input_tx
-                        .send(DesktopInput::Scancode {
-                            code,
-                            extended,
-                            down,
-                        })
-                        .await
-                        .is_err()
-                {
-                    break;
-                }
-            }
-            ServerHelperEvent::Key { keysym, down } => {
-                if let Some(backend) = &backend
-                    && backend
-                        .input_tx
-                        .send(DesktopInput::Key { keysym, down })
-                        .await
-                        .is_err()
-                {
-                    break;
-                }
-            }
+            } => DesktopInput::Scancode {
+                code,
+                extended,
+                down,
+            },
+            ServerHelperEvent::Key { keysym, down } => DesktopInput::Key { keysym, down },
             ServerHelperEvent::Wheel {
                 x,
                 y,
                 vertical,
                 delta,
-            } => {
-                if let Some(backend) = &backend
-                    && backend
-                        .input_tx
-                        .send(DesktopInput::Wheel {
-                            x,
-                            y,
-                            vertical,
-                            delta,
-                        })
-                        .await
-                        .is_err()
-                {
-                    break;
-                }
-            }
-            ServerHelperEvent::Error { message } => {
-                warn!(%message, "RDP serve helper reported an error");
-            }
-            ServerHelperEvent::Disconnected => break,
+            } => DesktopInput::Wheel {
+                x,
+                y,
+                vertical,
+                delta,
+            },
+        };
+
+        // Reached only for the viewer-input variants above.
+        let Some(backend) = &backend else {
+            continue;
+        };
+        if let Some(recorder) = &backend.recorder
+            && let Err(error) = recorder.write_input(&input).await
+        {
+            warn!(%error, "Failed to record RDP viewer input");
+        }
+        if backend.input_tx.send(input).await.is_err() {
+            break;
         }
     }
 
@@ -441,12 +429,13 @@ async fn control_loop(
     Ok(())
 }
 
-/// Bridge target-side desktop events to the serve helper, recording each. Dropping the
-/// (moved-in) recorder when this returns finalises the recording.
+/// Bridge target-side desktop events to the serve helper, recording each. The recorder
+/// is shared with `control_loop` (which records viewer input); the recording finalises
+/// once both drop their handle.
 async fn frame_bridge(
     mut event_rx: tokio::sync::mpsc::Receiver<DesktopEvent>,
     helper_in_tx: UnboundedSender<ServerHelperInput>,
-    recorder: Option<DesktopRecorder>,
+    recorder: Option<Arc<DesktopRecorder>>,
 ) {
     while let Some(event) = event_rx.recv().await {
         if let Some(recorder) = &recorder

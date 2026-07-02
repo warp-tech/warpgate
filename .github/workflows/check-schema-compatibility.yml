@@ -25,7 +25,6 @@ jobs:
         run: |
           mkdir warpgate-web/dist
           just build-rdp-helper
-          just build-rdp-server-helper
           just openapi-all
 
       - name: Checkout main branch to compare

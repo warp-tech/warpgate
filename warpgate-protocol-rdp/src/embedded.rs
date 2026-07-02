@@ -1,9 +1,9 @@
 //! Resolving and materialising an embedded helper executable.
 //!
-//! Warpgate ships two out-of-workspace RDP helpers (a target-facing client and a
-//! viewer-facing server), each compressed and embedded into this crate at build
-//! time (see `build.rs`). The materialisation strategy is security-sensitive and
-//! identical for both, so it lives here once and is parameterised per helper:
+//! Warpgate ships one out-of-workspace RDP helper (`warpgate-rdp-helper`, carrying the
+//! target-facing client and viewer-facing server as `connect`/`serve` subcommands),
+//! compressed and embedded into this crate at build time (see `build.rs`). The
+//! materialisation strategy is security-sensitive, so it lives here once:
 //!
 //! 1. An explicit path override env var, if set, points at an external helper (dev/CI).
 //! 2. On Linux the embedded image is written to an anonymous `memfd` and executed

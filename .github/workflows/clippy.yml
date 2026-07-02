@@ -23,9 +23,6 @@ jobs:
       - name: Build RDP helper
         run: just build-rdp-helper
 
-      - name: Build RDP server helper
-        run: just build-rdp-server-helper
-
       - name: Clippy
         run: |
           just clippy

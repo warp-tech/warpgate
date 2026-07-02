@@ -115,8 +115,7 @@ enum ControlOut {
     Disconnected,
 }
 
-#[tokio::main]
-async fn main() {
+pub async fn entry() {
     // Logs MUST go to stderr — stdout is the line-delimited control channel.
     let _ = tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
@@ -128,7 +127,7 @@ async fn main() {
 
     if let Err(error) = run().await {
         // Setup-level failure (bad config / TLS / loopback). Surface and exit non-zero.
-        eprintln!("warpgate-rdp-server-helper: {error:#}");
+        eprintln!("warpgate-rdp-helper serve: {error:#}");
         std::process::exit(1);
     }
 }
@@ -167,7 +166,7 @@ async fn run() -> Result<()> {
     let display = DisplayHandler {
         width: config.width,
         height: config.height,
-        updates: Some(frame_rx),
+        updates: Arc::new(Mutex::new(frame_rx)),
     };
     let input = InputHandler {
         out: out_tx.clone(),
@@ -334,7 +333,10 @@ fn frame_to_update(x: u16, y: u16, width: u16, height: u16, data: Vec<u8>) -> Op
 struct DisplayHandler {
     width: u16,
     height: u16,
-    updates: Option<mpsc::Receiver<DisplayUpdate>>,
+    // Shared, not `take()`n: ironrdp-server calls `updates()` again after every
+    // deactivation-reactivation (e.g. an mstsc / MS Remote Desktop resize), so a
+    // one-shot receiver would fail the second connection with "already taken".
+    updates: Arc<Mutex<mpsc::Receiver<DisplayUpdate>>>,
 }
 
 #[async_trait::async_trait]
@@ -349,23 +351,24 @@ impl RdpServerDisplay for DisplayHandler {
     }
 
     async fn updates(&mut self) -> Result<Box<dyn RdpServerDisplayUpdates>> {
-        let rx = self
-            .updates
-            .take()
-            .context("display updates receiver already taken")?;
-        Ok(Box::new(DisplayUpdatesReceiver { rx }))
+        // Hand out a fresh view over the shared receiver. Only one is active at a time
+        // (the previous is dropped when its client loop ends before reactivation).
+        Ok(Box::new(DisplayUpdatesReceiver {
+            rx: self.updates.clone(),
+        }))
     }
 }
 
 struct DisplayUpdatesReceiver {
-    rx: mpsc::Receiver<DisplayUpdate>,
+    rx: Arc<Mutex<mpsc::Receiver<DisplayUpdate>>>,
 }
 
 #[async_trait::async_trait]
 impl RdpServerDisplayUpdates for DisplayUpdatesReceiver {
     async fn next_update(&mut self) -> Result<Option<DisplayUpdate>> {
-        // `mpsc::Receiver::recv` is cancellation-safe, as this trait requires.
-        Ok(self.rx.recv().await)
+        // `mpsc::Receiver::recv` is cancellation-safe, as this trait requires; the guard
+        // is released on cancel and no message is lost.
+        Ok(self.rx.lock().await.recv().await)
     }
 }
 

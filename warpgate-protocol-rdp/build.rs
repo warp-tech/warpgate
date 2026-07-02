@@ -1,11 +1,11 @@
-//! Embeds the standalone RDP helper binaries into this crate so Warpgate ships as a
+//! Embeds the standalone RDP helper binary into this crate so Warpgate ships as a
 //! single executable.
 //!
-//! Two helpers are embedded: the target-facing client (`warpgate-rdp-helper`) and the
-//! viewer-facing server (`warpgate-rdp-server-helper`). Both are built separately — each
-//! has its own lockfile to avoid `picky`/`sspi` pre-release conflicts between IronRDP's
-//! generations and `russh` — so here we only locate the prebuilt artifacts, compress
-//! them, and stash them in `OUT_DIR` for `include_bytes!`. Embedding is mandatory: if an
+//! One helper is embedded: `warpgate-rdp-helper`, which carries both the target-facing
+//! client (`connect`) and the viewer-facing server (`serve`) as subcommands. It is built
+//! separately — it has its own lockfile to avoid `picky`/`sspi` pre-release conflicts
+//! between IronRDP and `russh` — so here we only locate the prebuilt artifact, compress
+//! it, and stash it in `OUT_DIR` for `include_bytes!`. Embedding is mandatory: if the
 //! artifact is missing the build fails (there is no runtime `$PATH` fallback).
 
 use std::error::Error;
@@ -13,7 +13,6 @@ use std::io::Write as _;
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // Target-facing RDP client helper.
     embed(&Helper {
         bin_env: "WARPGATE_RDP_HELPER_BIN",
         crate_dir: "warpgate-rdp-helper",
@@ -21,16 +20,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         blob_file: "rdp-helper.gz",
         blob_env: "RDP_HELPER_BLOB",
         just_recipe: "build-rdp-helper",
-    })?;
-
-    // Viewer-facing RDP server helper (the native RDP endpoint).
-    embed(&Helper {
-        bin_env: "WARPGATE_RDP_SERVER_HELPER_BIN",
-        crate_dir: "warpgate-rdp-server-helper",
-        bin_stem: "warpgate-rdp-server-helper",
-        blob_file: "rdp-server-helper.gz",
-        blob_env: "RDP_SERVER_HELPER_BLOB",
-        just_recipe: "build-rdp-server-helper",
     })?;
 
     Ok(())

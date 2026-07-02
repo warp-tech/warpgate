@@ -117,6 +117,8 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
     postgres: new Set([CredentialKind.Password, CredentialKind.WebUserApproval]),
     kubernetes: new Set([CredentialKind.Certificate, CredentialKind.WebUserApproval]),
     vnc: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.WebUserApproval]),
+    // Native RDP collects only a password over NLA; it can't gather interactive 2FA.
+    rdp: new Set([CredentialKind.Password]),
 }
 
 export function abbreviatePublicKey (key: string): string {
@@ -205,4 +207,6 @@ export const PROTOCOL_PROPERTIES: Record<string, ProtocolProperties> = {
     MySQL: { sessionsCanBeClosed: true },
     PostgreSQL: { sessionsCanBeClosed: true },
     Kubernetes: { sessionsCanBeClosed: false },
+    VNC: { sessionsCanBeClosed: true },
+    RDP: { sessionsCanBeClosed: true },
 }
