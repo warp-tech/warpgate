@@ -62,7 +62,7 @@
     "svelte-spa-router": "^4.0.1",
     "thenby": "^1.4.1",
     "tslib": "^2.8.0",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.61.0",
     "ua-parser-js": "^2.0.10",
     "vite": "^7.3.1",
