@@ -10,7 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::{FutureExt, StreamExt};
 use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use session::PostgresSession;
@@ -35,11 +36,11 @@ impl PostgresProtocolServer {
 }
 
 impl ProtocolServer for PostgresProtocolServer {
-    async fn run(
+    async fn bind(
         self,
         address: ListenEndpoint,
         tls: Vec<TlsCertificateAndPrivateKey>,
-    ) -> Result<()> {
+    ) -> Result<BoxFuture<'static, Result<()>>> {
         let certificate_and_key = tls
             .into_iter()
             .next()
@@ -58,7 +59,9 @@ impl ProtocolServer for PostgresProtocolServer {
             .tcp_accept_stream()
             .await
             .context("accepting connection")?;
-        loop {
+        let services = self.services;
+        Ok(async move {
+            loop {
             let Some(stream) = listener.next().await else {
                 return Ok(());
             };
@@ -95,7 +98,7 @@ impl ProtocolServer for PostgresProtocolServer {
             };
 
             let tls_config = tls_config.clone();
-            let services = self.services.clone();
+            let services = services.clone();
             tokio::spawn(async move {
                 let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
 
@@ -136,7 +139,9 @@ impl ProtocolServer for PostgresProtocolServer {
 
                 Ok::<(), anyhow::Error>(())
             });
+            }
         }
+        .boxed())
     }
 
     fn name(&self) -> &'static str {

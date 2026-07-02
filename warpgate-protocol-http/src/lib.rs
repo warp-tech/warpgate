@@ -14,6 +14,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use common::inject_request_authorization;
 pub use common::{PROTOCOL_NAME, SsoLoginState};
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{Listener, RustlsConfig};
@@ -80,11 +82,11 @@ fn make_rustls_config(tls: Vec<TlsCertificateAndPrivateKey>) -> Result<RustlsCon
 }
 
 impl ProtocolServer for HTTPProtocolServer {
-    async fn run(
+    async fn bind(
         self,
         address: ListenEndpoint,
         tls: Vec<TlsCertificateAndPrivateKey>,
-    ) -> Result<()> {
+    ) -> Result<BoxFuture<'static, Result<()>>> {
         let session_storage = make_session_storage();
         let session_store = SessionStore::new();
 
@@ -287,11 +289,19 @@ impl ProtocolServer for HTTPProtocolServer {
 
         let rustls_config = make_rustls_config(tls).context("rustls setup")?;
 
-        Server::new(address.poem_listener()?.rustls(rustls_config))
-            .run(app)
+        // Bind the socket now (errors here are non-fatal to the supervisor); the
+        // returned future drives the accept loop (errors there restart the listener).
+        let acceptor = address
+            .poem_listener()?
+            .rustls(rustls_config)
+            .into_acceptor()
             .await?;
 
-        Ok(())
+        Ok(async move {
+            Server::new_with_acceptor(acceptor).run(app).await?;
+            Ok(())
+        }
+        .boxed())
     }
 
     fn name(&self) -> &'static str {

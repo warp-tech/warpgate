@@ -9,7 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::{FutureExt, StreamExt};
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use russh::{MethodKind, MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
@@ -31,7 +32,10 @@ struct RusshConfigInit {
     keys: Vec<PrivateKey>,
 }
 
-pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
+pub async fn bind_server(
+    services: Services,
+    address: ListenEndpoint,
+) -> Result<BoxFuture<'static, Result<()>>> {
     let russh_config_init = Arc::new({
         let config = services.config.lock().await;
         RusshConfigInit {
@@ -41,19 +45,22 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 
     let mut listener = address.tcp_accept_stream().await?;
 
-    while let Some(stream) = listener.next().await {
-        let russh_config_init = russh_config_init.clone();
-        let services = services.clone();
+    Ok(async move {
+        while let Some(stream) = listener.next().await {
+            let russh_config_init = russh_config_init.clone();
+            let services = services.clone();
 
-        tokio::task::Builder::new()
-            .name("SSH new connection setup")
-            .spawn(async move {
-                if let Err(e) = _handle_connection(services, russh_config_init, stream).await {
-                    error!(%e, "Connection handling failed");
-                }
-            })?;
+            tokio::task::Builder::new()
+                .name("SSH new connection setup")
+                .spawn(async move {
+                    if let Err(e) = _handle_connection(services, russh_config_init, stream).await {
+                        error!(%e, "Connection handling failed");
+                    }
+                })?;
+        }
+        Ok(())
     }
-    Ok(())
+    .boxed())
 }
 
 async fn _handle_connection(

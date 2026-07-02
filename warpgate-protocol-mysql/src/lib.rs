@@ -8,7 +8,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::{FutureExt, StreamExt};
 use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use tracing::{Instrument, error, info, warn};
@@ -33,11 +34,11 @@ impl MySQLProtocolServer {
 }
 
 impl ProtocolServer for MySQLProtocolServer {
-    async fn run(
+    async fn bind(
         self,
         address: ListenEndpoint,
         tls: Vec<TlsCertificateAndPrivateKey>,
-    ) -> Result<()> {
+    ) -> Result<BoxFuture<'static, Result<()>>> {
         let certificate_and_key = tls
             .into_iter()
             .next()
@@ -54,23 +55,25 @@ impl ProtocolServer for MySQLProtocolServer {
 
         let mut listener = address.tcp_accept_stream().await?;
 
-        loop {
-            let Some(stream) = listener.next().await else {
-                return Ok(());
-            };
-            let Ok(remote_address) = stream.peer_addr() else {
-                // already disconnected
-                continue;
-            };
+        let services = self.services;
+        Ok(async move {
+            loop {
+                let Some(stream) = listener.next().await else {
+                    return Ok(());
+                };
+                let Ok(remote_address) = stream.peer_addr() else {
+                    // already disconnected
+                    continue;
+                };
 
-            let _ = stream.set_nodelay(true);
-            if detect_port_knock(&stream).await {
-                continue;
-            }
+                let _ = stream.set_nodelay(true);
+                if detect_port_knock(&stream).await {
+                    continue;
+                }
 
-            let tls_config = tls_config.clone();
-            let services = self.services.clone();
-            tokio::spawn(async move {
+                let tls_config = tls_config.clone();
+                let services = services.clone();
+                tokio::spawn(async move {
                 let (session_handle, mut abort_rx) = MySqlSessionHandle::new();
 
                 let server_handle = State::register_session(
@@ -110,7 +113,9 @@ impl ProtocolServer for MySQLProtocolServer {
 
                 Ok::<(), anyhow::Error>(())
             });
+            }
         }
+        .boxed())
     }
 
     fn name(&self) -> &'static str {

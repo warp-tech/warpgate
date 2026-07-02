@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use futures::future::BoxFuture;
 use futures::{Stream, StreamExt};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher, recommended_watcher};
@@ -13,12 +14,22 @@ use tracing::{error, info, warn};
 use warpgate_common::{ListenEndpoint, WarpgateError};
 use warpgate_tls::{TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey};
 
-/// A certificate + private key file pair (absolute paths) that a listener
-/// depends on and whose files should be watched for changes.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct TlsPair {
+pub struct TlsPathPair {
     pub certificate: PathBuf,
     pub key: PathBuf,
+}
+
+impl TlsPathPair {
+    pub fn new(base: &Path, certificate: &str, key: &str) -> Option<Self> {
+        if certificate.is_empty() || key.is_empty() {
+            return None;
+        }
+        Some(Self {
+            certificate: base.join(certificate),
+            key: base.join(key),
+        })
+    }
 }
 
 /// The desired state of a single protocol listener, derived from the current
@@ -28,15 +39,19 @@ pub struct ListenerParams {
     pub enabled: bool,
     pub endpoint: ListenEndpoint,
     /// TLS pairs the listener serves (main + SNI). Empty for non-TLS protocols.
-    pub tls: Vec<TlsPair>,
+    pub tls: Vec<TlsPathPair>,
 }
 
-/// Builds and runs the protocol server on the given endpoint, handed the
-/// pre-loaded and validated TLS material (empty for non-TLS protocols). Called
-/// afresh on every (re)start. The returned future resolves only when the listener
-/// stops (normally an error, since accept loops run forever).
+/// Builds the protocol server on the given endpoint, handed the pre-loaded and
+/// validated TLS material (empty for non-TLS protocols). Called afresh on every
+/// (re)start. Two phases: the outer future *binds* the socket — an error here is
+/// non-fatal (the supervisor pauses until the next config/cert change) — and the
+/// inner future *drives the accept loop* — an error there restarts the listener.
 pub type ServerFactory = Arc<
-    dyn Fn(ListenEndpoint, Vec<TlsCertificateAndPrivateKey>) -> BoxFuture<'static, Result<()>>
+    dyn Fn(
+            ListenEndpoint,
+            Vec<TlsCertificateAndPrivateKey>,
+        ) -> BoxFuture<'static, Result<BoxFuture<'static, Result<()>>>>
         + Send
         + Sync,
 >;
@@ -93,7 +108,7 @@ impl<C: Send + 'static> ListenerSupervisor<C> {
                     };
                     let new_desired = (self.selector)(&config);
                     self.update_watches(&new_desired, watcher.as_mut(), &mut watched_dirs);
-                    self.maybe_restart(&new_desired, false, &mut task, &mut applied).await;
+                    self.maybe_restart_with_new_params(&new_desired, &mut task, &mut applied).await;
                     desired = Some(new_desired);
                 }
                 Some(event) = watcher_rx.recv() => {
@@ -102,22 +117,25 @@ impl<C: Send + 'static> ListenerSupervisor<C> {
                     };
                     if Self::event_touches(&event, &new_desired) {
                         info!(name = self.name, "Certificate or key file changed on disk");
-                        self.maybe_restart(&new_desired, true, &mut task, &mut applied).await;
+                        self.restart_with_new_params(&new_desired, &mut task, &mut applied).await;
                     }
                 }
                 result = wait_task(&mut task), if task.is_some() => {
                     task = None;
                     match result {
-                        Ok(Ok(())) => {
-                            warn!(name = self.name, "Listener stopped unexpectedly; paused until the next config or certificate change");
-                        }
-                        Ok(Err(error)) => {
-                            error!(name = self.name, %error, "Listener failed; paused until the next config or certificate change");
-                        }
-                        Err(join_error) if join_error.is_panic() => {
-                            error!(name = self.name, %join_error, "Listener task panicked; paused until the next config or certificate change");
-                        }
+                        Ok(Ok(())) => warn!(name = self.name, "Accept loop stopped; restarting listener"),
+                        Ok(Err(error)) => error!(name = self.name, %error, "Accept loop failed; restarting listener"),
+                        Err(join_error) if join_error.is_panic() => error!(name = self.name, %join_error, "Accept loop panicked; restarting listener"),
                         Err(_) => {}
+                    }
+                    // The socket had bound successfully, so this is a transient
+                    // accept-loop failure: restart. Back off briefly to avoid a
+                    // tight crash loop; a *bind* failure during the restart then
+                    // pauses until the next config change (handled in restart).
+                    // ponytail: fixed 1s backoff, not exponential — rare event.
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    if let Some(params) = applied.clone() {
+                        self.restart_with_new_params(&params, &mut task, &mut applied).await;
                     }
                 }
             }
@@ -127,19 +145,26 @@ impl<C: Send + 'static> ListenerSupervisor<C> {
     /// Start, stop, or restart the listener to match `desired`. `force` bypasses
     /// the "params unchanged" check — used for cert file changes, where the paths
     /// are the same but the file contents are not.
-    async fn maybe_restart(
+    async fn maybe_restart_with_new_params(
         &self,
         desired: &ListenerParams,
-        force: bool,
         task: &mut Option<JoinHandle<Result<()>>>,
         applied: &mut Option<ListenerParams>,
     ) {
         let unchanged = applied.as_ref() == Some(desired);
         // A stopped/paused listener (task is None) always needs a (re)start attempt.
-        if !force && unchanged && task.is_some() {
+        if unchanged && task.is_some() {
             return;
         }
+        self.restart_with_new_params(desired, task, applied).await;
+    }
 
+    async fn restart_with_new_params(
+        &self,
+        desired: &ListenerParams,
+        task: &mut Option<JoinHandle<Result<()>>>,
+        applied: &mut Option<ListenerParams>,
+    ) {
         if !desired.enabled {
             if let Some(handle) = task.take() {
                 abort_and_wait(handle).await;
@@ -169,9 +194,19 @@ impl<C: Send + 'static> ListenerSupervisor<C> {
         if let Some(handle) = task.take() {
             abort_and_wait(handle).await;
         }
-        info!(name = self.name, endpoint = ?desired.endpoint, "Starting listener");
-        *task = Some(tokio::spawn((self.factory)(desired.endpoint.clone(), tls)));
         *applied = Some(desired.clone());
+
+        info!(name = self.name, endpoint = ?desired.endpoint, "Binding listener");
+        // Phase 1: bind. A bind failure is non-fatal — leave the listener stopped
+        // (`task` = None) so it retries on the next config or certificate change.
+        match (self.factory)(desired.endpoint.clone(), tls).await {
+            // Phase 2: drive the accept loop in its own task. If it ends, the task
+            // branch of `run` restarts the listener.
+            Ok(accept_loop) => *task = Some(tokio::spawn(accept_loop)),
+            Err(error) => {
+                error!(name = self.name, %error, "Listener failed to bind; paused until the next config or certificate change");
+            }
+        }
     }
 
     /// Watch the parent directories of the desired cert/key files (robust to
@@ -265,23 +300,20 @@ async fn wait_task(task: &mut Option<JoinHandle<Result<()>>>) -> Result<Result<(
 /// returned [`TlsState`] classifies whether the material could not be loaded or
 /// loaded but did not match.
 pub(crate) async fn validate_tls(
-    pairs: &[TlsPair],
+    pairs: &[TlsPathPair],
 ) -> Result<Vec<TlsCertificateAndPrivateKey>, WarpgateError> {
     let mut loaded = Vec::with_capacity(pairs.len());
     for pair in pairs {
-        let certificate = TlsCertificateBundle::from_file(&pair.certificate)
-            .await
-            .with_context(|| format!("loading certificate {:?}", pair.certificate))?;
-        let private_key = TlsPrivateKey::from_file(&pair.key)
-            .await
-            .with_context(|| format!("loading private key {:?}", pair.key))?;
+        // Keep the typed `WarpgateError::TlsSetup(RustlsSetupError::…)` (via `?`'s
+        // `#[from]`) so callers can distinguish a load failure from a cert/key
+        // mismatch — don't route through anyhow context, which would erase it.
+        let certificate = TlsCertificateBundle::from_file(&pair.certificate).await?;
+        let private_key = TlsPrivateKey::from_file(&pair.key).await?;
         let pair_material = TlsCertificateAndPrivateKey {
             certificate,
             private_key,
         };
-        pair_material
-            .verify_key_matches_certificate()
-            .with_context(|| format!("certificate {:?} / key {:?}", pair.certificate, pair.key))?;
+        pair_material.verify_key_matches_certificate()?;
         loaded.push(pair_material);
     }
     Ok(loaded)
@@ -327,8 +359,12 @@ mod tests {
                 if fail.load(Ordering::SeqCst) {
                     anyhow::bail!("simulated bind failure");
                 }
-                std::future::pending::<()>().await;
-                Ok(())
+                // Bind ok; the accept loop pends forever (listener stays up).
+                Ok(async move {
+                    std::future::pending::<()>().await;
+                    Ok(())
+                }
+                .boxed())
             }
             .boxed()
         })
@@ -407,6 +443,47 @@ mod tests {
         handle.abort();
     }
 
+    // Uses the real 1s restart backoff; well within `next_start`'s 5s timeout.
+    #[tokio::test]
+    async fn restarts_on_accept_loop_failure() {
+        use std::sync::atomic::AtomicUsize;
+
+        let (starts_tx, mut starts_rx) = unbounded_channel();
+        // Bind always succeeds; the first accept loop dies immediately, the rest pend.
+        let accept_calls = Arc::new(AtomicUsize::new(0));
+        let factory: ServerFactory = {
+            let starts = starts_tx.clone();
+            let accept_calls = accept_calls.clone();
+            Arc::new(move |endpoint: ListenEndpoint, _tls| {
+                let _ = starts.send(endpoint);
+                let accept_calls = accept_calls.clone();
+                async move {
+                    Ok(async move {
+                        if accept_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                            anyhow::bail!("accept loop died");
+                        }
+                        std::future::pending::<()>().await;
+                        Ok(())
+                    }
+                    .boxed())
+                }
+                .boxed()
+            })
+        };
+        let selector: ConfigSelector<ListenerParams> = Arc::new(|p: &ListenerParams| p.clone());
+
+        let (_cfg_tx, cfg_rx) = watch::channel(params(2401, true));
+        let supervisor = ListenerSupervisor::new("test", factory, selector);
+        let handle = tokio::spawn(supervisor.run(WatchStream::new(cfg_rx)));
+
+        // Initial bind, then the accept loop dies and the listener auto-restarts
+        // (no config change) after the backoff — a second bind on the same port.
+        assert_eq!(next_start(&mut starts_rx).await.port(), 2401);
+        assert_eq!(next_start(&mut starts_rx).await.port(), 2401);
+
+        handle.abort();
+    }
+
     #[tokio::test]
     async fn reloads_only_matching_cert_key_pairs() {
         let dir = tempdir().unwrap();
@@ -418,7 +495,7 @@ mod tests {
         std::fs::write(&cert_path, a.cert.pem()).unwrap();
         std::fs::write(&key_path, a.signing_key.serialize_pem()).unwrap();
 
-        let tls = vec![TlsPair {
+        let tls = vec![TlsPathPair {
             certificate: cert_path.clone(),
             key: key_path.clone(),
         }];
@@ -451,7 +528,7 @@ mod tests {
         let desired = ListenerParams {
             enabled: true,
             endpoint: endpoint(8443),
-            tls: vec![TlsPair {
+            tls: vec![TlsPathPair {
                 certificate: "/etc/warpgate/tls.crt".into(),
                 key: "/etc/warpgate/tls.key".into(),
             }],

@@ -9,10 +9,12 @@ use std::fmt::Debug;
 use anyhow::Result;
 pub use client::*;
 pub use common::*;
+use futures::future::BoxFuture;
 pub use keys::*;
-pub use server::run_server;
+pub use server::bind_server;
 use warpgate_common::{ListenEndpoint, ProtocolName};
 use warpgate_core::{ProtocolServer, Services};
+use warpgate_tls::TlsCertificateAndPrivateKey;
 
 pub static PROTOCOL_NAME: ProtocolName = "SSH";
 
@@ -33,12 +35,12 @@ impl SSHProtocolServer {
 }
 
 impl ProtocolServer for SSHProtocolServer {
-    async fn run(
+    async fn bind(
         self,
         address: ListenEndpoint,
-        _tls: Vec<warpgate_tls::TlsCertificateAndPrivateKey>,
-    ) -> Result<()> {
-        run_server(self.services, address).await
+        _tls: Vec<TlsCertificateAndPrivateKey>,
+    ) -> Result<BoxFuture<'static, Result<()>>> {
+        bind_server(self.services, address).await
     }
 
     fn name(&self) -> &'static str {

@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -24,20 +23,8 @@ use warpgate_protocol_ssh::SSHProtocolServer;
 
 use crate::config::{load_config, watch_config};
 use crate::listener_supervisor::{
-    ConfigSelector, ListenerParams, ListenerSupervisor, ServerFactory, TlsPair, validate_tls,
+    ConfigSelector, ListenerParams, ListenerSupervisor, ServerFactory, TlsPathPair, validate_tls,
 };
-
-/// Resolve a certificate/key config pair into absolute paths, skipping the pair
-/// if either path is unset.
-fn tls_pair(base: &Path, certificate: &str, key: &str) -> Option<TlsPair> {
-    if certificate.is_empty() || key.is_empty() {
-        return None;
-    }
-    Some(TlsPair {
-        certificate: base.join(certificate),
-        key: base.join(key),
-    })
-}
 
 /// Endpoint failures at startup are fatal (only runtime changes are non-fatal),
 /// so probe the initial config's TLS material and port before spawning the
@@ -115,16 +102,18 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         let services = services.clone();
         let factory: ServerFactory = Arc::new(move |address, tls| {
             let services = services.clone();
-            async move { HTTPProtocolServer::new(&services).run(address, tls).await }.boxed()
+            async move { HTTPProtocolServer::new(&services).bind(address, tls).await }.boxed()
         });
         let base = base.clone();
         let selector: ConfigSelector<WarpgateConfig> = Arc::new(move |c: &WarpgateConfig| {
             let mut tls = Vec::new();
-            if let Some(pair) = tls_pair(&base, &c.store.http.certificate, &c.store.http.key) {
+            if let Some(pair) =
+                TlsPathPair::new(&base, &c.store.http.certificate, &c.store.http.key)
+            {
                 tls.push(pair);
             }
             for sni in &c.store.http.sni_certificates {
-                if let Some(pair) = tls_pair(&base, &sni.certificate, &sni.key) {
+                if let Some(pair) = TlsPathPair::new(&base, &sni.certificate, &sni.key) {
                     tls.push(pair);
                 }
             }
@@ -143,7 +132,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             let services = services.clone();
             async move {
                 let server = SSHProtocolServer::new(&services).await?;
-                server.run(address, tls).await
+                server.bind(address, tls).await
             }
             .boxed()
         });
@@ -156,75 +145,31 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         supervisors.push(spawn_supervisor("SSH", false, factory, selector, &config_rx).await?);
     }
 
-    {
-        let services = services.clone();
-        let factory: ServerFactory = Arc::new(move |address, tls| {
+    // These protocols are uniform: sync `new`, one enable flag, one cert/key pair.
+    // `$cfg` is the `store` field holding their config (all share the shape).
+    macro_rules! tls_listener {
+        ($name:literal, $server:ident, $cfg:ident) => {{
             let services = services.clone();
-            async move { MySQLProtocolServer::new(&services).run(address, tls).await }.boxed()
-        });
-        let base = base.clone();
-        let selector: ConfigSelector<WarpgateConfig> =
-            Arc::new(move |c: &WarpgateConfig| ListenerParams {
-                enabled: c.store.mysql.enable,
-                endpoint: c.store.mysql.listen.clone(),
-                tls: tls_pair(&base, &c.store.mysql.certificate, &c.store.mysql.key)
-                    .into_iter()
-                    .collect(),
+            let base = base.clone();
+            let factory: ServerFactory = Arc::new(move |address, tls| {
+                let services = services.clone();
+                async move { $server::new(&services).bind(address, tls).await }.boxed()
             });
-        supervisors.push(spawn_supervisor("MySQL", true, factory, selector, &config_rx).await?);
+            let selector: ConfigSelector<WarpgateConfig> =
+                Arc::new(move |c: &WarpgateConfig| ListenerParams {
+                    enabled: c.store.$cfg.enable,
+                    endpoint: c.store.$cfg.listen.clone(),
+                    tls: TlsPathPair::new(&base, &c.store.$cfg.certificate, &c.store.$cfg.key)
+                        .into_iter()
+                        .collect(),
+                });
+            spawn_supervisor($name, true, factory, selector, &config_rx).await?
+        }};
     }
 
-    {
-        let services = services.clone();
-        let factory: ServerFactory = Arc::new(move |address, tls| {
-            let services = services.clone();
-            async move {
-                PostgresProtocolServer::new(&services)
-                    .run(address, tls)
-                    .await
-            }
-            .boxed()
-        });
-        let base = base.clone();
-        let selector: ConfigSelector<WarpgateConfig> =
-            Arc::new(move |c: &WarpgateConfig| ListenerParams {
-                enabled: c.store.postgres.enable,
-                endpoint: c.store.postgres.listen.clone(),
-                tls: tls_pair(&base, &c.store.postgres.certificate, &c.store.postgres.key)
-                    .into_iter()
-                    .collect(),
-            });
-        supervisors
-            .push(spawn_supervisor("PostgreSQL", true, factory, selector, &config_rx).await?);
-    }
-
-    {
-        let services = services.clone();
-        let factory: ServerFactory = Arc::new(move |address, tls| {
-            let services = services.clone();
-            async move {
-                KubernetesProtocolServer::new(&services)
-                    .run(address, tls)
-                    .await
-            }
-            .boxed()
-        });
-        let base = base.clone();
-        let selector: ConfigSelector<WarpgateConfig> =
-            Arc::new(move |c: &WarpgateConfig| ListenerParams {
-                enabled: c.store.kubernetes.enable,
-                endpoint: c.store.kubernetes.listen.clone(),
-                tls: tls_pair(
-                    &base,
-                    &c.store.kubernetes.certificate,
-                    &c.store.kubernetes.key,
-                )
-                .into_iter()
-                .collect(),
-            });
-        supervisors
-            .push(spawn_supervisor("Kubernetes", true, factory, selector, &config_rx).await?);
-    }
+    supervisors.push(tls_listener!("MySQL", MySQLProtocolServer, mysql));
+    supervisors.push(tls_listener!("PostgreSQL", PostgresProtocolServer, postgres));
+    supervisors.push(tls_listener!("Kubernetes", KubernetesProtocolServer, kubernetes));
 
     tokio::spawn({
         let services = services.clone();

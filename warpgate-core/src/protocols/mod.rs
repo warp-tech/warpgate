@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::future::Future;
 
 use anyhow::Result;
+use futures::future::BoxFuture;
 use warpgate_common::ListenEndpoint;
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
@@ -27,15 +28,18 @@ pub enum TargetTestError {
 
 pub trait ProtocolServer {
     fn name(&self) -> &'static str;
-    /// Run the listener on `address`. `tls` carries pre-loaded, validated TLS
-    /// material: the first entry is the primary certificate, any further entries
-    /// are SNI certificates (HTTP only). It is empty for protocols that do not
-    /// use TLS (SSH) or when none is configured. Passing it in avoids re-reading
-    /// the files and guarantees the server serves exactly the pair that was
-    /// validated (cert and key matched).
-    fn run(
+
+    /// Bind the listening socket(s) for `address`, returning a future that drives
+    /// the accept loop. The two phases fail differently for the supervisor:
+    ///
+    /// * an error while binding (from *this* future) is non-fatal — the listener is
+    ///   paused until the config or a certificate changes;
+    /// * an error from the returned accept-loop future restarts the listener.
+    ///
+    /// `tls` is validated TLS pair(s): the main cert + maybe SNI certs.
+    fn bind(
         self,
         address: ListenEndpoint,
         tls: Vec<TlsCertificateAndPrivateKey>,
-    ) -> impl Future<Output = Result<()>> + Send;
+    ) -> impl Future<Output = Result<BoxFuture<'static, Result<()>>>> + Send;
 }

@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use poem::listener::Listener;
 use poem::{EndpointExt, Route, Server};
 use rustls::ServerConfig;
@@ -20,11 +22,11 @@ mod handlers;
 
 use client_certs::CertificateExtractorMiddleware;
 
-pub async fn run_server(
+pub async fn bind_server(
     services: Services,
     address: ListenEndpoint,
     tls: Vec<TlsCertificateAndPrivateKey>,
-) -> Result<()> {
+) -> Result<BoxFuture<'static, Result<()>>> {
     let correlator = RequestCorrelator::new(&services);
 
     let app = Route::new()
@@ -55,10 +57,12 @@ pub async fn run_server(
     let tcp_acceptor = address.poem_listener()?.into_acceptor().await?;
     let cert_capturing_acceptor = CertificateCapturingAcceptor::new(tcp_acceptor, tls_config);
 
-    Server::new_with_acceptor(cert_capturing_acceptor)
-        .run(app)
-        .await
-        .context("Kubernetes server error")?;
-
-    Ok(())
+    Ok(async move {
+        Server::new_with_acceptor(cert_capturing_acceptor)
+            .run(app)
+            .await
+            .context("Kubernetes server error")?;
+        Ok(())
+    }
+    .boxed())
 }

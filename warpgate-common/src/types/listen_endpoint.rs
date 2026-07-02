@@ -69,7 +69,7 @@ impl ListenEndpoint {
 
     pub async fn tcp_accept_stream(
         &self,
-    ) -> Result<impl Stream<Item = TcpStream> + Unpin + Send, WarpgateError> {
+    ) -> Result<impl Stream<Item = TcpStream> + Unpin + Send + 'static, WarpgateError> {
         Ok(iter(
             self.tcp_listeners()
                 .await?
