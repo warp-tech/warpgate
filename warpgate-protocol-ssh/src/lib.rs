@@ -33,7 +33,11 @@ impl SSHProtocolServer {
 }
 
 impl ProtocolServer for SSHProtocolServer {
-    async fn run(self, address: ListenEndpoint) -> Result<()> {
+    async fn run(
+        self,
+        address: ListenEndpoint,
+        _tls: Vec<warpgate_tls::TlsCertificateAndPrivateKey>,
+    ) -> Result<()> {
         run_server(self.services, address).await
     }
 

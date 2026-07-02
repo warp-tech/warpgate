@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use anyhow::Result;
 use warpgate_common::{ListenEndpoint, ProtocolName};
 use warpgate_core::{ProtocolServer, Services};
+use warpgate_tls::TlsCertificateAndPrivateKey;
 
 mod correlator;
 pub mod recording;
@@ -26,8 +27,12 @@ impl KubernetesProtocolServer {
 }
 
 impl ProtocolServer for KubernetesProtocolServer {
-    async fn run(self, address: ListenEndpoint) -> Result<()> {
-        run_server(self.services, address).await
+    async fn run(
+        self,
+        address: ListenEndpoint,
+        tls: Vec<TlsCertificateAndPrivateKey>,
+    ) -> Result<()> {
+        run_server(self.services, address, tls).await
     }
 
     fn name(&self) -> &'static str {

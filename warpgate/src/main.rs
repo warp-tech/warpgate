@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod listener_supervisor;
 mod logging;
 
 use std::path::PathBuf;

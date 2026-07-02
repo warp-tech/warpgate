@@ -20,9 +20,7 @@ use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
-use warpgate_tls::{
-    ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
-};
+use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
 pub struct PostgresProtocolServer {
     services: Services,
@@ -37,27 +35,15 @@ impl PostgresProtocolServer {
 }
 
 impl ProtocolServer for PostgresProtocolServer {
-    async fn run(self, address: ListenEndpoint) -> Result<()> {
-        let certificate_and_key = {
-            let config = self.services.config.lock().await;
-            let paths_rel_to = self.services.global_params.paths_relative_to();
-            let certificate_path = paths_rel_to.join(&config.store.postgres.certificate);
-            let key_path = paths_rel_to.join(&config.store.postgres.key);
-
-            TlsCertificateAndPrivateKey {
-                certificate: TlsCertificateBundle::from_file(&certificate_path)
-                    .await
-                    .with_context(|| {
-                        format!("reading SSL private key from '{}'", key_path.display())
-                    })?,
-                private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
-                    format!(
-                        "reading SSL certificate from '{}'",
-                        certificate_path.display()
-                    )
-                })?,
-            }
-        };
+    async fn run(
+        self,
+        address: ListenEndpoint,
+        tls: Vec<TlsCertificateAndPrivateKey>,
+    ) -> Result<()> {
+        let certificate_and_key = tls
+            .into_iter()
+            .next()
+            .context("PostgreSQL requires a TLS certificate and key")?;
 
         let tls_config = ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::aws_lc_rs::default_provider(),

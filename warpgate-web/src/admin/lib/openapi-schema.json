@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.26.0-beta.1-modified"
+    "version": "v0.26.0-modified"
   },
   "servers": [
     {
@@ -3922,6 +3922,35 @@
         "operationId": "get_security_status"
       }
     },
+    "/listeners": {
+      "get": {
+        "summary": "Get the runtime status of each protocol listener (listener state and TLS\ncertificate/key state).",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ListenerStatus"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_listeners"
+      }
+    },
     "/users/{user_id}/credentials/certificates": {
       "get": {
         "parameters": [
@@ -5105,6 +5134,45 @@
           "UserPrincipalName",
           "SamAccountName"
         ]
+      },
+      "ListenerState": {
+        "type": "string",
+        "description": "Whether a protocol listener is currently accepting connections.",
+        "enum": [
+          "disabled",
+          "listening",
+          "failed"
+        ]
+      },
+      "ListenerStatus": {
+        "type": "object",
+        "title": "ListenerStatus",
+        "description": "Runtime status of a single protocol listener.",
+        "required": [
+          "protocol",
+          "listener_state",
+          "tls_state"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "description": "Protocol name, e.g. `SSH` or `HTTP`."
+          },
+          "address": {
+            "type": "string",
+            "description": "Configured listen address, if known."
+          },
+          "listener_state": {
+            "$ref": "#/components/schemas/ListenerState"
+          },
+          "tls_state": {
+            "$ref": "#/components/schemas/TlsState"
+          },
+          "error": {
+            "type": "string",
+            "description": "Human-readable detail for the most recent failure, if any."
+          }
+        }
       },
       "LockedUserInfo": {
         "type": "object",
@@ -6556,6 +6624,16 @@
           "Disabled",
           "Preferred",
           "Required"
+        ]
+      },
+      "TlsState": {
+        "type": "string",
+        "description": "State of a listener's TLS certificate and key.",
+        "enum": [
+          "not_applicable",
+          "loaded",
+          "load_failed",
+          "mismatch"
         ]
       },
       "UnblockIpRequest": {

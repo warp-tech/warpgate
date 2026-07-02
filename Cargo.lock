@@ -7269,6 +7269,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -7853,8 +7854,10 @@ dependencies = [
  "serde_ignored",
  "serde_json",
  "serde_yaml",
+ "tempfile",
  "time",
  "tokio",
+ "tokio-stream",
  "tracing",
  "tracing-log",
  "tracing-subscriber",
@@ -8064,6 +8067,7 @@ dependencies = [
  "warpgate-db-migrations",
  "warpgate-ldap",
  "warpgate-sso",
+ "warpgate-tls",
  "webpki",
 ]
 
@@ -8297,6 +8301,7 @@ dependencies = [
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-tls",
  "zeroize",
 ]
 

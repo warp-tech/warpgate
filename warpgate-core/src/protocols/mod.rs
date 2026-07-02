@@ -3,6 +3,7 @@ use std::future::Future;
 
 use anyhow::Result;
 use warpgate_common::ListenEndpoint;
+use warpgate_tls::TlsCertificateAndPrivateKey;
 
 mod handle;
 
@@ -26,5 +27,15 @@ pub enum TargetTestError {
 
 pub trait ProtocolServer {
     fn name(&self) -> &'static str;
-    fn run(self, address: ListenEndpoint) -> impl Future<Output = Result<()>> + Send;
+    /// Run the listener on `address`. `tls` carries pre-loaded, validated TLS
+    /// material: the first entry is the primary certificate, any further entries
+    /// are SNI certificates (HTTP only). It is empty for protocols that do not
+    /// use TLS (SSH) or when none is configured. Passing it in avoids re-reading
+    /// the files and guarantees the server serves exactly the pair that was
+    /// validated (cert and key matched).
+    fn run(
+        self,
+        address: ListenEndpoint,
+        tls: Vec<TlsCertificateAndPrivateKey>,
+    ) -> impl Future<Output = Result<()>> + Send;
 }

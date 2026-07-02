@@ -14,7 +14,7 @@ use tracing::warn;
 
 use crate::WarpgateError;
 
-#[derive(Clone, JsonSchema)]
+#[derive(Clone, PartialEq, Eq, JsonSchema)]
 pub struct ListenEndpoint(SocketAddr);
 
 impl ListenEndpoint {
