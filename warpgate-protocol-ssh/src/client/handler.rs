@@ -1,5 +1,5 @@
 use russh::Channel;
-use russh::client::{Msg, Session};
+use russh::client::{ChannelOpenHandle, Msg, Session};
 use russh::keys::{PublicKey, PublicKeyBase64};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -117,10 +117,12 @@ impl russh::client::Handler for ClientHandler {
         connected_port: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         __session: &mut Session,
     ) -> Result<(), Self::Error> {
         let connected_address = connected_address.to_string();
         let originator_address = originator_address.to_string();
+        reply.accept().await;
         let _ = self.event_tx.send(ClientHandlerEvent::ForwardedTcpIp(
             channel,
             ForwardedTcpIpParams {
@@ -138,9 +140,11 @@ impl russh::client::Handler for ClientHandler {
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let originator_address = originator_address.to_string();
+        reply.accept().await;
         let _ = self.event_tx.send(ClientHandlerEvent::X11(
             channel,
             originator_address,
@@ -153,9 +157,11 @@ impl russh::client::Handler for ClientHandler {
         &mut self,
         channel: Channel<Msg>,
         socket_path: &str,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let socket_path = socket_path.to_string();
+        reply.accept().await;
         let _ = self.event_tx.send(ClientHandlerEvent::ForwardedStreamlocal(
             channel,
             ForwardedStreamlocalParams { socket_path },
@@ -166,8 +172,10 @@ impl russh::client::Handler for ClientHandler {
     async fn server_channel_open_agent_forward(
         &mut self,
         channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
+        reply.accept().await;
         let _ = self
             .event_tx
             .send(ClientHandlerEvent::ForwardedAgent(channel));
