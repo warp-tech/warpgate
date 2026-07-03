@@ -62,7 +62,7 @@
                 break
             default:
                 if (ctx && canvas) {
-                    applyDesktopFrame(canvas, ctx, msg)
+                    void applyDesktopFrame(canvas, ctx, msg)
                 }
         }
     }

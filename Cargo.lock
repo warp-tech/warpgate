@@ -8312,6 +8312,7 @@ dependencies = [
  "ldap3",
  "packet",
  "password-hash 0.5.0",
+ "png",
  "poem",
  "poem-openapi",
  "rand 0.10.1",
@@ -8337,6 +8338,7 @@ dependencies = [
  "warpgate-ldap",
  "warpgate-sso",
  "webpki",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -9833,3 +9835,18 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[package]]
+name = "zune-core"
+version = "0.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f423a2c17029964870cfaabb1f13dfab7d092a62a29a89264f4d36990ca414a"
+
+[[package]]
+name = "zune-jpeg"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29ce2c8a9384ad323cf564b67da86e21d3cfdff87908bc1223ed5c99bc792713"
+dependencies = [
+ "zune-core",
+]

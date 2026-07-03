@@ -8,8 +8,8 @@ use tokio::time::Instant;
 use tracing::debug;
 use warpgate_db_entities::Recording::RecordingKind;
 
-use super::Recorder;
 use super::writer::RecordingWriter;
+use super::{Recorder, RecorderInit};
 
 pub struct TrafficRecorder {
     writer: RecordingWriter,
@@ -40,9 +40,9 @@ impl Recorder for TrafficRecorder {
         RecordingKind::Traffic
     }
 
-    fn new(writer: RecordingWriter) -> Self {
+    fn new(init: RecorderInit) -> Self {
         Self {
-            writer,
+            writer: init.writer,
             started_at: Instant::now(),
         }
     }

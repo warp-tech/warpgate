@@ -32,6 +32,10 @@ pub fn admin_api_app() -> impl IntoEndpoint {
             crate::api::recordings_detail::api_get_recording_desktop,
         )
         .at(
+            "/recordings/:id/desktop/index",
+            crate::api::recordings_detail::api_get_recording_desktop_index,
+        )
+        .at(
             "/recordings/:id/desktop-stream",
             crate::api::recordings_detail::api_get_recording_desktop_stream,
         )

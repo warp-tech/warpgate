@@ -31,6 +31,10 @@ pub struct Model {
     pub kind: RecordingKind,
     #[sea_orm(column_type = "Text")]
     pub metadata: String,
+    /// Storage layout: 1 = single legacy file, 2 = folder (`data.ndjson` [+ desktop
+    /// `index.json`]). Defaults to 1 for rows created before the folder layout.
+    #[sea_orm(default_value = 1)]
+    pub generation: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

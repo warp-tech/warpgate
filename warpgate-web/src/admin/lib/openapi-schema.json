@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.25.5-58-g270039d4-modified"
+    "version": "v0.26.0-beta.1-29-gb5102be2-modified"
   },
   "servers": [
     {
@@ -5578,7 +5578,8 @@
           "started",
           "session_id",
           "kind",
-          "metadata"
+          "metadata",
+          "generation"
         ],
         "properties": {
           "id": {
@@ -5605,6 +5606,11 @@
           },
           "metadata": {
             "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Storage layout: 1 = single legacy file, 2 = folder (`data.ndjson` [+ desktop\n`index.json`]). Defaults to 1 for rows created before the folder layout."
           }
         }
       },

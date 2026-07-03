@@ -14,25 +14,31 @@
     const CLICK_ANIM_S = 0.6
     const KEY_DISPLAY_S = 3
 
-    // Viewer-input items carry a timestamp too, but aren't framebuffer messages.
+    const DATA_URL = `/@warpgate/admin/api/recordings/${recording.id}/desktop`
+    const INDEX_URL = `${DATA_URL}/index`
+
+    // Framebuffer message types (everything else on the stream is a viewer-input item).
+    const FRAME_TYPES = new Set(['resize', 'raw_image', 'png_image', 'jpeg_image', 'copy_rect', 'cursor'])
+
+    type Frame = DesktopFrame & { time: number }
     type InputItem =
         | { type: 'key_input', time: number, keysym: number, down: boolean }
-        | { type: 'scancode_input', time: number, code: number, extended: boolean, down: boolean }
+        | { type: 'scancode_input', time: number, code: number, down: boolean }
         | { type: 'pointer_input', time: number, x: number, y: number, buttons: number }
-        | { type: 'wheel_input', time: number }
-        | { type: 'clipboard_input', time: number }
-
-    // A recording item is a framebuffer message or an input item, plus a timestamp.
-    type RecordingItem = (DesktopFrame | InputItem) & { time: number }
+        | { type: 'wheel_input' | 'clipboard_input', time: number }
+    interface DesktopIndex {
+        duration: number
+        keyframes: { time: number, offset: number }[]
+        input: InputItem[]
+    }
 
     let rootElement: HTMLDivElement
     let canvas: HTMLCanvasElement
     let ctx: CanvasRenderingContext2D | null = null
 
-    let events: RecordingItem[] = []
-    let appliedIndex = 0
     let timestamp = 0
     let duration = 0
+    let keyframes: { time: number, offset: number }[] = []
 
     // Viewer input, extracted for the live-input overlay. Populated in time order.
     let keyPresses: KeyPress[] = []
@@ -48,14 +54,24 @@
     let seekInputValue = 0
     let playing = false
     let loading = true
+    let notPlayable = false
     let sessionIsLive: boolean | null = null
+    let liveTailing = false
     let socket: WebSocket | null = null
     let destroyed = false
 
-    $: isStreaming = timestamp >= duration && playing
+    // --- streaming engine: pulls the ndjson via HTTP Range and applies frames in order,
+    // discarding each (bounded memory). Seeks restart from the nearest keyframe. ---
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+    let lineBuf = ''
+    let pending: Frame | null = null
+    let renderedTime = 0
+    let seekGen = 0
+    const decoder = new TextDecoder()
 
     onDestroy(() => {
         destroyed = true
+        abortReader()
         socket?.close()
     })
 
@@ -65,114 +81,225 @@
         }
         ctx = canvas.getContext('2d')
 
-        const data = await fetch(`/@warpgate/admin/api/recordings/${recording.id}/desktop`)
-            .then(r => r.text())
-        for (const line of data.split('\n')) {
-            if (line.trim()) {
-                addItem(JSON.parse(line) as RecordingItem)
-            }
+        const response = await fetch(INDEX_URL)
+        if (!response.ok) {
+            // gen-1 desktop recordings have no index and aren't supported.
+            notPlayable = true
+            loading = false
+            return
+        }
+        const index = await response.json() as DesktopIndex
+        duration = index.duration
+        keyframes = index.keyframes ?? []
+        for (const item of index.input ?? []) {
+            recordInput(item)
         }
 
-        seek(0)
+        await seek(0)
 
-        socket = new WebSocket(`wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/desktop-stream`)
-        socket.addEventListener('message', event => {
-            const message = JSON.parse(event.data)
-            if ('data' in message) {
-                addItem(message.data as RecordingItem)
-            } else if ('start' in message) {
-                sessionIsLive = message.live
-                if (sessionIsLive) {
-                    playing = true
-                    seek(duration)
-                }
-            } else if ('end' in message) {
-                sessionIsLive = false
-            }
-        })
+        socket = new WebSocket(`wss://${location.host}${DATA_URL}-stream`)
+        socket.addEventListener('message', event => onLiveMessage(JSON.parse(event.data)))
         socket.addEventListener('close', () => console.info('Live stream closed'))
 
         loading = false
         step()
     })
 
-    function addItem (item: RecordingItem) {
-        duration = Math.max(duration, item.time)
-        // Viewer-input items feed the overlay only; they never touch the framebuffer.
-        if (recordInput(item)) {
-            if (isStreaming) {
-                timestamp = item.time
-                seekInputValue = duration ? 100 * timestamp / duration : 0
+    function onLiveMessage (message: Record<string, unknown>) {
+        if ('start' in message) {
+            sessionIsLive = Boolean(message.live)
+            if (sessionIsLive) {
+                playing = true
+                goLive()
             }
-            return
-        }
-        events.push(item)
-        if (isStreaming && ctx) {
-            applyDesktopFrame(canvas, ctx, item as DesktopFrame)
-            appliedIndex = events.length
-            timestamp = item.time
-            canvasW = canvas.width
-            canvasH = canvas.height
-            seekInputValue = duration ? 100 * timestamp / duration : 0
+        } else if ('end' in message) {
+            sessionIsLive = false
+            liveTailing = false
+        } else if ('data' in message) {
+            const item = message.data as (Frame | InputItem)
+            if (typeof item.time === 'number') {
+                duration = Math.max(duration, item.time)
+            }
+            recordInput(item)
+            if (liveTailing && ctx && FRAME_TYPES.has(item.type)) {
+                void applyDesktopFrame(canvas, ctx, item as Frame).then(() => {
+                    renderedTime = item.time
+                    timestamp = item.time
+                    canvasW = canvas.width
+                    canvasH = canvas.height
+                    seekInputValue = duration ? 100 * timestamp / duration : 0
+                })
+            }
         }
     }
 
-    // Extract a viewer-input item into the overlay arrays. Returns true if `item` was
-    // input (i.e. not a framebuffer message). Clicks are button-press transitions.
-    function recordInput (item: RecordingItem): boolean {
+    // Extract a viewer-input item into the overlay arrays. Ignores framebuffer items.
+    // Clicks are button-press transitions.
+    function recordInput (item: InputItem | Frame) {
         switch (item.type) {
             case 'key_input':
                 if (item.down) {
                     keyPresses = [...keyPresses, { time: item.time, label: keysymLabel(item.keysym) }]
                 }
-                return true
+                break
             case 'scancode_input':
                 if (item.down) {
                     keyPresses = [...keyPresses, { time: item.time, label: scancodeLabel(item.code) }]
                 }
-                return true
+                break
             case 'pointer_input': {
                 const pressed = item.buttons & ~prevButtons
                 prevButtons = item.buttons
                 if (pressed) {
                     clicks = [...clicks, { time: item.time, x: item.x, y: item.y }]
                 }
-                return true
+                break
             }
-            case 'wheel_input':
-            case 'clipboard_input':
-                return true
         }
-        return false
     }
 
-    function seek (time: number) {
+    function abortReader () {
+        reader?.cancel().catch(() => {})
+        reader = null
+        lineBuf = ''
+        pending = null
+    }
+
+    async function openStreamAt (offset: number) {
+        abortReader()
+        const response = await fetch(DATA_URL, { headers: { Range: `bytes=${offset}-` } })
+        reader = response.body?.getReader() ?? null
+    }
+
+    function parseFrame (line: string): Frame | null {
+        try {
+            const item = JSON.parse(line)
+            return FRAME_TYPES.has(item.type) ? item as Frame : null
+        } catch {
+            return null
+        }
+    }
+
+    // Next framebuffer item from the open stream (skips input items); null at EOF.
+    async function nextFrame (): Promise<Frame | null> {
+        while (reader) {
+            const nl = lineBuf.indexOf('\n')
+            if (nl < 0) {
+                const { done, value } = await reader.read()
+                if (done) {
+                    const rest = lineBuf.trim()
+                    lineBuf = ''
+                    return rest ? parseFrame(rest) : null
+                }
+                lineBuf += decoder.decode(value, { stream: true })
+                continue
+            }
+            const line = lineBuf.slice(0, nl).trim()
+            lineBuf = lineBuf.slice(nl + 1)
+            const frame = line ? parseFrame(line) : null
+            if (frame) {
+                return frame
+            }
+        }
+        return null
+    }
+
+    // Apply frames from the open stream up to `time`, unless a newer seek supersedes us.
+    async function pumpUntil (time: number, gen: number) {
+        while (ctx) {
+            const frame = pending ?? await nextFrame()
+            if (gen !== seekGen) {
+                return
+            }
+            pending = null
+            if (!frame) {
+                return
+            }
+            if (frame.time > time) {
+                pending = frame
+                return
+            }
+            await applyDesktopFrame(canvas, ctx, frame)
+            if (gen !== seekGen) {
+                return
+            }
+            renderedTime = frame.time
+            canvasW = canvas.width
+            canvasH = canvas.height
+        }
+    }
+
+    function keyframeBefore (time: number): { time: number, offset: number } {
+        let best = { time: 0, offset: 0 }
+        for (const kf of keyframes) {
+            if (kf.time > time) {
+                break
+            }
+            best = kf
+        }
+        return best
+    }
+
+    // Coalesced, one-at-a-time seek (async apply must not run concurrently).
+    let seeking = false
+    let queuedSeek: number | null = null
+    async function seek (time: number) {
+        queuedSeek = Math.max(0, Math.min(duration, time))
+        if (seeking) {
+            return
+        }
+        seeking = true
+        try {
+            while (queuedSeek !== null) {
+                const target = queuedSeek
+                queuedSeek = null
+                await doSeek(target)
+            }
+        } finally {
+            seeking = false
+        }
+    }
+
+    async function doSeek (time: number) {
         if (!ctx) {
             return
         }
-        // Seeking backwards: clear and replay from the start (no keyframe index).
-        if (time < timestamp) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height)
-            appliedIndex = 0
+        liveTailing = false
+        const gen = ++seekGen
+        // Continue the open stream when moving forward; otherwise restart at the keyframe ≤ time.
+        if (!reader || time < renderedTime) {
+            const kf = keyframeBefore(time)
+            await openStreamAt(kf.offset)
+            if (gen !== seekGen) {
+                return
+            }
+            renderedTime = kf.time
         }
-        while (appliedIndex < events.length && events[appliedIndex]!.time <= time) {
-            applyDesktopFrame(canvas, ctx, events[appliedIndex]! as DesktopFrame)
-            appliedIndex++
+        await pumpUntil(time, gen)
+        if (gen !== seekGen) {
+            return
         }
         timestamp = time
-        canvasW = canvas.width
-        canvasH = canvas.height
         seekInputValue = duration ? 100 * time / duration : 0
     }
 
-    function step () {
+    function goLive () {
+        liveTailing = true
+        abortReader()
+        timestamp = duration
+        seekInputValue = 100
+    }
+
+    async function step () {
         if (destroyed) {
             return
         }
-        if (playing) {
-            seek(Math.min(duration, timestamp + 0.1))
+        if (playing && !liveTailing && !seeking && timestamp < duration) {
+            await seek(Math.min(duration, timestamp + 0.1))
         }
-        setTimeout(step, 100)
+        if (!destroyed) {
+            setTimeout(() => void step(), 100)
+        }
     }
 
     function togglePlaying () {
@@ -193,7 +320,11 @@
         <Spinner color="primary" />
     {/if}
 
-    <div class="container" class:invisible={loading}>
+    {#if notPlayable}
+        <div class="not-playable">This recording predates indexed playback and can't be played.</div>
+    {/if}
+
+    <div class="container" class:invisible={loading || notPlayable}>
         <div class="stage">
             <!-- svelte-ignore a11y-no-interactive-element-to-noninteractive-role -->
             <canvas bind:this={canvas} on:click={togglePlaying} role="img"></canvas>
@@ -221,7 +352,7 @@
         </div>
     </div>
 
-    <div class="toolbar" class:invisible={loading}>
+    <div class="toolbar" class:invisible={loading || notPlayable}>
         <button class="btn btn-link" on:click={togglePlaying}>
             <Fa icon={playing ? faPause : faPlay} fw />
         </button>
@@ -229,8 +360,8 @@
         {#if sessionIsLive === true}
             <button
                 class="btn live-btn"
-                class:active={isStreaming}
-                on:click={() => seek(duration)}
+                class:active={liveTailing}
+                on:click={goLive}
             >LIVE</button>
         {/if}
         <input
@@ -239,7 +370,7 @@
             min="0" max="100" step="0.001"
             style="background-size: {seekInputValue}% 100%;"
             bind:value={seekInputValue}
-            on:input={() => seek(duration * seekInputValue / 100)} />
+            on:input={() => void seek(duration * seekInputValue / 100)} />
         <button class="btn btn-link" on:click={toggleFullscreen}>
             <Fa icon={faExpand} fw />
         </button>
@@ -261,6 +392,13 @@
         margin: auto;
         max-width: 100%;
         overflow: auto;
+    }
+
+    .not-playable {
+        color: #eee;
+        padding: 2rem;
+        text-align: center;
+        font-size: 0.9rem;
     }
 
     .stage {

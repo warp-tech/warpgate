@@ -10,7 +10,9 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use url::Url;
 use warpgate_common::SessionId;
-use warpgate_core::recordings::{Recorder, RecordingWriter, SessionRecordings, TerminalRecorder};
+use warpgate_core::recordings::{
+    Recorder, RecorderInit, RecordingWriter, SessionRecordings, TerminalRecorder,
+};
 use warpgate_db_entities::Recording::RecordingKind;
 
 #[derive(Debug, Object)]
@@ -96,8 +98,10 @@ impl Recorder for KubernetesRecorder {
         RecordingKind::Kubernetes
     }
 
-    fn new(writer: RecordingWriter) -> Self {
-        Self { writer }
+    fn new(init: RecorderInit) -> Self {
+        Self {
+            writer: init.writer,
+        }
     }
 }
 

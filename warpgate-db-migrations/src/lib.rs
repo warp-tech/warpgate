@@ -59,6 +59,7 @@ mod m00054_login_protection_params;
 mod m00055_ssh_banner;
 mod m00056_web_ssh_enabled;
 mod m00057_password_login_mode;
+mod m00058_recording_generation;
 
 pub(crate) mod helpers;
 
@@ -125,6 +126,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00055_ssh_banner::Migration),
             Box::new(m00056_web_ssh_enabled::Migration),
             Box::new(m00057_password_login_mode::Migration),
+            Box::new(m00058_recording_generation::Migration),
         ]
     }
 }
