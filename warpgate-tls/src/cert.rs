@@ -37,6 +37,14 @@ pub struct TlsCertificateAndPrivateKey {
     pub private_key: TlsPrivateKey,
 }
 
+impl TlsCertificateAndPrivateKey {
+    pub fn verify_key_matches_certificate(&self) -> Result<(), RustlsSetupError> {
+        CertifiedKey::from(self.clone())
+            .keys_match()
+            .map_err(|_| RustlsSetupError::MismatchedCertificateAndKey)
+    }
+}
+
 impl TlsCertificateBundle {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes

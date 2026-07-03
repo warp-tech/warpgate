@@ -34,6 +34,7 @@ serde_json.workspace = true
 serde_yaml = { version = "0.9", default-features = false }
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
+tokio-stream = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 tracing-log = { version = "0.2", default-features = false, features = [
     "log-tracer",
@@ -56,6 +57,9 @@ warpgate-protocol-mysql = { path = "../warpgate-protocol-mysql" }
 warpgate-protocol-postgres = { path = "../warpgate-protocol-postgres" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-tls = { path = "../warpgate-tls" }
+
+[dev-dependencies]
+tempfile = "3"
 
 [features]
 default = ["sqlite"]
