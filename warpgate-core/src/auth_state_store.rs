@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
-use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
+use warpgate_common::auth::{AuthResult, AuthState, CredentialKind, CredentialPolicy};
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{SessionId, WarpgateError};
+use warpgate_common::{SessionId, User, WarpgateError};
 
 use crate::login_protection::{FailedAttemptInfo, LoginProtectionService};
 use crate::{ConfigProvider, ConfigProviderEnum};
@@ -61,6 +61,32 @@ fn check_ip_allowed(
     ))
 }
 
+/// Record a failed attempt for an unknown username so that username
+/// enumeration counts toward IP blocking, just like a wrong password would.
+///
+/// `credential_type` is `None` for contexts that must not be penalised —
+/// notably SSH public-key offers, which legitimately fail as clients try
+/// each agent key in turn — in which case nothing is recorded.
+async fn record_unknown_user_attempt(
+    login_protection: &LoginProtectionService,
+    username: &str,
+    protocol: &str,
+    remote_ip: Option<IpAddr>,
+    credential_type: Option<&str>,
+) {
+    let (Some(remote_ip), Some(credential_type)) = (remote_ip, credential_type) else {
+        return;
+    };
+    let _ = login_protection
+        .record_failed_attempt(FailedAttemptInfo {
+            username: username.to_string(),
+            remote_ip,
+            protocol: protocol.to_string(),
+            credential_type: credential_type.to_string(),
+        })
+        .await;
+}
+
 struct AuthCompletionSignal {
     sender: broadcast::Sender<AuthResult>,
     created_at: Instant,
@@ -73,79 +99,38 @@ impl AuthCompletionSignal {
 }
 
 pub struct AuthStateStore {
-    config_provider: Arc<Mutex<ConfigProviderEnum>>,
-    login_protection: Arc<LoginProtectionService>,
     store: HashMap<Uuid, (Arc<Mutex<AuthState>>, Instant)>,
     completion_signals: HashMap<Uuid, AuthCompletionSignal>,
     web_auth_request_signal: broadcast::Sender<Uuid>,
 }
 
+impl Default for AuthStateStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthStateStore {
-    pub fn new(
-        config_provider: Arc<Mutex<ConfigProviderEnum>>,
-        login_protection: Arc<LoginProtectionService>,
-    ) -> Self {
+    pub fn new() -> Self {
         Self {
             store: HashMap::new(),
-            config_provider,
-            login_protection,
             completion_signals: HashMap::new(),
             web_auth_request_signal: broadcast::channel(100).0,
         }
-    }
-
-    /// Record a failed attempt for an unknown username so that username
-    /// enumeration counts toward IP blocking, just like a wrong password would.
-    ///
-    /// `credential_type` is `None` for contexts that must not be penalised —
-    /// notably SSH public-key offers, which legitimately fail as clients try
-    /// each agent key in turn — in which case nothing is recorded.
-    async fn record_unknown_user_attempt(
-        &self,
-        username: &str,
-        protocol: &str,
-        remote_ip: Option<IpAddr>,
-        credential_type: Option<&str>,
-    ) {
-        let (Some(remote_ip), Some(credential_type)) = (remote_ip, credential_type) else {
-            return;
-        };
-        let _ = self
-            .login_protection
-            .record_failed_attempt(FailedAttemptInfo {
-                username: username.to_string(),
-                remote_ip,
-                protocol: protocol.to_string(),
-                credential_type: credential_type.to_string(),
-            })
-            .await;
     }
 
     pub fn contains_key(&self, id: &Uuid) -> bool {
         self.store.contains_key(id)
     }
 
-    pub async fn all_pending_web_auths_for_user(
-        &self,
-        username: &str,
-    ) -> Vec<Arc<Mutex<AuthState>>> {
-        let mut results = vec![];
-        for auth in self.store.values() {
-            {
-                let inner = auth.0.lock().await;
-                if !username_eq_ci(&inner.user_info().username, username) {
-                    continue;
-                }
-                let AuthResult::Need(need) = inner.verify() else {
-                    continue;
-                };
-                if !need.contains(&CredentialKind::WebUserApproval) {
-                    continue;
-                }
-            }
-            results.push(auth.0.clone());
-        }
-        results
+    /// Returns cloned `Arc` handles to every stored [`AuthState`].
+    ///
+    /// This only clones the handles and never locks the inner states, so the
+    /// store lock is held for the shortest possible time. Callers can then
+    /// inspect each state (which requires locking it) *after* releasing the
+    /// store lock, avoiding lock convoys on the store under concurrent logins.
+    pub fn snapshot_states(&self) -> Vec<Arc<Mutex<AuthState>>> {
+        self.store.values().map(|auth| auth.0.clone()).collect()
     }
 
     pub fn get(&self, id: &Uuid) -> Option<Arc<Mutex<AuthState>>> {
@@ -156,19 +141,24 @@ impl AuthStateStore {
         self.web_auth_request_signal.subscribe()
     }
 
-    pub async fn create(
-        &mut self,
-        session_id: Option<&SessionId>,
+    /// Resolves the user record and credential policy for an authentication
+    /// attempt.
+    ///
+    /// This performs the config-provider database lookups (`list_users`,
+    /// `get_credential_policy`) and the IP-range check **without** holding the
+    /// [`AuthStateStore`] lock. Callers must run this before locking the store
+    /// and pass the result to [`AuthStateStore::create`], so that concurrent
+    /// logins don't serialise on the store lock while doing database I/O.
+    pub async fn resolve_user_and_policy(
+        config_provider: &Arc<Mutex<ConfigProviderEnum>>,
+        login_protection: &LoginProtectionService,
         username: &str,
         protocol: &str,
         supported_credential_types: &[CredentialKind],
         remote_ip: Option<IpAddr>,
         rate_limit_credential_type: Option<&str>,
-    ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
-        let id = Uuid::new_v4();
-
-        let Some(user) = self
-            .config_provider
+    ) -> Result<(User, Box<dyn CredentialPolicy + Sync + Send>), WarpgateError> {
+        let Some(user) = config_provider
             .lock()
             .await
             .list_users()
@@ -177,7 +167,8 @@ impl AuthStateStore {
             .find(|u| username_eq_ci(&u.username, username))
             .cloned()
         else {
-            self.record_unknown_user_attempt(
+            record_unknown_user_attempt(
+                login_protection,
                 username,
                 protocol,
                 remote_ip,
@@ -189,14 +180,14 @@ impl AuthStateStore {
 
         check_ip_allowed(user.allowed_ip_ranges.as_ref(), remote_ip, username)?;
 
-        let policy = self
-            .config_provider
+        let policy = config_provider
             .lock()
             .await
             .get_credential_policy(username, supported_credential_types)
             .await?;
         let Some(policy) = policy else {
-            self.record_unknown_user_attempt(
+            record_unknown_user_attempt(
+                login_protection,
                 username,
                 protocol,
                 remote_ip,
@@ -205,6 +196,24 @@ impl AuthStateStore {
             .await;
             return Err(WarpgateError::UserNotFound(username.into()));
         };
+
+        Ok((user, policy))
+    }
+
+    /// Creates and stores a new [`AuthState`] from an already-resolved user and
+    /// credential policy (see [`AuthStateStore::resolve_user_and_policy`]).
+    ///
+    /// This is deliberately synchronous and does no database I/O, so the store
+    /// lock is only held for the in-memory insert.
+    pub fn create(
+        &mut self,
+        session_id: Option<&SessionId>,
+        user: &User,
+        protocol: &str,
+        policy: Box<dyn CredentialPolicy + Sync + Send>,
+        remote_ip: Option<IpAddr>,
+    ) -> (Uuid, Arc<Mutex<AuthState>>) {
+        let id = Uuid::new_v4();
 
         let (state_change_tx, mut state_change_rx) = broadcast::channel(1);
         let web_auth_request_signal = self.web_auth_request_signal.clone();
@@ -220,7 +229,7 @@ impl AuthStateStore {
             id,
             session_id.copied(),
             remote_ip,
-            (&user).into(),
+            user.into(),
             protocol.to_string(),
             policy,
             state_change_tx,
@@ -229,7 +238,7 @@ impl AuthStateStore {
             .insert(id, (Arc::new(Mutex::new(state)), Instant::now()));
 
         #[allow(clippy::unwrap_used)]
-        Ok((id, self.get(&id).unwrap()))
+        (id, self.get(&id).unwrap())
     }
 
     pub fn subscribe(&mut self, id: Uuid) -> broadcast::Receiver<AuthResult> {

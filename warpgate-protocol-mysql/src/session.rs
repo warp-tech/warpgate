@@ -17,7 +17,8 @@ use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
 use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
-    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
+    AuthStateStore, ConfigProvider, Services, WarpgateServerHandle, authorize_ticket,
+    consume_ticket,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
 use warpgate_database_protocols::mysql::protocol::Capabilities;
@@ -240,20 +241,29 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                     }
                 }
 
+                let (user, policy) = AuthStateStore::resolve_user_and_policy(
+                    &self.services.config_provider,
+                    &self.services.login_protection,
+                    &username,
+                    crate::common::PROTOCOL_NAME,
+                    &[CredentialKind::Password],
+                    Some(self.remote_address.ip()),
+                    Some("password"),
+                )
+                .await?;
+                let session_id = self.server_handle.lock().await.id();
                 let state_arc = self
                     .services
                     .auth_state_store
                     .lock()
                     .await
                     .create(
-                        Some(&self.server_handle.lock().await.id()),
-                        &username,
+                        Some(&session_id),
+                        &user,
                         crate::common::PROTOCOL_NAME,
-                        &[CredentialKind::Password],
+                        policy,
                         Some(self.remote_address.ip()),
-                        Some("password"),
                     )
-                    .await?
                     .1;
                 let mut state = state_arc.lock().await;
 

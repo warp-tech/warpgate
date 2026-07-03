@@ -34,7 +34,8 @@ use warpgate_core::recordings::{
     TrafficRecorder,
 };
 use warpgate_core::{
-    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
+    AuthStateStore, ConfigProvider, Services, WarpgateServerHandle, authorize_ticket,
+    consume_ticket,
 };
 use warpgate_db_entities::Parameters;
 
@@ -320,6 +321,16 @@ impl ServerSession {
                 username,
             )
         {
+            let (user, policy) = AuthStateStore::resolve_user_and_policy(
+                &self.services.config_provider,
+                &self.services.login_protection,
+                username,
+                crate::PROTOCOL_NAME,
+                &self.supported_credential_kinds(),
+                Some(self.remote_address.ip()),
+                rate_limit_credential_type,
+            )
+            .await?;
             let state = self
                 .services
                 .auth_state_store
@@ -327,13 +338,11 @@ impl ServerSession {
                 .await
                 .create(
                     Some(&self.id),
-                    username,
+                    &user,
                     crate::PROTOCOL_NAME,
-                    &self.supported_credential_kinds(),
+                    policy,
                     Some(self.remote_address.ip()),
-                    rate_limit_credential_type,
                 )
-                .await?
                 .1;
             self.auth_state = Some(state);
         }

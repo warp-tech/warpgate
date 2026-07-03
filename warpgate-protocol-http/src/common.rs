@@ -21,7 +21,7 @@ use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
-use warpgate_core::ConfigProvider;
+use warpgate_core::{AuthStateStore, ConfigProvider};
 use warpgate_db_entities::{User, UserAdminRoleAssignment};
 use warpgate_sso::WarpgateIdToken;
 
@@ -210,21 +210,25 @@ pub async fn get_or_create_auth_state_for_request(
         }
     }
 
-    let mut store = ctx.services().auth_state_store.lock().await;
-    let (id, state) = store
-        .create(
-            None,
-            username,
-            crate::common::PROTOCOL_NAME,
-            &[
-                CredentialKind::Password,
-                CredentialKind::Sso,
-                CredentialKind::Totp,
-            ],
-            remote_ip,
-            rate_limit_credential_type,
-        )
-        .await?;
+    let (user, policy) = AuthStateStore::resolve_user_and_policy(
+        &ctx.services().config_provider,
+        &ctx.services().login_protection,
+        username,
+        crate::common::PROTOCOL_NAME,
+        &[
+            CredentialKind::Password,
+            CredentialKind::Sso,
+            CredentialKind::Totp,
+        ],
+        remote_ip,
+        rate_limit_credential_type,
+    )
+    .await?;
+
+    let (id, state) = {
+        let mut store = ctx.services().auth_state_store.lock().await;
+        store.create(None, &user, crate::common::PROTOCOL_NAME, policy, remote_ip)
+    };
 
     {
         let session_id = session_id_for_request(req, ctx).await?;
