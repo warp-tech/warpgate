@@ -26,7 +26,7 @@ async function openWebSsh (target: TargetSnapshot) {
         })
         window.open(`/@warpgate#/web-ssh/${sessionId}`, '_blank')
     } catch (err) {
-        if (!handleReauthError(err)) {
+        if (!(await handleReauthError(err))) {
             throw err
         }
     }

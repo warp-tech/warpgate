@@ -48,7 +48,7 @@ async function create () {
             },
         })
     } catch (err) {
-        if (handleReauthError(err)) {
+        if (await handleReauthError(err)) {
             return
         }
         error = await stringifyError(err)
