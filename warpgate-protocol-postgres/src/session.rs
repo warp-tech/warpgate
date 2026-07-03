@@ -238,6 +238,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                         crate::common::PROTOCOL_NAME,
                         &[CredentialKind::Password],
                         Some(self.remote_address.ip()),
+                        Some("password"),
                     )
                     .await?
                     .1;

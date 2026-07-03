@@ -2,6 +2,7 @@ use poem_openapi::Enum;
 use sea_orm::Set;
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::PasswordPolicy;
 
@@ -27,6 +28,23 @@ pub enum PasswordLoginMode {
     /// Password login not offered and rejected by the server.
     #[sea_orm(string_value = "Disabled")]
     Disabled,
+}
+
+/// Whether the instance reports anonymous usage analytics, and at which
+/// payload level. `Undecided` triggers the one-time opt-in prompt in the admin
+/// UI; the instance never reports until the choice is made.
+#[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
+pub enum AnalyticsConsent {
+    /// No choice made yet — prompt the admin and report nothing.
+    #[sea_orm(string_value = "Undecided")]
+    Undecided,
+    /// Analytics disabled.
+    #[sea_orm(string_value = "Off")]
+    Off,
+    /// Analytics enabled.
+    #[sea_orm(string_value = "On")]
+    On,
 }
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
@@ -76,6 +94,11 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub ssh_banner: String,
     pub web_ssh_enabled: bool,
+    pub analytics_consent: AnalyticsConsent,
+    pub analytics_normal: bool,
+    pub analytics_instance_id: String,
+    pub instance_created_at: OffsetDateTime,
+    pub web_auth_max_age_seconds: Option<i64>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -141,6 +164,11 @@ impl Entity {
                     lp_user_exempt_admins: Set(true),
                     ssh_banner: Set("".into()),
                     web_ssh_enabled: Set(true),
+                    analytics_consent: Set(AnalyticsConsent::Undecided),
+                    analytics_normal: Set(false),
+                    analytics_instance_id: Set(Uuid::new_v4().to_string()),
+                    instance_created_at: Set(OffsetDateTime::now_utc()),
+                    web_auth_max_age_seconds: Set(None),
                 }
                 .insert(db)
                 .await

@@ -1,6 +1,6 @@
 [package]
 name = "warpgate"
-version = "0.26.0-beta.1"
+version = "0.26.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -34,6 +34,7 @@ serde_json.workspace = true
 serde_yaml = { version = "0.9", default-features = false }
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
+tokio-stream = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 tracing-log = { version = "0.2", default-features = false, features = [
     "log-tracer",
@@ -58,6 +59,9 @@ warpgate-protocol-rdp = { path = "../warpgate-protocol-rdp" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-protocol-vnc = { path = "../warpgate-protocol-vnc" }
 warpgate-tls = { path = "../warpgate-tls" }
+
+[dev-dependencies]
+tempfile = "3"
 
 [features]
 default = ["sqlite"]

@@ -8,6 +8,16 @@
     import AuthBar from 'common/AuthBar.svelte'
     import Brand from 'common/Brand.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import AnalyticsConsentModal from './AnalyticsConsentModal.svelte'
+
+    let showAnalyticsModal = $state(false)
+    $effect(() => {
+        if (($serverInfo?.shouldPromptAnalytics ?? false) && $serverInfo?.adminPermissions?.configEdit) {
+            setTimeout(() => {
+                showAnalyticsModal = true
+            }, 1000)
+        }
+    })
 
     async function init () {
         await reloadServerInfo()
@@ -81,6 +91,10 @@
         </footer>
     </div>
 </Loadable>
+
+{#if showAnalyticsModal}
+    <AnalyticsConsentModal bind:isOpen={showAnalyticsModal} />
+{/if}
 
 <style lang="scss">
     @media (max-width: 767px) {

@@ -44,7 +44,12 @@ impl Services {
 
         let config_provider = Arc::new(Mutex::new(DatabaseConfigProvider::new(&db).into()));
 
-        let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new(config_provider.clone())));
+        let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
+
+        let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new(
+            config_provider.clone(),
+            login_protection.clone(),
+        )));
 
         tokio::spawn({
             let auth_state_store = auth_state_store.clone();
@@ -60,9 +65,9 @@ impl Services {
         rate_limiter_registry.refresh().await?;
         let rate_limiter_registry = Arc::new(Mutex::new(rate_limiter_registry));
 
-        // Initialize login protection service (cache warmed from DB; thresholds
-        // are read fresh from DB on every auth attempt — same as all other params).
-        let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
+        // Opt-in usage analytics reporter. Always spawned; it re-reads consent
+        // from the DB on every run and reports nothing unless enabled.
+        crate::analytics::start(db.clone());
 
         // Background cleanup task — always started; cleanup_expired() skips
         // work (and logs its own summary) when there is something to do, and

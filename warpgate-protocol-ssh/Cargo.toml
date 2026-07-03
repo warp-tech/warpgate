@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-protocol-ssh"
-version = "0.26.0-beta.1"
+version = "0.26.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -37,4 +37,5 @@ warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
+warpgate-tls = { path = "../warpgate-tls" }
 zeroize = { version = "^1.5", default-features = false }

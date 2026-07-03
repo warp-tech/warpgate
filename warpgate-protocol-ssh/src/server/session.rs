@@ -70,6 +70,7 @@ pub enum Event {
     Client(RCEvent),
     MenuRedraw(u16, u16),
     Menu(MenuEvent),
+    ServerChannelOpenResult(Uuid, Result<ServerChannelId, russh::Error>),
 }
 
 struct PendingKeyboardInteractiveAuth {
@@ -97,6 +98,8 @@ pub struct ServerSession {
     channel_recorders: HashMap<Uuid, TerminalRecorder>,
     channel_map: BiMap<ServerChannelId, Uuid>,
     channel_pty_size_map: HashMap<Uuid, PtyRequest>,
+    pending_server_channel_opens: HashSet<Uuid>,
+    deferred_events: Vec<Event>,
     rc_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
     rc_abort_tx: UnboundedSender<()>,
     rc_state: RCState,
@@ -172,6 +175,8 @@ impl ServerSession {
             channel_recorders: HashMap::new(),
             channel_map: BiMap::new(),
             channel_pty_size_map: HashMap::new(),
+            pending_server_channel_opens: HashSet::new(),
+            deferred_events: vec![],
             rc_tx: rc_handles.command_tx.clone(),
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
@@ -293,7 +298,14 @@ impl ServerSession {
         kinds
     }
 
-    async fn get_auth_state(&mut self, username: &str) -> Result<Arc<Mutex<AuthState>>> {
+    /// `rate_limit_credential_type` is forwarded to `AuthStateStore::create` so
+    /// an unknown username is recorded as a failed attempt for IP blocking —
+    /// `None` for benign contexts (public-key offers) that must not be counted.
+    async fn get_auth_state(
+        &mut self,
+        username: &str,
+        rate_limit_credential_type: Option<&str>,
+    ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
         #[allow(clippy::unwrap_used)]
         if self.auth_state.is_none()
             || !username_eq_ci(
@@ -319,6 +331,7 @@ impl ServerSession {
                     crate::PROTOCOL_NAME,
                     &self.supported_credential_kinds(),
                     Some(self.remote_address.ip()),
+                    rate_limit_credential_type,
                 )
                 .await?
                 .1;
@@ -326,6 +339,30 @@ impl ServerSession {
         }
         #[allow(clippy::unwrap_used)]
         Ok(self.auth_state.clone().unwrap())
+    }
+
+    /// SSH counts only password/OTP guesses toward rate-limiting — public-key
+    /// offers legitimately fail as clients try each agent key in turn, so they
+    /// aren't counted as brute-force attempts.
+    const fn rate_limited_credential_type(credential: &AuthCredential) -> Option<&'static str> {
+        match credential {
+            AuthCredential::Password(_) => Some("password"),
+            AuthCredential::Otp(_) => Some("otp"),
+            _ => None,
+        }
+    }
+
+    async fn record_failed_login_attempt(&self, username: &str, credential_type: &str) {
+        let _ = self
+            .services
+            .login_protection
+            .record_failed_attempt(FailedAttemptInfo {
+                username: username.to_string(),
+                remote_ip: self.remote_address.ip(),
+                protocol: "ssh".to_string(),
+                credential_type: credential_type.to_string(),
+            })
+            .await;
     }
 
     pub fn make_logging_span(&self) -> tracing::Span {
@@ -351,6 +388,49 @@ impl ServerSession {
             .get_by_right(ch)
             .copied()
             .ok_or_else(|| anyhow::anyhow!("Channel not known"))
+    }
+
+    /// Opens a server->client channel in the background and delivers the
+    /// resulting channel mapping back into the event loop as an event.
+    /// Awaiting the client's confirmation inline would deadlock: the russh
+    /// session loop might itself be blocked on a handler event that this
+    /// event loop hasn't gotten to yet (#1459).
+    fn open_server_channel_in_background(
+        &mut self,
+        id: Uuid,
+        open: impl Future<Output = Result<russh::Channel<russh::server::Msg>, russh::Error>>
+        + Send
+        + 'static,
+    ) {
+        self.pending_server_channel_opens.insert(id);
+        let sender = self.event_sender.clone();
+        tokio::spawn(async move {
+            let result = open.await.map(|channel| ServerChannelId(channel.id()));
+            let _ = sender
+                .send_once(Event::ServerChannelOpenResult(id, result))
+                .await;
+        });
+    }
+
+    /// Events for a channel whose server-side open is still in flight arrive
+    /// before the channel mapping is known and must be held back; they are
+    /// replayed once the open resolves.
+    fn should_defer_event(&self, event: &Event) -> bool {
+        if self.pending_server_channel_opens.is_empty() {
+            return false;
+        }
+        match event {
+            Event::Client(e) => e
+                .channel()
+                .is_some_and(|ch| self.pending_server_channel_opens.contains(&ch)),
+            // A server event for an unmapped channel can only refer to a
+            // pending open: the client learns of such channels no earlier
+            // than from the confirmation that resolves the open.
+            Event::ServerHandler(e) => e
+                .existing_channel()
+                .is_some_and(|ch| !self.channel_map.contains_left(&ch)),
+            _ => false,
+        }
     }
 
     pub fn emit_pty_output(&self, data: &[u8]) -> Result<()> {
@@ -488,6 +568,11 @@ impl ServerSession {
         event: Event,
     ) -> Pin<Box<dyn Future<Output = Result<(), WarpgateError>> + Send + 'a>> {
         async move {
+            if self.should_defer_event(&event) {
+                debug!(?event, "Deferring event until channel opens are confirmed");
+                self.deferred_events.push(event);
+                return Ok(());
+            }
             match event {
                 Event::Client(RCEvent::Done) => Err(WarpgateError::SessionEnd)?,
                 Event::ServerHandler(ServerHandlerEvent::Disconnect) => {
@@ -521,6 +606,25 @@ impl ServerSession {
                 Event::Menu(action) => {
                     if let Err(err) = self.handle_menu_event(action).await {
                         error!(?err, "Menu loop action handler error");
+                    }
+                }
+                Event::ServerChannelOpenResult(id, result) => {
+                    self.pending_server_channel_opens.remove(&id);
+                    match result {
+                        Ok(server_channel_id) => {
+                            self.channel_map.insert(server_channel_id, id);
+                            self.all_channels.push(id);
+                        }
+                        Err(error) => {
+                            warn!(channel=%id, ?error, "Failed to open a channel to the client");
+                            self.traffic_connection_recorders.remove(&id);
+                            let _ =
+                                self.send_command(RCCommand::Channel(id, ChannelOperation::Close));
+                        }
+                    }
+                    let deferred = std::mem::take(&mut self.deferred_events);
+                    for event in deferred {
+                        self.handle_event(event).await?;
                     }
                 }
                 Event::MenuRedraw(_, _) | Event::ConsoleInput(_) => (),
@@ -1008,19 +1112,18 @@ impl ServerSession {
                 self.handle_unknown_host_key(key, reply).await?;
             }
             RCEvent::ForwardedTcpIp(id, params) => {
-                if let Some(session) = &mut self.session_handle {
-                    let server_channel = session
-                        .channel_open_forwarded_tcpip(
-                            params.connected_address,
-                            params.connected_port,
-                            params.originator_address.clone(),
-                            params.originator_port,
-                        )
-                        .await?;
-
-                    self.channel_map
-                        .insert(ServerChannelId(server_channel.id()), id);
-                    self.all_channels.push(id);
+                if let Some(session) = self.session_handle.clone() {
+                    let open_params = params.clone();
+                    self.open_server_channel_in_background(id, async move {
+                        session
+                            .channel_open_forwarded_tcpip(
+                                open_params.connected_address,
+                                open_params.connected_port,
+                                open_params.originator_address,
+                                open_params.originator_port,
+                            )
+                            .await
+                    });
 
                     let recorder = self
                         .traffic_recorder_for(
@@ -1050,14 +1153,13 @@ impl ServerSession {
                 }
             }
             RCEvent::ForwardedStreamlocal(id, params) => {
-                if let Some(session) = &mut self.session_handle {
-                    let server_channel = session
-                        .channel_open_forwarded_streamlocal(params.socket_path.clone())
-                        .await?;
-
-                    self.channel_map
-                        .insert(ServerChannelId(server_channel.id()), id);
-                    self.all_channels.push(id);
+                if let Some(session) = self.session_handle.clone() {
+                    let socket_path = params.socket_path.clone();
+                    self.open_server_channel_in_background(id, async move {
+                        session
+                            .channel_open_forwarded_streamlocal(socket_path)
+                            .await
+                    });
 
                     let recorder = self
                         .traffic_recorder_for(
@@ -1080,23 +1182,19 @@ impl ServerSession {
                 }
             }
             RCEvent::ForwardedAgent(id) => {
-                if let Some(session) = &mut self.session_handle {
-                    let server_channel = session.channel_open_agent().await?;
-
-                    self.channel_map
-                        .insert(ServerChannelId(server_channel.id()), id);
-                    self.all_channels.push(id);
+                if let Some(session) = self.session_handle.clone() {
+                    self.open_server_channel_in_background(id, async move {
+                        session.channel_open_agent().await
+                    });
                 }
             }
             RCEvent::X11(id, originator_address, originator_port) => {
-                if let Some(session) = &mut self.session_handle {
-                    let server_channel = session
-                        .channel_open_x11(originator_address, originator_port)
-                        .await?;
-
-                    self.channel_map
-                        .insert(ServerChannelId(server_channel.id()), id);
-                    self.all_channels.push(id);
+                if let Some(session) = self.session_handle.clone() {
+                    self.open_server_channel_in_background(id, async move {
+                        session
+                            .channel_open_x11(originator_address, originator_port)
+                            .await
+                    });
                 }
             }
         }
@@ -1950,7 +2048,14 @@ impl ServerSession {
                     return Ok(AuthResult::Rejected);
                 }
 
-                let state_arc = self.get_auth_state(username).await?;
+                let state_arc = self
+                    .get_auth_state(
+                        username,
+                        credential
+                            .as_ref()
+                            .and_then(Self::rate_limited_credential_type),
+                    )
+                    .await?;
                 let mut state = state_arc.lock().await;
 
                 if let Some(credential) = credential {
@@ -1961,27 +2066,12 @@ impl ServerSession {
                     )
                     .await?;
 
-                    // Record failed password/OTP guesses. Public-key offers
-                    // legitimately fail as clients try each agent key in turn, so
-                    // they aren't counted as brute-force attempts.
-                    if !credential_valid {
-                        let credential_type = match &credential {
-                            AuthCredential::Password(_) => Some("password"),
-                            AuthCredential::Otp(_) => Some("otp"),
-                            _ => None,
-                        };
-                        if let Some(credential_type) = credential_type {
-                            let _ = self
-                                .services
-                                .login_protection
-                                .record_failed_attempt(FailedAttemptInfo {
-                                    username: username.clone(),
-                                    remote_ip,
-                                    protocol: "ssh".to_string(),
-                                    credential_type: credential_type.to_string(),
-                                })
-                                .await;
-                        }
+                    if !credential_valid
+                        && let Some(credential_type) =
+                            Self::rate_limited_credential_type(&credential)
+                    {
+                        self.record_failed_login_attempt(username, credential_type)
+                            .await;
                     }
                 }
 

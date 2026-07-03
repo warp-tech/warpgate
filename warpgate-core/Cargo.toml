@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-core"
-version = "0.26.0-beta.1"
+version = "0.26.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -27,6 +27,7 @@ poem-openapi.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true
+reqwest = { workspace = true, features = ["json"] }
 russh.workspace = true
 rustls.workspace = true
 sea-orm.workspace = true
@@ -45,6 +46,7 @@ warpgate-common = { path = "../warpgate-common" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-db-migrations = { path = "../warpgate-db-migrations" }
 warpgate-ldap = { path = "../warpgate-ldap" }
+warpgate-tls = { path = "../warpgate-tls" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 webpki = { version = "0.22", default-features = false }
 zune-jpeg = "0.4"

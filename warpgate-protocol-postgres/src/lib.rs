@@ -10,7 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::{FutureExt, StreamExt};
 use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use session::PostgresSession;
@@ -20,9 +21,7 @@ use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
-use warpgate_tls::{
-    ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
-};
+use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
 pub struct PostgresProtocolServer {
     services: Services,
@@ -37,27 +36,15 @@ impl PostgresProtocolServer {
 }
 
 impl ProtocolServer for PostgresProtocolServer {
-    async fn run(self, address: ListenEndpoint) -> Result<()> {
-        let certificate_and_key = {
-            let config = self.services.config.lock().await;
-            let paths_rel_to = self.services.global_params.paths_relative_to();
-            let certificate_path = paths_rel_to.join(&config.store.postgres.certificate);
-            let key_path = paths_rel_to.join(&config.store.postgres.key);
-
-            TlsCertificateAndPrivateKey {
-                certificate: TlsCertificateBundle::from_file(&certificate_path)
-                    .await
-                    .with_context(|| {
-                        format!("reading SSL private key from '{}'", key_path.display())
-                    })?,
-                private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
-                    format!(
-                        "reading SSL certificate from '{}'",
-                        certificate_path.display()
-                    )
-                })?,
-            }
-        };
+    async fn bind(
+        self,
+        address: ListenEndpoint,
+        tls: Vec<TlsCertificateAndPrivateKey>,
+    ) -> Result<BoxFuture<'static, Result<()>>> {
+        let certificate_and_key = tls
+            .into_iter()
+            .next()
+            .context("PostgreSQL requires a TLS certificate and key")?;
 
         let tls_config = ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::aws_lc_rs::default_provider(),
@@ -72,7 +59,9 @@ impl ProtocolServer for PostgresProtocolServer {
             .tcp_accept_stream()
             .await
             .context("accepting connection")?;
-        loop {
+        let services = self.services;
+        Ok(async move {
+            loop {
             let Some(stream) = listener.next().await else {
                 return Ok(());
             };
@@ -109,7 +98,7 @@ impl ProtocolServer for PostgresProtocolServer {
             };
 
             let tls_config = tls_config.clone();
-            let services = self.services.clone();
+            let services = services.clone();
             tokio::spawn(async move {
                 let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
 
@@ -150,7 +139,9 @@ impl ProtocolServer for PostgresProtocolServer {
 
                 Ok::<(), anyhow::Error>(())
             });
+            }
         }
+        .boxed())
     }
 
     fn name(&self) -> &'static str {

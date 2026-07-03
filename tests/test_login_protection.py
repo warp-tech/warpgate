@@ -422,6 +422,78 @@ class TestLoginProtection:
         assert rc == 0, "correct password should work after unblock"
         assert out == b"/bin/sh\n"
 
+    def test_ip_blocking_over_ssh_unknown_username(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey,
+        timeout,
+    ):
+        """SSH password auth with a non-existent username still counts toward
+        IP blocking, so username enumeration can't dodge the rate limiter."""
+        wg = _lp_wg(processes, ip_max=3, user_max=100)
+        ssh_port = processes.start_ssh_server(
+            trusted_keys=[wg_c_ed25519_pubkey.read_text()]
+        )
+        wait_port(ssh_port)
+        url = f"https://localhost:{wg.http_port}"
+
+        # A real user exists, but we brute-force with unknown usernames.
+        with admin_client(url) as api:
+            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+            api.create_password_credential(
+                user.id, sdk.NewPasswordCredential(password="correct_password")
+            )
+            api.add_user_role(user.id, role.id)
+            target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=f"ssh-{uuid4()}",
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetSSHOptions(
+                            kind="Ssh",
+                            host="localhost",
+                            port=ssh_port,
+                            username="root",
+                            auth=sdk.SSHTargetAuth(
+                                sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                            ),
+                        )
+                    ),
+                )
+            )
+            api.add_target_role(target.id, role.id)
+
+        def ssh_login(username, password):
+            client = processes.start_ssh_client(
+                f"{username}:{target.name}@localhost",
+                "-p",
+                str(wg.ssh_port),
+                "-i",
+                "/dev/null",
+                "-o",
+                "PreferredAuthentications=password",
+                "-o",
+                "NumberOfPasswordPrompts=1",
+                password=password,
+            )
+            client.communicate(timeout=timeout)
+            return client.returncode
+
+        # Exceed the IP threshold using a username that does not exist.
+        for _ in range(3):
+            assert ssh_login(f"nonexistent-{uuid4()}", "whatever") != 0
+
+        # The IP is now blocked, so even the real user's correct password fails.
+        assert ssh_login(user.username, "correct_password") != 0, (
+            "unknown-username attempts should count toward IP blocking"
+        )
+
+        with admin_client(url) as api:
+            blocked = api.list_blocked_ips()
+            assert blocked, "expected a blocked IP after unknown-username brute force"
+            for entry in blocked:
+                api.unblock_ip(sdk.UnblockIpRequest(ip=entry.ip_address))
+
     # ── admin exemption ──────────────────────────────────────────────────────
 
     def test_admin_exempt_from_lockout(

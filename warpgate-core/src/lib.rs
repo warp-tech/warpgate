@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod auth;
 mod auth_state_store;
 mod config_providers;

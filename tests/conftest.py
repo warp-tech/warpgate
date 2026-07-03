@@ -100,8 +100,21 @@ class ProcessManager:
         self.children = []
         self.ctx = ctx
         self.timeout = timeout
+        self._k3s_containers: List[str] = []
+
+    def _remove_k3s_containers(self):
+        """Force-remove every k3s container we've started so far. Idempotent —
+        `docker rm -f` on an already-gone container is a harmless no-op."""
+        for name in self._k3s_containers:
+            subprocess.run(
+                ["docker", "rm", "-f", name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        self._k3s_containers.clear()
 
     def stop(self):
+        self._remove_k3s_containers()
         for child in self.children:
             try:
                 p = psutil.Process(child.process.pid)
@@ -253,7 +266,16 @@ class ProcessManager:
         creates a ServiceAccount and clusterrolebinding, then uses
         `kubectl create token` to fetch the bearer token. Assumes a modern
         k8s version (no fallback logic needed).
+
+        The ProcessManager is session-scoped, so a k3s container would
+        otherwise stay up until the whole run ends. Left running, several of
+        these heavyweight privileged containers pile up across the k8s tests
+        and starve each other; an OOM-killed one is then removed by `--rm` and
+        later `docker exec`s fail with "No such container". Only one is ever
+        needed at a time, so tear down any earlier k3s before starting a fresh
+        one.
         """
+        self._remove_k3s_containers()
         port = alloc_port()
         container_name = f"warpgate-e2e-k3s-{uuid.uuid4()}"
         image = os.getenv("K3S_IMAGE", "rancher/k3s:v1.35.2-k3s1")
@@ -275,6 +297,7 @@ class ProcessManager:
                 "--disable-cloud-controller",
             ]
         )
+        self._k3s_containers.append(container_name)
 
         def wait_k3s():
             # Wait until kube-apiserver is responding

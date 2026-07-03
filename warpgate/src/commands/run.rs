@@ -1,11 +1,17 @@
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
-use futures::{FutureExt, StreamExt};
+use futures::FutureExt;
+use futures::stream::{FuturesUnordered, StreamExt};
 #[cfg(target_os = "linux")]
 use sd_notify::NotifyState;
 use tokio::signal::unix::SignalKind;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, error, info, warn};
 use warpgate_common::version::warpgate_version;
-use warpgate_common::{GlobalParams, ListenEndpoint};
+use warpgate_common::{GlobalParams, WarpgateConfig};
 use warpgate_core::db::cleanup_db;
 use warpgate_core::logging::install_database_logger;
 use warpgate_core::{ConfigProvider, ProtocolServer, Services};
@@ -18,17 +24,38 @@ use warpgate_protocol_ssh::SSHProtocolServer;
 use warpgate_protocol_vnc::VncProtocolServer;
 
 use crate::config::{load_config, watch_config};
+use crate::listener_supervisor::{
+    ConfigSelector, ListenerParams, ListenerSupervisor, ServerFactory, TlsPathPair, validate_tls,
+};
 
-async fn run_protocol_server<T: ProtocolServer + Send + 'static>(
-    server: T,
-    address: ListenEndpoint,
-) -> Result<()> {
-    let name = server.name();
-    info!("Accepting {name} connections on {address:?}");
-    server
-        .run(address)
-        .await
-        .with_context(|| format!("protocol server: {name}"))
+/// Endpoint failures at startup are fatal (only runtime changes are non-fatal),
+/// so probe the initial config's TLS material and port before spawning the
+/// supervisor, which then owns rebinding for the process lifetime.
+async fn spawn_supervisor(
+    name: &'static str,
+    requires_tls: bool,
+    factory: ServerFactory,
+    selector: ConfigSelector<WarpgateConfig>,
+    config_rx: &watch::Receiver<WarpgateConfig>,
+) -> Result<JoinHandle<()>> {
+    let params = selector(&config_rx.borrow());
+    if params.enabled {
+        if requires_tls && params.tls.is_empty() {
+            anyhow::bail!("{name} listener: no TLS certificate/key configured");
+        }
+        validate_tls(&params.tls)
+            .await
+            .with_context(|| format!("{name} listener: TLS setup failed"))?;
+        // Fail fast if the port can't be bound; the probe listeners drop here and
+        // the supervisor rebinds. ponytail: tiny drop→rebind window, fine at startup.
+        params.endpoint.tcp_listeners().await.with_context(|| {
+            format!("{name} listener: cannot bind {}", params.endpoint.address())
+        })?;
+    }
+    let stream = WatchStream::new(config_rx.clone());
+    Ok(tokio::spawn(
+        ListenerSupervisor::new(name, factory, selector).run(stream),
+    ))
 }
 
 pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<()> {
@@ -59,53 +86,92 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         info!("Warpgate is now running.");
     }
 
-    let mut protocol_futures = futures::stream::FuturesUnordered::new();
+    drop(config);
 
-    protocol_futures.push(
-        run_protocol_server(
-            HTTPProtocolServer::new(&services),
-            config.store.http.listen.clone(),
-        )
-        .boxed(),
-    );
+    // The config file is watched and pushed onto this channel; each protocol
+    // supervisor and the session-reauth loop react to changes off a clone of it.
+    let config_rx = watch_config(params, services.config.clone()).await?;
 
-    if config.store.ssh.enable {
-        protocol_futures.push(
-            run_protocol_server(
-                SSHProtocolServer::new(&services).await?,
-                config.store.ssh.listen.clone(),
-            )
-            .boxed(),
-        );
+    let base = params.paths_relative_to().clone();
+
+    // One supervisor per protocol keeps its listener in sync with the live config,
+    // rebinding on endpoint/enable/certificate changes and pausing (rather than
+    // killing the process) if a bind fails.
+    let mut supervisors: FuturesUnordered<JoinHandle<()>> = FuturesUnordered::new();
+
+    // HTTP has no `enable` flag — it is always on.
+    {
+        let services = services.clone();
+        let factory: ServerFactory = Arc::new(move |address, tls| {
+            let services = services.clone();
+            async move { HTTPProtocolServer::new(&services).bind(address, tls).await }.boxed()
+        });
+        let base = base.clone();
+        let selector: ConfigSelector<WarpgateConfig> = Arc::new(move |c: &WarpgateConfig| {
+            let mut tls = Vec::new();
+            if let Some(pair) =
+                TlsPathPair::new(&base, &c.store.http.certificate, &c.store.http.key)
+            {
+                tls.push(pair);
+            }
+            for sni in &c.store.http.sni_certificates {
+                if let Some(pair) = TlsPathPair::new(&base, &sni.certificate, &sni.key) {
+                    tls.push(pair);
+                }
+            }
+            ListenerParams {
+                enabled: true,
+                endpoint: c.store.http.listen.clone(),
+                tls,
+            }
+        });
+        supervisors.push(spawn_supervisor("HTTP", true, factory, selector, &config_rx).await?);
     }
 
-    if config.store.mysql.enable {
-        protocol_futures.push(
-            run_protocol_server(
-                MySQLProtocolServer::new(&services),
-                config.store.mysql.listen.clone(),
-            )
-            .boxed(),
-        );
+    {
+        let services = services.clone();
+        let factory: ServerFactory = Arc::new(move |address, tls| {
+            let services = services.clone();
+            async move {
+                let server = SSHProtocolServer::new(&services).await?;
+                server.bind(address, tls).await
+            }
+            .boxed()
+        });
+        let selector: ConfigSelector<WarpgateConfig> =
+            Arc::new(|c: &WarpgateConfig| ListenerParams {
+                enabled: c.store.ssh.enable,
+                endpoint: c.store.ssh.listen.clone(),
+                tls: Vec::new(),
+            });
+        supervisors.push(spawn_supervisor("SSH", false, factory, selector, &config_rx).await?);
     }
 
-    if config.store.postgres.enable {
-        protocol_futures.push(
-            run_protocol_server(
-                PostgresProtocolServer::new(&services),
-                config.store.postgres.listen.clone(),
-            )
-            .boxed(),
-        );
+    // These protocols are uniform: sync `new`, one enable flag, one cert/key pair.
+    // `$cfg` is the `store` field holding their config (all share the shape).
+    macro_rules! tls_listener {
+        ($name:literal, $server:ident, $cfg:ident) => {{
+            let services = services.clone();
+            let base = base.clone();
+            let factory: ServerFactory = Arc::new(move |address, tls| {
+                let services = services.clone();
+                async move { $server::new(&services).bind(address, tls).await }.boxed()
+            });
+            let selector: ConfigSelector<WarpgateConfig> =
+                Arc::new(move |c: &WarpgateConfig| ListenerParams {
+                    enabled: c.store.$cfg.enable,
+                    endpoint: c.store.$cfg.listen.clone(),
+                    tls: TlsPathPair::new(&base, &c.store.$cfg.certificate, &c.store.$cfg.key)
+                        .into_iter()
+                        .collect(),
+                });
+            spawn_supervisor($name, true, factory, selector, &config_rx).await?
+        }};
     }
 
-    if config.store.kubernetes.enable {
-        protocol_futures.push(
-            KubernetesProtocolServer::new(&services)
-                .run(config.store.kubernetes.listen.clone())
-                .boxed(),
-        );
-    }
+    supervisors.push(tls_listener!("MySQL", MySQLProtocolServer, mysql));
+    supervisors.push(tls_listener!("PostgreSQL", PostgresProtocolServer, postgres));
+    supervisors.push(tls_listener!("Kubernetes", KubernetesProtocolServer, kubernetes));
 
     if config.store.vnc.enable {
         protocol_futures.push(
@@ -175,13 +241,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         });
     }
 
-    drop(config);
-
-    if protocol_futures.is_empty() {
-        anyhow::bail!("No protocols are enabled in the config file, exiting");
-    }
-
-    tokio::spawn(watch_config_and_reload(services.clone()));
+    tokio::spawn(watch_config_and_reload(services.clone(), config_rx.clone()));
 
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
 
@@ -193,12 +253,11 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             _ = sigint.recv() => {
                 break
             }
-            result = protocol_futures.next() => {
+            result = supervisors.next() => {
                 match result {
                     Some(Err(error)) => {
-                        error!(?error, "Server error");
-                        std::process::exit(1);
-                    },
+                        error!(?error, "Listener supervisor task failed");
+                    }
                     None => break,
                     _ => (),
                 }
@@ -210,10 +269,11 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     Ok(())
 }
 
-pub async fn watch_config_and_reload(services: Services) -> Result<()> {
-    let mut reload_event = watch_config(&services.global_params, services.config.clone())?;
-
-    while reload_event.recv().await == Ok(()) {
+pub async fn watch_config_and_reload(
+    services: Services,
+    mut config_rx: watch::Receiver<WarpgateConfig>,
+) -> Result<()> {
+    while config_rx.changed().await.is_ok() {
         let state = services.state.lock().await;
         let mut cp = services.config_provider.lock().await;
         // TODO no longer happens since everything is in the DB
