@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.26.0-beta.1-modified"
+    "version": "v0.26.0-1-g6c231ba6-modified"
   },
   "servers": [
     {
@@ -1187,6 +1187,9 @@
               }
             }
           },
+          "401": {
+            "description": ""
+          },
           "403": {
             "description": ""
           },
@@ -1817,8 +1820,7 @@
             "type": "boolean"
           },
           "should_prompt_analytics": {
-            "type": "boolean",
-            "description": "Whether the admin UI should show the one-time analytics opt-in prompt:\ntrue only for a config-editing admin of an undecided instance that is\nolder than a week and has finished or dismissed the Getting Started steps."
+            "type": "boolean"
           }
         }
       },

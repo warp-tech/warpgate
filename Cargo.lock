@@ -8020,6 +8020,7 @@ dependencies = [
  "uuid",
  "warpgate-common",
  "warpgate-core",
+ "warpgate-db-entities",
 ]
 
 [[package]]

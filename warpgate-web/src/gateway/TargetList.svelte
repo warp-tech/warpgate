@@ -12,6 +12,7 @@ import { firstBy } from 'thenby'
 import GettingStarted from 'common/GettingStarted.svelte'
 import EmptyState from 'common/EmptyState.svelte'
 import GroupColorCircle from 'common/GroupColorCircle.svelte'
+import { handleReauthError } from 'common/reauth'
 
 let instructionsTarget: TargetSnapshot|undefined = $state()
 
@@ -19,10 +20,16 @@ const canEditTargets = $derived($serverInfo?.adminPermissions?.targetsEdit ?? fa
 const webSshEnabled = $derived($serverInfo?.webSshEnabled ?? true)
 
 async function openWebSsh (target: TargetSnapshot) {
-    const { sessionId } = await api.createWebSshSession({
-        createWebSshSessionBody: { targetId: target.id },
-    })
-    window.open(`/@warpgate#/web-ssh/${sessionId}`, '_blank')
+    try {
+        const { sessionId } = await api.createWebSshSession({
+            createWebSshSessionBody: { targetId: target.id },
+        })
+        window.open(`/@warpgate#/web-ssh/${sessionId}`, '_blank')
+    } catch (err) {
+        if (!(await handleReauthError(err))) {
+            throw err
+        }
+    }
 }
 
 function loadTargets(
