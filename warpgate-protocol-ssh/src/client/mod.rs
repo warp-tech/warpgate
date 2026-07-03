@@ -153,6 +153,23 @@ pub enum RCEvent {
     X11(Uuid, String, u32),
 }
 
+impl RCEvent {
+    /// The already-open channel this event refers to, if any.
+    pub(crate) const fn channel(&self) -> Option<Uuid> {
+        match self {
+            Self::Output(channel, _)
+            | Self::Success(channel)
+            | Self::ChannelFailure(channel)
+            | Self::Eof(channel)
+            | Self::Close(channel)
+            | Self::ExitStatus(channel, _)
+            | Self::ExitSignal { channel, .. }
+            | Self::ExtendedData { channel, .. } => Some(*channel),
+            _ => None,
+        }
+    }
+}
+
 pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 
 #[derive(Clone, Debug)]

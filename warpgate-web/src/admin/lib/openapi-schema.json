@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.26.0-1-g4463f1ed-modified"
+    "version": "v0.26.0-2-g81553667-modified"
   },
   "servers": [
     {
@@ -887,6 +887,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": ""
           },
           "400": {
             "description": "",
@@ -5374,6 +5377,10 @@
           "web_ssh_enabled": {
             "type": "boolean"
           },
+          "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
           "analytics_consent": {
             "$ref": "#/components/schemas/AnalyticsConsent"
           },
@@ -5532,6 +5539,10 @@
           },
           "web_ssh_enabled": {
             "type": "boolean"
+          },
+          "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64"
           },
           "analytics_consent": {
             "$ref": "#/components/schemas/AnalyticsConsent"

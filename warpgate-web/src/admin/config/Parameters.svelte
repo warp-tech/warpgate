@@ -411,6 +411,18 @@
                     <HelpText>
                         Minimized hides the username and password fields behind a link, with the focus on the SSO buttons. Disabled removes password login entirely and the server rejects password attempts — make sure all users can sign in via SSO first.
                     </HelpText>
+
+                    <FormGroup floating label="Require re-authentication after (blank = never)">
+                        <input
+                            type="text"
+                            class="form-control"
+                            placeholder="e.g. 8h, 30m, 1d"
+                            use:humantimeDuration={{ seconds: parameters.webAuthMaxAgeSeconds, onChange: v => { parameters!.webAuthMaxAgeSeconds = v } }}
+                        />
+                    </FormGroup>
+                    <HelpText>
+                        Forces users to sign in again once before accessing Web SSH or creating tickets if at least this much time has passed since they've logged in. Native SSH/database sessions are unaffected.
+                    </HelpText>
                 </Section>
                 {/if}
 
