@@ -13,8 +13,18 @@ reject — instead the tests read Warpgate's verdict server-side (see
 `conftest.rdp_session_authorized`): `full_connect` only has to *drive* the connection.
 """
 
+import os
 import shutil
 import subprocess
+
+
+def _display_prefix():
+    """The `freerdp*-x11` client needs an X display. On headless CI (no `DISPLAY`) wrap it
+    in `xvfb-run` to give it a virtual one; a no-op locally where a display already exists."""
+    if os.environ.get("DISPLAY"):
+        return []
+    xvfb_run = shutil.which("xvfb-run")
+    return [xvfb_run, "-a"] if xvfb_run else []
 
 
 def _xfreerdp_bin():
@@ -39,6 +49,7 @@ def full_connect(host, port, selector, password, timeout):
     binary = _xfreerdp_bin()
     assert binary is not None, "xfreerdp not installed"
     cmd = [
+        *_display_prefix(),
         binary,
         f"/v:{host}:{port}",
         f"/u:{selector}",

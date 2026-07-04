@@ -64,7 +64,9 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y gnome-keyring kubectl
-          # FreeRDP CLI (xfreerdp/xfreerdp3) drives the native RDP tests.
+          # FreeRDP CLI (xfreerdp/xfreerdp3) drives the native RDP tests. The `-x11`
+          # build needs an X display, so xvfb provides a virtual one on headless CI.
+          sudo apt install -y xvfb
           sudo apt install -y freerdp2-x11 || sudo apt install -y freerdp3-x11
           pip3 install keyring==24 poetry==1.8.3
           poetry install
