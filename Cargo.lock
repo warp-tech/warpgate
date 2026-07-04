@@ -8744,7 +8744,6 @@ name = "warpgate-web-ssh"
 version = "0.23.4"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "bytes",
  "futures",
  "poem",

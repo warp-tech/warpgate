@@ -7,12 +7,12 @@ use tokio::time::Instant;
 use tracing::debug;
 use warpgate_db_entities::Recording::RecordingKind;
 
-use super::writer::RecordingWriter;
+use super::writer::RawRecordingWriter;
 use super::{Recorder, Result};
 use crate::recordings::RecordingWriterOpener;
 
 pub struct TrafficRecorder {
-    writer: RecordingWriter,
+    writer: RawRecordingWriter,
     started_at: Instant,
 }
 
@@ -42,7 +42,7 @@ impl Recorder for TrafficRecorder {
 
     async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
         Ok(Self {
-            writer: opener.open(super::DATA_FILENAME).await?,
+            writer: opener.open_tcpdump_data().await?,
             started_at: Instant::now(),
         })
     }
@@ -52,12 +52,16 @@ pub struct ConnectionRecorder {
     params: TrafficConnectionParams,
     seq_tx: u32,
     seq_rx: u32,
-    writer: RecordingWriter,
+    writer: RawRecordingWriter,
     started_at: Instant,
 }
 
 impl ConnectionRecorder {
-    fn new(params: TrafficConnectionParams, writer: RecordingWriter, started_at: Instant) -> Self {
+    fn new(
+        params: TrafficConnectionParams,
+        writer: RawRecordingWriter,
+        started_at: Instant,
+    ) -> Self {
         Self {
             params,
             writer,

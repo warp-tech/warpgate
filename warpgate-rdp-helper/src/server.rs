@@ -44,9 +44,13 @@ use tracing::warn;
 use warpgate_rdp_ipc::server::{Event as ControlOut, Input as ControlIn, ServeConfig};
 
 pub async fn entry() {
-    // Logs MUST go to stderr — stdout is the line-delimited control channel.
+    // Logs MUST go to stderr — stdout is the line-delimited control channel. Keep them
+    // minimal: Warpgate reads each line and re-logs it with its own timestamp, so the
+    // helper's timestamp (and target) would just be redundant noise.
     let _ = tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
+        .without_time()
+        .with_target(false)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),

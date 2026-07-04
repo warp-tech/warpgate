@@ -1,27 +1,21 @@
-//! Resolving and materialising an embedded helper executable.
+//! A helper to spawn embedded helpers
 //!
-//! Warpgate ships one out-of-workspace RDP helper (`warpgate-rdp-helper`, carrying the
-//! target-facing client and viewer-facing server as `connect`/`serve` subcommands),
-//! compressed and embedded into this crate at build time (see `build.rs`). The
-//! materialisation strategy is security-sensitive, so it lives here once:
-//!
-//! 1. An explicit path override env var, if set, points at an external helper (dev/CI).
-//! 2. On Linux the embedded image is written to an anonymous `memfd` and executed
-//!    from `/proc/self/fd/N`, so it never touches the filesystem.
-//! 3. Elsewhere it is extracted to a private temp file that the returned guard owns
-//!    and unlinks on drop.
+//! Extracts the embedded helper either into a memfd or a secure tempfile
+//! and runs it, removing later on drop
 
+#[cfg(not(target_os = "linux"))]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+#[cfg(not(target_os = "linux"))]
+use tempfile::{TempDir, TempPath};
 use warpgate_common::WarpgateError;
 
-/// A gzip-compressed embedded helper image plus the metadata needed to
-/// materialise and run it.
 pub(crate) struct EmbeddedHelper {
     /// gzip-compressed helper image, embedded by `build.rs`.
     blob: &'static [u8],
-    /// Name used for the Linux `memfd` and as the temp-file prefix.
+    /// used for the Linux `memfd` and as the temp-file prefix.
     name: &'static str,
     /// Env var holding an explicit external path override (dev/CI).
     override_env: &'static str,
@@ -29,32 +23,35 @@ pub(crate) struct EmbeddedHelper {
 
 /// A ready-to-spawn helper executable. Owns the temp fd/file so that
 /// it can outlive `spawn()`.
-pub(crate) struct HelperExecutable {
-    path: PathBuf,
-    #[cfg(not(target_os = "linux"))]
-    _temp: Option<tempfile::TempPath>,
-    #[cfg(not(target_os = "linux"))]
-    _tempdir: Option<tempfile::TempDir>,
+#[allow(unused)]
+pub(crate) enum HelperExecutable {
+    Preexisting(PathBuf),
     #[cfg(target_os = "linux")]
-    _memfd: Option<std::fs::File>,
+    MemFd(std::fs::File),
+    #[cfg(not(target_os = "linux"))]
+    Extracted {
+        temp_path: TempPath,
+        temp_dir: TempDir,
+    },
 }
 
 impl HelperExecutable {
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
+    /// Path to use when spawning
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Preexisting(path) => path,
+            // `/proc/self/fd/N` resolves to the memfd at exec time (in the forked child,
+            // before CLOEXEC fires); the owned `file` keeps N valid across the spawn.
+            #[cfg(target_os = "linux")]
+            Self::MemFd(file) => Path::new(&format!("/proc/self/fd/{}", file.as_raw_fd())),
+            #[cfg(not(target_os = "linux"))]
+            Self::Extracted { temp_path, .. } => temp_path.as_ref(),
+        }
     }
 
     /// A helper referenced by an external path (the override env var); nothing owned.
-    const fn at(path: PathBuf) -> Self {
-        Self {
-            path,
-            #[cfg(not(target_os = "linux"))]
-            _temp: None,
-            #[cfg(not(target_os = "linux"))]
-            _tempdir: None,
-            #[cfg(target_os = "linux")]
-            _memfd: None,
-        }
+    const fn preexisting(path: PathBuf) -> Self {
+        Self::Preexisting(path)
     }
 }
 
@@ -74,7 +71,7 @@ impl EmbeddedHelper {
     /// Resolve the helper executable, materialising the embedded copy as needed.
     pub(crate) fn resolve(&self) -> Result<HelperExecutable, WarpgateError> {
         if let Some(path) = std::env::var_os(self.override_env) {
-            return Ok(HelperExecutable::at(PathBuf::from(path)));
+            return Ok(HelperExecutable::preexisting(PathBuf::from(path)));
         }
 
         #[cfg(target_os = "linux")]
@@ -105,13 +102,7 @@ impl EmbeddedHelper {
         self.decompress_into(&mut file)?;
         file.flush().ok();
 
-        // `/proc/self/fd/N` resolves to the memfd at exec time (in the forked child,
-        // before CLOEXEC fires); the owned `file` keeps N valid across the spawn.
-        let path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
-        Ok(HelperExecutable {
-            path,
-            _memfd: Some(file),
-        })
+        Ok(HelperExecutable::MemFd(file))
     }
 
     /// Extract the embedded helper to a temp file.
@@ -123,9 +114,7 @@ impl EmbeddedHelper {
     /// `memfd` is unavailable; there is no owning field, so the file is persisted.
     #[cfg(not(target_os = "linux"))]
     pub(crate) fn extract_to_tempfile(&self) -> Result<HelperExecutable, WarpgateError> {
-        use std::os::unix::fs::PermissionsExt;
-
-        let dir = tempfile::TempDir::new().context("creating helper cache dir")?;
+        let dir = TempDir::new().context("creating helper cache dir")?;
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
 
         let mut tmp = tempfile::Builder::new()
@@ -140,10 +129,9 @@ impl EmbeddedHelper {
         let helper = {
             // Keep the path (closing the write handle); unlinked when the guard drops.
             let temp = tmp.into_temp_path();
-            HelperExecutable {
-                path: temp.to_path_buf(),
-                _temp: Some(temp),
-                _tempdir: Some(dir),
+            HelperExecutable::Extracted {
+                temp_path: temp,
+                temp_dir: dir,
             }
         };
 

@@ -1,14 +1,10 @@
+from base64 import b64decode
 from uuid import uuid4
 
 import pytest
 
 from .api_client import admin_client, sdk
-from .conftest import (
-    ProcessManager,
-    WarpgateProcess,
-    rdp_session_authorized,
-    wait_rdp_session_authorized,
-)
+from .conftest import ProcessManager, WarpgateProcess, rdp_session_authorized
 from .rdp_client import full_connect, have_xfreerdp
 from .util import wait_port
 
@@ -17,11 +13,21 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _provision(api, viewer_password="123"):
+def _provision(api, otp_key_base64):
     role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
     user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
-    api.create_password_credential(
-        user.id, sdk.NewPasswordCredential(password=viewer_password)
+    api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
+    api.create_otp_credential(
+        user.id, sdk.NewOtpCredential(secret_key=list(b64decode(otp_key_base64)))
+    )
+    api.update_user(
+        user.id,
+        sdk.UserDataRequest(
+            username=user.username,
+            credential_policy=sdk.UserRequireCredentialsPolicy(
+                rdp=[sdk.CredentialKind.PASSWORD, sdk.CredentialKind.TOTP],
+            ),
+        ),
     )
     api.add_user_role(user.id, role.id)
     target = api.create_target(
@@ -30,9 +36,7 @@ def _provision(api, viewer_password="123"):
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetRdpOptions(
                     kind="Rdp",
-                    # The backend is never reached in these auth tests (auth is evaluated
-                    # before/instead of dialing it), so this address only needs to be
-                    # well-formed.
+                    # Never dialed: auth is rejected before Warpgate connects the target.
                     host="localhost",
                     port=3389,
                     username="user",
@@ -51,19 +55,21 @@ def _provision(api, viewer_password="123"):
 
 
 class Test:
-    def test_password(
+    def test_otp_required_rejects_native_rdp(
         self,
         processes: ProcessManager,
+        otp_key_base64: str,
         timeout,
         shared_wg: WarpgateProcess,
     ):
-        # RDP is client-initiated: the listener sends nothing until the client speaks,
-        # so don't wait for a server greeting (like the HTTP/Kubernetes checks).
+        # Native RDP collects only username+password over NLA, so a policy that also
+        # requires TOTP can't be satisfied — the correct password alone is rejected
+        # (the second factor can't be gathered over the RDP auth exchange).
         wait_port(shared_wg.rdp_port, recv=False)
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
-            user, target = _provision(api)
+            user, target = _provision(api, otp_key_base64)
             full_connect(
                 "localhost",
                 shared_wg.rdp_port,
@@ -71,30 +77,8 @@ class Test:
                 "123",
                 timeout,
             )
-            assert wait_rdp_session_authorized(api, user.username, timeout), (
-                "correct password did not produce an authorized session"
-            )
-
-    def test_wrong_password_rejected(
-        self,
-        processes: ProcessManager,
-        timeout,
-        shared_wg: WarpgateProcess,
-    ):
-        wait_port(shared_wg.rdp_port, recv=False)
-
-        url = f"https://localhost:{shared_wg.http_port}"
-        with admin_client(url) as api:
-            user, target = _provision(api)
-            full_connect(
-                "localhost",
-                shared_wg.rdp_port,
-                f"{user.username}:{target.name}",
-                "wrong",
-                timeout,
-            )
-            # Warpgate rejects before/without stamping the session — no authorized
-            # session must ever appear (the verdict is final once the connection drops).
+            # The password alone can't satisfy the TOTP factor, so Warpgate must not
+            # authorize — no session is ever stamped with this user.
             assert not rdp_session_authorized(api, user.username), (
-                "wrong password produced an authorized session"
+                "OTP-required user was authorized over native RDP with the password alone"
             )

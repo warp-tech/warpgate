@@ -72,25 +72,24 @@ impl Framebuffer {
         let fb_w = self.width as usize;
         let fb_h = self.height as usize;
         let (x, y, w, h) = (x as usize, y as usize, w as usize, h as usize);
+        if x >= fb_w || y >= fb_h {
+            return;
+        }
+        // Clip once, then process whole rows so bounds checks stay out of the inner loop.
+        let cols = w.min(fb_w - x);
+        let rows = h.min(fb_h - y);
         let src_stride = w.saturating_mul(SRC);
-        for row in 0..h {
-            let dst_y = y + row;
-            if dst_y >= fb_h {
+        for row in 0..rows {
+            let src_off = row * src_stride;
+            let Some(src_row) = data.get(src_off..src_off + cols * SRC) else {
+                break; // truncated source: leave the rest stale, as before
+            };
+            let dst_off = ((y + row) * fb_w + x) * 4;
+            let Some(dst_row) = self.rgba.get_mut(dst_off..dst_off + cols * 4) else {
                 break;
-            }
-            for col in 0..w {
-                let dst_x = x + col;
-                if dst_x >= fb_w {
-                    break;
-                }
-                let src_off = row * src_stride + col * SRC;
-                let Some(src_px) = data.get(src_off..src_off + SRC) else {
-                    continue;
-                };
-                let dst_off = (dst_y * fb_w + dst_x) * 4;
-                if let Some(dst) = self.rgba.get_mut(dst_off..dst_off + 4) {
-                    dst.copy_from_slice(&convert(src_px));
-                }
+            };
+            for (dst, src) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(SRC)) {
+                dst.copy_from_slice(&convert(src));
             }
         }
     }
@@ -111,34 +110,29 @@ impl Framebuffer {
         }
         let fb_w = self.width as usize;
         let fb_h = self.height as usize;
-        let (sx, sy, w, h) = (src_x as usize, src_y as usize, w as usize, h as usize);
-        let mut scratch = vec![0u8; w.saturating_mul(h).saturating_mul(4)];
-        for row in 0..h {
-            let src_row = sy + row;
-            if src_row >= fb_h {
-                break;
-            }
-            for col in 0..w {
-                let src_col = sx + col;
-                if src_col >= fb_w {
-                    break;
-                }
-                let src_off = (src_row * fb_w + src_col) * 4;
-                let scr_off = (row * w + col) * 4;
-                if let (Some(s), Some(d)) = (
-                    self.rgba.get(src_off..src_off + 4),
-                    scratch.get_mut(scr_off..scr_off + 4),
-                ) {
-                    d.copy_from_slice(s);
-                }
-            }
+        let (sx, sy, dx, dy, w, h) = (
+            src_x as usize,
+            src_y as usize,
+            dst_x as usize,
+            dst_y as usize,
+            w as usize,
+            h as usize,
+        );
+        if sx >= fb_w || sy >= fb_h || dx >= fb_w || dy >= fb_h {
+            return;
         }
-        self.blit::<4>(dst_x, dst_y, w as u32, h as u32, &scratch, |px| {
-            match (px.first(), px.get(1), px.get(2), px.get(3)) {
-                (Some(&r), Some(&g), Some(&b), Some(&a)) => [r, g, b, a],
-                _ => [0, 0, 0, 255],
-            }
-        });
+        // Clip so both src and dst rows stay in bounds, then memmove one contiguous run per
+        // row. Iterate rows away from the destination so overlapping bands aren't clobbered
+        // before they're read (same reasoning as memmove direction).
+        let cols = w.min(fb_w - sx).min(fb_w - dx);
+        let rows = h.min(fb_h - sy).min(fb_h - dy);
+        let run = cols * 4;
+        for row in 0..rows {
+            let row = if dy > sy { rows - 1 - row } else { row };
+            let src_off = ((sy + row) * fb_w + sx) * 4;
+            let dst_off = ((dy + row) * fb_w + dx) * 4;
+            self.rgba.copy_within(src_off..src_off + run, dst_off);
+        }
     }
 }
 
@@ -148,15 +142,10 @@ pub(crate) fn bgra_to_rgba(bgra: &[u8], w: u16, h: u16, out: &mut Vec<u8>) {
     let count = usize::from(w).saturating_mul(usize::from(h));
     out.clear();
     out.reserve(count.saturating_mul(4));
-    for i in 0..count {
-        let off = i * 4;
-        let Some(px) = bgra.get(off..off + 4) else {
-            break;
-        };
-        let b = px.first().copied().unwrap_or(0);
-        let g = px.get(1).copied().unwrap_or(0);
-        let r = px.get(2).copied().unwrap_or(0);
-        out.extend_from_slice(&[r, g, b, 255]);
+    for src in bgra.chunks_exact(4).take(count) {
+        if let &[b, g, r, _] = src {
+            out.extend_from_slice(&[r, g, b, 255]);
+        }
     }
 }
 

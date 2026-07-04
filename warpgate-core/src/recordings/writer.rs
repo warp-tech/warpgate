@@ -1,14 +1,16 @@
 use std::collections::HashMap;
+use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
+use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tracing::error;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
@@ -18,13 +20,13 @@ use warpgate_db_entities::Recording;
 use super::{Error, Result};
 
 #[derive(Clone)]
-pub struct RecordingWriter {
+pub struct RawRecordingWriter {
     sender: mpsc::Sender<Bytes>,
     live_sender: broadcast::Sender<Bytes>,
     drop_signal: mpsc::Sender<()>,
 }
 
-impl RecordingWriter {
+impl RawRecordingWriter {
     pub(crate) async fn new(
         path: PathBuf,
         model: Recording::Model,
@@ -121,9 +123,40 @@ impl RecordingWriter {
     }
 }
 
-impl Drop for RecordingWriter {
+impl Drop for RawRecordingWriter {
     fn drop(&mut self) {
         let signal = std::mem::replace(&mut self.drop_signal, mpsc::channel(1).0);
         tokio::spawn(async move { signal.send(()).await });
+    }
+}
+
+pub struct NDJsonRecordingWriter {
+    pub(crate) inner: RawRecordingWriter,
+    buf: RwLock<Vec<u8>>,
+}
+
+impl Clone for NDJsonRecordingWriter {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            buf: RwLock::new(Vec::new()),
+        }
+    }
+}
+
+impl NDJsonRecordingWriter {
+    pub(crate) fn new(inner: RawRecordingWriter) -> Self {
+        Self {
+            inner,
+            buf: RwLock::new(Vec::new()),
+        }
+    }
+
+    pub async fn write_json_line<I: Serialize>(&self, value: I) -> Result<usize> {
+        let buf = &mut self.buf.write().await;
+        serde_json::to_writer(buf.deref_mut(), &value).map_err(Error::Serialization)?;
+        buf.push(b'\n');
+        self.inner.write(&buf).await?;
+        Ok(buf.len())
     }
 }

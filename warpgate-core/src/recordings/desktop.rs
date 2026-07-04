@@ -7,15 +7,14 @@ use tokio::time::Instant;
 use warpgate_db_entities::Recording::RecordingKind;
 
 use super::framebuffer::{Framebuffer, bgra_to_rgba, decode_jpeg_rgb, encode_png_rgba};
-use super::writer::RecordingWriter;
 use super::{Error, Recorder, Result};
 use crate::recordings::RecordingWriterOpener;
+use crate::recordings::writer::NDJsonRecordingWriter;
 use crate::{DesktopEvent, DesktopInput, DesktopRect};
 
-const MAX_GOP_BYTES: u64 = 2_000_000;
+const MAX_GOP_BYTES: usize = 2_000_000;
 const MAX_GOP_SECONDS: f32 = 10.0;
 const PNG_OFFLOAD_ENCODING_ABOVE_SIZE: usize = 64 * 1024;
-const INDEX_FLUSH_BYTES: usize = 64 * 1024;
 
 /// A rectangle as serialised in the recording stream. Matches the shape of the
 /// `rect` field in the web-desktop WebSocket `ServerMessage`, so the browser can
@@ -136,7 +135,7 @@ pub struct DesktopRecordingMetadata;
 #[serde(tag = "type", rename_all = "snake_case")]
 enum IndexEntry {
     /// Seek anchor: a keyframe's playback time and byte offset into `data.ndjson`.
-    Keyframe { time: f32, offset: u64 },
+    Keyframe { time: f32, offset: usize },
     /// A desktop size change; the player uses the first one to size the canvas at t=0.
     Resize { time: f32, width: u16, height: u16 },
     /// A viewer input event — timestamp only (heatmap density; full data is in the stream).
@@ -145,32 +144,24 @@ enum IndexEntry {
     End { time: f32 },
 }
 
-fn push_entry_to_index(st: &mut RecorderState, entry: &IndexEntry) -> serde_json::Result<()> {
-    serde_json::to_writer(&mut st.index_buf, entry)?;
-    st.index_buf.push(b'\n');
-    Ok(())
-}
-
 /// Mutable recorder state, guarded by one mutex so event/input writes stay ordered and byte
 /// offsets always match the file.
 #[derive(Default)]
 struct RecorderState {
     fb: Framebuffer,
     /// Current `data.ndjson` byte offset (== bytes written so far).
-    offset: u64,
-    bytes_since_keyframe: u64,
+    offset: usize,
+    bytes_since_keyframe: usize,
     last_keyframe_time: f32,
     duration: f32,
     // reusable scratch buffers (cleared + refilled, never reallocated per frame)
-    index_buf: Vec<u8>,
     rgba_scratch: Vec<u8>,
     png_out: Vec<u8>,
-    line_buf: Vec<u8>,
 }
 
 pub struct DesktopRecorder {
-    data_writer: RecordingWriter,
-    index_writer: RecordingWriter,
+    data_writer: NDJsonRecordingWriter,
+    index_writer: NDJsonRecordingWriter,
     started_at: Instant,
     state: Arc<Mutex<RecorderState>>,
 }
@@ -178,6 +169,11 @@ pub struct DesktopRecorder {
 impl DesktopRecorder {
     fn get_time(&self) -> f32 {
         self.started_at.elapsed().as_secs_f32()
+    }
+
+    async fn write_index_item(&self, item: &IndexEntry) -> Result<()> {
+        self.index_writer.write_json_line(item).await?;
+        Ok(())
     }
 
     /// Serialize + write one line, tracking the byte offset atomically (under the state
@@ -188,11 +184,7 @@ impl DesktopRecorder {
         st: &mut RecorderState,
         item: &DesktopRecordingItem,
     ) -> Result<()> {
-        st.line_buf.clear();
-        serde_json::to_writer(&mut st.line_buf, item).map_err(Error::Serialization)?;
-        st.line_buf.push(b'\n');
-        let len = st.line_buf.len() as u64;
-        self.data_writer.write(&st.line_buf).await?;
+        let len = self.data_writer.write_json_line(item).await?;
         st.offset += len;
         st.bytes_since_keyframe += len;
         Ok(())
@@ -254,14 +246,12 @@ impl DesktopRecorder {
                     height: *height,
                 };
                 self.write_data_item(&mut st, &item).await?;
-                push_entry_to_index(
-                    &mut st,
-                    &IndexEntry::Resize {
-                        time,
-                        width: *width,
-                        height: *height,
-                    },
-                )?;
+                self.write_index_item(&IndexEntry::Resize {
+                    time,
+                    width: *width,
+                    height: *height,
+                })
+                .await?;
             }
             DesktopEvent::RawImage { rect, data } => {
                 let rect: RecordingRect = (*rect).into();
@@ -373,8 +363,8 @@ impl DesktopRecorder {
         self.write_data_item(st, &item).await?;
         st.bytes_since_keyframe = 0;
         st.last_keyframe_time = time;
-        push_entry_to_index(st, &IndexEntry::Keyframe { time, offset })?;
-        self.flush_index(st).await?;
+        self.write_index_item(&IndexEntry::Keyframe { time, offset })
+            .await?;
         Ok(())
     }
 
@@ -425,19 +415,7 @@ impl DesktopRecorder {
         let mut st = self.state.lock().await;
         st.duration = st.duration.max(time);
         self.write_data_item(&mut st, &item).await?;
-        push_entry_to_index(&mut st, &IndexEntry::Input { time })?;
-        if st.index_buf.len() >= INDEX_FLUSH_BYTES {
-            self.flush_index(&mut st).await?;
-        }
-        Ok(())
-    }
-
-    async fn flush_index(&self, st: &mut RecorderState) -> Result<()> {
-        if st.index_buf.is_empty() {
-            return Ok(());
-        }
-        self.index_writer.write(&st.index_buf).await?;
-        st.index_buf.clear();
+        self.write_index_item(&IndexEntry::Input { time }).await?;
         Ok(())
     }
 }
@@ -448,16 +426,12 @@ impl Drop for DesktopRecorder {
         let index_writer = self.index_writer.clone();
 
         tokio::spawn(async move {
-            let mut state = state.lock().await;
+            let state = state.lock().await;
             let entry = IndexEntry::End {
                 time: state.duration,
             };
 
-            if serde_json::to_writer(&mut state.index_buf, &entry).is_ok() {
-                state.index_buf.push(b'\n');
-            }
-
-            index_writer.write(&state.index_buf).await?;
+            index_writer.write_json_line(&entry).await?;
             Result::Ok(())
         });
     }
@@ -470,8 +444,8 @@ impl Recorder for DesktopRecorder {
 
     async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
         Ok(Self {
-            data_writer: opener.open(super::DATA_FILENAME).await?,
-            index_writer: opener.open(super::INDEX_FILENAME).await?,
+            data_writer: opener.open_ndjson_data().await?,
+            index_writer: opener.open_index().await?,
             started_at: Instant::now(),
             state: Arc::new(Mutex::new(RecorderState::default())),
         })

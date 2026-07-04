@@ -16,7 +16,7 @@ use tracing::error;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::recordings::{AsciiCast, TerminalRecordingItem};
+use warpgate_core::recordings::{AsciiCast, RecordingFile, TerminalRecordingItem};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_protocol_kubernetes::recording::{
     KubernetesRecordingItem, KubernetesRecordingItemApiObject,
@@ -94,7 +94,7 @@ impl Api {
             return Err(NotFoundError.into());
         };
 
-        let path = recordings.data_path_for(&recording);
+        let path = recordings.file_path(&recording, RecordingFile::NDJsonData);
 
         let file = File::open(&path).await.map_err(InternalServerError)?;
         let reader = BufReader::new(file);
@@ -135,7 +135,7 @@ pub async fn api_get_recording_cast(
             .recordings
             .lock()
             .await
-            .data_path_for(&recording)
+            .file_path(&recording, RecordingFile::NDJsonData)
     };
 
     let mut response = vec![];
@@ -193,7 +193,7 @@ pub async fn api_get_recording_tcpdump(
             .recordings
             .lock()
             .await
-            .data_path_for(&recording)
+            .file_path(&recording, RecordingFile::TcpDumpData)
     };
 
     let content = std::fs::read(path).map_err(InternalServerError)?;
@@ -228,7 +228,7 @@ pub async fn api_get_recording_desktop(
             .recordings
             .lock()
             .await
-            .data_path_for(&recording)
+            .file_path(&recording, RecordingFile::NDJsonData)
     };
 
     Ok(static_req
@@ -246,15 +246,12 @@ pub async fn api_get_recording_desktop_index(
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
     let recording = find_desktop_recording(&ctx, id.0).await?;
-    let Some(index_path) = ({
-        ctx.services()
-            .recordings
-            .lock()
-            .await
-            .index_path_for(&recording)
-    }) else {
-        return Err(NotFoundError.into());
-    };
+    let index_path = ctx
+        .services()
+        .recordings
+        .lock()
+        .await
+        .file_path(&recording, RecordingFile::Index);
 
     Ok(static_req
         .create_response(&index_path, false, false)?

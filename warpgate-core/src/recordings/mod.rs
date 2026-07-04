@@ -21,12 +21,25 @@ mod writer;
 pub use desktop::*;
 pub use terminal::*;
 pub use traffic::*;
-pub use writer::RecordingWriter;
+pub use writer::{NDJsonRecordingWriter, RawRecordingWriter};
 
-/// Fixed name of the primary data stream inside a gen-2 recording folder.
-pub const DATA_FILENAME: &str = "data.ndjson";
-/// Fixed name of the desktop seek index (append-only ndjson) inside a gen-2 recording folder.
-pub const INDEX_FILENAME: &str = "index.ndjson";
+// The possible files that a recording can open
+#[derive(Debug, Clone, Copy)]
+pub enum RecordingFile {
+    NDJsonData,
+    TcpDumpData,
+    Index,
+}
+
+impl RecordingFile {
+    fn filename(&self) -> &'static str {
+        match self {
+            RecordingFile::NDJsonData => "data.ndjson",
+            RecordingFile::TcpDumpData => "data.tcpdump",
+            RecordingFile::Index => "index.ndjson",
+        }
+    }
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -63,9 +76,25 @@ pub struct RecordingWriterOpener {
 }
 
 impl RecordingWriterOpener {
-    pub async fn open(&self, filename: &str) -> Result<RecordingWriter> {
-        RecordingWriter::new(
-            self.folder.join(filename),
+    pub async fn open_ndjson_data(&self) -> Result<NDJsonRecordingWriter> {
+        Ok(NDJsonRecordingWriter::new(
+            self.open(RecordingFile::NDJsonData).await?,
+        ))
+    }
+
+    pub async fn open_index(&self) -> Result<NDJsonRecordingWriter> {
+        Ok(NDJsonRecordingWriter::new(
+            self.open(RecordingFile::Index).await?,
+        ))
+    }
+
+    pub async fn open_tcpdump_data(&self) -> Result<RawRecordingWriter> {
+        self.open(RecordingFile::TcpDumpData).await
+    }
+
+    async fn open(&self, file: RecordingFile) -> Result<RawRecordingWriter> {
+        RawRecordingWriter::new(
+            self.folder.join(file.filename()),
             self.model.clone(),
             self.db.clone(),
             self.live.clone(),
@@ -204,21 +233,13 @@ impl SessionRecordings {
     }
 
     /// On-disk path of a recording's primary data stream, generation-aware: gen 1 is a
-    /// single file, gen 2 is `data.ndjson` inside the recording folder.
-    pub fn data_path_for(&self, recording: &Recording::Model) -> PathBuf {
+    /// single file, gen 2 is multiple files inside the recording folder.
+    pub fn file_path(&self, recording: &Recording::Model, file: RecordingFile) -> PathBuf {
         let base = self.path_for(&recording.session_id, &recording.name);
         if recording.generation >= 2 {
-            base.join(DATA_FILENAME)
+            base.join(file.filename())
         } else {
             base
         }
-    }
-
-    /// Path of a gen-2 recording's seek index sidecar, or `None` for gen 1 (which has none).
-    pub fn index_path_for(&self, recording: &Recording::Model) -> Option<PathBuf> {
-        (recording.generation >= 2).then(|| {
-            self.path_for(&recording.session_id, &recording.name)
-                .join(INDEX_FILENAME)
-        })
     }
 }

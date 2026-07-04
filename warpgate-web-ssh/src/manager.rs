@@ -190,7 +190,7 @@ fn spawn_event_loop(
                             session
                                 .push(ServerMessage::Output {
                                     channel_id,
-                                    data: crate::protocol::Base64Bytes(data),
+                                    data,
                                 })
                                 .await;
                         }

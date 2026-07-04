@@ -791,6 +791,9 @@ class ProcessManager:
                 "certificate": "tls.certificate.pem",
                 "key": "tls.key.pem",
             }
+            # Record all sessions so tests can assert on recordings (unattended-setup
+            # already picked a path under the data dir; just turn it on).
+            config.setdefault("recordings", {})["enable"] = True
             if config_patch:
                 always_merger.merge(config, config_patch)
             with config_path.open("w") as f:
@@ -953,6 +956,25 @@ def otp_key_base32():
 @pytest.fixture(scope="session")
 def password_123_hash():
     return "$argon2id$v=19$m=4096,t=3,p=1$cxT6YKZS7r3uBT4nPJXEJQ$GhjTXyGi5vD2H/0X8D3VgJCZSXM4I8GiXRzl4k5ytk0"
+
+
+def rdp_session_authorized(api, username):
+    """Whether Warpgate has an authorized session for `username`.
+
+    Warpgate stamps a session's username only on successful authorization, so this is a
+    direct, client-independent read of the RDP auth verdict (the native RDP client can't
+    observe a post-handshake rejection — see `rdp_client`).
+    """
+    return len(api.get_sessions(username=username).items) > 0
+
+
+def wait_rdp_session_authorized(api, username, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if rdp_session_authorized(api, username):
+            return True
+        time.sleep(0.2)
+    return False
 
 
 logging.basicConfig(level=logging.DEBUG)

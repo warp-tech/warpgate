@@ -7,7 +7,6 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
-base64 = { version = "0.22", default-features = false, features = ["std"] }
 bytes.workspace = true
 futures.workspace = true
 poem.workspace = true
