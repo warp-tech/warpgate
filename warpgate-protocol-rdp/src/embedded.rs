@@ -3,6 +3,8 @@
 //! Extracts the embedded helper either into a memfd or a secure tempfile
 //! and runs it, removing later on drop
 
+#[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
 #[cfg(not(target_os = "linux"))]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -93,7 +95,6 @@ impl EmbeddedHelper {
     #[cfg(target_os = "linux")]
     pub(crate) fn run_from_memfd(&self) -> Result<HelperExecutable, WarpgateError> {
         use std::io::Write as _;
-        use std::os::fd::AsRawFd as _;
 
         use rustix::fs::{MemfdFlags, memfd_create};
 
