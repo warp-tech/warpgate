@@ -5,6 +5,13 @@
     import { applyDesktopFrame, ensureCanvasSize, type DesktopFrame } from 'common/desktopCanvas'
     import { keysymLabel, scancodeLabel, type KeyPress, type Click } from 'common/desktopInput'
     import PlayerToolbar from './PlayerToolbar.svelte'
+    import { latestWins } from './latestWins'
+
+    // Playback modes. `live` tails the growing recording (deltas applied as they stream);
+    // `playing` advances through recorded time; `paused` holds a frame. Grabbing the
+    // scrubber pauses; "go live" enters `live`; play/pause toggles paused↔playing and
+    // always leaves `live`.
+    type PlayerMode = 'paused' | 'playing' | 'live'
 
     export let recording: Recording
 
@@ -57,11 +64,10 @@
     $: activeKeys = keyPresses.filter(k => k.time <= timestamp && k.time > timestamp - KEY_DISPLAY_S)
     $: activeClicks = clicks.filter(c => c.time <= timestamp && c.time > timestamp - CLICK_ANIM_S)
     let seekInputValue = 0
-    let playing = false
+    let mode: PlayerMode = 'paused'
     let loading = true
     let notPlayable = false
     let sessionIsLive: boolean | null = null
-    let liveTailing = false
     let socket: WebSocket | null = null
     let destroyed = false
 
@@ -71,7 +77,6 @@
     let lineBuf = ''
     let pending: Frame | InputItem | null = null
     let renderedTime = 0
-    let seekGen = 0
     const decoder = new TextDecoder()
 
     onDestroy(() => {
@@ -123,7 +128,9 @@
             canvasH = canvas.height
         }
 
-        await seek(0)
+        // Await the first paint directly (nothing else is seeking yet) so we don't clear
+        // `loading` before there's a frame on the canvas. A fresh (never-aborted) signal.
+        await doSeek({ time: 0, keyframeSkip: false, goLive: false }, new AbortController().signal)
 
         socket = new WebSocket(`wss://${location.host}${DATA_URL}-stream`)
         socket.addEventListener('message', event => onLiveMessage(JSON.parse(event.data)))
@@ -137,19 +144,20 @@
         if ('start' in message) {
             sessionIsLive = Boolean(message.live)
             if (sessionIsLive) {
-                playing = true
                 goLive()
             }
         } else if ('end' in message) {
             sessionIsLive = false
-            liveTailing = false
+            if (mode === 'live') {
+                mode = 'paused'
+            }
         } else if ('data' in message) {
             const item = message.data as (Frame | InputItem)
             if (typeof item.time === 'number') {
                 duration = Math.max(duration, item.time)
             }
             recordInput(item)
-            if (liveTailing && ctx && FRAME_TYPES.has(item.type)) {
+            if (mode === 'live' && ctx && FRAME_TYPES.has(item.type)) {
                 void applyDesktopFrame(canvas, ctx, item as Frame).then(() => {
                     renderedTime = item.time
                     timestamp = item.time
@@ -209,9 +217,11 @@
         pending = null
     }
 
-    async function openStreamAt (offset: number) {
+    async function openStreamAt (offset: number, signal: AbortSignal) {
         abortReader()
-        const response = await fetch(DATA_URL, { headers: { Range: `bytes=${offset}-` } })
+        // Pass the seek's signal so a superseded seek aborts this Range request instead of
+        // downloading bytes we'll throw away.
+        const response = await fetch(DATA_URL, { headers: { Range: `bytes=${offset}-` }, signal })
         reader = response.body?.getReader() ?? null
     }
 
@@ -250,10 +260,10 @@
     // Play the stream up to `time`, unless a newer seek supersedes us: apply framebuffer
     // items to the canvas and feed viewer-input items to the overlay (the overlay is
     // rebuilt from the stream, not the index — see `doSeek`'s reset on reopen).
-    async function pumpUntil (time: number, gen: number) {
+    async function pumpUntil (time: number, signal: AbortSignal) {
         while (ctx) {
             const item = pending ?? await nextItem()
-            if (gen !== seekGen) {
+            if (signal.aborted) {
                 return
             }
             pending = null
@@ -266,7 +276,7 @@
             }
             if (FRAME_TYPES.has(item.type)) {
                 await applyDesktopFrame(canvas, ctx, item as Frame)
-                if (gen !== seekGen) {
+                if (signal.aborted) {
                     return
                 }
                 renderedTime = item.time
@@ -289,86 +299,78 @@
         return best
     }
 
-    // Coalesced, one-at-a-time seek (async apply must not run concurrently).
-    // `keyframeSkip` lets an explicit scrub jump forward to a keyframe (fast); playback
-    // stepping leaves it off so it renders every intermediate frame (smooth motion).
-    let seeking = false
-    let queuedSeek: { time: number, keyframeSkip: boolean, goLive: boolean } | null = null
-    async function seek (time: number, keyframeSkip = false, goLive = false) {
-        queuedSeek = { time: Math.max(0, Math.min(duration, time)), keyframeSkip, goLive }
-        if (seeking) {
-            return
-        }
-        seeking = true
-        try {
-            while (queuedSeek !== null) {
-                const req = queuedSeek
-                queuedSeek = null
-                await doSeek(req.time, req.keyframeSkip, req.goLive)
-            }
-        } finally {
-            seeking = false
-        }
+    interface SeekRequest { time: number, keyframeSkip: boolean, goLive: boolean }
+
+    // All seeks go through one latest-wins runner: rapid scrubs coalesce and a new seek
+    // supersedes any in-flight one. `keyframeSkip` lets an explicit scrub jump forward to a
+    // keyframe; playback stepping leaves it off so it renders every intermediate frame.
+    const runSeek = latestWins((req: SeekRequest, signal) => doSeek(req, signal))
+
+    function seek (time: number, keyframeSkip = false, goLive = false) {
+        runSeek({ time: Math.max(0, Math.min(duration, time)), keyframeSkip, goLive })
     }
 
-    async function doSeek (time: number, keyframeSkip: boolean, goLiveAfter = false) {
+    async function doSeek (req: SeekRequest, signal: AbortSignal) {
         if (!ctx) {
             return
         }
-        liveTailing = false
-        const gen = ++seekGen
-        // Restart the stream at the keyframe ≤ time when we can't cheaply continue
-        // forward: no open stream, seeking backward, or (on an explicit scrub) a keyframe
-        // lies between our current render position and the target — jumping to it beats
-        // replaying every delta in between.
+        const { time, keyframeSkip, goLive } = req
+        // Restart the stream at the keyframe ≤ time when we can't cheaply continue forward:
+        // no open stream, seeking backward, or (on an explicit scrub) a keyframe lies
+        // between our render position and the target — jumping beats replaying the deltas.
         const kf = keyframeBefore(time)
         if (!reader || time < renderedTime || (keyframeSkip && kf.time > renderedTime)) {
-            await openStreamAt(kf.offset)
-            if (gen !== seekGen) {
+            await openStreamAt(kf.offset, signal)
+            if (signal.aborted) {
                 return
             }
             renderedTime = kf.time
-            // The overlay is rebuilt from the stream as we pump forward from the keyframe;
-            // reset it so a reopen (backward seek or keyframe jump) doesn't duplicate clicks
-            // or desync the button-transition detection in `recordInput`.
+            // The overlay is rebuilt from the stream as we pump forward; reset it so a
+            // reopen doesn't duplicate clicks or desync button-transition detection.
             keyPresses = []
             clicks = []
             prevButtons = 0
         }
-        await pumpUntil(time, gen)
-        if (gen !== seekGen) {
+        await pumpUntil(time, signal)
+        if (signal.aborted) {
             return
         }
         timestamp = time
         seekInputValue = duration ? 100 * time / duration : 0
-        // Only now (base = latest keyframe + deltas up to the live edge) is it safe to
-        // apply incoming live deltas; tailing from a stale/blank base would freeze.
-        if (goLiveAfter) {
-            liveTailing = true
+        // Base is now the latest keyframe + deltas up to the live edge, so it's finally
+        // safe to tail: applying incoming live deltas on a stale base is what froze it.
+        if (goLive) {
+            mode = 'live'
         }
     }
 
-    // Jump to the live edge: a keyframe-based seek to the latest recorded frame (reusing
-    // doSeek's keyframe logic), then start tailing. Rebasing on a keyframe is what keeps
-    // the image correct — without it the incoming deltas paint over an outdated frame.
+    // Jump to the live edge: a keyframe-based seek to the newest recorded frame (reusing
+    // doSeek), then tail. Held paused during the rebase so playback stepping and live-apply
+    // don't interfere; doSeek flips us to `live` once the correct base is painted.
     function goLive () {
-        void seek(duration, true, true)
+        mode = 'paused'
+        seek(duration, true, true)
     }
 
-    async function step () {
+    function step () {
         if (destroyed) {
             return
         }
-        if (playing && !liveTailing && !seeking && timestamp < duration) {
-            await seek(Math.min(duration, timestamp + 0.1))
+        if (mode === 'playing' && timestamp < duration) {
+            seek(Math.min(duration, timestamp + 0.1))
         }
-        if (!destroyed) {
-            setTimeout(() => void step(), 100)
-        }
+        setTimeout(step, 100)
     }
 
     function togglePlaying () {
-        playing = !playing
+        // Play/pause always leaves live tailing (pausing freezes the current frame).
+        mode = mode === 'paused' ? 'playing' : 'paused'
+    }
+
+    // Grabbing the scrubber pauses and leaves live (so live deltas don't fight the scrub).
+    function scrub (time: number) {
+        mode = 'paused'
+        seek(time, true)
     }
 
     function toggleFullscreen () {
@@ -418,17 +420,17 @@
     </div>
 
     <PlayerToolbar
-        {playing}
+        playing={mode !== 'paused'}
         {timestamp}
         {heatmap}
         bind:seekInputValue
         hidden={loading || notPlayable}
         isLive={sessionIsLive === true}
-        liveActive={liveTailing}
+        liveActive={mode === 'live'}
         onTogglePlaying={togglePlaying}
         onToggleFullscreen={toggleFullscreen}
         onGoLive={goLive}
-        onSeek={pct => void seek(duration * pct / 100, true)}
+        onSeek={pct => scrub(duration * pct / 100)}
     />
 </div>
 

@@ -7,6 +7,7 @@
     import { Spinner } from '@sveltestrap/sveltestrap'
     import type { Recording } from 'admin/lib/api'
     import PlayerToolbar from './PlayerToolbar.svelte'
+    import { latestWins } from './latestWins'
 
     export let recording: Recording
 
@@ -112,7 +113,9 @@
             addData(JSON.parse(line))
         }
 
-        await seek(duration)
+        // Await the first paint directly (nothing else is seeking yet) so `loading` clears
+        // only once the terminal reflects the recording.
+        await _seekInternal(duration)
 
         socket = new WebSocket(`wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/stream`)
         socket.addEventListener('message', function (event) {
@@ -186,11 +189,13 @@
         term.options.fontSize = fontWidth / (metrics.width / 6) * 10
     }
 
-    let seekPromise = Promise.resolve()
+    // Shared latest-wins runner: serializes seeks and coalesces rapid scrubs to the newest
+    // target (replaying the terminal to an intermediate position we're about to leave is
+    // wasted work). Reconstructing state at `time` is independent of skipped seeks.
+    const runSeek = latestWins((time: number) => _seekInternal(time))
 
-    async function seek (time: number) {
-        seekPromise = seekPromise.then(() => _seekInternal(time))
-        await seekPromise
+    function seek (time: number) {
+        runSeek(time)
     }
 
     async function _seekInternal (time: number) {
@@ -282,12 +287,12 @@
     let destroyed = false
     onDestroy(() => destroyed = true)
 
-    async function step () {
+    function step () {
         if (destroyed) {
             return
         }
         if (playing) {
-            await seek(Math.min(duration, timestamp + 0.1))
+            seek(Math.min(duration, timestamp + 0.1))
         }
         setTimeout(step, 100)
     }
