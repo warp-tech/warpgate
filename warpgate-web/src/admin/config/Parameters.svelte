@@ -55,7 +55,16 @@
     async function save () {
         updateError = undefined
         try {
-            await api.updateParameters({ parameterUpdate: parameters! })
+            // Cleared nullable fields must be sent as explicit null: undefined
+            // is dropped by JSON.stringify, so the server keeps the old value.
+            const parameterUpdate = {
+                ...parameters!,
+                ticketMaxDurationSeconds: parameters!.ticketMaxDurationSeconds ?? null,
+                ticketMaxUses: parameters!.ticketMaxUses ?? null,
+                maxApiTokenDurationSeconds: parameters!.maxApiTokenDurationSeconds ?? null,
+                webAuthMaxAgeSeconds: parameters!.webAuthMaxAgeSeconds ?? null,
+            } as unknown as ParameterValues
+            await api.updateParameters({ parameterUpdate })
             await reloadServerInfo()
         } catch (err) {
             updateError = await stringifyError(err)

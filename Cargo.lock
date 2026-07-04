@@ -1932,15 +1932,6 @@ dependencies = [
 
 [[package]]
 name = "des"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffdd80ce8ce993de27e9f063a444a4d53ce8e8db4c1f00cc03af5ad5a9867a1e"
-dependencies = [
- "cipher 0.4.4",
-]
-
-[[package]]
-name = "des"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "916a94e407b54f9034d71dd748234cd1e516ced6284009906ae246f177eafe5a"
@@ -5784,7 +5775,7 @@ dependencies = [
  "data-encoding",
  "delegate",
  "der 0.8.0",
- "des 0.9.0",
+ "des",
  "digest 0.11.3",
  "ecdsa 0.17.0",
  "ed25519-dalek 3.0.0-rc.1",
@@ -7058,7 +7049,7 @@ dependencies = [
  "chacha20",
  "cipher 0.5.2",
  "ctutils",
- "des 0.9.0",
+ "des",
  "poly1305",
  "ssh-encoding",
  "zeroize",
@@ -8614,7 +8605,6 @@ dependencies = [
  "aes 0.8.4",
  "anyhow",
  "bytes",
- "des 0.8.1",
  "ecb",
  "futures",
  "getrandom 0.2.17",
@@ -8634,6 +8624,7 @@ dependencies = [
  "warpgate-db-entities",
  "warpgate-protocol-vnc-ui",
  "warpgate-tls",
+ "zune-jpeg",
 ]
 
 [[package]]

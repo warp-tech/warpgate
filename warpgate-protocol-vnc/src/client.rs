@@ -82,13 +82,15 @@ const BROWSER_ENCODINGS: &[VncEncoding] = &[
     VncEncoding::DesktopSizePseudo,
 ];
 
-/// Encodings for the native re-encode/recording proxy. Tight is omitted so the
-/// backend never produces a JPEG sub-encoding (the workspace ships no JPEG decoder);
-/// CopyRect is omitted so re-encoding needs no server-side framebuffer; and the
-/// cursor pseudo-encoding is omitted so the backend bakes the cursor into the
-/// framebuffer. What remains decodes to plain BGRA `RawImage`/`Resize` events that
-/// re-encode straight to the viewer as RFB Raw rectangles.
-const RECORDING_ENCODINGS: &[VncEncoding] = &[
+/// Encodings for the native decode-and-re-encode proxy (the single path every native
+/// VNC session takes, recorded or not). Tight is included so the backend can compress
+/// with its JPEG sub-encoding (bandwidth-efficient over the target link); we decode the
+/// JPEG and re-encode toward the viewer. CopyRect is omitted so re-encoding needs no
+/// server-side framebuffer, and the cursor pseudo-encoding is omitted so the backend
+/// bakes the cursor into the framebuffer. What remains decodes to `RawImage`/`JpegImage`/
+/// `Resize` events that re-encode to the viewer as RFB Raw rectangles.
+const PROXY_ENCODINGS: &[VncEncoding] = &[
+    VncEncoding::Tight,
     VncEncoding::Zrle,
     VncEncoding::Raw,
     VncEncoding::DesktopSizePseudo,
@@ -100,12 +102,12 @@ pub fn connect(options: TargetVncOptions) -> VncClientHandles {
     spawn_client(options, BROWSER_ENCODINGS)
 }
 
-/// Like [`connect`], but negotiates a reduced set of encodings (see
-/// [`RECORDING_ENCODINGS`]) suitable for the native VNC proxy's decode-and-re-encode
-/// recording path, where every backend update must round-trip through a minimal RFB
-/// server encoder toward the viewer.
-pub fn connect_for_recording(options: TargetVncOptions) -> VncClientHandles {
-    spawn_client(options, RECORDING_ENCODINGS)
+/// Like [`connect`], but negotiates the encodings ([`PROXY_ENCODINGS`]) used by the
+/// native VNC proxy's single decode-and-re-encode path, where every backend update is
+/// decoded (Tight/JPEG included) and re-encoded through a minimal RFB server encoder
+/// toward the viewer, and optionally recorded.
+pub fn connect_for_proxy(options: TargetVncOptions) -> VncClientHandles {
+    spawn_client(options, PROXY_ENCODINGS)
 }
 
 fn spawn_client(options: TargetVncOptions, encodings: &'static [VncEncoding]) -> VncClientHandles {

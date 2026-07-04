@@ -29,7 +29,10 @@ pub(crate) struct EmbeddedHelper {
 pub(crate) enum HelperExecutable {
     Preexisting(PathBuf),
     #[cfg(target_os = "linux")]
-    MemFd(std::fs::File),
+    MemFd {
+        memfd: std::fs::File,
+        path: PathBuf,
+    },
     #[cfg(not(target_os = "linux"))]
     Extracted {
         temp_path: TempPath,
@@ -45,7 +48,7 @@ impl HelperExecutable {
             // `/proc/self/fd/N` resolves to the memfd at exec time (in the forked child,
             // before CLOEXEC fires); the owned `file` keeps N valid across the spawn.
             #[cfg(target_os = "linux")]
-            Self::MemFd(file) => Path::new(&format!("/proc/self/fd/{}", file.as_raw_fd())),
+            Self::MemFd { path } => path.as_ref(),
             #[cfg(not(target_os = "linux"))]
             Self::Extracted { temp_path, .. } => temp_path.as_ref(),
         }
@@ -103,7 +106,10 @@ impl EmbeddedHelper {
         self.decompress_into(&mut file)?;
         file.flush().ok();
 
-        Ok(HelperExecutable::MemFd(file))
+        Ok(HelperExecutable::MemFd {
+            path: Path::new(&format!("/proc/self/fd/{}", file.as_raw_fd())),
+            memfd: file,
+        })
     }
 
     /// Extract the embedded helper to a temp file.

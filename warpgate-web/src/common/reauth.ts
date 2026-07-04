@@ -7,7 +7,14 @@ export async function handleReauthError (err: unknown): Promise<boolean> {
     if (err instanceof ResponseError && err.response.status === 401) {
         // If we don't cancel the current AuthState, the server
         // will just go 'yup, you're logged in aight'
-        await api.cancelDefaultAuth()
+        try {
+            await api.cancelDefaultAuth()
+        } catch (e) {
+            if (!(e instanceof ResponseError && e.response.status === 404)) {
+                // 404 if default auth state is already cleared
+                throw e
+            }
+        }
 
         const next = location.pathname + location.hash
         location.assign('/@warpgate#/login?next=' + encodeURIComponent(next) + '&reauth=1')

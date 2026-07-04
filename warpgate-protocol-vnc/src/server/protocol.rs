@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::debug;
 
@@ -223,29 +223,6 @@ where
     Ok(())
 }
 
-pub async fn write_framebuffer_update_request<S>(
-    stream: &mut S,
-    incremental: bool,
-    x: u16,
-    y: u16,
-    w: u16,
-    h: u16,
-) -> Result<()>
-where
-    S: AsyncWrite + Unpin,
-{
-    let mut msg = Vec::with_capacity(10);
-    msg.push(3); // FramebufferUpdateRequest
-    msg.push(u8::from(incremental));
-    msg.extend_from_slice(&x.to_be_bytes());
-    msg.extend_from_slice(&y.to_be_bytes());
-    msg.extend_from_slice(&w.to_be_bytes());
-    msg.extend_from_slice(&h.to_be_bytes());
-    stream.write_all(&msg).await?;
-    stream.flush().await?;
-    Ok(())
-}
-
 /// Protocol parse loop
 pub async fn read_client_messages<R>(
     mut reader: R,
@@ -390,38 +367,3 @@ where
     Ok(reader)
 }
 
-pub async fn forward_format_setup<S>(
-    backend: &mut S,
-    pixel_format: &PixelFormat,
-    encodings: Option<&[u8]>,
-) -> Result<()>
-where
-    S: AsyncWrite + Unpin,
-{
-    let mut set_pixel_format = Vec::with_capacity(20);
-    set_pixel_format.push(0); // SetPixelFormat
-    set_pixel_format.extend_from_slice(&[0, 0, 0]); // padding
-    set_pixel_format.extend_from_slice(&pixel_format.raw);
-    backend.write_all(&set_pixel_format).await?;
-
-    if let Some(raw) = encodings {
-        backend.write_all(raw).await?;
-    }
-    backend.flush().await?;
-    Ok(())
-}
-
-/// Parse the framebuffer width/height from a backend ServerInit message.
-pub fn parse_server_init_size(server_init: &[u8]) -> Result<(u16, u16)> {
-    let width = server_init
-        .get(0..2)
-        .and_then(|s| <[u8; 2]>::try_from(s).ok())
-        .map(u16::from_be_bytes)
-        .context("ServerInit missing width")?;
-    let height = server_init
-        .get(2..4)
-        .and_then(|s| <[u8; 2]>::try_from(s).ok())
-        .map(u16::from_be_bytes)
-        .context("ServerInit missing height")?;
-    Ok((width, height))
-}

@@ -483,14 +483,46 @@ async fn frame_bridge(
 
 /// Funnel queued [`ServerHelperInput`] messages to the serve helper's stdin as
 /// line-delimited JSON.
+/// How many framebuffer updates may be queued toward the serve helper before we start
+/// shedding the oldest. Serializing a `Frame` means JSON-encoding a ~1 MB base64 string;
+/// if the viewer/helper falls behind, an unbounded queue would pin a core on that and lag
+/// the screen far behind live. Small on purpose so we deliver the live edge, not a backlog.
+const MAX_PENDING_HELPER_FRAMES: usize = 8;
+
 async fn helper_stdin_writer(mut stdin: ChildStdin, mut rx: UnboundedReceiver<ServerHelperInput>) {
-    while let Some(msg) = rx.recv().await {
-        let Ok(mut line) = serde_json::to_string(&msg) else {
-            continue;
-        };
-        line.push('\n');
-        if stdin.write_all(line.as_bytes()).await.is_err() {
-            break;
+    let mut batch: std::collections::VecDeque<ServerHelperInput> = std::collections::VecDeque::new();
+    loop {
+        // Block for at least one message, then drain everything else already queued so we
+        // can shed staleness across the whole burst before doing any expensive work.
+        match rx.recv().await {
+            Some(msg) => batch.push_back(msg),
+            None => return,
+        }
+        while let Ok(msg) = rx.try_recv() {
+            batch.push_back(msg);
+        }
+
+        // Drop the oldest framebuffer updates beyond the cap; never drop control messages
+        // (auth verdicts / resize / shutdown), whose loss would desync the viewer.
+        let is_frame = |m: &ServerHelperInput| matches!(m, ServerHelperInput::Frame { .. });
+        let mut frames = batch.iter().filter(|m| is_frame(m)).count();
+        while frames > MAX_PENDING_HELPER_FRAMES {
+            if let Some(pos) = batch.iter().position(is_frame) {
+                batch.remove(pos);
+                frames -= 1;
+            } else {
+                break;
+            }
+        }
+
+        for msg in batch.drain(..) {
+            let Ok(mut line) = serde_json::to_string(&msg) else {
+                continue;
+            };
+            line.push('\n');
+            if stdin.write_all(line.as_bytes()).await.is_err() {
+                return;
+            }
         }
         let _ = stdin.flush().await;
     }
@@ -982,4 +1014,63 @@ fn key_otp_action(keysym: u32) -> Option<OtpAction> {
         0x0d | 0x0a => OtpAction::Submit, // CR / LF
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod otp_input_tests {
+    use super::{OtpAction, key_otp_action, scancode_otp_action};
+
+    fn digit(action: Option<OtpAction>) -> Option<char> {
+        match action {
+            Some(OtpAction::Digit(c)) => Some(c),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn scancode_number_row() {
+        // 0x02..=0x0a is the '1'..'9' row (computed, so guard the ends), 0x0b is '0'.
+        assert_eq!(digit(scancode_otp_action(0x02)), Some('1'));
+        assert_eq!(digit(scancode_otp_action(0x0a)), Some('9'));
+        assert_eq!(digit(scancode_otp_action(0x0b)), Some('0'));
+    }
+
+    #[test]
+    fn scancode_keypad() {
+        for (code, expected) in [
+            (0x52u8, '0'),
+            (0x4f, '1'),
+            (0x50, '2'),
+            (0x51, '3'),
+            (0x4b, '4'),
+            (0x4c, '5'),
+            (0x4d, '6'),
+            (0x47, '7'),
+            (0x48, '8'),
+            (0x49, '9'),
+        ] {
+            assert_eq!(digit(scancode_otp_action(code)), Some(expected), "scancode {code:#x}");
+        }
+    }
+
+    #[test]
+    fn scancode_control_and_unmapped() {
+        assert!(matches!(scancode_otp_action(0x0e), Some(OtpAction::Backspace)));
+        assert!(matches!(scancode_otp_action(0x1c), Some(OtpAction::Submit)));
+        assert!(scancode_otp_action(0x3b).is_none()); // F1 — not an OTP key
+        assert!(scancode_otp_action(0x00).is_none());
+    }
+
+    #[test]
+    fn keysym_digits_control_and_unmapped() {
+        for d in 0..=9u8 {
+            let c = char::from(b'0' + d);
+            assert_eq!(digit(key_otp_action(u32::from(c))), Some(c));
+        }
+        assert!(matches!(key_otp_action(0x08), Some(OtpAction::Backspace)));
+        assert!(matches!(key_otp_action(0x0d), Some(OtpAction::Submit)));
+        assert!(matches!(key_otp_action(0x0a), Some(OtpAction::Submit)));
+        assert!(key_otp_action(u32::from('A')).is_none());
+        assert!(key_otp_action(u32::from(' ')).is_none());
+    }
 }

@@ -55,16 +55,17 @@ def _provision(api, otp_key_base64):
 
 
 class Test:
-    def test_otp_required_rejects_native_rdp(
+    def test_otp_required_not_authorized_without_second_factor(
         self,
         processes: ProcessManager,
         otp_key_base64: str,
         timeout,
         shared_wg: WarpgateProcess,
     ):
-        # Native RDP collects only username+password over NLA, so a policy that also
-        # requires TOTP can't be satisfied — the correct password alone is rejected
-        # (the second factor can't be gathered over the RDP auth exchange).
+        # A TOTP-required user is prompted for the code on the RDP hold screen after NLA.
+        # This client connects but never enters it, so Warpgate must never authorize —
+        # it stamps the session username only once the second factor completes (in
+        # `connect_backend`), so no session is ever stamped with this user.
         wait_port(shared_wg.rdp_port, recv=False)
 
         url = f"https://localhost:{shared_wg.http_port}"
@@ -77,8 +78,6 @@ class Test:
                 "123",
                 timeout,
             )
-            # The password alone can't satisfy the TOTP factor, so Warpgate must not
-            # authorize — no session is ever stamped with this user.
             assert not rdp_session_authorized(api, user.username), (
-                "OTP-required user was authorized over native RDP with the password alone"
+                "OTP-required user was authorized over native RDP without the second factor"
             )

@@ -3,6 +3,9 @@ projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpga
 run *ARGS='run':
     RUST_BACKTRACE=1 cargo run --all-features -- --config config.yaml {{ARGS}}
 
+run-release *ARGS='run':
+    RUST_BACKTRACE=1 cargo run --all-features --release -- --config config.yaml {{ARGS}}
+
 # Run before `cargo build` so warpgate-protocol-rdp's build script can embed it into the main binary.
 build-rdp-helper *ARGS:
     cd warpgate-rdp-helper && cargo build --release {{ARGS}}

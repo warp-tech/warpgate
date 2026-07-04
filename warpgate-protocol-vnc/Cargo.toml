@@ -22,11 +22,12 @@ uuid.workspace = true
 thiserror.workspace = true
 rustls.workspace = true
 tokio-rustls.workspace = true
-des = { version = "0.8", default-features = false }
 aes = { version = "0.8", default-features = false }
 ecb = { version = "0.1", default-features = false, features = ["block-padding"] }
 md-5 = { version = "0.10", default-features = false }
 num-bigint = { version = "0.4", default-features = false }
 getrandom = "0.2"
+# Decodes backend Tight/JPEG rects so they can be re-encoded to the viewer as RFB Raw.
+zune-jpeg = "0.4"
 # Vendored fork of vnc-rs 0.5.3 exposing the decode loop for proxy recording; see vendor/vnc-rs/PATCHES.md
 vnc = { package = "vnc-rs", path = "../vendor/vnc-rs" }
