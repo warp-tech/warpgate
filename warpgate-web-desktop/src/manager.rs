@@ -119,7 +119,7 @@ impl WebDesktopClientManager {
             .recordings
             .lock()
             .await
-            .start::<DesktopRecorder, _>(&session_id, None, DesktopRecordingMetadata)
+            .start::<DesktopRecorder, _>(&session_id, None, DesktopRecordingMetadata::Desktop)
             .await
         {
             Ok(recorder) => Some(Arc::new(recorder)),

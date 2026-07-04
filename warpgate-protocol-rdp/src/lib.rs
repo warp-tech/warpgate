@@ -5,9 +5,9 @@
 //! conflict between IronRDP's CredSSP stack and `russh`). The prebuilt helper is
 //! embedded into this crate at build time (see `build.rs`) and extracted for
 //! use, so Warpgate ships as a single executable. This crate spawns that helper as a
-//! subprocess and bridges its line-delimited JSON stdio to the shared
-//! [`DesktopEvent`]/[`DesktopInput`] streams, so the existing web-desktop manager and
-//! browser canvas renderer work unchanged.
+//! subprocess and bridges its length-delimited binary stdio (raw BGRA frames,
+//! JSON control messages) to the shared [`DesktopEvent`]/[`DesktopInput`] streams,
+//! so the existing web-desktop manager and browser canvas renderer work unchanged.
 
 mod embedded;
 mod helper;
@@ -19,15 +19,15 @@ pub use server::bind_server;
 use std::process::Stdio;
 
 use anyhow::Context;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use futures::{SinkExt, StreamExt};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
-use tracing::{Instrument, debug, error, info_span, warn};
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tracing::{Instrument, debug, error, info_span};
 use warpgate_common::{ListenEndpoint, ProtocolName, RdpTargetAuth, TargetRdpOptions};
 use warpgate_rdp_ipc::client::{ConnectConfig, Event as HelperEvent, Input as HelperInput};
 use warpgate_tls::TlsCertificateAndPrivateKey;
@@ -144,7 +144,7 @@ async fn run(
         .spawn()
         .with_context(|| format!("spawning RDP helper ({})", helper.path().display()))?;
 
-    let mut stdin = child.stdin.take().context("helper stdin")?;
+    let stdin = child.stdin.take().context("helper stdin")?;
     let stdout = child.stdout.take().context("helper stdout")?;
 
     // Surface helper diagnostics (panics, errors) to the log instead of discarding them.
@@ -157,7 +157,15 @@ async fn run(
         });
     }
 
-    // Send the connection config as the first line.
+    // Length-delimited framing (matches the helper). Frames can be a full-screen rect.
+    let codec = || {
+        LengthDelimitedCodec::builder()
+            .max_frame_length(warpgate_rdp_ipc::MAX_FRAME_LEN)
+            .new_codec()
+    };
+
+    // First frame: the connection config.
+    let mut stdin_wr = FramedWrite::new(stdin, codec());
     let config = ConnectConfig {
         host: options.host.clone(),
         port: options.port,
@@ -168,13 +176,13 @@ async fn run(
         height: 800,
         verify_tls: options.verify_tls,
     };
-    let mut config_line = serde_json::to_string(&config)?;
-    config_line.push('\n');
-    stdin.write_all(config_line.as_bytes()).await?;
-    stdin.flush().await?;
+    let mut config_buf = Vec::new();
+    warpgate_rdp_ipc::encode_json_into(&config, &mut config_buf);
+    stdin_wr.send(Bytes::copy_from_slice(&config_buf)).await?;
 
     // Forward input to the helper.
     let input_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
         while let Some(input) = input_rx.recv().await {
             let msg = match input {
                 DesktopInput::Pointer { x, y, buttons } => {
@@ -200,20 +208,17 @@ async fn run(
                 // Clipboard/refresh not yet wired through the helper.
                 DesktopInput::Clipboard(_) | DesktopInput::Refresh => None,
             };
-            if let Some(msg) = msg
-                && let Ok(mut line) = serde_json::to_string(&msg)
-            {
-                line.push('\n');
-                if stdin.write_all(line.as_bytes()).await.is_err() {
+            if let Some(msg) = msg {
+                msg.encode_into(&mut buf);
+                if stdin_wr.send(Bytes::copy_from_slice(&buf)).await.is_err() {
                     break;
                 }
-                let _ = stdin.flush().await;
             }
         }
     });
 
     // Read events from the helper.
-    let mut reader = BufReader::new(stdout).lines();
+    let mut reader = FramedRead::new(stdout, codec());
     loop {
         tokio::select! {
             biased;
@@ -221,11 +226,13 @@ async fn run(
                 debug!("RDP client aborted");
                 break;
             }
-            line = reader.next_line() => {
-                let Some(line) = line.context("reading helper output")? else {
+            frame = reader.next() => {
+                let Some(frame) = frame else {
                     break;
                 };
-                if let Ok(event) = serde_json::from_str::<HelperEvent>(line.trim()) {
+                let frame = frame.context("reading helper output")?;
+                // `freeze()` is zero-copy; the image payload becomes a slice of this buffer.
+                if let Some(event) = HelperEvent::decode(frame.freeze()) {
                     // Race the (possibly blocking) send against abort so a slow consumer
                     // can't starve abort handling while the helper floods stdout.
                     tokio::select! {
@@ -265,21 +272,16 @@ async fn forward_event(
             width,
             height,
             data,
-        } => {
-            let Ok(bytes) = STANDARD.decode(data) else {
-                warn!("invalid base64 in helper raw_image");
-                return Ok(());
-            };
-            DesktopEvent::RawImage {
-                rect: DesktopRect {
-                    x,
-                    y,
-                    width,
-                    height,
-                },
-                data: Bytes::from(bytes),
-            }
-        }
+        } => DesktopEvent::RawImage {
+            rect: DesktopRect {
+                x,
+                y,
+                width,
+                height,
+            },
+            // `data` is a zero-copy `Bytes` slice of the wire frame — moved, not copied.
+            data,
+        },
         HelperEvent::Error { message } => DesktopEvent::Error(message),
         HelperEvent::Disconnected => DesktopEvent::State(DesktopState::Disconnected),
     };

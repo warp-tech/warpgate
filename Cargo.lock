@@ -8543,7 +8543,6 @@ name = "warpgate-protocol-rdp"
 version = "0.23.4"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "bytes",
  "flate2",
  "futures",
@@ -8554,6 +8553,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tracing",
  "uuid",
  "warpgate-common",
@@ -8624,7 +8624,6 @@ dependencies = [
  "warpgate-db-entities",
  "warpgate-protocol-vnc-ui",
  "warpgate-tls",
- "zune-jpeg",
 ]
 
 [[package]]
@@ -8641,7 +8640,9 @@ dependencies = [
 name = "warpgate-rdp-ipc"
 version = "0.23.4"
 dependencies = [
+ "bytes",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -71,8 +71,6 @@ export function recordingMetadataToFieldSet(metadata: RecordingMetadata): [strin
             fieldSets.push(['Path', metadata.path])
             break
         case 'desktop':
-            fieldSets.push(['Protocol', metadata.protocol.toUpperCase()])
-            fieldSets.push(['Target', metadata.target])
             break
     }
 

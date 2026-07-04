@@ -42,6 +42,7 @@ use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 use self::protocol::{
     ClientEvent, DEFAULT_PIXEL_FORMAT, PixelFormat, pack_bgra, pack_rgb, read_client_messages,
     write_desktop_size, write_raw_rect, write_server_cut_text, write_server_init,
+    write_tight_jpeg_rect,
 };
 use self::rfb::{
     SecurityType, server_apple_dh_auth, server_negotiate_security, server_read_client_init,
@@ -308,7 +309,7 @@ async fn negotiate_and_authorize(
         .recordings
         .lock()
         .await
-        .start::<DesktopRecorder, _>(&session_id, None, DesktopRecordingMetadata)
+        .start::<DesktopRecorder, _>(&session_id, None, DesktopRecordingMetadata::Desktop)
         .await
     {
         Ok(recorder) => Some(recorder),
@@ -409,17 +410,6 @@ async fn wait_for_backend_size(
     bail!("backend channel closed before first frame")
 }
 
-/// Decode a Tight/JPEG rectangle payload to RGB888 (3 bytes/pixel). `None` on malformed
-/// data, so a single bad rect is dropped rather than tearing down the session.
-fn decode_jpeg_rgb(data: &[u8]) -> Option<Vec<u8>> {
-    use zune_jpeg::JpegDecoder;
-    use zune_jpeg::zune_core::colorspace::ColorSpace;
-    use zune_jpeg::zune_core::options::DecoderOptions;
-
-    let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB);
-    JpegDecoder::new_with_options(data, options).decode().ok()
-}
-
 /// Re-encode one queued backend frame toward the viewer in response to an outstanding
 /// `FramebufferUpdateRequest`. Clears `pending_request` once a frame is actually sent.
 async fn flush_frame<W>(
@@ -437,14 +427,18 @@ where
             render.pending_request = false;
         }
         // The backend compressed this rect with Tight's JPEG sub-encoding. The viewer
-        // may not support Tight, so decode to RGB here and re-encode as an RFB Raw rect.
-        DesktopEvent::JpegImage { rect, data } => {
-            if let Some(rgb) = decode_jpeg_rgb(&data) {
-                let pixels = pack_rgb(&render.pixel_format, &rgb);
-                write_raw_rect(viewer_wr, rect.x, rect.y, rect.width, rect.height, &pixels).await?;
-            } else {
-                warn!("failed to decode backend JPEG rect; dropping");
-            }
+        // negotiated Tight, so it decodes JPEG itself — forward the bytes straight through
+        // as a Tight/JPEG rect rather than decoding and re-encoding as (much larger) Raw.
+        DesktopEvent::JpegImage { rect, data } if render.viewer_supports_tight => {
+            write_tight_jpeg_rect(viewer_wr, rect.x, rect.y, rect.width, rect.height, &data)
+                .await?;
+            render.pending_request = false;
+        }
+        // A viewer that requested Tight is universal; if one somehow didn't, we can't
+        // proxy the backend's JPEG without a decoder, so skip the rect (it stays stale
+        // until the next full frame) rather than carrying a JPEG decoder for this.
+        DesktopEvent::JpegImage { .. } => {
+            warn!("viewer did not negotiate Tight; dropping backend JPEG rect");
             render.pending_request = false;
         }
         DesktopEvent::Resize { width, height } if render.supports_desktop_size => {
@@ -502,9 +496,12 @@ async fn run_proxy_session(session: ProxySession) -> Result<()> {
                 match event {
                     Some(ClientEvent::WantsFrame) => render.pending_request = true,
                     Some(ClientEvent::PixelFormat(pf)) => render.pixel_format = pf,
-                    Some(ClientEvent::Encodings { raw, desktop_size }) => {
-                        render.encodings = Some(raw);
+                    Some(ClientEvent::Encodings {
+                        desktop_size,
+                        tight,
+                    }) => {
                         render.supports_desktop_size = desktop_size;
+                        render.viewer_supports_tight = tight;
                     }
                     Some(ClientEvent::Key { down, keysym }) => {
                         let input = DesktopInput::Key { keysym, down };
@@ -571,8 +568,10 @@ async fn run_proxy_session(session: ProxySession) -> Result<()> {
 /// Shared state for the hold screen
 struct RenderState {
     pixel_format: PixelFormat,
-    encodings: Option<Vec<u8>>,
     supports_desktop_size: bool,
+    /// The viewer negotiated the Tight encoding, so backend JPEG rects can be forwarded
+    /// through as Tight/JPEG instead of being decoded and re-encoded as Raw.
+    viewer_supports_tight: bool,
     pending_request: bool,
     reader_done: bool,
     tick: u64,
@@ -582,8 +581,8 @@ impl RenderState {
     const fn new() -> Self {
         Self {
             pixel_format: DEFAULT_PIXEL_FORMAT,
-            encodings: None,
             supports_desktop_size: false,
+            viewer_supports_tight: false,
             pending_request: false,
             reader_done: false,
             tick: 0,
@@ -595,9 +594,12 @@ impl RenderState {
     fn note_event(&mut self, event: Option<ClientEvent>) -> Option<u32> {
         match event {
             Some(ClientEvent::PixelFormat(pf)) => self.pixel_format = pf,
-            Some(ClientEvent::Encodings { raw, desktop_size }) => {
-                self.encodings = Some(raw);
+            Some(ClientEvent::Encodings {
+                desktop_size,
+                tight,
+            }) => {
                 self.supports_desktop_size = desktop_size;
+                self.viewer_supports_tight = tight;
             }
             Some(ClientEvent::WantsFrame) => self.pending_request = true,
             Some(ClientEvent::Key { down: true, keysym }) => return Some(keysym),

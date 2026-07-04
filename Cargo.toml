@@ -171,6 +171,10 @@ lto = true
 panic = "abort"
 strip = "debuginfo"
 
+[profile.release-no-lto]
+inherits = "release"
+lto = false
+
 [profile.coverage]
 inherits = "dev"
 

@@ -5,8 +5,11 @@ use tracing::debug;
 use super::MAX_STRING_LEN;
 
 const ENCODING_RAW: i32 = 0;
+const ENCODING_TIGHT: i32 = 7;
 const ENCODING_DESKTOP_SIZE: i32 = -223;
 const MAX_ENCODINGS: usize = 4096;
+/// Tight compression-control byte selecting the JPEG sub-encoding (`0x09 << 4`).
+const TIGHT_JPEG_CONTROL: u8 = 0x90;
 
 /// RFB `PIXEL_FORMAT` + the raw bytes so it can be replayed
 #[derive(Clone, Copy, Debug)]
@@ -130,7 +133,7 @@ pub fn pack_bgra(pixel_format: &PixelFormat, bgra: &[u8]) -> Vec<u8> {
 
 pub enum ClientEvent {
     PixelFormat(PixelFormat),
-    Encodings { raw: Vec<u8>, desktop_size: bool },
+    Encodings { desktop_size: bool, tight: bool },
     WantsFrame,
     Key { down: bool, keysym: u32 },
     Pointer { x: u16, y: u16, buttons: u8 },
@@ -192,6 +195,41 @@ where
     let mut msg = Vec::with_capacity(16 + pixels.len());
     push_single_rect_fb_update_header(&mut msg, x, y, w, h, ENCODING_RAW);
     msg.extend_from_slice(pixels);
+    stream.write_all(&msg).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+/// Append a Tight "compact length" (1–3 bytes, 7 bits each, little-endian, MSB=continue).
+fn push_tight_compact_len(msg: &mut Vec<u8>, len: usize) {
+    msg.push((len & 0x7f) as u8 | if len >= 0x80 { 0x80 } else { 0 });
+    if len >= 0x80 {
+        msg.push(((len >> 7) & 0x7f) as u8 | if len >= 0x4000 { 0x80 } else { 0 });
+        if len >= 0x4000 {
+            msg.push(((len >> 14) & 0xff) as u8);
+        }
+    }
+}
+
+/// Forward a backend Tight/JPEG rectangle to the viewer verbatim as a Tight-JPEG rect —
+/// no decode/re-encode. Only valid when the viewer negotiated the Tight encoding (it then
+/// decodes the JPEG itself). JPEG is always full-colour, so the pixel format is irrelevant.
+pub async fn write_tight_jpeg_rect<S>(
+    stream: &mut S,
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+    jpeg: &[u8],
+) -> Result<()>
+where
+    S: AsyncWrite + Unpin,
+{
+    let mut msg = Vec::with_capacity(20 + jpeg.len());
+    push_single_rect_fb_update_header(&mut msg, x, y, w, h, ENCODING_TIGHT);
+    msg.push(TIGHT_JPEG_CONTROL);
+    push_tight_compact_len(&mut msg, jpeg.len());
+    msg.extend_from_slice(jpeg);
     stream.write_all(&msg).await?;
     stream.flush().await?;
     Ok(())
@@ -274,19 +312,21 @@ where
                 let mut body = vec![0u8; count * 4];
                 reader.read_exact(&mut body).await?;
                 let mut desktop_size = false;
+                let mut tight = false;
                 for chunk in body.chunks_exact(4) {
-                    if let Ok(arr) = <[u8; 4]>::try_from(chunk)
-                        && i32::from_be_bytes(arr) == ENCODING_DESKTOP_SIZE
-                    {
-                        desktop_size = true;
+                    if let Ok(arr) = <[u8; 4]>::try_from(chunk) {
+                        match i32::from_be_bytes(arr) {
+                            ENCODING_DESKTOP_SIZE => desktop_size = true,
+                            ENCODING_TIGHT => tight = true,
+                            _ => {}
+                        }
                     }
                 }
-                debug!(count, desktop_size, "viewer SetEncodings");
-                let mut raw = Vec::with_capacity(3 + body.len());
-                raw.push(2);
-                raw.extend_from_slice(&head);
-                raw.extend_from_slice(&body);
-                let _ = events.send(ClientEvent::Encodings { raw, desktop_size });
+                debug!(count, desktop_size, tight, "viewer SetEncodings");
+                let _ = events.send(ClientEvent::Encodings {
+                    desktop_size,
+                    tight,
+                });
             }
             3 => {
                 // FramebufferUpdateRequest: incremental + x + y + w + h.

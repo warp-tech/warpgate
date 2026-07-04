@@ -13,7 +13,6 @@ warpgate-protocol-vnc-ui = { path = "../warpgate-protocol-vnc-ui" }
 warpgate-rdp-ipc = { path = "../warpgate-rdp-ipc" }
 warpgate-tls = { path = "../warpgate-tls" }
 anyhow.workspace = true
-base64 = { version = "0.22", default-features = false, features = ["std"] }
 bytes.workspace = true
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 libc = "0.2"
@@ -32,6 +31,7 @@ tokio = { workspace = true, features = [
     "fs",
 ] }
 tokio-stream.workspace = true
+tokio-util = { version = "0.7", features = ["codec"] }
 tracing.workspace = true
 uuid.workspace = true
 

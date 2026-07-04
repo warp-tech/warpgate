@@ -93,11 +93,16 @@ impl RecordingWriterOpener {
     }
 
     async fn open(&self, file: RecordingFile) -> Result<RawRecordingWriter> {
+        // Only the primary data stream is live-broadcast (keyed by recording id). The index
+        // and tcpdump sidecars must NOT register: they'd overwrite the data writer's entry
+        // under the same id, and a live viewer would then receive the index (seek anchors,
+        // no pixels) instead of the framebuffer.
+        let live = matches!(file, RecordingFile::NDJsonData).then(|| self.live.clone());
         RawRecordingWriter::new(
             self.folder.join(file.filename()),
             self.model.clone(),
             self.db.clone(),
-            self.live.clone(),
+            live,
             &self.params,
         )
         .await

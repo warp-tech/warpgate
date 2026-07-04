@@ -7,18 +7,17 @@
 //! design Apache Guacamole uses with `guacd`).
 //!
 //! Protocol (line-delimited JSON over stdio):
-//! - first line on **stdin**: a [`ConnectConfig`]
-//! - subsequent lines on **stdin**: [`InputMessage`]s
-//! - lines on **stdout**: [`OutputMessage`]s (framebuffer is BGRA, base64-encoded)
+//! - first frame on **stdin**: a [`ConnectConfig`]
+//! - subsequent frames on **stdin**: [`InputMessage`]s
+//! - frames on **stdout**: [`OutputMessage`]s (framebuffer is raw BGRA, binary-framed)
 
-use std::io::{BufRead, Write};
+use std::cell::RefCell;
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
 use ironrdp::connector::{self, ConnectionResult, Credentials};
 use ironrdp::graphics::image_processing::PixelFormat;
 use ironrdp::input::{Database, MouseButton, MousePosition, Operation, Scancode, WheelRotations};
@@ -30,14 +29,35 @@ use ironrdp::session::{ActiveStage, ActiveStageOutput};
 use sspi::network_client::reqwest_network_client::ReqwestNetworkClient;
 use warpgate_rdp_ipc::client::{ConnectConfig, Event as OutputMessage, Input as InputMessage};
 
+thread_local! {
+    /// Reused scratch for the framebuffer hot path — the encoded IMAGE frame body.
+    static EMIT_FRAME: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Write one length-delimited frame (big-endian u32 length + body) — the wire format
+/// `tokio_util::codec::LengthDelimitedCodec` uses on the async (Warpgate) side.
+fn write_frame(w: &mut impl Write, body: &[u8]) {
+    let Ok(len) = u32::try_from(body.len()) else {
+        return;
+    };
+    let _ = w.write_all(&len.to_be_bytes());
+    let _ = w.write_all(body);
+    let _ = w.flush();
+}
+
+/// Read one length-delimited frame body (blocking).
+fn read_frame(r: &mut impl Read) -> std::io::Result<Vec<u8>> {
+    let mut len = [0u8; 4];
+    r.read_exact(&mut len)?;
+    let mut body = vec![0u8; u32::from_be_bytes(len) as usize];
+    r.read_exact(&mut body)?;
+    Ok(body)
+}
+
 fn emit(msg: &OutputMessage) {
-    if let Ok(line) = serde_json::to_string(msg) {
-        let stdout = std::io::stdout();
-        let mut lock = stdout.lock();
-        let _ = lock.write_all(line.as_bytes());
-        let _ = lock.write_all(b"\n");
-        let _ = lock.flush();
-    }
+    let mut body = Vec::new();
+    msg.encode_into(&mut body);
+    write_frame(&mut std::io::stdout().lock(), &body);
 }
 
 pub fn entry() {
@@ -54,14 +74,11 @@ fn run() -> Result<()> {
         .install_default()
         .ok();
 
-    // First stdin line is the connection config.
-    let mut first_line = String::new();
-    std::io::stdin()
-        .lock()
-        .read_line(&mut first_line)
-        .context("reading config line")?;
+    // First stdin frame is the connection config.
+    let config_frame =
+        read_frame(&mut std::io::stdin().lock()).context("reading config frame")?;
     let config: ConnectConfig =
-        serde_json::from_str(first_line.trim()).context("parsing config")?;
+        warpgate_rdp_ipc::decode_json(&config_frame).context("parsing config")?;
 
     let connector_config = build_config(&config);
     let (connection_result, framed) = connect(
@@ -81,13 +98,16 @@ fn run() -> Result<()> {
     // Read input messages from stdin on a background thread.
     let (input_tx, input_rx) = mpsc::channel::<InputMessage>();
     std::thread::spawn(move || {
-        let stdin = std::io::stdin();
-        for line in stdin.lock().lines() {
-            let Ok(line) = line else { break };
-            if let Ok(msg) = serde_json::from_str::<InputMessage>(line.trim()) {
-                if input_tx.send(msg).is_err() {
-                    break;
-                }
+        let mut stdin = std::io::stdin().lock();
+        loop {
+            let Ok(frame) = read_frame(&mut stdin) else {
+                break;
+            };
+            let Some(msg) = InputMessage::decode(&frame) else {
+                continue;
+            };
+            if input_tx.send(msg).is_err() {
+                break;
             }
         }
     });
@@ -211,28 +231,29 @@ fn emit_region(image: &DecodedImage, region: &ironrdp::pdu::geometry::InclusiveR
         return;
     }
 
-    // Copy row by row, converting RGBA -> BGRA over 4-byte chunks (bounds checked once per
-    // row, not per channel) — this is the hot path under high-frequency updates.
-    let mut out = vec![0u8; w * h * 4];
-    for row in 0..h {
-        let src_start = ((top + row) * img_w + left) * 4;
-        let dst_start = row * w * 4;
-        let src_row = &src[src_start..src_start + w * 4];
-        let dst_row = &mut out[dst_start..dst_start + w * 4];
-        for (s, d) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
-            d[0] = s[2];
-            d[1] = s[1];
-            d[2] = s[0];
-            d[3] = 255;
+    // Build the binary IMAGE frame body straight into the reused scratch buffer: the
+    // header (see `warpgate_rdp_ipc`) followed by BGRA pixels converted from the source
+    // RGBA row by row. No intermediate buffer, no base64, no JSON — this is the hot path.
+    EMIT_FRAME.with(|scratch| {
+        let frame = &mut *scratch.borrow_mut();
+        frame.clear();
+        frame.reserve(9 + w * h * 4);
+        frame.push(warpgate_rdp_ipc::KIND_IMAGE);
+        frame.extend_from_slice(&(left as u16).to_le_bytes());
+        frame.extend_from_slice(&(top as u16).to_le_bytes());
+        frame.extend_from_slice(&(w as u16).to_le_bytes());
+        frame.extend_from_slice(&(h as u16).to_le_bytes());
+        for row in 0..h {
+            let src_start = ((top + row) * img_w + left) * 4;
+            let src_row = &src[src_start..src_start + w * 4];
+            for s in src_row.chunks_exact(4) {
+                frame.push(s[2]);
+                frame.push(s[1]);
+                frame.push(s[0]);
+                frame.push(255);
+            }
         }
-    }
-
-    emit(&OutputMessage::RawImage {
-        x: left as u16,
-        y: top as u16,
-        width: w as u16,
-        height: h as u16,
-        data: STANDARD.encode(&out),
+        write_frame(&mut std::io::stdout().lock(), frame);
     });
 }
 

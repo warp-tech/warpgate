@@ -21,7 +21,12 @@ export function latestWins<T> (task: (arg: T, signal: AbortSignal) => Promise<vo
                 try {
                     await task(arg, signal)
                 } catch (err) {
-                    if (!signal.aborted) {
+                    // An AbortError just means this run was superseded (its fetch / body
+                    // stream was cancelled) — expected, not a failure. `signal.aborted` can
+                    // still read false when the abort arrives via `reader.cancel()`, so also
+                    // match by name.
+                    const aborted = signal.aborted || (err instanceof Error && err.name === 'AbortError')
+                    if (!aborted) {
                         console.error('latestWins task failed', err)
                     }
                 }

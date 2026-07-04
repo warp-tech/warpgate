@@ -31,7 +31,7 @@ impl RawRecordingWriter {
         path: PathBuf,
         model: Recording::Model,
         db: Arc<Mutex<DatabaseConnection>>,
-        live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
+        live: Option<Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>>,
         params: &GlobalParams,
     ) -> Result<Self> {
         let file = File::options()
@@ -46,21 +46,24 @@ impl RawRecordingWriter {
         let (sender, mut receiver) = mpsc::channel::<Bytes>(1024);
         let (drop_signal, mut drop_receiver) = mpsc::channel(1);
 
+        // Register in the live-subscription map only when this file is the live stream
+        // (see `RecordingWriterOpener::open`). Sidecars pass `None` so they don't clobber
+        // the data writer's entry, which shares the same recording id.
         let live_sender = broadcast::channel(128).0;
-        {
-            let mut live = live.lock().await;
-            live.insert(model.id, live_sender.clone());
-        }
-
-        tokio::spawn({
-            let live = live.clone();
-            let id = model.id;
-            async move {
-                let _ = drop_receiver.recv().await;
+        if let Some(live) = live {
+            {
                 let mut live = live.lock().await;
-                live.remove(&id);
+                live.insert(model.id, live_sender.clone());
             }
-        });
+            tokio::spawn({
+                let id = model.id;
+                async move {
+                    let _ = drop_receiver.recv().await;
+                    let mut live = live.lock().await;
+                    live.remove(&id);
+                }
+            });
+        }
 
         tokio::spawn(async move {
             try_block!(async {
@@ -154,6 +157,7 @@ impl NDJsonRecordingWriter {
 
     pub async fn write_json_line<I: Serialize>(&self, value: I) -> Result<usize> {
         let buf = &mut self.buf.write().await;
+        buf.clear();
         serde_json::to_writer(buf.deref_mut(), &value).map_err(Error::Serialization)?;
         buf.push(b'\n');
         self.inner.write(&buf).await?;

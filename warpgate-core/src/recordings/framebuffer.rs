@@ -94,6 +94,43 @@ impl Framebuffer {
         }
     }
 
+    /// Copy a clipped sub-rect (already RGBA) into `out` (cleared + refilled). Returns the
+    /// clipped `(x, y, w, h)` actually copied, or `None` when the region is empty/off-screen.
+    /// Lets the recorder encode one coalesced dirty rect instead of every incoming delta.
+    pub(crate) fn copy_region_rgba(
+        &self,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+        out: &mut Vec<u8>,
+    ) -> Option<(u32, u32, u32, u32)> {
+        out.clear();
+        if self.is_empty() {
+            return None;
+        }
+        let fb_w = self.width as usize;
+        let fb_h = self.height as usize;
+        let (x, y) = (x as usize, y as usize);
+        if x >= fb_w || y >= fb_h {
+            return None;
+        }
+        let cols = (w as usize).min(fb_w - x);
+        let rows = (h as usize).min(fb_h - y);
+        if cols == 0 || rows == 0 {
+            return None;
+        }
+        out.reserve(cols.saturating_mul(rows).saturating_mul(4));
+        for row in 0..rows {
+            let off = ((y + row) * fb_w + x) * 4;
+            let Some(src) = self.rgba.get(off..off + cols * 4) else {
+                break;
+            };
+            out.extend_from_slice(src);
+        }
+        Some((x as u32, y as u32, cols as u32, rows as u32))
+    }
+
     /// Copy a `w`x`h` region from `(src_x, src_y)` to `(dst_x, dst_y)` (overlap-safe via a
     /// scratch copy). Used for RDP/VNC CopyRect (scrolling).
     pub(crate) fn copy_rect(
@@ -132,19 +169,6 @@ impl Framebuffer {
             let src_off = ((sy + row) * fb_w + sx) * 4;
             let dst_off = ((dy + row) * fb_w + dx) * 4;
             self.rgba.copy_within(src_off..src_off + run, dst_off);
-        }
-    }
-}
-
-/// Convert a `w`x`h` BGRA rectangle to RGBA (opaque) into `out` (cleared + refilled). Used
-/// to feed the PNG encoder for a delta rect without allocating a fresh buffer each frame.
-pub(crate) fn bgra_to_rgba(bgra: &[u8], w: u16, h: u16, out: &mut Vec<u8>) {
-    let count = usize::from(w).saturating_mul(usize::from(h));
-    out.clear();
-    out.reserve(count.saturating_mul(4));
-    for src in bgra.chunks_exact(4).take(count) {
-        if let &[b, g, r, _] = src {
-            out.extend_from_slice(&[r, g, b, 255]);
         }
     }
 }
@@ -246,9 +270,22 @@ mod tests {
     }
 
     #[test]
-    fn bgra_to_rgba_swaps_channels() {
+    fn copy_region_rgba_extracts_and_clips() {
+        let mut fb = Framebuffer::default();
+        fb.resize(2, 2);
+        fb.blit_bgra(0, 0, 2, 2, &[
+            0, 0, 255, 255, 0, 255, 0, 255, // red, green
+            255, 0, 0, 255, 255, 255, 255, 255, // blue, white
+        ]);
         let mut out = Vec::new();
-        bgra_to_rgba(&[1, 2, 3, 255, 4, 5, 6, 255], 2, 1, &mut out);
-        assert_eq!(out, vec![3, 2, 1, 255, 6, 5, 4, 255]);
+        // Bottom-right 1x1 pixel (white).
+        assert_eq!(fb.copy_region_rgba(1, 1, 1, 1, &mut out), Some((1, 1, 1, 1)));
+        assert_eq!(out, vec![255, 255, 255, 255]);
+        // A region overflowing the edge clips to what's on-screen.
+        assert_eq!(fb.copy_region_rgba(1, 0, 5, 5, &mut out), Some((1, 0, 1, 2)));
+        assert_eq!(out.len(), 1 * 2 * 4);
+        // Fully off-screen origin yields nothing.
+        assert_eq!(fb.copy_region_rgba(2, 0, 1, 1, &mut out), None);
     }
+
 }

@@ -28,9 +28,8 @@ use std::os::fd::{FromRawFd, RawFd};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
 use bytes::Bytes;
+use futures::{SinkExt, StreamExt};
 use ironrdp_server::tokio_rustls::rustls::ServerConfig as TlsServerConfig;
 use ironrdp_server::tokio_rustls::TlsAcceptor;
 use ironrdp_server::{
@@ -38,9 +37,10 @@ use ironrdp_server::{
     DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent, PixelFormat, RdpServer,
     RdpServerDisplay, RdpServerDisplayUpdates, RdpServerInputHandler,
 };
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{Stdin, Stdout};
 use tokio::net::UnixStream as TokioUnixStream;
 use tokio::sync::{mpsc, Mutex};
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::warn;
 use warpgate_rdp_ipc::server::{Event as ControlOut, Input as ControlIn, ServeConfig};
 
@@ -79,22 +79,29 @@ async fn run() -> Result<()> {
     let _ = ironrdp_server::tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
         .install_default();
 
-    // Read the config line first; the remaining stdin becomes the control channel.
-    let mut stdin_lines = BufReader::new(tokio::io::stdin()).lines();
-    let first = stdin_lines
-        .next_line()
+    // Length-delimited framing on stdio; read the config frame first, then the control
+    // channel. Frames can be a full-screen BGRA rect, so raise the size limit.
+    let codec = || {
+        LengthDelimitedCodec::builder()
+            .max_frame_length(warpgate_rdp_ipc::MAX_FRAME_LEN)
+            .new_codec()
+    };
+    let mut stdin_frames = FramedRead::new(tokio::io::stdin(), codec());
+    let first = stdin_frames
+        .next()
         .await
-        .context("reading config line")?
-        .context("missing config line on stdin")?;
+        .context("missing config frame on stdin")?
+        .context("reading config frame")?;
     let config: ServeConfig =
-        serde_json::from_str(first.trim()).context("parsing config line")?;
+        warpgate_rdp_ipc::decode_json(&first).context("parsing config frame")?;
 
     let (out_tx, out_rx) = mpsc::unbounded_channel::<ControlOut>();
     let (frame_tx, frame_rx) = mpsc::channel::<DisplayUpdate>(256);
     let (auth_tx, auth_rx) = mpsc::channel::<bool>(1);
 
-    let writer_handle = tokio::spawn(stdout_writer(out_rx));
-    let router_handle = tokio::spawn(stdin_router(stdin_lines, frame_tx, auth_tx));
+    let stdout_frames = FramedWrite::new(tokio::io::stdout(), codec());
+    let writer_handle = tokio::spawn(stdout_writer(stdout_frames, out_rx));
+    let router_handle = tokio::spawn(stdin_router(stdin_frames, frame_tx, auth_tx));
 
     let tls = build_tls_acceptor(&config.cert_pem, &config.key_pem)?;
 
@@ -181,38 +188,34 @@ fn build_tls_acceptor(cert_pem: &str, key_pem: &str) -> Result<TlsAcceptor> {
 }
 
 /// Drains `ControlOut` messages to stdout as line-delimited JSON.
-async fn stdout_writer(mut rx: mpsc::UnboundedReceiver<ControlOut>) {
-    let mut stdout = tokio::io::stdout();
+async fn stdout_writer(
+    mut wr: FramedWrite<Stdout, LengthDelimitedCodec>,
+    mut rx: mpsc::UnboundedReceiver<ControlOut>,
+) {
+    let mut buf = Vec::new();
     while let Some(msg) = rx.recv().await {
-        let Ok(mut line) = serde_json::to_string(&msg) else {
-            continue;
-        };
-        line.push('\n');
-        if stdout.write_all(line.as_bytes()).await.is_err() {
+        msg.encode_into(&mut buf);
+        if wr.send(Bytes::copy_from_slice(&buf)).await.is_err() {
             break;
         }
-        let _ = stdout.flush().await;
     }
 }
 
 /// Reads `ControlIn` messages from stdin and routes them to the display backend
 /// (framebuffer updates) and the credential validator (auth decisions).
 async fn stdin_router(
-    mut lines: tokio::io::Lines<BufReader<tokio::io::Stdin>>,
+    mut rd: FramedRead<Stdin, LengthDelimitedCodec>,
     frame_tx: mpsc::Sender<DisplayUpdate>,
     auth_tx: mpsc::Sender<bool>,
 ) {
-    while let Ok(Some(line)) = lines.next_line().await {
-        let line = line.trim();
-        if line.is_empty() {
+    while let Some(frame) = rd.next().await {
+        let Ok(frame) = frame else {
+            break;
+        };
+        // `freeze()` is zero-copy; a `Frame`'s pixels become a slice of this buffer.
+        let Some(msg) = ControlIn::decode(frame.freeze()) else {
+            warn!("ignoring invalid control message");
             continue;
-        }
-        let msg: ControlIn = match serde_json::from_str(line) {
-            Ok(msg) => msg,
-            Err(error) => {
-                warn!(%error, "ignoring invalid control message");
-                continue;
-            }
         };
         match msg {
             ControlIn::AuthResponse { accept } => {
@@ -225,11 +228,8 @@ async fn stdin_router(
                 height,
                 data,
             } => {
-                let Ok(bytes) = STANDARD.decode(&data) else {
-                    warn!("ignoring frame with invalid base64");
-                    continue;
-                };
-                if let Some(update) = frame_to_update(x, y, width, height, bytes) {
+                // `data` is raw BGRA now (binary IMAGE frame) — no base64 decode.
+                if let Some(update) = frame_to_update(x, y, width, height, data) {
                     if frame_tx.send(update).await.is_err() {
                         break;
                     }
@@ -251,7 +251,7 @@ async fn stdin_router(
 
 /// Convert a BGRA framebuffer rectangle from Warpgate into an IronRDP bitmap update.
 /// Returns `None` for degenerate or short buffers rather than panicking downstream.
-fn frame_to_update(x: u16, y: u16, width: u16, height: u16, data: Vec<u8>) -> Option<DisplayUpdate> {
+fn frame_to_update(x: u16, y: u16, width: u16, height: u16, data: Bytes) -> Option<DisplayUpdate> {
     let nz_width = NonZeroU16::new(width)?;
     let nz_height = NonZeroU16::new(height)?;
     let stride = NonZeroUsize::new(usize::from(width) * 4)?;
@@ -267,7 +267,7 @@ fn frame_to_update(x: u16, y: u16, width: u16, height: u16, data: Vec<u8>) -> Op
         // The client helper emits bytes in B,G,R,A memory order (see its raw-image
         // emitter), which is exactly `PixelFormat::BgrA32`.
         format: PixelFormat::BgrA32,
-        data: Bytes::from(data),
+        data,
         stride,
     }))
 }

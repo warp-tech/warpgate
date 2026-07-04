@@ -3387,8 +3387,8 @@ version = "0.23.4"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64",
  "bytes",
+ "futures",
  "ironrdp",
  "ironrdp-blocking",
  "ironrdp-server",
@@ -3399,6 +3399,7 @@ dependencies = [
  "serde_json",
  "sspi",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "warpgate-rdp-ipc",
@@ -3409,7 +3410,9 @@ dependencies = [
 name = "warpgate-rdp-ipc"
 version = "0.23.4"
 dependencies = [
+ "bytes",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -26,16 +26,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
-use futures::FutureExt;
 use futures::future::BoxFuture;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, copy_bidirectional};
+use futures::{FutureExt, SinkExt};
+use tokio::io::{AsyncBufReadExt, BufReader, copy_bidirectional};
 use tokio::net::{TcpStream, UnixStream};
 use tokio::process::{ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio_stream::StreamExt;
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
@@ -67,6 +66,17 @@ const HELPER_STREAM_FD: i32 = 3;
 /// resolution arrives as a `Resize` shortly after).
 const DEFAULT_WIDTH: u16 = 1280;
 const DEFAULT_HEIGHT: u16 = 800;
+
+/// Length-delimited frame reader/writer over the serve helper's stdio. Frames can be a
+/// full-screen BGRA rect, so the size cap is raised past the codec's 8 MB default.
+type HelperReader = FramedRead<ChildStdout, LengthDelimitedCodec>;
+type HelperWriter = FramedWrite<ChildStdin, LengthDelimitedCodec>;
+
+fn helper_codec() -> LengthDelimitedCodec {
+    LengthDelimitedCodec::builder()
+        .max_frame_length(warpgate_rdp_ipc::MAX_FRAME_LEN)
+        .new_codec()
+}
 
 /// Handles to the connected target-side RDP client, kept once authentication succeeds.
 struct BackendBridge {
@@ -179,8 +189,7 @@ async fn handle_connection(
     warpgate_end
         .set_nonblocking(true)
         .context("making the RDP transport non-blocking")?;
-    let mut loopback =
-        UnixStream::from_std(warpgate_end).context("wrapping the RDP transport")?;
+    let mut loopback = UnixStream::from_std(warpgate_end).context("wrapping the RDP transport")?;
     let helper_fd = helper_end.as_raw_fd();
 
     // Kept in scope until after `spawn` so the Linux memfd stays open across exec.
@@ -212,7 +221,7 @@ async fn handle_connection(
     // closes (and the relay sees EOF) once the helper exits.
     drop(helper_end);
 
-    let mut child_stdin = child.stdin.take().context("serve helper stdin")?;
+    let child_stdin = child.stdin.take().context("serve helper stdin")?;
     let child_stdout = child.stdout.take().context("serve helper stdout")?;
 
     // Surface helper diagnostics (panics, errors) to the log instead of discarding them.
@@ -225,21 +234,23 @@ async fn handle_connection(
         });
     }
 
-    // First stdin line: the serve config (TLS material + initial size).
+    // First frame on stdin: the serve config (TLS material + initial size).
+    let mut helper_stdin = FramedWrite::new(child_stdin, helper_codec());
     let config = ServeConfig {
         cert_pem,
         key_pem,
         width: DEFAULT_WIDTH,
         height: DEFAULT_HEIGHT,
     };
-    let mut config_line = serde_json::to_string(&config)?;
-    config_line.push('\n');
-    child_stdin.write_all(config_line.as_bytes()).await?;
-    child_stdin.flush().await?;
+    let mut config_buf = Vec::new();
+    warpgate_rdp_ipc::encode_json_into(&config, &mut config_buf);
+    helper_stdin
+        .send(bytes::Bytes::copy_from_slice(&config_buf))
+        .await?;
 
     // All subsequent helper stdin writes are funnelled through one task.
     let (helper_in_tx, helper_in_rx) = unbounded_channel::<ServerHelperInput>();
-    let stdin_task = tokio::spawn(helper_stdin_writer(child_stdin, helper_in_rx));
+    let stdin_task = tokio::spawn(helper_stdin_writer(helper_stdin, helper_in_rx));
 
     // The socketpair is already connected — no connect-back to wait for. Run the raw byte
     // relay (viewer ⇄ helper) and the JSON control loop concurrently;
@@ -272,15 +283,12 @@ async fn control_loop(
     stdout: ChildStdout,
     helper_in_tx: UnboundedSender<ServerHelperInput>,
 ) -> Result<()> {
-    let mut lines = BufReader::new(stdout).lines();
+    let mut frames = FramedRead::new(stdout, helper_codec());
     let mut backend: Option<BackendBridge> = None;
 
-    while let Some(line) = lines
-        .next_line()
-        .await
-        .context("reading serve helper output")?
-    {
-        let Ok(event) = serde_json::from_str::<ServerHelperEvent>(line.trim()) else {
+    while let Some(frame) = frames.next().await {
+        let frame = frame.context("reading serve helper output")?;
+        let Some(event) = ServerHelperEvent::decode(&frame) else {
             continue;
         };
 
@@ -330,7 +338,7 @@ async fn control_loop(
                         {
                             break;
                         }
-                        match run_hold_screen(&services, &interactive, &mut lines, &helper_in_tx)
+                        match run_hold_screen(&services, &interactive, &mut frames, &helper_in_tx)
                             .await
                         {
                             Ok(Some(user_info)) => {
@@ -438,19 +446,31 @@ async fn control_loop(
     Ok(())
 }
 
-/// Bridge target-side desktop events to the serve helper, recording each. The recorder
-/// is shared with `control_loop` (which records viewer input); the recording finalises
-/// once both drop their handle.
+/// Bridge target-side desktop events to the serve helper. Recording runs on its own task
+/// so its (serialising) `write_event` never gates live frame delivery — `DesktopEvent`
+/// clones are cheap (`RawImage` holds ref-counted `Bytes`). The recorder is also shared
+/// with `control_loop` (viewer input); the recording finalises once every handle drops.
 async fn frame_bridge(
     mut event_rx: tokio::sync::mpsc::Receiver<DesktopEvent>,
     helper_in_tx: UnboundedSender<ServerHelperInput>,
     recorder: Option<Arc<DesktopRecorder>>,
 ) {
+    let record_tx = recorder.map(|recorder| {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<DesktopEvent>(256);
+        tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                if let Err(error) = recorder.write_event(&event).await {
+                    warn!(%error, "Failed to record RDP desktop event");
+                }
+            }
+        });
+        tx
+    });
+
     while let Some(event) = event_rx.recv().await {
-        if let Some(recorder) = &recorder
-            && let Err(error) = recorder.write_event(&event).await
-        {
-            warn!(%error, "Failed to record RDP desktop event");
+        if let Some(record_tx) = &record_tx {
+            // Best-effort: recording must never stall the live path, so drop under overload.
+            let _ = record_tx.try_send(event.clone());
         }
 
         let message = match event {
@@ -460,7 +480,8 @@ async fn frame_bridge(
                 y: rect.y,
                 width: rect.width,
                 height: rect.height,
-                data: STANDARD.encode(&data),
+                // `data` is ref-counted `Bytes` — moved into the frame, no framebuffer copy.
+                data,
             },
             DesktopEvent::State(DesktopState::Disconnected) => {
                 let _ = helper_in_tx.send(ServerHelperInput::Shutdown);
@@ -481,16 +502,19 @@ async fn frame_bridge(
     }
 }
 
-/// Funnel queued [`ServerHelperInput`] messages to the serve helper's stdin as
-/// line-delimited JSON.
 /// How many framebuffer updates may be queued toward the serve helper before we start
-/// shedding the oldest. Serializing a `Frame` means JSON-encoding a ~1 MB base64 string;
-/// if the viewer/helper falls behind, an unbounded queue would pin a core on that and lag
-/// the screen far behind live. Small on purpose so we deliver the live edge, not a backlog.
+/// shedding the oldest. Queued `Frame`s are cheap (ref-counted `Bytes`), but each still
+/// costs a copy at the framed write; if the viewer/helper falls behind, an unbounded queue
+/// would lag the screen far behind live. Small on purpose so we deliver the live edge.
 const MAX_PENDING_HELPER_FRAMES: usize = 8;
 
-async fn helper_stdin_writer(mut stdin: ChildStdin, mut rx: UnboundedReceiver<ServerHelperInput>) {
-    let mut batch: std::collections::VecDeque<ServerHelperInput> = std::collections::VecDeque::new();
+async fn helper_stdin_writer(
+    mut stdin: HelperWriter,
+    mut rx: UnboundedReceiver<ServerHelperInput>,
+) {
+    let mut batch: std::collections::VecDeque<ServerHelperInput> =
+        std::collections::VecDeque::new();
+    let mut body = Vec::new();
     loop {
         // Block for at least one message, then drain everything else already queued so we
         // can shed staleness across the whole burst before doing any expensive work.
@@ -516,11 +540,13 @@ async fn helper_stdin_writer(mut stdin: ChildStdin, mut rx: UnboundedReceiver<Se
         }
 
         for msg in batch.drain(..) {
-            let Ok(mut line) = serde_json::to_string(&msg) else {
-                continue;
-            };
-            line.push('\n');
-            if stdin.write_all(line.as_bytes()).await.is_err() {
+            msg.encode_into(&mut body);
+            // `feed` (not `send`) to avoid a flush per message; flush once after the batch.
+            if stdin
+                .feed(bytes::Bytes::copy_from_slice(&body))
+                .await
+                .is_err()
+            {
                 return;
             }
         }
@@ -535,7 +561,7 @@ async fn start_recorder(services: &Services, session_id: &Uuid) -> Option<Deskto
         .recordings
         .lock()
         .await
-        .start::<DesktopRecorder, _>(session_id, None, DesktopRecordingMetadata)
+        .start::<DesktopRecorder, _>(session_id, None, DesktopRecordingMetadata::Desktop)
         .await
     {
         Ok(recorder) => Some(recorder),
@@ -650,7 +676,10 @@ async fn authenticate(
                 }
             }
 
-            match state_arc.lock().await.verify() {
+            // Bind to a local so the guard drops before `complete()` re-locks it (see
+            // `run_hold_screen`).
+            let verification = state_arc.lock().await.verify();
+            match verification {
                 AuthResult::Accepted { user_info } => {
                     let _ = services
                         .login_protection
@@ -752,7 +781,11 @@ async fn connect_backend(
         input_tx,
         abort_tx,
     } = crate::connect(options);
-    let frame_bridge = tokio::spawn(frame_bridge(event_rx, helper_in_tx.clone(), recorder.clone()));
+    let frame_bridge = tokio::spawn(frame_bridge(
+        event_rx,
+        helper_in_tx.clone(),
+        recorder.clone(),
+    ));
     Ok(BackendBridge {
         input_tx,
         abort_tx,
@@ -762,7 +795,7 @@ async fn connect_backend(
 }
 
 /// How often the holding screen repaints (spinner animation cadence).
-const HOLD_RENDER_INTERVAL: Duration = Duration::from_millis(200);
+const HOLD_RENDER_INTERVAL: Duration = Duration::from_millis(100);
 /// Max wrong one-time passwords entered on the holding screen before giving up.
 const MAX_OTP_ATTEMPTS: usize = 3;
 
@@ -781,7 +814,7 @@ enum OtpAction {
 async fn run_hold_screen(
     services: &Services,
     interactive: &InteractiveAuth,
-    lines: &mut Lines<BufReader<ChildStdout>>,
+    frames: &mut HelperReader,
     helper_in_tx: &UnboundedSender<ServerHelperInput>,
 ) -> Result<Option<AuthStateUserInfo>> {
     let state = services
@@ -809,7 +842,10 @@ async fn run_hold_screen(
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
-        let need = match state.lock().await.verify() {
+        // Bind to a local so the `state` guard drops here — `complete()` below re-locks
+        // the same AuthState mutex, and holding a match-scrutinee guard across it deadlocks.
+        let verification = state.lock().await.verify();
+        let need = match verification {
             AuthResult::Accepted { user_info } => {
                 let _ = services
                     .login_protection
@@ -821,6 +857,9 @@ async fn run_hold_screen(
                     .await
                     .complete(&interactive.state_id)
                     .await;
+                // Swap the OTP prompt for a "Connecting" screen before the caller blocks on
+                // the backend connect, so the viewer gets feedback instead of a frozen frame.
+                let _ = render_connecting_frame(helper_in_tx, tick);
                 return Ok(Some(user_info));
             }
             AuthResult::Rejected => return Ok(None),
@@ -840,16 +879,17 @@ async fn run_hold_screen(
         tokio::select! {
             // Browser approval landed (or the signal lagged/closed); re-verify on the next loop.
             _ = approval.recv(), if awaiting_web => {}
-            line = lines.next_line() => {
-                let Some(line) = line.context("reading serve helper output")? else {
+            frame = frames.next() => {
+                let Some(frame) = frame else {
                     return Ok(None);
                 };
-                let action = match serde_json::from_str::<ServerHelperEvent>(line.trim()) {
-                    Ok(ServerHelperEvent::Disconnected) => return Ok(None),
-                    Ok(ServerHelperEvent::Scancode { code, down, .. }) if down => {
+                let frame = frame.context("reading serve helper output")?;
+                let action = match ServerHelperEvent::decode(&frame) {
+                    Some(ServerHelperEvent::Disconnected) => return Ok(None),
+                    Some(ServerHelperEvent::Scancode { code, down, .. }) if down => {
                         scancode_otp_action(code)
                     }
-                    Ok(ServerHelperEvent::Key { keysym, down }) if down => key_otp_action(keysym),
+                    Some(ServerHelperEvent::Key { keysym, down }) if down => key_otp_action(keysym),
                     _ => None,
                 };
                 if !awaiting_web
@@ -962,8 +1002,21 @@ fn render_hold_frame(
     tick: u64,
     prompt: &ui::AuthPrompt,
 ) -> Result<()> {
-    // The UI renders RGB888 (the VNC screen); convert to the BGRA the serve helper expects.
-    let rgb = ui::render_authentication(tick, prompt).unwrap_or_default();
+    paint_ui_frame(helper_in_tx, ui::render_authentication(tick, prompt).unwrap_or_default())
+}
+
+/// Paint the "Connecting" screen — shown after auth completes while we reach the target, so
+/// the viewer isn't frozen on the last prompt during the (possibly slow) backend connect.
+fn render_connecting_frame(
+    helper_in_tx: &UnboundedSender<ServerHelperInput>,
+    tick: u64,
+) -> Result<()> {
+    paint_ui_frame(helper_in_tx, ui::render_connecting(tick).unwrap_or_default())
+}
+
+/// Send a full-screen RGB888 UI image to the viewer, converting to the BGRA the serve helper
+/// expects.
+fn paint_ui_frame(helper_in_tx: &UnboundedSender<ServerHelperInput>, rgb: Vec<u8>) -> Result<()> {
     let mut bgra = Vec::with_capacity(rgb.len() / 3 * 4);
     for px in rgb.chunks_exact(3) {
         if let Some(&[r, g, b]) = px.first_chunk::<3>() {
@@ -976,7 +1029,7 @@ fn render_hold_frame(
             y: 0,
             width: ui::SCREEN_W,
             height: ui::SCREEN_H,
-            data: STANDARD.encode(&bgra),
+            data: bgra.into(),
         })
         .is_err()
     {
@@ -1049,13 +1102,20 @@ mod otp_input_tests {
             (0x48, '8'),
             (0x49, '9'),
         ] {
-            assert_eq!(digit(scancode_otp_action(code)), Some(expected), "scancode {code:#x}");
+            assert_eq!(
+                digit(scancode_otp_action(code)),
+                Some(expected),
+                "scancode {code:#x}"
+            );
         }
     }
 
     #[test]
     fn scancode_control_and_unmapped() {
-        assert!(matches!(scancode_otp_action(0x0e), Some(OtpAction::Backspace)));
+        assert!(matches!(
+            scancode_otp_action(0x0e),
+            Some(OtpAction::Backspace)
+        ));
         assert!(matches!(scancode_otp_action(0x1c), Some(OtpAction::Submit)));
         assert!(scancode_otp_action(0x3b).is_none()); // F1 — not an OTP key
         assert!(scancode_otp_action(0x00).is_none());

@@ -7,4 +7,8 @@ publish = false
 description = "Stdio IPC message types shared between Warpgate and its out-of-workspace RDP helper. Pure serde types (no crypto deps), so it can be a path dependency of both the in-workspace crate and the separately-locked helper."
 
 [dependencies]
+# `bytes` is zero-dependency; keeps the crate lockfile-light while letting the framebuffer
+# variants carry ref-counted buffers the hot paths can move instead of re-allocating.
+bytes = { version = "1", default-features = false }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
