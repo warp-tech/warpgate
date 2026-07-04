@@ -54,18 +54,33 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// What a [`Recorder`] receives when a recording starts. Gen-2 recordings are folders;
-/// the primary `data.ndjson` writer is pre-opened here (it owns the live broadcast and the
-/// finalize `ended` marking), and `folder` lets a recorder open auxiliary files of its own
-/// (e.g. the desktop seek `index.json`).
-pub struct RecorderInit {
-    pub writer: RecordingWriter,
-    pub folder: PathBuf,
+pub struct RecordingWriterOpener {
+    folder: PathBuf,
+    model: Recording::Model,
+    db: Arc<Mutex<DatabaseConnection>>,
+    live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
+    params: GlobalParams,
 }
 
-pub trait Recorder {
+impl RecordingWriterOpener {
+    pub async fn open(&self, filename: &str) -> Result<RecordingWriter> {
+        RecordingWriter::new(
+            self.folder.join(filename),
+            self.model.clone(),
+            self.db.clone(),
+            self.live.clone(),
+            &self.params,
+        )
+        .await
+    }
+}
+
+pub trait Recorder
+where
+    Self: Sized,
+{
     fn kind() -> RecordingKind;
-    fn new(init: RecorderInit) -> Self;
+    fn new(opener: &RecordingWriterOpener) -> impl Future<Output = Result<Self>> + Send;
 }
 
 pub struct SessionRecordings {
@@ -148,15 +163,15 @@ impl SessionRecordings {
             }
         };
 
-        let writer = RecordingWriter::new(
-            folder.join(DATA_FILENAME),
+        let opener = RecordingWriterOpener {
+            folder: folder.clone(),
             model,
-            self.db.clone(),
-            self.live.clone(),
-            &self.params,
-        )
-        .await?;
-        Ok(T::new(RecorderInit { writer, folder }))
+            db: self.db.clone(),
+            live: self.live.clone(),
+            params: self.params.clone(),
+        };
+
+        Ok(T::new(&opener).await?)
     }
 
     pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<Bytes>> {
@@ -201,7 +216,9 @@ impl SessionRecordings {
 
     /// Path of a gen-2 recording's seek index sidecar, or `None` for gen 1 (which has none).
     pub fn index_path_for(&self, recording: &Recording::Model) -> Option<PathBuf> {
-        (recording.generation >= 2)
-            .then(|| self.path_for(&recording.session_id, &recording.name).join(INDEX_FILENAME))
+        (recording.generation >= 2).then(|| {
+            self.path_for(&recording.session_id, &recording.name)
+                .join(INDEX_FILENAME)
+        })
     }
 }

@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use url::Url;
 use warpgate_common::SessionId;
 use warpgate_core::recordings::{
-    Recorder, RecorderInit, RecordingWriter, SessionRecordings, TerminalRecorder,
+    Recorder, RecordingWriter, RecordingWriterOpener, SessionRecordings, TerminalRecorder,
 };
 use warpgate_db_entities::Recording::RecordingKind;
 
@@ -98,10 +98,12 @@ impl Recorder for KubernetesRecorder {
         RecordingKind::Kubernetes
     }
 
-    fn new(init: RecorderInit) -> Self {
-        Self {
-            writer: init.writer,
-        }
+    async fn new(opener: &RecordingWriterOpener) -> warpgate_core::recordings::Result<Self> {
+        Ok(Self {
+            writer: opener
+                .open(warpgate_core::recordings::DATA_FILENAME)
+                .await?,
+        })
     }
 }
 

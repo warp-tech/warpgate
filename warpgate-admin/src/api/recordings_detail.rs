@@ -2,8 +2,8 @@ use anyhow::Context;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use poem::error::{InternalServerError, NotFoundError};
-use poem::web::Data;
 use poem::web::websocket::{Message, WebSocket};
+use poem::web::{Data, StaticFileRequest};
 use poem::{IntoResponse, handler};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -11,7 +11,7 @@ use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
 use tokio::fs::File;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::error;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
@@ -201,25 +201,6 @@ pub async fn api_get_recording_tcpdump(
     Ok(Bytes::from(content))
 }
 
-/// Parse a single `Range: bytes=start-[end]` spec. Returns `(start, Some(end))` or
-/// `(start, None)` for an open-ended range. Only the first spec is honoured.
-// Used by the raw `#[handler]` routes (wired in lib.rs); the spec-printer bin doesn't
-// route those, so it sees these helpers as dead.
-#[allow(dead_code)]
-fn parse_byte_range(value: &str) -> Option<(u64, Option<u64>)> {
-    let spec = value.strip_prefix("bytes=")?.split(',').next()?.trim();
-    let (start, end) = spec.split_once('-')?;
-    let start = start.trim().parse().ok()?;
-    let end = end.trim();
-    let end = if end.is_empty() {
-        None
-    } else {
-        Some(end.parse().ok()?)
-    };
-    Some((start, end))
-}
-
-#[allow(dead_code)]
 async fn find_desktop_recording(
     ctx: &AuthenticatedRequestContext,
     id: Uuid,
@@ -237,74 +218,48 @@ async fn find_desktop_recording(
 pub async fn api_get_recording_desktop(
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
-    req: &poem::Request,
+    static_req: StaticFileRequest,
 ) -> poem::Result<poem::Response> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
     let recording = find_desktop_recording(&ctx, id.0).await?;
-    let path = { ctx.services().recordings.lock().await.data_path_for(&recording) };
-
-    // Framebuffer recordings are large; stream the file, and honour Range requests so the
-    // player can seek to a keyframe offset without downloading everything.
-    let mut file = File::open(&path).await.map_err(InternalServerError)?;
-    let total = file.metadata().await.map_err(InternalServerError)?.len();
-
-    let range = req
-        .headers()
-        .get(poem::http::header::RANGE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(parse_byte_range);
-
-    let Some((start, end)) = range else {
-        return Ok(poem::Response::builder()
-            .content_type("application/x-ndjson")
-            .header(poem::http::header::ACCEPT_RANGES, "bytes")
-            .body(poem::Body::from_async_read(file)));
+    let path = {
+        ctx.services()
+            .recordings
+            .lock()
+            .await
+            .data_path_for(&recording)
     };
 
-    if start >= total {
-        return Ok(poem::Response::builder()
-            .status(poem::http::StatusCode::RANGE_NOT_SATISFIABLE)
-            .header(poem::http::header::CONTENT_RANGE, format!("bytes */{total}"))
-            .finish());
-    }
-    let end = end.unwrap_or(total.saturating_sub(1)).min(total.saturating_sub(1));
-    let len = end - start + 1;
-    file.seek(std::io::SeekFrom::Start(start))
-        .await
-        .map_err(InternalServerError)?;
-    Ok(poem::Response::builder()
-        .status(poem::http::StatusCode::PARTIAL_CONTENT)
-        .content_type("application/x-ndjson")
-        .header(poem::http::header::ACCEPT_RANGES, "bytes")
-        .header(
-            poem::http::header::CONTENT_RANGE,
-            format!("bytes {start}-{end}/{total}"),
-        )
-        .header(poem::http::header::CONTENT_LENGTH, len)
-        .body(poem::Body::from_async_read(file.take(len))))
+    Ok(static_req
+        .create_response(&path, false, false)?
+        .with_content_type("application/x-ndjson")
+        .into_response())
 }
 
 #[handler]
 pub async fn api_get_recording_desktop_index(
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
+    static_req: StaticFileRequest,
 ) -> poem::Result<poem::Response> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
     let recording = find_desktop_recording(&ctx, id.0).await?;
-    // gen-1 desktop has no index → 404, which tells the player it's not playable.
-    let Some(index_path) = ({ ctx.services().recordings.lock().await.index_path_for(&recording) })
-    else {
+    let Some(index_path) = ({
+        ctx.services()
+            .recordings
+            .lock()
+            .await
+            .index_path_for(&recording)
+    }) else {
         return Err(NotFoundError.into());
     };
-    // Missing (not yet flushed) also reads as 404.
-    let file = File::open(&index_path)
-        .await
-        .map_err(|_| poem::Error::from(NotFoundError))?;
-    Ok(poem::Response::builder()
-        .content_type("application/x-ndjson")
-        .body(poem::Body::from_async_read(file)))
+
+    Ok(static_req
+        .create_response(&index_path, false, false)?
+        .with_content_type("application/x-ndjson")
+        .into_response())
 }
 
 #[handler]
@@ -354,7 +309,7 @@ pub async fn api_get_recording_desktop_stream(
 }
 
 #[handler]
-pub async fn api_get_recording_stream(
+pub async fn api_get_recording_terminal_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,

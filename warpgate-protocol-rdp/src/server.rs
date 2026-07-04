@@ -40,7 +40,6 @@ use warpgate_common::auth::{
 };
 use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::{ListenEndpoint, Secret, Target, TargetOptions, TargetRdpOptions};
-use warpgate_rdp_ipc::server::{Event as ServerHelperEvent, Input as ServerHelperInput, ServeConfig};
 use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
@@ -48,9 +47,12 @@ use warpgate_core::{
     ConfigProvider, DesktopEvent, DesktopInput, DesktopState, Services, SessionStateInit, State,
     WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
+use warpgate_rdp_ipc::server::{
+    Event as ServerHelperEvent, Input as ServerHelperInput, ServeConfig,
+};
 
-use crate::session_handle::RdpSessionHandle;
 use crate::PROTOCOL_NAME;
+use crate::session_handle::RdpSessionHandle;
 
 /// How long to wait for the serve helper to connect back to our loopback port before
 /// giving up (covers a helper that dies on startup, e.g. bad TLS material).
@@ -271,8 +273,14 @@ async fn control_loop(
                     // Already authenticated; ignore a duplicate request.
                     continue;
                 }
-                match authenticate(&services, &server_handle, &username, password, remote_address)
-                    .await
+                match authenticate(
+                    &services,
+                    &server_handle,
+                    &username,
+                    password,
+                    remote_address,
+                )
+                .await
                 {
                     Ok(Some((user_info, target, options))) => {
                         {
@@ -283,9 +291,7 @@ async fn control_loop(
                         info!(target=%target.name, "Authorized");
 
                         let session_id = server_handle.lock().await.id();
-                        let recorder = start_recorder(&services, &session_id, &target.name)
-                            .await
-                            .map(Arc::new);
+                        let recorder = start_recorder(&services, &session_id).await.map(Arc::new);
 
                         let crate::RdpClientHandles {
                             event_rx,
@@ -421,10 +427,7 @@ async fn frame_bridge(
 
 /// Funnel queued [`ServerHelperInput`] messages to the serve helper's stdin as
 /// line-delimited JSON.
-async fn helper_stdin_writer(
-    mut stdin: ChildStdin,
-    mut rx: UnboundedReceiver<ServerHelperInput>,
-) {
+async fn helper_stdin_writer(mut stdin: ChildStdin, mut rx: UnboundedReceiver<ServerHelperInput>) {
     while let Some(msg) = rx.recv().await {
         let Ok(mut line) = serde_json::to_string(&msg) else {
             continue;
@@ -439,24 +442,12 @@ async fn helper_stdin_writer(
 
 /// Start a Desktop recording for this RDP session, mirroring the native VNC / in-browser
 /// path. Returns `None` when recording is disabled.
-async fn start_recorder(
-    services: &Services,
-    session_id: &Uuid,
-    target_name: &str,
-) -> Option<DesktopRecorder> {
+async fn start_recorder(services: &Services, session_id: &Uuid) -> Option<DesktopRecorder> {
     match services
         .recordings
         .lock()
         .await
-        .start::<DesktopRecorder, _>(
-            session_id,
-            None,
-            DesktopRecordingMetadata::Desktop {
-                // Match the other desktop paths' lowercase tag so all record identically.
-                protocol: "rdp".to_owned(),
-                target: target_name.to_owned(),
-            },
-        )
+        .start::<DesktopRecorder, _>(session_id, None, DesktopRecordingMetadata)
         .await
     {
         Ok(recorder) => Some(recorder),

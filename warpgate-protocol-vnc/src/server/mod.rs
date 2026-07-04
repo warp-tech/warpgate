@@ -323,15 +323,7 @@ async fn negotiate_and_authorize(
         .recordings
         .lock()
         .await
-        .start::<DesktopRecorder, _>(
-            &session_id,
-            None,
-            DesktopRecordingMetadata::Desktop {
-                // Match the in-browser path's lowercase tag so both record identically.
-                protocol: "vnc".to_owned(),
-                target: target.name.clone(),
-            },
-        )
+        .start::<DesktopRecorder, _>(&session_id, None, DesktopRecordingMetadata)
         .await
     {
         Ok(recorder) => Some(recorder),
@@ -425,15 +417,17 @@ async fn negotiate_and_authorize(
         );
     }
 
-    Ok(Some(AuthorizedSession::Record(Box::new(RecordingSession {
-        viewer_wr,
-        viewer_events: events_rx,
-        reader,
-        stop_tx,
-        render,
-        backend,
-        recorder,
-    }))))
+    Ok(Some(AuthorizedSession::Record(Box::new(
+        RecordingSession {
+            viewer_wr,
+            viewer_events: events_rx,
+            reader,
+            stop_tx,
+            render,
+            backend,
+            recorder,
+        },
+    ))))
 }
 
 /// A negotiated, authorized session ready to run. Either a fully transparent byte
@@ -495,7 +489,11 @@ async fn wait_for_backend_size(
 
 /// Re-encode one queued backend frame toward the viewer in response to an outstanding
 /// `FramebufferUpdateRequest`. Clears `pending_request` once a frame is actually sent.
-async fn flush_frame<W>(viewer_wr: &mut W, render: &mut RenderState, event: DesktopEvent) -> Result<()>
+async fn flush_frame<W>(
+    viewer_wr: &mut W,
+    render: &mut RenderState,
+    event: DesktopEvent,
+) -> Result<()>
 where
     W: AsyncWrite + Unpin,
 {

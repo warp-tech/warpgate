@@ -40,7 +40,7 @@ jobs:
           rustup component add llvm-tools-preview
 
       - name: Run Rust unit tests
-        run: cargo test -p warpgate-protocol-vnc-ui
+        run: just test
 
       - name: Build UI
         run: |
@@ -64,6 +64,8 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y gnome-keyring kubectl
+          # FreeRDP CLI (xfreerdp/xfreerdp3) drives the native RDP tests.
+          sudo apt install -y freerdp2-x11 || sudo apt install -y freerdp3-x11
           pip3 install keyring==24 poetry==1.8.3
           poetry install
 

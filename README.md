@@ -99,7 +99,7 @@ Warpgate is being actively used in enterprise settings.
 
 ## How it works
 
-Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH, HTTPS, Kubernetes, MySQL and PostgreSQL connections and provide an (optional) web admin UI. RDP and VNC desktops are accessed in the browser through the web UI and are session-recorded like SSH.
+Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH, HTTPS, Kubernetes, MySQL, PostgreSQL, RDP and VNC connections and provide an (optional) web admin UI.
 
 Run `warpgate setup` to interactively generate a config file, including port bindings. See [Getting started](https://warpgate.null.page/getting-started/) for details.
 

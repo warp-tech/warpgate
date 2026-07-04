@@ -80,6 +80,14 @@ pub(crate) enum Commands {
         #[clap(long)]
         kubernetes_port: Option<u16>,
 
+        /// Enable VNC and set port
+        #[clap(long)]
+        vnc_port: Option<u16>,
+
+        /// Enable RDP and set port
+        #[clap(long)]
+        rdp_port: Option<u16>,
+
         /// Enable session recording
         #[clap(long)]
         record_sessions: bool,

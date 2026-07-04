@@ -115,23 +115,11 @@ impl WebDesktopClientManager {
         // Start a desktop recording (no-op if recording is disabled in config). Shared
         // (Arc) between the session — which records viewer input — and the event loop,
         // which records framebuffer updates; the recording finalises when both drop.
-        let protocol = match &target.options {
-            TargetOptions::Vnc(_) => "vnc",
-            TargetOptions::Rdp(_) => "rdp",
-            _ => "desktop",
-        };
         let recorder: Option<Arc<DesktopRecorder>> = match services
             .recordings
             .lock()
             .await
-            .start::<DesktopRecorder, _>(
-                &session_id,
-                None,
-                DesktopRecordingMetadata::Desktop {
-                    protocol: protocol.to_owned(),
-                    target: target_name.to_owned(),
-                },
-            )
+            .start::<DesktopRecorder, _>(&session_id, None, DesktopRecordingMetadata)
             .await
         {
             Ok(recorder) => Some(Arc::new(recorder)),

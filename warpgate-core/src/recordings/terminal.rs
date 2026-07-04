@@ -4,7 +4,8 @@ use tokio::time::Instant;
 use warpgate_db_entities::Recording::RecordingKind;
 
 use super::writer::RecordingWriter;
-use super::{Error, Recorder, RecorderInit, Result};
+use super::{Error, Recorder, Result};
+use crate::recordings::RecordingWriterOpener;
 
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -119,10 +120,10 @@ impl Recorder for TerminalRecorder {
         RecordingKind::Terminal
     }
 
-    fn new(init: RecorderInit) -> Self {
-        Self {
-            writer: init.writer,
+    async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
+        Ok(Self {
+            writer: opener.open(super::DATA_FILENAME).await?,
             started_at: Instant::now(),
-        }
+        })
     }
 }

@@ -1,6 +1,5 @@
 use std::net::Ipv4Addr;
 
-use anyhow::Result;
 use bytes::Bytes;
 use packet::Builder;
 use rand::RngExt;
@@ -9,7 +8,8 @@ use tracing::debug;
 use warpgate_db_entities::Recording::RecordingKind;
 
 use super::writer::RecordingWriter;
-use super::{Recorder, RecorderInit};
+use super::{Recorder, Result};
+use crate::recordings::RecordingWriterOpener;
 
 pub struct TrafficRecorder {
     writer: RecordingWriter,
@@ -40,11 +40,11 @@ impl Recorder for TrafficRecorder {
         RecordingKind::Traffic
     }
 
-    fn new(init: RecorderInit) -> Self {
-        Self {
-            writer: init.writer,
+    async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
+        Ok(Self {
+            writer: opener.open(super::DATA_FILENAME).await?,
             started_at: Instant::now(),
-        }
+        })
     }
 }
 
@@ -67,7 +67,7 @@ impl ConnectionRecorder {
         }
     }
 
-    pub async fn write_connection_setup(&mut self) -> Result<()> {
+    pub async fn write_connection_setup(&mut self) -> anyhow::Result<()> {
         self.writer
             .write(&[
                 0xd4, 0xc3, 0xb2, 0xa1, 0x02, 0, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0,
@@ -99,7 +99,7 @@ impl ConnectionRecorder {
         Ok(())
     }
 
-    pub async fn write_rx(&mut self, data: &[u8]) -> Result<()> {
+    pub async fn write_rx(&mut self, data: &[u8]) -> anyhow::Result<()> {
         debug!("connection {:?} data rx {:?}", self.params, data);
         let seq_rx = self.seq_rx;
         self.seq_rx = self.seq_rx.wrapping_add(data.len() as u32);
@@ -118,7 +118,7 @@ impl ConnectionRecorder {
         Ok(())
     }
 
-    pub async fn write_tx(&mut self, data: &[u8]) -> Result<()> {
+    pub async fn write_tx(&mut self, data: &[u8]) -> anyhow::Result<()> {
         debug!("connection {:?} data tx {:?}", self.params, data);
         let seq_tx = self.seq_tx;
         self.seq_tx = self.seq_tx.wrapping_add(data.len() as u32);
@@ -137,9 +137,9 @@ impl ConnectionRecorder {
         Ok(())
     }
 
-    fn ip_packet_tx<F>(&self, f: F) -> Result<Bytes>
+    fn ip_packet_tx<F>(&self, f: F) -> anyhow::Result<Bytes>
     where
-        F: FnOnce(packet::ip::v4::Builder) -> Result<Bytes>,
+        F: FnOnce(packet::ip::v4::Builder) -> anyhow::Result<Bytes>,
     {
         match self.params {
             TrafficConnectionParams::Socket { .. } => f(packet::ip::v4::Builder::default()
@@ -155,9 +155,9 @@ impl ConnectionRecorder {
         }
     }
 
-    fn ip_packet_rx<F>(&self, f: F) -> Result<Bytes>
+    fn ip_packet_rx<F>(&self, f: F) -> anyhow::Result<Bytes>
     where
-        F: FnOnce(packet::ip::v4::Builder) -> Result<Bytes>,
+        F: FnOnce(packet::ip::v4::Builder) -> anyhow::Result<Bytes>,
     {
         match self.params {
             TrafficConnectionParams::Socket { .. } => f(packet::ip::v4::Builder::default()
@@ -173,9 +173,9 @@ impl ConnectionRecorder {
         }
     }
 
-    fn tcp_packet_tx<F>(&self, f: F) -> Result<Bytes>
+    fn tcp_packet_tx<F>(&self, f: F) -> anyhow::Result<Bytes>
     where
-        F: FnOnce(packet::tcp::Builder) -> Result<Bytes>,
+        F: FnOnce(packet::tcp::Builder) -> anyhow::Result<Bytes>,
     {
         self.ip_packet_tx(|b| match self.params {
             TrafficConnectionParams::Socket { .. } => f(b.tcp()?.source(0)?.destination(0)?),
@@ -185,9 +185,9 @@ impl ConnectionRecorder {
         })
     }
 
-    fn tcp_packet_rx<F>(&self, f: F) -> Result<Bytes>
+    fn tcp_packet_rx<F>(&self, f: F) -> anyhow::Result<Bytes>
     where
-        F: FnOnce(packet::tcp::Builder) -> Result<Bytes>,
+        F: FnOnce(packet::tcp::Builder) -> anyhow::Result<Bytes>,
     {
         self.ip_packet_rx(|b| match self.params {
             TrafficConnectionParams::Socket { .. } => f(b.tcp()?.source(0)?.destination(0)?),
@@ -197,7 +197,7 @@ impl ConnectionRecorder {
         })
     }
 
-    fn tcp_init(&mut self) -> Result<(Bytes, Bytes, Bytes)> {
+    fn tcp_init(&mut self) -> anyhow::Result<(Bytes, Bytes, Bytes)> {
         let seq_tx = self.seq_tx;
         self.seq_tx = self.seq_tx.wrapping_add(1);
         let seq_rx = self.seq_rx;

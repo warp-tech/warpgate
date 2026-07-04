@@ -18,8 +18,7 @@ jobs:
         run: |
           cargo deny --version
           cargo deny check
-          # The RDP helper has its own lockfile (IronRDP/sspi etc.) that ships
-          # embedded in the main binary; scan it with the same policy. The config
-          # path must be absolute — a relative --config resolves against the
-          # helper's manifest dir, not the repo root.
+          # The RDP helper has its own lockfile outside of cargo workspace
+          # The config path must be absolute, a relative --config resolves
+          # against the helper's manifest dir, not the repo root
           cargo deny --manifest-path warpgate-rdp-helper/Cargo.toml check --config "$PWD/deny.toml"

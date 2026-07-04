@@ -200,20 +200,8 @@ allow = [
     "CC0-1.0",
     "MPL-2.0",
     "CDLA-Permissive-2.0",
+    "Unlicense",
 ]
-
-# `async_io_stream` (pulled in transitively by `vnc-rs`) is released under the
-# Unlicense, a permissive public-domain dedication. Allow it scoped to that crate
-# rather than globally.
-[[licenses.exceptions]]
-allow = ["Unlicense"]
-crate = "async_io_stream"
-
-# `portpicker` (pulled in transitively by `sspi` in the RDP helper) is likewise
-# released under the Unlicense. Allow it scoped to that crate.
-[[licenses.exceptions]]
-allow = ["Unlicense"]
-crate = "portpicker"
 
 [[licenses.clarify]]
 crate = "ring"

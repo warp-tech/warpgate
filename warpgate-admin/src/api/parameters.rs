@@ -270,8 +270,7 @@ impl Api {
         parameters.lp_user_exempt_admins = body.lp_user_exempt_admins.map_or(NotSet, Set);
         parameters.ssh_banner = body.ssh_banner.clone().map_or(NotSet, Set);
         parameters.web_clients_enabled = body.web_clients_enabled.map_or(NotSet, Set);
-        parameters.web_auth_max_age_seconds =
-            body.web_auth_max_age_seconds.map_or(NotSet, Set);
+        parameters.web_auth_max_age_seconds = body.web_auth_max_age_seconds.map_or(NotSet, Set);
         parameters.analytics_consent = body.analytics_consent.map_or(NotSet, Set);
         parameters.analytics_normal = body.analytics_normal.map_or(NotSet, Set);
 
