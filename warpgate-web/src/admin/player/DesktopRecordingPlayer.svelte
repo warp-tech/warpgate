@@ -66,7 +66,6 @@
     let seekInputValue = 0
     let mode: PlayerMode = 'paused'
     let loading = true
-    let notPlayable = false
     let sessionIsLive: boolean | null = null
     let socket: WebSocket | null = null
     let destroyed = false
@@ -93,10 +92,7 @@
 
         const response = await fetch(INDEX_URL)
         if (!response.ok) {
-            // gen-1 desktop recordings have no index and aren't supported.
-            notPlayable = true
-            loading = false
-            return
+            throw new Error(`Failed to fetch index: ${response.status} ${response.statusText}`)
         }
         // Parse the whole (small) index once: seek anchors, input timestamps for the
         // heatmap, and the first resize so we can size the canvas at t=0.
@@ -387,11 +383,7 @@
         <Spinner color="primary" />
     {/if}
 
-    {#if notPlayable}
-        <div class="not-playable">This recording predates indexed playback and can't be played.</div>
-    {/if}
-
-    <div class="stage-container" class:invisible={loading || notPlayable}>
+    <div class="stage-container" class:invisible={loading}>
         <div class="stage">
             <!-- svelte-ignore a11y-no-interactive-element-to-noninteractive-role -->
             <canvas bind:this={canvas} on:click={togglePlaying} role="img"></canvas>
@@ -424,7 +416,7 @@
         {timestamp}
         {heatmap}
         bind:seekInputValue
-        hidden={loading || notPlayable}
+        hidden={loading}
         isLive={sessionIsLive === true}
         liveActive={mode === 'live'}
         onTogglePlaying={togglePlaying}

@@ -7,13 +7,16 @@ publish = false
 
 [dependencies]
 warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-protocol-vnc-ui = { path = "../warpgate-protocol-vnc-ui" }
 warpgate-rdp-ipc = { path = "../warpgate-rdp-ipc" }
 warpgate-tls = { path = "../warpgate-tls" }
 anyhow.workspace = true
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 bytes.workspace = true
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+libc = "0.2"
 futures.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

@@ -9,37 +9,42 @@
 //!   [`crate::connect`]) drives the RDP client toward the configured target.
 //!
 //! Warpgate keeps ownership of the listener, the session/audit lifecycle, and
-//! authentication. Per connection it binds a private loopback socket, spawns the serve
-//! helper, and shuttles the raw (TLS) RDP byte stream between the viewer and the helper
-//! with [`copy_bidirectional`]. Credentials the viewer submits arrive over the helper's
+//! authentication. Per connection it creates a private, unnamed socketpair (the serve
+//! helper inherits one end as an fd), spawns the serve helper, and shuttles the raw (TLS)
+//! RDP byte stream between the viewer and the helper with [`copy_bidirectional`]. Credentials the viewer submits arrive over the helper's
 //! stdout control channel as [`ServerHelperEvent::AuthRequest`]; Warpgate authenticates
 //! them with the same [`AuthSelector`] flow used by the native VNC server, connects to
 //! the resolved target, and bridges target framebuffer events to the serve helper while
 //! recording them — so native RDP records exactly like the in-browser path.
 
-use std::net::{Ipv4Addr, SocketAddr};
+use std::collections::HashSet;
+use std::net::{IpAddr, SocketAddr};
+use std::os::fd::AsRawFd;
+use std::os::unix::net::UnixStream as StdUnixStream;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, copy_bidirectional};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, copy_bidirectional};
+use tokio::net::{TcpStream, UnixStream};
 use tokio::process::{ChildStdin, ChildStdout, Command};
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
-use tokio::time::timeout;
 use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
+    AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
 };
 use warpgate_common::helpers::net::detect_port_knock;
+use warpgate_common::helpers::otp::OTP_DIGITS;
 use warpgate_common::{ListenEndpoint, Secret, Target, TargetOptions, TargetRdpOptions};
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
@@ -47,6 +52,7 @@ use warpgate_core::{
     ConfigProvider, DesktopEvent, DesktopInput, DesktopState, Services, SessionStateInit, State,
     WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
+use warpgate_protocol_vnc_ui as ui;
 use warpgate_rdp_ipc::server::{
     Event as ServerHelperEvent, Input as ServerHelperInput, ServeConfig,
 };
@@ -54,9 +60,9 @@ use warpgate_rdp_ipc::server::{
 use crate::PROTOCOL_NAME;
 use crate::session_handle::RdpSessionHandle;
 
-/// How long to wait for the serve helper to connect back to our loopback port before
-/// giving up (covers a helper that dies on startup, e.g. bad TLS material).
-const HELPER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// The fd number at which the serve helper receives its end of the RDP transport
+/// socketpair (`dup2`'d into place by `pre_exec`, then passed to the helper as a CLI arg).
+const HELPER_STREAM_FD: i32 = 3;
 /// Desktop size advertised to the viewer before the target connects (the target's real
 /// resolution arrives as a `Resize` shortly after).
 const DEFAULT_WIDTH: u16 = 1280;
@@ -163,25 +169,48 @@ async fn handle_connection(
     };
 
     // Warpgate owns the viewer socket + session; the serve helper runs the RDP server
-    // state machine. They're connected by a private loopback socket over which we shuttle
-    // the raw (TLS) RDP byte stream — Warpgate stays a transparent pipe and never sees
-    // plaintext, since TLS is terminated end-to-end between the viewer and the helper.
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-        .await
-        .context("binding loopback listener for the RDP serve helper")?;
-    let loopback_port = listener.local_addr()?.port();
+    // state machine. They're connected by a private, unnamed socketpair — the helper
+    // inherits its end as fd HELPER_STREAM_FD, so there's no loopback port for another
+    // local process to connect to or race. Warpgate stays a transparent pipe of the raw
+    // (TLS) RDP bytes and never sees plaintext: TLS is terminated end-to-end between the
+    // viewer and the helper.
+    let (warpgate_end, helper_end) =
+        StdUnixStream::pair().context("creating the RDP serve helper socketpair")?;
+    warpgate_end
+        .set_nonblocking(true)
+        .context("making the RDP transport non-blocking")?;
+    let mut loopback =
+        UnixStream::from_std(warpgate_end).context("wrapping the RDP transport")?;
+    let helper_fd = helper_end.as_raw_fd();
 
     // Kept in scope until after `spawn` so the Linux memfd stays open across exec.
     let helper = crate::helper::resolve()?;
-    let mut child = Command::new(helper.path())
+    let mut command = Command::new(helper.path());
+    command
         .arg("serve")
+        .arg(HELPER_STREAM_FD.to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         // Kill the helper if this task is cancelled/dropped (tokio doesn't by default).
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+    // Hand the helper its end of the socketpair as fd HELPER_STREAM_FD. `dup2` produces a
+    // fresh, non-CLOEXEC fd *in this child only*, while `helper_end` keeps CLOEXEC in the
+    // parent — so concurrent per-connection spawns can't inherit each other's transport.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::dup2(helper_fd, HELPER_STREAM_FD) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = command
         .spawn()
         .with_context(|| format!("spawning RDP serve helper ({})", helper.path().display()))?;
+    // The child now holds its own copy of the transport; drop ours so the socket fully
+    // closes (and the relay sees EOF) once the helper exits.
+    drop(helper_end);
 
     let mut child_stdin = child.stdin.take().context("serve helper stdin")?;
     let child_stdout = child.stdout.take().context("serve helper stdout")?;
@@ -196,9 +225,8 @@ async fn handle_connection(
         });
     }
 
-    // First stdin line: the serve config (loopback port + TLS material + initial size).
+    // First stdin line: the serve config (TLS material + initial size).
     let config = ServeConfig {
-        loopback_port,
         cert_pem,
         key_pem,
         width: DEFAULT_WIDTH,
@@ -213,17 +241,8 @@ async fn handle_connection(
     let (helper_in_tx, helper_in_rx) = unbounded_channel::<ServerHelperInput>();
     let stdin_task = tokio::spawn(helper_stdin_writer(child_stdin, helper_in_rx));
 
-    // The helper reads the config, then connects back to our loopback port; bound the
-    // wait so a helper that dies on startup doesn't hang the session.
-    let (mut loopback, _) = timeout(HELPER_CONNECT_TIMEOUT, listener.accept())
-        .await
-        .map_err(|_| {
-            anyhow!("RDP serve helper did not connect back within {HELPER_CONNECT_TIMEOUT:?}")
-        })?
-        .context("accepting serve helper loopback connection")?;
-    loopback.set_nodelay(true).ok();
-
-    // Run the raw byte relay (viewer ⇄ helper) and the JSON control loop concurrently;
+    // The socketpair is already connected — no connect-back to wait for. Run the raw byte
+    // relay (viewer ⇄ helper) and the JSON control loop concurrently;
     // whichever ends first tears the session down.
     tokio::select! {
         result = control_loop(services, server_handle, remote_address, child_stdout, helper_in_tx) => {
@@ -282,34 +301,18 @@ async fn control_loop(
                 )
                 .await
                 {
-                    Ok(Some((user_info, target, options))) => {
-                        {
-                            let handle = server_handle.lock().await;
-                            handle.set_user_info(user_info).await?;
-                            handle.set_target(&target).await?;
-                        }
-                        info!(target=%target.name, "Authorized");
-
-                        let session_id = server_handle.lock().await.id();
-                        let recorder = start_recorder(&services, &session_id).await.map(Arc::new);
-
-                        let crate::RdpClientHandles {
-                            event_rx,
-                            input_tx,
-                            abort_tx,
-                        } = crate::connect(options);
-                        let frame_bridge = tokio::spawn(frame_bridge(
-                            event_rx,
-                            helper_in_tx.clone(),
-                            recorder.clone(),
-                        ));
-                        backend = Some(BackendBridge {
-                            input_tx,
-                            abort_tx,
-                            frame_bridge,
-                            recorder,
-                        });
-
+                    Ok(AuthOutcome::Authorized(user_info, target, options)) => {
+                        backend = Some(
+                            connect_backend(
+                                &services,
+                                &server_handle,
+                                &helper_in_tx,
+                                user_info,
+                                target,
+                                options,
+                            )
+                            .await?,
+                        );
                         if helper_in_tx
                             .send(ServerHelperInput::AuthResponse { accept: true })
                             .is_err()
@@ -317,7 +320,60 @@ async fn control_loop(
                             break;
                         }
                     }
-                    Ok(None) => {
+                    Ok(AuthOutcome::NeedsInteractive(interactive)) => {
+                        // Accept the NLA so the RDP session starts, then collect the second
+                        // factor (TOTP / web approval) on a Warpgate-rendered holding screen
+                        // before connecting to the target.
+                        if helper_in_tx
+                            .send(ServerHelperInput::AuthResponse { accept: true })
+                            .is_err()
+                        {
+                            break;
+                        }
+                        match run_hold_screen(&services, &interactive, &mut lines, &helper_in_tx)
+                            .await
+                        {
+                            Ok(Some(user_info)) => {
+                                match finalize_user_auth(
+                                    &services,
+                                    &interactive.username,
+                                    &interactive.target_name,
+                                )
+                                .await
+                                {
+                                    Ok((target, options)) => {
+                                        backend = Some(
+                                            connect_backend(
+                                                &services,
+                                                &server_handle,
+                                                &helper_in_tx,
+                                                user_info,
+                                                target,
+                                                options,
+                                            )
+                                            .await?,
+                                        );
+                                    }
+                                    Err(error) => {
+                                        warn!(%error, "Authorization failed after second factor");
+                                        let _ = helper_in_tx.send(ServerHelperInput::Shutdown);
+                                        break;
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                warn!("Interactive authentication failed");
+                                let _ = helper_in_tx.send(ServerHelperInput::Shutdown);
+                                break;
+                            }
+                            Err(error) => {
+                                warn!(%error, "Holding-screen error");
+                                let _ = helper_in_tx.send(ServerHelperInput::Shutdown);
+                                break;
+                            }
+                        }
+                    }
+                    Ok(AuthOutcome::Failed) => {
                         warn!("Authentication failed");
                         let _ =
                             helper_in_tx.send(ServerHelperInput::AuthResponse { accept: false });
@@ -459,19 +515,38 @@ async fn start_recorder(services: &Services, session_id: &Uuid) -> Option<Deskto
     }
 }
 
+/// Result of validating the viewer's up-front (NLA) credentials.
+enum AuthOutcome {
+    /// Fully authenticated (password-only policy, or ticket auth).
+    Authorized(AuthStateUserInfo, Target, TargetRdpOptions),
+    /// Password accepted, but the policy needs an interactive second factor
+    /// (TOTP / web approval) — collected on the holding screen ([`run_hold_screen`]).
+    NeedsInteractive(InteractiveAuth),
+    /// Rejected, invalid, blocked, or a factor we can't collect over RDP.
+    Failed,
+}
+
+/// A partially-authenticated session awaiting its interactive second factor.
+struct InteractiveAuth {
+    state_id: Uuid,
+    username: String,
+    target_name: String,
+    remote_ip: IpAddr,
+}
+
 /// Authenticate the viewer's submitted credentials.
 ///
-/// RDP collects only a username and password up front (over NLA), so unlike the native
-/// VNC server we declare only [`CredentialKind::Password`] and reject any policy that
-/// needs an additional interactive factor (TOTP / web approval) — those can't be gathered
-/// over the RDP auth exchange. Ticket auth is fully supported.
+/// RDP collects only a username and password up front (over NLA). A password-only policy
+/// (or a ticket) authorises immediately; a policy that additionally needs TOTP or web
+/// approval returns [`AuthOutcome::NeedsInteractive`], and the caller gathers that factor
+/// on a holding screen after provisionally accepting the NLA.
 async fn authenticate(
     services: &Services,
-    server_handle: &Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
+    server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     selector: &str,
     password: String,
     remote_address: SocketAddr,
-) -> Result<Option<(AuthStateUserInfo, Target, TargetRdpOptions)>> {
+) -> Result<AuthOutcome> {
     let selector: AuthSelector = selector.into();
 
     match selector {
@@ -490,7 +565,7 @@ async fn authenticate(
                 .is_some()
             {
                 warn!(ip = %remote_ip, "RDP auth attempt from blocked IP");
-                return Ok(None);
+                return Ok(AuthOutcome::Failed);
             }
             if services
                 .login_protection
@@ -499,7 +574,7 @@ async fn authenticate(
                 .is_some()
             {
                 warn!(username = %username, "RDP auth attempt for locked user");
-                return Ok(None);
+                return Ok(AuthOutcome::Failed);
             }
 
             let (state_id, state_arc) = services
@@ -510,7 +585,11 @@ async fn authenticate(
                     Some(&server_handle.lock().await.id()),
                     &username,
                     PROTOCOL_NAME,
-                    &[CredentialKind::Password],
+                    &[
+                        CredentialKind::Password,
+                        CredentialKind::Totp,
+                        CredentialKind::WebUserApproval,
+                    ],
                     Some(remote_address.ip()),
                     Some("password"),
                 )
@@ -535,7 +614,7 @@ async fn authenticate(
                             credential_type: "password".to_string(),
                         })
                         .await;
-                    return Ok(None);
+                    return Ok(AuthOutcome::Failed);
                 }
             }
 
@@ -553,19 +632,30 @@ async fn authenticate(
                         .await;
                     let (target, options) =
                         finalize_user_auth(services, &user_info.username, &target_name).await?;
-                    Ok(Some((user_info, target, options)))
+                    Ok(AuthOutcome::Authorized(user_info, target, options))
                 }
-                // RDP can't collect a second factor interactively (see fn doc).
-                AuthResult::Need(_) | AuthResult::Rejected => Ok(None),
+                AuthResult::Need(kinds)
+                    if kinds.contains(&CredentialKind::Totp)
+                        || kinds.contains(&CredentialKind::WebUserApproval) =>
+                {
+                    Ok(AuthOutcome::NeedsInteractive(InteractiveAuth {
+                        state_id,
+                        username,
+                        target_name,
+                        remote_ip,
+                    }))
+                }
+                // A required factor we can't collect on the holding screen.
+                AuthResult::Need(_) | AuthResult::Rejected => Ok(AuthOutcome::Failed),
             }
         }
         AuthSelector::Ticket { secret } => match authorize_ticket(&services.db, &secret).await? {
             Some((ticket, target_model, user_info)) => {
                 consume_ticket(&services.db, &ticket.id).await?;
                 let (target, options) = find_rdp_target(services, &target_model.name).await?;
-                Ok(Some((user_info, target, options)))
+                Ok(AuthOutcome::Authorized(user_info, target, options))
             }
-            None => Ok(None),
+            None => Ok(AuthOutcome::Failed),
         },
     }
 }
@@ -604,4 +694,292 @@ async fn find_rdp_target(
         bail!("Target {target_name} is not an RDP target");
     };
     Ok((target.clone(), options.clone()))
+}
+
+/// Connect to the target and start bridging its framebuffer, once auth is complete.
+async fn connect_backend(
+    services: &Services,
+    server_handle: &Arc<Mutex<WarpgateServerHandle>>,
+    helper_in_tx: &UnboundedSender<ServerHelperInput>,
+    user_info: AuthStateUserInfo,
+    target: Target,
+    options: TargetRdpOptions,
+) -> Result<BackendBridge> {
+    {
+        let handle = server_handle.lock().await;
+        handle.set_user_info(user_info).await?;
+        handle.set_target(&target).await?;
+    }
+    info!(target=%target.name, "Authorized");
+
+    let session_id = server_handle.lock().await.id();
+    let recorder = start_recorder(services, &session_id).await.map(Arc::new);
+
+    let crate::RdpClientHandles {
+        event_rx,
+        input_tx,
+        abort_tx,
+    } = crate::connect(options);
+    let frame_bridge = tokio::spawn(frame_bridge(event_rx, helper_in_tx.clone(), recorder.clone()));
+    Ok(BackendBridge {
+        input_tx,
+        abort_tx,
+        frame_bridge,
+        recorder,
+    })
+}
+
+/// How often the holding screen repaints (spinner animation cadence).
+const HOLD_RENDER_INTERVAL: Duration = Duration::from_millis(200);
+/// Max wrong one-time passwords entered on the holding screen before giving up.
+const MAX_OTP_ATTEMPTS: usize = 3;
+
+/// A single OTP keypress on the holding screen.
+enum OtpAction {
+    Digit(char),
+    Backspace,
+    Submit,
+}
+
+/// Render a holding screen to the viewer and collect the interactive second factor — a
+/// TOTP typed on the viewer's keyboard, or an out-of-band web approval — until the auth
+/// state is fully accepted. Returns the authenticated user on success, `None` on failure
+/// or viewer disconnect. Input events are read from the same serve-helper channel as the
+/// main control loop, so it hands us `&mut lines` for the duration.
+async fn run_hold_screen(
+    services: &Services,
+    interactive: &InteractiveAuth,
+    lines: &mut Lines<BufReader<ChildStdout>>,
+    helper_in_tx: &UnboundedSender<ServerHelperInput>,
+) -> Result<Option<AuthStateUserInfo>> {
+    let state = services
+        .auth_state_store
+        .lock()
+        .await
+        .get(&interactive.state_id)
+        .context("auth state expired")?;
+    let mut approval = services
+        .auth_state_store
+        .lock()
+        .await
+        .subscribe(interactive.state_id);
+
+    // Size the viewer to the UI canvas; the target's real size follows once it connects.
+    let _ = helper_in_tx.send(ServerHelperInput::Resize {
+        width: ui::SCREEN_W,
+        height: ui::SCREEN_H,
+    });
+
+    let mut otp = String::new();
+    let mut otp_failures = 0usize;
+    let mut tick = 0u64;
+    let mut ticker = tokio::time::interval(HOLD_RENDER_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        let need = match state.lock().await.verify() {
+            AuthResult::Accepted { user_info } => {
+                let _ = services
+                    .login_protection
+                    .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
+                    .await;
+                services
+                    .auth_state_store
+                    .lock()
+                    .await
+                    .complete(&interactive.state_id)
+                    .await;
+                return Ok(Some(user_info));
+            }
+            AuthResult::Rejected => return Ok(None),
+            AuthResult::Need(need) => need,
+        };
+
+        let Some(prompt) = build_prompt(services, &state, &need, &otp).await else {
+            warn!(
+                "RDP auth policy requires a factor that can't be collected on the holding screen"
+            );
+            return Ok(None);
+        };
+        let awaiting_web = matches!(prompt, ui::AuthPrompt::WebApproval { .. });
+
+        render_hold_frame(helper_in_tx, tick, &prompt)?;
+
+        tokio::select! {
+            // Browser approval landed (or the signal lagged/closed); re-verify on the next loop.
+            _ = approval.recv(), if awaiting_web => {}
+            line = lines.next_line() => {
+                let Some(line) = line.context("reading serve helper output")? else {
+                    return Ok(None);
+                };
+                let action = match serde_json::from_str::<ServerHelperEvent>(line.trim()) {
+                    Ok(ServerHelperEvent::Disconnected) => return Ok(None),
+                    Ok(ServerHelperEvent::Scancode { code, down, .. }) if down => {
+                        scancode_otp_action(code)
+                    }
+                    Ok(ServerHelperEvent::Key { keysym, down }) if down => key_otp_action(keysym),
+                    _ => None,
+                };
+                if !awaiting_web
+                    && let Some(action) = action
+                    && apply_otp(action, &mut otp, &mut otp_failures, services, &state, interactive)
+                        .await?
+                {
+                    warn!("too many incorrect one-time passwords");
+                    return Ok(None);
+                }
+            }
+            _ = ticker.tick() => tick = tick.wrapping_add(1),
+        }
+    }
+}
+
+/// Pick the prompt to show for the credentials still needed. Mirrors the native VNC flow:
+/// TOTP takes precedence over web approval when a policy allows either.
+async fn build_prompt(
+    services: &Services,
+    state: &Arc<Mutex<AuthState>>,
+    need: &HashSet<CredentialKind>,
+    otp: &str,
+) -> Option<ui::AuthPrompt> {
+    if need.contains(&CredentialKind::Totp) {
+        Some(ui::AuthPrompt::Otp {
+            entered: otp.to_owned(),
+        })
+    } else if need.contains(&CredentialKind::WebUserApproval) {
+        Some(ui::AuthPrompt::WebApproval {
+            url: web_approval_url(services, state).await,
+            security_key: state.lock().await.identification_string().to_owned(),
+        })
+    } else {
+        None
+    }
+}
+
+async fn web_approval_url(services: &Services, state: &Arc<Mutex<AuthState>>) -> Option<String> {
+    let external_url = {
+        let config = services.config.lock().await;
+        construct_external_url(None, &config, None)
+            .await
+            .inspect_err(|error| warn!(%error, "Failed to construct external URL"))
+            .ok()?
+    };
+    let url = state.lock().await.construct_web_approval_url(external_url);
+    Some(url.to_string())
+}
+
+/// Apply one OTP keypress. Returns `Ok(true)` when too many wrong OTPs have been entered
+/// and the session should be abandoned.
+async fn apply_otp(
+    action: OtpAction,
+    otp: &mut String,
+    otp_failures: &mut usize,
+    services: &Services,
+    state: &Arc<Mutex<AuthState>>,
+    interactive: &InteractiveAuth,
+) -> Result<bool> {
+    let submit = match action {
+        OtpAction::Digit(c) => {
+            // OTP chars are always ASCII digits, so byte length == char count.
+            if otp.len() < OTP_DIGITS {
+                otp.push(c);
+            }
+            otp.len() >= OTP_DIGITS
+        }
+        OtpAction::Backspace => {
+            otp.pop();
+            false
+        }
+        OtpAction::Submit => !otp.is_empty(),
+    };
+    if !submit {
+        return Ok(false);
+    }
+
+    let credential = AuthCredential::Otp(Secret::new(std::mem::take(otp)));
+    // Route through the shared helper so a bad OTP emits the same audit event as SSH/etc.
+    let valid = validate_and_add_credential(
+        &mut *state.lock().await,
+        &credential,
+        &mut *services.config_provider.lock().await,
+    )
+    .await
+    .unwrap_or(false);
+
+    if !valid {
+        *otp_failures += 1;
+        let _ = services
+            .login_protection
+            .record_failed_attempt(FailedAttemptInfo {
+                username: interactive.username.clone(),
+                remote_ip: interactive.remote_ip,
+                protocol: "rdp".to_string(),
+                credential_type: "otp".to_string(),
+            })
+            .await;
+        if *otp_failures >= MAX_OTP_ATTEMPTS {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Paint the current holding-screen prompt to the viewer as a full BGRA frame.
+fn render_hold_frame(
+    helper_in_tx: &UnboundedSender<ServerHelperInput>,
+    tick: u64,
+    prompt: &ui::AuthPrompt,
+) -> Result<()> {
+    // The UI renders RGB888 (the VNC screen); convert to the BGRA the serve helper expects.
+    let rgb = ui::render_authentication(tick, prompt).unwrap_or_default();
+    let mut bgra = Vec::with_capacity(rgb.len() / 3 * 4);
+    for px in rgb.chunks_exact(3) {
+        if let Some(&[r, g, b]) = px.first_chunk::<3>() {
+            bgra.extend_from_slice(&[b, g, r, 255]);
+        }
+    }
+    if helper_in_tx
+        .send(ServerHelperInput::Frame {
+            x: 0,
+            y: 0,
+            width: ui::SCREEN_W,
+            height: ui::SCREEN_H,
+            data: STANDARD.encode(&bgra),
+        })
+        .is_err()
+    {
+        bail!("serve helper channel closed");
+    }
+    Ok(())
+}
+
+/// Map a PC/AT set-1 scancode (what mstsc/FreeRDP send) to an OTP action.
+fn scancode_otp_action(code: u8) -> Option<OtpAction> {
+    Some(match code {
+        0x02..=0x0a => OtpAction::Digit(char::from(b'1' + (code - 0x02))), // top row 1..9
+        0x0b => OtpAction::Digit('0'),
+        0x52 => OtpAction::Digit('0'), // keypad 0
+        0x4f => OtpAction::Digit('1'),
+        0x50 => OtpAction::Digit('2'),
+        0x51 => OtpAction::Digit('3'),
+        0x4b => OtpAction::Digit('4'),
+        0x4c => OtpAction::Digit('5'),
+        0x4d => OtpAction::Digit('6'),
+        0x47 => OtpAction::Digit('7'),
+        0x48 => OtpAction::Digit('8'),
+        0x49 => OtpAction::Digit('9'),
+        0x0e => OtpAction::Backspace,
+        0x1c => OtpAction::Submit, // Enter (main + keypad)
+        _ => return None,
+    })
+}
+
+/// Map a Unicode keypress (viewers that send `Key` instead of scancodes) to an OTP action.
+fn key_otp_action(keysym: u32) -> Option<OtpAction> {
+    Some(match keysym {
+        0x30..=0x39 => OtpAction::Digit(char::from(u8::try_from(keysym).ok()?)), // '0'..'9'
+        0x08 => OtpAction::Backspace,
+        0x0d | 0x0a => OtpAction::Submit, // CR / LF
+        _ => return None,
+    })
 }

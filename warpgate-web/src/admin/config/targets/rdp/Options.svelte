@@ -1,6 +1,7 @@
 <script lang="ts">
-    import { FormGroup } from '@sveltestrap/sveltestrap'
-    import { type TargetOptionsTargetRdpOptions } from '../../../lib/api'
+    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { type TargetOptionsTargetRdpOptions } from 'admin/lib/api'
+    import HelpText from 'admin/lib/HelpText.svelte';
 
     interface Props {
         options: TargetOptionsTargetRdpOptions,
@@ -42,12 +43,7 @@
 
 <h4 class="mt-4">TLS</h4>
 
-<div class="form-check">
-    <input class="form-check-input" type="checkbox" id="rdp-verify-tls" bind:checked={options.verifyTls} />
-    <label class="form-check-label" for="rdp-verify-tls">
-        Verify server certificate
-    </label>
-</div>
-<div class="text-muted small mt-1">
-    Many RDP servers use self-signed certificates; leave off unless the server presents a certificate trusted by the OS.
-</div>
+<Input type="switch" label="Verify certificate" bind:checked={options.verifyTls} />
+<HelpText>
+    Typically, RDP servers use self-signed certificates, so this is off by default.
+</HelpText>

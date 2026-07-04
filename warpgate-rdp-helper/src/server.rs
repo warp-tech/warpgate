@@ -24,6 +24,7 @@
 
 use std::net::SocketAddr;
 use std::num::{NonZeroU16, NonZeroUsize};
+use std::os::fd::{FromRawFd, RawFd};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -38,7 +39,7 @@ use ironrdp_server::{
     RdpServerDisplay, RdpServerDisplayUpdates, RdpServerInputHandler,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
+use tokio::net::UnixStream as TokioUnixStream;
 use tokio::sync::{mpsc, Mutex};
 use tracing::warn;
 use warpgate_rdp_ipc::server::{Event as ControlOut, Input as ControlIn, ServeConfig};
@@ -65,6 +66,14 @@ pub async fn entry() {
 }
 
 async fn run() -> Result<()> {
+    // Warpgate hands us our end of the RDP-transport socketpair as an inherited fd, passed
+    // as the second CLI argument (`serve <fd>`).
+    let raw_fd: RawFd = std::env::args()
+        .nth(2)
+        .context("missing RDP transport fd argument")?
+        .parse()
+        .context("parsing RDP transport fd argument")?;
+
     // `ironrdp-server` pulls in tokio-rustls with the aws-lc-rs provider (its
     // default); install it as the process default so `ServerConfig::builder()` works.
     let _ = ironrdp_server::tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
@@ -89,11 +98,14 @@ async fn run() -> Result<()> {
 
     let tls = build_tls_acceptor(&config.cert_pem, &config.key_pem)?;
 
-    // Warpgate is listening on the loopback port; connecting yields the raw RDP
-    // byte stream the IronRDP server speaks over (Warpgate relays it to the viewer).
-    let stream = TcpStream::connect(("127.0.0.1", config.loopback_port))
-        .await
-        .with_context(|| format!("connecting to Warpgate loopback port {}", config.loopback_port))?;
+    // The inherited fd is our end of the socketpair — the raw RDP byte stream the IronRDP
+    // server speaks over (Warpgate relays it to the viewer). Safety: Warpgate dup2'd this
+    // fd into place before exec and passed us its number; nothing else owns it.
+    let std_stream = unsafe { std::os::unix::net::UnixStream::from_raw_fd(raw_fd) };
+    std_stream
+        .set_nonblocking(true)
+        .context("making the RDP transport non-blocking")?;
+    let stream = TokioUnixStream::from_std(std_stream).context("wrapping the RDP transport")?;
 
     let display = DisplayHandler {
         width: config.width,

@@ -117,8 +117,8 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
     postgres: new Set([CredentialKind.Password, CredentialKind.WebUserApproval]),
     kubernetes: new Set([CredentialKind.Certificate, CredentialKind.WebUserApproval]),
     vnc: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.WebUserApproval]),
-    // Native RDP collects only a password over NLA; it can't gather interactive 2FA.
-    rdp: new Set([CredentialKind.Password]),
+    // Password over NLA, then TOTP / web approval gathered on the holding screen.
+    rdp: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.WebUserApproval]),
 }
 
 export function abbreviatePublicKey (key: string): string {

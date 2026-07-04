@@ -1,0 +1,37 @@
+# Vendored fork of vnc-rs 0.5.3 (https://github.com/HsuJv/vnc-rs), MIT OR Apache-2.0.
+# See PATCHES.md for the exact changes Warpgate makes on top of upstream 0.5.3.
+[package]
+name = "vnc-rs"
+version = "0.5.3"
+edition = "2021"
+description = "An async implementation of VNC client side protocol (vendored fork; see PATCHES.md)"
+homepage = "https://github.com/HsuJv/vnc-rs"
+repository = "https://github.com/HsuJv/vnc-rs"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["vnc"]
+publish = false
+
+[lib]
+name = "vnc"
+path = "src/lib.rs"
+
+[dependencies]
+async_io_stream = "0.3"
+flate2 = "1"
+futures = "0.3"
+thiserror = "1"
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["compat"] }
+tracing = { version = "0.1", features = ["log"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.tokio]
+version = "1"
+features = ["full"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.tokio]
+version = "1"
+features = ["sync", "macros", "io-util", "rt", "time"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.wasm-bindgen-futures]
+version = "0.4"

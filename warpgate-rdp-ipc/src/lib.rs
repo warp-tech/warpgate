@@ -55,10 +55,11 @@ pub mod client {
 pub mod server {
     use serde::{Deserialize, Serialize};
 
-    /// First stdin line: TLS material + the loopback port Warpgate relays the viewer to.
+    /// First stdin line: TLS material + initial size. The RDP byte stream is *not* here —
+    /// Warpgate hands the helper its end of a socketpair as an inherited fd (passed as a
+    /// CLI argument), so there's no loopback port to name or race.
     #[derive(Serialize, Deserialize)]
     pub struct ServeConfig {
-        pub loopback_port: u16,
         pub cert_pem: String,
         pub key_pem: String,
         #[serde(default = "super::default_width")]

@@ -27,6 +27,7 @@ members = [
     "warpgate-web-clients-common",
     "warpgate-web-desktop",
     "warpgate-web-ssh",
+    "vendor/vnc-rs",
 ]
 # warpgate-rdp-helper is intentionally excluded: IronRDP's NLA/CredSSP stack (sspi/picky)
 # exact-pins RustCrypto pre-release crates that conflict with russh's exact pins, so RDP
