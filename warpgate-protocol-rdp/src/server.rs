@@ -25,6 +25,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, copy_bidirectional};
 use tokio::net::{TcpListener, TcpStream};
@@ -123,83 +125,73 @@ impl BackendBridge {
     }
 }
 
-pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
+pub async fn bind_server(
+    services: Services,
+    address: ListenEndpoint,
     // The serve helper terminates TLS itself (it has its own rustls with a different
     // crypto provider), so we hand it the raw PEM rather than a built acceptor.
-    let (cert_pem, key_pem) = {
-        let config = services.config.lock().await;
-        let paths_rel_to = services.global_params.paths_relative_to();
-        let certificate_path = paths_rel_to.join(&config.store.rdp.certificate);
-        let key_path = paths_rel_to.join(&config.store.rdp.key);
-
-        let cert_pem = tokio::fs::read_to_string(&certificate_path)
-            .await
-            .with_context(|| {
-                format!(
-                    "reading RDP TLS certificate from '{}'",
-                    certificate_path.display()
-                )
-            })?;
-        let key_pem = tokio::fs::read_to_string(&key_path)
-            .await
-            .with_context(|| format!("reading RDP TLS private key from '{}'", key_path.display()))?;
-        (cert_pem, key_pem)
-    };
-
+    cert_pem: String,
+    key_pem: String,
+) -> Result<BoxFuture<'static, Result<()>>> {
     let mut listener = address.tcp_accept_stream().await?;
 
-    while let Some(stream) = listener.next().await {
-        let remote_address = stream.peer_addr().context("getting peer address")?;
-        stream.set_nodelay(true)?;
-        if detect_port_knock(&stream).await {
-            continue;
+    Ok(async move {
+        while let Some(stream) = listener.next().await {
+            let Ok(remote_address) = stream.peer_addr() else {
+                continue;
+            };
+            let _ = stream.set_nodelay(true);
+            if detect_port_knock(&stream).await {
+                continue;
+            }
+
+            let services = services.clone();
+            let cert_pem = cert_pem.clone();
+            let key_pem = key_pem.clone();
+            tokio::spawn(async move {
+                let (session_handle, mut abort_rx) = RdpSessionHandle::new();
+
+                let server_handle = match State::register_session(
+                    &services.state,
+                    &PROTOCOL_NAME,
+                    SessionStateInit {
+                        remote_address: Some(remote_address),
+                        handle: Box::new(session_handle),
+                    },
+                )
+                .await
+                {
+                    Ok(h) => h,
+                    Err(error) => {
+                        error!(%error, "Failed to register session");
+                        return;
+                    }
+                };
+
+                let span = info_span!("RDP", session=%server_handle.lock().await.id());
+
+                tokio::select! {
+                    result = handle_connection(
+                        services,
+                        server_handle.clone(),
+                        stream,
+                        remote_address,
+                        cert_pem,
+                        key_pem,
+                    ).instrument(span) => match result {
+                        Ok(()) => info!("Session ended"),
+                        Err(error) => error!(%error, "Session failed"),
+                    },
+                    _ = abort_rx.recv() => {
+                        warn!("Session aborted by admin");
+                    }
+                }
+            });
         }
 
-        let services = services.clone();
-        let cert_pem = cert_pem.clone();
-        let key_pem = key_pem.clone();
-        tokio::spawn(async move {
-            let (session_handle, mut abort_rx) = RdpSessionHandle::new();
-
-            let server_handle = match State::register_session(
-                &services.state,
-                &PROTOCOL_NAME,
-                SessionStateInit {
-                    remote_address: Some(remote_address),
-                    handle: Box::new(session_handle),
-                },
-            )
-            .await
-            {
-                Ok(h) => h,
-                Err(error) => {
-                    error!(%error, "Failed to register session");
-                    return;
-                }
-            };
-
-            let span = info_span!("RDP", session=%server_handle.lock().await.id());
-
-            tokio::select! {
-                result = handle_connection(
-                    services,
-                    server_handle.clone(),
-                    stream,
-                    remote_address,
-                    cert_pem,
-                    key_pem,
-                ).instrument(span) => match result {
-                    Ok(()) => info!("Session ended"),
-                    Err(error) => error!(%error, "Session failed"),
-                },
-                _ = abort_rx.recv() => {
-                    warn!("Session aborted by admin");
-                }
-            }
-        });
+        Ok(())
     }
-
-    Ok(())
+    .boxed())
 }
 
 async fn handle_connection(
@@ -574,6 +566,7 @@ async fn authenticate(
                     PROTOCOL_NAME,
                     &[CredentialKind::Password],
                     Some(remote_address.ip()),
+                    Some("password"),
                 )
                 .await?;
 

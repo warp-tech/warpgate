@@ -14,7 +14,7 @@ mod helper;
 mod server;
 mod session_handle;
 
-pub use server::run_server;
+pub use server::bind_server;
 
 use std::process::Stdio;
 
@@ -22,6 +22,7 @@ use anyhow::Context;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::{
@@ -29,6 +30,7 @@ use tokio::sync::mpsc::{
 };
 use tracing::{Instrument, debug, error, info_span, warn};
 use warpgate_common::{ListenEndpoint, ProtocolName, RdpTargetAuth, TargetRdpOptions};
+use warpgate_tls::TlsCertificateAndPrivateKey;
 use warpgate_core::{
     DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
     ProtocolServer, Services,
@@ -52,8 +54,21 @@ impl RdpProtocolServer {
 }
 
 impl ProtocolServer for RdpProtocolServer {
-    async fn run(self, address: ListenEndpoint) -> anyhow::Result<()> {
-        run_server(self.services, address).await
+    async fn bind(
+        self,
+        address: ListenEndpoint,
+        tls: Vec<TlsCertificateAndPrivateKey>,
+    ) -> anyhow::Result<BoxFuture<'static, anyhow::Result<()>>> {
+        // The serve helper terminates TLS itself, so hand it the raw PEM.
+        let certificate_and_key = tls
+            .into_iter()
+            .next()
+            .context("RDP requires a TLS certificate and key")?;
+        let cert_pem = String::from_utf8(certificate_and_key.certificate.bytes().to_vec())
+            .context("RDP TLS certificate is not valid UTF-8 PEM")?;
+        let key_pem = String::from_utf8(certificate_and_key.private_key.bytes().to_vec())
+            .context("RDP TLS private key is not valid UTF-8 PEM")?;
+        bind_server(self.services, address, cert_pem, key_pem).await
     }
 
     fn name(&self) -> &'static str {

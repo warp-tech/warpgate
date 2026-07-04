@@ -17,7 +17,7 @@ import { handleReauthError } from 'common/reauth'
 let instructionsTarget: TargetSnapshot|undefined = $state()
 
 const canEditTargets = $derived($serverInfo?.adminPermissions?.targetsEdit ?? false)
-const webSshEnabled = $derived($serverInfo?.webSshEnabled ?? true)
+const webClientsEnabled = $derived($serverInfo?.webClientsEnabled ?? true)
 
 async function openWebSsh (target: TargetSnapshot) {
     try {
@@ -33,10 +33,16 @@ async function openWebSsh (target: TargetSnapshot) {
 }
 
 async function openWebDesktop (target: TargetSnapshot) {
-    const { sessionId } = await api.createWebDesktopSession({
-        createWebDesktopSessionBody: { targetId: target.id },
-    })
-    window.open(`/@warpgate#/web-desktop/${sessionId}`, '_blank')
+    try {
+        const { sessionId } = await api.createWebDesktopSession({
+            createWebDesktopSessionBody: { targetId: target.id },
+        })
+        window.open(`/@warpgate#/web-desktop/${sessionId}`, '_blank')
+    } catch (err) {
+        if (!(await handleReauthError(err))) {
+            throw err
+        }
+    }
 }
 
 function loadTargets(
@@ -83,13 +89,17 @@ function selectTarget (target: TargetSnapshot) {
         }
     } else if (target.kind === TargetKind.Ssh) {
         const targetClickAction = $serverInfo?.targetClickAction
-        if (!webSshEnabled || targetClickAction === TargetClickAction.ShowInstructions) {
+        if (!webClientsEnabled || targetClickAction === TargetClickAction.ShowInstructions) {
             instructionsTarget = target
         } else {
             openWebSsh(target)
         }
     } else if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) {
-        openWebDesktop(target)
+        if (!webClientsEnabled) {
+            instructionsTarget = target
+        } else {
+            openWebDesktop(target)
+        }
     } else {
         instructionsTarget = target
     }
@@ -204,7 +214,7 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                     </DropdownToggle>
                     <DropdownMenu end>
                         {#if target.kind === TargetKind.Ssh}
-                            {#if webSshEnabled}
+                            {#if webClientsEnabled}
                                 <DropdownItem onclick={e => {
                                     openWebSsh(target)
                                     e.preventDefault()
@@ -254,7 +264,7 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
         {/if}
     </ModalBody>
     <ModalFooter>
-        {#if instructionsTarget?.kind === TargetKind.Ssh && webSshEnabled}
+        {#if instructionsTarget?.kind === TargetKind.Ssh && webClientsEnabled}
             <Button
                 color="primary"
                 class="d-flex align-items-center justify-content-center gap-2 modal-button"

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use poem::session::Session;
 use poem::web::{Data, RemoteAddr};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -8,8 +9,9 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::EntityTrait;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
-use warpgate_common_http::auth::AuthenticatedRequestContext;
+use warpgate_common_http::auth::{AuthenticatedRequestContext, web_reauth_required};
 use warpgate_core::ConfigProvider;
+use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Target::{self, TargetKind};
 use warpgate_web_desktop::WebDesktopClientManager;
 
@@ -38,6 +40,8 @@ struct WebDesktopSessionInfo {
 enum CreateWebDesktopSessionResponse {
     #[oai(status = 201)]
     Created(Json<WebDesktopSessionCreated>),
+    #[oai(status = 401)]
+    ReauthRequired,
     #[oai(status = 403)]
     Forbidden,
     #[oai(status = 404)]
@@ -75,6 +79,7 @@ impl Api {
     async fn api_create_web_desktop_session(
         &self,
         remote_addr: &RemoteAddr,
+        session: &Session,
         ctx: Data<&AuthenticatedRequestContext>,
         body: Json<CreateWebDesktopSessionBody>,
         manager: Data<&Arc<WebDesktopClientManager>>,
@@ -83,6 +88,19 @@ impl Api {
         let (Some(username), user_id) = (ctx.auth.username(), ctx.auth.user_id()) else {
             return Ok(CreateWebDesktopSessionResponse::Forbidden);
         };
+
+        if web_reauth_required(&ctx, session).await? {
+            return Ok(CreateWebDesktopSessionResponse::ReauthRequired);
+        }
+
+        // Same global gate as web SSH: the in-browser RDP/VNC desktop clients.
+        if !Parameters::Entity::get(&*ctx.services().db.lock().await)
+            .await
+            .map_err(WarpgateError::from)?
+            .web_clients_enabled
+        {
+            return Ok(CreateWebDesktopSessionResponse::Forbidden);
+        }
 
         let Some(target) = Target::Entity::find_by_id(body.target_id)
             .one(&*ctx.services().db.lock().await)

@@ -1,14 +1,16 @@
 use std::fmt::Debug;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use futures::future::BoxFuture;
 use warpgate_common::{ListenEndpoint, ProtocolName};
 use warpgate_core::{ProtocolServer, Services};
+use warpgate_tls::TlsCertificateAndPrivateKey;
 
 mod client;
 mod server;
 
 pub use client::{VncClientHandles, connect};
-pub use server::run_server;
+pub use server::bind_server;
 
 pub static PROTOCOL_NAME: ProtocolName = "VNC";
 
@@ -25,8 +27,16 @@ impl VncProtocolServer {
 }
 
 impl ProtocolServer for VncProtocolServer {
-    async fn run(self, address: ListenEndpoint) -> Result<()> {
-        run_server(self.services, address).await
+    async fn bind(
+        self,
+        address: ListenEndpoint,
+        tls: Vec<TlsCertificateAndPrivateKey>,
+    ) -> Result<BoxFuture<'static, Result<()>>> {
+        let certificate_and_key = tls
+            .into_iter()
+            .next()
+            .context("VNC requires a TLS certificate and key")?;
+        bind_server(self.services, address, certificate_and_key).await
     }
 
     fn name(&self) -> &'static str {

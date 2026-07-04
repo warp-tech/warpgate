@@ -129,6 +129,37 @@ impl ServerMessage {
                 | Self::Cursor { .. }
         )
     }
+
+    /// Encode for the WebSocket. Pixel-carrying frames are sent as compact **binary**
+    /// (`[kind: u8][x,y,w,h: u16 LE][pixels…]`) so large buffers avoid the base64 +
+    /// JSON-string cost that otherwise pins a core on the hot path; everything else stays
+    /// small JSON text.
+    pub fn ws_payload(&self) -> WsPayload {
+        match self {
+            Self::RawImage { rect, data } => WsPayload::Binary(encode_image(1, *rect, &data.0)),
+            Self::JpegImage { rect, data } => WsPayload::Binary(encode_image(2, *rect, &data.0)),
+            Self::Cursor { rect, data } => WsPayload::Binary(encode_image(3, *rect, &data.0)),
+            other => WsPayload::Text(serde_json::to_string(other).unwrap_or_default()),
+        }
+    }
+}
+
+/// A WebSocket payload: small control messages as JSON text, pixel frames as binary.
+pub enum WsPayload {
+    Text(String),
+    Binary(Vec<u8>),
+}
+
+/// `[kind: u8][x: u16 LE][y: u16 LE][width: u16 LE][height: u16 LE][pixels…]`.
+fn encode_image(kind: u8, rect: WsRect, data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(9 + data.len());
+    out.push(kind);
+    out.extend_from_slice(&rect.x.to_le_bytes());
+    out.extend_from_slice(&rect.y.to_le_bytes());
+    out.extend_from_slice(&rect.width.to_le_bytes());
+    out.extend_from_slice(&rect.height.to_le_bytes());
+    out.extend_from_slice(data);
+    out
 }
 
 fn state_name(state: DesktopState) -> &'static str {

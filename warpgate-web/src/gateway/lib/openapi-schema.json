@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.25.5-58-g270039d4-modified"
+    "version": "v0.26.0-35-g86c7d219-modified"
   },
   "servers": [
     {
@@ -1187,6 +1187,9 @@
               }
             }
           },
+          "401": {
+            "description": ""
+          },
           "403": {
             "description": ""
           },
@@ -1306,6 +1309,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": ""
           },
           "403": {
             "description": ""
@@ -1877,8 +1883,9 @@
           "ticket_require_description",
           "ticket_request_show_all_targets",
           "target_click_action",
-          "web_ssh_enabled",
-          "has_ldap"
+          "web_clients_enabled",
+          "has_ldap",
+          "should_prompt_analytics"
         ],
         "properties": {
           "version": {
@@ -1939,7 +1946,7 @@
             "type": "integer",
             "format": "int64"
           },
-          "web_ssh_enabled": {
+          "web_clients_enabled": {
             "type": "boolean"
           },
           "has_ldap": {
@@ -1952,6 +1959,9 @@
             "$ref": "#/components/schemas/AdminPermissions"
           },
           "running_on_ec2": {
+            "type": "boolean"
+          },
+          "should_prompt_analytics": {
             "type": "boolean"
           }
         }

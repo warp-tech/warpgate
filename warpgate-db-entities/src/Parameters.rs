@@ -93,7 +93,7 @@ pub struct Model {
     pub lp_user_exempt_admins: bool,
     #[sea_orm(column_type = "Text")]
     pub ssh_banner: String,
-    pub web_ssh_enabled: bool,
+    pub web_clients_enabled: bool,
     pub analytics_consent: AnalyticsConsent,
     pub analytics_normal: bool,
     pub analytics_instance_id: String,
@@ -163,7 +163,7 @@ impl Entity {
                     lp_user_lockout_duration_seconds: Set(3600),
                     lp_user_exempt_admins: Set(true),
                     ssh_banner: Set("".into()),
-                    web_ssh_enabled: Set(true),
+                    web_clients_enabled: Set(true),
                     analytics_consent: Set(AnalyticsConsent::Undecided),
                     analytics_normal: Set(false),
                     analytics_instance_id: Set(Uuid::new_v4().to_string()),

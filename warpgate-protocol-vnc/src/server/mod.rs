@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use tokio::io::{AsyncRead, AsyncWrite, copy_bidirectional};
@@ -37,9 +39,7 @@ use warpgate_core::{
     WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 use warpgate_protocol_vnc_ui as ui;
-use warpgate_tls::{
-    ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
-};
+use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
 use self::protocol::{
     ClientEvent, DEFAULT_PIXEL_FORMAT, PixelFormat, forward_format_setup, pack_bgra, pack_rgb,
@@ -54,28 +54,11 @@ use self::rfb::{
 use self::session_handle::VncSessionHandle;
 use crate::PROTOCOL_NAME;
 
-pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<()> {
-    let certificate_and_key = {
-        let config = services.config.lock().await;
-        let paths_rel_to = services.global_params.paths_relative_to();
-        let certificate_path = paths_rel_to.join(&config.store.vnc.certificate);
-        let key_path = paths_rel_to.join(&config.store.vnc.key);
-
-        TlsCertificateAndPrivateKey {
-            certificate: TlsCertificateBundle::from_file(&certificate_path)
-                .await
-                .with_context(|| {
-                    format!(
-                        "reading TLS certificate from '{}'",
-                        certificate_path.display()
-                    )
-                })?,
-            private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
-                format!("reading TLS private key from '{}'", key_path.display())
-            })?,
-        }
-    };
-
+pub async fn bind_server(
+    services: Services,
+    address: ListenEndpoint,
+    certificate_and_key: TlsCertificateAndPrivateKey,
+) -> Result<BoxFuture<'static, Result<()>>> {
     let tls_config = ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::aws_lc_rs::default_provider(),
     ))
@@ -88,56 +71,61 @@ pub async fn run_server(services: Services, address: ListenEndpoint) -> Result<(
 
     let mut listener = address.tcp_accept_stream().await?;
 
-    while let Some(stream) = listener.next().await {
-        let remote_address = stream.peer_addr().context("getting peer address")?;
-        stream.set_nodelay(true)?;
-        if detect_port_knock(&stream).await {
-            continue;
+    Ok(async move {
+        while let Some(stream) = listener.next().await {
+            let Ok(remote_address) = stream.peer_addr() else {
+                continue;
+            };
+            let _ = stream.set_nodelay(true);
+            if detect_port_knock(&stream).await {
+                continue;
+            }
+
+            let tls_config = tls_config.clone();
+            let services = services.clone();
+            tokio::spawn(async move {
+                let (session_handle, mut abort_rx) = VncSessionHandle::new();
+
+                let server_handle = match State::register_session(
+                    &services.state,
+                    &PROTOCOL_NAME,
+                    SessionStateInit {
+                        remote_address: Some(remote_address),
+                        handle: Box::new(session_handle),
+                    },
+                )
+                .await
+                {
+                    Ok(h) => h,
+                    Err(error) => {
+                        error!(%error, "Failed to register session");
+                        return;
+                    }
+                };
+
+                let span = info_span!("VNC", session=%server_handle.lock().await.id());
+
+                tokio::select! {
+                    result = handle_connection(
+                        services,
+                        server_handle.clone(),
+                        stream,
+                        tls_config,
+                        remote_address,
+                    ).instrument(span) => match result {
+                        Ok(()) => info!("Session ended"),
+                        Err(error) => error!(%error, "Session failed"),
+                    },
+                    _ = abort_rx.recv() => {
+                        warn!("Session aborted by admin");
+                    }
+                }
+            });
         }
 
-        let tls_config = tls_config.clone();
-        let services = services.clone();
-        tokio::spawn(async move {
-            let (session_handle, mut abort_rx) = VncSessionHandle::new();
-
-            let server_handle = match State::register_session(
-                &services.state,
-                &PROTOCOL_NAME,
-                SessionStateInit {
-                    remote_address: Some(remote_address),
-                    handle: Box::new(session_handle),
-                },
-            )
-            .await
-            {
-                Ok(h) => h,
-                Err(error) => {
-                    error!(%error, "Failed to register session");
-                    return;
-                }
-            };
-
-            let span = info_span!("VNC", session=%server_handle.lock().await.id());
-
-            tokio::select! {
-                result = handle_connection(
-                    services,
-                    server_handle.clone(),
-                    stream,
-                    tls_config,
-                    remote_address,
-                ).instrument(span) => match result {
-                    Ok(()) => info!("Session ended"),
-                    Err(error) => error!(%error, "Session failed"),
-                },
-                _ = abort_rx.recv() => {
-                    warn!("Session aborted by admin");
-                }
-            }
-        });
+        Ok(())
     }
-
-    Ok(())
+    .boxed())
 }
 
 /// A timeout for the case where the client stalls after
@@ -943,6 +931,7 @@ async fn authenticate(
                         CredentialKind::WebUserApproval,
                     ],
                     Some(remote_address.ip()),
+                    Some("password"),
                 )
                 .await?;
 

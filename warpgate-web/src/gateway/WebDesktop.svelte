@@ -5,7 +5,7 @@
     import InfoBox from 'common/InfoBox.svelte'
     import { ReconnectingWebSocket, ConnectionState } from './lib/ReconnectingWebSocket.svelte'
     import { loadTheme } from 'theme'
-    import { applyDesktopFrame, type Rect } from 'common/desktopCanvas'
+    import { applyDesktopFrame, isIncrementalFrame, type DesktopFrame, type Rect } from 'common/desktopCanvas'
 
     interface Props {
         params: { sessionId: string }
@@ -32,17 +32,37 @@
     let sessionNotFound = $state(false)
     let sessionInfo = $state<WebDesktopSessionInfo | null>(null)
 
+    // Framebuffer messages are queued off the WS thread and painted in a rAF loop so a
+    // burst of updates (e.g. dragging a window) can never block the main thread. Beyond
+    // this cap we drop the oldest incremental frames to stay near the live edge.
+    const MAX_PENDING_FRAMES = 360
+    let pendingFrames: DesktopFrame[] = []
+    let rafHandle: number | null = null
+    // Latest pointer position, flushed at most once per frame (mousemove fires far faster
+    // than we need to forward); button presses/releases are sent immediately.
+    let pendingPointer: { x: number, y: number, buttons: number } | null = null
+
     const ws = new ReconnectingWebSocket({
         url: `wss://${location.host}/@warpgate/api/web-desktop/sessions/${sessionId}/stream`,
         onOpen: () => null,
-        onMessage: data => onMessage(JSON.parse(data) as ServerMessage),
+        onMessage: onWsMessage,
     })
 
     function send (msg: unknown) {
         ws.send(JSON.stringify(msg))
     }
 
-    function onMessage (msg: ServerMessage) {
+    // Pixel frames arrive as binary (see the backend's `ws_payload`); control messages
+    // (connection state, resize, copy-rect, clipboard, error) arrive as JSON text.
+    function onWsMessage (data: string | ArrayBuffer) {
+        if (typeof data !== 'string') {
+            const frame = decodeBinaryFrame(data)
+            if (frame) {
+                queueFrame(frame)
+            }
+            return
+        }
+        const msg = JSON.parse(data) as ServerMessage
         switch (msg.type) {
             case 'connection_state':
                 if (msg.state === 'connected') {
@@ -61,10 +81,56 @@
                 connectionError = msg.message
                 break
             default:
-                if (ctx && canvas) {
-                    void applyDesktopFrame(canvas, ctx, msg)
-                }
+                queueFrame(msg)
         }
+    }
+
+    // `[kind: u8][x,y,w,h: u16 LE][pixels…]` — the compact binary framing sent for pixels.
+    function decodeBinaryFrame (buf: ArrayBuffer): DesktopFrame | null {
+        if (buf.byteLength < 9) {
+            return null
+        }
+        const view = new DataView(buf)
+        const rect = {
+            x: view.getUint16(1, true),
+            y: view.getUint16(3, true),
+            width: view.getUint16(5, true),
+            height: view.getUint16(7, true),
+        }
+        const data = new Uint8Array(buf, 9)
+        switch (view.getUint8(0)) {
+            case 1: return { type: 'raw_image', rect, data }
+            case 2: return { type: 'jpeg_image', rect, data }
+            case 3: return { type: 'cursor', rect, data }
+            default: return null
+        }
+    }
+
+    // Queue a framebuffer message for the next paint. When we fall behind, shed the
+    // oldest droppable frame so the backlog (and per-frame work) stays bounded; structural
+    // frames (resize / keyframes) are kept.
+    function queueFrame (frame: DesktopFrame) {
+        pendingFrames.push(frame)
+        if (pendingFrames.length > MAX_PENDING_FRAMES) {
+            const idx = pendingFrames.findIndex(isIncrementalFrame)
+            pendingFrames.splice(idx === -1 ? 0 : idx, 1)
+        }
+    }
+
+    // Single rAF loop: paint whatever has arrived, then forward the latest pointer.
+    function tick () {
+        if (ctx && canvas && pendingFrames.length) {
+            const batch = pendingFrames
+            pendingFrames = []
+            for (const frame of batch) {
+                void applyDesktopFrame(canvas, ctx, frame)
+            }
+        }
+        if (pendingPointer) {
+            send({ type: 'pointer_event', ...pendingPointer })
+            pendingPointer = null
+        }
+        rafHandle = requestAnimationFrame(tick)
     }
 
     // RFB button mask: bit0=left, bit1=middle, bit2=right
@@ -92,8 +158,16 @@
         return { x: Math.max(0, x), y: Math.max(0, y) }
     }
 
-    function onPointer (e: MouseEvent) {
+    // Coalesce high-frequency moves: keep only the latest, forwarded once per frame by `tick`.
+    function onPointerMove (e: MouseEvent) {
         const { x, y } = canvasCoords(e)
+        pendingPointer = { x, y, buttons: rfbButtons(e) }
+    }
+
+    // Button transitions must not be delayed or coalesced away, so send them immediately.
+    function onPointerButton (e: MouseEvent) {
+        const { x, y } = canvasCoords(e)
+        pendingPointer = null
         send({ type: 'pointer_event', x, y, buttons: rfbButtons(e) })
     }
 
@@ -169,6 +243,7 @@
         if (canvas) {
             ctx = canvas.getContext('2d')
         }
+        rafHandle = requestAnimationFrame(tick)
         try {
             sessionInfo = await api.getWebDesktopSession({ sessionId })
         } catch (e) {
@@ -183,6 +258,9 @@
 
     onDestroy(() => {
         ws.close()
+        if (rafHandle !== null) {
+            cancelAnimationFrame(rafHandle)
+        }
     })
 
     loadTheme('dark')
@@ -220,9 +298,9 @@
         <canvas
             bind:this={canvas}
             tabindex="0"
-            onmousemove={onPointer}
-            onmousedown={onPointer}
-            onmouseup={onPointer}
+            onmousemove={onPointerMove}
+            onmousedown={onPointerButton}
+            onmouseup={onPointerButton}
             onwheel={onWheel}
             oncontextmenu={e => e.preventDefault()}
         ></canvas>

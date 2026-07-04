@@ -172,26 +172,8 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     supervisors.push(tls_listener!("MySQL", MySQLProtocolServer, mysql));
     supervisors.push(tls_listener!("PostgreSQL", PostgresProtocolServer, postgres));
     supervisors.push(tls_listener!("Kubernetes", KubernetesProtocolServer, kubernetes));
-
-    if config.store.vnc.enable {
-        protocol_futures.push(
-            run_protocol_server(
-                VncProtocolServer::new(&services),
-                config.store.vnc.listen.clone(),
-            )
-            .boxed(),
-        );
-    }
-
-    if config.store.rdp.enable {
-        protocol_futures.push(
-            run_protocol_server(
-                RdpProtocolServer::new(&services),
-                config.store.rdp.listen.clone(),
-            )
-            .boxed(),
-        );
-    }
+    supervisors.push(tls_listener!("VNC", VncProtocolServer, vnc));
+    supervisors.push(tls_listener!("RDP", RdpProtocolServer, rdp));
 
     tokio::spawn({
         let services = services.clone();

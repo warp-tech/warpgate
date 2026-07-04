@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.26.0-beta.1-29-gb5102be2-modified"
+    "version": "v0.26.0-35-g86c7d219-modified"
   },
   "servers": [
     {
@@ -887,6 +887,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": ""
           },
           "400": {
             "description": "",
@@ -3694,6 +3697,43 @@
         "operationId": "update_parameters"
       }
     },
+    "/parameters/analytics-preview": {
+      "get": {
+        "parameters": [
+          {
+            "name": "normal",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsPreview"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_analytics_preview"
+      }
+    },
     "/ssh/check-host-key": {
       "post": {
         "requestBody": {
@@ -4296,6 +4336,33 @@
           },
           "ticket_requests_manage": {
             "type": "boolean"
+          }
+        }
+      },
+      "AnalyticsConsent": {
+        "type": "string",
+        "description": "Whether the instance reports anonymous usage analytics, and at which\npayload level. `Undecided` triggers the one-time opt-in prompt in the admin\nUI; the instance never reports until the choice is made.",
+        "enum": [
+          "Undecided",
+          "Off",
+          "On"
+        ]
+      },
+      "AnalyticsPreview": {
+        "type": "object",
+        "title": "AnalyticsPreview",
+        "required": [
+          "url",
+          "payload"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The target URL the report would be POSTed to."
+          },
+          "payload": {
+            "type": "string",
+            "description": "Pretty-printed JSON request body that would be sent."
           }
         }
       },
@@ -5307,7 +5374,17 @@
           "ssh_banner": {
             "type": "string"
           },
-          "web_ssh_enabled": {
+          "web_clients_enabled": {
+            "type": "boolean"
+          },
+          "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "analytics_consent": {
+            "$ref": "#/components/schemas/AnalyticsConsent"
+          },
+          "analytics_normal": {
             "type": "boolean"
           }
         }
@@ -5344,7 +5421,9 @@
           "lp_user_lockout_duration_seconds",
           "lp_user_exempt_admins",
           "ssh_banner",
-          "web_ssh_enabled"
+          "web_clients_enabled",
+          "analytics_consent",
+          "analytics_normal"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -5458,7 +5537,17 @@
           "ssh_banner": {
             "type": "string"
           },
-          "web_ssh_enabled": {
+          "web_clients_enabled": {
+            "type": "boolean"
+          },
+          "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "analytics_consent": {
+            "$ref": "#/components/schemas/AnalyticsConsent"
+          },
+          "analytics_normal": {
             "type": "boolean"
           }
         }

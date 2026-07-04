@@ -96,7 +96,7 @@ impl Api {
         if !Parameters::Entity::get(&*ctx.services().db.lock().await)
             .await
             .map_err(WarpgateError::from)?
-            .web_ssh_enabled
+            .web_clients_enabled
         {
             return Ok(CreateWebSshSessionResponse::Forbidden);
         }

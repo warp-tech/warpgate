@@ -7,14 +7,37 @@
 
 export interface Rect { x: number, y: number, width: number, height: number }
 
+// Image payloads arrive base64-encoded from recordings (JSON) and as raw bytes from the
+// live binary WebSocket; accept either.
+// eslint-disable-next-line @typescript-eslint/no-type-alias
+type FrameImageData = string | Uint8Array<ArrayBuffer>
+
 /** The visual subset of desktop messages that mutate the framebuffer. */
 export type DesktopFrame =
     | { type: 'resize', width: number, height: number }
-    | { type: 'raw_image', rect: Rect, data: string }
-    | { type: 'png_image', rect: Rect, keyframe?: boolean, data: string }
-    | { type: 'jpeg_image', rect: Rect, data: string }
+    | { type: 'raw_image', rect: Rect, data: FrameImageData }
+    | { type: 'png_image', rect: Rect, keyframe?: boolean, data: FrameImageData }
+    | { type: 'jpeg_image', rect: Rect, data: FrameImageData }
     | { type: 'copy_rect', dst: Rect, src_x: number, src_y: number }
-    | { type: 'cursor', rect: Rect, data: string }
+    | { type: 'cursor', rect: Rect, data: FrameImageData }
+
+/**
+ * A frame that only touches part of the surface and can be dropped to catch up
+ * under load. `resize` and full-frame keyframes are structural and never dropped.
+ */
+export function isIncrementalFrame (msg: DesktopFrame): boolean {
+    switch (msg.type) {
+        case 'raw_image':
+        case 'jpeg_image':
+        case 'copy_rect':
+        case 'cursor':
+            return true
+        case 'png_image':
+            return !msg.keyframe
+        case 'resize':
+            return false
+    }
+}
 
 export function base64ToBytes (b64: string): Uint8Array<ArrayBuffer> {
     const binary = atob(b64)
@@ -23,6 +46,11 @@ export function base64ToBytes (b64: string): Uint8Array<ArrayBuffer> {
         bytes[i] = binary.charCodeAt(i)
     }
     return bytes
+}
+
+/** Normalize an image payload (base64 from recordings, raw bytes from the live WS). */
+function toBytes (data: FrameImageData): Uint8Array<ArrayBuffer> {
+    return typeof data === 'string' ? base64ToBytes(data) : data
 }
 
 export function ensureCanvasSize (canvas: HTMLCanvasElement, width: number, height: number): void {
@@ -79,15 +107,15 @@ export async function applyDesktopFrame (
             break
         case 'raw_image':
             ensureForRect(canvas, msg.rect)
-            drawRaw(ctx, msg.rect, base64ToBytes(msg.data))
+            drawRaw(ctx, msg.rect, toBytes(msg.data))
             break
         case 'png_image':
             ensureForRect(canvas, msg.rect)
-            await drawImageBlob(ctx, msg.rect, base64ToBytes(msg.data), 'image/png')
+            await drawImageBlob(ctx, msg.rect, toBytes(msg.data), 'image/png')
             break
         case 'jpeg_image':
             ensureForRect(canvas, msg.rect)
-            await drawImageBlob(ctx, msg.rect, base64ToBytes(msg.data), 'image/jpeg')
+            await drawImageBlob(ctx, msg.rect, toBytes(msg.data), 'image/jpeg')
             break
         case 'copy_rect':
             ctx.drawImage(

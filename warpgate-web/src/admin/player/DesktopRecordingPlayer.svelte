@@ -1,18 +1,18 @@
 <script lang="ts">
-    import Fa from 'svelte-fa'
     import { onDestroy, onMount } from 'svelte'
-    import { faPlay, faPause, faExpand } from '@fortawesome/free-solid-svg-icons'
     import { Spinner } from '@sveltestrap/sveltestrap'
-    import formatDuration from 'format-duration'
     import type { Recording } from 'admin/lib/api'
     import { applyDesktopFrame, type DesktopFrame } from 'common/desktopCanvas'
     import { keysymLabel, scancodeLabel, type KeyPress, type Click } from 'common/desktopInput'
+    import PlayerToolbar from './PlayerToolbar.svelte'
 
     export let recording: Recording
 
     // How long a click ring animates / a pressed key stays on the overlay (seconds).
     const CLICK_ANIM_S = 0.6
     const KEY_DISPLAY_S = 3
+    // Number of time buckets in the scrubber input-density heatmap.
+    const HEATMAP_BUCKETS = 120
 
     const DATA_URL = `/@warpgate/admin/api/recordings/${recording.id}/desktop`
     const INDEX_URL = `${DATA_URL}/index`
@@ -39,6 +39,8 @@
     let timestamp = 0
     let duration = 0
     let keyframes: { time: number, offset: number }[] = []
+    // Per-bucket viewer-input density (0..1) drawn behind the scrubber.
+    let heatmap: number[] = []
 
     // Viewer input, extracted for the live-input overlay. Populated in time order.
     let keyPresses: KeyPress[] = []
@@ -94,6 +96,7 @@
         for (const item of index.input ?? []) {
             recordInput(item)
         }
+        heatmap = computeHeatmap(index.input ?? [], duration)
 
         await seek(0)
 
@@ -156,6 +159,22 @@
                 break
             }
         }
+    }
+
+    // Bucket viewer-input events by time into a 0..1 density curve for the scrubber
+    // heatmap. Perceptual (sqrt) scaling so one high-rate burst (e.g. a window drag)
+    // doesn't flatten every other bucket to invisibility.
+    function computeHeatmap (input: { time: number }[], total: number): number[] {
+        const buckets = new Array<number>(HEATMAP_BUCKETS).fill(0)
+        if (total <= 0) {
+            return buckets
+        }
+        for (const item of input) {
+            const i = Math.min(HEATMAP_BUCKETS - 1, Math.max(0, Math.floor(HEATMAP_BUCKETS * item.time / total)))
+            buckets[i] = (buckets[i] ?? 0) + 1
+        }
+        const max = Math.max(1, ...buckets)
+        return buckets.map(c => Math.sqrt(c / max))
     }
 
     function abortReader () {
@@ -241,34 +260,39 @@
     }
 
     // Coalesced, one-at-a-time seek (async apply must not run concurrently).
+    // `keyframeSkip` lets an explicit scrub jump forward to a keyframe (fast); playback
+    // stepping leaves it off so it renders every intermediate frame (smooth motion).
     let seeking = false
-    let queuedSeek: number | null = null
-    async function seek (time: number) {
-        queuedSeek = Math.max(0, Math.min(duration, time))
+    let queuedSeek: { time: number, keyframeSkip: boolean } | null = null
+    async function seek (time: number, keyframeSkip = false) {
+        queuedSeek = { time: Math.max(0, Math.min(duration, time)), keyframeSkip }
         if (seeking) {
             return
         }
         seeking = true
         try {
             while (queuedSeek !== null) {
-                const target = queuedSeek
+                const { time: target, keyframeSkip: skip } = queuedSeek
                 queuedSeek = null
-                await doSeek(target)
+                await doSeek(target, skip)
             }
         } finally {
             seeking = false
         }
     }
 
-    async function doSeek (time: number) {
+    async function doSeek (time: number, keyframeSkip: boolean) {
         if (!ctx) {
             return
         }
         liveTailing = false
         const gen = ++seekGen
-        // Continue the open stream when moving forward; otherwise restart at the keyframe ≤ time.
-        if (!reader || time < renderedTime) {
-            const kf = keyframeBefore(time)
+        // Restart the stream at the keyframe ≤ time when we can't cheaply continue
+        // forward: no open stream, seeking backward, or (on an explicit scrub) a keyframe
+        // lies between our current render position and the target — jumping to it beats
+        // replaying every delta in between.
+        const kf = keyframeBefore(time)
+        if (!reader || time < renderedTime || (keyframeSkip && kf.time > renderedTime)) {
             await openStreamAt(kf.offset)
             if (gen !== seekGen) {
                 return
@@ -352,29 +376,19 @@
         </div>
     </div>
 
-    <div class="toolbar" class:invisible={loading || notPlayable}>
-        <button class="btn btn-link" on:click={togglePlaying}>
-            <Fa icon={playing ? faPause : faPlay} fw />
-        </button>
-        <pre class="timestamp">{ formatDuration(timestamp * 1000, { leading: true }) }</pre>
-        {#if sessionIsLive === true}
-            <button
-                class="btn live-btn"
-                class:active={liveTailing}
-                on:click={goLive}
-            >LIVE</button>
-        {/if}
-        <input
-            class="w-100"
-            type="range"
-            min="0" max="100" step="0.001"
-            style="background-size: {seekInputValue}% 100%;"
-            bind:value={seekInputValue}
-            on:input={() => void seek(duration * seekInputValue / 100)} />
-        <button class="btn btn-link" on:click={toggleFullscreen}>
-            <Fa icon={faExpand} fw />
-        </button>
-    </div>
+    <PlayerToolbar
+        {playing}
+        {timestamp}
+        {heatmap}
+        bind:seekInputValue
+        hidden={loading || notPlayable}
+        isLive={sessionIsLive === true}
+        liveActive={liveTailing}
+        onTogglePlaying={togglePlaying}
+        onToggleFullscreen={toggleFullscreen}
+        onGoLive={goLive}
+        onSeek={pct => void seek(duration * pct / 100, true)}
+    />
 </div>
 
 <style lang="scss">
@@ -456,68 +470,11 @@
         white-space: nowrap;
     }
 
-    .toolbar {
-        display: flex;
-    }
-
-    .btn {
-        color: #eee;
-
-        :global(svg) {
-            transition: all .25s ease-out;
-            &:hover {
-                transform: scale(1.2);
-            }
-        }
-    }
-
     :global(.spinner-border) {
         position: absolute;
         left: 50%;
         top: 50%;
         margin: -12px 0 0 -12px;
         z-index: 1;
-    }
-
-    input[type="range"] {
-        appearance: none;
-        -webkit-appearance: none;
-        margin: 18px 10px 0;
-        height: 2px;
-        border-radius: 5px;
-        background: linear-gradient(#eee, #eee);
-        background-repeat: no-repeat;
-        cursor: pointer;
-    }
-
-    input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        height: 10px;
-        width: 10px;
-        border-radius: 50%;
-        background: #eee;
-    }
-
-    .timestamp {
-        flex: none;
-        overflow: visible;
-        color: #eeeeee;
-        margin: 0;
-        font-size: 0.75rem;
-        align-self: center;
-    }
-
-    .live-btn {
-        font-size: 0.75rem;
-        align-self: center;
-        color: red;
-        flex: none;
-
-        &.active {
-            background: red;
-            color: white;
-            padding: 0.1rem 0.25rem;
-            margin: 0 0.5rem;
-        }
     }
 </style>

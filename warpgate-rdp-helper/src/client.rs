@@ -197,24 +197,45 @@ fn active_loop(
 }
 
 /// Handle a batch of active-stage outputs. Returns `true` if the session should terminate.
+///
+/// Protocol responses (crucially, the RDP *frame acknowledgements* that gate the server's
+/// flow control) are written and flushed **first**, before the framebuffer tiles are
+/// emitted to stdout. Emitting a tile can block on stdout backpressure when anything
+/// downstream is momentarily slow; if the ack sat behind that, the server would stop
+/// sending and the frame rate would collapse to a few fps while everything sits idle.
 fn process_outputs(
     framed: &mut UpgradedFramed,
     image: &DecodedImage,
     outputs: Vec<ActiveStageOutput>,
 ) -> Result<bool> {
-    for out in outputs {
+    let mut terminate = false;
+    let mut wrote_response = false;
+    for out in &outputs {
         match out {
             ActiveStageOutput::ResponseFrame(frame) => {
-                framed.write_all(&frame).context("writing response")?;
+                framed.write_all(frame).context("writing response")?;
+                wrote_response = true;
             }
-            ActiveStageOutput::GraphicsUpdate(region) => {
-                emit_region(image, &region);
-            }
-            ActiveStageOutput::Terminate(_) => return Ok(true),
+            ActiveStageOutput::Terminate(_) => terminate = true,
             _ => {}
         }
     }
-    Ok(false)
+    if wrote_response {
+        // Framed doesn't expose a flush; flush the inner stream so the ack hits the wire
+        // now rather than whenever the TLS stream happens to flush next.
+        framed
+            .get_inner_mut()
+            .0
+            .flush()
+            .context("flushing response")?;
+    }
+
+    for out in outputs {
+        if let ActiveStageOutput::GraphicsUpdate(region) = out {
+            emit_region(image, &region);
+        }
+    }
+    Ok(terminate)
 }
 
 /// Emit the BGRA pixels for an updated rectangle.
@@ -237,18 +258,25 @@ fn emit_region(image: &DecodedImage, region: &ironrdp::pdu::geometry::InclusiveR
     let w = right - left + 1;
     let h = bottom - top + 1;
     let src = image.data();
+    // Clamping keeps every row slice below in bounds as long as the backing buffer is the
+    // expected RGBA size; bail once here rather than bounds-checking every pixel.
+    if src.len() < img_w * img_h * 4 {
+        return;
+    }
 
+    // Copy row by row, converting RGBA -> BGRA over 4-byte chunks (bounds checked once per
+    // row, not per channel) — this is the hot path under high-frequency updates.
     let mut out = vec![0u8; w * h * 4];
     for row in 0..h {
-        let src_row = (top + row) * img_w + left;
-        for col in 0..w {
-            let s = (src_row + col) * 4;
-            let d = (row * w + col) * 4;
-            // source is RGBA, emit BGRA
-            out[d] = src.get(s + 2).copied().unwrap_or(0);
-            out[d + 1] = src.get(s + 1).copied().unwrap_or(0);
-            out[d + 2] = src.get(s).copied().unwrap_or(0);
-            out[d + 3] = 255;
+        let src_start = ((top + row) * img_w + left) * 4;
+        let dst_start = row * w * 4;
+        let src_row = &src[src_start..src_start + w * 4];
+        let dst_row = &mut out[dst_start..dst_start + w * 4];
+        for (s, d) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
+            d[0] = s[2];
+            d[1] = s[1];
+            d[2] = s[0];
+            d[3] = 255;
         }
     }
 

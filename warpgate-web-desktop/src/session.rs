@@ -16,7 +16,15 @@ use warpgate_db_entities::Target::TargetKind;
 use crate::WebDesktopClientManager;
 use crate::protocol::ServerMessage;
 
-pub const OUTPUT_BUFFER_CAPACITY: usize = 4096;
+/// Initial output-buffer allocation. Not a hard cap: incremental frames are bounded by
+/// [`MAX_BUFFERED_INCREMENTAL`] and structural messages are rare, so the buffer stays small.
+const OUTPUT_BUFFER_CAPACITY: usize = 128;
+
+/// How many incremental (droppable) framebuffer frames to keep buffered for a slow or
+/// briefly-disconnected client. Small on purpose: a client that falls behind should get
+/// the recent live edge, not a huge stale backlog to grind through (which is what froze
+/// the browser on high-frequency updates). Structural messages are never counted or dropped.
+const MAX_BUFFERED_INCREMENTAL: usize = 64;
 
 pub struct WebDesktopSessionHandle {
     abort_tx: UnboundedSender<()>,
@@ -87,15 +95,19 @@ impl WebDesktopSession {
 
     pub async fn push_event(&self, msg: ServerMessage) {
         let mut buf = self.output_buffer.lock().await;
-        if buf.len() >= OUTPUT_BUFFER_CAPACITY {
-            // Prefer to drop "incremental" frames first
-            let drop_idx = buf
-                .iter()
-                .position(ServerMessage::is_incremental)
-                .unwrap_or(0);
-            buf.remove(drop_idx);
-        }
+        let incremental = msg.is_incremental();
         buf.push_back(msg);
+        // Only ever shed incremental frames, and only the oldest beyond the cap — never a
+        // structural message (resize / connection state / error), and never `unwrap_or(0)`
+        // onto one. The buffer stays small, so this scan is over a handful of items.
+        if incremental {
+            while buf.iter().filter(|m| m.is_incremental()).count() > MAX_BUFFERED_INCREMENTAL {
+                let Some(idx) = buf.iter().position(ServerMessage::is_incremental) else {
+                    break;
+                };
+                buf.remove(idx);
+            }
+        }
         self.output_notify.notify_waiters();
     }
 

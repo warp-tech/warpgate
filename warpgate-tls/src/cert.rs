@@ -29,6 +29,10 @@ impl TlsPrivateKey {
     pub fn key(&self) -> &Arc<dyn SigningKey> {
         &self.key
     }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 #[derive(Debug, Clone)]

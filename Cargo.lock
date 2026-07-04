@@ -8557,6 +8557,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "flate2",
+ "futures",
  "rustix 1.1.4",
  "serde",
  "serde_json",
@@ -8567,6 +8568,7 @@ dependencies = [
  "uuid",
  "warpgate-common",
  "warpgate-core",
+ "warpgate-tls",
 ]
 
 [[package]]
