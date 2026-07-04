@@ -27,61 +27,8 @@ use ironrdp::pdu::rdp::capability_sets::MajorPlatformType;
 use ironrdp::pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
 use ironrdp::session::image::DecodedImage;
 use ironrdp::session::{ActiveStage, ActiveStageOutput};
-use serde::{Deserialize, Serialize};
 use sspi::network_client::reqwest_network_client::ReqwestNetworkClient;
-
-#[derive(Deserialize)]
-struct ConnectConfig {
-    host: String,
-    port: u16,
-    username: String,
-    password: String,
-    #[serde(default)]
-    domain: Option<String>,
-    #[serde(default = "default_width")]
-    width: u16,
-    #[serde(default = "default_height")]
-    height: u16,
-    /// Verify the RDP server's TLS certificate against the system root store.
-    #[serde(default)]
-    verify_tls: bool,
-}
-
-fn default_width() -> u16 {
-    1280
-}
-fn default_height() -> u16 {
-    800
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum InputMessage {
-    Pointer { x: u16, y: u16, buttons: u8 },
-    Key { keysym: u32, down: bool },
-    Scancode { code: u8, extended: bool, down: bool },
-    Wheel { vertical: bool, delta: i16 },
-}
-
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum OutputMessage<'a> {
-    Connected {
-        width: u16,
-        height: u16,
-    },
-    RawImage {
-        x: u16,
-        y: u16,
-        width: u16,
-        height: u16,
-        data: &'a str,
-    },
-    Error {
-        message: String,
-    },
-    Disconnected,
-}
+use warpgate_rdp_ipc::client::{ConnectConfig, Event as OutputMessage, Input as InputMessage};
 
 fn emit(msg: &OutputMessage) {
     if let Ok(line) = serde_json::to_string(msg) {
@@ -285,7 +232,7 @@ fn emit_region(image: &DecodedImage, region: &ironrdp::pdu::geometry::InclusiveR
         y: top as u16,
         width: w as u16,
         height: h as u16,
-        data: &STANDARD.encode(&out),
+        data: STANDARD.encode(&out),
     });
 }
 

@@ -1,19 +1,12 @@
-use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
-use tokio::sync::futures::Notified;
-use tokio::sync::mpsc::{Sender, UnboundedSender};
-use tokio::sync::{Mutex, Notify};
-use tokio::task::JoinHandle;
+use tokio::sync::mpsc::Sender;
 use tracing::warn;
 use uuid::Uuid;
+use warpgate_core::DesktopInput;
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{DesktopInput, SessionHandle, WarpgateServerHandle};
-use warpgate_db_entities::Target::TargetKind;
+use warpgate_web_clients_common::{ManagedSession, Sheddable, WebSession};
 
-use crate::WebDesktopClientManager;
 use crate::protocol::ServerMessage;
 
 /// Initial output-buffer allocation. Not a hard cap: incremental frames are bounded by
@@ -26,44 +19,17 @@ const OUTPUT_BUFFER_CAPACITY: usize = 128;
 /// the browser on high-frequency updates). Structural messages are never counted or dropped.
 const MAX_BUFFERED_INCREMENTAL: usize = 64;
 
-pub struct WebDesktopSessionHandle {
-    abort_tx: UnboundedSender<()>,
-}
-
-impl WebDesktopSessionHandle {
-    pub fn new(abort_tx: UnboundedSender<()>) -> Self {
-        Self { abort_tx }
-    }
-}
-
-impl SessionHandle for WebDesktopSessionHandle {
-    fn close(&mut self) {
-        let _ = self.abort_tx.send(());
+impl Sheddable for ServerMessage {
+    fn is_droppable(&self) -> bool {
+        self.is_incremental()
     }
 }
 
 pub struct WebDesktopSession {
-    id: Uuid,
-    user_id: Uuid,
-    target_name: String,
-    target_kind: TargetKind,
-
-    // prevents the handle from getting dropped too early
-    _server_handle: Arc<Mutex<WarpgateServerHandle>>,
-
+    core: WebSession<ServerMessage>,
     input_tx: Sender<DesktopInput>,
-    abort_tx: UnboundedSender<()>,
-
     // shared with the manager's event loop; records viewer input for audit
     recorder: Option<Arc<DesktopRecorder>>,
-
-    // events are buffered so that we can queue and replay them
-    // if the WS stream reconnects
-    output_buffer: Arc<Mutex<VecDeque<ServerMessage>>>,
-    output_notify: Arc<Notify>,
-
-    is_dead: Arc<AtomicBool>,
-    disconnect_timer: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl WebDesktopSession {
@@ -71,72 +37,26 @@ impl WebDesktopSession {
         id: Uuid,
         user_id: Uuid,
         target_name: String,
-        target_kind: TargetKind,
-        server_handle: Arc<Mutex<WarpgateServerHandle>>,
+        target_kind: warpgate_db_entities::Target::TargetKind,
+        server_handle: Arc<tokio::sync::Mutex<warpgate_core::WarpgateServerHandle>>,
         input_tx: Sender<DesktopInput>,
-        abort_tx: UnboundedSender<()>,
+        abort_tx: tokio::sync::mpsc::UnboundedSender<()>,
         recorder: Option<Arc<DesktopRecorder>>,
     ) -> Self {
         Self {
-            id,
-            user_id,
-            target_name,
-            target_kind,
-            _server_handle: server_handle,
+            core: WebSession::new(
+                id,
+                user_id,
+                target_name,
+                target_kind,
+                server_handle,
+                abort_tx,
+                OUTPUT_BUFFER_CAPACITY,
+                MAX_BUFFERED_INCREMENTAL,
+            ),
             input_tx,
-            abort_tx,
             recorder,
-            output_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(OUTPUT_BUFFER_CAPACITY))),
-            output_notify: Arc::new(Notify::new()),
-            is_dead: Arc::new(AtomicBool::new(false)),
-            disconnect_timer: Arc::new(Mutex::new(None)),
         }
-    }
-
-    pub async fn push_event(&self, msg: ServerMessage) {
-        let mut buf = self.output_buffer.lock().await;
-        let incremental = msg.is_incremental();
-        buf.push_back(msg);
-        // Only ever shed incremental frames, and only the oldest beyond the cap — never a
-        // structural message (resize / connection state / error), and never `unwrap_or(0)`
-        // onto one. The buffer stays small, so this scan is over a handful of items.
-        if incremental {
-            while buf.iter().filter(|m| m.is_incremental()).count() > MAX_BUFFERED_INCREMENTAL {
-                let Some(idx) = buf.iter().position(ServerMessage::is_incremental) else {
-                    break;
-                };
-                buf.remove(idx);
-            }
-        }
-        self.output_notify.notify_waiters();
-    }
-
-    pub async fn drain_buffer(&self) -> Vec<ServerMessage> {
-        self.output_buffer.lock().await.drain(..).collect()
-    }
-
-    pub fn is_dead(&self) -> bool {
-        self.is_dead.load(Ordering::Relaxed)
-    }
-
-    pub fn abort(&self) {
-        let _ = self.abort_tx.send(());
-    }
-
-    pub fn id(&self) -> Uuid {
-        self.id
-    }
-
-    pub fn user_id(&self) -> Uuid {
-        self.user_id
-    }
-
-    pub fn target_name(&self) -> &str {
-        &self.target_name
-    }
-
-    pub fn target_kind(&self) -> &TargetKind {
-        &self.target_kind
     }
 
     pub async fn send_input(&self, input: DesktopInput) {
@@ -149,28 +69,26 @@ impl WebDesktopSession {
         // let inputs drop under backpressure
         let _ = self.input_tx.try_send(input);
     }
+}
 
-    pub async fn start_disconnect_timer(&self, manager: Arc<WebDesktopClientManager>) {
-        let id = self.id();
-        let timer = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            manager.remove_session(id).await;
-        });
-        *self.disconnect_timer.lock().await = Some(timer);
+impl std::ops::Deref for WebDesktopSession {
+    type Target = WebSession<ServerMessage>;
+    fn deref(&self) -> &Self::Target {
+        &self.core
+    }
+}
+
+impl ManagedSession for WebDesktopSession {
+    fn id(&self) -> Uuid {
+        self.core.id()
     }
 
-    pub async fn cancel_disconnect_timer(&self) {
-        if let Some(handle) = self.disconnect_timer.lock().await.take() {
-            handle.abort();
-        }
+    fn user_id(&self) -> Uuid {
+        self.core.user_id()
     }
 
-    pub fn wait_buffer(&self) -> Notified<'_> {
-        self.output_notify.notified()
-    }
-
-    pub fn close(&self) {
-        self.is_dead.store(true, Ordering::Relaxed);
-        self.output_notify.notify_waiters();
+    fn on_removed(&self) {
+        self.core.abort();
+        self.core.close();
     }
 }

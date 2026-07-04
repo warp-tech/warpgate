@@ -3401,7 +3401,15 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "warpgate-rdp-ipc",
  "x509-cert",
+]
+
+[[package]]
+name = "warpgate-rdp-ipc"
+version = "0.23.4"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-rdp-ipc = { path = "../warpgate-rdp-ipc" }
 warpgate-tls = { path = "../warpgate-tls" }
 anyhow.workspace = true
 base64 = { version = "0.22", default-features = false, features = ["std"] }

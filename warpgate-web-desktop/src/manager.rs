@@ -11,15 +11,27 @@ use warpgate_common::{Target, TargetOptions, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{ConfigProvider, Services, SessionStateInit, State};
 use warpgate_db_entities::Target::TargetKind;
+use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
 use crate::protocol::ServerMessage;
-use crate::session::{WebDesktopSession, WebDesktopSessionHandle};
+use crate::session::WebDesktopSession;
 
 const MAX_SESSIONS_PER_USER: usize = 50;
 
 #[derive(Default)]
-pub struct WebDesktopClientManager {
-    sessions: Arc<Mutex<HashMap<Uuid, Arc<WebDesktopSession>>>>,
+pub struct WebDesktopClientManager(ClientManager<WebDesktopSession>);
+
+impl std::ops::Deref for WebDesktopClientManager {
+    type Target = ClientManager<WebDesktopSession>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl SessionRemover for WebDesktopClientManager {
+    async fn remove_session(&self, id: Uuid) {
+        self.0.remove_session(id).await;
+    }
 }
 
 impl WebDesktopClientManager {
@@ -35,12 +47,8 @@ impl WebDesktopClientManager {
         target_name: &str,
         remote_address: Option<SocketAddr>,
     ) -> Result<Uuid, WarpgateError> {
-        {
-            let sessions = self.sessions.lock().await;
-            let user_session_count = sessions.values().filter(|s| s.user_id() == user_id).count();
-            if user_session_count >= MAX_SESSIONS_PER_USER {
-                return Err(WarpgateError::SessionLimitReached);
-            }
+        if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
+            return Err(WarpgateError::SessionLimitReached);
         }
 
         let target: Target = {
@@ -59,7 +67,7 @@ impl WebDesktopClientManager {
         };
 
         let (handle_abort_tx, mut handle_abort_rx) = mpsc::unbounded_channel::<()>();
-        let session_handle = WebDesktopSessionHandle::new(handle_abort_tx);
+        let session_handle = WebSessionHandle::new(handle_abort_tx);
 
         let server_handle = State::register_session(
             &services.state,
@@ -161,27 +169,13 @@ impl WebDesktopClientManager {
             }
         });
 
-        self.sessions
-            .lock()
-            .await
-            .insert(session_id, session.clone());
+        self.insert(session.clone()).await;
 
-        spawn_event_loop(session.clone(), event_rx, self.sessions.clone(), recorder);
+        spawn_event_loop(session.clone(), event_rx, self.sessions(), recorder);
 
         debug!(session=%session_id, user=%username, target=%target_name, "Web-desktop session created");
 
         Ok(session_id)
-    }
-
-    pub async fn get_session(&self, id: Uuid) -> Option<Arc<WebDesktopSession>> {
-        self.sessions.lock().await.get(&id).cloned()
-    }
-
-    pub async fn remove_session(&self, id: Uuid) {
-        if let Some(session) = self.sessions.lock().await.remove(&id) {
-            session.abort();
-            session.close();
-        }
     }
 }
 
@@ -201,7 +195,7 @@ fn spawn_event_loop(
                 {
                     warn!(%error, "Failed to record desktop event");
                 }
-                session.push_event(ServerMessage::from(event)).await;
+                session.push(ServerMessage::from(event)).await;
             }
             // Backend ended; dropping `recorder` here finalises the recording.
             session.close();

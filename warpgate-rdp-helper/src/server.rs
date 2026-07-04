@@ -37,83 +37,11 @@ use ironrdp_server::{
     DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent, PixelFormat, RdpServer,
     RdpServerDisplay, RdpServerDisplayUpdates, RdpServerInputHandler,
 };
-use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
 use tracing::warn;
-
-/// First stdin line: everything Warpgate must hand the helper to stand up the
-/// viewer-facing RDP server.
-#[derive(Deserialize)]
-struct ServeConfig {
-    /// Loopback TCP port (on 127.0.0.1) Warpgate is listening on for the raw RDP
-    /// byte stream. The helper connects to it; Warpgate shuttles viewer bytes.
-    loopback_port: u16,
-    /// PEM-encoded TLS certificate chain presented to the viewer.
-    cert_pem: String,
-    /// PEM-encoded TLS private key for `cert_pem`.
-    key_pem: String,
-    /// Initial desktop size advertised to the viewer (before the target connects).
-    #[serde(default = "default_width")]
-    width: u16,
-    #[serde(default = "default_height")]
-    height: u16,
-}
-
-fn default_width() -> u16 {
-    1280
-}
-fn default_height() -> u16 {
-    800
-}
-
-/// Messages from Warpgate to the helper (stdin, after the first config line).
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ControlIn {
-    /// Warpgate's verdict for a pending [`ControlOut::AuthRequest`].
-    AuthResponse { accept: bool },
-    /// A rectangular framebuffer update in 32-bit BGRA (`width * height * 4` bytes,
-    /// base64-encoded) — exactly what the client helper emits for the target.
-    Frame {
-        x: u16,
-        y: u16,
-        width: u16,
-        height: u16,
-        data: String,
-    },
-    /// The target desktop resolution changed.
-    Resize { width: u16, height: u16 },
-    /// Tear the session down.
-    Shutdown,
-}
-
-/// Messages from the helper to Warpgate (stdout).
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ControlOut {
-    /// Credentials submitted by the viewer; Warpgate authenticates and replies
-    /// with [`ControlIn::AuthResponse`].
-    AuthRequest {
-        username: String,
-        password: String,
-        domain: Option<String>,
-    },
-    /// Pointer moved / button state changed. `buttons` is a bitmask
-    /// (bit0=left, bit1=middle, bit2=right, bit3=button4, bit4=button5).
-    Pointer { x: u16, y: u16, buttons: u8 },
-    /// A raw PC/AT scancode (set 1) as sent by the native viewer.
-    Scancode { code: u8, extended: bool, down: bool },
-    /// A Unicode keypress (viewers occasionally send these instead of scancodes).
-    Key { keysym: u32, down: bool },
-    /// Mouse wheel scrolled; `delta` is a signed notch count.
-    Wheel { x: u16, y: u16, vertical: bool, delta: i16 },
-    /// A non-fatal error to surface to Warpgate's log.
-    Error { message: String },
-    /// The RDP session ended.
-    Disconnected,
-}
+use warpgate_rdp_ipc::server::{Event as ControlOut, Input as ControlIn, ServeConfig};
 
 pub async fn entry() {
     // Logs MUST go to stderr — stdout is the line-delimited control channel.

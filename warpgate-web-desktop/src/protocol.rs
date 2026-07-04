@@ -1,25 +1,6 @@
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
-
-#[derive(Clone, Debug)]
-pub struct Base64Bytes(pub Bytes);
-
-impl Serialize for Base64Bytes {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&STANDARD.encode(&self.0))
-    }
-}
-
-impl<'de> Deserialize<'de> for Base64Bytes {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        let bytes = STANDARD.decode(s).map_err(serde::de::Error::custom)?;
-        Ok(Self(Bytes::from(bytes)))
-    }
-}
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct WsRect {
@@ -107,10 +88,22 @@ impl From<ClientMessage> for Option<DesktopInput> {
 pub enum ServerMessage {
     ConnectionState { state: &'static str },
     Resize { width: u16, height: u16 },
-    RawImage { rect: WsRect, data: Base64Bytes },
-    JpegImage { rect: WsRect, data: Base64Bytes },
+    RawImage {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
+    JpegImage {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
     CopyRect { dst: WsRect, src_x: u16, src_y: u16 },
-    Cursor { rect: WsRect, data: Base64Bytes },
+    Cursor {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
     Clipboard { text: String },
     Bell,
     Error { message: String },
@@ -136,9 +129,9 @@ impl ServerMessage {
     /// small JSON text.
     pub fn ws_payload(&self) -> WsPayload {
         match self {
-            Self::RawImage { rect, data } => WsPayload::Binary(encode_image(1, *rect, &data.0)),
-            Self::JpegImage { rect, data } => WsPayload::Binary(encode_image(2, *rect, &data.0)),
-            Self::Cursor { rect, data } => WsPayload::Binary(encode_image(3, *rect, &data.0)),
+            Self::RawImage { rect, data } => WsPayload::Binary(encode_image(1, *rect, data)),
+            Self::JpegImage { rect, data } => WsPayload::Binary(encode_image(2, *rect, data)),
+            Self::Cursor { rect, data } => WsPayload::Binary(encode_image(3, *rect, data)),
             other => WsPayload::Text(serde_json::to_string(other).unwrap_or_default()),
         }
     }
@@ -179,11 +172,11 @@ impl From<DesktopEvent> for ServerMessage {
             DesktopEvent::Resize { width, height } => ServerMessage::Resize { width, height },
             DesktopEvent::RawImage { rect, data } => ServerMessage::RawImage {
                 rect: rect.into(),
-                data: Base64Bytes(data),
+                data,
             },
             DesktopEvent::JpegImage { rect, data } => ServerMessage::JpegImage {
                 rect: rect.into(),
-                data: Base64Bytes(data),
+                data,
             },
             DesktopEvent::CopyRect { dst, src_x, src_y } => ServerMessage::CopyRect {
                 dst: dst.into(),
@@ -192,7 +185,7 @@ impl From<DesktopEvent> for ServerMessage {
             },
             DesktopEvent::Cursor { rect, data } => ServerMessage::Cursor {
                 rect: rect.into(),
-                data: Base64Bytes(data),
+                data,
             },
             DesktopEvent::Clipboard(text) => ServerMessage::Clipboard { text },
             DesktopEvent::Bell => ServerMessage::Bell,

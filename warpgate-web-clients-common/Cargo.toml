@@ -1,0 +1,14 @@
+[package]
+name = "warpgate-web-clients-common"
+version = "0.23.4"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Shared session/manager plumbing for the web-* client crates (web-ssh, web-desktop): buffered outbound messages, session lifecycle, and the in-memory session registry, generic over the per-protocol message type."
+
+[dependencies]
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+warpgate-core = { path = "../warpgate-core" }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }

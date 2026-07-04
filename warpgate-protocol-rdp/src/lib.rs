@@ -23,13 +23,13 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 use tracing::{Instrument, debug, error, info_span, warn};
 use warpgate_common::{ListenEndpoint, ProtocolName, RdpTargetAuth, TargetRdpOptions};
+use warpgate_rdp_ipc::client::{ConnectConfig, Event as HelperEvent, Input as HelperInput};
 use warpgate_tls::TlsCertificateAndPrivateKey;
 use warpgate_core::{
     DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
@@ -87,48 +87,6 @@ pub struct RdpClientHandles {
     pub event_rx: Receiver<DesktopEvent>,
     pub input_tx: Sender<DesktopInput>,
     pub abort_tx: UnboundedSender<()>,
-}
-
-#[derive(Serialize)]
-struct ConnectConfig {
-    host: String,
-    port: u16,
-    username: String,
-    password: String,
-    domain: Option<String>,
-    width: u16,
-    height: u16,
-    /// Whether the helper must verify the RDP server's TLS certificate.
-    verify_tls: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum HelperEvent {
-    Connected {
-        width: u16,
-        height: u16,
-    },
-    RawImage {
-        x: u16,
-        y: u16,
-        width: u16,
-        height: u16,
-        data: String,
-    },
-    Error {
-        message: String,
-    },
-    Disconnected,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum HelperInput {
-    Pointer { x: u16, y: u16, buttons: u8 },
-    Key { keysym: u32, down: bool },
-    Scancode { code: u8, extended: bool, down: bool },
-    Wheel { vertical: bool, delta: i16 },
 }
 
 /// Spawn the RDP helper for a target and bridge it to normalised desktop streams.

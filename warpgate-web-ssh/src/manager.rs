@@ -17,15 +17,27 @@ use warpgate_core::{ConfigProvider, Services, SessionStateInit, State};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::known_hosts::KnownHosts;
 use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient, resolve_ssh_chain};
+use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
 use crate::protocol::ServerMessage;
-use crate::session::{WebSshSession, WebSshSessionHandle};
+use crate::session::WebSshSession;
 
 const MAX_SESSIONS_PER_USER: usize = 100;
 
 #[derive(Default)]
-pub struct WebSshClientManager {
-    sessions: Arc<Mutex<HashMap<Uuid, Arc<WebSshSession>>>>,
+pub struct WebSshClientManager(ClientManager<WebSshSession>);
+
+impl std::ops::Deref for WebSshClientManager {
+    type Target = ClientManager<WebSshSession>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl SessionRemover for WebSshClientManager {
+    async fn remove_session(&self, id: Uuid) {
+        self.0.remove_session(id).await;
+    }
 }
 
 impl WebSshClientManager {
@@ -41,12 +53,8 @@ impl WebSshClientManager {
         target_name: &str,
         remote_address: Option<SocketAddr>,
     ) -> Result<Uuid, WarpgateError> {
-        {
-            let sessions = self.sessions.lock().await;
-            let user_session_count = sessions.values().filter(|s| s.user_id() == user_id).count();
-            if user_session_count >= MAX_SESSIONS_PER_USER {
-                return Err(WarpgateError::SessionLimitReached);
-            }
+        if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
+            return Err(WarpgateError::SessionLimitReached);
         }
 
         let target: Target = {
@@ -65,7 +73,7 @@ impl WebSshClientManager {
         }
 
         let (abort_tx, mut abort_rx) = mpsc::unbounded_channel::<()>();
-        let session_handle = WebSshSessionHandle::new(abort_tx);
+        let session_handle = WebSessionHandle::new(abort_tx);
 
         let server_handle = State::register_session(
             &services.state,
@@ -123,10 +131,7 @@ impl WebSshClientManager {
             }
         });
 
-        self.sessions
-            .lock()
-            .await
-            .insert(session_id, session.clone());
+        self.insert(session.clone()).await;
 
         let ssh_chain = resolve_ssh_chain(services, target.id, Some(&username.to_string()))
             .await?
@@ -141,7 +146,7 @@ impl WebSshClientManager {
         spawn_event_loop(
             session.clone(),
             rc_handles.event_rx,
-            self.sessions.clone(),
+            self.sessions(),
             services.clone(),
             ssh_options,
         );
@@ -149,16 +154,6 @@ impl WebSshClientManager {
         debug!(session=%session_id, user=%username, target=%target_name, "Web-SSH session created");
 
         Ok(session_id)
-    }
-
-    pub async fn get_session(&self, id: Uuid) -> Option<Arc<WebSshSession>> {
-        self.sessions.lock().await.get(&id).cloned()
-    }
-
-    pub async fn remove_session(&self, id: Uuid) {
-        if let Some(session) = self.sessions.lock().await.remove(&id) {
-            session.abort();
-        }
     }
 }
 
@@ -178,7 +173,7 @@ fn spawn_event_loop(
                     match event {
                         RCEvent::State(state) => {
                             session
-                                .push_event(ServerMessage::ConnectionState { state })
+                                .push(ServerMessage::ConnectionState { state })
                                 .await;
                         }
                         RCEvent::Output(channel_id, data) => {
@@ -193,43 +188,43 @@ fn spawn_event_loop(
                                 }).await;
                             }
                             session
-                                .push_event(ServerMessage::Output {
+                                .push(ServerMessage::Output {
                                     channel_id,
                                     data: crate::protocol::Base64Bytes(data),
                                 })
                                 .await;
                         }
                         RCEvent::Eof(channel_id) => {
-                            session.push_event(ServerMessage::Eof { channel_id }).await;
+                            session.push(ServerMessage::Eof { channel_id }).await;
                         }
 
                         RCEvent::ExitStatus(channel_id, code) => {
                             session
-                                .push_event(ServerMessage::ExitStatus { channel_id, code })
+                                .push(ServerMessage::ExitStatus { channel_id, code })
                                 .await;
                         }
                         RCEvent::Close(channel_id) |
                         RCEvent::ChannelFailure(channel_id) => {
                             session.stop_recording(channel_id).await;
                             session
-                                .push_event(ServerMessage::ChannelClosed { channel_id })
+                                .push(ServerMessage::ChannelClosed { channel_id })
                                 .await;
                         }
                         RCEvent::Error(e) => {
                             session
-                                .push_event(ServerMessage::Error {
+                                .push(ServerMessage::Error {
                                     message: e.to_string(),
                                 })
                                 .await;
                         }
                         RCEvent::ConnectionError(e) => {
                             session
-                                .push_event(ServerMessage::Error {
+                                .push(ServerMessage::Error {
                                     message: e.to_string(),
                                 })
                                 .await;
                             session
-                                .push_event(ServerMessage::ConnectionState {
+                                .push(ServerMessage::ConnectionState {
                                     state: RCState::Disconnected,
                                 })
                                 .await;
@@ -262,7 +257,7 @@ fn spawn_event_loop(
                                 }
                                 SshHostKeyVerificationMode::Prompt => {
                                     session
-                                        .push_event(ServerMessage::HostKeyUnknown {
+                                        .push(ServerMessage::HostKeyUnknown {
                                             host: ssh_options.host.clone(),
                                             port: ssh_options.port,
                                             key_type: key.algorithm().to_string(),

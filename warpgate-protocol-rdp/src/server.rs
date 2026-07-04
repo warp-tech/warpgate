@@ -27,7 +27,6 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, copy_bidirectional};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{ChildStdin, ChildStdout, Command};
@@ -41,6 +40,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::{ListenEndpoint, Secret, Target, TargetOptions, TargetRdpOptions};
+use warpgate_rdp_ipc::server::{Event as ServerHelperEvent, Input as ServerHelperInput, ServeConfig};
 use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
@@ -59,53 +59,6 @@ const HELPER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// resolution arrives as a `Resize` shortly after).
 const DEFAULT_WIDTH: u16 = 1280;
 const DEFAULT_HEIGHT: u16 = 800;
-
-/// First stdin line handed to the serve helper. Mirrors its `ServeConfig`.
-#[derive(Serialize)]
-struct ServeConfig {
-    loopback_port: u16,
-    cert_pem: String,
-    key_pem: String,
-    width: u16,
-    height: u16,
-}
-
-/// Messages Warpgate writes to the serve helper's stdin (after the config line).
-/// Mirrors the helper's `ControlIn`.
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ServerHelperInput {
-    AuthResponse {
-        accept: bool,
-    },
-    Frame {
-        x: u16,
-        y: u16,
-        width: u16,
-        height: u16,
-        data: String,
-    },
-    Resize {
-        width: u16,
-        height: u16,
-    },
-    Shutdown,
-}
-
-/// Messages Warpgate reads from the serve helper's stdout. Mirrors the helper's
-/// `ControlOut`. The helper also reports the viewer's `domain`, but Warpgate resolves
-/// the target (and its domain) from the [`AuthSelector`], so that field is ignored.
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ServerHelperEvent {
-    AuthRequest { username: String, password: String },
-    Pointer { x: u16, y: u16, buttons: u8 },
-    Scancode { code: u8, extended: bool, down: bool },
-    Key { keysym: u32, down: bool },
-    Wheel { x: u16, y: u16, vertical: bool, delta: i16 },
-    Error { message: String },
-    Disconnected,
-}
 
 /// Handles to the connected target-side RDP client, kept once authentication succeeds.
 struct BackendBridge {
@@ -311,7 +264,9 @@ async fn control_loop(
         };
 
         let input = match event {
-            ServerHelperEvent::AuthRequest { username, password } => {
+            ServerHelperEvent::AuthRequest {
+                username, password, ..
+            } => {
                 if backend.is_some() {
                     // Already authenticated; ignore a duplicate request.
                     continue;

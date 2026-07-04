@@ -25,6 +25,9 @@ sspi = { version = "0.21", features = ["network_client"] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Shared IPC message types with the in-workspace warpgate-protocol-rdp crate. Pure serde,
+# so it slots into this crate's isolated lockfile without pulling any conflicting pins.
+warpgate-rdp-ipc = { path = "../warpgate-rdp-ipc" }
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
 # Own lockfile: must NOT join the Warpgate workspace (picky/sspi pre-release clash).

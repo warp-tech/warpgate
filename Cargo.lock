@@ -8568,6 +8568,7 @@ dependencies = [
  "uuid",
  "warpgate-common",
  "warpgate-core",
+ "warpgate-rdp-ipc",
  "warpgate-tls",
 ]
 
@@ -8645,6 +8646,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "warpgate-rdp-ipc"
+version = "0.23.4"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "warpgate-sso"
 version = "0.26.0"
 dependencies = [
@@ -8696,11 +8704,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "warpgate-web-clients-common"
+version = "0.23.4"
+dependencies = [
+ "tokio",
+ "tracing",
+ "uuid",
+ "warpgate-core",
+ "warpgate-db-entities",
+]
+
+[[package]]
 name = "warpgate-web-desktop"
 version = "0.23.4"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "bytes",
  "futures",
  "poem",
@@ -8718,6 +8736,7 @@ dependencies = [
  "warpgate-db-entities",
  "warpgate-protocol-rdp",
  "warpgate-protocol-vnc",
+ "warpgate-web-clients-common",
 ]
 
 [[package]]
@@ -8743,6 +8762,7 @@ dependencies = [
  "warpgate-core",
  "warpgate-db-entities",
  "warpgate-protocol-ssh",
+ "warpgate-web-clients-common",
 ]
 
 [[package]]
