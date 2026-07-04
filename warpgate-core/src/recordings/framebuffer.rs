@@ -5,8 +5,6 @@
 //! periodically snapshot it as a PNG keyframe. All rectangle ops are bounds-checked and
 //! clip silently rather than panicking (Cranky denies indexing/unwrap/panic here).
 
-use std::io::Write as _;
-
 use super::{Error, Result};
 
 /// RGBA (row-major, 4 bytes/pixel) framebuffer reconstructed from desktop deltas.
@@ -197,19 +195,6 @@ pub(crate) fn decode_jpeg_rgb(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     let pixels = decoder.decode().ok()?;
     let (w, h) = decoder.dimensions()?;
     Some((w as u32, h as u32, pixels))
-}
-
-/// Write `out` to `path` atomically (write a temp sibling then rename). Used for the index
-/// sidecar so a crash mid-write never leaves a truncated file.
-pub(crate) async fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("json.tmp");
-    {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-    }
-    std::fs::rename(&tmp, path)?;
-    Ok(())
 }
 
 #[cfg(test)]

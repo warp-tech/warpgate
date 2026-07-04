@@ -190,8 +190,11 @@ impl ProtocolServer for HTTPProtocolServer {
                     endpoint_auth(admin_api_app).with(cache_bust()),
                 )
                 .at(
+                    // Served unauthenticated like the gateway shell: the admin API is
+                    // auth-gated, and the SPA redirects to login client-side so the login
+                    // `next` can include its hash route (a server redirect can't see it).
                     "/admin",
-                    page_auth(EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html"))
+                    EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html")
                         .with(cache_bust()),
                 )
                 .at(

@@ -25,8 +25,8 @@ pub use writer::RecordingWriter;
 
 /// Fixed name of the primary data stream inside a gen-2 recording folder.
 pub const DATA_FILENAME: &str = "data.ndjson";
-/// Fixed name of the desktop seek index inside a gen-2 recording folder.
-pub const INDEX_FILENAME: &str = "index.json";
+/// Fixed name of the desktop seek index (append-only ndjson) inside a gen-2 recording folder.
+pub const INDEX_FILENAME: &str = "index.ndjson";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

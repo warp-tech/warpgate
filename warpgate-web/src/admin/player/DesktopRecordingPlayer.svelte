@@ -2,7 +2,7 @@
     import { onDestroy, onMount } from 'svelte'
     import { Spinner } from '@sveltestrap/sveltestrap'
     import type { Recording } from 'admin/lib/api'
-    import { applyDesktopFrame, type DesktopFrame } from 'common/desktopCanvas'
+    import { applyDesktopFrame, ensureCanvasSize, type DesktopFrame } from 'common/desktopCanvas'
     import { keysymLabel, scancodeLabel, type KeyPress, type Click } from 'common/desktopInput'
     import PlayerToolbar from './PlayerToolbar.svelte'
 
@@ -12,7 +12,7 @@
     const CLICK_ANIM_S = 0.6
     const KEY_DISPLAY_S = 3
     // Number of time buckets in the scrubber input-density heatmap.
-    const HEATMAP_BUCKETS = 120
+    const HEATMAP_BUCKETS = 200
 
     const DATA_URL = `/@warpgate/admin/api/recordings/${recording.id}/desktop`
     const INDEX_URL = `${DATA_URL}/index`
@@ -26,11 +26,14 @@
         | { type: 'scancode_input', time: number, code: number, down: boolean }
         | { type: 'pointer_input', time: number, x: number, y: number, buttons: number }
         | { type: 'wheel_input' | 'clipboard_input', time: number }
-    interface DesktopIndex {
-        duration: number
-        keyframes: { time: number, offset: number }[]
-        input: InputItem[]
-    }
+    // Lines of the append-only `index.ndjson`: seek anchors, size changes, input
+    // timestamps (heatmap only) and a final duration marker. Overlay input comes from the
+    // data stream, not here.
+    type IndexLine =
+        | { type: 'keyframe', time: number, offset: number }
+        | { type: 'resize', time: number, width: number, height: number }
+        | { type: 'input', time: number }
+        | { type: 'end', time: number }
 
     let rootElement: HTMLDivElement
     let canvas: HTMLCanvasElement
@@ -66,7 +69,7 @@
     // discarding each (bounded memory). Seeks restart from the nearest keyframe. ---
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
     let lineBuf = ''
-    let pending: Frame | null = null
+    let pending: Frame | InputItem | null = null
     let renderedTime = 0
     let seekGen = 0
     const decoder = new TextDecoder()
@@ -90,13 +93,35 @@
             loading = false
             return
         }
-        const index = await response.json() as DesktopIndex
-        duration = index.duration
-        keyframes = index.keyframes ?? []
-        for (const item of index.input ?? []) {
-            recordInput(item)
+        // Parse the whole (small) index once: seek anchors, input timestamps for the
+        // heatmap, and the first resize so we can size the canvas at t=0.
+        const text = await response.text()
+        const inputTimes: number[] = []
+        let firstResize: { width: number, height: number } | null = null
+        for (const line of text.split('\n')) {
+            if (!line.trim()) {
+                continue
+            }
+            let entry: IndexLine
+            try {
+                entry = JSON.parse(line) as IndexLine
+            } catch {
+                continue
+            }
+            duration = Math.max(duration, entry.time)
+            switch (entry.type) {
+                case 'keyframe': keyframes.push({ time: entry.time, offset: entry.offset }); break
+                case 'resize': firstResize ??= { width: entry.width, height: entry.height }; break
+                case 'input': inputTimes.push(entry.time); break
+                case 'end': duration = entry.time; break
+            }
         }
-        heatmap = computeHeatmap(index.input ?? [], duration)
+        heatmap = computeHeatmap(inputTimes, duration)
+        if (firstResize && ctx) {
+            ensureCanvasSize(canvas, firstResize.width, firstResize.height)
+            canvasW = canvas.width
+            canvasH = canvas.height
+        }
 
         await seek(0)
 
@@ -164,13 +189,13 @@
     // Bucket viewer-input events by time into a 0..1 density curve for the scrubber
     // heatmap. Perceptual (sqrt) scaling so one high-rate burst (e.g. a window drag)
     // doesn't flatten every other bucket to invisibility.
-    function computeHeatmap (input: { time: number }[], total: number): number[] {
+    function computeHeatmap (times: number[], total: number): number[] {
         const buckets = new Array<number>(HEATMAP_BUCKETS).fill(0)
         if (total <= 0) {
             return buckets
         }
-        for (const item of input) {
-            const i = Math.min(HEATMAP_BUCKETS - 1, Math.max(0, Math.floor(HEATMAP_BUCKETS * item.time / total)))
+        for (const time of times) {
+            const i = Math.min(HEATMAP_BUCKETS - 1, Math.max(0, Math.floor(HEATMAP_BUCKETS * time / total)))
             buckets[i] = (buckets[i] ?? 0) + 1
         }
         const max = Math.max(1, ...buckets)
@@ -190,17 +215,16 @@
         reader = response.body?.getReader() ?? null
     }
 
-    function parseFrame (line: string): Frame | null {
+    function parseItem (line: string): Frame | InputItem | null {
         try {
-            const item = JSON.parse(line)
-            return FRAME_TYPES.has(item.type) ? item as Frame : null
+            return JSON.parse(line) as Frame | InputItem
         } catch {
             return null
         }
     }
 
-    // Next framebuffer item from the open stream (skips input items); null at EOF.
-    async function nextFrame (): Promise<Frame | null> {
+    // Next item (frame or viewer-input) from the open stream; null at EOF.
+    async function nextItem (): Promise<Frame | InputItem | null> {
         while (reader) {
             const nl = lineBuf.indexOf('\n')
             if (nl < 0) {
@@ -208,43 +232,49 @@
                 if (done) {
                     const rest = lineBuf.trim()
                     lineBuf = ''
-                    return rest ? parseFrame(rest) : null
+                    return rest ? parseItem(rest) : null
                 }
                 lineBuf += decoder.decode(value, { stream: true })
                 continue
             }
             const line = lineBuf.slice(0, nl).trim()
             lineBuf = lineBuf.slice(nl + 1)
-            const frame = line ? parseFrame(line) : null
-            if (frame) {
-                return frame
+            const item = line ? parseItem(line) : null
+            if (item) {
+                return item
             }
         }
         return null
     }
 
-    // Apply frames from the open stream up to `time`, unless a newer seek supersedes us.
+    // Play the stream up to `time`, unless a newer seek supersedes us: apply framebuffer
+    // items to the canvas and feed viewer-input items to the overlay (the overlay is
+    // rebuilt from the stream, not the index — see `doSeek`'s reset on reopen).
     async function pumpUntil (time: number, gen: number) {
         while (ctx) {
-            const frame = pending ?? await nextFrame()
+            const item = pending ?? await nextItem()
             if (gen !== seekGen) {
                 return
             }
             pending = null
-            if (!frame) {
+            if (!item) {
                 return
             }
-            if (frame.time > time) {
-                pending = frame
+            if (item.time > time) {
+                pending = item
                 return
             }
-            await applyDesktopFrame(canvas, ctx, frame)
-            if (gen !== seekGen) {
-                return
+            if (FRAME_TYPES.has(item.type)) {
+                await applyDesktopFrame(canvas, ctx, item as Frame)
+                if (gen !== seekGen) {
+                    return
+                }
+                renderedTime = item.time
+                canvasW = canvas.width
+                canvasH = canvas.height
+            } else {
+                recordInput(item as InputItem)
             }
-            renderedTime = frame.time
-            canvasW = canvas.width
-            canvasH = canvas.height
         }
     }
 
@@ -263,25 +293,25 @@
     // `keyframeSkip` lets an explicit scrub jump forward to a keyframe (fast); playback
     // stepping leaves it off so it renders every intermediate frame (smooth motion).
     let seeking = false
-    let queuedSeek: { time: number, keyframeSkip: boolean } | null = null
-    async function seek (time: number, keyframeSkip = false) {
-        queuedSeek = { time: Math.max(0, Math.min(duration, time)), keyframeSkip }
+    let queuedSeek: { time: number, keyframeSkip: boolean, goLive: boolean } | null = null
+    async function seek (time: number, keyframeSkip = false, goLive = false) {
+        queuedSeek = { time: Math.max(0, Math.min(duration, time)), keyframeSkip, goLive }
         if (seeking) {
             return
         }
         seeking = true
         try {
             while (queuedSeek !== null) {
-                const { time: target, keyframeSkip: skip } = queuedSeek
+                const req = queuedSeek
                 queuedSeek = null
-                await doSeek(target, skip)
+                await doSeek(req.time, req.keyframeSkip, req.goLive)
             }
         } finally {
             seeking = false
         }
     }
 
-    async function doSeek (time: number, keyframeSkip: boolean) {
+    async function doSeek (time: number, keyframeSkip: boolean, goLiveAfter = false) {
         if (!ctx) {
             return
         }
@@ -298,6 +328,12 @@
                 return
             }
             renderedTime = kf.time
+            // The overlay is rebuilt from the stream as we pump forward from the keyframe;
+            // reset it so a reopen (backward seek or keyframe jump) doesn't duplicate clicks
+            // or desync the button-transition detection in `recordInput`.
+            keyPresses = []
+            clicks = []
+            prevButtons = 0
         }
         await pumpUntil(time, gen)
         if (gen !== seekGen) {
@@ -305,13 +341,18 @@
         }
         timestamp = time
         seekInputValue = duration ? 100 * time / duration : 0
+        // Only now (base = latest keyframe + deltas up to the live edge) is it safe to
+        // apply incoming live deltas; tailing from a stale/blank base would freeze.
+        if (goLiveAfter) {
+            liveTailing = true
+        }
     }
 
+    // Jump to the live edge: a keyframe-based seek to the latest recorded frame (reusing
+    // doSeek's keyframe logic), then start tailing. Rebasing on a keyframe is what keeps
+    // the image correct — without it the incoming deltas paint over an outdated frame.
     function goLive () {
-        liveTailing = true
-        abortReader()
-        timestamp = duration
-        seekInputValue = 100
+        void seek(duration, true, true)
     }
 
     async function step () {
@@ -348,7 +389,7 @@
         <div class="not-playable">This recording predates indexed playback and can't be played.</div>
     {/if}
 
-    <div class="container" class:invisible={loading || notPlayable}>
+    <div class="stage-container" class:invisible={loading || notPlayable}>
         <div class="stage">
             <!-- svelte-ignore a11y-no-interactive-element-to-noninteractive-role -->
             <canvas bind:this={canvas} on:click={togglePlaying} role="img"></canvas>
@@ -400,12 +441,17 @@
         display: flex;
         flex-direction: column;
         background: #262626;
+        border: 1px solid #ffffff1a;
     }
 
-    .container {
+    .stage-container {
         margin: auto;
         max-width: 100%;
         overflow: auto;
+
+        // center in fullscreen
+        flex-grow: 1;
+        align-content: center;
     }
 
     .not-playable {

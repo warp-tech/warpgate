@@ -1,7 +1,8 @@
 <script lang="ts">
     import Fa from 'svelte-fa'
-    import { faPlay, faPause, faExpand } from '@fortawesome/free-solid-svg-icons'
+    import { faPlay, faPause, faExpand, faCircle, faFastForward } from '@fortawesome/free-solid-svg-icons'
     import formatDuration from 'format-duration'
+    import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte';
 
     // Shared controls for the recording players (terminal + desktop): play/pause,
     // elapsed time, optional LIVE button, a scrubber with an optional input-density
@@ -30,11 +31,23 @@
     </button>
     <pre class="timestamp">{ formatDuration(timestamp * 1000, { leading: true }) }</pre>
     {#if isLive}
-        <button
-            class="btn live-btn"
-            class:active={liveActive}
-            on:click={onGoLive}
-        >LIVE</button>
+        {#if liveActive}
+            <div class="live-indicator gap-2 m-2">
+                <Fa icon={faCircle} size="xs" />
+                <span>Live</span>
+            </div>
+        {:else}
+            <button
+                id="go-live-button"
+                class="btn btn-link text-danger d-flex align-items-center gap-2"
+                on:click={onGoLive}
+            >
+                <Fa icon={faFastForward} size="xs" />
+            </button>
+            <Tooltip target="go-live-button" placement="top" container="body">
+                Go live
+            </Tooltip>
+        {/if}
     {/if}
     <div class="seek">
         {#if heatmap}
@@ -60,6 +73,7 @@
 <style lang="scss">
     .toolbar {
         display: flex;
+        height: 45px;
     }
 
     .btn {
@@ -67,9 +81,10 @@
 
         :global(svg) {
             transition: all .25s ease-out;
-            &:hover {
-                transform: scale(1.2);
-            }
+        }
+
+        &:hover :global(svg) {
+            transform: scale(1.2);
         }
     }
 
@@ -82,59 +97,54 @@
         align-self: center;
     }
 
-    .live-btn {
-        font-size: 0.75rem;
-        align-self: center;
+    .live-indicator {
+        display: flex;
+        align-items: center;
         color: red;
-        flex: none;
 
-        &.active {
-            background: red;
-            color: white;
-            padding: 0.1rem 0.25rem;
-            margin: 0 0.5rem;
+        span {
+            text-transform: uppercase;
+            font-weight: bold;
+            font-size: 0.75rem;
+            letter-spacing: 1px;
         }
     }
 
     .seek {
         position: relative;
         flex: 1 1 auto;
-        display: flex;
-        align-items: center;
+        display: grid;
+        margin: 0 10px;
     }
 
-    // Input-event density band behind the scrubber. Taller than the 2px track so it
-    // reads as a coloured halo around the thin white scrubber line + fill on top.
     .heatmap {
-        position: absolute;
-        left: 10px;
-        right: 10px;
-        top: 19px;
-        height: 8px;
-        transform: translateY(-50%);
+        grid-area: 1 / 1;
+        align-self: center;
+
         display: flex;
+        height: 8px;
         border-radius: 4px;
         overflow: hidden;
         pointer-events: none;
         z-index: 0;
-        background: rgba(255, 255, 255, 0.06);
     }
 
     .heatmap span {
         flex: 1 1 0;
-        background: #5bc0be;
+        background: #008fff;
     }
 
     input[type="range"] {
+        grid-area: 1 / 1;
+        align-self: center;
+
         appearance: none;
         -webkit-appearance: none;
         position: relative;
         z-index: 1;
-        margin: 18px 10px 0;
-        height: 2px;
+        height: 8px;
         border-radius: 5px;
-        background: linear-gradient(#eee, #eee);
-        background-repeat: no-repeat;
+        background: #ffffff2e;
         cursor: pointer;
 
         &:hover::-webkit-slider-thumb {
@@ -144,9 +154,9 @@
 
     input[type="range"]::-webkit-slider-thumb {
         -webkit-appearance: none;
-        height: 10px;
-        width: 10px;
-        border-radius: 50%;
+        height: 15px;
+        width: 5px;
+        border-radius: 3px;
         background: #eee;
         transition: all .25s ease-out;
     }

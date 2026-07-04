@@ -303,7 +303,7 @@ pub async fn api_get_recording_desktop_index(
         .await
         .map_err(|_| poem::Error::from(NotFoundError))?;
     Ok(poem::Response::builder()
-        .content_type("application/json")
+        .content_type("application/x-ndjson")
         .body(poem::Body::from_async_read(file)))
 }
 
