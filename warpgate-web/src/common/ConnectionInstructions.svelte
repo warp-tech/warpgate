@@ -1,12 +1,11 @@
 <script lang="ts">
-    import { Button, FormGroup, ListGroup, ListGroupItem } from '@sveltestrap/sveltestrap'
+    import { Button, FormGroup, ListGroup, ListGroupItem, Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
     import { api, TargetKind, type ExistingCertificateCredential, type SsoKubernetesConfigDescription } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { makeExampleSSHCommand, makeCommonSelectorUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand, protocolHost, protocolPortString, makeOidcKubeconfig } from 'common/protocols'
     import { getCertificateKey, getAllCertificateKeys } from 'gateway/lib/certificateStore'
     import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
     import CopyButton from 'common/CopyButton.svelte'
-    import { Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import InfoBox from './InfoBox.svelte'
     import { faCertificate, faPlus } from '@fortawesome/free-solid-svg-icons'
@@ -39,7 +38,7 @@
     let pendingSelectCertId: string | undefined = $state()
 
     let k8sOidcConfigs: SsoKubernetesConfigDescription[] = $state([])
-    let selectedOidcProvider: string | undefined = $state(undefined)
+    let selectedOidcProvider: string | undefined = $state()
     let kubeconfigMode: 'oidc' | 'certificate' = $state('certificate')
 
     interface CertificateWithKeyStatus {
@@ -252,8 +251,8 @@
 
 {#if k8sOidcConfigs.length > 0}
   <ul class="nav nav-pills mb-3">
-    <li class="nav-item"><button class="nav-link {kubeconfigMode === 'oidc' ? 'active' : ''}" onclick={() => kubeconfigMode = 'oidc'}>OIDC (kubelogin)</button></li>
-    <li class="nav-item"><button class="nav-link {kubeconfigMode === 'certificate' ? 'active' : ''}" onclick={() => kubeconfigMode = 'certificate'}>Certificate</button></li>
+    <li class="nav-item"><button class="nav-link {kubeconfigMode === 'oidc' ? 'active' : ''}" onclick={() => kubeconfigMode = 'oidc'}>OIDC with kubelogin</button></li>
+    <li class="nav-item"><button class="nav-link {kubeconfigMode === 'certificate' ? 'active' : ''}" onclick={() => kubeconfigMode = 'certificate'}>Certificate authentication</button></li>
   </ul>
 {/if}
 
@@ -266,16 +265,13 @@
       {/each}
     </select>
   {/if}
-  <FormGroup floating label="Kubeconfig file" class="d-flex align-items-center">
-    <textarea class="form-control" readonly style="height: 27rem; font-family: monospace; font-size: 0.9em;">{oidcKubeconfig}</textarea>
-    <CopyButton text={oidcKubeconfig} />
-  </FormGroup>
+  <CopyableTextarea label="Kubeconfig file" value={oidcKubeconfig} />
   <div class="text-muted small mb-3">Requires the <a href="https://github.com/int128/kubelogin" target="_blank" rel="noreferrer noopener">kubelogin</a> (oidc-login) kubectl plugin.</div>
 {/if}
 
 {#if kubeconfigMode === 'certificate' || k8sOidcConfigs.length === 0}
 <div class="row">
-    <div class="col-12 col-lg-6">
+    <div class="col-12 col-lg">
         <!-- svelte-ignore a11y_label_has_associated_control -->
         {#if !ticketSecret}
             {#if certificates.length > 0}
@@ -356,7 +352,7 @@
             {/if}
         {/if}
     </div>
-    <div class="col-12 col-lg-6">
+    {#if certificates.length > 0}
         <FormGroup floating label="Kubeconfig file" class="d-flex align-items-center">
             <textarea class="form-control" readonly style="height: 27rem; font-family: monospace; font-size: 0.9em;">{kubeconfig}</textarea>
             <CopyButton text={kubeconfig} />
@@ -371,6 +367,7 @@
             Save the kubeconfig above to a file (e.g. <code>warpgate-kubeconfig.yaml</code>) and use it with kubectl.
         </InfoBox>
     </div>
+    {/if}
 </div>
 {/if}
 {/if}
