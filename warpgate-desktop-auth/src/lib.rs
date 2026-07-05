@@ -108,12 +108,10 @@ pub async fn authenticate<P: DesktopProtocol>(
                 return Ok(DesktopAuthOutcome::Failed);
             }
 
+            let session_id = server_handle.lock().await.id();
             let (state_id, state_arc) = services
-                .auth_state_store
-                .lock()
-                .await
-                .create(
-                    Some(&server_handle.lock().await.id()),
+                .create_auth_state(
+                    Some(&session_id),
                     &username,
                     P::NAME,
                     &[

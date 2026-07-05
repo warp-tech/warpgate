@@ -11,7 +11,7 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use time::OffsetDateTime;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_admin::api::AnySecurityScheme;
@@ -436,8 +436,11 @@ impl Api {
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
-        let store = services.auth_state_store.lock().await;
-        let Some(state_arc) = store.get(&state_id.0) else {
+        let state_arc = {
+            let store = services.auth_state_store.lock().await;
+            store.get(&state_id.0)
+        };
+        let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
         serialize_auth_state_inner(state_arc, services)
@@ -460,12 +463,20 @@ impl Api {
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
-        let mut store = services.auth_state_store.lock().await;
-        let Some(state_arc) = store.get(&state_id.0) else {
+        let state_arc = {
+            let store = services.auth_state_store.lock().await;
+            store.get(&state_id.0)
+        };
+        let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
         state_arc.lock().await.reject();
-        store.complete(&state_id.0).await;
+        services
+            .auth_state_store
+            .lock()
+            .await
+            .complete(&state_id.0)
+            .await;
         session.clear_auth_state();
 
         serialize_auth_state_inner(state_arc, services)
@@ -486,19 +497,36 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<AuthStateListResponse> {
         let services = ctx.services();
-        let store = services.auth_state_store.lock().await;
 
         let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
         else {
             return Ok(AuthStateListResponse::NotFound);
         };
 
-        let state_arcs = store.all_pending_web_auths_for_user(username).await;
+        // Snapshot the state handles while briefly holding the store lock, then
+        // release it before inspecting/serialising each state. Inspecting a
+        // state locks its inner mutex (and `serialize_auth_state_inner` locks
+        // the session state store), so doing that work under the auth state
+        // store lock would serialise every login against this endpoint.
+        let state_arcs = {
+            let store = services.auth_state_store.lock().await;
+            store.snapshot_states()
+        };
 
         let mut results = vec![];
 
         for state_arc in state_arcs {
-            results.push(serialize_auth_state_inner(state_arc, services).await?);
+            let is_pending_web_approval = {
+                let state = state_arc.lock().await;
+                username_eq_ci(&state.user_info().username, username)
+                    && matches!(
+                        state.verify(),
+                        AuthResult::Need(need) if need.contains(&CredentialKind::WebUserApproval)
+                    )
+            };
+            if is_pending_web_approval {
+                results.push(serialize_auth_state_inner(state_arc, services).await?);
+            }
         }
 
         Ok(AuthStateListResponse::Ok(Json(results)))
@@ -595,14 +623,15 @@ async fn get_foreign_auth_state(
     id: &Uuid,
     ctx: &AuthenticatedRequestContext,
 ) -> Option<Arc<Mutex<AuthState>>> {
-    let store = ctx.services().auth_state_store.lock().await;
-
     let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
     else {
         return None;
     };
 
-    let state_arc = store.get(id)?;
+    let state_arc = {
+        let store = ctx.services().auth_state_store.lock().await;
+        store.get(id)?
+    };
 
     {
         let state = state_arc.lock().await;
@@ -620,10 +649,15 @@ async fn serialize_auth_state_inner(
 ) -> poem::Result<AuthStateResponseInternal> {
     let state = state_arc.lock().await;
 
-    let session_state_store = services.state.lock().await;
-    let session_state = state
-        .session_id()
-        .and_then(|session_id| session_state_store.sessions.get(session_id));
+    // Clone the session state handle under a brief session-store lock, then
+    // release it before locking the per-session mutex, so we never hold the
+    // session state store lock across another lock acquisition.
+    let session_state = {
+        let session_state_store = services.state.lock().await;
+        state
+            .session_id()
+            .and_then(|session_id| session_state_store.sessions.get(session_id).cloned())
+    };
 
     let peer_addr = match session_state {
         Some(x) => x.lock().await.remote_address,
@@ -663,13 +697,30 @@ pub async fn api_get_web_auth_requests_stream(
     Ok(ws.on_upgrade(|socket| async move {
         let (mut sink, _) = socket.split();
 
-        while let Ok(id) = rx.recv().await {
-            let auth_state_store = auth_state_store.lock().await;
-            if let Some(state) = auth_state_store.get(&id) {
-                let state = state.lock().await;
-                if username_eq_ci(&state.user_info().username, &username) {
-                    sink.send(Message::Text(id.to_string())).await?;
-                }
+        loop {
+            let id = match rx.recv().await {
+                Ok(id) => id,
+                // The signal channel only carries wake-ups; if we lag behind we
+                // can safely resync on the next event instead of tearing down.
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            };
+
+            // Clone the state handle under a brief store lock, then release it
+            // before locking the inner state, so we never hold the store lock
+            // across an inner-state lock (which protocol sessions hold across
+            // DB I/O) or the socket write.
+            let state_arc = {
+                let store = auth_state_store.lock().await;
+                store.get(&id)
+            };
+            let belongs_to_user = match state_arc {
+                Some(state) => username_eq_ci(&state.lock().await.user_info().username, &username),
+                None => false,
+            };
+
+            if belongs_to_user {
+                sink.send(Message::Text(id.to_string())).await?;
             }
         }
 

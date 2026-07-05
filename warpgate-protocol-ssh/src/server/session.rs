@@ -298,8 +298,8 @@ impl ServerSession {
         kinds
     }
 
-    /// `rate_limit_credential_type` is forwarded to `AuthStateStore::create` so
-    /// an unknown username is recorded as a failed attempt for IP blocking —
+    /// `rate_limit_credential_type` is forwarded to `Services::create_auth_state`
+    /// so an unknown username is recorded as a failed attempt for IP blocking —
     /// `None` for benign contexts (public-key offers) that must not be counted.
     async fn get_auth_state(
         &mut self,
@@ -322,10 +322,7 @@ impl ServerSession {
         {
             let state = self
                 .services
-                .auth_state_store
-                .lock()
-                .await
-                .create(
+                .create_auth_state(
                     Some(&self.id),
                     username,
                     crate::PROTOCOL_NAME,

@@ -39,9 +39,6 @@ jobs:
           cargo clean
           rustup component add llvm-tools-preview
 
-      - name: Run Rust unit tests
-        run: cargo llvm-cov test --workspace
-
       - name: Build UI
         run: |
           just npm ci
@@ -53,6 +50,9 @@ jobs:
       # and warpgate-protocol-rdp's extraction test runs.
       - name: Build RDP helper
         run: just build-rdp-helper
+
+      - name: Run Rust unit tests
+        run: cargo llvm-cov test --workspace
 
       - name: Build images
         working-directory: tests

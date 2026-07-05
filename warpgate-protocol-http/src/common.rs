@@ -210,9 +210,9 @@ pub async fn get_or_create_auth_state_for_request(
         }
     }
 
-    let mut store = ctx.services().auth_state_store.lock().await;
-    let (id, state) = store
-        .create(
+    let (id, state) = ctx
+        .services()
+        .create_auth_state(
             None,
             username,
             crate::common::PROTOCOL_NAME,

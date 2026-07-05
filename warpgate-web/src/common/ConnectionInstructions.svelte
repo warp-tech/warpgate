@@ -10,6 +10,7 @@
     import InfoBox from './InfoBox.svelte'
     import { faCertificate, faPlus } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
+    import CopyableTextArea from './CopyableTextArea.svelte';
 
     interface Props {
         targetName?: string;
@@ -265,7 +266,7 @@
       {/each}
     </select>
   {/if}
-  <CopyableTextarea label="Kubeconfig file" value={oidcKubeconfig} />
+  <CopyableTextArea label="Kubeconfig file" value={oidcKubeconfig} />
   <div class="text-muted small mb-3">Requires the <a href="https://github.com/int128/kubelogin" target="_blank" rel="noreferrer noopener">kubelogin</a> (oidc-login) kubectl plugin.</div>
 {/if}
 
@@ -366,7 +367,6 @@
         <InfoBox class="mt-3">
             Save the kubeconfig above to a file (e.g. <code>warpgate-kubeconfig.yaml</code>) and use it with kubectl.
         </InfoBox>
-    </div>
     {/if}
 </div>
 {/if}
