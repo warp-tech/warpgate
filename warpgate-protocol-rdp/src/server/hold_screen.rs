@@ -2,6 +2,7 @@
 //! valid password (NLA) when the credential policy still needs a TOTP or web approval.
 //! Collects that factor over the live RDP session before the target is dialed.
 
+use std::convert::Infallible;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -51,7 +52,7 @@ pub(super) async fn run_hold_screen(
     });
 
     let mut otp = OtpEntry::new("rdp");
-    let mut tick = 0u64;
+    let mut painter = HoldPainter::new();
     let mut ticker = tokio::time::interval(HOLD_RENDER_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -73,7 +74,7 @@ pub(super) async fn run_hold_screen(
                     .await;
                 // Swap the OTP prompt for a "Connecting" screen before the caller blocks on
                 // the backend connect, so the viewer gets feedback instead of a frozen frame.
-                let _ = render_connecting_frame(helper_in_tx, tick);
+                let _ = painter.paint(helper_in_tx, ui::render_connecting);
                 return Ok(Some(user_info));
             }
             AuthResult::Rejected => return Ok(None),
@@ -125,60 +126,55 @@ pub(super) async fn run_hold_screen(
                         }
                 },
                 _ = ticker.tick() => {
-                    render_hold_frame(helper_in_tx, tick, &prompt)?;
-                    tick = tick.wrapping_add(1)
+                    painter.paint(helper_in_tx, |tick| ui::render_authentication(tick, &prompt))?;
                 },
             }
         }
     }
 }
 
-/// Paint the current holding-screen prompt to the viewer as a full BGRA frame.
-fn render_hold_frame(
-    helper_in_tx: &UnboundedSender<ServerHelperInput>,
+/// Paints the full-screen hold-screen UI to the RDP viewer via the serve helper, owning the
+/// spinner tick. `paint` takes a UI render function (`ui::render_*`) so the prompt and
+/// "Connecting" screens go through one code path.
+struct HoldPainter {
     tick: u64,
-    prompt: &ui::AuthPrompt,
-) -> Result<()> {
-    paint_ui_frame(
-        helper_in_tx,
-        ui::render_authentication(tick, prompt).unwrap_or_default(),
-    )
 }
 
-/// Paint the "Connecting" screen — shown after auth completes while we reach the target, so
-/// the viewer isn't frozen on the last prompt during the (possibly slow) backend connect.
-fn render_connecting_frame(
-    helper_in_tx: &UnboundedSender<ServerHelperInput>,
-    tick: u64,
-) -> Result<()> {
-    paint_ui_frame(
-        helper_in_tx,
-        ui::render_connecting(tick).unwrap_or_default(),
-    )
-}
+impl HoldPainter {
+    fn new() -> Self {
+        Self { tick: 0 }
+    }
 
-/// Send a full-screen RGB888 UI image to the viewer, converting to the BGRA the serve helper
-/// expects.
-fn paint_ui_frame(helper_in_tx: &UnboundedSender<ServerHelperInput>, rgb: Vec<u8>) -> Result<()> {
-    let mut bgra = Vec::with_capacity(rgb.len() / 3 * 4);
-    for px in rgb.chunks_exact(3) {
-        if let Some(&[r, g, b]) = px.first_chunk::<3>() {
-            bgra.extend_from_slice(&[b, g, r, 255]);
+    /// Render one frame with `render_frame(tick)` (RGB888), convert it to the BGRA the serve
+    /// helper expects, and push it as a full-screen frame. Advances the spinner tick.
+    fn paint(
+        &mut self,
+        helper_in_tx: &UnboundedSender<ServerHelperInput>,
+        render_frame: impl FnOnce(u64) -> Result<Vec<u8>, Infallible>,
+    ) -> Result<()> {
+        let rgb = render_frame(self.tick).unwrap_or_default();
+        self.tick = self.tick.wrapping_add(1);
+
+        let mut bgra = Vec::with_capacity(rgb.len() / 3 * 4);
+        for px in rgb.chunks_exact(3) {
+            if let Some(&[r, g, b]) = px.first_chunk::<3>() {
+                bgra.extend_from_slice(&[b, g, r, 255]);
+            }
         }
+        if helper_in_tx
+            .send(ServerHelperInput::Frame {
+                x: 0,
+                y: 0,
+                width: ui::SCREEN_W,
+                height: ui::SCREEN_H,
+                data: bgra.into(),
+            })
+            .is_err()
+        {
+            bail!("serve helper channel closed");
+        }
+        Ok(())
     }
-    if helper_in_tx
-        .send(ServerHelperInput::Frame {
-            x: 0,
-            y: 0,
-            width: ui::SCREEN_W,
-            height: ui::SCREEN_H,
-            data: bgra.into(),
-        })
-        .is_err()
-    {
-        bail!("serve helper channel closed");
-    }
-    Ok(())
 }
 
 /// Map a PC/AT set-1 scancode (what mstsc/FreeRDP send) to an OTP action.
