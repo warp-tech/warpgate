@@ -1,0 +1,16 @@
+[package]
+edition = "2024"
+license = "Apache-2.0"
+name = "warpgate-desktop-auth"
+version = "0.23.4"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+uuid.workspace = true
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-desktop-ui = { path = "../warpgate-desktop-ui" }

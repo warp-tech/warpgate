@@ -19,7 +19,9 @@ use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_postgres::PostgresProtocolServer;
+use warpgate_protocol_rdp::RdpProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
+use warpgate_protocol_vnc::VncProtocolServer;
 
 use crate::config::{load_config, watch_config};
 use crate::listener_supervisor::{
@@ -168,8 +170,18 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     }
 
     supervisors.push(tls_listener!("MySQL", MySQLProtocolServer, mysql));
-    supervisors.push(tls_listener!("PostgreSQL", PostgresProtocolServer, postgres));
-    supervisors.push(tls_listener!("Kubernetes", KubernetesProtocolServer, kubernetes));
+    supervisors.push(tls_listener!(
+        "PostgreSQL",
+        PostgresProtocolServer,
+        postgres
+    ));
+    supervisors.push(tls_listener!(
+        "Kubernetes",
+        KubernetesProtocolServer,
+        kubernetes
+    ));
+    supervisors.push(tls_listener!("VNC", VncProtocolServer, vnc));
+    supervisors.push(tls_listener!("RDP", RdpProtocolServer, rdp));
 
     tokio::spawn({
         let services = services.clone();

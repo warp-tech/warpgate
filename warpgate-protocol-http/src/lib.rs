@@ -37,6 +37,8 @@ use warpgate_common_http::logging::{
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_tls::TlsCertificateAndPrivateKey;
 use warpgate_web::Assets;
+use warpgate_web_desktop::WebDesktopClientManager;
+use warpgate_web_desktop::api::ws_handler as desktop_web_client_ws_handler;
 use warpgate_web_ssh::WebSshClientManager;
 use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 
@@ -156,9 +158,11 @@ impl ProtocolServer for HTTPProtocolServer {
 
         // /@warpgate/ routes
         let web_ssh_manager = Arc::new(WebSshClientManager::new());
+        let web_desktop_manager = Arc::new(WebDesktopClientManager::new());
         let at_warpgate_endpoints = || {
             let services = self.services.clone();
             let web_ssh_manager = web_ssh_manager.clone();
+            let web_desktop_manager = web_desktop_manager.clone();
             let api_service = {
                 OpenApiService::new(crate::api::get(), "Warpgate user API", warpgate_version())
                     .server("/@warpgate/api")
@@ -186,9 +190,11 @@ impl ProtocolServer for HTTPProtocolServer {
                     endpoint_auth(admin_api_app).with(cache_bust()),
                 )
                 .at(
+                    // Served unauthenticated like the gateway shell: the admin API is
+                    // auth-gated, and the SPA redirects to login client-side so the login
+                    // `next` can include its hash route (a server redirect can't see it).
                     "/admin",
-                    page_auth(EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html"))
-                        .with(cache_bust()),
+                    EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html").with(cache_bust()),
                 )
                 .at(
                     "/api/auth/web-auth-requests/stream",
@@ -197,6 +203,10 @@ impl ProtocolServer for HTTPProtocolServer {
                 .at(
                     "/api/web-ssh/sessions/:session_id/stream",
                     endpoint_auth(ssh_web_client_ws_handler),
+                )
+                .at(
+                    "/api/web-desktop/sessions/:session_id/stream",
+                    endpoint_auth(desktop_web_client_ws_handler),
                 )
                 .at(
                     "",
@@ -227,6 +237,7 @@ impl ProtocolServer for HTTPProtocolServer {
                     }
                 })
                 .data(web_ssh_manager)
+                .data(web_desktop_manager)
                 .with(ContentSecurityPolicyMiddleware)
         };
 

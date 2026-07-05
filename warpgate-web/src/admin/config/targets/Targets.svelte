@@ -168,6 +168,12 @@
                     {#if target.options.kind === TargetKind.Kubernetes}
                         Kubernetes
                     {/if}
+                    {#if target.options.kind === TargetKind.Vnc}
+                        VNC
+                    {/if}
+                    {#if target.options.kind === TargetKind.Rdp}
+                        RDP
+                    {/if}
                 </small>
             </a>
         {/snippet}

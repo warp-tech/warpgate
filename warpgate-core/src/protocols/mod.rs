@@ -6,8 +6,12 @@ use futures::future::BoxFuture;
 use warpgate_common::ListenEndpoint;
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
+mod desktop;
 mod handle;
 
+pub use desktop::{
+    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
+};
 pub use handle::{SessionHandle, WarpgateServerHandle};
 
 #[derive(Debug, thiserror::Error)]

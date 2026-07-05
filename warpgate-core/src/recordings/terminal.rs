@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use warpgate_db_entities::Recording::RecordingKind;
 
-use super::writer::RecordingWriter;
-use super::{Error, Recorder, Result};
+use super::{Recorder, Result};
+use crate::recordings::RecordingWriterOpener;
+use crate::recordings::writer::NDJsonRecordingWriter;
 
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -79,7 +80,7 @@ impl From<TerminalRecordingItem> for AsciiCast {
 }
 
 pub struct TerminalRecorder {
-    writer: RecordingWriter,
+    writer: NDJsonRecordingWriter,
     started_at: Instant,
 }
 
@@ -88,29 +89,26 @@ impl TerminalRecorder {
         self.started_at.elapsed().as_secs_f32()
     }
 
-    async fn write_item(&self, item: &TerminalRecordingItem) -> Result<()> {
-        let mut serialized_item = serde_json::to_vec(&item).map_err(Error::Serialization)?;
-        serialized_item.push(b'\n');
-        self.writer.write(&serialized_item).await?;
+    pub async fn write(&self, stream: TerminalRecordingStreamId, data: &[u8]) -> Result<()> {
+        self.writer
+            .write_json_line(&TerminalRecordingItem::Data {
+                time: self.get_time(),
+                stream,
+                data: Bytes::from(data.to_vec()),
+            })
+            .await?;
         Ok(())
     }
 
-    pub async fn write(&self, stream: TerminalRecordingStreamId, data: &[u8]) -> Result<()> {
-        self.write_item(&TerminalRecordingItem::Data {
-            time: self.get_time(),
-            stream,
-            data: Bytes::from(data.to_vec()),
-        })
-        .await
-    }
-
     pub async fn write_pty_resize(&self, cols: u32, rows: u32) -> Result<()> {
-        self.write_item(&TerminalRecordingItem::PtyResize {
-            time: self.get_time(),
-            rows,
-            cols,
-        })
-        .await
+        self.writer
+            .write_json_line(&TerminalRecordingItem::PtyResize {
+                time: self.get_time(),
+                rows,
+                cols,
+            })
+            .await?;
+        Ok(())
     }
 }
 
@@ -119,10 +117,10 @@ impl Recorder for TerminalRecorder {
         RecordingKind::Terminal
     }
 
-    fn new(writer: RecordingWriter) -> Self {
-        Self {
-            writer,
+    async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
+        Ok(Self {
+            writer: opener.open_ndjson_data().await?,
             started_at: Instant::now(),
-        }
+        })
     }
 }

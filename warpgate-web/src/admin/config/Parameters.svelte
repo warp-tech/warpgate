@@ -55,7 +55,16 @@
     async function save () {
         updateError = undefined
         try {
-            await api.updateParameters({ parameterUpdate: parameters! })
+            // Cleared nullable fields must be sent as explicit null: undefined
+            // is dropped by JSON.stringify, so the server keeps the old value.
+            const parameterUpdate = {
+                ...parameters!,
+                ticketMaxDurationSeconds: parameters!.ticketMaxDurationSeconds ?? null,
+                ticketMaxUses: parameters!.ticketMaxUses ?? null,
+                maxApiTokenDurationSeconds: parameters!.maxApiTokenDurationSeconds ?? null,
+                webAuthMaxAgeSeconds: parameters!.webAuthMaxAgeSeconds ?? null,
+            } as unknown as ParameterValues
+            await api.updateParameters({ parameterUpdate })
             await reloadServerInfo()
         } catch (err) {
             updateError = await stringifyError(err)
@@ -184,20 +193,6 @@
                 </Section>
 
                 <Section id="ssh" title="SSH">
-                    <Subsection title="Web SSH">
-                        <label
-                            for="webSshEnabled"
-                            class="d-flex align-items-center"
-                        >
-                            <Input
-                                id="webSshEnabled"
-                                class="mb-0 me-2"
-                                type="switch"
-                                bind:checked={parameters.webSshEnabled} />
-                            <div>Enable Web SSH (in-browser terminal)</div>
-                        </label>
-                    </Subsection>
-
                     <Subsection title="Allowed authentication methods">
                         <label
                             for="sshClientAuthPublickey"
@@ -366,6 +361,21 @@
                 </Section>
 
                 <Section id="ui" title="UI">
+                    <label
+                        for="webClientsEnabled"
+                        class="d-flex align-items-center"
+                    >
+                        <Input
+                            id="webClientsEnabled"
+                            class="mb-0 me-2"
+                            type="switch"
+                            bind:checked={parameters.webClientsEnabled} />
+                        <div>Enable in-browser clients (SSH terminal, RDP/VNC desktop)</div>
+                    </label>
+                    <HelpText>
+                        Lets users open SSH, RDP and VNC targets directly in the browser from the portal. When off, only native-client connection instructions are shown.
+                    </HelpText>
+
                     <FormGroup floating label="SSH target click action">
                         <select
                             id="targetClickAction"

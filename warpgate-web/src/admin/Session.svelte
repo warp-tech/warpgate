@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions, type TargetPostgresOptions, type TargetKubernetesOptions } from 'admin/lib/api'
+    import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions, type TargetPostgresOptions, type TargetKubernetesOptions, type TargetVncOptions, type TargetRdpOptions } from 'admin/lib/api'
     import { timeAgo } from 'admin/lib/time'
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
@@ -59,6 +59,14 @@
             if (session.target.options.kind === 'Kubernetes') {
                 const options = session.target.options as unknown as TargetKubernetesOptions
                 address = options.clusterUrl
+            }
+            if (session.target.options.kind === 'Vnc') {
+                const options = session.target.options as TargetVncOptions
+                address = `${options.host}:${options?.port}`
+            }
+            if (session.target.options.kind === 'Rdp') {
+                const options = session.target.options as TargetRdpOptions
+                address = `${options.host}:${options?.port}`
             }
             return `${session.target.name} (${address})`
         } else {

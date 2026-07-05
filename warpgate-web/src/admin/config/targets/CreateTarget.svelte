@@ -80,6 +80,25 @@
                         privateKey: '',
                     },
                 },
+                Vnc: {
+                    kind: TargetKind.Vnc,
+                    host: '192.168.0.1',
+                    port: 5900,
+                    auth: {
+                        kind: 'None' as const,
+                    },
+                },
+                Rdp: {
+                    kind: TargetKind.Rdp,
+                    host: '192.168.0.1',
+                    port: 3389,
+                    username: 'Administrator',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
+                    verifyTls: false,
+                },
             }[params.kind]
             if (!options) {
                 return

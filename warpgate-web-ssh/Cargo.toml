@@ -7,7 +7,6 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
-base64 = { version = "0.22", default-features = false, features = ["std"] }
 bytes.workspace = true
 futures.workspace = true
 poem.workspace = true
@@ -25,3 +24,4 @@ warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
+warpgate-web-clients-common = { path = "../warpgate-web-clients-common" }

@@ -1,0 +1,43 @@
+[package]
+edition = "2024"
+license = "Apache-2.0"
+name = "warpgate-protocol-rdp"
+version = "0.23.4"
+publish = false
+
+[dependencies]
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-common-http = { path = "../warpgate-common-http" }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-desktop-auth = { path = "../warpgate-desktop-auth" }
+warpgate-desktop-ui = { path = "../warpgate-desktop-ui" }
+warpgate-rdp-ipc = { path = "../warpgate-rdp-ipc" }
+warpgate-tls = { path = "../warpgate-tls" }
+anyhow.workspace = true
+bytes.workspace = true
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+libc = "0.2"
+futures.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tempfile = "3"
+tokio = { workspace = true, features = [
+    "process",
+    "io-util",
+    "net",
+    "sync",
+    "macros",
+    "time",
+    "rt",
+    "fs",
+] }
+tokio-stream.workspace = true
+tokio-util = { version = "0.7", features = ["codec"] }
+tracing.workspace = true
+uuid.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+
+[build-dependencies]
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }

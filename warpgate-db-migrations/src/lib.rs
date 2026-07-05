@@ -61,6 +61,8 @@ mod m00056_web_ssh_enabled;
 mod m00057_password_login_mode;
 mod m00058_analytics;
 mod m00059_web_auth_max_age;
+mod m00060_recording_generation;
+mod m00061_rename_web_ssh_enabled;
 
 pub(crate) mod helpers;
 
@@ -129,6 +131,8 @@ impl MigratorTrait for Migrator {
             Box::new(m00057_password_login_mode::Migration),
             Box::new(m00058_analytics::Migration),
             Box::new(m00059_web_auth_max_age::Migration),
+            Box::new(m00060_recording_generation::Migration),
+            Box::new(m00061_rename_web_ssh_enabled::Migration),
         ]
     }
 }

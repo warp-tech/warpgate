@@ -3,10 +3,11 @@
     import { onDestroy, onMount } from 'svelte'
     import { Terminal } from '@xterm/xterm'
     import { SerializeAddon } from '@xterm/addon-serialize'
-    import { faPlay, faPause, faExpand } from '@fortawesome/free-solid-svg-icons'
+    import { faPlay } from '@fortawesome/free-solid-svg-icons'
     import { Spinner } from '@sveltestrap/sveltestrap'
-    import formatDuration from 'format-duration'
     import type { Recording } from 'admin/lib/api'
+    import PlayerToolbar from './PlayerToolbar.svelte'
+    import { latestWins } from './latestWins'
 
     export let recording: Recording
 
@@ -112,7 +113,9 @@
             addData(JSON.parse(line))
         }
 
-        await seek(duration)
+        // Await the first paint directly (nothing else is seeking yet) so `loading` clears
+        // only once the terminal reflects the recording.
+        await _seekInternal(duration)
 
         socket = new WebSocket(`wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/stream`)
         socket.addEventListener('message', function (event) {
@@ -186,11 +189,13 @@
         term.options.fontSize = fontWidth / (metrics.width / 6) * 10
     }
 
-    let seekPromise = Promise.resolve()
+    // Shared latest-wins runner: serializes seeks and coalesces rapid scrubs to the newest
+    // target (replaying the terminal to an intermediate position we're about to leave is
+    // wasted work). Reconstructing state at `time` is independent of skipped seeks.
+    const runSeek = latestWins((time: number) => _seekInternal(time))
 
-    async function seek (time: number) {
-        seekPromise = seekPromise.then(() => _seekInternal(time))
-        await seekPromise
+    function seek (time: number) {
+        runSeek(time)
     }
 
     async function _seekInternal (time: number) {
@@ -282,12 +287,12 @@
     let destroyed = false
     onDestroy(() => destroyed = true)
 
-    async function step () {
+    function step () {
         if (destroyed) {
             return
         }
         if (playing) {
-            await seek(Math.min(duration, timestamp + 0.1))
+            seek(Math.min(duration, timestamp + 0.1))
         }
         setTimeout(step, 100)
     }
@@ -334,31 +339,18 @@
         bind:this={containerElement}
     ></div>
 
-    <div class="toolbar" class:invisible={loading}>
-        <button class="btn btn-link" on:click={togglePlaying}>
-            <Fa icon={playing ? faPause : faPlay} fw />
-        </button>
-        <pre
-            class="timestamp"
-        >{ formatDuration(timestamp * 1000, { leading: true }) }</pre>
-        {#if sessionIsLive === true}
-            <button
-                class="btn live-btn"
-                class:active={isStreaming}
-                on:click={() => seek(duration)}
-            >LIVE</button>
-        {/if}
-        <input
-            class="w-100"
-            type="range"
-            min="0" max="100" step="0.001"
-            style="background-size: {seekInputValue}% 100%;"
-            bind:value={seekInputValue}
-            on:input={() => seek(duration * seekInputValue / 100)} />
-        <button class="btn btn-link" on:click={toggleFullscreen}>
-            <Fa icon={faExpand} fw />
-        </button>
-    </div>
+    <PlayerToolbar
+        {playing}
+        {timestamp}
+        bind:seekInputValue
+        hidden={loading}
+        isLive={sessionIsLive === true}
+        liveActive={isStreaming}
+        onTogglePlaying={togglePlaying}
+        onToggleFullscreen={toggleFullscreen}
+        onGoLive={() => seek(duration)}
+        onSeek={pct => seek(duration * pct / 100)}
+    />
 </div>
 
 <style lang="scss">
@@ -378,23 +370,8 @@
         margin: auto;
     }
 
-    .toolbar {
-        display: flex;
-    }
-
     :global(.xterm) {
         cursor: pointer !important;
-    }
-
-    .btn {
-        color: #eee;
-
-        :global(svg) {
-            transition: all .25s ease-out;
-            &:hover {
-                transform: scale(1.2);
-            }
-        }
     }
 
     :global(.spinner-border), .pause-overlay {
@@ -409,60 +386,5 @@
         width: 24px;
         text-align: center;
         color: white;
-    }
-
-    input[type="range"] {
-        appearance: none;
-        -webkit-appearance: none;
-        margin: 18px 10px 0;
-        height: 2px;
-        background: #ffffff99;
-        border-radius: 5px;
-        background: linear-gradient(#eee, #eee);
-        background-repeat: no-repeat;
-        cursor: pointer;
-
-        &:hover::-webkit-slider-thumb {
-            transform: scale(1.5);
-        }
-    }
-
-    input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        height: 10px;
-        width: 10px;
-        border-radius: 50%;
-        background: #eee;
-        transition: all .25s ease-out;
-    }
-
-    input[type=range]::-webkit-slider-runnable-track  {
-        -webkit-appearance: none;
-        box-shadow: none;
-        border: none;
-        background: transparent;
-    }
-
-    .timestamp {
-        flex: none;
-        overflow: visible;
-        color: #eeeeee;
-        margin: 0;
-        font-size: 0.75rem;
-        align-self: center;
-    }
-
-    .live-btn {
-        font-size: 0.75rem;
-        align-self: center;
-        color: red;
-        flex: none;
-
-        &.active {
-            background: red;
-            color: white;
-            padding: 0.1rem 0.25rem;
-            margin: 0 0.5rem;
-        }
     }
 </style>

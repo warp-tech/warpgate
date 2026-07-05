@@ -62,83 +62,83 @@ impl ProtocolServer for PostgresProtocolServer {
         let services = self.services;
         Ok(async move {
             loop {
-            let Some(stream) = listener.next().await else {
-                return Ok(());
-            };
-
-            if detect_port_knock(&stream).await {
-                continue;
-            }
-
-            let Ok(remote_address) = stream.peer_addr() else {
-                // already disconnected
-                continue;
-            };
-
-            // Enable TCP keepalive to prevent idle connections from timing out
-            // This is especially important during web auth approval wait
-            // Use socket2 to configure keepalive (tokio TcpStream doesn't expose it directly)
-            let stream = (|| {
-                let socket = Socket::from(stream.into_std()?);
-                let keepalive = TcpKeepalive::new()
-                    .with_time(Duration::from_secs(60)) // Start keepalive after 60s of inactivity
-                    .with_interval(Duration::from_secs(10)) // Send probes every 10s
-                    .with_retries(3); // 3 retries before considering dead
-                socket.set_tcp_keepalive(&keepalive)?;
-                socket.set_tcp_nodelay(true)?;
-                tokio::net::TcpStream::from_std(socket.into())
-            })();
-
-            let stream = match stream {
-                Ok(stream) => stream,
-                Err(error) => {
-                    warn!(%error, "Failed to set up an accepted connection");
-                    continue;
-                }
-            };
-
-            let tls_config = tls_config.clone();
-            let services = services.clone();
-            tokio::spawn(async move {
-                let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
-
-                let server_handle = State::register_session(
-                    &services.state,
-                    &crate::common::PROTOCOL_NAME,
-                    SessionStateInit {
-                        remote_address: Some(remote_address),
-                        handle: Box::new(session_handle),
-                    },
-                )
-                .await?;
-
-                let wrapped_stream = {
-                    let guard = server_handle.lock().await;
-                    guard.wrap_stream(stream).await?
+                let Some(stream) = listener.next().await else {
+                    return Ok(());
                 };
 
-                let session = PostgresSession::new(
-                    server_handle,
-                    services,
-                    wrapped_stream,
-                    tls_config,
-                    remote_address,
-                )
-                .await;
-
-                let span = session.make_logging_span();
-                tokio::select! {
-                    result = session.run().instrument(span) => match result {
-                        Ok(()) => info!("Session ended"),
-                        Err(e) => error!(error=%e, "Session failed"),
-                    },
-                    _ = abort_rx.recv() => {
-                        warn!("Session aborted by admin");
-                    },
+                if detect_port_knock(&stream).await {
+                    continue;
                 }
 
-                Ok::<(), anyhow::Error>(())
-            });
+                let Ok(remote_address) = stream.peer_addr() else {
+                    // already disconnected
+                    continue;
+                };
+
+                // Enable TCP keepalive to prevent idle connections from timing out
+                // This is especially important during web auth approval wait
+                // Use socket2 to configure keepalive (tokio TcpStream doesn't expose it directly)
+                let stream = (|| {
+                    let socket = Socket::from(stream.into_std()?);
+                    let keepalive = TcpKeepalive::new()
+                        .with_time(Duration::from_secs(60)) // Start keepalive after 60s of inactivity
+                        .with_interval(Duration::from_secs(10)) // Send probes every 10s
+                        .with_retries(3); // 3 retries before considering dead
+                    socket.set_tcp_keepalive(&keepalive)?;
+                    socket.set_tcp_nodelay(true)?;
+                    tokio::net::TcpStream::from_std(socket.into())
+                })();
+
+                let stream = match stream {
+                    Ok(stream) => stream,
+                    Err(error) => {
+                        warn!(%error, "Failed to set up an accepted connection");
+                        continue;
+                    }
+                };
+
+                let tls_config = tls_config.clone();
+                let services = services.clone();
+                tokio::spawn(async move {
+                    let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
+
+                    let server_handle = State::register_session(
+                        &services.state,
+                        &crate::common::PROTOCOL_NAME,
+                        SessionStateInit {
+                            remote_address: Some(remote_address),
+                            handle: Box::new(session_handle),
+                        },
+                    )
+                    .await?;
+
+                    let wrapped_stream = {
+                        let guard = server_handle.lock().await;
+                        guard.wrap_stream(stream).await?
+                    };
+
+                    let session = PostgresSession::new(
+                        server_handle,
+                        services,
+                        wrapped_stream,
+                        tls_config,
+                        remote_address,
+                    )
+                    .await;
+
+                    let span = session.make_logging_span();
+                    tokio::select! {
+                        result = session.run().instrument(span) => match result {
+                            Ok(()) => info!("Session ended"),
+                            Err(e) => error!(error=%e, "Session failed"),
+                        },
+                        _ = abort_rx.recv() => {
+                            warn!("Session aborted by admin");
+                        },
+                    }
+
+                    Ok::<(), anyhow::Error>(())
+                });
             }
         }
         .boxed())

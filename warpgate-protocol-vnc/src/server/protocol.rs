@@ -1,0 +1,415 @@
+use anyhow::{Result, bail};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tracing::debug;
+
+/// Max clipboard payload (either direction). Clipboard sync is a convenience, not a bulk
+/// transfer channel — cap it so a giant paste isn't mirrored wholesale.
+const MAX_CLIPBOARD_LEN: usize = 8 * 1024;
+
+const ENCODING_RAW: i32 = 0;
+const ENCODING_TIGHT: i32 = 7;
+const ENCODING_DESKTOP_SIZE: i32 = -223;
+const MAX_ENCODINGS: usize = 4096;
+/// Tight compression-control byte selecting the JPEG sub-encoding (`0x09 << 4`).
+const TIGHT_JPEG_CONTROL: u8 = 0x90;
+
+/// RFB `PIXEL_FORMAT` + the raw bytes so it can be replayed
+#[derive(Clone, Copy, Debug)]
+pub struct PixelFormat {
+    pub raw: [u8; 16],
+    pub bits_per_pixel: u8,
+    pub big_endian: bool,
+    pub red_max: u16,
+    pub green_max: u16,
+    pub blue_max: u16,
+    pub red_shift: u8,
+    pub green_shift: u8,
+    pub blue_shift: u8,
+}
+
+pub const DEFAULT_PIXEL_FORMAT: PixelFormat = PixelFormat {
+    raw: [32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0],
+    bits_per_pixel: 32,
+    big_endian: false,
+    red_max: 255,
+    green_max: 255,
+    blue_max: 255,
+    red_shift: 16,
+    green_shift: 8,
+    blue_shift: 0,
+};
+
+impl PixelFormat {
+    const fn parse(raw: [u8; 16]) -> Self {
+        let [
+            bpp,
+            _depth,
+            be,
+            _tc,
+            rmh,
+            rml,
+            gmh,
+            gml,
+            bmh,
+            bml,
+            rs,
+            gs,
+            bs,
+            _,
+            _,
+            _,
+        ] = raw;
+        Self {
+            raw,
+            bits_per_pixel: bpp,
+            big_endian: be != 0,
+            red_max: u16::from_be_bytes([rmh, rml]),
+            green_max: u16::from_be_bytes([gmh, gml]),
+            blue_max: u16::from_be_bytes([bmh, bml]),
+            red_shift: rs,
+            green_shift: gs,
+            blue_shift: bs,
+        }
+    }
+
+    /// RFB requires `bits_per_pixel` of 8/16/32
+    pub const fn is_supported(&self) -> bool {
+        matches!(self.bits_per_pixel, 8 | 16 | 32)
+    }
+
+    /// Pack 8-bit RGB color into this pixel format
+    pub fn pack(&self, r: u8, g: u8, b: u8, out: &mut Vec<u8>) {
+        // `shift` is viewer-controlled (0..=255); a value >= 32 would overflow the `u32`
+        // left-shift (panic in debug, wrong value in release), so drop those channel bits.
+        let comp = |v: u8, max: u16, shift: u8| {
+            (u32::from(v) * u32::from(max) / 255)
+                .checked_shl(u32::from(shift))
+                .unwrap_or(0)
+        };
+        let value = comp(r, self.red_max, self.red_shift)
+            | comp(g, self.green_max, self.green_shift)
+            | comp(b, self.blue_max, self.blue_shift);
+        let n = (self.bits_per_pixel as usize) / 8;
+        if self.big_endian {
+            for i in (0..n).rev() {
+                out.push((value >> (8 * i)) as u8);
+            }
+        } else {
+            for i in 0..n {
+                out.push((value >> (8 * i)) as u8);
+            }
+        }
+    }
+}
+
+/// Pack an RGB888 image (3 bytes per pixel) into the viewer's pixel format
+pub fn pack_rgb(pixel_format: &PixelFormat, rgb: &[u8]) -> Vec<u8> {
+    let bytes_per_pixel = usize::from(pixel_format.bits_per_pixel) / 8;
+    let mut out = Vec::with_capacity(rgb.len() / 3 * bytes_per_pixel);
+    for px in rgb.chunks_exact(3) {
+        if let [r, g, b] = *px {
+            pixel_format.pack(r, g, b, &mut out);
+        }
+    }
+    out
+}
+
+/// Pack a BGRA image (4 bytes per pixel, `[b, g, r, a]` as produced by the backend
+/// decoder's `PixelFormat::bgra()`) into the viewer's pixel format. When the viewer
+/// kept our advertised [`DEFAULT_PIXEL_FORMAT`] — the common case — the bytes are
+/// already in exactly that 32-bit little-endian BGRX layout, so they're copied
+/// directly; otherwise each pixel is re-packed into the requested format.
+pub fn pack_bgra(pixel_format: &PixelFormat, bgra: &[u8]) -> Vec<u8> {
+    if pixel_format.raw == DEFAULT_PIXEL_FORMAT.raw {
+        return bgra.to_vec();
+    }
+    let bytes_per_pixel = usize::from(pixel_format.bits_per_pixel) / 8;
+    let mut out = Vec::with_capacity(bgra.len() / 4 * bytes_per_pixel);
+    for px in bgra.chunks_exact(4) {
+        if let [b, g, r, _a] = *px {
+            pixel_format.pack(r, g, b, &mut out);
+        }
+    }
+    out
+}
+
+pub enum ClientEvent {
+    PixelFormat(PixelFormat),
+    Encodings { desktop_size: bool, tight: bool },
+    WantsFrame,
+    Key { down: bool, keysym: u32 },
+    Pointer { x: u16, y: u16, buttons: u8 },
+    Clipboard(String),
+}
+
+pub async fn write_server_init<S>(
+    stream: &mut S,
+    width: u16,
+    height: u16,
+    pixel_format: &PixelFormat,
+    name: &str,
+) -> Result<()>
+where
+    S: AsyncWrite + Unpin,
+{
+    let mut msg = Vec::with_capacity(24 + name.len());
+    msg.extend_from_slice(&width.to_be_bytes());
+    msg.extend_from_slice(&height.to_be_bytes());
+    msg.extend_from_slice(&pixel_format.raw);
+    msg.extend_from_slice(&(name.len() as u32).to_be_bytes());
+    msg.extend_from_slice(name.as_bytes());
+    stream.write_all(&msg).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+fn push_single_rect_fb_update_header(
+    msg: &mut Vec<u8>,
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+    encoding: i32,
+) {
+    msg.push(0); // FramebufferUpdate
+    msg.push(0); // padding
+    msg.extend_from_slice(&1u16.to_be_bytes()); // one rectangle
+    msg.extend_from_slice(&x.to_be_bytes());
+    msg.extend_from_slice(&y.to_be_bytes());
+    msg.extend_from_slice(&w.to_be_bytes());
+    msg.extend_from_slice(&h.to_be_bytes());
+    msg.extend_from_slice(&encoding.to_be_bytes());
+}
+
+/// Send a single-rectangle FramebufferUpdate using Raw encoding. `pixels` must already
+/// be encoded in the viewer's pixel format and be `w * h * bytes_per_pixel` long.
+pub async fn write_raw_rect<S>(
+    stream: &mut S,
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+    pixels: &[u8],
+) -> Result<()>
+where
+    S: AsyncWrite + Unpin,
+{
+    let mut msg = Vec::with_capacity(16 + pixels.len());
+    push_single_rect_fb_update_header(&mut msg, x, y, w, h, ENCODING_RAW);
+    msg.extend_from_slice(pixels);
+    stream.write_all(&msg).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+/// Append a Tight "compact length" (1–3 bytes, 7 bits each, little-endian, MSB=continue).
+fn push_tight_compact_len(msg: &mut Vec<u8>, len: usize) {
+    msg.push((len & 0x7f) as u8 | if len >= 0x80 { 0x80 } else { 0 });
+    if len >= 0x80 {
+        msg.push(((len >> 7) & 0x7f) as u8 | if len >= 0x4000 { 0x80 } else { 0 });
+        if len >= 0x4000 {
+            msg.push(((len >> 14) & 0xff) as u8);
+        }
+    }
+}
+
+/// Forward a backend Tight/JPEG rectangle to the viewer verbatim as a Tight-JPEG rect —
+/// no decode/re-encode. Only valid when the viewer negotiated the Tight encoding (it then
+/// decodes the JPEG itself). JPEG is always full-colour, so the pixel format is irrelevant.
+pub async fn write_tight_jpeg_rect<S>(
+    stream: &mut S,
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+    jpeg: &[u8],
+) -> Result<()>
+where
+    S: AsyncWrite + Unpin,
+{
+    let mut msg = Vec::with_capacity(20 + jpeg.len());
+    push_single_rect_fb_update_header(&mut msg, x, y, w, h, ENCODING_TIGHT);
+    msg.push(TIGHT_JPEG_CONTROL);
+    push_tight_compact_len(&mut msg, jpeg.len());
+    msg.extend_from_slice(jpeg);
+    stream.write_all(&msg).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+pub async fn write_server_cut_text<S>(stream: &mut S, text: &str) -> Result<()>
+where
+    S: AsyncWrite + Unpin,
+{
+    // Cap the payload mirrored to the viewer, truncating on a char boundary.
+    let mut end = text.len().min(MAX_CLIPBOARD_LEN);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let bytes = text.get(..end).unwrap_or(text).as_bytes();
+    let mut msg = Vec::with_capacity(8 + bytes.len());
+    msg.push(3); // ServerCutText
+    msg.extend_from_slice(&[0, 0, 0]); // padding
+    msg.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+    msg.extend_from_slice(bytes);
+    stream.write_all(&msg).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+pub async fn write_desktop_size<S>(stream: &mut S, width: u16, height: u16) -> Result<()>
+where
+    S: AsyncWrite + Unpin,
+{
+    let mut msg = Vec::with_capacity(16);
+    push_single_rect_fb_update_header(&mut msg, 0, 0, width, height, ENCODING_DESKTOP_SIZE);
+    stream.write_all(&msg).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+/// Protocol parse loop
+pub async fn read_client_messages<R>(
+    mut reader: R,
+    events: tokio::sync::mpsc::UnboundedSender<ClientEvent>,
+    mut stop: tokio::sync::oneshot::Receiver<()>,
+) -> Result<R>
+where
+    R: AsyncRead + Unpin,
+{
+    loop {
+        let msg_type = tokio::select! {
+            biased;
+            _ = &mut stop => break,
+            r = reader.read_u8() => match r {
+                Ok(t) => t,
+                Err(_) => break, // EOF / viewer gone
+            },
+        };
+        match msg_type {
+            0 => {
+                // SetPixelFormat: 3 padding + 16-byte pixel format.
+                let mut padding = [0u8; 3];
+                reader.read_exact(&mut padding).await?;
+                let mut pf = [0u8; 16];
+                reader.read_exact(&mut pf).await?;
+                let parsed = PixelFormat::parse(pf);
+                debug!(
+                    bits_per_pixel = parsed.bits_per_pixel,
+                    big_endian = parsed.big_endian,
+                    "viewer SetPixelFormat"
+                );
+                if !parsed.is_supported() {
+                    bail!(
+                        "viewer requested unsupported bits_per_pixel: {}",
+                        parsed.bits_per_pixel
+                    );
+                }
+                let _ = events.send(ClientEvent::PixelFormat(parsed));
+            }
+            2 => {
+                // SetEncodings: 1 padding + 2 count + count * 4-byte encodings.
+                let mut head = [0u8; 3];
+                reader.read_exact(&mut head).await?;
+                let [_, count_hi, count_lo] = head;
+                let count = usize::from(u16::from_be_bytes([count_hi, count_lo]));
+                if count > MAX_ENCODINGS {
+                    bail!("client sent too many encodings: {count}");
+                }
+                let mut body = vec![0u8; count * 4];
+                reader.read_exact(&mut body).await?;
+                let mut desktop_size = false;
+                let mut tight = false;
+                for chunk in body.chunks_exact(4) {
+                    if let Ok(arr) = <[u8; 4]>::try_from(chunk) {
+                        match i32::from_be_bytes(arr) {
+                            ENCODING_DESKTOP_SIZE => desktop_size = true,
+                            ENCODING_TIGHT => tight = true,
+                            _ => {}
+                        }
+                    }
+                }
+                debug!(count, desktop_size, tight, "viewer SetEncodings");
+                let _ = events.send(ClientEvent::Encodings {
+                    desktop_size,
+                    tight,
+                });
+            }
+            3 => {
+                // FramebufferUpdateRequest: incremental + x + y + w + h.
+                let mut rest = [0u8; 9];
+                reader.read_exact(&mut rest).await?;
+                let _ = events.send(ClientEvent::WantsFrame);
+            }
+            4 => {
+                // KeyEvent: down-flag(1) + padding(2) + keysym(4).
+                let mut rest = [0u8; 7];
+                reader.read_exact(&mut rest).await?;
+                let [down, _, _, k0, k1, k2, k3] = rest;
+                let _ = events.send(ClientEvent::Key {
+                    down: down != 0,
+                    keysym: u32::from_be_bytes([k0, k1, k2, k3]),
+                });
+            }
+            5 => {
+                // PointerEvent: button-mask(1) + x(2) + y(2).
+                let mut rest = [0u8; 5];
+                reader.read_exact(&mut rest).await?;
+                let [buttons, x_hi, x_lo, y_hi, y_lo] = rest;
+                let _ = events.send(ClientEvent::Pointer {
+                    x: u16::from_be_bytes([x_hi, x_lo]),
+                    y: u16::from_be_bytes([y_hi, y_lo]),
+                    buttons,
+                });
+            }
+            6 => {
+                // ClientCutText: 3 padding + 4 length + text.
+                let mut rest = [0u8; 7];
+                reader.read_exact(&mut rest).await?;
+                let [_, _, _, l0, l1, l2, l3] = rest;
+                let len = u32::from_be_bytes([l0, l1, l2, l3]) as usize;
+                if len > MAX_CLIPBOARD_LEN {
+                    bail!("client cut text too long: {len}");
+                }
+                let mut text = vec![0u8; len];
+                reader.read_exact(&mut text).await?;
+                let _ = events.send(ClientEvent::Clipboard(
+                    String::from_utf8_lossy(&text).into_owned(),
+                ));
+            }
+            150 => {
+                // EnableContinuousUpdates: enable + x + y + w + h.
+                debug!("viewer EnableContinuousUpdates");
+                let mut rest = [0u8; 9];
+                reader.read_exact(&mut rest).await?;
+            }
+            248 => {
+                // ClientFence: 3 padding + 4 flags + 1 length + payload.
+                let mut head = [0u8; 8];
+                reader.read_exact(&mut head).await?;
+                let [_, _, _, _, _, _, _, len] = head;
+                debug!(len, "viewer ClientFence");
+                let mut payload = vec![0u8; usize::from(len)];
+                reader.read_exact(&mut payload).await?;
+            }
+            250 => {
+                // xvp: padding + version + code.
+                debug!("viewer xvp");
+                let mut rest = [0u8; 3];
+                reader.read_exact(&mut rest).await?;
+            }
+            251 => {
+                // SetDesktopSize: padding + w + h + number-of-screens + padding,
+                // then number-of-screens * 16-byte screen descriptors.
+                let mut head = [0u8; 7];
+                reader.read_exact(&mut head).await?;
+                let [_, _, _, _, _, screens, _] = head;
+                debug!(screens, "viewer SetDesktopSize");
+                let mut bodies = vec![0u8; usize::from(screens) * 16];
+                reader.read_exact(&mut bodies).await?;
+            }
+            other => bail!("unexpected client message type {other}"),
+        }
+    }
+    Ok(reader)
+}

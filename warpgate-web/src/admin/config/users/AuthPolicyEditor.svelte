@@ -5,7 +5,7 @@ import type { ExistingCredential } from './CredentialEditor.svelte'
 import InfoBox from 'common/InfoBox.svelte'
 import { SvelteSet } from 'svelte/reactivity'
 
-type ProtocolID = 'http' | 'ssh' | 'mysql' | 'postgres' | 'kubernetes'
+type ProtocolID = 'http' | 'ssh' | 'mysql' | 'postgres' | 'kubernetes' | 'vnc' | 'rdp'
 
 interface Props {
     value: UserRequireCredentialsPolicy
@@ -30,6 +30,8 @@ const labels = {
     WebUserApproval: 'In-browser auth',
 }
 
+const requirePassword = $derived(protocolId === 'vnc' || protocolId === 'rdp')
+
 const tips: Record<ProtocolID, Map<[CredentialKind, boolean], string>> = {
     postgres: new Map([
         [
@@ -40,6 +42,13 @@ const tips: Record<ProtocolID, Map<[CredentialKind, boolean], string>> = {
     http: new Map(),
     mysql: new Map(),
     ssh: new Map(),
+    vnc: new Map([
+        [
+            [CredentialKind.WebUserApproval, true],
+            'The client is shown a link to approve the login in the browser, and is held on a waiting screen until confirmed.',
+        ],
+    ]),
+    rdp: new Map(),
     kubernetes: new Map([
         [
             [CredentialKind.WebUserApproval, true],
@@ -66,9 +75,18 @@ const validCredentials = $derived.by(() => {
 
 let isAny = $derived(!value[protocolId])
 
+// Keep the password credential present in any explicit policy when it's mandatory.
+$effect(() => {
+    if (requirePassword && value[protocolId] && !value[protocolId].includes(CredentialKind.Password)) {
+        value[protocolId] = [CredentialKind.Password, ...value[protocolId]]
+    }
+})
+
 function updateAny () {
     if (isAny) {
         value[protocolId] = undefined
+    } else if (requirePassword) {
+        value[protocolId] = [CredentialKind.Password]
     } else {
         value[protocolId] = []
         let oneCred = Array.from(validCredentials).find(x => possibleCredentials.has(x))
@@ -79,6 +97,10 @@ function updateAny () {
 }
 
 function toggle (type: CredentialKind) {
+    // Password is mandatory when required by this protocol.
+    if (requirePassword && type === CredentialKind.Password) {
+        return
+    }
     if (value[protocolId]!.includes(type)) {
         value[protocolId] = value[protocolId]!.filter((x: CredentialKind) => x !== type)
     } else {
@@ -101,7 +123,8 @@ function toggle (type: CredentialKind) {
                 <Input
                     id={'policy-editor-' + protocolId + type}
                     type="switch"
-                    checked={value[protocolId]?.includes(type)}
+                    checked={value[protocolId]?.includes(type) || (requirePassword && type === CredentialKind.Password)}
+                    disabled={requirePassword && type === CredentialKind.Password}
                     label={labels[type]}
                     on:change={() => toggle(type)}
                 />
