@@ -756,7 +756,7 @@
           "default": false
         },
         "enable_ard_auth": {
-          "description": "Offer Apple-DH (ARD, type 30) auth. Unlike VeNCrypt it doesn't wrap the session in\nTLS, so the relay after auth is cleartext — off by default; when off, viewers must use\nVeNCrypt/TLS.",
+          "description": "Enable Apple-DH (ARD / type 30) auth. It does not support TLS unlike VeNCrypt",
           "type": "boolean",
           "default": false
         },
