@@ -32,13 +32,67 @@ pub const KIND_IMAGE: u8 = 1;
 /// `LengthDelimitedCodec::builder().max_frame_length(MAX_FRAME_LEN)` on every reader.
 pub const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
 
-/// A decoded image frame borrowing the wire buffer (no copy until the caller wants one).
-pub struct ImageFrame<'a> {
+/// The fixed-size header prefixing every IMAGE frame body: a [`KIND_IMAGE`] byte followed by
+/// the rectangle as four little-endian `u16`s. Owns the wire layout so its size ([`Self::LEN`])
+/// and field offsets live in exactly one place instead of being spelled out at each call site.
+#[derive(Clone, Copy)]
+pub struct ImageHeader {
     pub x: u16,
     pub y: u16,
     pub width: u16,
     pub height: u16,
-    pub pixels: &'a [u8],
+}
+
+impl ImageHeader {
+    /// Encoded size on the wire: the kind byte + four `u16` fields.
+    pub const LEN: usize = 1 + 4 * 2;
+
+    /// Append the kind byte and rectangle to `out`.
+    pub fn write_into(&self, out: &mut Vec<u8>) {
+        out.push(KIND_IMAGE);
+        out.extend_from_slice(&self.x.to_le_bytes());
+        out.extend_from_slice(&self.y.to_le_bytes());
+        out.extend_from_slice(&self.width.to_le_bytes());
+        out.extend_from_slice(&self.height.to_le_bytes());
+    }
+
+    /// Parse the header from the front of a frame body. `None` if it's not an IMAGE frame or
+    /// is shorter than [`Self::LEN`].
+    fn read_from(frame: &[u8]) -> Option<Self> {
+        let header = frame.get(..Self::LEN)?;
+        if *header.first()? != KIND_IMAGE {
+            return None;
+        }
+        let field = |i: usize| -> Option<u16> {
+            Some(u16::from_le_bytes(header.get(i..i + 2)?.try_into().ok()?))
+        };
+        Some(Self {
+            x: field(1)?,
+            y: field(3)?,
+            width: field(5)?,
+            height: field(7)?,
+        })
+    }
+}
+
+/// A frame body classified by its kind byte, so callers dispatch with a `match` instead of
+/// inspecting raw bytes and offsets themselves.
+pub enum WireFrame<'a> {
+    /// A JSON control message: the payload with the kind byte stripped.
+    Control(&'a [u8]),
+    /// A binary framebuffer rectangle: its header and the pixels that follow.
+    Image(ImageHeader, &'a [u8]),
+}
+
+/// Classify a frame body. A short/empty or malformed-image frame decodes as an empty
+/// [`WireFrame::Control`], which the JSON path then simply fails to parse.
+pub fn decode_frame(frame: &[u8]) -> WireFrame<'_> {
+    if frame.first() == Some(&KIND_IMAGE) {
+        if let Some(header) = ImageHeader::read_from(frame) {
+            return WireFrame::Image(header, frame.get(ImageHeader::LEN..).unwrap_or_default());
+        }
+    }
+    WireFrame::Control(frame.get(1..).unwrap_or_default())
 }
 
 /// Encode a control message as a JSON frame body into `out` (cleared first, so `out` can
@@ -54,12 +108,14 @@ pub fn encode_json_into<T: Serialize>(msg: &T, out: &mut Vec<u8>) {
 /// Encode a framebuffer rectangle as a binary IMAGE frame body into `out` (cleared first).
 pub fn encode_image_into(x: u16, y: u16, width: u16, height: u16, pixels: &[u8], out: &mut Vec<u8>) {
     out.clear();
-    out.reserve(9 + pixels.len());
-    out.push(KIND_IMAGE);
-    out.extend_from_slice(&x.to_le_bytes());
-    out.extend_from_slice(&y.to_le_bytes());
-    out.extend_from_slice(&width.to_le_bytes());
-    out.extend_from_slice(&height.to_le_bytes());
+    out.reserve(ImageHeader::LEN + pixels.len());
+    ImageHeader {
+        x,
+        y,
+        width,
+        height,
+    }
+    .write_into(out);
     out.extend_from_slice(pixels);
 }
 
@@ -71,24 +127,6 @@ pub fn frame_kind(frame: &[u8]) -> u8 {
 /// Parse a JSON control frame body.
 pub fn decode_json<T: DeserializeOwned>(frame: &[u8]) -> Option<T> {
     serde_json::from_slice(frame.get(1..)?).ok()
-}
-
-/// Parse a binary IMAGE frame body, borrowing its pixels.
-pub fn decode_image(frame: &[u8]) -> Option<ImageFrame<'_>> {
-    let header = frame.get(0..9)?;
-    if *header.first()? != KIND_IMAGE {
-        return None;
-    }
-    let u16_at = |i: usize| -> Option<u16> {
-        Some(u16::from_le_bytes(header.get(i..i + 2)?.try_into().ok()?))
-    };
-    Some(ImageFrame {
-        x: u16_at(1)?,
-        y: u16_at(3)?,
-        width: u16_at(5)?,
-        height: u16_at(7)?,
-        pixels: frame.get(9..)?,
-    })
 }
 
 /// Target-facing client channel (`warpgate-rdp-helper connect`): Warpgate drives an RDP
@@ -171,18 +209,15 @@ pub mod client {
         }
         /// Takes the owned frame so the image payload is a zero-copy slice of it, not a copy.
         pub fn decode(frame: bytes::Bytes) -> Option<Self> {
-            if super::frame_kind(&frame) == super::KIND_IMAGE {
-                let img = super::decode_image(&frame)?;
-                let (x, y, width, height) = (img.x, img.y, img.width, img.height);
-                Some(Event::RawImage {
-                    x,
-                    y,
-                    width,
-                    height,
-                    data: frame.slice(9..),
-                })
-            } else {
-                super::decode_json(&frame)
+            match super::decode_frame(&frame) {
+                super::WireFrame::Image(h, _) => Some(Event::RawImage {
+                    x: h.x,
+                    y: h.y,
+                    width: h.width,
+                    height: h.height,
+                    data: frame.slice(super::ImageHeader::LEN..),
+                }),
+                super::WireFrame::Control(_) => super::decode_json(&frame),
             }
         }
     }
@@ -244,18 +279,15 @@ pub mod server {
         }
         /// Takes the owned frame so the image payload is a zero-copy slice of it, not a copy.
         pub fn decode(frame: bytes::Bytes) -> Option<Self> {
-            if super::frame_kind(&frame) == super::KIND_IMAGE {
-                let img = super::decode_image(&frame)?;
-                let (x, y, width, height) = (img.x, img.y, img.width, img.height);
-                Some(Input::Frame {
-                    x,
-                    y,
-                    width,
-                    height,
-                    data: frame.slice(9..),
-                })
-            } else {
-                super::decode_json(&frame)
+            match super::decode_frame(&frame) {
+                super::WireFrame::Image(h, _) => Some(Input::Frame {
+                    x: h.x,
+                    y: h.y,
+                    width: h.width,
+                    height: h.height,
+                    data: frame.slice(super::ImageHeader::LEN..),
+                }),
+                super::WireFrame::Control(_) => super::decode_json(&frame),
             }
         }
     }

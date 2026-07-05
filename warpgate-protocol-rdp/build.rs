@@ -69,7 +69,11 @@ fn embed(helper: &Helper) -> Result<(), Box<dyn Error>> {
     let blob_path = out_dir.join(helper.blob_file);
     std::fs::write(&blob_path, &compressed)?;
 
-    println!("cargo:rustc-env={}={}", helper.blob_env, blob_path.display());
+    println!(
+        "cargo:rustc-env={}={}",
+        helper.blob_env,
+        blob_path.display()
+    );
     Ok(())
 }
 

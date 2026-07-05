@@ -7,6 +7,32 @@
 
 use super::{Error, Result};
 
+/// A rectangle in framebuffer pixels. `width`/`height` are extents, not far corners — the
+/// distinction the old bare `(u32, u32, u32, u32)` tuples blurred (some were `x0,y0,x1,y1`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Rect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Rect {
+    /// The smallest rect covering both `self` and `other` (used to coalesce dirty regions).
+    pub(crate) fn union(self, other: Rect) -> Rect {
+        let x = self.x.min(other.x);
+        let y = self.y.min(other.y);
+        let right = (self.x + self.width).max(other.x + other.width);
+        let bottom = (self.y + self.height).max(other.y + other.height);
+        Rect {
+            x,
+            y,
+            width: right - x,
+            height: bottom - y,
+        }
+    }
+}
+
 /// RGBA (row-major, 4 bytes/pixel) framebuffer reconstructed from desktop deltas.
 #[derive(Default)]
 pub(crate) struct Framebuffer {
@@ -95,28 +121,21 @@ impl Framebuffer {
     }
 
     /// Copy a clipped sub-rect (already RGBA) into `out` (cleared + refilled). Returns the
-    /// clipped `(x, y, w, h)` actually copied, or `None` when the region is empty/off-screen.
-    /// Lets the recorder encode one coalesced dirty rect instead of every incoming delta.
-    pub(crate) fn copy_region_rgba(
-        &self,
-        x: u32,
-        y: u32,
-        w: u32,
-        h: u32,
-        out: &mut Vec<u8>,
-    ) -> Option<(u32, u32, u32, u32)> {
+    /// clipped rect actually copied, or `None` when the region is empty/off-screen. Lets the
+    /// recorder encode one coalesced dirty rect instead of every incoming delta.
+    pub(crate) fn copy_region_rgba(&self, rect: Rect, out: &mut Vec<u8>) -> Option<Rect> {
         out.clear();
         if self.is_empty() {
             return None;
         }
         let fb_w = self.width as usize;
         let fb_h = self.height as usize;
-        let (x, y) = (x as usize, y as usize);
+        let (x, y) = (rect.x as usize, rect.y as usize);
         if x >= fb_w || y >= fb_h {
             return None;
         }
-        let cols = (w as usize).min(fb_w - x);
-        let rows = (h as usize).min(fb_h - y);
+        let cols = (rect.width as usize).min(fb_w - x);
+        let rows = (rect.height as usize).min(fb_h - y);
         if cols == 0 || rows == 0 {
             return None;
         }
@@ -128,7 +147,12 @@ impl Framebuffer {
             };
             out.extend_from_slice(src);
         }
-        Some((x as u32, y as u32, cols as u32, rows as u32))
+        Some(Rect {
+            x: x as u32,
+            y: y as u32,
+            width: cols as u32,
+            height: rows as u32,
+        })
     }
 
     /// Copy a `w`x`h` region from `(src_x, src_y)` to `(dst_x, dst_y)` (overlap-safe via a
@@ -278,14 +302,20 @@ mod tests {
             255, 0, 0, 255, 255, 255, 255, 255, // blue, white
         ]);
         let mut out = Vec::new();
+        let rect = |x, y, width, height| Rect {
+            x,
+            y,
+            width,
+            height,
+        };
         // Bottom-right 1x1 pixel (white).
-        assert_eq!(fb.copy_region_rgba(1, 1, 1, 1, &mut out), Some((1, 1, 1, 1)));
+        assert_eq!(fb.copy_region_rgba(rect(1, 1, 1, 1), &mut out), Some(rect(1, 1, 1, 1)));
         assert_eq!(out, vec![255, 255, 255, 255]);
         // A region overflowing the edge clips to what's on-screen.
-        assert_eq!(fb.copy_region_rgba(1, 0, 5, 5, &mut out), Some((1, 0, 1, 2)));
+        assert_eq!(fb.copy_region_rgba(rect(1, 0, 5, 5), &mut out), Some(rect(1, 0, 1, 2)));
         assert_eq!(out.len(), 1 * 2 * 4);
         // Fully off-screen origin yields nothing.
-        assert_eq!(fb.copy_region_rgba(2, 0, 1, 1, &mut out), None);
+        assert_eq!(fb.copy_region_rgba(rect(2, 0, 1, 1), &mut out), None);
     }
 
 }

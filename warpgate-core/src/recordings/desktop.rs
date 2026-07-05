@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use warpgate_db_entities::Recording::RecordingKind;
 
-use super::framebuffer::{Framebuffer, decode_jpeg_rgb, encode_png_rgba};
+use super::framebuffer::{Framebuffer, Rect, decode_jpeg_rgb, encode_png_rgba};
 use super::{Error, Recorder, Result};
 use crate::recordings::RecordingWriterOpener;
 use crate::recordings::writer::NDJsonRecordingWriter;
@@ -163,9 +163,9 @@ struct RecorderState {
     bytes_since_keyframe: usize,
     last_keyframe_time: f32,
     duration: f32,
-    /// Union bounding box `(x0, y0, x1, y1)` (exclusive maxes) of framebuffer pixels blitted
-    /// but not yet PNG-encoded — deferred by `MIN_RECORD_FRAME_INTERVAL` and flushed as one rect.
-    dirty: Option<(u32, u32, u32, u32)>,
+    /// Union of framebuffer pixels blitted but not yet PNG-encoded — deferred by
+    /// `MIN_RECORD_FRAME_INTERVAL` and flushed as one rect.
+    dirty: Option<Rect>,
     /// Time of the last encoded delta frame; gates the frame-rate cap.
     last_frame_time: f32,
     // reusable scratch buffers (cleared + refilled, never reallocated per frame)
@@ -174,22 +174,21 @@ struct RecorderState {
 }
 
 impl RecorderState {
-    /// Grow the pending dirty region to include this rect (framebuffer coords).
-    fn mark_dirty(&mut self, x: u32, y: u32, w: u32, h: u32) {
-        let new = (x, y, x.saturating_add(w), y.saturating_add(h));
+    /// Grow the pending dirty region to include `rect` (framebuffer coords).
+    fn mark_dirty(&mut self, rect: Rect) {
         self.dirty = Some(match self.dirty {
-            Some((x0, y0, x1, y1)) => (x0.min(new.0), y0.min(new.1), x1.max(new.2), y1.max(new.3)),
-            None => new,
+            Some(existing) => existing.union(rect),
+            None => rect,
         });
     }
 }
 
 /// Copy the pending dirty region out of the framebuffer into `out` (RGBA), clearing `dirty`.
-/// Returns the clipped `(x, y, w, h)`, or `None` if nothing is pending. Shared by the live
+/// Returns the clipped rect, or `None` if nothing is pending. Shared by the live
 /// frame-rate-capped flush and the finalize (drop) flush.
-fn take_dirty_region(st: &mut RecorderState, out: &mut Vec<u8>) -> Option<(u32, u32, u32, u32)> {
-    let (x0, y0, x1, y1) = st.dirty.take()?;
-    st.fb.copy_region_rgba(x0, y0, x1 - x0, y1 - y0, out)
+fn take_dirty_region(st: &mut RecorderState, out: &mut Vec<u8>) -> Option<Rect> {
+    let rect = st.dirty.take()?;
+    st.fb.copy_region_rgba(rect, out)
 }
 
 pub struct DesktopRecorder {
@@ -269,17 +268,17 @@ impl DesktopRecorder {
         let mut rgba = std::mem::take(&mut st.rgba_scratch);
         let region = take_dirty_region(st, &mut rgba);
         st.rgba_scratch = rgba;
-        let Some((x, y, w, h)) = region else {
+        let Some(r) = region else {
             return Ok(());
         };
-        let png = self.png_encode_scratch_rgba_buffer(st, w, h).await?;
+        let png = self.png_encode_scratch_rgba_buffer(st, r.width, r.height).await?;
         let item = DesktopRecordingItem::PngImage {
             time,
             rect: RecordingRect {
-                x: x as u16,
-                y: y as u16,
-                width: w as u16,
-                height: h as u16,
+                x: r.x as u16,
+                y: r.y as u16,
+                width: r.width as u16,
+                height: r.height as u16,
             },
             keyframe: false,
             data: png,
@@ -324,12 +323,12 @@ impl DesktopRecorder {
                     data,
                 );
                 // Coalesce into the dirty region; encode at most once per frame interval.
-                st.mark_dirty(
-                    u32::from(rect.x),
-                    u32::from(rect.y),
-                    u32::from(rect.width),
-                    u32::from(rect.height),
-                );
+                st.mark_dirty(Rect {
+                    x: u32::from(rect.x),
+                    y: u32::from(rect.y),
+                    width: u32::from(rect.width),
+                    height: u32::from(rect.height),
+                });
                 if time - st.last_frame_time >= MIN_RECORD_FRAME_INTERVAL {
                     self.flush_delta(&mut st, time).await?;
                 }
@@ -495,16 +494,16 @@ impl Drop for DesktopRecorder {
 
             // Flush pixels the frame-rate cap deferred, so the final frame is recorded.
             let mut rgba = std::mem::take(&mut state.rgba_scratch);
-            if let Some((x, y, w, h)) = take_dirty_region(&mut state, &mut rgba) {
+            if let Some(r) = take_dirty_region(&mut state, &mut rgba) {
                 let mut out = std::mem::take(&mut state.png_out);
-                if encode_png_rgba(w, h, &rgba, &mut out).is_ok() {
+                if encode_png_rgba(r.width, r.height, &rgba, &mut out).is_ok() {
                     let item = DesktopRecordingItem::PngImage {
                         time,
                         rect: RecordingRect {
-                            x: x as u16,
-                            y: y as u16,
-                            width: w as u16,
-                            height: h as u16,
+                            x: r.x as u16,
+                            y: r.y as u16,
+                            width: r.width as u16,
+                            height: r.height as u16,
                         },
                         keyframe: false,
                         data: Bytes::copy_from_slice(&out),

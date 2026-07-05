@@ -118,7 +118,8 @@ fn spawn_client(options: TargetVncOptions, encodings: &'static [VncEncoding]) ->
     let span = info_span!("VNC-client", host = %options.host, port = options.port);
     tokio::spawn(
         async move {
-            if let Err(error) = run(options, encodings, event_tx.clone(), input_rx, abort_rx).await {
+            if let Err(error) = run(options, encodings, event_tx.clone(), input_rx, abort_rx).await
+            {
                 error!(%error, "VNC backend client failed");
                 let _ = event_tx.send(DesktopEvent::Error(error.to_string())).await;
             }

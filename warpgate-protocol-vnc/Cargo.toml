@@ -8,10 +8,11 @@ publish = false
 [dependencies]
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-desktop-auth = { path = "../warpgate-desktop-auth" }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
 warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
-warpgate-protocol-vnc-ui = { path = "../warpgate-protocol-vnc-ui" }
+warpgate-desktop-ui = { path = "../warpgate-desktop-ui" }
 anyhow.workspace = true
 bytes.workspace = true
 futures.workspace = true

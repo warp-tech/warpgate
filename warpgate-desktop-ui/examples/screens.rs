@@ -2,7 +2,7 @@ use std::convert::Infallible;
 use std::error::Error;
 
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
-use warpgate_protocol_vnc_ui::{
+use warpgate_desktop_ui::{
     AuthPrompt, SCREEN_H, SCREEN_W, render_authentication, render_connecting,
 };
 

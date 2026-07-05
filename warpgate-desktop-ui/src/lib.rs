@@ -1,4 +1,4 @@
-//! Renders the "connecting" / auth screen shown to a VNC client
+//! Renders the "connecting" / auth screens shown to a native desktop viewer (RDP or VNC)
 #![allow(clippy::cast_precision_loss, clippy::suboptimal_flops)]
 
 mod bouncy_ball;

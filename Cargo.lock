@@ -8388,6 +8388,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "warpgate-desktop-auth"
+version = "0.23.4"
+dependencies = [
+ "anyhow",
+ "tokio",
+ "tracing",
+ "uuid",
+ "warpgate-common",
+ "warpgate-common-http",
+ "warpgate-core",
+ "warpgate-desktop-ui",
+]
+
+[[package]]
+name = "warpgate-desktop-ui"
+version = "0.23.4"
+dependencies = [
+ "embedded-graphics",
+ "minifb",
+ "png",
+ "warpgate-common",
+]
+
+[[package]]
 name = "warpgate-ldap"
 version = "0.26.0"
 dependencies = [
@@ -8559,7 +8583,8 @@ dependencies = [
  "warpgate-common",
  "warpgate-common-http",
  "warpgate-core",
- "warpgate-protocol-vnc-ui",
+ "warpgate-desktop-auth",
+ "warpgate-desktop-ui",
  "warpgate-rdp-ipc",
  "warpgate-tls",
 ]
@@ -8622,18 +8647,9 @@ dependencies = [
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
- "warpgate-protocol-vnc-ui",
+ "warpgate-desktop-auth",
+ "warpgate-desktop-ui",
  "warpgate-tls",
-]
-
-[[package]]
-name = "warpgate-protocol-vnc-ui"
-version = "0.23.4"
-dependencies = [
- "embedded-graphics",
- "minifb",
- "png",
- "warpgate-common",
 ]
 
 [[package]]

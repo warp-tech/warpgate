@@ -14,14 +14,13 @@ mod helper;
 mod server;
 mod session_handle;
 
-pub use server::bind_server;
-
 use std::process::Stdio;
 
 use anyhow::Context;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{SinkExt, StreamExt};
+pub use server::bind_server;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
@@ -29,12 +28,12 @@ use tokio::sync::mpsc::{
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{Instrument, debug, error, info_span};
 use warpgate_common::{ListenEndpoint, ProtocolName, RdpTargetAuth, TargetRdpOptions};
-use warpgate_rdp_ipc::client::{ConnectConfig, Event as HelperEvent, Input as HelperInput};
-use warpgate_tls::TlsCertificateAndPrivateKey;
 use warpgate_core::{
     DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
     ProtocolServer, Services,
 };
+use warpgate_rdp_ipc::client::{ConnectConfig, Event as HelperEvent, Input as HelperInput};
+use warpgate_tls::TlsCertificateAndPrivateKey;
 
 pub static PROTOCOL_NAME: ProtocolName = "RDP";
 

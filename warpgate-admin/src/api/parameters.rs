@@ -49,6 +49,8 @@ struct ParameterValues {
     pub lp_user_lockout_duration_seconds: i32,
     pub lp_user_exempt_admins: bool,
     pub ssh_banner: String,
+    /// Deprecated in 0.27: superseded by `web_clients_enabled`
+    pub web_ssh_enabled: bool,
     pub web_clients_enabled: bool,
     pub web_auth_max_age_seconds: Option<i64>,
     pub analytics_consent: Parameters::AnalyticsConsent,
@@ -167,6 +169,7 @@ impl Api {
             lp_user_lockout_duration_seconds: parameters.lp_user_lockout_duration_seconds,
             lp_user_exempt_admins: parameters.lp_user_exempt_admins,
             ssh_banner: parameters.ssh_banner,
+            web_ssh_enabled: parameters.web_clients_enabled,
             web_clients_enabled: parameters.web_clients_enabled,
             web_auth_max_age_seconds: parameters.web_auth_max_age_seconds,
             analytics_consent: parameters.analytics_consent,

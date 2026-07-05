@@ -1,11 +1,11 @@
+mod bridge;
+mod hold_screen;
 mod protocol;
 mod rfb;
 mod session_handle;
 
-use std::collections::{HashSet, VecDeque};
 use std::convert::Infallible;
-use std::future::Future;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,32 +17,25 @@ use rustls::server::NoClientAuth;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{Instant, sleep, timeout_at};
+use tokio::time::{Instant, timeout_at};
 use tokio_rustls::TlsAcceptor;
 use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
-use uuid::Uuid;
-use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
-};
 use warpgate_common::helpers::net::detect_port_knock;
-use warpgate_common::helpers::otp::OTP_DIGITS;
-use warpgate_common::{ListenEndpoint, Secret, Target, TargetOptions, TargetVncOptions};
-use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::auth::validate_and_add_credential;
-use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
-use warpgate_core::{
-    ConfigProvider, DesktopEvent, DesktopInput, DesktopState, Services, SessionStateInit, State,
-    WarpgateServerHandle, authorize_ticket, consume_ticket,
+use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetVncOptions};
+use warpgate_core::recordings::DesktopRecorder;
+use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
+use warpgate_desktop_auth::{
+    DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
 };
-use warpgate_protocol_vnc_ui as ui;
+use warpgate_desktop_ui as ui;
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
+use self::bridge::{run_proxy_session, wait_for_backend_size};
+use self::hold_screen::{collect_additional_credentials, render_while};
 use self::protocol::{
-    ClientEvent, DEFAULT_PIXEL_FORMAT, PixelFormat, pack_bgra, pack_rgb, read_client_messages,
-    write_desktop_size, write_raw_rect, write_server_cut_text, write_server_init,
-    write_tight_jpeg_rect,
+    ClientEvent, DEFAULT_PIXEL_FORMAT, PixelFormat, pack_rgb, read_client_messages,
+    write_desktop_size, write_raw_rect, write_server_init,
 };
 use self::rfb::{
     SecurityType, server_apple_dh_auth, server_negotiate_security, server_read_client_init,
@@ -207,24 +200,31 @@ async fn negotiate_and_authorize(
             }
         };
 
-    let authenticated =
-        match authenticate(services, server_handle, &username, password, remote_address).await {
-            Ok(Some(a)) => a,
-            Ok(None) => {
-                warn!("Authentication failed");
-                server_write_security_result(&mut viewer, false, "Authentication failed")
-                    .await
-                    .ok();
-                return Ok(None);
-            }
-            Err(error) => {
-                warn!(%error, "Authentication error");
-                server_write_security_result(&mut viewer, false, "Authentication failed")
-                    .await
-                    .ok();
-                return Ok(None);
-            }
-        };
+    let authenticated = match authenticate::<VncProto>(
+        services,
+        server_handle,
+        &username,
+        password,
+        remote_address,
+    )
+    .await
+    {
+        Ok(DesktopAuthOutcome::Failed) => {
+            warn!("Authentication failed");
+            server_write_security_result(&mut viewer, false, "Authentication failed")
+                .await
+                .ok();
+            return Ok(None);
+        }
+        Ok(outcome) => outcome,
+        Err(error) => {
+            warn!(%error, "Authentication error");
+            server_write_security_result(&mut viewer, false, "Authentication failed")
+                .await
+                .ok();
+            return Ok(None);
+        }
+    };
 
     server_write_security_result(&mut viewer, true, "").await?;
     // Consume the viewer's ClientInit; its shared-flag is irrelevant because the backend
@@ -249,24 +249,20 @@ async fn negotiate_and_authorize(
     let mut render = RenderState::new();
 
     let (user_info, target, vnc_options) = match authenticated {
-        VncAuthState::Ready {
+        DesktopAuthOutcome::Authorized {
             user_info,
             target,
             options,
         } => (user_info, target, options),
-        VncAuthState::NeedsInteractive {
-            state_id,
-            username,
-            target_name,
-        } => {
+        DesktopAuthOutcome::NeedsInteractive(interactive) => {
             collect_additional_credentials(
                 &mut viewer_wr,
                 &mut events_rx,
                 &mut render,
                 services,
-                state_id,
-                &username,
-                remote_address.ip(),
+                interactive.state_id,
+                &interactive.username,
+                interactive.remote_ip,
             )
             .await?;
 
@@ -274,22 +270,29 @@ async fn negotiate_and_authorize(
                 .auth_state_store
                 .lock()
                 .await
-                .get(&state_id)
+                .get(&interactive.state_id)
                 .context("auth state expired during approval")?
                 .lock()
                 .await
                 .user_info()
                 .clone();
-            let (target, options) = finalize_user_auth(services, &username, &target_name).await?;
+            let (target, options) = finalize_user_auth::<VncProto>(
+                services,
+                &interactive.username,
+                &interactive.target_name,
+            )
+            .await?;
             // Interactive (TOTP / web-approval) auth fully succeeded: clear any failed
             // attempts, mirroring the password-only `Accepted` path in `authenticate` and
             // the SSH baseline, which clears counters once 2FA completes. Fail open.
             let _ = services
                 .login_protection
-                .clear_failed_attempts(&remote_address.ip(), &user_info.username)
+                .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
                 .await;
             (user_info, target, options)
         }
+        // Already handled before the security handshake above.
+        DesktopAuthOutcome::Failed => return Ok(None),
     };
 
     {
@@ -305,20 +308,7 @@ async fn negotiate_and_authorize(
     // interactive-auth / connecting screens (which render into the viewer framebuffer)
     // keep working and the viewer never needs a JPEG decoder.
     let session_id = server_handle.lock().await.id();
-    let recorder = match services
-        .recordings
-        .lock()
-        .await
-        .start::<DesktopRecorder, _>(&session_id, None, DesktopRecordingMetadata::Desktop)
-        .await
-    {
-        Ok(recorder) => Some(recorder),
-        Err(warpgate_core::recordings::Error::Disabled) => None,
-        Err(error) => {
-            warn!(%error, "Failed to start VNC session recording");
-            None
-        }
-    };
+    let recorder = warpgate_desktop_auth::start_recording(services, &session_id, "vnc").await;
 
     // A single backend client connection decodes every update (Tight/JPEG included, see
     // PROXY_ENCODINGS); we both record it and re-encode it toward the viewer as RFB Raw.
@@ -367,202 +357,6 @@ struct ProxySession {
     render: RenderState,
     backend: crate::client::VncClientHandles,
     recorder: Option<DesktopRecorder>,
-}
-
-/// Record an event, logging (but not failing on) recorder write errors. No-op when
-/// recording is disabled (`None`).
-async fn record_event(recorder: &Option<DesktopRecorder>, event: &DesktopEvent) {
-    if let Some(recorder) = recorder
-        && let Err(error) = recorder.write_event(event).await
-    {
-        warn!(%error, "Failed to record VNC desktop event");
-    }
-}
-
-/// Record a viewer input, logging (but not failing on) recorder write errors. No-op when
-/// recording is disabled (`None`).
-async fn record_input(recorder: &Option<DesktopRecorder>, input: &DesktopInput) {
-    if let Some(recorder) = recorder
-        && let Err(error) = recorder.write_input(input).await
-    {
-        warn!(%error, "Failed to record VNC viewer input");
-    }
-}
-
-/// Drain backend events until the first [`DesktopEvent::Resize`] reveals the framebuffer
-/// geometry, recording each consumed event. The backend client always emits `Resize`
-/// before any `RawImage`, so nothing visible is consumed here.
-async fn wait_for_backend_size(
-    event_rx: &mut mpsc::Receiver<DesktopEvent>,
-    recorder: &Option<DesktopRecorder>,
-) -> Result<(u16, u16)> {
-    while let Some(event) = event_rx.recv().await {
-        record_event(recorder, &event).await;
-        match event {
-            DesktopEvent::Resize { width, height } => return Ok((width, height)),
-            DesktopEvent::Error(message) => bail!("backend error before first frame: {message}"),
-            DesktopEvent::State(DesktopState::Disconnected) => {
-                bail!("backend disconnected before first frame")
-            }
-            _ => {}
-        }
-    }
-    bail!("backend channel closed before first frame")
-}
-
-/// Re-encode one queued backend frame toward the viewer in response to an outstanding
-/// `FramebufferUpdateRequest`. Clears `pending_request` once a frame is actually sent.
-async fn flush_frame<W>(
-    viewer_wr: &mut W,
-    render: &mut RenderState,
-    event: DesktopEvent,
-) -> Result<()>
-where
-    W: AsyncWrite + Unpin,
-{
-    match event {
-        DesktopEvent::RawImage { rect, data } => {
-            let pixels = pack_bgra(&render.pixel_format, &data);
-            write_raw_rect(viewer_wr, rect.x, rect.y, rect.width, rect.height, &pixels).await?;
-            render.pending_request = false;
-        }
-        // The backend compressed this rect with Tight's JPEG sub-encoding. The viewer
-        // negotiated Tight, so it decodes JPEG itself — forward the bytes straight through
-        // as a Tight/JPEG rect rather than decoding and re-encoding as (much larger) Raw.
-        DesktopEvent::JpegImage { rect, data } if render.viewer_supports_tight => {
-            write_tight_jpeg_rect(viewer_wr, rect.x, rect.y, rect.width, rect.height, &data)
-                .await?;
-            render.pending_request = false;
-        }
-        // A viewer that requested Tight is universal; if one somehow didn't, we can't
-        // proxy the backend's JPEG without a decoder, so skip the rect (it stays stale
-        // until the next full frame) rather than carrying a JPEG decoder for this.
-        DesktopEvent::JpegImage { .. } => {
-            warn!("viewer did not negotiate Tight; dropping backend JPEG rect");
-            render.pending_request = false;
-        }
-        DesktopEvent::Resize { width, height } if render.supports_desktop_size => {
-            write_desktop_size(viewer_wr, width, height).await?;
-            render.pending_request = false;
-        }
-        // A resize the viewer can't be told about: drop it but keep the request pending
-        // so the next real frame still satisfies it. Other variants never reach the queue.
-        _ => {}
-    }
-    Ok(())
-}
-
-/// The decode-and-re-encode loop: pump backend `DesktopEvent`s to the viewer as RFB
-/// (recording each), and forward viewer input back to the backend. Lockstep — at most
-/// one rect per `FramebufferUpdateRequest` — with a bounded queue providing end-to-end
-/// backpressure when the viewer is slow. Dropping the recorder finalises the recording.
-async fn run_proxy_session(session: ProxySession) -> Result<()> {
-    /// Bound on queued-but-unflushed backend frames before we stop draining the backend.
-    const QUEUE_CAP: usize = 256;
-
-    let ProxySession {
-        mut viewer_wr,
-        mut viewer_events,
-        reader,
-        stop_tx,
-        mut render,
-        backend,
-        recorder,
-    } = session;
-    let crate::client::VncClientHandles {
-        mut event_rx,
-        input_tx,
-        abort_tx,
-    } = backend;
-
-    let mut queue: VecDeque<DesktopEvent> = VecDeque::new();
-
-    let result = loop {
-        // Satisfy an outstanding request with one queued frame before blocking again.
-        if render.pending_request
-            && let Some(event) = queue.pop_front()
-        {
-            if let Err(error) = flush_frame(&mut viewer_wr, &mut render, event).await {
-                break Err(error);
-            }
-            continue;
-        }
-
-        tokio::select! {
-            biased;
-
-            // Viewer → us: input to forward, plus pixel-format/encoding/refresh updates.
-            event = viewer_events.recv() => {
-                match event {
-                    Some(ClientEvent::WantsFrame) => render.pending_request = true,
-                    Some(ClientEvent::PixelFormat(pf)) => render.pixel_format = pf,
-                    Some(ClientEvent::Encodings {
-                        desktop_size,
-                        tight,
-                    }) => {
-                        render.supports_desktop_size = desktop_size;
-                        render.viewer_supports_tight = tight;
-                    }
-                    Some(ClientEvent::Key { down, keysym }) => {
-                        let input = DesktopInput::Key { keysym, down };
-                        record_input(&recorder, &input).await;
-                        if input_tx.send(input).await.is_err() {
-                            break Ok(());
-                        }
-                    }
-                    Some(ClientEvent::Pointer { x, y, buttons }) => {
-                        let input = DesktopInput::Pointer { x, y, buttons };
-                        record_input(&recorder, &input).await;
-                        if input_tx.send(input).await.is_err() {
-                            break Ok(());
-                        }
-                    }
-                    Some(ClientEvent::Clipboard(text)) => {
-                        let input = DesktopInput::Clipboard(text);
-                        record_input(&recorder, &input).await;
-                        let _ = input_tx.send(input).await;
-                    }
-                    None => break Ok(()), // viewer disconnected
-                }
-            }
-
-            // Backend → us: record every event, queue frames, mirror clipboard. Gated so
-            // a slow viewer back-pressures the backend instead of growing the queue.
-            event = event_rx.recv(), if queue.len() < QUEUE_CAP => {
-                match event {
-                    Some(event) => {
-                        record_event(&recorder, &event).await;
-                        match event {
-                            DesktopEvent::RawImage { .. }
-                            | DesktopEvent::JpegImage { .. }
-                            | DesktopEvent::Resize { .. } => {
-                                queue.push_back(event);
-                            }
-                            DesktopEvent::Clipboard(text) => {
-                                if let Err(error) = write_server_cut_text(&mut viewer_wr, &text).await {
-                                    break Err(error);
-                                }
-                            }
-                            DesktopEvent::State(DesktopState::Disconnected) => break Ok(()),
-                            DesktopEvent::Error(message) => break Err(anyhow!("backend error: {message}")),
-                            // PROXY_ENCODINGS rules out CopyRect/Cursor; Bell/Cursor ignored.
-                            _ => {}
-                        }
-                    }
-                    None => break Ok(()), // backend ended
-                }
-            }
-        }
-    };
-
-    // Teardown: stop the viewer reader and the backend client. Dropping `recorder`
-    // (held until here) finalises the recording.
-    let _ = stop_tx.send(());
-    let _ = abort_tx.send(());
-    reader.abort();
-    drop(recorder);
-
-    result
 }
 
 /// Shared state for the hold screen
@@ -627,384 +421,18 @@ impl RenderState {
     }
 }
 
-/// Render the hold screen while awaiting future
-async fn render_while<W, F>(
-    viewer_wr: &mut W,
-    events_rx: &mut mpsc::UnboundedReceiver<ClientEvent>,
-    state: &mut RenderState,
-    wait: F,
-) -> Result<F::Output>
-where
-    W: AsyncWrite + Unpin,
-    F: Future,
-{
-    tokio::pin!(wait);
-    loop {
-        tokio::select! {
-            out = &mut wait => return Ok(out),
-            event = events_rx.recv(), if !state.reader_done => {
-                state.note_event(event);
-            }
-            // Only render when asked to
-            () = sleep(SPINNER_INTERVAL), if state.pending_request => {
-                state.paint(viewer_wr, ui::render_connecting).await?;
-            }
+/// VNC's binding to the shared desktop-auth flow.
+struct VncProto;
+
+impl DesktopProtocol for VncProto {
+    type Options = TargetVncOptions;
+    const NAME: &'static str = PROTOCOL_NAME;
+    const LABEL: &'static str = "vnc";
+
+    fn options(target: &Target) -> Option<TargetVncOptions> {
+        match &target.options {
+            TargetOptions::Vnc(options) => Some(options.clone()),
+            _ => None,
         }
     }
-}
-
-/// ui animation frame interval while connecting to the backend
-const SPINNER_INTERVAL: Duration = Duration::from_millis(30);
-
-/// Render hold screen UI while collecting OTP/waiting for web auth
-async fn collect_additional_credentials<W>(
-    viewer_wr: &mut W,
-    events_rx: &mut mpsc::UnboundedReceiver<ClientEvent>,
-    render: &mut RenderState,
-    services: &Services,
-    state_id: Uuid,
-    username: &str,
-    remote_ip: IpAddr,
-) -> Result<()>
-where
-    W: AsyncWrite + Unpin,
-{
-    let state = services
-        .auth_state_store
-        .lock()
-        .await
-        .get(&state_id)
-        .context("auth state expired")?;
-
-    let mut otp = String::new();
-    let mut otp_failures = 0usize;
-    let mut approval = services.auth_state_store.lock().await.subscribe(state_id);
-
-    async fn next_prompt(
-        services: &Services,
-        state: &Arc<tokio::sync::Mutex<AuthState>>,
-        kinds: HashSet<CredentialKind>,
-        otp: &str,
-    ) -> Option<ui::AuthPrompt> {
-        if kinds.contains(&CredentialKind::Totp) {
-            Some(ui::AuthPrompt::Otp {
-                entered: otp.to_owned(),
-            })
-        } else if kinds.contains(&CredentialKind::WebUserApproval) {
-            Some(ui::AuthPrompt::WebApproval {
-                url: web_approval_url(services, state).await,
-                security_key: state.lock().await.identification_string().to_owned(),
-            })
-        } else {
-            None
-        }
-    }
-
-    'next_prompt: loop {
-        let need = match state.lock().await.verify() {
-            AuthResult::Accepted { .. } => return Ok(()),
-            AuthResult::Rejected => bail!("VNC authentication rejected"),
-            AuthResult::Need(need) => need,
-        };
-
-        let Some(prompt) = next_prompt(services, &state, need, &otp).await else {
-            bail!("authentication policy requires a factor that cannot be collected over VNC");
-        };
-
-        if let ui::AuthPrompt::WebApproval { url, .. } = &prompt {
-            if let Some(url) = url {
-                write_server_cut_text(viewer_wr, &url).await.ok();
-            }
-        }
-
-        loop {
-            tokio::select! {
-                // Browser approval landed (or the signal lagged/closed); the loop re-verifies.
-                _ = approval.recv(), if matches!(prompt, ui::AuthPrompt::WebApproval { ..}) => {
-                    continue 'next_prompt // web approval accepted
-                }
-                event = events_rx.recv(), if !render.reader_done => {
-                    if let Some(keysym) = render.note_event(event)
-                        && matches!(prompt, ui::AuthPrompt::Otp { ..})
-                    {
-                        if handle_otp_keypress(keysym, &mut otp, services, &state, username, remote_ip)
-                            .await
-                        {
-                            otp_failures += 1;
-                            if otp_failures >= MAX_OTP_ATTEMPTS {
-                                bail!("too many incorrect one-time passwords");
-                            }
-                        }
-                        render.pending_request = true; // reflect the input on the next paint
-                        continue 'next_prompt // OTP might have been accepted or rejected
-                    }
-                }
-                () = sleep(SPINNER_INTERVAL), if render.pending_request => {
-                    render.paint(viewer_wr, |tick| ui::render_authentication(tick, &prompt)).await?;
-                }
-            }
-        }
-    }
-}
-
-// X11 keysyms accepted in the OTP field
-const KEYSYM_DIGIT_0: u32 = 0x0030;
-const KEYSYM_DIGIT_9: u32 = 0x0039;
-const KEYSYM_KP_0: u32 = 0xFFB0;
-const KEYSYM_KP_9: u32 = 0xFFB9;
-const KEYSYM_BACKSPACE: u32 = 0xFF08;
-const KEYSYM_RETURN: u32 = 0xFF0D;
-const KEYSYM_KP_ENTER: u32 = 0xFF8D;
-
-const MAX_OTP_ATTEMPTS: usize = 3;
-
-async fn handle_otp_keypress(
-    keysym: u32,
-    otp: &mut String,
-    services: &Services,
-    state: &Arc<tokio::sync::Mutex<AuthState>>,
-    username: &str,
-    remote_ip: IpAddr,
-) -> bool {
-    let mut submit = false;
-    match keysym {
-        KEYSYM_DIGIT_0..=KEYSYM_DIGIT_9 if otp.len() < OTP_DIGITS => {
-            otp.push(char::from(keysym as u8));
-            submit = otp.len() == OTP_DIGITS;
-        }
-        KEYSYM_KP_0..=KEYSYM_KP_9 if otp.len() < OTP_DIGITS => {
-            otp.push(char::from(b'0' + (keysym - KEYSYM_KP_0) as u8));
-            submit = otp.len() == OTP_DIGITS;
-        }
-        KEYSYM_BACKSPACE => {
-            otp.pop();
-        }
-        KEYSYM_RETURN | KEYSYM_KP_ENTER => submit = true,
-        _ => {}
-    }
-
-    if submit {
-        let credential = AuthCredential::Otp(Secret::new(std::mem::take(otp)));
-        // Route through the shared helper so a bad OTP emits the same
-        // UserAuthenticationFailed1 audit event as the other protocols.
-        let valid = validate_and_add_credential(
-            &mut *state.lock().await,
-            &credential,
-            &mut *services.config_provider.lock().await,
-        )
-        .await
-        .unwrap_or(false);
-        if !valid {
-            warn!("Incorrect one-time password");
-            let _ = services
-                .login_protection
-                .record_failed_attempt(FailedAttemptInfo {
-                    username: username.to_string(),
-                    remote_ip,
-                    protocol: "vnc".to_string(),
-                    credential_type: "otp".to_string(),
-                })
-                .await;
-            return true;
-        }
-    }
-    false
-}
-
-#[allow(clippy::large_enum_variant)]
-enum VncAuthState {
-    Ready {
-        user_info: AuthStateUserInfo,
-        target: Target,
-        options: TargetVncOptions,
-    },
-    NeedsInteractive {
-        state_id: Uuid,
-        username: String,
-        target_name: String,
-    },
-}
-
-/// Validate the initial VNC auth
-async fn authenticate(
-    services: &Services,
-    server_handle: &Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
-    selector: &str,
-    password: String,
-    remote_address: SocketAddr,
-) -> Result<Option<VncAuthState>> {
-    let selector: AuthSelector = selector.into();
-
-    match selector {
-        AuthSelector::User {
-            username,
-            target_name,
-        } => {
-            let remote_ip = remote_address.ip();
-
-            // Brute-force protection: reject blocked IPs / locked users before
-            // evaluating credentials. Fail closed (propagate lookup errors).
-            if services
-                .login_protection
-                .check_ip_blocked(&remote_ip)
-                .await?
-                .is_some()
-            {
-                warn!(ip = %remote_ip, "VNC auth attempt from blocked IP");
-                return Ok(None);
-            }
-            if services
-                .login_protection
-                .check_user_locked(&username)
-                .await?
-                .is_some()
-            {
-                warn!(username = %username, "VNC auth attempt for locked user");
-                return Ok(None);
-            }
-
-            let (state_id, state_arc) = services
-                .auth_state_store
-                .lock()
-                .await
-                .create(
-                    Some(&server_handle.lock().await.id()),
-                    &username,
-                    PROTOCOL_NAME,
-                    &[
-                        CredentialKind::Password,
-                        CredentialKind::Totp,
-                        CredentialKind::WebUserApproval,
-                    ],
-                    Some(remote_address.ip()),
-                    Some("password"),
-                )
-                .await?;
-
-            // Password is mandatory, we don't want to serve an anon session
-            {
-                let credential = AuthCredential::Password(Secret::new(password));
-                let mut state = state_arc.lock().await;
-                let credential_valid = validate_and_add_credential(
-                    &mut state,
-                    &credential,
-                    &mut *services.config_provider.lock().await,
-                )
-                .await?;
-                if !credential_valid {
-                    let _ = services
-                        .login_protection
-                        .record_failed_attempt(FailedAttemptInfo {
-                            username: username.clone(),
-                            remote_ip,
-                            protocol: "vnc".to_string(),
-                            credential_type: "password".to_string(),
-                        })
-                        .await;
-                    return Ok(None);
-                }
-            }
-
-            let result = state_arc.lock().await.verify();
-            match result {
-                AuthResult::Accepted { user_info } => {
-                    let _ = services
-                        .login_protection
-                        .clear_failed_attempts(&remote_ip, &user_info.username)
-                        .await;
-                    services
-                        .auth_state_store
-                        .lock()
-                        .await
-                        .complete(&state_id)
-                        .await;
-                    let (target, options) =
-                        finalize_user_auth(services, &user_info.username, &target_name).await?;
-                    Ok(Some(VncAuthState::Ready {
-                        user_info,
-                        target,
-                        options,
-                    }))
-                }
-
-                AuthResult::Need(kinds)
-                    if kinds.iter().all(|k| {
-                        matches!(k, CredentialKind::Totp | CredentialKind::WebUserApproval)
-                    }) =>
-                {
-                    Ok(Some(VncAuthState::NeedsInteractive {
-                        state_id,
-                        username,
-                        target_name,
-                    }))
-                }
-
-                // Any other unmet requirement that isn't collectable over VNC
-                AuthResult::Need(_) | AuthResult::Rejected => Ok(None),
-            }
-        }
-        AuthSelector::Ticket { secret } => match authorize_ticket(&services.db, &secret).await? {
-            Some((ticket, target_model, user_info)) => {
-                consume_ticket(&services.db, &ticket.id).await?;
-                let (target, options) = find_vnc_target(services, &target_model.name).await?;
-                Ok(Some(VncAuthState::Ready {
-                    user_info,
-                    target,
-                    options,
-                }))
-            }
-            None => Ok(None),
-        },
-    }
-}
-
-async fn finalize_user_auth(
-    services: &Services,
-    username: &str,
-    target_name: &str,
-) -> Result<(Target, TargetVncOptions)> {
-    let authorized = services
-        .config_provider
-        .lock()
-        .await
-        .authorize_target(username, target_name)
-        .await?;
-    if !authorized {
-        bail!("Target {target_name} not authorized for {username}");
-    }
-    find_vnc_target(services, target_name).await
-}
-
-async fn web_approval_url(
-    services: &Services,
-    state: &Arc<tokio::sync::Mutex<AuthState>>,
-) -> Option<String> {
-    let external_url = {
-        let config = services.config.lock().await;
-        construct_external_url(None, &config, None)
-            .await
-            .inspect_err(|error| warn!(%error, "Failed to construct external URL"))
-            .ok()?
-    };
-    let url = state.lock().await.construct_web_approval_url(external_url);
-    Some(url.to_string())
-}
-
-async fn find_vnc_target(
-    services: &Services,
-    target_name: &str,
-) -> Result<(Target, TargetVncOptions)> {
-    let Some(target) = services
-        .config_provider
-        .lock()
-        .await
-        .get_target_by_name(target_name)
-        .await?
-    else {
-        bail!("Target {target_name} not found");
-    };
-    let TargetOptions::Vnc(ref options) = target.options else {
-        bail!("Target {target_name} is not a VNC target");
-    };
-    return Ok((target.clone(), options.clone()));
 }

@@ -5,8 +5,9 @@
 //! and materialised on first use. The override env var is `WARPGATE_RDP_HELPER`. See
 //! [`crate::embedded`] for the materialisation strategy.
 
-use crate::embedded::{EmbeddedHelper, HelperExecutable};
 use warpgate_common::WarpgateError;
+
+use crate::embedded::{EmbeddedHelper, HelperExecutable};
 
 /// The RDP helper (client + server subcommands), embedded by `build.rs`.
 static HELPER: EmbeddedHelper = EmbeddedHelper::new(

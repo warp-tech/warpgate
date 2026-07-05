@@ -237,12 +237,14 @@ fn emit_region(image: &DecodedImage, region: &ironrdp::pdu::geometry::InclusiveR
     EMIT_FRAME.with(|scratch| {
         let frame = &mut *scratch.borrow_mut();
         frame.clear();
-        frame.reserve(9 + w * h * 4);
-        frame.push(warpgate_rdp_ipc::KIND_IMAGE);
-        frame.extend_from_slice(&(left as u16).to_le_bytes());
-        frame.extend_from_slice(&(top as u16).to_le_bytes());
-        frame.extend_from_slice(&(w as u16).to_le_bytes());
-        frame.extend_from_slice(&(h as u16).to_le_bytes());
+        frame.reserve(warpgate_rdp_ipc::ImageHeader::LEN + w * h * 4);
+        warpgate_rdp_ipc::ImageHeader {
+            x: left as u16,
+            y: top as u16,
+            width: w as u16,
+            height: h as u16,
+        }
+        .write_into(frame);
         for row in 0..h {
             let src_start = ((top + row) * img_w + left) * 4;
             let src_row = &src[src_start..src_start + w * 4];
