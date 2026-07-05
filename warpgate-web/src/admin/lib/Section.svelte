@@ -26,7 +26,7 @@
     }
 
     .sectioned-form-section {
-        padding: 0 0 1.5rem;
+        margin: 0 0 3rem;
     }
 
     .sectioned-form-section:last-child {

@@ -7,8 +7,10 @@ use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
+use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{SessionId, WarpgateError};
 
+use crate::login_protection::{FailedAttemptInfo, LoginProtectionService};
 use crate::{ConfigProvider, ConfigProviderEnum};
 
 #[allow(clippy::unwrap_used)]
@@ -72,19 +74,51 @@ impl AuthCompletionSignal {
 
 pub struct AuthStateStore {
     config_provider: Arc<Mutex<ConfigProviderEnum>>,
+    login_protection: Arc<LoginProtectionService>,
     store: HashMap<Uuid, (Arc<Mutex<AuthState>>, Instant)>,
     completion_signals: HashMap<Uuid, AuthCompletionSignal>,
     web_auth_request_signal: broadcast::Sender<Uuid>,
 }
 
 impl AuthStateStore {
-    pub fn new(config_provider: Arc<Mutex<ConfigProviderEnum>>) -> Self {
+    pub fn new(
+        config_provider: Arc<Mutex<ConfigProviderEnum>>,
+        login_protection: Arc<LoginProtectionService>,
+    ) -> Self {
         Self {
             store: HashMap::new(),
             config_provider,
+            login_protection,
             completion_signals: HashMap::new(),
             web_auth_request_signal: broadcast::channel(100).0,
         }
+    }
+
+    /// Record a failed attempt for an unknown username so that username
+    /// enumeration counts toward IP blocking, just like a wrong password would.
+    ///
+    /// `credential_type` is `None` for contexts that must not be penalised —
+    /// notably SSH public-key offers, which legitimately fail as clients try
+    /// each agent key in turn — in which case nothing is recorded.
+    async fn record_unknown_user_attempt(
+        &self,
+        username: &str,
+        protocol: &str,
+        remote_ip: Option<IpAddr>,
+        credential_type: Option<&str>,
+    ) {
+        let (Some(remote_ip), Some(credential_type)) = (remote_ip, credential_type) else {
+            return;
+        };
+        let _ = self
+            .login_protection
+            .record_failed_attempt(FailedAttemptInfo {
+                username: username.to_string(),
+                remote_ip,
+                protocol: protocol.to_string(),
+                credential_type: credential_type.to_string(),
+            })
+            .await;
     }
 
     pub fn contains_key(&self, id: &Uuid) -> bool {
@@ -99,7 +133,7 @@ impl AuthStateStore {
         for auth in self.store.values() {
             {
                 let inner = auth.0.lock().await;
-                if inner.user_info().username != username {
+                if !username_eq_ci(&inner.user_info().username, username) {
                     continue;
                 }
                 let AuthResult::Need(need) = inner.verify() else {
@@ -129,6 +163,7 @@ impl AuthStateStore {
         protocol: &str,
         supported_credential_types: &[CredentialKind],
         remote_ip: Option<IpAddr>,
+        rate_limit_credential_type: Option<&str>,
     ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
         let id = Uuid::new_v4();
 
@@ -139,9 +174,16 @@ impl AuthStateStore {
             .list_users()
             .await?
             .iter()
-            .find(|u| u.username.to_lowercase() == username.to_lowercase())
+            .find(|u| username_eq_ci(&u.username, username))
             .cloned()
         else {
+            self.record_unknown_user_attempt(
+                username,
+                protocol,
+                remote_ip,
+                rate_limit_credential_type,
+            )
+            .await;
             return Err(WarpgateError::UserNotFound(username.into()));
         };
 
@@ -154,6 +196,13 @@ impl AuthStateStore {
             .get_credential_policy(username, supported_credential_types)
             .await?;
         let Some(policy) = policy else {
+            self.record_unknown_user_attempt(
+                username,
+                protocol,
+                remote_ip,
+                rate_limit_credential_type,
+            )
+            .await;
             return Err(WarpgateError::UserNotFound(username.into()));
         };
 

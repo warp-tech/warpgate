@@ -14,6 +14,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
+use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{ProtocolName, SessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
@@ -195,6 +196,7 @@ pub async fn get_or_create_auth_state_for_request(
     req: &Request,
     username: &str,
     ctx: &UnauthenticatedRequestContext,
+    rate_limit_credential_type: Option<&str>,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
     let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
     let session = <&Session>::from_request_without_body(req)
@@ -202,7 +204,7 @@ pub async fn get_or_create_auth_state_for_request(
         .context("Session not in request")?;
 
     if let Some(state) = get_auth_state_for_request(req, ctx).await? {
-        let existing_matched = state.lock().await.user_info().username == username;
+        let existing_matched = username_eq_ci(&state.lock().await.user_info().username, username);
         if existing_matched {
             return Ok(state);
         }
@@ -220,6 +222,7 @@ pub async fn get_or_create_auth_state_for_request(
                 CredentialKind::Totp,
             ],
             remote_ip,
+            rate_limit_credential_type,
         )
         .await?;
 
@@ -305,6 +308,7 @@ pub async fn authorize_session(
         user_id: user_info.id,
         username: user_info.username,
     });
+    warpgate_common_http::auth::stamp_session_auth_time(session);
 
     Ok(())
 }

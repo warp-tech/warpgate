@@ -1,10 +1,9 @@
 <script lang="ts">
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { FormGroup, Input, Alert } from '@sveltestrap/sveltestrap'
     import { api, type Target, type TargetOptionsTargetSSHOptions } from '../../../lib/api'
     import { faExternalLink } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import TargetSshHostKeyChecker from './KeyChecker.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import { serverInfo } from 'gateway/lib/store'
     import { TargetKind } from 'gateway/lib/api'

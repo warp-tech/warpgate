@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod listener_supervisor;
 mod logging;
 
 use std::path::PathBuf;
@@ -79,6 +80,14 @@ pub(crate) enum Commands {
         #[clap(long)]
         kubernetes_port: Option<u16>,
 
+        /// Enable VNC and set port
+        #[clap(long)]
+        vnc_port: Option<u16>,
+
+        /// Enable RDP and set port
+        #[clap(long)]
+        rdp_port: Option<u16>,
+
         /// Enable session recording
         #[clap(long)]
         record_sessions: bool,
@@ -115,6 +124,15 @@ pub(crate) enum Commands {
     RecoverAccess {
         #[clap(action=ArgAction::Set)]
         username: Option<String>,
+    },
+    /// Run database migrations
+    #[clap(allow_negative_numbers = true)]
+    MigrateDatabase {
+        /// Number of migrations to apply (positive) or revert (negative)
+        #[clap(value_name = "STEPS", default_value = "1", allow_hyphen_values = true)]
+        steps: i32,
+        #[clap(long, action=ArgAction::SetTrue)]
+        destructive: bool,
     },
     /// Show version information
     Version,
@@ -176,6 +194,15 @@ async fn _main() -> Result<()> {
             crate::commands::recover_access::command(&params, username.as_ref()).await
         }
         Commands::Healthcheck => crate::commands::healthcheck::command(&params).await,
+        Commands::MigrateDatabase { steps, destructive } => {
+            if *steps < 0 && !destructive {
+                error!(
+                    "Reverting migrations is a destructive operation. Use the --destructive flag to confirm."
+                );
+                std::process::exit(1);
+            }
+            crate::commands::migrate::command(&params, *steps).await
+        }
     }
 }
 

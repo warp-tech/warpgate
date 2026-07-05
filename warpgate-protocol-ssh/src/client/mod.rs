@@ -18,7 +18,7 @@ use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
-use russh::{MethodKind, Preferred, Sig, kex};
+use russh::{MethodKind, Preferred, Sig, kex, mac};
 use serde::Serialize;
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
@@ -151,6 +151,23 @@ pub enum RCEvent {
     ForwardedStreamlocal(Uuid, ForwardedStreamlocalParams),
     ForwardedAgent(Uuid),
     X11(Uuid, String, u32),
+}
+
+impl RCEvent {
+    /// The already-open channel this event refers to, if any.
+    pub(crate) const fn channel(&self) -> Option<Uuid> {
+        match self {
+            Self::Output(channel, _)
+            | Self::Success(channel)
+            | Self::ChannelFailure(channel)
+            | Self::Eof(channel)
+            | Self::Close(channel)
+            | Self::ExitStatus(channel, _)
+            | Self::ExitSignal { channel, .. }
+            | Self::ExtendedData { channel, .. } => Some(*channel),
+            _ => None,
+        }
+    }
 }
 
 pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
@@ -529,6 +546,17 @@ impl RemoteClient {
                     russh::cipher::AES_128_CTR,
                     russh::cipher::AES_128_CBC,
                     russh::cipher::TRIPLE_DES_CBC,
+                ]),
+                // The secure defaults exclude SHA-1 MACs; append them here for
+                // legacy devices (e.g. older network switches that only offer
+                // hmac-sha1). https://github.com/warp-tech/warpgate/issues/2066
+                mac: Cow::Borrowed(&[
+                    mac::HMAC_SHA512_ETM,
+                    mac::HMAC_SHA256_ETM,
+                    mac::HMAC_SHA512,
+                    mac::HMAC_SHA256,
+                    mac::HMAC_SHA1_ETM,
+                    mac::HMAC_SHA1,
                 ]),
                 ..<_>::default()
             }

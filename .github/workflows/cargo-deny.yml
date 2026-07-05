@@ -9,7 +9,7 @@ jobs:
     name: cargo-deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
 
       - name: Install cargo-deny
         run: cargo install --locked cargo-deny@0.18.9
@@ -18,3 +18,7 @@ jobs:
         run: |
           cargo deny --version
           cargo deny check
+          # The RDP helper has its own lockfile outside of cargo workspace
+          # The config path must be absolute, a relative --config resolves
+          # against the helper's manifest dir, not the repo root
+          cargo deny --manifest-path warpgate-rdp-helper/Cargo.toml check --config "$PWD/deny.toml"

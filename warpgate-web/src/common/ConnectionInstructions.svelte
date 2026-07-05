@@ -2,17 +2,15 @@
     import { Button, FormGroup, ListGroup, ListGroupItem } from '@sveltestrap/sveltestrap'
     import { api, TargetKind, type ExistingCertificateCredential, type SsoKubernetesConfigDescription } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand, makeOidcKubeconfig } from 'common/protocols'
+    import { makeExampleSSHCommand, makeCommonSelectorUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand, protocolHost, protocolPortString, makeOidcKubeconfig } from 'common/protocols'
     import { getCertificateKey, getAllCertificateKeys } from 'gateway/lib/certificateStore'
     import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
     import CopyButton from 'common/CopyButton.svelte'
-    import Alert from './sveltestrap-s5-ports/Alert.svelte'
+    import { Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import InfoBox from './InfoBox.svelte'
     import { faCertificate, faPlus } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
-    import Badge from './sveltestrap-s5-ports/Badge.svelte'
-    import Tooltip from './sveltestrap-s5-ports/Tooltip.svelte'
 
     interface Props {
         targetName?: string;
@@ -157,7 +155,7 @@
         oidcClientSecret: selectedOidc?.clientSecret ?? undefined,
     }))
 
-    let sshUsername = $derived(makeSSHUsername(opts))
+    let commonSelectorUsername = $derived(makeCommonSelectorUsername(opts))
     let exampleSSHCommand = $derived(makeExampleSSHCommand(opts))
     let exampleSCPCommand = $derived(makeExampleSCPCommand(opts))
     let mySQLUsername = $derived(makeMySQLUsername(opts))
@@ -171,12 +169,14 @@
     let kubeconfig = $derived(makeKubeconfig(opts))
     let oidcKubeconfig = $derived(makeOidcKubeconfig(opts))
     let exampleKubectlCommand = $derived(makeExampleKubectlCommand(opts))
+    let rdpEndpoint = $derived(`${protocolHost(opts, 'rdp')}:${protocolPortString(opts, 'rdp')}`)
+    let vncEndpoint = $derived(`${protocolHost(opts, 'vnc')}:${protocolPortString(opts, 'vnc')}`)
 </script>
 
 {#if targetKind === TargetKind.Ssh}
     <FormGroup floating label="SSH username" class="d-flex align-items-center">
-        <input type="text" class="form-control" readonly value={sshUsername} />
-        <CopyButton text={sshUsername} />
+        <input type="text" class="form-control" readonly value={commonSelectorUsername} />
+        <CopyButton text={commonSelectorUsername} />
     </FormGroup>
 
     <FormGroup floating label="Example SSH command" class="d-flex align-items-center">
@@ -270,7 +270,7 @@
     <textarea class="form-control" readonly style="height: 27rem; font-family: monospace; font-size: 0.9em;">{oidcKubeconfig}</textarea>
     <CopyButton text={oidcKubeconfig} />
   </FormGroup>
-  <div class="text-muted small mb-3">Requires the <a href="https://github.com/int128/kubelogin" target="_blank" rel="noreferrer">kubelogin</a> (oidc-login) kubectl plugin.</div>
+  <div class="text-muted small mb-3">Requires the <a href="https://github.com/int128/kubelogin" target="_blank" rel="noreferrer noopener">kubelogin</a> (oidc-login) kubectl plugin.</div>
 {/if}
 
 {#if kubeconfigMode === 'certificate' || k8sOidcConfigs.length === 0}
@@ -383,4 +383,28 @@
     storeInBrowserByDefault={true}
     onClose={() => { issuingCertificate = false; loadCertificates() }}
 />
+{/if}
+
+{#if targetKind === TargetKind.Rdp}
+<FormGroup floating label="RDP username" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={commonSelectorUsername} />
+    <CopyButton text={commonSelectorUsername} />
+</FormGroup>
+
+<FormGroup floating label="RDP endpoint" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={rdpEndpoint} />
+    <CopyButton text={rdpEndpoint} />
+</FormGroup>
+{/if}
+
+{#if targetKind === TargetKind.Vnc}
+<FormGroup floating label="VNC username" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={commonSelectorUsername} />
+    <CopyButton text={commonSelectorUsername} />
+</FormGroup>
+
+<FormGroup floating label="VNC endpoint" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={vncEndpoint} />
+    <CopyButton text={vncEndpoint} />
+</FormGroup>
 {/if}

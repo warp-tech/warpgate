@@ -24,6 +24,8 @@ pub struct PortsInfo {
     mysql: Option<u16>,
     postgres: Option<u16>,
     kubernetes: Option<u16>,
+    vnc: Option<u16>,
+    rdp: Option<u16>,
 }
 
 #[derive(Serialize, Object)]
@@ -33,6 +35,8 @@ pub struct ExternalHostsInfo {
     mysql: Option<String>,
     postgres: Option<String>,
     kubernetes: Option<String>,
+    vnc: Option<String>,
+    rdp: Option<String>,
 }
 
 #[derive(Serialize, Object, Debug)]
@@ -84,6 +88,8 @@ pub struct Info {
     external_host: Option<String>,
     external_hosts: Option<ExternalHostsInfo>,
     ports: PortsInfo,
+    password_login_mode: Parameters::PasswordLoginMode,
+    /// Deprecated in 0.26: superseded by `password_login_mode`
     minimize_password_login: bool,
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
@@ -95,10 +101,12 @@ pub struct Info {
     ticket_request_show_all_targets: bool,
     target_click_action: Parameters::TargetClickAction,
     max_api_token_duration_seconds: Option<i64>,
+    web_clients_enabled: bool,
     has_ldap: bool,
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
     running_on_ec2: Option<bool>,
+    should_prompt_analytics: bool,
 }
 
 #[derive(ApiResponse)]
@@ -203,6 +211,18 @@ impl Api {
                     .external_host
                     .clone()
                     .or_else(|| fallback_host.clone()),
+                vnc: config
+                    .store
+                    .vnc
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                rdp: config
+                    .store
+                    .rdp
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
             })
         } else {
             None
@@ -256,6 +276,17 @@ impl Api {
             None
         };
 
+        let should_prompt_analytics = {
+            let instance_older_than_a_week = time::OffsetDateTime::now_utc()
+                - parameters.instance_created_at
+                >= time::Duration::weeks(1);
+
+            admin_permissions.as_ref().is_some_and(|p| p.config_edit)
+                && parameters.analytics_consent == Parameters::AnalyticsConsent::Undecided
+                && setup_state.is_none()
+                && instance_older_than_a_week
+        };
+
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: auth_ctx.is_some().then(|| warpgate_version().to_string()),
             username: auth_ctx
@@ -263,7 +294,9 @@ impl Api {
                 .and_then(|auth_ctx| auth_ctx.auth.username().map(ToString::to_string)),
             selected_target: session.get_target_name(),
             external_host,
-            minimize_password_login: parameters.minimize_password_login,
+            password_login_mode: parameters.password_login_mode,
+            minimize_password_login: parameters.password_login_mode
+                == Parameters::PasswordLoginMode::Minimized,
             authorized_via_ticket: matches!(
                 session.get_auth(),
                 Some(SessionAuthorization::Ticket { .. })
@@ -295,6 +328,16 @@ impl Api {
                     } else {
                         None
                     },
+                    vnc: if config.store.vnc.enable {
+                        Some(config.store.vnc.external_port())
+                    } else {
+                        None
+                    },
+                    rdp: if config.store.rdp.enable {
+                        Some(config.store.rdp.external_port())
+                    } else {
+                        None
+                    },
                 }
             } else {
                 PortsInfo {
@@ -303,6 +346,8 @@ impl Api {
                     mysql: None,
                     postgres: None,
                     kubernetes: None,
+                    vnc: None,
+                    rdp: None,
                 }
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,
@@ -313,6 +358,7 @@ impl Api {
             ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
             target_click_action: parameters.target_click_action,
             max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
+            web_clients_enabled: parameters.web_clients_enabled,
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,
             admin_permissions,
@@ -321,6 +367,7 @@ impl Api {
             } else {
                 None
             },
+            should_prompt_analytics,
         })))
     }
 

@@ -54,6 +54,15 @@ mod m00049_text_columns;
 mod m00050_password_policy;
 mod m00051_tutorial_dismissed;
 mod m00052_log_text_column;
+mod m00053_login_protection;
+mod m00054_login_protection_params;
+mod m00055_ssh_banner;
+mod m00056_web_ssh_enabled;
+mod m00057_password_login_mode;
+mod m00058_analytics;
+mod m00059_web_auth_max_age;
+mod m00060_recording_generation;
+mod m00061_rename_web_ssh_enabled;
 
 pub(crate) mod helpers;
 
@@ -115,10 +124,32 @@ impl MigratorTrait for Migrator {
             Box::new(m00050_password_policy::Migration),
             Box::new(m00051_tutorial_dismissed::Migration),
             Box::new(m00052_log_text_column::Migration),
+            Box::new(m00053_login_protection::Migration),
+            Box::new(m00054_login_protection_params::Migration),
+            Box::new(m00055_ssh_banner::Migration),
+            Box::new(m00056_web_ssh_enabled::Migration),
+            Box::new(m00057_password_login_mode::Migration),
+            Box::new(m00058_analytics::Migration),
+            Box::new(m00059_web_auth_max_age::Migration),
+            Box::new(m00060_recording_generation::Migration),
+            Box::new(m00061_rename_web_ssh_enabled::Migration),
         ]
     }
 }
 
 pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbErr> {
     Migrator::up(connection, None).await
+}
+
+/// Apply `steps` pending migrations.
+pub async fn migrate_database_up(connection: &DatabaseConnection, steps: u32) -> Result<(), DbErr> {
+    Migrator::up(connection, Some(steps)).await
+}
+
+/// Revert `steps` applied migrations.
+pub async fn migrate_database_down(
+    connection: &DatabaseConnection,
+    steps: u32,
+) -> Result<(), DbErr> {
+    Migrator::down(connection, Some(steps)).await
 }

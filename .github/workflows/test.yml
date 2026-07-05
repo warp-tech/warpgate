@@ -9,7 +9,7 @@ jobs:
   Tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           submodules: recursive
 
@@ -39,12 +39,20 @@ jobs:
           cargo clean
           rustup component add llvm-tools-preview
 
+      - name: Run Rust unit tests
+        run: cargo llvm-cov test --workspace
+
       - name: Build UI
         run: |
           just npm ci
           just openapi
           just npm run openapi:tests-sdk
           just npm run build
+
+      # Built separately (own lockfile) so the workspace coverage build embeds it
+      # and warpgate-protocol-rdp's extraction test runs.
+      - name: Build RDP helper
+        run: just build-rdp-helper
 
       - name: Build images
         working-directory: tests
@@ -56,6 +64,10 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y gnome-keyring kubectl
+          # FreeRDP CLI (xfreerdp/xfreerdp3) drives the native RDP tests. The `-x11`
+          # build needs an X display, so xvfb provides a virtual one on headless CI.
+          sudo apt install -y xvfb
+          sudo apt install -y freerdp2-x11 || sudo apt install -y freerdp3-x11
           pip3 install keyring==24 poetry==1.8.3
           poetry install
 

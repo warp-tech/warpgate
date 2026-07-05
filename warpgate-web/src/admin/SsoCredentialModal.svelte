@@ -7,11 +7,11 @@
         Modal,
         ModalBody,
         ModalFooter,
+        Alert,
     } from '@sveltestrap/sveltestrap'
 
     import { type ExistingSsoCredential } from './lib/api'
     import { api } from 'gateway/lib/api'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
 
     interface Props {

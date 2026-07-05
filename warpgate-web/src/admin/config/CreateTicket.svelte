@@ -4,10 +4,10 @@ import AsyncButton from 'common/AsyncButton.svelte'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import { TargetKind } from 'gateway/lib/api'
 import { link } from 'svelte-spa-router'
-import { FormGroup } from '@sveltestrap/sveltestrap'
+import { FormGroup, Alert } from '@sveltestrap/sveltestrap'
 import { firstBy } from 'thenby'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+import { handleReauthError } from 'common/reauth'
 
 let error: string|null = $state(null)
 let targets: Target[]|undefined = $state()
@@ -47,6 +47,9 @@ async function create () {
             },
         })
     } catch (err) {
+        if (await handleReauthError(err)) {
+            return
+        }
         error = await stringifyError(err)
     }
 }

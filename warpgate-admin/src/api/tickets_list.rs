@@ -1,4 +1,5 @@
 use anyhow::Context;
+use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -9,6 +10,7 @@ use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_common_http::auth::web_reauth_required;
 use warpgate_core::logging::AuditEvent;
 use warpgate_db_entities::{Target, Ticket, User};
 
@@ -91,6 +93,9 @@ enum CreateTicketResponse {
     #[oai(status = 201)]
     Created(Json<TicketAndSecret>),
 
+    #[oai(status = 401)]
+    ReauthRequired,
+
     #[oai(status = 400)]
     BadRequest(Json<String>),
 
@@ -126,6 +131,7 @@ impl Api {
     #[oai(path = "/tickets", method = "post", operation_id = "create_ticket")]
     async fn api_create_ticket(
         &self,
+        session: &Session,
         ctx: Data<&AuthenticatedRequestContext>,
         body: Json<CreateTicketRequest>,
         _sec_scheme: AnySecurityScheme,
@@ -133,6 +139,10 @@ impl Api {
         use warpgate_db_entities::Ticket;
 
         require_admin_permission(&ctx, Some(AdminPermission::TicketsCreate)).await?;
+
+        if web_reauth_required(&ctx, session).await? {
+            return Ok(CreateTicketResponse::ReauthRequired);
+        }
 
         let db = ctx.services().db.lock().await;
 

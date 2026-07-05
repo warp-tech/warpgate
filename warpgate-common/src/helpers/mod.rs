@@ -9,4 +9,5 @@ pub mod password_policy;
 pub mod rng;
 pub mod serde_base64;
 pub mod serde_base64_secret;
+pub mod username;
 pub mod websocket;

@@ -7,10 +7,10 @@
         Modal,
         ModalBody,
         ModalFooter,
+        ModalHeader,
     } from '@sveltestrap/sveltestrap'
 
     import { serverInfo } from 'gateway/lib/store'
-    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
 
     interface Props {
         isOpen: boolean

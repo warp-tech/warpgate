@@ -1,0 +1,200 @@
+use std::net::IpAddr;
+
+use poem::web::Data;
+use poem_openapi::param::Path;
+use poem_openapi::payload::Json;
+use poem_openapi::{ApiResponse, Object, OpenApi};
+use time::OffsetDateTime;
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
+
+use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
+
+pub struct Api;
+
+#[derive(Object)]
+struct BlockedIpInfo {
+    ip_address: String,
+    blocked_at: OffsetDateTime,
+    expires_at: OffsetDateTime,
+    block_count: i32,
+    reason: String,
+}
+
+#[derive(Object)]
+struct LockedUserInfo {
+    username: String,
+    locked_at: OffsetDateTime,
+    expires_at: Option<OffsetDateTime>,
+    reason: String,
+}
+
+#[derive(Object)]
+struct SecurityStatus {
+    blocked_ip_count: u64,
+    locked_user_count: u64,
+    failed_attempts_last_hour: u64,
+    failed_attempts_last_24h: u64,
+}
+
+#[derive(Object)]
+struct UnblockIpRequest {
+    /// IP address to unblock (IPv4 or IPv6).
+    ip: String,
+}
+
+#[derive(ApiResponse)]
+enum ListBlockedIpsResponse {
+    #[oai(status = 200)]
+    Ok(Json<Vec<BlockedIpInfo>>),
+}
+
+#[derive(ApiResponse)]
+enum UnblockIpResponse {
+    #[oai(status = 200)]
+    Ok,
+    #[oai(status = 400)]
+    InvalidIp,
+}
+
+#[derive(ApiResponse)]
+enum ListLockedUsersResponse {
+    #[oai(status = 200)]
+    Ok(Json<Vec<LockedUserInfo>>),
+}
+
+#[derive(ApiResponse)]
+enum UnlockUserResponse {
+    #[oai(status = 200)]
+    Ok,
+}
+
+#[derive(ApiResponse)]
+enum SecurityStatusResponse {
+    #[oai(status = 200)]
+    Ok(Json<SecurityStatus>),
+}
+
+#[OpenApi]
+impl Api {
+    /// List all currently blocked IPs.
+    #[oai(
+        path = "/login-protection/blocked-ips",
+        method = "get",
+        operation_id = "list_blocked_ips"
+    )]
+    async fn list_blocked_ips(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<ListBlockedIpsResponse, WarpgateError> {
+        require_admin_permission(&ctx, None).await?;
+        let blocked_ips = ctx.services().login_protection.list_blocked_ips().await?;
+        let result: Vec<BlockedIpInfo> = blocked_ips
+            .into_iter()
+            .map(|info| BlockedIpInfo {
+                ip_address: info.ip_address.to_string(),
+                blocked_at: info.blocked_at,
+                expires_at: info.expires_at,
+                block_count: info.block_count,
+                reason: info.reason,
+            })
+            .collect();
+        Ok(ListBlockedIpsResponse::Ok(Json(result)))
+    }
+
+    /// Unblock an IP address.
+    ///
+    /// The IP is taken from the request body (rather than a path segment or
+    /// query parameter) to avoid encoding ambiguity with IPv6 addresses.
+    #[oai(
+        path = "/login-protection/blocked-ips",
+        method = "delete",
+        operation_id = "unblock_ip"
+    )]
+    async fn unblock_ip(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        body: Json<UnblockIpRequest>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<UnblockIpResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+        let ip_addr: IpAddr = match body.ip.parse() {
+            Ok(addr) => addr,
+            Err(_) => return Ok(UnblockIpResponse::InvalidIp),
+        };
+        ctx.services().login_protection.unblock_ip(&ip_addr).await?;
+        Ok(UnblockIpResponse::Ok)
+    }
+
+    /// List all currently locked user accounts.
+    #[oai(
+        path = "/login-protection/locked-users",
+        method = "get",
+        operation_id = "list_locked_users"
+    )]
+    async fn list_locked_users(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<ListLockedUsersResponse, WarpgateError> {
+        require_admin_permission(&ctx, None).await?;
+        let locked_users = ctx.services().login_protection.list_locked_users().await?;
+        let result: Vec<LockedUserInfo> = locked_users
+            .into_iter()
+            .map(|info| LockedUserInfo {
+                username: info.username,
+                locked_at: info.locked_at,
+                expires_at: info.expires_at,
+                reason: info.reason,
+            })
+            .collect();
+        Ok(ListLockedUsersResponse::Ok(Json(result)))
+    }
+
+    /// Unlock a user account by username.
+    #[oai(
+        path = "/login-protection/locked-users/:username",
+        method = "delete",
+        operation_id = "unlock_user"
+    )]
+    async fn unlock_user(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        username: Path<String>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<UnlockUserResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+        ctx.services()
+            .login_protection
+            .unlock_user(&username.0)
+            .await?;
+        Ok(UnlockUserResponse::Ok)
+    }
+
+    /// Get security status summary (blocked IPs, locked users, failure counts).
+    #[oai(
+        path = "/login-protection/status",
+        method = "get",
+        operation_id = "get_security_status"
+    )]
+    async fn get_security_status(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<SecurityStatusResponse, WarpgateError> {
+        require_admin_permission(&ctx, None).await?;
+        let status = ctx
+            .services()
+            .login_protection
+            .get_security_status()
+            .await?;
+        Ok(SecurityStatusResponse::Ok(Json(SecurityStatus {
+            blocked_ip_count: status.blocked_ip_count,
+            locked_user_count: status.locked_user_count,
+            failed_attempts_last_hour: status.failed_attempts_last_hour,
+            failed_attempts_last_24h: status.failed_attempts_last_24h,
+        })))
+    }
+}

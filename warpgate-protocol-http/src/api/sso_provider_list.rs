@@ -312,7 +312,8 @@ impl Api {
         };
 
         let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
-        let state_arc = match get_or_create_auth_state_for_request(req, &username, &ctx).await {
+        let state_arc = match get_or_create_auth_state_for_request(req, &username, &ctx, None).await
+        {
             Ok(state) => state,
             Err(e) => {
                 if matches!(e, WarpgateError::IpAddrNotAllowed(..)) {

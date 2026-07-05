@@ -3,9 +3,8 @@ import { api } from 'admin/lib/api'
 import { adminPermissions } from '../lib/store'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { replace } from 'svelte-spa-router'
-import { Form, FormGroup } from '@sveltestrap/sveltestrap'
+import { Form, FormGroup, Alert } from '@sveltestrap/sveltestrap'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 let error: string|null = $state(null)
 let username = $state('')

@@ -6,13 +6,13 @@
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { replace } from 'svelte-spa-router'
-    import { Button, FormGroup, Input, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
+    import { Button, FormGroup, Input, Modal, ModalBody, ModalFooter, Alert, ModalHeader } from '@sveltestrap/sveltestrap'
     import TlsConfiguration from '../../TlsConfiguration.svelte'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
+    import TargetVncOptions from './vnc/Options.svelte'
+    import TargetRdpOptions from './rdp/Options.svelte'
     import HttpHeadersEditor from './http/HeadersEditor.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
@@ -191,6 +191,14 @@
             <Section id="target-options" title="Target options">
                 {#if target.options.kind === 'Ssh'}
                     <TargetSshOptions id={target.id} options={target.options} />
+                {/if}
+
+                {#if target.options.kind === 'Vnc'}
+                    <TargetVncOptions bind:options={target.options} />
+                {/if}
+
+                {#if target.options.kind === 'Rdp'}
+                    <TargetRdpOptions bind:options={target.options} />
                 {/if}
 
                 {#if target.options.kind === 'Http'}

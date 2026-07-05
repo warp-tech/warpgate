@@ -1,27 +1,32 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::atomic::AtomicUsize;
 
 use bytes::Bytes;
 use russh::keys::PublicKey;
-use tokio::sync::futures::Notified;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::{Mutex, Notify, oneshot};
-use tokio::task::JoinHandle;
+use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info};
 use uuid::Uuid;
+use warpgate_core::WarpgateServerHandle;
 use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
-use warpgate_core::{SessionHandle, WarpgateServerHandle};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
     ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError, SshRecordingMetadata,
 };
+use warpgate_web_clients_common::{ManagedSession, Sheddable, WebSession};
 
-use crate::WebSshClientManager;
 use crate::protocol::ServerMessage;
 
-pub const OUTPUT_BUFFER_CAPACITY: usize = 2048;
+/// Terminal output ring: the whole byte stream is droppable, so an idle/slow client's backlog
+/// is capped at the most recent [`OUTPUT_BUFFER_CAPACITY`] messages.
+const OUTPUT_BUFFER_CAPACITY: usize = 2048;
+
+impl Sheddable for ServerMessage {
+    fn is_droppable(&self) -> bool {
+        true
+    }
+}
 
 pub struct PendingHostKey {
     pub reply: oneshot::Sender<bool>,
@@ -30,41 +35,11 @@ pub struct PendingHostKey {
     pub port: u16,
 }
 
-pub struct WebSshSessionHandle {
-    abort_tx: UnboundedSender<()>,
-}
-
-impl WebSshSessionHandle {
-    pub const fn new(abort_tx: UnboundedSender<()>) -> Self {
-        Self { abort_tx }
-    }
-}
-
-impl SessionHandle for WebSshSessionHandle {
-    fn close(&mut self) {
-        let _ = self.abort_tx.send(());
-    }
-}
-
 pub struct WebSshSession {
-    id: Uuid,
-    user_id: Uuid,
-    target_name: String,
-    target_kind: TargetKind,
-
-    // prevents the handle from getting dropped too early
-    _server_handle: Arc<Mutex<WarpgateServerHandle>>,
+    core: WebSession<ServerMessage>,
 
     command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
-    abort_tx: UnboundedSender<()>,
 
-    // events are buffer so that we can queue and replay them
-    // if the WS stream reconnects
-    output_buffer: Arc<Mutex<VecDeque<ServerMessage>>>,
-    output_notify: Arc<Notify>,
-
-    is_dead: Arc<AtomicBool>,
-    disconnect_timer: Arc<Mutex<Option<JoinHandle<()>>>>,
     channel_counter: Arc<AtomicUsize>,
     recordings: Arc<Mutex<SessionRecordings>>,
     channel_recorders: Arc<Mutex<HashMap<Uuid, TerminalRecorder>>>,
@@ -84,78 +59,22 @@ impl WebSshSession {
         recordings: Arc<Mutex<SessionRecordings>>,
     ) -> Self {
         Self {
-            id,
-            user_id,
-            target_name,
-            target_kind,
-            _server_handle: server_handle,
+            core: WebSession::new(
+                id,
+                user_id,
+                target_name,
+                target_kind,
+                server_handle,
+                abort_tx,
+                OUTPUT_BUFFER_CAPACITY,
+                OUTPUT_BUFFER_CAPACITY,
+            ),
             command_tx,
-            abort_tx,
-            output_buffer: Arc::new(Mutex::new(VecDeque::with_capacity(OUTPUT_BUFFER_CAPACITY))),
-            output_notify: Arc::new(Notify::new()),
-            is_dead: Arc::new(AtomicBool::new(false)),
-            disconnect_timer: Arc::new(Mutex::new(None)),
             channel_counter: Arc::new(AtomicUsize::new(0)),
             recordings,
             channel_recorders: Arc::new(Mutex::new(HashMap::new())),
             pending_host_key: Arc::new(Mutex::new(None)),
         }
-    }
-
-    pub async fn push_event(&self, msg: ServerMessage) {
-        let mut buf = self.output_buffer.lock().await;
-        if buf.len() >= OUTPUT_BUFFER_CAPACITY {
-            buf.pop_front();
-        }
-        buf.push_back(msg);
-        self.output_notify.notify_waiters();
-    }
-
-    pub async fn drain_buffer(&self) -> Vec<ServerMessage> {
-        self.output_buffer.lock().await.drain(..).collect()
-    }
-
-    pub fn is_dead(&self) -> bool {
-        self.is_dead.load(Ordering::Relaxed)
-    }
-
-    pub fn abort(&self) {
-        let _ = self.abort_tx.send(());
-    }
-
-    pub const fn id(&self) -> Uuid {
-        self.id
-    }
-
-    pub const fn user_id(&self) -> Uuid {
-        self.user_id
-    }
-
-    pub fn target_name(&self) -> &str {
-        &self.target_name
-    }
-
-    pub const fn target_kind(&self) -> &TargetKind {
-        &self.target_kind
-    }
-
-    pub async fn start_disconnect_timer(&self, manager: Arc<WebSshClientManager>) {
-        let id = self.id();
-        let timer = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            manager.remove_session(id).await;
-        });
-        *self.disconnect_timer.lock().await = Some(timer);
-    }
-
-    pub async fn cancel_disconnect_timer(&self) {
-        if let Some(handle) = self.disconnect_timer.lock().await.take() {
-            handle.abort();
-        }
-    }
-
-    pub fn wait_buffer(&self) -> Notified<'_> {
-        self.output_notify.notified()
     }
 
     pub async fn set_pending_host_key(&self, pending: PendingHostKey) {
@@ -182,7 +101,7 @@ impl WebSshSession {
             .lock()
             .await
             .start::<TerminalRecorder, _>(
-                &self.id,
+                &self.id(),
                 Some(channel_id.to_string()),
                 SshRecordingMetadata::Shell {
                     channel: channel_number,
@@ -207,12 +126,6 @@ impl WebSshSession {
         self.channel_recorders.lock().await.remove(&channel_id);
     }
 
-    pub fn close(&self) {
-        self.is_dead
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        self.output_notify.notify_waiters();
-    }
-
     fn command(&self, cmd: RCCommand) -> Option<oneshot::Receiver<Result<(), SshClientError>>> {
         let (tx, rx) = oneshot::channel();
 
@@ -226,7 +139,7 @@ impl WebSshSession {
     pub async fn open_shell_channel(&self, cols: u32, rows: u32) -> Uuid {
         let channel_id = Uuid::new_v4();
 
-        info!(session=%self.id, channel=%channel_id, "Opening session channel");
+        info!(session=%self.id(), channel=%channel_id, "Opening session channel");
 
         self.start_recording(channel_id).await;
         self.with_recorder(channel_id, async move |r: &TerminalRecorder| {
@@ -267,6 +180,27 @@ impl WebSshSession {
 
     pub fn close_channel(&self, channel_id: Uuid) {
         self.command(RCCommand::Channel(channel_id, ChannelOperation::Close));
+    }
+}
+
+impl std::ops::Deref for WebSshSession {
+    type Target = WebSession<ServerMessage>;
+    fn deref(&self) -> &Self::Target {
+        &self.core
+    }
+}
+
+impl ManagedSession for WebSshSession {
+    fn id(&self) -> Uuid {
+        self.core.id()
+    }
+
+    fn user_id(&self) -> Uuid {
+        self.core.user_id()
+    }
+
+    fn on_removed(&self) {
+        self.core.abort();
     }
 }
 

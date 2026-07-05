@@ -8,7 +8,7 @@ export enum ConnectionState {
 export interface ReconnectingWebSocketOptions {
     url: string
     onOpen: () => void
-    onMessage: (data: string) => void
+    onMessage: (data: string | ArrayBuffer) => void
 }
 
 export class ReconnectingWebSocket {
@@ -20,7 +20,7 @@ export class ReconnectingWebSocket {
     private closed = false
     private readonly url: string
     private readonly onOpen: () => void
-    private readonly onMessage: (data: string) => void
+    private readonly onMessage: (data: string | ArrayBuffer) => void
     private readonly maxAttempts = 5
 
     constructor (opts: ReconnectingWebSocketOptions) {
@@ -34,6 +34,8 @@ export class ReconnectingWebSocket {
             return
         }
         this.socket = new WebSocket(this.url)
+        // Framebuffer frames arrive as binary; get them as ArrayBuffer, not Blob.
+        this.socket.binaryType = 'arraybuffer'
 
         this.socket.addEventListener('open', () => {
             this.attempt = 0
@@ -42,7 +44,7 @@ export class ReconnectingWebSocket {
         })
 
         this.socket.addEventListener('message', e => {
-            this.onMessage(e.data as string)
+            this.onMessage(e.data as string | ArrayBuffer)
         })
 
         this.socket.addEventListener('error', () => {

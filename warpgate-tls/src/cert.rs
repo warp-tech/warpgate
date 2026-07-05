@@ -29,12 +29,24 @@ impl TlsPrivateKey {
     pub fn key(&self) -> &Arc<dyn SigningKey> {
         &self.key
     }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct TlsCertificateAndPrivateKey {
     pub certificate: TlsCertificateBundle,
     pub private_key: TlsPrivateKey,
+}
+
+impl TlsCertificateAndPrivateKey {
+    pub fn verify_key_matches_certificate(&self) -> Result<(), RustlsSetupError> {
+        CertifiedKey::from(self.clone())
+            .keys_match()
+            .map_err(|_| RustlsSetupError::MismatchedCertificateAndKey)
+    }
 }
 
 impl TlsCertificateBundle {

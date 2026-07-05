@@ -72,6 +72,17 @@
         "listen": "[::]:55432"
       }
     },
+    "rdp": {
+      "$ref": "#/$defs/RdpConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "external_host": null,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:3389"
+      }
+    },
     "recordings": {
       "$ref": "#/$defs/RecordingsConfig",
       "default": {
@@ -97,6 +108,18 @@
       "default": [],
       "items": {
         "$ref": "#/$defs/SsoProviderConfig"
+      }
+    },
+    "vnc": {
+      "$ref": "#/$defs/VncConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "enable_ard_auth": false,
+        "external_host": null,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:5900"
       }
     }
   },
@@ -327,6 +350,44 @@
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",
           "default": "[::]:55432"
+        }
+      }
+    },
+    "RdpConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": ""
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:3389"
         }
       }
     },
@@ -723,6 +784,49 @@
         "external_host",
         "host_header"
       ]
+    },
+    "VncConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": ""
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "enable_ard_auth": {
+          "description": "Enable Apple-DH (ARD / type 30) auth. It does not support TLS unlike VeNCrypt",
+          "type": "boolean",
+          "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:5900"
+        }
+      }
     }
   }
 }

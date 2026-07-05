@@ -1,15 +1,14 @@
 <script lang="ts">
     import { get } from 'svelte/store'
     import { querystring, replace } from 'svelte-spa-router'
-    import { Button, FormGroup } from '@sveltestrap/sveltestrap'
+    import { Button, FormGroup, Alert } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
 
-    import { api, ApiAuthState, LoginFailureResponseFromJSON, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
+    import { api, ApiAuthState, LoginFailureResponseFromJSON, PasswordLoginMode, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
 
     let error: string|null = $state(null)
@@ -17,12 +16,18 @@
     let password = $state('')
     let otp = $state('')
     let busy = $state(false)
+    let credentialRejected = $state(false)
     let otpInput: HTMLInputElement|undefined = $state()
     let authState: ApiAuthState|undefined = $state()
     let ssoProvidersPromise = api.getSsoProviders()
     let showPasswordLogin = $state(false)
 
+    const passwordLoginMode = $derived($serverInfo?.passwordLoginMode ?? PasswordLoginMode.Enabled)
+    const passwordLoginAllowed = $derived(passwordLoginMode !== PasswordLoginMode.Disabled)
+    const passwordLoginMinimized = $derived(passwordLoginMode === PasswordLoginMode.Minimized)
+
     const nextURL = new URLSearchParams(get(querystring)).get('next') ?? undefined
+    const reauthRequired = new URLSearchParams(get(querystring)).get('reauth') === '1'
     const serverErrorMessage = new URLSearchParams(location.search).get('login_error')
     const initPromise = init()
 
@@ -38,7 +43,7 @@
                 throw err
             }
         }
-        continueWithState()
+        await continueWithState()
     }
 
     function success () {
@@ -49,15 +54,12 @@
         }
     }
 
-    async function continueWithState () {
+    async function continueWithState ({ allowSsoRedirect = true } = {}) {
         if (authState === ApiAuthState.Success) {
             success()
         }
-        if (authState === ApiAuthState.SsoNeeded) {
+        if (authState === ApiAuthState.SsoNeeded && allowSsoRedirect) {
             const providers = await ssoProvidersPromise
-            if (!providers.length) {
-                // todo
-            }
             if (providers.length === 1) {
                 startSSO(providers[0]!)
             }
@@ -80,6 +82,7 @@
 
     async function _login () {
         error = null
+        credentialRejected = false
         try {
             if (authState === ApiAuthState.OtpNeeded) {
                 await api.otpLogin({
@@ -102,8 +105,12 @@
                 if (err.response.status === 401) {
                     const failure = LoginFailureResponseFromJSON(await err.response.json())
                     authState = failure.state
+                    credentialRejected = failure.credentialRejected ?? false
 
-                    continueWithState()
+                    // Don't auto-advance to another auth method (e.g. SSO) when
+                    // the submitted credential was rejected — show the error and
+                    // let the user retry or pick a method themselves.
+                    continueWithState({ allowSsoRedirect: !credentialRejected })
                 } else {
                     error = await err.response.text()
                 }
@@ -209,14 +216,17 @@
                 </Button>
             </form>
         {/if}
-        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && (!$serverInfo?.minimizePasswordLogin || showPasswordLogin)}
+        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginAllowed && (!passwordLoginMinimized || showPasswordLogin)}
             <!-- eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -->
             {@render localLoginForm()}
         {/if}
 
         <div class="mt-3"></div>
 
-        {#if authState === ApiAuthState.Failed}
+        {#if reauthRequired}
+            <Alert color="warning">The security policy requires you to sign in again before accessing this function.</Alert>
+        {/if}
+        {#if credentialRejected || authState === ApiAuthState.Failed}
             <Alert color="danger">Incorrect credentials</Alert>
         {/if}
         {#if authState === ApiAuthState.IpRejected}
@@ -257,7 +267,7 @@
         </Loadable>
     {/if}
 
-    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && $serverInfo?.minimizePasswordLogin && !showPasswordLogin}
+    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginMinimized && !showPasswordLogin}
         <div class="mt-3 text-center">
             <!-- svelte-ignore a11y_invalid_attribute -->
             <a

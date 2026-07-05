@@ -10,7 +10,9 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use url::Url;
 use warpgate_common::SessionId;
-use warpgate_core::recordings::{Recorder, RecordingWriter, SessionRecordings, TerminalRecorder};
+use warpgate_core::recordings::{
+    NDJsonRecordingWriter, Recorder, RecordingWriterOpener, SessionRecordings, TerminalRecorder,
+};
 use warpgate_db_entities::Recording::RecordingKind;
 
 #[derive(Debug, Object)]
@@ -53,22 +55,12 @@ impl From<KubernetesRecordingItem> for KubernetesRecordingItemApiObject {
     }
 }
 
+/// Recorder for Kubernetes API sessions
 pub struct KubernetesRecorder {
-    writer: RecordingWriter,
+    writer: NDJsonRecordingWriter,
 }
 
 impl KubernetesRecorder {
-    async fn write_item(
-        &self,
-        item: &KubernetesRecordingItem,
-    ) -> Result<(), warpgate_core::recordings::Error> {
-        let mut serialized_item =
-            serde_json::to_vec(&item).map_err(warpgate_core::recordings::Error::Serialization)?;
-        serialized_item.push(b'\n');
-        self.writer.write(&serialized_item).await?;
-        Ok(())
-    }
-
     pub async fn record_response(
         &self,
         method: &str,
@@ -78,16 +70,18 @@ impl KubernetesRecorder {
         status: u16,
         response_body: &[u8],
     ) -> Result<(), warpgate_core::recordings::Error> {
-        self.write_item(&KubernetesRecordingItem {
-            timestamp: OffsetDateTime::now_utc(),
-            request_method: method.to_string(),
-            request_path: path.to_string(),
-            request_headers: headers,
-            request_body: Bytes::from(request_body.to_vec()),
-            response_status: Some(status),
-            response_body: Some(response_body.to_vec()),
-        })
-        .await
+        self.writer
+            .write_json_line(&KubernetesRecordingItem {
+                timestamp: OffsetDateTime::now_utc(),
+                request_method: method.to_string(),
+                request_path: path.to_string(),
+                request_headers: headers,
+                request_body: Bytes::from(request_body.to_vec()),
+                response_status: Some(status),
+                response_body: Some(response_body.to_vec()),
+            })
+            .await?;
+        Ok(())
     }
 }
 
@@ -96,8 +90,10 @@ impl Recorder for KubernetesRecorder {
         RecordingKind::Kubernetes
     }
 
-    fn new(writer: RecordingWriter) -> Self {
-        Self { writer }
+    async fn new(opener: &RecordingWriterOpener) -> warpgate_core::recordings::Result<Self> {
+        Ok(Self {
+            writer: opener.open_ndjson_data().await?,
+        })
     }
 }
 

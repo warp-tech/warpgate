@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.25.5-16-ga5d65a7a-modified"
+    "version": "v0.25.5-23-g57c54df3-modified"
   },
   "servers": [
     {
@@ -887,6 +887,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": ""
           },
           "400": {
             "description": "",
@@ -3694,6 +3697,43 @@
         "operationId": "update_parameters"
       }
     },
+    "/parameters/analytics-preview": {
+      "get": {
+        "parameters": [
+          {
+            "name": "normal",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsPreview"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_analytics_preview"
+      }
+    },
     "/ssh/check-host-key": {
       "post": {
         "requestBody": {
@@ -3737,6 +3777,152 @@
           }
         ],
         "operationId": "check_ssh_host_key"
+      }
+    },
+    "/login-protection/blocked-ips": {
+      "get": {
+        "summary": "List all currently blocked IPs.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BlockedIpInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "list_blocked_ips"
+      },
+      "delete": {
+        "summary": "Unblock an IP address.",
+        "description": "The IP is taken from the request body (rather than a path segment or\nquery parameter) to avoid encoding ambiguity with IPv6 addresses.",
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UnblockIpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "unblock_ip"
+      }
+    },
+    "/login-protection/locked-users": {
+      "get": {
+        "summary": "List all currently locked user accounts.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LockedUserInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "list_locked_users"
+      }
+    },
+    "/login-protection/locked-users/{username}": {
+      "delete": {
+        "summary": "Unlock a user account by username.",
+        "parameters": [
+          {
+            "name": "username",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "unlock_user"
+      }
+    },
+    "/login-protection/status": {
+      "get": {
+        "summary": "Get security status summary (blocked IPs, locked users, failure counts).",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_security_status"
       }
     },
     "/users/{user_id}/credentials/certificates": {
@@ -4150,6 +4336,64 @@
           },
           "ticket_requests_manage": {
             "type": "boolean"
+          }
+        }
+      },
+      "AnalyticsConsent": {
+        "type": "string",
+        "description": "Whether the instance reports anonymous usage analytics, and at which\npayload level. `Undecided` triggers the one-time opt-in prompt in the admin\nUI; the instance never reports until the choice is made.",
+        "enum": [
+          "Undecided",
+          "Off",
+          "On"
+        ]
+      },
+      "AnalyticsPreview": {
+        "type": "object",
+        "title": "AnalyticsPreview",
+        "required": [
+          "url",
+          "payload"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The target URL the report would be POSTed to."
+          },
+          "payload": {
+            "type": "string",
+            "description": "Pretty-printed JSON request body that would be sent."
+          }
+        }
+      },
+      "BlockedIpInfo": {
+        "type": "object",
+        "title": "BlockedIpInfo",
+        "required": [
+          "ip_address",
+          "blocked_at",
+          "expires_at",
+          "block_count",
+          "reason"
+        ],
+        "properties": {
+          "ip_address": {
+            "type": "string"
+          },
+          "blocked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "block_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "reason": {
+            "type": "string"
           }
         }
       },
@@ -4865,6 +5109,31 @@
           "SamAccountName"
         ]
       },
+      "LockedUserInfo": {
+        "type": "object",
+        "title": "LockedUserInfo",
+        "required": [
+          "username",
+          "locked_at",
+          "reason"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "locked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "LogEntry": {
         "type": "object",
         "title": "LogEntry",
@@ -4997,9 +5266,6 @@
       "ParameterUpdate": {
         "type": "object",
         "title": "ParameterUpdate",
-        "required": [
-          "allow_own_credential_management"
-        ],
         "properties": {
           "allow_own_credential_management": {
             "type": "boolean"
@@ -5017,8 +5283,8 @@
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
           },
-          "minimize_password_login": {
-            "type": "boolean"
+          "password_login_mode": {
+            "$ref": "#/components/schemas/PasswordLoginMode"
           },
           "ticket_self_service_enabled": {
             "type": "boolean"
@@ -5054,6 +5320,71 @@
             "format": "int64"
           },
           "record_scp": {
+            "type": "boolean"
+          },
+          "login_protection_enabled": {
+            "type": "boolean"
+          },
+          "login_protection_retention_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_base_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_block_duration_multiplier": {
+            "type": "number",
+            "format": "double"
+          },
+          "lp_ip_max_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_cooldown_reset_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_auto_unlock": {
+            "type": "boolean"
+          },
+          "lp_user_lockout_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_exempt_admins": {
+            "type": "boolean"
+          },
+          "ssh_banner": {
+            "type": "string"
+          },
+          "web_clients_enabled": {
+            "type": "boolean"
+          },
+          "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "analytics_consent": {
+            "$ref": "#/components/schemas/AnalyticsConsent"
+          },
+          "analytics_normal": {
             "type": "boolean"
           }
         }
@@ -5066,6 +5397,7 @@
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
+          "password_login_mode",
           "minimize_password_login",
           "ticket_self_service_enabled",
           "ticket_auto_approve_existing_access",
@@ -5074,7 +5406,25 @@
           "target_click_action",
           "show_session_menu",
           "password_policy",
-          "record_scp"
+          "record_scp",
+          "login_protection_enabled",
+          "login_protection_retention_seconds",
+          "lp_ip_max_attempts",
+          "lp_ip_time_window_seconds",
+          "lp_ip_base_block_duration_seconds",
+          "lp_ip_block_duration_multiplier",
+          "lp_ip_max_block_duration_seconds",
+          "lp_ip_cooldown_reset_seconds",
+          "lp_user_max_attempts",
+          "lp_user_time_window_seconds",
+          "lp_user_auto_unlock",
+          "lp_user_lockout_duration_seconds",
+          "lp_user_exempt_admins",
+          "ssh_banner",
+          "web_ssh_enabled",
+          "web_clients_enabled",
+          "analytics_consent",
+          "analytics_normal"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -5093,8 +5443,12 @@
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
           },
+          "password_login_mode": {
+            "$ref": "#/components/schemas/PasswordLoginMode"
+          },
           "minimize_password_login": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Deprecated in 0.26: superseded by `password_login_mode`"
           },
           "ticket_self_service_enabled": {
             "type": "boolean"
@@ -5131,8 +5485,86 @@
           },
           "record_scp": {
             "type": "boolean"
+          },
+          "login_protection_enabled": {
+            "type": "boolean"
+          },
+          "login_protection_retention_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_base_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_block_duration_multiplier": {
+            "type": "number",
+            "format": "double"
+          },
+          "lp_ip_max_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_cooldown_reset_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_auto_unlock": {
+            "type": "boolean"
+          },
+          "lp_user_lockout_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_exempt_admins": {
+            "type": "boolean"
+          },
+          "ssh_banner": {
+            "type": "string"
+          },
+          "web_ssh_enabled": {
+            "type": "boolean",
+            "description": "Deprecated in 0.27: superseded by `web_clients_enabled`"
+          },
+          "web_clients_enabled": {
+            "type": "boolean"
+          },
+          "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "analytics_consent": {
+            "$ref": "#/components/schemas/AnalyticsConsent"
+          },
+          "analytics_normal": {
+            "type": "boolean"
           }
         }
+      },
+      "PasswordLoginMode": {
+        "type": "string",
+        "description": "How the password login form is presented on the gateway login page.",
+        "enum": [
+          "Enabled",
+          "Minimized",
+          "Disabled"
+        ]
       },
       "PasswordPolicy": {
         "type": "object",
@@ -5183,6 +5615,54 @@
           "3.2"
         ]
       },
+      "RdpTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RdpTargetAuth_RdpTargetPasswordAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Password": "#/components/schemas/RdpTargetAuth_RdpTargetPasswordAuth"
+          }
+        }
+      },
+      "RdpTargetAuth_RdpTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/RdpTargetPasswordAuth"
+          }
+        ]
+      },
+      "RdpTargetPasswordAuth": {
+        "type": "object",
+        "title": "RdpTargetPasswordAuth",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
       "Recording": {
         "type": "object",
         "title": "Recording",
@@ -5192,7 +5672,8 @@
           "started",
           "session_id",
           "kind",
-          "metadata"
+          "metadata",
+          "generation"
         ],
         "properties": {
           "id": {
@@ -5219,6 +5700,11 @@
           },
           "metadata": {
             "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Storage layout: 1 = single legacy file, 2 = folder (`data.ndjson` [+ desktop\n`index.json`]). Defaults to 1 for rows created before the folder layout."
           }
         }
       },
@@ -5227,7 +5713,8 @@
         "enum": [
           "Terminal",
           "Traffic",
-          "Kubernetes"
+          "Kubernetes",
+          "Desktop"
         ]
       },
       "Role": {
@@ -5406,6 +5893,34 @@
             "$ref": "#/components/schemas/SshTargetPublicKeyAuth"
           }
         ]
+      },
+      "SecurityStatus": {
+        "type": "object",
+        "title": "SecurityStatus",
+        "required": [
+          "blocked_ip_count",
+          "locked_user_count",
+          "failed_attempts_last_hour",
+          "failed_attempts_last_24h"
+        ],
+        "properties": {
+          "blocked_ip_count": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "locked_user_count": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "failed_attempts_last_hour": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "failed_attempts_last_24h": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
       },
       "SessionSnapshot": {
         "type": "object",
@@ -5707,6 +6222,12 @@
           },
           {
             "$ref": "#/components/schemas/TargetOptions_TargetPostgresOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptions_TargetVncOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptions_TargetRdpOptions"
           }
         ],
         "discriminator": {
@@ -5716,7 +6237,9 @@
             "Http": "#/components/schemas/TargetOptions_TargetHTTPOptions",
             "Kubernetes": "#/components/schemas/TargetOptions_TargetKubernetesOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
-            "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions"
+            "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
+            "Vnc": "#/components/schemas/TargetOptions_TargetVncOptions",
+            "Rdp": "#/components/schemas/TargetOptions_TargetRdpOptions"
           }
         }
       },
@@ -5808,6 +6331,28 @@
           }
         ]
       },
+      "TargetOptions_TargetRdpOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Rdp"
+                ],
+                "example": "Rdp"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetRdpOptions"
+          }
+        ]
+      },
       "TargetOptions_TargetSSHOptions": {
         "allOf": [
           {
@@ -5827,6 +6372,28 @@
           },
           {
             "$ref": "#/components/schemas/TargetSSHOptions"
+          }
+        ]
+      },
+      "TargetOptions_TargetVncOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Vnc"
+                ],
+                "example": "Vnc"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetVncOptions"
           }
         ]
       },
@@ -5872,6 +6439,39 @@
           }
         }
       },
+      "TargetRdpOptions": {
+        "type": "object",
+        "title": "TargetRdpOptions",
+        "required": [
+          "host",
+          "port",
+          "username",
+          "auth",
+          "verify_tls"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "username": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/RdpTargetAuth"
+          },
+          "verify_tls": {
+            "type": "boolean",
+            "description": "Verify the RDP server's TLS certificate against the system root store.\nRDP servers commonly use self-signed certificates, so this is off by default."
+          }
+        }
+      },
       "TargetSSHOptions": {
         "type": "object",
         "title": "TargetSSHOptions",
@@ -5901,6 +6501,27 @@
           "jump_host": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "TargetVncOptions": {
+        "type": "object",
+        "title": "TargetVncOptions",
+        "required": [
+          "host",
+          "port",
+          "auth"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/VncTargetAuth"
           }
         }
       },
@@ -6114,6 +6735,19 @@
           "Required"
         ]
       },
+      "UnblockIpRequest": {
+        "type": "object",
+        "title": "UnblockIpRequest",
+        "required": [
+          "ip"
+        ],
+        "properties": {
+          "ip": {
+            "type": "string",
+            "description": "IP address to unblock (IPv4 or IPv6)."
+          }
+        }
+      },
       "UpdateCertificateCredential": {
         "type": "object",
         "title": "UpdateCertificateCredential",
@@ -6300,6 +6934,18 @@
             "items": {
               "$ref": "#/components/schemas/CredentialKind"
             }
+          },
+          "vnc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "rdp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
           }
         }
       },
@@ -6345,6 +6991,84 @@
           "is_active": {
             "type": "boolean",
             "description": "Whether this assignment is currently active (not expired, not revoked)"
+          }
+        }
+      },
+      "VncTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VncTargetAuth_VncTargetNoneAuth"
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetAuth_VncTargetPasswordAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "None": "#/components/schemas/VncTargetAuth_VncTargetNoneAuth",
+            "Password": "#/components/schemas/VncTargetAuth_VncTargetPasswordAuth"
+          }
+        }
+      },
+      "VncTargetAuth_VncTargetNoneAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "None"
+                ],
+                "example": "None"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetNoneAuth"
+          }
+        ]
+      },
+      "VncTargetAuth_VncTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetPasswordAuth"
+          }
+        ]
+      },
+      "VncTargetNoneAuth": {
+        "type": "object",
+        "title": "VncTargetNoneAuth"
+      },
+      "VncTargetPasswordAuth": {
+        "type": "object",
+        "title": "VncTargetPasswordAuth",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
           }
         }
       }

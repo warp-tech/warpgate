@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR branch
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           fetch-depth: 0
 
@@ -18,6 +18,10 @@ jobs:
           rustup component add clippy
           cargo install --locked just@1.4.0
           cargo install --locked cargo-cranky@0.3.0
+
+      # Built first so warpgate-protocol-rdp's embedded-helper code paths are linted.
+      - name: Build RDP helper
+        run: just build-rdp-helper
 
       - name: Clippy
         run: |

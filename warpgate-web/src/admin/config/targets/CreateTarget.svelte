@@ -1,9 +1,8 @@
 <script lang="ts">
     import { api, type TargetOptions, type TargetGroup, TlsMode } from 'admin/lib/api'
     import { replace } from 'svelte-spa-router'
-    import { Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
+    import { Button, Form, FormGroup, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { onMount } from 'svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { adminPermissions } from '../../lib/store'
@@ -79,6 +78,25 @@
                         certificate: '',
                         privateKey: '',
                     },
+                },
+                Vnc: {
+                    kind: TargetKind.Vnc,
+                    host: '192.168.0.1',
+                    port: 5900,
+                    auth: {
+                        kind: 'None' as const,
+                    },
+                },
+                Rdp: {
+                    kind: TargetKind.Rdp,
+                    host: '192.168.0.1',
+                    port: 3389,
+                    username: 'Administrator',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
+                    verifyTls: false,
                 },
             }[params.kind]
             if (!options) {

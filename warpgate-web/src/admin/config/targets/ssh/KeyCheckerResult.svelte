@@ -23,7 +23,7 @@
     import { faCheck, faWarning } from '@fortawesome/free-solid-svg-icons'
     import CopyButton from 'common/CopyButton.svelte'
 
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { Alert } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
 
     interface Props {

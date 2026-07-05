@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR branch
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           fetch-depth: 0
 
@@ -24,18 +24,19 @@ jobs:
       - name: Generate API schema files
         run: |
           mkdir warpgate-web/dist
+          just build-rdp-helper
           just openapi-all
 
       - name: Checkout main branch to compare
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           ref: main
           path: main-branch
 
       - name: Check admin API
         run: |
-          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN /specs/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /specs/warpgate-web/src/admin/lib/openapi-schema.json
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN --severity-levels /specs/oasdiff-severity.txt /specs/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /specs/warpgate-web/src/admin/lib/openapi-schema.json
 
       - name: Check gateway API
         run: |
-          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN /specs/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /specs/warpgate-web/src/gateway/lib/openapi-schema.json
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN --severity-levels /specs/oasdiff-severity.txt /specs/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /specs/warpgate-web/src/gateway/lib/openapi-schema.json

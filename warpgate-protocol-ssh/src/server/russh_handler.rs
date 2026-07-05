@@ -2,8 +2,8 @@ use std::fmt::Debug;
 
 use bytes::Bytes;
 use russh::keys::PublicKey;
-use russh::server::{Auth, Handle, Msg, Session};
-use russh::{Channel, ChannelId, Pty, Sig};
+use russh::server::{Auth, ChannelOpenHandle, Handle, Msg, Session};
+use russh::{Channel, ChannelId, ChannelOpenFailure, Pty, Sig};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
@@ -50,8 +50,33 @@ pub enum ServerHandlerEvent {
     Disconnect,
 }
 
+impl ServerHandlerEvent {
+    /// The already-open channel this event refers to, if any.
+    /// Channel open events establish new channels and are not included.
+    pub(crate) const fn existing_channel(&self) -> Option<ServerChannelId> {
+        match self {
+            Self::SubsystemRequest(channel, ..)
+            | Self::PtyRequest(channel, ..)
+            | Self::ShellRequest(channel, ..)
+            | Self::Data(channel, ..)
+            | Self::ExtendedData(channel, ..)
+            | Self::ChannelClose(channel, ..)
+            | Self::ChannelEof(channel, ..)
+            | Self::WindowChangeRequest(channel, ..)
+            | Self::Signal(channel, ..)
+            | Self::ExecRequest(channel, ..)
+            | Self::EnvRequest(channel, ..)
+            | Self::X11Request(channel, ..)
+            | Self::AgentForward(channel, ..) => Some(*channel),
+            _ => None,
+        }
+    }
+}
+
 pub struct ServerHandler {
     pub event_tx: UnboundedSender<ServerHandlerEvent>,
+    /// Optional custom banner shown to the client during authentication.
+    pub banner: Option<String>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -71,6 +96,10 @@ impl ServerHandler {
 impl russh::server::Handler for ServerHandler {
     type Error = anyhow::Error;
 
+    async fn authentication_banner(&mut self) -> Result<Option<String>, Self::Error> {
+        Ok(self.banner.clone())
+    }
+
     async fn auth_succeeded(&mut self, session: &mut Session) -> Result<(), Self::Error> {
         let handle = session.handle();
         self.send_event(ServerHandlerEvent::Authenticated(HandleWrapper(handle)))?;
@@ -80,8 +109,9 @@ impl russh::server::Handler for ServerHandler {
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         let (tx, rx) = oneshot::channel();
 
         self.send_event(ServerHandlerEvent::ChannelOpenSession(
@@ -89,8 +119,8 @@ impl russh::server::Handler for ServerHandler {
             tx,
         ))?;
 
-        let allowed = rx.await.unwrap_or(false);
-        Ok(allowed)
+        reply_channel_open(reply, rx.await.unwrap_or(false)).await;
+        Ok(())
     }
 
     async fn subsystem_request(
@@ -398,8 +428,9 @@ impl russh::server::Handler for ServerHandler {
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         let host_to_connect = host_to_connect.to_string();
         let originator_address = originator_address.to_string();
         let (tx, rx) = oneshot::channel();
@@ -413,16 +444,17 @@ impl russh::server::Handler for ServerHandler {
             },
             tx,
         ))?;
-        let allowed = rx.await.unwrap_or(false);
-        Ok(allowed)
+        reply_channel_open(reply, rx.await.unwrap_or(false)).await;
+        Ok(())
     }
 
     async fn channel_open_direct_streamlocal(
         &mut self,
         channel: Channel<Msg>,
         socket_path: &str,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         let socket_path = socket_path.to_string();
         let (tx, rx) = oneshot::channel();
         self.send_event(ServerHandlerEvent::ChannelOpenDirectStreamlocal(
@@ -430,8 +462,8 @@ impl russh::server::Handler for ServerHandler {
             socket_path,
             tx,
         ))?;
-        let allowed = rx.await.unwrap_or(false);
-        Ok(allowed)
+        reply_channel_open(reply, rx.await.unwrap_or(false)).await;
+        Ok(())
     }
 
     async fn x11_request(
@@ -551,6 +583,16 @@ impl russh::server::Handler for ServerHandler {
             session.request_failure();
         }
         Ok(allowed)
+    }
+}
+
+async fn reply_channel_open(reply: ChannelOpenHandle, allowed: bool) {
+    if allowed {
+        reply.accept().await;
+    } else {
+        reply
+            .reject(ChannelOpenFailure::AdministrativelyProhibited)
+            .await;
     }
 }
 

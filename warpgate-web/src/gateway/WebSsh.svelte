@@ -77,7 +77,7 @@
     const ws = new ReconnectingWebSocket({
         url: `wss://${location.host}/@warpgate/api/web-ssh/sessions/${sessionId}/stream`,
         onOpen: () => requestNewChannel(),
-        onMessage: data => onMessage(JSON.parse(data) as ServerMessage),
+        onMessage: data => onMessage(JSON.parse(data as string) as ServerMessage),
     })
 
     function send (msg: ClientMessage) {
