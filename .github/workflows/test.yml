@@ -40,7 +40,7 @@ jobs:
           rustup component add llvm-tools-preview
 
       - name: Run Rust unit tests
-        run: just test
+        run: cargo llvm-cov test --workspace
 
       - name: Build UI
         run: |
