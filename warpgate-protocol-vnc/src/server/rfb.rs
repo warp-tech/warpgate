@@ -52,12 +52,16 @@ impl SecurityType {
     }
 }
 
-/// Security types offered to the viewer, in preference order.
+/// Security types offered to the viewer, in preference order. Apple-DH is only offered when
+/// the listener opts into it (it doesn't wrap the session in TLS); VeNCrypt is always offered.
 const VIEWER_SECURITY_TYPES: [SecurityType; 2] = [SecurityType::VeNCrypt, SecurityType::AppleDh];
 
 /// RFB ProtocolVersion exchange, then offer the supported security types and read
-/// the client's choice
-pub async fn server_negotiate_security<S>(stream: &mut S) -> Result<SecurityType>
+/// the client's choice. `allow_apple_dh` gates the cleartext Apple-DH (ARD) type.
+pub async fn server_negotiate_security<S>(
+    stream: &mut S,
+    allow_apple_dh: bool,
+) -> Result<SecurityType>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -75,9 +79,14 @@ where
         "viewer RFB version"
     );
 
-    let mut offer = Vec::with_capacity(1 + VIEWER_SECURITY_TYPES.len());
-    offer.push(VIEWER_SECURITY_TYPES.len() as u8);
-    offer.extend(VIEWER_SECURITY_TYPES.iter().map(|t| t.code()));
+    let offered: Vec<SecurityType> = VIEWER_SECURITY_TYPES
+        .into_iter()
+        .filter(|t| allow_apple_dh || *t != SecurityType::AppleDh)
+        .collect();
+
+    let mut offer = Vec::with_capacity(1 + offered.len());
+    offer.push(offered.len() as u8);
+    offer.extend(offered.iter().map(|t| t.code()));
     stream.write_all(&offer).await?;
     stream.flush().await?;
 
@@ -88,7 +97,7 @@ where
     debug!(selected, "viewer selected security type");
 
     match SecurityType::from_code(selected) {
-        Some(t) if VIEWER_SECURITY_TYPES.contains(&t) => Ok(t),
+        Some(t) if offered.contains(&t) => Ok(t),
         _ => bail!("viewer selected unsupported security type {selected}"),
     }
 }
@@ -189,10 +198,11 @@ E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFF";
 
         // Decrypt: username in [0..64], password in [64..128], each NUL-terminated.
         let plain = aes128_ecb_decrypt(&aes_key, &encrypted)?;
-        Ok((
-            cstr(plain.get(..64).unwrap_or_default()),
-            cstr(plain.get(64..).unwrap_or_default()),
-        ))
+        let username = cstr(plain.get(..64).unwrap_or_default())
+            .context("Apple DH username field is not NUL-terminated")?;
+        let password = cstr(plain.get(64..).unwrap_or_default())
+            .context("Apple DH password field is not NUL-terminated")?;
+        Ok((username, password))
     }
 
     /// Left-pad (or right-truncate) `bytes` to exactly `len` bytes, big-endian.
@@ -205,11 +215,12 @@ E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFF";
         out
     }
 
-    /// Decode a fixed-width NUL-terminated C string field.
-    fn cstr(bytes: &[u8]) -> String {
-        let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    /// Decode a fixed-width NUL-terminated C string field. A field with no NUL terminator
+    /// (i.e. one that fills the whole width) is malformed — reject it rather than guess.
+    fn cstr(bytes: &[u8]) -> Option<String> {
+        let end = bytes.iter().position(|&b| b == 0)?;
         #[allow(clippy::indexing_slicing, reason = "checked")]
-        String::from_utf8_lossy(&bytes[..end]).into_owned()
+        Some(String::from_utf8_lossy(&bytes[..end]).into_owned())
     }
 
     fn md5_16(data: &[u8]) -> [u8; 16] {

@@ -578,6 +578,10 @@ pub struct VncConfig {
 
     #[serde(default)]
     pub key: String,
+
+    /// Enable Apple-DH (ARD / type 30) auth. It does not support TLS unlike VeNCrypt
+    #[serde(default = "_default_false")]
+    pub enable_ard_auth: bool,
 }
 
 impl Default for VncConfig {
@@ -589,6 +593,7 @@ impl Default for VncConfig {
             external_host: None,
             certificate: "".into(),
             key: "".into(),
+            enable_ard_auth: false,
         }
     }
 }

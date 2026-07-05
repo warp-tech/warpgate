@@ -178,10 +178,12 @@ async fn negotiate_and_authorize(
     tls_config: Arc<ServerConfig>,
     remote_address: SocketAddr,
 ) -> Result<Option<Box<ProxySession>>> {
+    let allow_apple_dh = services.config.lock().await.store.vnc.enable_ard_auth;
+
     // ProtocolVersion + security-type negotiation, then branch per chosen type to get
     // the (possibly TLS-upgraded) viewer stream and the credentials it carries.
     let (mut viewer, username, password): (Box<dyn ViewerStream>, _, _) =
-        match server_negotiate_security(&mut stream).await? {
+        match server_negotiate_security(&mut stream, allow_apple_dh).await? {
             SecurityType::VeNCrypt => {
                 server_vencrypt_sub_negotiate(&mut stream).await?;
                 let mut tls = TlsAcceptor::from(tls_config)

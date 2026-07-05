@@ -2,7 +2,9 @@ use anyhow::{Result, bail};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::debug;
 
-use super::MAX_STRING_LEN;
+/// Max clipboard payload (either direction). Clipboard sync is a convenience, not a bulk
+/// transfer channel — cap it so a giant paste isn't mirrored wholesale.
+const MAX_CLIPBOARD_LEN: usize = 8 * 1024;
 
 const ENCODING_RAW: i32 = 0;
 const ENCODING_TIGHT: i32 = 7;
@@ -239,7 +241,12 @@ pub async fn write_server_cut_text<S>(stream: &mut S, text: &str) -> Result<()>
 where
     S: AsyncWrite + Unpin,
 {
-    let bytes = text.as_bytes();
+    // Cap the payload mirrored to the viewer, truncating on a char boundary.
+    let mut end = text.len().min(MAX_CLIPBOARD_LEN);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let bytes = text.get(..end).unwrap_or(text).as_bytes();
     let mut msg = Vec::with_capacity(8 + bytes.len());
     msg.push(3); // ServerCutText
     msg.extend_from_slice(&[0, 0, 0]); // padding
@@ -361,7 +368,7 @@ where
                 reader.read_exact(&mut rest).await?;
                 let [_, _, _, l0, l1, l2, l3] = rest;
                 let len = u32::from_be_bytes([l0, l1, l2, l3]) as usize;
-                if len > MAX_STRING_LEN {
+                if len > MAX_CLIPBOARD_LEN {
                     bail!("client cut text too long: {len}");
                 }
                 let mut text = vec![0u8; len];

@@ -115,6 +115,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "enable_ard_auth": false,
         "external_host": null,
         "external_port": null,
         "key": "",
@@ -751,6 +752,11 @@
           "default": ""
         },
         "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "enable_ard_auth": {
+          "description": "Offer Apple-DH (ARD, type 30) auth. Unlike VeNCrypt it doesn't wrap the session in\nTLS, so the relay after auth is cleartext — off by default; when off, viewers must use\nVeNCrypt/TLS.",
           "type": "boolean",
           "default": false
         },
