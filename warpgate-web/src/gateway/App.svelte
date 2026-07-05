@@ -100,6 +100,10 @@
             reloadWebAuthRequests()
         }
     })
+
+    function onRouteLoaded (detail: RouteDetail) {
+        doNotShowAuthRequests = !!(detail.userData as any)?.['doNotShowAuthRequests']
+    }
 </script>
 
 <svelte:window on:pageshow={onPageResume}/>
@@ -151,9 +155,7 @@
             {/if}
 
             <main>
-                <Router {routes} on:routeLoaded={e => {
-                    doNotShowAuthRequests = !!(e.detail.userData as any)?.['doNotShowAuthRequests']
-                }} />
+                <Router {routes} {onRouteLoaded} />
             </main>
 
             <footer class="mt-5">

@@ -1,7 +1,7 @@
 <script lang="ts">
     import NavListItem from 'common/NavListItem.svelte'
     import { wrap } from 'svelte-spa-router/wrap'
-    import Router from 'svelte-spa-router'
+    import Router, { type RouteDetail } from 'svelte-spa-router'
     import { serverInfo } from 'gateway/lib/store'
 
     const routes = {
@@ -83,6 +83,10 @@
     }
 
     let sidebarMode = $state(false)
+
+    function onRouteLoading (detail: RouteDetail) {
+        sidebarMode = detail.route !== ''
+    }
 </script>
 
 {#snippet navItems()}
@@ -176,9 +180,7 @@
     </div>
 
     <div class="main">
-        <Router {routes} prefix="/config" on:routeLoading={e => {
-            sidebarMode = e.detail.route !== ''
-        }} />
+        <Router {routes} prefix="/config" {onRouteLoading} />
     </div>
 </div>
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Button, FormGroup, ListGroup, ListGroupItem, Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
+    import { Button, ListGroup, ListGroupItem, Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
     import { api, TargetKind, type ExistingCertificateCredential, type SsoKubernetesConfigDescription } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { makeExampleSSHCommand, makeCommonSelectorUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand, protocolHost, protocolPortString, makeOidcKubeconfig } from 'common/protocols'

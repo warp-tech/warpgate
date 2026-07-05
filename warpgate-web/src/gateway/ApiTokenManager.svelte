@@ -7,8 +7,7 @@
     import CreateApiTokenModal from './CreateApiTokenModal.svelte'
     import { Alert, Badge, Button } from '@sveltestrap/sveltestrap'
     import EmptyState from 'common/EmptyState.svelte'
-    import { querystring } from 'svelte-spa-router'
-    import { get } from 'svelte/store'
+    import { router } from 'svelte-spa-router'
     import { parseHumantimeDuration } from 'common/duration'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
 
@@ -18,7 +17,7 @@
     let error: string | undefined = $state()
     const now = Date.now()
 
-    const urlParams = new URLSearchParams(get(querystring) ?? '')
+    const urlParams = new URLSearchParams(router.querystring ?? '')
     const autoCreate = urlParams.get('create') === 'true'
     const paramLabel = urlParams.get('label') ?? ''
     const paramExpiry = urlParams.get('expiry')

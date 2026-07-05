@@ -1,6 +1,5 @@
 <script lang="ts">
-    import { get } from 'svelte/store'
-    import { querystring, replace } from 'svelte-spa-router'
+    import { router, replace } from 'svelte-spa-router'
     import { Button, FormGroup, Alert } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
@@ -26,8 +25,8 @@
     const passwordLoginAllowed = $derived(passwordLoginMode !== PasswordLoginMode.Disabled)
     const passwordLoginMinimized = $derived(passwordLoginMode === PasswordLoginMode.Minimized)
 
-    const nextURL = new URLSearchParams(get(querystring)).get('next') ?? undefined
-    const reauthRequired = new URLSearchParams(get(querystring)).get('reauth') === '1'
+    const nextURL = new URLSearchParams(router.querystring ?? '').get('next') ?? undefined
+    const reauthRequired = new URLSearchParams(router.querystring ?? '').get('reauth') === '1'
     const serverErrorMessage = new URLSearchParams(location.search).get('login_error')
     const initPromise = init()
 
