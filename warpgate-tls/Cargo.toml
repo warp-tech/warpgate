@@ -1,22 +1,23 @@
 [package]
-edition = "2021"
-license = "Apache-2.0"
 name = "warpgate-tls"
-version = "0.20.2"
+version = "0.26.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
 
 [dependencies]
-once_cell = { version = "1.17", default-features = false }
+bytes.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
+rustls.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pki-types.workspace = true
-rustls.workspace = true
 sea-orm.workspace = true
-serde_json.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
-tokio-rustls.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 tracing.workspace = true
 webpki = { version = "0.22", default-features = false }
-x509-parser = "0.17.0"
+x509-parser = { version = "0.18.1", default-features = false }

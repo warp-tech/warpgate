@@ -19,15 +19,15 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo sh -s -- -y
           echo "/root/.cargo/bin" >> $GITHUB_PATH
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           submodules: recursive
 
       - name: Install tools
         run: |
-          sudo env "PATH=$PATH" cargo install --locked just
+          sudo env "PATH=$PATH" cargo install --locked just@1.4.0
 
       - name: Reprotest
         run: |
           sudo ulimit -n 999999
-          sudo env "PATH=$PATH" reprotest -vv --min-cpus=99999 --vary=environment,build_path,kernel,aslr,num_cpus,-time,-user_group,fileordering,domain_host,home,locales,exec_path,timezone,umask --build-command 'just npm ci; just npm run build; SOURCE_DATE_EPOCH=0 cargo build --all-features --release' . target/release/warpgate
+          sudo env "PATH=$PATH" reprotest -vv --min-cpus=99999 --vary=environment,build_path,kernel,aslr,num_cpus,-time,-user_group,fileordering,domain_host,home,locales,exec_path,timezone,umask --build-command 'just npm ci; just npm run build; SOURCE_DATE_EPOCH=0 just build-rdp-helper; SOURCE_DATE_EPOCH=0 cargo build --all-features --release' . target/release/warpgate

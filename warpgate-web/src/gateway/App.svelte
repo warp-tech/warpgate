@@ -11,7 +11,8 @@
     import { api, type AuthStateResponseInternal } from './lib/api'
     import { Button } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
-    import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+    import { faArrowRight, faCog } from '@fortawesome/free-solid-svg-icons'
+    import { hasAdminAccess } from 'admin/lib/store'
 
     let redirecting = $state(false)
     let serverInfoPromise = reloadServerInfo()
@@ -63,6 +64,10 @@
             asyncComponent: () => import('./ProfileCredentials.svelte') as any,
             conditions: [requireLogin],
         }),
+        '/ticket-requests': wrap({
+            asyncComponent: () => import('./TicketRequests.svelte') as any,
+            conditions: [requireLogin],
+        }),
         '/login': wrap({
             asyncComponent: () => import('./Login.svelte') as any,
         }),
@@ -95,6 +100,10 @@
             reloadWebAuthRequests()
         }
     })
+
+    function onRouteLoaded (detail: RouteDetail) {
+        doNotShowAuthRequests = !!(detail.userData as any)?.['doNotShowAuthRequests']
+    }
 </script>
 
 <svelte:window on:pageshow={onPageResume}/>
@@ -109,7 +118,16 @@
                     <Brand />
                 </a>
 
-                <AuthBar />
+                <div class="ms-auto d-flex align-items-center">
+                    {#if $hasAdminAccess}
+                    <a href="/@warpgate/admin" class="btn btn-warning btn-sm d-flex align-items-center gap-1 me-3">
+                        <Fa icon={faCog} class="mx-1" />
+                        <span class="me-1">Admin</span>
+                    </a>
+                    {/if}
+
+                    <AuthBar />
+                </div>
             </div>
 
             {#if !doNotShowAuthRequests}
@@ -137,9 +155,7 @@
             {/if}
 
             <main>
-                <Router {routes} on:routeLoaded={e => {
-                    doNotShowAuthRequests = !!(e.detail.userData as any)?.['doNotShowAuthRequests']
-                }} />
+                <Router {routes} {onRouteLoaded} />
             </main>
 
             <footer class="mt-5">
@@ -158,7 +174,7 @@
 
 <style lang="scss">
     .container {
-        width: 500px;
+        width: 600px;
         max-width: 100vw;
     }
 </style>

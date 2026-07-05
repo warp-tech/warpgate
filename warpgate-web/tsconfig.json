@@ -6,7 +6,6 @@
         "module": "esnext",
         "resolveJsonModule": true,
         "strictNullChecks": true,
-        "baseUrl": ".",
         "verbatimModuleSyntax": true,
         "noUnusedLocals": false,
         "noUncheckedIndexedAccess": true,
@@ -21,7 +20,7 @@
         "checkJs": true,
         "paths": {
             "*": [
-                "src/*"
+                "./src/*"
             ]
         }
     },

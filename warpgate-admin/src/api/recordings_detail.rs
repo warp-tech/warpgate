@@ -1,29 +1,29 @@
-use std::sync::Arc;
-
 use anyhow::Context;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use poem::error::{InternalServerError, NotFoundError};
 use poem::web::websocket::{Message, WebSocket};
-use poem::web::Data;
-use poem::{handler, IntoResponse};
+use poem::web::{Data, StaticFileRequest};
+use poem::{IntoResponse, handler};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::Mutex;
-use tracing::*;
+use tracing::error;
 use uuid::Uuid;
-use warpgate_core::recordings::{AsciiCast, SessionRecordings, TerminalRecordingItem};
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_core::recordings::{AsciiCast, RecordingFile, TerminalRecordingItem};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_protocol_kubernetes::recording::{
     KubernetesRecordingItem, KubernetesRecordingItemApiObject,
 };
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
@@ -49,11 +49,13 @@ impl Api {
     )]
     async fn api_get_recording(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetRecordingResponse> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+        let db = ctx.services().db.lock().await;
 
         let recording = Recording::Entity::find_by_id(id.0)
             .one(&*db)
@@ -73,11 +75,14 @@ impl Api {
     )]
     async fn api_get_recording_kubernetes(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
-        recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetKubernetesRecordingResponse> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+        let db = ctx.services().db.lock().await;
+        let recordings = ctx.services().recordings.lock().await;
 
         let recording = Recording::Entity::find_by_id(id.0)
             .filter(Recording::Column::Kind.eq(RecordingKind::Kubernetes))
@@ -89,12 +94,7 @@ impl Api {
             return Err(NotFoundError.into());
         };
 
-        let path = {
-            recordings
-                .lock()
-                .await
-                .path_for(&recording.session_id, &recording.name)
-        };
+        let path = recordings.file_path(&recording, RecordingFile::NDJsonData);
 
         let file = File::open(&path).await.map_err(InternalServerError)?;
         let reader = BufReader::new(file);
@@ -113,11 +113,12 @@ impl Api {
 
 #[handler]
 pub async fn api_get_recording_cast(
-    db: Data<&Arc<Mutex<DatabaseConnection>>>,
-    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+    ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
 ) -> poem::Result<String> {
-    let db = db.lock().await;
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+    let db = ctx.services().db.lock().await;
 
     let recording = Recording::Entity::find_by_id(id.0)
         .filter(Recording::Column::Kind.eq(RecordingKind::Terminal))
@@ -130,13 +131,14 @@ pub async fn api_get_recording_cast(
     };
 
     let path = {
-        recordings
+        ctx.services()
+            .recordings
             .lock()
             .await
-            .path_for(&recording.session_id, &recording.name)
+            .file_path(&recording, RecordingFile::NDJsonData)
     };
 
-    let mut response = vec![]; //String::new();
+    let mut response = vec![];
 
     let mut last_size = (0, 0);
     let file = File::open(&path).await.map_err(InternalServerError)?;
@@ -169,11 +171,12 @@ pub async fn api_get_recording_cast(
 
 #[handler]
 pub async fn api_get_recording_tcpdump(
-    db: Data<&Arc<Mutex<DatabaseConnection>>>,
-    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+    ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
 ) -> poem::Result<Bytes> {
-    let db = db.lock().await;
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+    let db = ctx.services().db.lock().await;
 
     let recording = Recording::Entity::find_by_id(id.0)
         .filter(Recording::Column::Kind.eq(RecordingKind::Traffic))
@@ -186,10 +189,11 @@ pub async fn api_get_recording_tcpdump(
     };
 
     let path = {
-        recordings
+        ctx.services()
+            .recordings
             .lock()
             .await
-            .path_for(&recording.session_id, &recording.name)
+            .file_path(&recording, RecordingFile::TcpDumpData)
     };
 
     let content = std::fs::read(path).map_err(InternalServerError)?;
@@ -197,16 +201,122 @@ pub async fn api_get_recording_tcpdump(
     Ok(Bytes::from(content))
 }
 
+async fn find_desktop_recording(
+    ctx: &AuthenticatedRequestContext,
+    id: Uuid,
+) -> poem::Result<Recording::Model> {
+    let db = ctx.services().db.lock().await;
+    Recording::Entity::find_by_id(id)
+        .filter(Recording::Column::Kind.eq(RecordingKind::Desktop))
+        .one(&*db)
+        .await
+        .map_err(InternalServerError)?
+        .ok_or_else(|| NotFoundError.into())
+}
+
 #[handler]
-pub async fn api_get_recording_stream(
-    ws: WebSocket,
-    recordings: Data<&Arc<Mutex<SessionRecordings>>>,
+pub async fn api_get_recording_desktop(
+    ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
-) -> impl IntoResponse {
-    let recordings = recordings.lock().await;
+    static_req: StaticFileRequest,
+) -> poem::Result<poem::Response> {
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+    let recording = find_desktop_recording(&ctx, id.0).await?;
+    let path = {
+        ctx.services()
+            .recordings
+            .lock()
+            .await
+            .file_path(&recording, RecordingFile::NDJsonData)
+    };
+
+    Ok(static_req
+        .create_response(&path, false, false)?
+        .with_content_type("application/x-ndjson")
+        .into_response())
+}
+
+#[handler]
+pub async fn api_get_recording_desktop_index(
+    ctx: Data<&AuthenticatedRequestContext>,
+    id: poem::web::Path<Uuid>,
+    static_req: StaticFileRequest,
+) -> poem::Result<poem::Response> {
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+    let recording = find_desktop_recording(&ctx, id.0).await?;
+    let index_path = ctx
+        .services()
+        .recordings
+        .lock()
+        .await
+        .file_path(&recording, RecordingFile::Index);
+
+    Ok(static_req
+        .create_response(&index_path, false, false)?
+        .with_content_type("application/x-ndjson")
+        .into_response())
+}
+
+#[handler]
+pub async fn api_get_recording_desktop_stream(
+    ws: WebSocket,
+    ctx: Data<&AuthenticatedRequestContext>,
+    id: poem::web::Path<Uuid>,
+) -> poem::Result<impl IntoResponse> {
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+    let recordings = ctx.services().recordings.lock().await;
     let receiver = recordings.subscribe_live(&id).await;
 
-    ws.on_upgrade(|socket| async move {
+    Ok(ws.on_upgrade(|socket| async move {
+        let (mut sink, _) = socket.split();
+
+        sink.send(Message::Text(serde_json::to_string(&json!({
+            "start": true,
+            "live": receiver.is_some(),
+        }))?))
+        .await?;
+
+        if let Some(mut receiver) = receiver {
+            tokio::spawn(async move {
+                if let Err(error) = async {
+                    while let Ok(data) = receiver.recv().await {
+                        // Each broadcast line is a serialised DesktopRecordingItem.
+                        let item: serde_json::Value = serde_json::from_slice(&data)?;
+                        let msg = serde_json::to_string(&json!({ "data": item }))?;
+                        sink.send(Message::Text(msg)).await?;
+                    }
+                    sink.send(Message::Text(serde_json::to_string(&json!({
+                        "end": true,
+                    }))?))
+                    .await?;
+                    Ok::<(), anyhow::Error>(())
+                }
+                .await
+                {
+                    error!(%error, "Livestream error:");
+                }
+            });
+        }
+
+        Ok::<(), anyhow::Error>(())
+    }))
+}
+
+#[handler]
+pub async fn api_get_recording_terminal_stream(
+    ws: WebSocket,
+    ctx: Data<&AuthenticatedRequestContext>,
+    id: poem::web::Path<Uuid>,
+) -> Result<impl IntoResponse, WarpgateError> {
+    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+
+    let recordings = ctx.services().recordings.lock().await;
+    let receiver = recordings.subscribe_live(&id).await;
+
+    Ok(ws.on_upgrade(|socket| async move {
         let (mut sink, _) = socket.split();
 
         sink.send(Message::Text(serde_json::to_string(&json!({
@@ -238,5 +348,5 @@ pub async fn api_get_recording_stream(
         }
 
         Ok::<(), anyhow::Error>(())
-    })
+    }))
 }

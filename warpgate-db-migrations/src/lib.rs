@@ -1,6 +1,6 @@
 use sea_orm::DatabaseConnection;
-use sea_orm_migration::prelude::*;
 use sea_orm_migration::MigrationTrait;
+use sea_orm_migration::prelude::*;
 
 mod m00001_create_ticket;
 mod m00002_create_session;
@@ -32,6 +32,39 @@ mod m00027_ca;
 mod m00028_certificate_credentials;
 mod m00029_certificate_revocation;
 mod m00030_add_recording_metadata;
+mod m00031_minimize_password_login;
+mod m00032_admin_roles;
+mod m00033_add_log_target;
+mod m00034_add_log_related_fields;
+mod m00035_ticket_user_target_id;
+mod m00036_user_role_expiry_history;
+mod m00037_database_target_auth;
+mod m00038_fix_target_auth_tags;
+mod m00039_show_session_menu;
+mod m00040_allowed_ip_range;
+mod m00041_fix_user_role_assignment_dates;
+mod m00042_database_target_auth_again;
+mod m00043_unique_usernames;
+mod m00044_ticket_requests;
+mod m00045_role_default_flag;
+mod m00046_max_api_token_duration;
+mod m00047_record_scp;
+mod m00048_target_click_action;
+mod m00049_text_columns;
+mod m00050_password_policy;
+mod m00051_tutorial_dismissed;
+mod m00052_log_text_column;
+mod m00053_login_protection;
+mod m00054_login_protection_params;
+mod m00055_ssh_banner;
+mod m00056_web_ssh_enabled;
+mod m00057_password_login_mode;
+mod m00058_analytics;
+mod m00059_web_auth_max_age;
+mod m00060_recording_generation;
+mod m00061_rename_web_ssh_enabled;
+
+pub(crate) mod helpers;
 
 pub struct Migrator;
 
@@ -69,10 +102,54 @@ impl MigratorTrait for Migrator {
             Box::new(m00028_certificate_credentials::Migration),
             Box::new(m00029_certificate_revocation::Migration),
             Box::new(m00030_add_recording_metadata::Migration),
+            Box::new(m00031_minimize_password_login::Migration),
+            Box::new(m00032_admin_roles::Migration),
+            Box::new(m00033_add_log_target::Migration),
+            Box::new(m00034_add_log_related_fields::Migration),
+            Box::new(m00035_ticket_user_target_id::Migration),
+            Box::new(m00036_user_role_expiry_history::Migration),
+            Box::new(m00037_database_target_auth::Migration),
+            Box::new(m00038_fix_target_auth_tags::Migration),
+            Box::new(m00039_show_session_menu::Migration),
+            Box::new(m00040_allowed_ip_range::Migration),
+            Box::new(m00041_fix_user_role_assignment_dates::Migration),
+            Box::new(m00042_database_target_auth_again::Migration),
+            Box::new(m00043_unique_usernames::Migration),
+            Box::new(m00044_ticket_requests::Migration),
+            Box::new(m00045_role_default_flag::Migration),
+            Box::new(m00046_max_api_token_duration::Migration),
+            Box::new(m00047_record_scp::Migration),
+            Box::new(m00048_target_click_action::Migration),
+            Box::new(m00049_text_columns::Migration),
+            Box::new(m00050_password_policy::Migration),
+            Box::new(m00051_tutorial_dismissed::Migration),
+            Box::new(m00052_log_text_column::Migration),
+            Box::new(m00053_login_protection::Migration),
+            Box::new(m00054_login_protection_params::Migration),
+            Box::new(m00055_ssh_banner::Migration),
+            Box::new(m00056_web_ssh_enabled::Migration),
+            Box::new(m00057_password_login_mode::Migration),
+            Box::new(m00058_analytics::Migration),
+            Box::new(m00059_web_auth_max_age::Migration),
+            Box::new(m00060_recording_generation::Migration),
+            Box::new(m00061_rename_web_ssh_enabled::Migration),
         ]
     }
 }
 
 pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbErr> {
     Migrator::up(connection, None).await
+}
+
+/// Apply `steps` pending migrations.
+pub async fn migrate_database_up(connection: &DatabaseConnection, steps: u32) -> Result<(), DbErr> {
+    Migrator::up(connection, Some(steps)).await
+}
+
+/// Revert `steps` applied migrations.
+pub async fn migrate_database_down(
+    connection: &DatabaseConnection,
+    steps: u32,
+) -> Result<(), DbErr> {
+    Migrator::down(connection, Some(steps)).await
 }

@@ -3,18 +3,18 @@ use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
-use warpgate_common::{SSHTargetAuth, SshTargetPasswordAuth, TargetSSHOptions, WarpgateError};
-use warpgate_core::Services;
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient};
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient, resolve_ssh_chain};
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 pub struct Api;
 
 #[derive(Object)]
 struct CheckSshHostKeyRequest {
-    host: String,
-    port: u16,
+    target_id: Uuid,
 }
 
 #[derive(Object)]
@@ -40,29 +40,31 @@ impl Api {
     )]
     async fn api_ssh_check_host_key(
         &self,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<CheckSshHostKeyRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CheckSshHostKeyResponse, WarpgateError> {
-        let mut handles = RemoteClient::create(Uuid::new_v4(), services.clone())?;
+        require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
 
-        let _ = handles.command_tx.send((
-            RCCommand::Connect(TargetSSHOptions {
-                host: body.host.clone(),
-                port: body.port,
-                username: "".into(),
-                allow_insecure_algos: None,
-                auth: SSHTargetAuth::Password(SshTargetPasswordAuth {
-                    password: "".to_string().into(),
-                }),
-            }),
-            None,
-        ));
+        let ssh_chain = resolve_ssh_chain(ctx.services(), body.target_id, ctx.auth.username())
+            .await?
+            .into_iter()
+            .map(|x| x.ssh_options)
+            .collect::<Vec<_>>();
+
+        let mut handles = RemoteClient::create(Uuid::new_v4(), ctx.services().clone())?;
+        let _ = handles
+            .command_tx
+            .send((RCCommand::Connect(ssh_chain), None));
 
         let fut = async move {
             let key = loop {
                 match handles.event_rx.recv().await {
                     Some(RCEvent::HostKeyReceived(key)) => break key,
+                    Some(RCEvent::HostKeyUnknown(key, reply)) => {
+                        let _ = reply.send(true);
+                        break key;
+                    }
                     Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
                     Some(RCEvent::Error(err)) => return Err(err),
                     None => anyhow::bail!("Failed to connect to target"),

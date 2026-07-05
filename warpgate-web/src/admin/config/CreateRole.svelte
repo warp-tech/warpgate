@@ -2,9 +2,8 @@
 import { api } from 'admin/lib/api'
 import AsyncButton from 'common/AsyncButton.svelte'
 import { replace } from 'svelte-spa-router'
-import { Form, FormGroup } from '@sveltestrap/sveltestrap'
+import { Form, FormGroup, Alert } from '@sveltestrap/sveltestrap'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
 
 let error: string|null = $state(null)
 let name = $state('')
@@ -14,9 +13,10 @@ async function create () {
         const role = await api.createRole({
             roleDataRequest: {
                 name,
+                isDefault: false,
             },
         })
-        replace(`/config/roles/${role.id}`)
+        replace(`/config/access-roles/${role.id}`)
     } catch (err) {
         error = await stringifyError(err)
     }

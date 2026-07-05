@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -9,23 +9,29 @@ use delegate::delegate;
 use futures::{StreamExt, TryStreamExt};
 use http::header::HeaderName;
 use http::uri::{Authority, Scheme};
-use http::{HeaderValue, Uri};
-use once_cell::sync::Lazy;
+use http::{HeaderValue, StatusCode, Uri};
 use poem::session::Session;
-use poem::web::websocket::WebSocket;
 use poem::web::Data;
+use poem::web::websocket::WebSocket;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite, Connector};
-use tracing::*;
+use tokio::sync::Mutex;
+use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
+use tracing::{debug, error, warn};
 use url::Url;
 use warpgate_common::helpers::websocket::pump_websocket;
-use warpgate_common::{try_block, TargetHTTPOptions, WarpgateError};
-use warpgate_core::logging::http::{get_client_ip, log_request_result};
-use warpgate_core::Services;
-use warpgate_tls::{configure_tls_connector, TlsMode};
+use warpgate_common::http_headers::{
+    X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO, may_forward_header,
+};
+use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
+use warpgate_common_http::logging::{get_client_ip, log_request_result};
+use warpgate_common_http::{
+    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
+};
+use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
-use crate::common::{SessionAuthorization, SessionExt};
+use crate::common::SessionExt;
+use crate::session::SessionStore;
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
 static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
@@ -81,26 +87,6 @@ impl SomeRequestBuilder for http::request::Builder {
     }
 }
 
-static DONT_FORWARD_HEADERS: Lazy<HashSet<HeaderName>> = Lazy::new(|| {
-    #[allow(clippy::mutable_key_type)]
-    let mut s = HashSet::new();
-    s.insert(http::header::ACCEPT_ENCODING);
-    s.insert(http::header::SEC_WEBSOCKET_EXTENSIONS);
-    s.insert(http::header::SEC_WEBSOCKET_ACCEPT);
-    s.insert(http::header::SEC_WEBSOCKET_KEY);
-    s.insert(http::header::SEC_WEBSOCKET_VERSION);
-    s.insert(http::header::UPGRADE);
-    s.insert(http::header::HOST);
-    s.insert(http::header::CONNECTION);
-    s.insert(http::header::STRICT_TRANSPORT_SECURITY);
-    s.insert(http::header::UPGRADE_INSECURE_REQUESTS);
-    s
-});
-
-static X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
-static X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
-static X_FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
-
 fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) -> Result<Uri> {
     let target_uri = Uri::try_from(options.url.clone())?;
     let source_uri = req.uri().clone();
@@ -147,11 +133,11 @@ fn copy_client_response<R: SomeResponse>(
     server_response: &mut poem::Response,
 ) {
     let mut headers = client_response.headers().clone();
-    for h in client_response.headers().iter() {
-        if DONT_FORWARD_HEADERS.contains(h.0) {
-            if let http::header::Entry::Occupied(e) = headers.entry(h.0) {
-                e.remove_entry();
-            }
+    for h in client_response.headers() {
+        if !may_forward_header(h.0)
+            && let http::header::Entry::Occupied(e) = headers.entry(h.0)
+        {
+            e.remove_entry();
         }
     }
     server_response.headers_mut().extend(headers);
@@ -200,11 +186,21 @@ fn rewrite_response(
         for value in entry.iter_mut() {
             try_block!({
                 let mut cookie = Cookie::parse(value.to_str()?)?;
-                cookie.set_expires(cookie::Expiration::Session);
+                // Some apps clear a cookie by re-setting it with an expiration
+                // in the past. We keep these as-is
+                // https://github.com/warp-tech/warpgate/issues/2112
+                if let Some(cookie::Expiration::DateTime(expires)) = cookie.expires()
+                    && expires >= cookie::time::OffsetDateTime::now_utc()
+                {
+                    cookie.set_expires(cookie::Expiration::Session);
+                }
+                // the domain set by the target isn't going to match the actual host anyway
+                // https://github.com/warp-tech/warpgate/issues/2048
+                cookie.unset_domain();
                 *value = cookie.to_string().parse()?;
             } catch (error: anyhow::Error) {
-                warn!(?error, header=?value, "Failed to parse response cookie")
-            })
+                warn!(?error, header=?value, "Failed to parse response cookie");
+            });
         }
     }
 
@@ -213,7 +209,7 @@ fn rewrite_response(
 
 fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B {
     for k in req.headers().keys() {
-        if DONT_FORWARD_HEADERS.contains(k) {
+        if !may_forward_header(k) {
             continue;
         }
         target = target.header(
@@ -230,19 +226,19 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
     target
 }
 
-fn inject_forwarding_headers<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
-    #[allow(clippy::unwrap_used)]
-    if let Some(host) = req.headers().get(http::header::HOST) {
-        target = target.header(
-            X_FORWARDED_HOST.clone(),
-            host.to_str()?.split(':').next().unwrap(),
-        );
+fn inject_forwarding_headers<B: SomeRequestBuilder>(
+    req: &Request,
+    ctx: &AuthenticatedRequestContext,
+    mut target: B,
+) -> B {
+    if let Some(host) = ctx.trusted_host_header(req) {
+        target = target.header(X_FORWARDED_HOST.clone(), host);
     }
-    target = target.header(X_FORWARDED_PROTO.clone(), req.scheme().as_str());
+    target = target.header(X_FORWARDED_PROTO.clone(), ctx.trusted_proto(req).as_str());
     if let Some(addr) = req.remote_addr().as_socket_addr() {
         target = target.header(X_FORWARDED_FOR.clone(), addr.ip().to_string());
     }
-    Ok(target)
+    target
 }
 
 async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
@@ -261,11 +257,11 @@ async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B)
 
 pub async fn proxy_normal_request(
     req: &Request,
+    ctx: &AuthenticatedRequestContext,
     body: Body,
     options: &TargetHTTPOptions,
 ) -> poem::Result<Response> {
     let uri = construct_uri(req, options, false)?;
-    let services = Data::<&Services>::from_request_without_body(req).await?;
 
     tracing::debug!("URI: {:?}", uri);
 
@@ -274,7 +270,7 @@ pub async fn proxy_normal_request(
         .redirect(reqwest::redirect::Policy::none())
         .connection_verbose(true);
 
-    if let TlsMode::Required = options.tls.mode {
+    if options.tls.mode == TlsMode::Required {
         client = client.https_only(true);
     }
 
@@ -305,7 +301,7 @@ pub async fn proxy_normal_request(
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
     client_request = copy_server_request(req, client_request);
-    client_request = inject_forwarding_headers(req, client_request)?;
+    client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
     if let Some(authorization_header) = authorization_header {
@@ -324,13 +320,21 @@ pub async fn proxy_normal_request(
     let mut response: Response = "".into();
 
     copy_client_response(&client_response, &mut response);
-    copy_client_body(client_response, &mut response).await?;
+
+    let embed_session_menu = {
+        let db = ctx.services().db.lock().await;
+        warpgate_db_entities::Parameters::Entity::get(&db)
+            .await
+            .map(|p| p.show_session_menu)
+            .unwrap_or(true)
+    };
+    copy_client_body(client_response, &mut response, embed_session_menu).await?;
 
     log_request_result(
         req.method(),
         req.original_uri(),
-        get_client_ip(req, Some(*services)).await.as_deref(),
-        &status,
+        get_client_ip(req, ctx.services()).await.as_deref(),
+        status,
     );
 
     rewrite_response(&mut response, options, &uri)?;
@@ -340,8 +344,12 @@ pub async fn proxy_normal_request(
 async fn copy_client_body(
     client_response: reqwest::Response,
     response: &mut Response,
+    embed_session_menu: bool,
 ) -> Result<()> {
-    if response.content_type().map(|c| c.starts_with("text/html")) == Some(true)
+    if embed_session_menu
+        && response
+            .content_type()
+            .is_some_and(|c| c.starts_with("text/html"))
         && response.status() == 200
     {
         copy_client_body_and_embed(client_response, response).await?;
@@ -369,7 +377,10 @@ async fn copy_client_body_and_embed(
         script_manifest.file
     );
     for css_file in script_manifest.css.unwrap_or_default() {
-        inject += &format!(r#"<link rel="stylesheet" href="/@warpgate/{css_file}" />"#,);
+        let _ = write!(
+            &mut inject,
+            r#"<link rel="stylesheet" href="/@warpgate/{css_file}" />"#
+        );
     }
 
     let before = "</head>";
@@ -394,10 +405,11 @@ async fn copy_client_body_and_embed(
 pub async fn proxy_websocket_request(
     req: &Request,
     ws: WebSocket,
+    ctx: &AuthenticatedRequestContext,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
     let uri = construct_uri(req, options, true)?;
-    proxy_ws_inner(req, ws, uri.clone(), options)
+    proxy_ws_inner(req, ws, uri.clone(), ctx, options)
         .await
         .map_err(|error| {
             tracing::error!(?uri, ?error, "WebSocket proxy failed");
@@ -439,8 +451,23 @@ async fn proxy_ws_inner(
     req: &Request,
     ws: WebSocket,
     uri: Uri,
+    ctx: &AuthenticatedRequestContext,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
+    let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
+        .await?
+        .clone();
+    let session = <&Session>::from_request_without_body(req).await?;
+    let mut close_rx = session_middleware.lock().await.close_receiver_for(session);
+    if close_rx.is_none()
+        && matches!(
+            &ctx.auth,
+            RequestAuthorization::Session(SessionAuthorization::User { .. })
+        )
+    {
+        return Err(poem::Error::from_status(StatusCode::UNAUTHORIZED));
+    }
+
     let (authorization_header, uri) = extract_basic_auth(uri)?;
     let mut client_request = http::request::Builder::new()
         .uri(uri.clone())
@@ -465,7 +492,7 @@ async fn proxy_ws_inner(
     }
 
     client_request = copy_server_request(req, client_request);
-    client_request = inject_forwarding_headers(req, client_request)?;
+    client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
 
@@ -493,7 +520,7 @@ async fn proxy_ws_inner(
             let (server_sink, server_source) = socket.split();
 
             if let Err(error) = {
-                let server_to_client =
+                let mut server_to_client =
                     tokio::spawn(pump_websocket(server_source, client_sink, |msg| {
                         Box::pin(async {
                             tracing::debug!("Server: {:?}", msg);
@@ -501,7 +528,7 @@ async fn proxy_ws_inner(
                         })
                     }));
 
-                let client_to_server =
+                let mut client_to_server =
                     tokio::spawn(pump_websocket(client_source, server_sink, |msg| {
                         Box::pin(async {
                             tracing::debug!("Client: {:?}", msg);
@@ -509,8 +536,47 @@ async fn proxy_ws_inner(
                         })
                     }));
 
-                server_to_client.await??;
-                client_to_server.await??;
+                let (server_finished, pump_result): (
+                    bool,
+                    Option<Result<anyhow::Result<()>, tokio::task::JoinError>>,
+                ) = tokio::select! {
+                    result = &mut server_to_client => {
+                        (true, Some(result))
+                    }
+                    result = &mut client_to_server => {
+                        (false, Some(result))
+                    }
+                    _ = async {
+                        match close_rx.as_mut() {
+                            Some(close_rx) => {
+                                let _ = close_rx.recv().await;
+                            }
+                            None => std::future::pending::<()>().await,
+                        }
+                    } => {
+                        (false, None)
+                    }
+                };
+
+                match pump_result {
+                    Some(result) if server_finished => {
+                        client_to_server.abort();
+                        let _ = client_to_server.await;
+                        result.context("server-to-client WebSocket pump task failed")??;
+                    }
+                    Some(result) => {
+                        server_to_client.abort();
+                        let _ = server_to_client.await;
+                        result.context("client-to-server WebSocket pump task failed")??;
+                    }
+                    None => {
+                        debug!("Closing WebSocket stream after HTTP session ended");
+                        server_to_client.abort();
+                        client_to_server.abort();
+                        let _ = server_to_client.await;
+                        let _ = client_to_server.await;
+                    }
+                }
                 debug!("Closing Websocket stream");
 
                 Ok::<_, anyhow::Error>(())
@@ -524,4 +590,86 @@ async fn proxy_ws_inner(
     copy_client_response(&client_response, &mut response);
     rewrite_response(&mut response, options, &uri)?;
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_options(url: &str) -> TargetHTTPOptions {
+        TargetHTTPOptions {
+            url: url.to_string(),
+            tls: Default::default(),
+            headers: None,
+            external_host: None,
+        }
+    }
+
+    #[test]
+    fn rewrite_response_strips_cookie_domain() {
+        let mut resp = poem::Response::builder()
+            .header(
+                http::header::SET_COOKIE,
+                "lsws_uid=abc; HttpOnly; Secure; Path=/; Domain=100.0.0.1",
+            )
+            .body(());
+
+        let options = make_options("https://100.0.0.1:7080");
+        let source_uri = Uri::try_from("https://100.0.0.1:7080/login.php").unwrap();
+
+        rewrite_response(&mut resp, &options, &source_uri).unwrap();
+
+        let cookie_headers: Vec<_> = resp
+            .headers()
+            .get_all(http::header::SET_COOKIE)
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+
+        assert_eq!(cookie_headers.len(), 1);
+        let cookie = Cookie::parse(cookie_headers[0].as_str()).unwrap();
+        assert_eq!(cookie.name(), "lsws_uid");
+        assert_eq!(cookie.value(), "abc");
+        assert_eq!(cookie.domain(), None);
+        assert_eq!(cookie.path(), Some("/"));
+        assert_eq!(cookie.http_only(), Some(true));
+        assert_eq!(cookie.secure(), Some(true));
+    }
+
+    fn rewrite_cookie(set_cookie: &str) -> Cookie<'static> {
+        let mut resp = poem::Response::builder()
+            .header(http::header::SET_COOKIE, set_cookie)
+            .body(());
+        let options = make_options("https://100.0.0.1:7080");
+        let source_uri = Uri::try_from("https://100.0.0.1:7080/index.php").unwrap();
+        rewrite_response(&mut resp, &options, &source_uri).unwrap();
+        let cookie_headers: Vec<_> = resp
+            .headers()
+            .get_all(http::header::SET_COOKIE)
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(cookie_headers.len(), 1);
+        Cookie::parse(cookie_headers[0].clone()).unwrap()
+    }
+
+    #[test]
+    fn rewrite_response_keeps_past_expiration() {
+        // A past-dated deletion cookie would otherwise drop the live session
+        // cookie and cause a login loop. https://github.com/warp-tech/warpgate/issues/2112
+        let cookie =
+            rewrite_cookie("lsws_uid=deleted; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+        assert_eq!(cookie.value(), "deleted");
+        assert!(matches!(
+            cookie.expires(),
+            Some(cookie::Expiration::DateTime(_))
+        ));
+    }
+
+    #[test]
+    fn rewrite_response_removes_future_expiration() {
+        // A genuine persistent cookie must keep the expiry the origin set.
+        let cookie = rewrite_cookie("lsws_uid=abc; Path=/; Expires=Tue, 01 Jan 2999 00:00:00 GMT");
+        assert_eq!(cookie.expires(), None);
+    }
 }

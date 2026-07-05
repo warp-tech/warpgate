@@ -1,7 +1,7 @@
 <script lang="ts">
     import { api, CredentialKind, PasswordState, type CredentialsState, type ExistingOtpCredential, type ExistingPublicKeyCredential, type ExistingCertificateCredential } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { deleteCertificateKey } from 'gateway/lib/certificateStore'
     import { faCertificate, faIdBadge, faKey, faKeyboard, faMobilePhone } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import PublicKeyCredentialModal from 'admin/PublicKeyCredentialModal.svelte'
@@ -10,8 +10,7 @@
     import CreateOtpModal from 'admin/CreateOtpModal.svelte'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import { Button } from '@sveltestrap/sveltestrap'
-    import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
+    import { Button, Alert, Tooltip } from '@sveltestrap/sveltestrap'
 
     let creds: CredentialsState | undefined = $state()
 
@@ -75,6 +74,7 @@
         if (confirm('Permanently revoke certificate?')) {
             creds!.certificates = creds!.certificates.filter(c => c.id !== credential.id)
             await api.revokeMyCertificate(credential)
+            await deleteCertificateKey(credential.id)
         }
     }
 </script>

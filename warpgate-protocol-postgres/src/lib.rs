@@ -10,53 +10,41 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use futures::TryStreamExt;
-use rustls::server::NoClientAuth;
+use futures::future::BoxFuture;
+use futures::{FutureExt, StreamExt};
 use rustls::ServerConfig;
+use rustls::server::NoClientAuth;
 use session::PostgresSession;
 use session_handle::PostgresSessionHandle;
 use socket2::{Socket, TcpKeepalive};
-use tracing::*;
+use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
+use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
-use warpgate_tls::{
-    ResolveServerCert, TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey,
-};
+use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
 pub struct PostgresProtocolServer {
     services: Services,
 }
 
 impl PostgresProtocolServer {
-    pub async fn new(services: &Services) -> Result<Self> {
-        Ok(PostgresProtocolServer {
+    pub fn new(services: &Services) -> Self {
+        Self {
             services: services.clone(),
-        })
+        }
     }
 }
 
 impl ProtocolServer for PostgresProtocolServer {
-    async fn run(self, address: ListenEndpoint) -> Result<()> {
-        let certificate_and_key = {
-            let config = self.services.config.lock().await;
-            let paths_rel_to = self.services.global_params.paths_relative_to();
-            let certificate_path = paths_rel_to.join(&config.store.postgres.certificate);
-            let key_path = paths_rel_to.join(&config.store.postgres.key);
-
-            TlsCertificateAndPrivateKey {
-                certificate: TlsCertificateBundle::from_file(&certificate_path)
-                    .await
-                    .with_context(|| {
-                        format!("reading SSL private key from '{}'", key_path.display())
-                    })?,
-                private_key: TlsPrivateKey::from_file(&key_path).await.with_context(|| {
-                    format!(
-                        "reading SSL certificate from '{}'",
-                        certificate_path.display()
-                    )
-                })?,
-            }
-        };
+    async fn bind(
+        self,
+        address: ListenEndpoint,
+        tls: Vec<TlsCertificateAndPrivateKey>,
+    ) -> Result<BoxFuture<'static, Result<()>>> {
+        let certificate_and_key = tls
+            .into_iter()
+            .next()
+            .context("PostgreSQL requires a TLS certificate and key")?;
 
         let tls_config = ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::aws_lc_rs::default_provider(),
@@ -71,65 +59,89 @@ impl ProtocolServer for PostgresProtocolServer {
             .tcp_accept_stream()
             .await
             .context("accepting connection")?;
-        loop {
-            let Some(stream) = listener.try_next().await? else {
-                return Ok(());
-            };
+        let services = self.services;
+        Ok(async move {
+            loop {
+                let Some(stream) = listener.next().await else {
+                    return Ok(());
+                };
 
-            let remote_address = stream.peer_addr().context("getting peer address")?;
-
-            // Enable TCP keepalive to prevent idle connections from timing out
-            // This is especially important during web auth approval wait
-            // Use socket2 to configure keepalive (tokio TcpStream doesn't expose it directly)
-            let socket = Socket::from(stream.into_std()?);
-            let keepalive = TcpKeepalive::new()
-                .with_time(Duration::from_secs(60)) // Start keepalive after 60s of inactivity
-                .with_interval(Duration::from_secs(10)) // Send probes every 10s
-                .with_retries(3); // 3 retries before considering dead
-            socket.set_tcp_keepalive(&keepalive)?;
-            socket.set_nodelay(true)?;
-            let stream = tokio::net::TcpStream::from_std(socket.into())?;
-
-            let tls_config = tls_config.clone();
-            let services = self.services.clone();
-            tokio::spawn(async move {
-                let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
-
-                let server_handle = State::register_session(
-                    &services.state,
-                    &crate::common::PROTOCOL_NAME,
-                    SessionStateInit {
-                        remote_address: Some(remote_address),
-                        handle: Box::new(session_handle),
-                    },
-                )
-                .await?;
-
-                let wrapped_stream = server_handle.lock().await.wrap_stream(stream).await?;
-
-                let session = PostgresSession::new(
-                    server_handle,
-                    services,
-                    wrapped_stream,
-                    tls_config,
-                    remote_address,
-                )
-                .await;
-
-                let span = session.make_logging_span();
-                tokio::select! {
-                    result = session.run().instrument(span) => match result {
-                        Ok(_) => info!("Session ended"),
-                        Err(e) => error!(error=%e, "Session failed"),
-                    },
-                    _ = abort_rx.recv() => {
-                        warn!("Session aborted by admin");
-                    },
+                if detect_port_knock(&stream).await {
+                    continue;
                 }
 
-                Ok::<(), anyhow::Error>(())
-            });
+                let Ok(remote_address) = stream.peer_addr() else {
+                    // already disconnected
+                    continue;
+                };
+
+                // Enable TCP keepalive to prevent idle connections from timing out
+                // This is especially important during web auth approval wait
+                // Use socket2 to configure keepalive (tokio TcpStream doesn't expose it directly)
+                let stream = (|| {
+                    let socket = Socket::from(stream.into_std()?);
+                    let keepalive = TcpKeepalive::new()
+                        .with_time(Duration::from_secs(60)) // Start keepalive after 60s of inactivity
+                        .with_interval(Duration::from_secs(10)) // Send probes every 10s
+                        .with_retries(3); // 3 retries before considering dead
+                    socket.set_tcp_keepalive(&keepalive)?;
+                    socket.set_tcp_nodelay(true)?;
+                    tokio::net::TcpStream::from_std(socket.into())
+                })();
+
+                let stream = match stream {
+                    Ok(stream) => stream,
+                    Err(error) => {
+                        warn!(%error, "Failed to set up an accepted connection");
+                        continue;
+                    }
+                };
+
+                let tls_config = tls_config.clone();
+                let services = services.clone();
+                tokio::spawn(async move {
+                    let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
+
+                    let server_handle = State::register_session(
+                        &services.state,
+                        &crate::common::PROTOCOL_NAME,
+                        SessionStateInit {
+                            remote_address: Some(remote_address),
+                            handle: Box::new(session_handle),
+                        },
+                    )
+                    .await?;
+
+                    let wrapped_stream = {
+                        let guard = server_handle.lock().await;
+                        guard.wrap_stream(stream).await?
+                    };
+
+                    let session = PostgresSession::new(
+                        server_handle,
+                        services,
+                        wrapped_stream,
+                        tls_config,
+                        remote_address,
+                    )
+                    .await;
+
+                    let span = session.make_logging_span();
+                    tokio::select! {
+                        result = session.run().instrument(span) => match result {
+                            Ok(()) => info!("Session ended"),
+                            Err(e) => error!(error=%e, "Session failed"),
+                        },
+                        _ = abort_rx.recv() => {
+                            warn!("Session aborted by admin");
+                        },
+                    }
+
+                    Ok::<(), anyhow::Error>(())
+                });
+            }
         }
+        .boxed())
     }
 
     fn name(&self) -> &'static str {

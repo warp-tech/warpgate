@@ -1,5 +1,5 @@
 <script lang="ts">
-    import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
+    import { Badge } from '@sveltestrap/sveltestrap'
     import type { KubernetesRecordingItem } from './lib/api'
     import { firstBy } from 'thenby'
     interface Props {
@@ -59,7 +59,8 @@
                         <tbody>
                             {#each item.responseBody.rows as row (row)}
                                 <tr>
-                                    {#each row.cells as cell (cell)}
+                                    <!-- eslint-disable-next-line svelte/require-each-key -->
+                                    {#each row.cells as cell}
                                         <td>{cell}</td>
                                     {/each}
                                 </tr>

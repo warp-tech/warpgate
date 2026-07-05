@@ -19,6 +19,7 @@
       "default": {
         "certificate": "",
         "cookie_max_age": "1day",
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:8888",
@@ -32,6 +33,7 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:8443",
@@ -41,6 +43,7 @@
     "log": {
       "$ref": "#/$defs/LogConfig",
       "default": {
+        "audit_retention": "11months 30days 3h 50m 24s",
         "format": "text",
         "retention": "7days",
         "send_to": null
@@ -49,8 +52,10 @@
     "mysql": {
       "$ref": "#/$defs/MySqlConfig",
       "default": {
+        "advertised_version": "8.0.3-Warpgate",
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:33306"
@@ -61,9 +66,21 @@
       "default": {
         "certificate": "",
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "key": "",
         "listen": "[::]:55432"
+      }
+    },
+    "rdp": {
+      "$ref": "#/$defs/RdpConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "external_host": null,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:3389"
       }
     },
     "recordings": {
@@ -77,6 +94,7 @@
       "$ref": "#/$defs/SshConfig",
       "default": {
         "enable": false,
+        "external_host": null,
         "external_port": null,
         "host_key_verification": "prompt",
         "inactivity_timeout": "5m",
@@ -90,6 +108,18 @@
       "default": [],
       "items": {
         "$ref": "#/$defs/SsoProviderConfig"
+      }
+    },
+    "vnc": {
+      "$ref": "#/$defs/VncConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "enable_ard_auth": false,
+        "external_host": null,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:5900"
       }
     }
   },
@@ -123,6 +153,13 @@
         "cookie_max_age": {
           "type": "string",
           "default": "1day"
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
@@ -170,6 +207,13 @@
           "type": "boolean",
           "default": false
         },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "external_port": {
           "type": [
             "integer",
@@ -200,6 +244,10 @@
     "LogConfig": {
       "type": "object",
       "properties": {
+        "audit_retention": {
+          "type": "string",
+          "default": "11months 30days 3h 50m 24s"
+        },
         "format": {
           "$ref": "#/$defs/LogFormat",
           "default": "text"
@@ -227,6 +275,11 @@
     "MySqlConfig": {
       "type": "object",
       "properties": {
+        "advertised_version": {
+          "description": "The server version advertised to clients during the handshake.\nWe can't auto-match the target's version since the target is only known\nafter the handshake, but clients use it to pick a protocol dialect.",
+          "type": "string",
+          "default": "8.0.3-Warpgate"
+        },
         "certificate": {
           "type": "string",
           "default": ""
@@ -234,6 +287,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
@@ -266,6 +326,13 @@
           "type": "boolean",
           "default": false
         },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "external_port": {
           "type": [
             "integer",
@@ -286,6 +353,44 @@
         }
       }
     },
+    "RdpConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": ""
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:3389"
+        }
+      }
+    },
     "RecordingsConfig": {
       "type": "object",
       "properties": {
@@ -298,6 +403,20 @@
           "default": "./data/recordings"
         }
       }
+    },
+    "RoleMapping": {
+      "description": "A role mapping value that accepts either a single role or a list of roles.\nIn YAML config: `\"group\": \"role\"` or `\"group\": [\"role1\", \"role2\"]`",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
     },
     "SniCertificateConfig": {
       "type": "object",
@@ -320,6 +439,13 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "external_port": {
           "type": [
@@ -373,15 +499,55 @@
         {
           "type": "object",
           "properties": {
-            "type": {
-              "type": "string",
-              "const": "google"
+            "admin_email": {
+              "description": "A Google Workspace admin email for domain-wide delegation",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "admin_role_mappings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/RoleMapping"
+              }
             },
             "client_id": {
               "type": "string"
             },
             "client_secret": {
               "type": "string"
+            },
+            "role_mappings": {
+              "description": "Maps Google group email addresses to Warpgate role names.\nUse \"*\" as a key to set a default role for any group not explicitly mapped.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/RoleMapping"
+              }
+            },
+            "service_account_email": {
+              "description": "Service account email for Google Directory API group lookups",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "service_account_key": {
+              "description": "PEM private key from the service account JSON key file",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "google"
             }
           },
           "required": [
@@ -393,10 +559,6 @@
         {
           "type": "object",
           "properties": {
-            "type": {
-              "type": "string",
-              "const": "apple"
-            },
             "client_id": {
               "type": "string"
             },
@@ -408,6 +570,10 @@
             },
             "team_id": {
               "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "apple"
             }
           },
           "required": [
@@ -421,10 +587,6 @@
         {
           "type": "object",
           "properties": {
-            "type": {
-              "type": "string",
-              "const": "azure"
-            },
             "client_id": {
               "type": "string"
             },
@@ -433,6 +595,10 @@
             },
             "tenant": {
               "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "azure"
             }
           },
           "required": [
@@ -445,10 +611,6 @@
         {
           "type": "object",
           "properties": {
-            "type": {
-              "type": "string",
-              "const": "custom"
-            },
             "additional_trusted_audiences": {
               "type": [
                 "array",
@@ -457,6 +619,21 @@
               "items": {
                 "type": "string"
               }
+            },
+            "admin_role_mappings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/RoleMapping"
+              }
+            },
+            "admin_roles_claim": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "client_id": {
               "type": "string"
@@ -473,8 +650,15 @@
                 "null"
               ],
               "additionalProperties": {
-                "type": "string"
+                "$ref": "#/$defs/RoleMapping"
               }
+            },
+            "roles_claim": {
+              "description": "OIDC claim to read group memberships from (e.g. \"groups\").\nIts values are mapped to roles via role_mappings / admin_role_mappings.\nWhen unset, the warpgate_roles / warpgate_admin_roles claims are used.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "scopes": {
               "type": "array",
@@ -485,6 +669,10 @@
             "trust_unknown_audiences": {
               "type": "boolean",
               "default": false
+            },
+            "type": {
+              "type": "string",
+              "const": "custom"
             }
           },
           "required": [
@@ -503,6 +691,21 @@
         "auto_create_users": {
           "type": "boolean",
           "default": false
+        },
+        "default_credential_policy": {
+          "description": "Default credential policy for auto-created users.\nKeys: \"http\", \"ssh\", \"mysql\", \"postgres\"\nValues: list of credential kinds e.g. [\"sso\"], [\"web\"], []"
+        },
+        "kubernetes": {
+          "description": "kubectl OIDC parameters for generating a kubelogin kubeconfig.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SsoProviderKubernetesConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "label": {
           "type": [
@@ -524,12 +727,106 @@
           "items": {
             "type": "string"
           }
+        },
+        "return_url_domain": {
+          "$ref": "#/$defs/SsoReturnUrlDomainPreference",
+          "default": "external_host"
+        },
+        "return_url_prefix": {
+          "$ref": "#/$defs/SsoProviderReturnUrlPrefix",
+          "default": "@"
         }
       },
       "required": [
         "name",
         "provider"
       ]
+    },
+    "SsoProviderKubernetesConfig": {
+      "type": "object",
+      "properties": {
+        "client_id": {
+          "description": "Public OIDC client id used by kubectl (kubelogin). Must be listed in the\nprovider's `additional_trusted_audiences`.",
+          "type": "string"
+        },
+        "client_secret": {
+          "description": "Optional client secret (only for confidential kubectl clients).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scopes": {
+          "description": "Extra scopes for kubelogin. Defaults to openid/email/profile when unset.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "client_id"
+      ]
+    },
+    "SsoProviderReturnUrlPrefix": {
+      "type": "string",
+      "enum": [
+        "@",
+        "_"
+      ]
+    },
+    "SsoReturnUrlDomainPreference": {
+      "type": "string",
+      "enum": [
+        "external_host",
+        "host_header"
+      ]
+    },
+    "VncConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": ""
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "enable_ard_auth": {
+          "description": "Enable Apple-DH (ARD / type 30) auth. It does not support TLS unlike VeNCrypt",
+          "type": "boolean",
+          "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:5900"
+        }
+      }
     }
   }
 }

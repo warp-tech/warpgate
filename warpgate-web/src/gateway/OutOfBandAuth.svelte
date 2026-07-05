@@ -1,8 +1,8 @@
 <script lang="ts">
     import { api, ApiAuthState, type AuthStateResponseInternal } from 'gateway/lib/api'
+    import { Alert } from '@sveltestrap/sveltestrap'
     import AsyncButton from 'common/AsyncButton.svelte'
     import RelativeDate from 'admin/RelativeDate.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
 
     interface Props {

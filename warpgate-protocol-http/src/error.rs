@@ -2,8 +2,9 @@ use http::StatusCode;
 use poem::IntoResponse;
 use tracing::error;
 
-pub fn error_page(e: poem::Error) -> impl IntoResponse {
+pub fn error_page(e: &poem::Error) -> impl IntoResponse {
     error!("{:?}", e);
+    let e = html_escape::encode_text(&e.to_string()).into_owned();
     poem::web::Html(format!(
         r#"<!DOCTYPE html>
         <style>

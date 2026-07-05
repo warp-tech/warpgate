@@ -1,19 +1,32 @@
 <script lang="ts">
     import { api, type ExistingApiToken } from 'gateway/lib/api'
     import Loadable from 'common/Loadable.svelte'
+    import { stringifyError } from 'common/errors'
     import { faKey } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import CreateApiTokenModal from './CreateApiTokenModal.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import CopyButton from 'common/CopyButton.svelte'
-    import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
+    import { Alert, Badge, Button } from '@sveltestrap/sveltestrap'
     import EmptyState from 'common/EmptyState.svelte'
-    import { Button } from '@sveltestrap/sveltestrap'
+    import { router } from 'svelte-spa-router'
+    import { parseHumantimeDuration } from 'common/duration'
+    import CopyableTextArea from 'common/CopyableTextArea.svelte'
 
     let tokens: ExistingApiToken[] = $state([])
     let creatingToken = $state(false)
     let lastCreatedSecret: string | undefined = $state()
+    let error: string | undefined = $state()
     const now = Date.now()
+
+    const urlParams = new URLSearchParams(router.querystring ?? '')
+    const autoCreate = urlParams.get('create') === 'true'
+    const paramLabel = urlParams.get('label') ?? ''
+    const paramExpiry = urlParams.get('expiry')
+
+    const initialExpiryMs = paramExpiry ? parseHumantimeDuration(paramExpiry) : undefined
+
+    if (autoCreate) {
+        creatingToken = true
+    }
 
     async function deleteToken (token: ExistingApiToken) {
         tokens = tokens.filter(c => c.id !== token.id)
@@ -22,9 +35,14 @@
     }
 
     async function createToken (label: string, expiry: Date) {
-        const { secret, token } = await api.createApiToken({ newApiToken : { label, expiry } })
-        lastCreatedSecret = secret
-        tokens = [...tokens, token]
+        try {
+            error = undefined
+            const { secret, token } = await api.createApiToken({ newApiToken : { label, expiry } })
+            lastCreatedSecret = secret
+            tokens = [...tokens, token]
+        } catch (err: any) {
+            error = await stringifyError(err)
+        }
     }
 </script>
 
@@ -36,14 +54,12 @@
     }}>Create token</Button>
 </div>
 
+{#if error}
+<Alert color="danger">{error}</Alert>
+{/if}
+
 {#if lastCreatedSecret}
-<Alert color="info">
-    <div>Your token - shown only once:</div>
-    <div class="d-flex align-items-center mt-2">
-        <code style="min-width: 0">{lastCreatedSecret}</code>
-        <CopyButton class="ms-auto" text={lastCreatedSecret} />
-    </div>
-</Alert>
+    <CopyableTextArea class="border-warning" label="Your new token (shown only once)" value={lastCreatedSecret} />
 {/if}
 
 <Loadable promise={api.getMyApiTokens()} bind:data={tokens}>
@@ -84,5 +100,7 @@
 <CreateApiTokenModal
     bind:isOpen={creatingToken}
     create={createToken}
+    initialLabel={paramLabel}
+    {initialExpiryMs}
 />
 {/if}

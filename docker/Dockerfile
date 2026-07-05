@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.3-labs
 # hadolint global ignore=DL3008
-FROM rust:1.93.0-bullseye@sha256:3ebcc2d6d71fb93a2967e35723902c51dd87dbb36f66f795a58d7921553fbcd4 AS build
+FROM rust:1.96.0-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -9,7 +9,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates-java nodejs openjdk-17-jdk \
     && rm -rf /var/lib/apt/lists/* \
-    && cargo install just
+    && cargo install --locked just@1.4.0
 
 COPY . /opt/warpgate
 
@@ -24,9 +24,10 @@ WORKDIR /opt/warpgate
 RUN just npm ci \
     && just openapi \
     && just npm run build \
+    && just build-rdp-helper \
     && cargo build --features mysql,postgres --release
 
-FROM debian:bullseye-20260202@sha256:a50c3ed0200d2f58736c3bb02b4a9f174f3d6d3bd866f2f640375f1e82c61348
+FROM debian:bullseye-20260623@sha256:e7100042ddfd3c1fb9d4a5bf15acbdb1058d7bb3340142916d3413a5c001fc89
 LABEL maintainer=heywoodlh
 ARG USER_ID=1000
 

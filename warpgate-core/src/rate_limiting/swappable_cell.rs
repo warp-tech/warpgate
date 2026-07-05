@@ -2,8 +2,8 @@ use governor::clock::QuantaInstant;
 use tokio::sync::watch;
 use warpgate_common::WarpgateError;
 
-use super::shared_limiter::SharedWarpgateRateLimiter;
 use super::RateLimiterDirection;
+use super::shared_limiter::SharedWarpgateRateLimiter;
 
 pub struct SwappableLimiterCellHandle {
     sender: watch::Sender<Option<SharedWarpgateRateLimiter>>,
@@ -41,9 +41,9 @@ impl SwappableLimiterCell {
     }
 
     fn _maybe_update(&mut self) {
-        let _ref = self.receiver.borrow_and_update();
-        if _ref.has_changed() {
-            self.inner = _ref.as_ref().cloned();
+        let ref_ = self.receiver.borrow_and_update();
+        if ref_.has_changed() {
+            self.inner = ref_.as_ref().cloned();
         }
     }
 

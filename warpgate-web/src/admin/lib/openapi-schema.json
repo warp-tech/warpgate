@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.20.0-37-g94ecc95e-modified"
+    "version": "v0.25.5-23-g57c54df3-modified"
   },
   "servers": [
     {
@@ -50,6 +50,16 @@
             "name": "logged_in_only",
             "schema": {
               "type": "boolean"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "username",
+            "schema": {
+              "type": "string"
             },
             "in": "query",
             "required": false,
@@ -283,6 +293,14 @@
             }
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_kubernetes_recording"
       }
     },
@@ -444,9 +462,6 @@
               }
             }
           },
-          "403": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
@@ -477,9 +492,6 @@
         ],
         "responses": {
           "204": {
-            "description": ""
-          },
-          "403": {
             "description": ""
           },
           "404": {
@@ -585,6 +597,248 @@
         "operationId": "get_role_users"
       }
     },
+    "/admin-roles": {
+      "get": {
+        "parameters": [
+          {
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminRole"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_admin_roles"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRoleDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRole"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "create_admin_role"
+      }
+    },
+    "/admin-roles/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRole"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_admin_role"
+      },
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRoleDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRole"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_admin_role"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_admin_role"
+      }
+    },
+    "/admin-roles/{id}/users": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/User"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_admin_role_users"
+      }
+    },
     "/tickets": {
       "get": {
         "responses": {
@@ -634,6 +888,9 @@
               }
             }
           },
+          "401": {
+            "description": ""
+          },
           "400": {
             "description": "",
             "content": {
@@ -643,6 +900,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -688,6 +948,138 @@
           }
         ],
         "operationId": "delete_ticket"
+      }
+    },
+    "/ticket-requests": {
+      "get": {
+        "parameters": [
+          {
+            "name": "status",
+            "schema": {
+              "$ref": "#/components/schemas/TicketRequestStatus"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TicketRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ticket_requests"
+      }
+    },
+    "/ticket-requests/{id}/approve": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketRequest"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "approve_ticket_request"
+      }
+    },
+    "/ticket-requests/{id}/deny": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/DenyTicketRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketRequest"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "deny_ticket_request"
       }
     },
     "/ssh/known-hosts": {
@@ -1065,9 +1457,6 @@
           "204": {
             "description": ""
           },
-          "403": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
@@ -1245,9 +1634,6 @@
         ],
         "responses": {
           "204": {
-            "description": ""
-          },
-          "403": {
             "description": ""
           },
           "404": {
@@ -1780,6 +2166,7 @@
     },
     "/users/{id}/roles": {
       "get": {
+        "summary": "Get all role assignments for a user with expiry information",
         "parameters": [
           {
             "name": "id",
@@ -1801,7 +2188,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Role"
+                    "$ref": "#/components/schemas/UserRoleAssignmentResponse"
                   }
                 }
               }
@@ -1823,6 +2210,271 @@
       }
     },
     "/users/{id}/roles/{role_id}": {
+      "get": {
+        "summary": "Get a single user role assignment with details",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_user_role"
+      },
+      "post": {
+        "summary": "Add a role to a user with optional expiry",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AddUserRoleRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "add_user_role"
+      },
+      "delete": {
+        "summary": "Remove a role from a user (soft delete - sets revoked_at)",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_user_role"
+      },
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "role_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoleAssignmentResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_user_role"
+      }
+    },
+    "/users/{id}/admin-roles": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminRole"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_user_admin_roles"
+      }
+    },
+    "/users/{id}/admin-roles/{role_id}": {
       "post": {
         "parameters": [
           {
@@ -1854,6 +2506,9 @@
           },
           "409": {
             "description": ""
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -1864,7 +2519,7 @@
             "CookieSecurityScheme": []
           }
         ],
-        "operationId": "add_user_role"
+        "operationId": "add_user_admin_role"
       },
       "delete": {
         "parameters": [
@@ -1907,7 +2562,7 @@
             "CookieSecurityScheme": []
           }
         ],
-        "operationId": "delete_user_role"
+        "operationId": "delete_user_admin_role"
       }
     },
     "/users/{user_id}/credentials/passwords": {
@@ -1981,6 +2636,22 @@
               "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/ExistingPasswordCredential"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PasswordPolicyViolation"
+                  }
                 }
               }
             }
@@ -2116,6 +2787,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -2308,6 +2982,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           },
           "403": {
             "description": "",
@@ -2530,6 +3207,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -3017,6 +3697,43 @@
         "operationId": "update_parameters"
       }
     },
+    "/parameters/analytics-preview": {
+      "get": {
+        "parameters": [
+          {
+            "name": "normal",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsPreview"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_analytics_preview"
+      }
+    },
     "/ssh/check-host-key": {
       "post": {
         "requestBody": {
@@ -3060,6 +3777,152 @@
           }
         ],
         "operationId": "check_ssh_host_key"
+      }
+    },
+    "/login-protection/blocked-ips": {
+      "get": {
+        "summary": "List all currently blocked IPs.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BlockedIpInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "list_blocked_ips"
+      },
+      "delete": {
+        "summary": "Unblock an IP address.",
+        "description": "The IP is taken from the request body (rather than a path segment or\nquery parameter) to avoid encoding ambiguity with IPv6 addresses.",
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UnblockIpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "unblock_ip"
+      }
+    },
+    "/login-protection/locked-users": {
+      "get": {
+        "summary": "List all currently locked user accounts.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LockedUserInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "list_locked_users"
+      }
+    },
+    "/login-protection/locked-users/{username}": {
+      "delete": {
+        "summary": "Unlock a user account by username.",
+        "parameters": [
+          {
+            "name": "username",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "unlock_user"
+      }
+    },
+    "/login-protection/status": {
+      "get": {
+        "summary": "Get security status summary (blocked IPs, locked users, failure counts).",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_security_status"
       }
     },
     "/users/{user_id}/credentials/certificates": {
@@ -3136,6 +3999,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": ""
           }
         },
         "security": [
@@ -3282,6 +4148,255 @@
           }
         }
       },
+      "AddUserRoleRequest": {
+        "type": "object",
+        "title": "AddUserRoleRequest",
+        "description": "Request to add a user role with optional expiry",
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "default": null
+          }
+        }
+      },
+      "AdminRole": {
+        "type": "object",
+        "title": "AdminRole",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "targets_create",
+          "targets_edit",
+          "targets_delete",
+          "users_create",
+          "users_edit",
+          "users_delete",
+          "access_roles_create",
+          "access_roles_edit",
+          "access_roles_delete",
+          "access_roles_assign",
+          "sessions_view",
+          "sessions_terminate",
+          "recordings_view",
+          "tickets_create",
+          "tickets_delete",
+          "config_edit",
+          "admin_roles_manage",
+          "ticket_requests_manage"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "targets_create": {
+            "type": "boolean"
+          },
+          "targets_edit": {
+            "type": "boolean"
+          },
+          "targets_delete": {
+            "type": "boolean"
+          },
+          "users_create": {
+            "type": "boolean"
+          },
+          "users_edit": {
+            "type": "boolean"
+          },
+          "users_delete": {
+            "type": "boolean"
+          },
+          "access_roles_create": {
+            "type": "boolean"
+          },
+          "access_roles_edit": {
+            "type": "boolean"
+          },
+          "access_roles_delete": {
+            "type": "boolean"
+          },
+          "access_roles_assign": {
+            "type": "boolean"
+          },
+          "sessions_view": {
+            "type": "boolean"
+          },
+          "sessions_terminate": {
+            "type": "boolean"
+          },
+          "recordings_view": {
+            "type": "boolean"
+          },
+          "tickets_create": {
+            "type": "boolean"
+          },
+          "tickets_delete": {
+            "type": "boolean"
+          },
+          "config_edit": {
+            "type": "boolean"
+          },
+          "admin_roles_manage": {
+            "type": "boolean"
+          },
+          "ticket_requests_manage": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AdminRoleDataRequest": {
+        "type": "object",
+        "title": "AdminRoleDataRequest",
+        "required": [
+          "name",
+          "targets_create",
+          "targets_edit",
+          "targets_delete",
+          "users_create",
+          "users_edit",
+          "users_delete",
+          "access_roles_create",
+          "access_roles_edit",
+          "access_roles_delete",
+          "access_roles_assign",
+          "sessions_view",
+          "sessions_terminate",
+          "recordings_view",
+          "tickets_create",
+          "tickets_delete",
+          "config_edit",
+          "admin_roles_manage"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "targets_create": {
+            "type": "boolean"
+          },
+          "targets_edit": {
+            "type": "boolean"
+          },
+          "targets_delete": {
+            "type": "boolean"
+          },
+          "users_create": {
+            "type": "boolean"
+          },
+          "users_edit": {
+            "type": "boolean"
+          },
+          "users_delete": {
+            "type": "boolean"
+          },
+          "access_roles_create": {
+            "type": "boolean"
+          },
+          "access_roles_edit": {
+            "type": "boolean"
+          },
+          "access_roles_delete": {
+            "type": "boolean"
+          },
+          "access_roles_assign": {
+            "type": "boolean"
+          },
+          "sessions_view": {
+            "type": "boolean"
+          },
+          "sessions_terminate": {
+            "type": "boolean"
+          },
+          "recordings_view": {
+            "type": "boolean"
+          },
+          "tickets_create": {
+            "type": "boolean"
+          },
+          "tickets_delete": {
+            "type": "boolean"
+          },
+          "config_edit": {
+            "type": "boolean"
+          },
+          "admin_roles_manage": {
+            "type": "boolean"
+          },
+          "ticket_requests_manage": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AnalyticsConsent": {
+        "type": "string",
+        "description": "Whether the instance reports anonymous usage analytics, and at which\npayload level. `Undecided` triggers the one-time opt-in prompt in the admin\nUI; the instance never reports until the choice is made.",
+        "enum": [
+          "Undecided",
+          "Off",
+          "On"
+        ]
+      },
+      "AnalyticsPreview": {
+        "type": "object",
+        "title": "AnalyticsPreview",
+        "required": [
+          "url",
+          "payload"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The target URL the report would be POSTed to."
+          },
+          "payload": {
+            "type": "string",
+            "description": "Pretty-printed JSON request body that would be sent."
+          }
+        }
+      },
+      "BlockedIpInfo": {
+        "type": "object",
+        "title": "BlockedIpInfo",
+        "required": [
+          "ip_address",
+          "blocked_at",
+          "expires_at",
+          "block_count",
+          "reason"
+        ],
+        "properties": {
+          "ip_address": {
+            "type": "string"
+          },
+          "blocked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "block_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "BootstrapThemeColor": {
         "type": "string",
         "enum": [
@@ -3299,16 +4414,12 @@
         "type": "object",
         "title": "CheckSshHostKeyRequest",
         "required": [
-          "host",
-          "port"
+          "target_id"
         ],
         "properties": {
-          "host": {
-            "type": "string"
-          },
-          "port": {
-            "type": "integer",
-            "format": "uint16"
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -3409,13 +4520,17 @@
       "CreateTicketRequest": {
         "type": "object",
         "title": "CreateTicketRequest",
-        "required": [
-          "username",
-          "target_name"
-        ],
         "properties": {
           "username": {
             "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           },
           "target_name": {
             "type": "string"
@@ -3458,6 +4573,93 @@
           "Sso",
           "WebUserApproval"
         ]
+      },
+      "DatabaseTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetPasswordAuth"
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetIamRoleAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Password": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetPasswordAuth",
+            "IamRole": "#/components/schemas/DatabaseTargetAuth_DatabaseTargetIamRoleAuth"
+          }
+        }
+      },
+      "DatabaseTargetAuth_DatabaseTargetIamRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "IamRole"
+                ],
+                "example": "IamRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseTargetIamRoleAuth"
+          }
+        ]
+      },
+      "DatabaseTargetAuth_DatabaseTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseTargetPasswordAuth"
+          }
+        ]
+      },
+      "DatabaseTargetIamRoleAuth": {
+        "type": "object",
+        "title": "DatabaseTargetIamRoleAuth"
+      },
+      "DatabaseTargetPasswordAuth": {
+        "type": "object",
+        "title": "DatabaseTargetPasswordAuth",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "DenyTicketRequestBody": {
+        "type": "object",
+        "title": "DenyTicketRequestBody",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
       },
       "ExistingCertificateCredential": {
         "type": "object",
@@ -3588,6 +4790,21 @@
           },
           "search": {
             "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "related_users": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "related_access_roles": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "related_admin_roles": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -3675,13 +4892,17 @@
           },
           {
             "$ref": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetCertificateAuth"
+          },
+          {
+            "$ref": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetIamRoleAuth"
           }
         ],
         "discriminator": {
           "propertyName": "kind",
           "mapping": {
             "Token": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetTokenAuth",
-            "Certificate": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetCertificateAuth"
+            "Certificate": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetCertificateAuth",
+            "IamRole": "#/components/schemas/KubernetesTargetAuth_KubernetesTargetIamRoleAuth"
           }
         }
       },
@@ -3704,6 +4925,28 @@
           },
           {
             "$ref": "#/components/schemas/KubernetesTargetCertificateAuth"
+          }
+        ]
+      },
+      "KubernetesTargetAuth_KubernetesTargetIamRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "IamRole"
+                ],
+                "example": "IamRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/KubernetesTargetIamRoleAuth"
           }
         ]
       },
@@ -3744,6 +4987,10 @@
             "type": "string"
           }
         }
+      },
+      "KubernetesTargetIamRoleAuth": {
+        "type": "object",
+        "title": "KubernetesTargetIamRoleAuth"
       },
       "KubernetesTargetTokenAuth": {
         "type": "object",
@@ -3862,12 +5109,38 @@
           "SamAccountName"
         ]
       },
+      "LockedUserInfo": {
+        "type": "object",
+        "title": "LockedUserInfo",
+        "required": [
+          "username",
+          "locked_at",
+          "reason"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "locked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "LogEntry": {
         "type": "object",
         "title": "LogEntry",
         "required": [
           "id",
           "text",
+          "target",
           "values",
           "timestamp",
           "session_id"
@@ -3880,6 +5153,9 @@
           "text": {
             "type": "string"
           },
+          "target": {
+            "type": "string"
+          },
           "values": {},
           "timestamp": {
             "type": "string",
@@ -3890,6 +5166,15 @@
             "format": "uuid"
           },
           "username": {
+            "type": "string"
+          },
+          "related_users": {
+            "type": "string"
+          },
+          "related_access_roles": {
+            "type": "string"
+          },
+          "related_admin_roles": {
             "type": "string"
           }
         }
@@ -3981,9 +5266,6 @@
       "ParameterUpdate": {
         "type": "object",
         "title": "ParameterUpdate",
-        "required": [
-          "allow_own_credential_management"
-        ],
         "properties": {
           "allow_own_credential_management": {
             "type": "boolean"
@@ -3999,6 +5281,110 @@
             "type": "boolean"
           },
           "ssh_client_auth_keyboard_interactive": {
+            "type": "boolean"
+          },
+          "password_login_mode": {
+            "$ref": "#/components/schemas/PasswordLoginMode"
+          },
+          "ticket_self_service_enabled": {
+            "type": "boolean"
+          },
+          "ticket_auto_approve_existing_access": {
+            "type": "boolean"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
+          },
+          "ticket_require_description": {
+            "type": "boolean"
+          },
+          "ticket_request_show_all_targets": {
+            "type": "boolean"
+          },
+          "target_click_action": {
+            "$ref": "#/components/schemas/TargetClickAction"
+          },
+          "show_session_menu": {
+            "type": "boolean"
+          },
+          "password_policy": {
+            "$ref": "#/components/schemas/PasswordPolicy"
+          },
+          "max_api_token_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "record_scp": {
+            "type": "boolean"
+          },
+          "login_protection_enabled": {
+            "type": "boolean"
+          },
+          "login_protection_retention_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_base_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_block_duration_multiplier": {
+            "type": "number",
+            "format": "double"
+          },
+          "lp_ip_max_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_cooldown_reset_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_auto_unlock": {
+            "type": "boolean"
+          },
+          "lp_user_lockout_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_exempt_admins": {
+            "type": "boolean"
+          },
+          "ssh_banner": {
+            "type": "string"
+          },
+          "web_clients_enabled": {
+            "type": "boolean"
+          },
+          "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "analytics_consent": {
+            "$ref": "#/components/schemas/AnalyticsConsent"
+          },
+          "analytics_normal": {
             "type": "boolean"
           }
         }
@@ -4010,7 +5396,35 @@
           "allow_own_credential_management",
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
-          "ssh_client_auth_keyboard_interactive"
+          "ssh_client_auth_keyboard_interactive",
+          "password_login_mode",
+          "minimize_password_login",
+          "ticket_self_service_enabled",
+          "ticket_auto_approve_existing_access",
+          "ticket_require_description",
+          "ticket_request_show_all_targets",
+          "target_click_action",
+          "show_session_menu",
+          "password_policy",
+          "record_scp",
+          "login_protection_enabled",
+          "login_protection_retention_seconds",
+          "lp_ip_max_attempts",
+          "lp_ip_time_window_seconds",
+          "lp_ip_base_block_duration_seconds",
+          "lp_ip_block_duration_multiplier",
+          "lp_ip_max_block_duration_seconds",
+          "lp_ip_cooldown_reset_seconds",
+          "lp_user_max_attempts",
+          "lp_user_time_window_seconds",
+          "lp_user_auto_unlock",
+          "lp_user_lockout_duration_seconds",
+          "lp_user_exempt_admins",
+          "ssh_banner",
+          "web_ssh_enabled",
+          "web_clients_enabled",
+          "analytics_consent",
+          "analytics_normal"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4028,6 +5442,224 @@
           },
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
+          },
+          "password_login_mode": {
+            "$ref": "#/components/schemas/PasswordLoginMode"
+          },
+          "minimize_password_login": {
+            "type": "boolean",
+            "description": "Deprecated in 0.26: superseded by `password_login_mode`"
+          },
+          "ticket_self_service_enabled": {
+            "type": "boolean"
+          },
+          "ticket_auto_approve_existing_access": {
+            "type": "boolean"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
+          },
+          "ticket_require_description": {
+            "type": "boolean"
+          },
+          "ticket_request_show_all_targets": {
+            "type": "boolean"
+          },
+          "target_click_action": {
+            "$ref": "#/components/schemas/TargetClickAction"
+          },
+          "show_session_menu": {
+            "type": "boolean"
+          },
+          "password_policy": {
+            "$ref": "#/components/schemas/PasswordPolicy"
+          },
+          "max_api_token_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "record_scp": {
+            "type": "boolean"
+          },
+          "login_protection_enabled": {
+            "type": "boolean"
+          },
+          "login_protection_retention_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_base_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_block_duration_multiplier": {
+            "type": "number",
+            "format": "double"
+          },
+          "lp_ip_max_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_cooldown_reset_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_auto_unlock": {
+            "type": "boolean"
+          },
+          "lp_user_lockout_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_exempt_admins": {
+            "type": "boolean"
+          },
+          "ssh_banner": {
+            "type": "string"
+          },
+          "web_ssh_enabled": {
+            "type": "boolean",
+            "description": "Deprecated in 0.27: superseded by `web_clients_enabled`"
+          },
+          "web_clients_enabled": {
+            "type": "boolean"
+          },
+          "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "analytics_consent": {
+            "$ref": "#/components/schemas/AnalyticsConsent"
+          },
+          "analytics_normal": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PasswordLoginMode": {
+        "type": "string",
+        "description": "How the password login form is presented on the gateway login page.",
+        "enum": [
+          "Enabled",
+          "Minimized",
+          "Disabled"
+        ]
+      },
+      "PasswordPolicy": {
+        "type": "object",
+        "title": "PasswordPolicy",
+        "description": "Rules that a password must satisfy.",
+        "required": [
+          "min_length",
+          "require_uppercase",
+          "require_lowercase",
+          "require_digits",
+          "require_special"
+        ],
+        "properties": {
+          "min_length": {
+            "type": "integer",
+            "format": "uint32",
+            "description": "Minimum number of characters (0 = no requirement)."
+          },
+          "require_uppercase": {
+            "type": "boolean"
+          },
+          "require_lowercase": {
+            "type": "boolean"
+          },
+          "require_digits": {
+            "type": "boolean"
+          },
+          "require_special": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PasswordPolicyViolation": {
+        "type": "string",
+        "description": "A single rule that was violated.",
+        "enum": [
+          "TooShort",
+          "MissingUppercase",
+          "MissingLowercase",
+          "MissingDigit",
+          "MissingSpecial"
+        ]
+      },
+      "PostgresProtocolVersion": {
+        "type": "string",
+        "enum": [
+          "3.0",
+          "3.2"
+        ]
+      },
+      "RdpTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RdpTargetAuth_RdpTargetPasswordAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Password": "#/components/schemas/RdpTargetAuth_RdpTargetPasswordAuth"
+          }
+        }
+      },
+      "RdpTargetAuth_RdpTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/RdpTargetPasswordAuth"
+          }
+        ]
+      },
+      "RdpTargetPasswordAuth": {
+        "type": "object",
+        "title": "RdpTargetPasswordAuth",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
           }
         }
       },
@@ -4040,7 +5672,8 @@
           "started",
           "session_id",
           "kind",
-          "metadata"
+          "metadata",
+          "generation"
         ],
         "properties": {
           "id": {
@@ -4067,6 +5700,11 @@
           },
           "metadata": {
             "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Storage layout: 1 = single legacy file, 2 = folder (`data.ndjson` [+ desktop\n`index.json`]). Defaults to 1 for rows created before the folder layout."
           }
         }
       },
@@ -4075,7 +5713,8 @@
         "enum": [
           "Terminal",
           "Traffic",
-          "Kubernetes"
+          "Kubernetes",
+          "Desktop"
         ]
       },
       "Role": {
@@ -4084,7 +5723,8 @@
         "required": [
           "id",
           "name",
-          "description"
+          "description",
+          "is_default"
         ],
         "properties": {
           "id": {
@@ -4096,6 +5736,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
           }
         }
       },
@@ -4111,6 +5754,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
           }
         }
       },
@@ -4168,15 +5814,41 @@
           },
           {
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         ],
         "discriminator": {
           "propertyName": "kind",
           "mapping": {
             "Password": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth",
-            "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
+            "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth",
+            "IamRole": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         }
+      },
+      "SSHTargetAuth_SshTargetIamRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "IamRole"
+                ],
+                "example": "IamRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetIamRoleAuth"
+          }
+        ]
       },
       "SSHTargetAuth_SshTargetPasswordAuth": {
         "allOf": [
@@ -4222,6 +5894,34 @@
           }
         ]
       },
+      "SecurityStatus": {
+        "type": "object",
+        "title": "SecurityStatus",
+        "required": [
+          "blocked_ip_count",
+          "locked_user_count",
+          "failed_attempts_last_hour",
+          "failed_attempts_last_24h"
+        ],
+        "properties": {
+          "blocked_ip_count": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "locked_user_count": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "failed_attempts_last_hour": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "failed_attempts_last_24h": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
       "SessionSnapshot": {
         "type": "object",
         "title": "SessionSnapshot",
@@ -4258,6 +5958,10 @@
           }
         }
       },
+      "SshTargetIamRoleAuth": {
+        "type": "object",
+        "title": "SshTargetIamRoleAuth"
+      },
       "SshTargetPasswordAuth": {
         "type": "object",
         "title": "SshTargetPasswordAuth",
@@ -4282,7 +5986,9 @@
           "name",
           "description",
           "allow_roles",
-          "options"
+          "options",
+          "ticket_requests_disabled",
+          "ticket_require_approval"
         ],
         "properties": {
           "id": {
@@ -4311,8 +6017,29 @@
           "group_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ticket_requests_disabled": {
+            "type": "boolean"
+          },
+          "ticket_require_approval": {
+            "type": "boolean"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
           }
         }
+      },
+      "TargetClickAction": {
+        "type": "string",
+        "enum": [
+          "Connect",
+          "ShowInstructions"
+        ]
       },
       "TargetDataRequest": {
         "type": "object",
@@ -4338,6 +6065,20 @@
           "group_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ticket_requests_disabled": {
+            "type": "boolean"
+          },
+          "ticket_require_approval": {
+            "type": "boolean"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
           }
         }
       },
@@ -4413,15 +6154,11 @@
         "title": "TargetKubernetesOptions",
         "required": [
           "cluster_url",
-          "namespace",
           "tls",
           "auth"
         ],
         "properties": {
           "cluster_url": {
-            "type": "string"
-          },
-          "namespace": {
             "type": "string"
           },
           "tls": {
@@ -4452,8 +6189,13 @@
           "username": {
             "type": "string"
           },
+          "auth": {
+            "$ref": "#/components/schemas/DatabaseTargetAuth"
+          },
           "password": {
-            "type": "string"
+            "type": "string",
+            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
+            "deprecated": true
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
@@ -4482,7 +6224,10 @@
             "$ref": "#/components/schemas/TargetOptions_TargetPostgresOptions"
           },
           {
-            "$ref": "#/components/schemas/TargetOptions_TargetWebAdminOptions"
+            "$ref": "#/components/schemas/TargetOptions_TargetVncOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptions_TargetRdpOptions"
           }
         ],
         "discriminator": {
@@ -4493,7 +6238,8 @@
             "Kubernetes": "#/components/schemas/TargetOptions_TargetKubernetesOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
             "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
-            "WebAdmin": "#/components/schemas/TargetOptions_TargetWebAdminOptions"
+            "Vnc": "#/components/schemas/TargetOptions_TargetVncOptions",
+            "Rdp": "#/components/schemas/TargetOptions_TargetRdpOptions"
           }
         }
       },
@@ -4585,6 +6331,28 @@
           }
         ]
       },
+      "TargetOptions_TargetRdpOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Rdp"
+                ],
+                "example": "Rdp"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetRdpOptions"
+          }
+        ]
+      },
       "TargetOptions_TargetSSHOptions": {
         "allOf": [
           {
@@ -4607,7 +6375,7 @@
           }
         ]
       },
-      "TargetOptions_TargetWebAdminOptions": {
+      "TargetOptions_TargetVncOptions": {
         "allOf": [
           {
             "type": "object",
@@ -4618,14 +6386,14 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "WebAdmin"
+                  "Vnc"
                 ],
-                "example": "WebAdmin"
+                "example": "Vnc"
               }
             }
           },
           {
-            "$ref": "#/components/schemas/TargetWebAdminOptions"
+            "$ref": "#/components/schemas/TargetVncOptions"
           }
         ]
       },
@@ -4649,8 +6417,13 @@
           "username": {
             "type": "string"
           },
+          "auth": {
+            "$ref": "#/components/schemas/DatabaseTargetAuth"
+          },
           "password": {
-            "type": "string"
+            "type": "string",
+            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
+            "deprecated": true
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
@@ -4660,6 +6433,42 @@
           },
           "default_database_name": {
             "type": "string"
+          },
+          "protocol_version": {
+            "$ref": "#/components/schemas/PostgresProtocolVersion"
+          }
+        }
+      },
+      "TargetRdpOptions": {
+        "type": "object",
+        "title": "TargetRdpOptions",
+        "required": [
+          "host",
+          "port",
+          "username",
+          "auth",
+          "verify_tls"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "username": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/RdpTargetAuth"
+          },
+          "verify_tls": {
+            "type": "boolean",
+            "description": "Verify the RDP server's TLS certificate against the system root store.\nRDP servers commonly use self-signed certificates, so this is off by default."
           }
         }
       },
@@ -4688,12 +6497,33 @@
           },
           "auth": {
             "$ref": "#/components/schemas/SSHTargetAuth"
+          },
+          "jump_host": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
-      "TargetWebAdminOptions": {
+      "TargetVncOptions": {
         "type": "object",
-        "title": "TargetWebAdminOptions"
+        "title": "TargetVncOptions",
+        "required": [
+          "host",
+          "port",
+          "auth"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/VncTargetAuth"
+          }
+        }
       },
       "TestLdapServerRequest": {
         "type": "object",
@@ -4755,13 +6585,20 @@
         "title": "Ticket",
         "required": [
           "id",
+          "user_id",
           "username",
           "description",
+          "target_id",
           "target",
+          "self_service",
           "created"
         ],
         "properties": {
           "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
             "type": "string",
             "format": "uuid"
           },
@@ -4771,12 +6608,19 @@
           "description": {
             "type": "string"
           },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "target": {
             "type": "string"
           },
           "uses_left": {
             "type": "integer",
             "format": "int16"
+          },
+          "self_service": {
+            "type": "boolean"
           },
           "expiry": {
             "type": "string",
@@ -4804,6 +6648,69 @@
           }
         }
       },
+      "TicketRequest": {
+        "type": "object",
+        "title": "TicketRequest",
+        "required": [
+          "id",
+          "user_id",
+          "target_id",
+          "description",
+          "status",
+          "created"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requested_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketRequestStatus"
+          },
+          "resolved_by_user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deny_reason": {
+            "type": "string"
+          }
+        }
+      },
+      "TicketRequestStatus": {
+        "type": "string",
+        "enum": [
+          "Pending",
+          "Approved",
+          "Denied"
+        ]
+      },
       "Tls": {
         "type": "object",
         "title": "Tls",
@@ -4827,6 +6734,19 @@
           "Preferred",
           "Required"
         ]
+      },
+      "UnblockIpRequest": {
+        "type": "object",
+        "title": "UnblockIpRequest",
+        "required": [
+          "ip"
+        ],
+        "properties": {
+          "ip": {
+            "type": "string",
+            "description": "IP address to unblock (IPv4 or IPv6)."
+          }
+        }
       },
       "UpdateCertificateCredential": {
         "type": "object",
@@ -4903,6 +6823,18 @@
           }
         }
       },
+      "UpdateUserRoleRequest": {
+        "type": "object",
+        "title": "UpdateUserRoleRequest",
+        "description": "Request to update user role expiry",
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The new expiry timestamp, or null to remove expiry (make permanent)"
+          }
+        }
+      },
       "User": {
         "type": "object",
         "title": "User",
@@ -4932,6 +6864,12 @@
           "ldap_server_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "allowed_ip_ranges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -4954,6 +6892,12 @@
           "rate_limit_bytes_per_second": {
             "type": "integer",
             "format": "uint32"
+          },
+          "allowed_ip_ranges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -4990,6 +6934,141 @@
             "items": {
               "$ref": "#/components/schemas/CredentialKind"
             }
+          },
+          "vnc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "rdp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          }
+        }
+      },
+      "UserRoleAssignmentResponse": {
+        "type": "object",
+        "title": "UserRoleAssignmentResponse",
+        "description": "Response containing user role assignment with expiry info.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "is_expired",
+          "is_active"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Role ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Role name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Role description"
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the role was granted"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this role assignment expires (null = permanent)"
+          },
+          "is_expired": {
+            "type": "boolean",
+            "description": "Whether this assignment has expired"
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "Whether this assignment is currently active (not expired, not revoked)"
+          }
+        }
+      },
+      "VncTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VncTargetAuth_VncTargetNoneAuth"
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetAuth_VncTargetPasswordAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "None": "#/components/schemas/VncTargetAuth_VncTargetNoneAuth",
+            "Password": "#/components/schemas/VncTargetAuth_VncTargetPasswordAuth"
+          }
+        }
+      },
+      "VncTargetAuth_VncTargetNoneAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "None"
+                ],
+                "example": "None"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetNoneAuth"
+          }
+        ]
+      },
+      "VncTargetAuth_VncTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetPasswordAuth"
+          }
+        ]
+      },
+      "VncTargetNoneAuth": {
+        "type": "object",
+        "title": "VncTargetNoneAuth"
+      },
+      "VncTargetPasswordAuth": {
+        "type": "object",
+        "title": "VncTargetPasswordAuth",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
           }
         }
       }

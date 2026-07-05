@@ -1,9 +1,9 @@
 <script lang="ts">
     import { api, type SSHKey, type SSHKnownHost } from 'admin/lib/api'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import CopyButton from 'common/CopyButton.svelte'
     import { stringifyError } from 'common/errors'
-    import { Button } from '@sveltestrap/sveltestrap'
+    import { Button, Alert } from '@sveltestrap/sveltestrap'
+    import { adminPermissions } from 'admin/lib/store'
+    import CopyableTextArea from 'common/CopyableTextArea.svelte'
 
     let error: string|undefined = $state()
     let knownHosts: SSHKnownHost[]|undefined = $state()
@@ -11,7 +11,9 @@
 
     async function load () {
         ownKeys = await api.getSshOwnKeys()
-        knownHosts = await api.getSshKnownHosts()
+        if ($adminPermissions.configEdit) {
+            knownHosts = await api.getSshKnownHosts()
+        }
     }
 
     load().catch(async e => {
@@ -38,12 +40,7 @@
     <Alert color="info">Add these keys to the targets' <code>authorized_keys</code> files</Alert>
     <div class="list-group list-group-flush">
         {#each ownKeys as key (key)}
-            <div class="list-group-item d-flex">
-                <pre>{key.kind} {key.publicKeyBase64}</pre>
-                <div class="ms-auto">
-                    <CopyButton class="ms-3 px-0" text={key.kind + ' ' + key.publicKeyBase64} />
-                </div>
-            </div>
+            <CopyableTextArea label={key.kind} value={key.publicKeyBase64} />
         {/each}
     </div>
 {/if}
@@ -63,10 +60,15 @@
                         {host.host}:{host.port}
                     </strong>
 
-                    <Button class="ms-auto" color="link px-0" onclick={e => {
-                        e.preventDefault()
-                        deleteHost(host)
-                    }}>Delete</Button>
+                    <Button
+                        class="ms-auto"
+                        color="link px-0"
+                        onclick={e => {
+                            e.preventDefault()
+                            deleteHost(host)
+                        }}
+                        disabled={!$adminPermissions.configEdit}
+                    >Delete</Button>
                 </div>
                 <pre>{host.keyType} {host.keyBase64}</pre>
             </div>

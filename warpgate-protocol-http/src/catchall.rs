@@ -1,17 +1,19 @@
 use std::sync::Arc;
 
-use http::header::HOST;
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
 use poem::web::{Data, FromRequest, Redirect};
-use poem::{handler, Body, IntoResponse, Request, Response};
+use poem::{Body, IntoResponse, Request, Response, handler};
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::*;
+use tracing::{Instrument, debug, info_span};
 use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
-use warpgate_core::{ConfigProvider, Services, WarpgateServerHandle};
+use warpgate_common_http::{
+    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
+};
+use warpgate_core::{ConfigProvider, WarpgateServerHandle};
 
-use crate::common::{RequestAuthorization, SessionAuthorization, SessionExt};
+use crate::common::SessionExt;
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
 
 #[derive(Deserialize)]
@@ -30,10 +32,10 @@ pub async fn catchall_endpoint(
     ws: Option<WebSocket>,
     session: &Session,
     body: Body,
-    services: Data<&Services>,
+    ctx: Data<&AuthenticatedRequestContext>,
     server_handle: Option<Data<&Arc<Mutex<WarpgateServerHandle>>>>,
 ) -> poem::Result<Response> {
-    let target_and_options = get_target_for_request(req, services.0).await?;
+    let target_and_options = get_target_for_request(req, &ctx).await?;
     let Some((target, options)) = target_and_options else {
         return Ok(target_select_redirect());
     };
@@ -47,11 +49,11 @@ pub async fn catchall_endpoint(
     let span = info_span!("", target=%target.name);
 
     Ok(match ws {
-        Some(ws) => proxy_websocket_request(req, ws, &options)
+        Some(ws) => proxy_websocket_request(req, ws, &ctx, &options)
             .instrument(span)
             .await?
             .into_response(),
-        None => proxy_normal_request(req, body, &options)
+        None => proxy_normal_request(req, *ctx, body, &options)
             .instrument(span)
             .await?
             .into_response(),
@@ -60,35 +62,25 @@ pub async fn catchall_endpoint(
 
 async fn get_target_for_request(
     req: &Request,
-    services: &Services,
+    ctx: &AuthenticatedRequestContext,
 ) -> poem::Result<Option<(Target, TargetHTTPOptions)>> {
     let session = <&Session>::from_request_without_body(req).await?;
     let params: QueryParams = req.params()?;
-    let auth = Data::<&RequestAuthorization>::from_request_without_body(req).await?;
 
     let selected_target_name;
     let need_role_auth;
 
-    let request_host = req
-        .header(HOST)
-        .map(|h| h.split(':').next().unwrap_or(h).to_string())
-        .or_else(|| req.original_uri().host().map(|x| x.to_string()));
+    let request_host = ctx.trusted_hostname(req);
 
     let host_based_target_name = if let Some(host) = request_host {
-        let found = services
+        let found = ctx
+            .services()
             .config_provider
             .lock()
             .await
-            .list_targets()
+            .get_target_by_hostname(host.as_str())
             .await?
-            .iter()
-            .filter_map(|t| match t.options {
-                TargetOptions::Http(ref options) => Some((t, options)),
-                _ => None,
-            })
-            .find(|(_, o)| o.external_host.as_deref() == Some(&host))
-            .map(|(t, _)| t.name.clone());
-
+            .map(|t| t.name);
         if found.is_some() {
             debug!(
                 "Domain rebinding detected: host={} -> target={:?}",
@@ -100,29 +92,30 @@ async fn get_target_for_request(
         None
     };
 
-    let username = match *auth {
+    let username = match &ctx.auth {
         RequestAuthorization::Session(SessionAuthorization::Ticket {
             target_name,
             username,
+            ..
         }) => {
             selected_target_name = Some(target_name.clone());
             need_role_auth = false;
             username
         }
-        RequestAuthorization::Session(SessionAuthorization::User(username)) => {
+        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => {
             need_role_auth = true;
 
-            selected_target_name = if let Some(ref rebound_target) = host_based_target_name {
-                Some(rebound_target.clone())
-            } else if let Some(warpgate_target) = params.warpgate_target {
+            selected_target_name = if let Some(warpgate_target) = params.warpgate_target {
                 Some(warpgate_target)
+            } else if let Some(ref rebound_target) = host_based_target_name {
+                Some(rebound_target.clone())
             } else {
                 session.get_target_name()
             };
             username
         }
         RequestAuthorization::UserToken { .. } | RequestAuthorization::AdminToken => {
-            return Ok(None)
+            return Ok(None);
         }
     };
 
@@ -131,25 +124,22 @@ async fn get_target_for_request(
 
     if let Some(target_name) = final_target_name {
         let target = {
-            services
+            ctx.services()
                 .config_provider
                 .lock()
                 .await
-                .list_targets()
+                .get_target_by_name(target_name.as_str())
                 .await?
-                .iter()
-                .filter(|t| t.name == target_name)
-                .filter_map(|t| match t.options {
-                    TargetOptions::Http(ref options) => Some((t, options)),
+                .and_then(|t| match t.options {
+                    TargetOptions::Http(ref options) => Some((t.clone(), options.clone())),
                     _ => None,
                 })
-                .next()
-                .map(|(t, o)| (t.clone(), o.clone()))
         };
 
         if let Some(target) = target {
             if need_role_auth
-                && !services
+                && !ctx
+                    .services()
                     .config_provider
                     .lock()
                     .await

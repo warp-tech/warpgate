@@ -29,12 +29,24 @@ impl TlsPrivateKey {
     pub fn key(&self) -> &Arc<dyn SigningKey> {
         &self.key
     }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct TlsCertificateAndPrivateKey {
     pub certificate: TlsCertificateBundle,
     pub private_key: TlsPrivateKey,
+}
+
+impl TlsCertificateAndPrivateKey {
+    pub fn verify_key_matches_certificate(&self) -> Result<(), RustlsSetupError> {
+        CertifiedKey::from(self.clone())
+            .keys_match()
+            .map_err(|_| RustlsSetupError::MismatchedCertificateAndKey)
+    }
 }
 
 impl TlsCertificateBundle {
@@ -111,10 +123,10 @@ impl TlsCertificateBundle {
             }
         }
 
-        if let Some(subject) = cert.subject().iter_common_name().next() {
-            if let Ok(cn) = subject.as_str() {
-                names.push(cn.to_string());
-            }
+        if let Some(subject) = cert.subject().iter_common_name().next()
+            && let Ok(cn) = subject.as_str()
+        {
+            names.push(cn.to_string());
         }
 
         // Remove duplicates while preserving order
@@ -159,9 +171,7 @@ impl From<TlsPrivateKey> for Vec<u8> {
 
 impl From<TlsCertificateAndPrivateKey> for RustlsCertificate {
     fn from(val: TlsCertificateAndPrivateKey) -> Self {
-        RustlsCertificate::new()
-            .cert(val.certificate)
-            .key(val.private_key)
+        Self::new().cert(val.certificate).key(val.private_key)
     }
 }
 
@@ -169,7 +179,7 @@ impl From<TlsCertificateAndPrivateKey> for CertifiedKey {
     fn from(val: TlsCertificateAndPrivateKey) -> Self {
         let cert = val.certificate;
         let key = val.private_key;
-        CertifiedKey {
+        Self {
             cert: cert.certificates,
             key: key.key,
             ocsp: None,

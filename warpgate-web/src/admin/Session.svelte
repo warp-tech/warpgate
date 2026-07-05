@@ -1,20 +1,20 @@
 <script lang="ts">
-    import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions, type TargetPostgresOptions, type TargetKubernetesOptions } from 'admin/lib/api'
+    import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions, type TargetPostgresOptions, type TargetKubernetesOptions, type TargetVncOptions, type TargetRdpOptions } from 'admin/lib/api'
     import { timeAgo } from 'admin/lib/time'
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { formatDistance, formatDistanceToNow } from 'date-fns'
     import { onDestroy } from 'svelte'
     import { link } from 'svelte-spa-router'
-    import LogViewer from './LogViewer.svelte'
+    import LogViewer from './log-viewer/LogViewer.svelte'
     import RelativeDate from './RelativeDate.svelte'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { Alert } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
     import { faUser } from '@fortawesome/free-regular-svg-icons'
-    import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
+    import { Badge } from '@sveltestrap/sveltestrap'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
-    import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
+    import { Tooltip } from '@sveltestrap/sveltestrap'
     import { PROTOCOL_PROPERTIES } from 'common/protocols'
     import { recordingMetadataToFieldSet, recordingTypeLabel } from 'common/recordings'
 
@@ -59,6 +59,14 @@
             if (session.target.options.kind === 'Kubernetes') {
                 const options = session.target.options as unknown as TargetKubernetesOptions
                 address = options.clusterUrl
+            }
+            if (session.target.options.kind === 'Vnc') {
+                const options = session.target.options as TargetVncOptions
+                address = `${options.host}:${options?.port}`
+            }
+            if (session.target.options.kind === 'Rdp') {
+                const options = session.target.options as TargetRdpOptions
+                address = `${options.host}:${options?.port}`
             }
             return `${session.target.name} (${address})`
         } else {

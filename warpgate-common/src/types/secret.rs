@@ -6,7 +6,7 @@ use data_encoding::HEXLOWER;
 use delegate::delegate;
 use poem_openapi::registry::{MetaSchemaRef, Registry};
 use poem_openapi::types::{ParseError, ParseFromJSON, ToJSON};
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
 use crate::helpers::rng::get_crypto_rng;
@@ -16,7 +16,7 @@ pub struct Secret<T>(T);
 
 impl Secret<String> {
     pub fn random() -> Self {
-        Secret::new(HEXLOWER.encode(&Bytes::from_iter(get_crypto_rng().gen::<[u8; 32]>())))
+        Self::new(HEXLOWER.encode(&Bytes::from_iter(get_crypto_rng().random::<[u8; 32]>())))
     }
 }
 
@@ -25,7 +25,7 @@ impl<T> Secret<T> {
         Self(v)
     }
 
-    pub fn expose_secret(&self) -> &T {
+    pub const fn expose_secret(&self) -> &T {
         &self.0
     }
 }
@@ -79,7 +79,7 @@ impl<T: poem_openapi::types::Type> poem_openapi::types::Type for Secret<T> {
         T::schema_ref()
     }
     fn register(registry: &mut Registry) {
-        T::register(registry)
+        T::register(registry);
     }
 
     delegate! {

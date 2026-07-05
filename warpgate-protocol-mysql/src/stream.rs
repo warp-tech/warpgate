@@ -1,8 +1,8 @@
 use bytes::{Bytes, BytesMut};
-use mysql_common::proto::codec::error::PacketCodecError;
 use mysql_common::proto::codec::PacketCodec;
+use mysql_common::proto::codec::error::PacketCodecError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::*;
+use tracing::trace;
 use warpgate_database_protocols::io::Encode;
 use warpgate_tls::{MaybeTlsStream, MaybeTlsStreamError, UpgradableStream};
 
@@ -16,8 +16,7 @@ pub enum MySqlStreamError {
 
 pub struct MySqlStream<S, TS>
 where
-    S: UpgradableStream<TS>,
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: UpgradableStream<TS> + AsyncRead + AsyncWrite + Unpin,
     TS: AsyncRead + AsyncWrite + Unpin,
 {
     stream: MaybeTlsStream<S, TS>,
@@ -28,8 +27,7 @@ where
 
 impl<S, TS> MySqlStream<S, TS>
 where
-    S: UpgradableStream<TS>,
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: UpgradableStream<TS> + AsyncRead + AsyncWrite + Unpin,
     TS: AsyncRead + AsyncWrite + Unpin,
 {
     pub fn new(stream: S) -> Self {
@@ -86,15 +84,19 @@ where
         mut self,
         config: <S as UpgradableStream<TS>>::UpgradeConfig,
     ) -> Result<Self, MaybeTlsStreamError> {
-        self.stream = self.stream.upgrade(config).await?;
+        // Any data already read off the socket past the last decoded packet
+        // is the beginning of the TLS handshake (e.g. clients are allowed
+        // to send their ClientHello right behind the SSLRequest packet) and
+        // has to be replayed into the TLS layer (#1421).
+        let leftover = std::mem::take(&mut self.inbound_buffer).freeze();
+        self.stream = self.stream.upgrade(config, leftover).await?;
         Ok(self)
     }
 
-    pub fn is_tls(&self) -> bool {
+    pub const fn is_tls(&self) -> bool {
         match self.stream {
-            MaybeTlsStream::Raw(_) => false,
             MaybeTlsStream::Tls(_) => true,
-            MaybeTlsStream::Upgrading => false,
+            MaybeTlsStream::Raw(_) | MaybeTlsStream::Upgrading => false,
         }
     }
 }

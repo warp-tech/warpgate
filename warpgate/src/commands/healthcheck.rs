@@ -4,7 +4,7 @@ use warpgate_common::GlobalParams;
 
 use crate::config::load_config;
 
-pub(crate) async fn command(params: &GlobalParams) -> Result<()> {
+pub async fn command(params: &GlobalParams) -> Result<()> {
     let config = load_config(params, true)?;
 
     let url = format!(

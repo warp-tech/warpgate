@@ -9,7 +9,7 @@ const config = {
         },
     },
     preprocess: sveltePreprocess({
-        sourceMap: true,
+        sourceMap: false,
     }),
     vitePlugin: {
         prebundleSvelteLibraries: true,

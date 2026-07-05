@@ -3,35 +3,38 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::{Buf, Bytes, BytesMut};
-use rand::Rng;
+use rand::RngExt;
 use rustls::ServerConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
-use tracing::*;
+use tracing::{error, info, info_span, trace, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
-    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
+use warpgate_database_protocols::mysql::protocol::Capabilities;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
 use warpgate_database_protocols::mysql::protocol::connect::{
     AuthSwitchRequest, Handshake, HandshakeResponse,
 };
 use warpgate_database_protocols::mysql::protocol::response::{ErrPacket, OkPacket, Status};
 use warpgate_database_protocols::mysql::protocol::text::Query;
-use warpgate_database_protocols::mysql::protocol::Capabilities;
+use warpgate_tls::ServerTlsStream;
 
 use crate::client::{ConnectionOptions, MySqlClient};
 use crate::error::MySqlError;
 use crate::stream::MySqlStream;
 
 pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
-    stream: MySqlStream<S, tokio_rustls::server::TlsStream<S>>,
+    stream: MySqlStream<S, ServerTlsStream<S>>,
     capabilities: Capabilities,
     challenge: [u8; 20],
     username: Option<String>,
@@ -69,7 +72,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 | Capabilities::DEPRECATE_EOF
                 | Capabilities::SECURE_CONNECTION
                 | Capabilities::SSL,
-            challenge: get_crypto_rng().gen(),
+            challenge: get_crypto_rng().random(),
             tls_config: Arc::new(tls_config),
             username: None,
             database: None,
@@ -81,11 +84,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
 
     pub fn make_logging_span(&self) -> tracing::Span {
         let client_ip = self.remote_address.ip().to_string();
-        match self.username {
-            Some(ref username) => {
-                info_span!("MySQL", session=%self.id, session_username=%username, %client_ip)
-            }
-            None => info_span!("MySQL", session=%self.id, %client_ip),
+        if let Some(ref username) = self.username {
+            info_span!("MySQL", session=%self.id, session_username=%username, %client_ip)
+        } else {
+            info_span!("MySQL", session=%self.id, %client_ip)
         }
     }
 
@@ -94,9 +96,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         let challenge_2 = challenge_1.split_off(8);
         let challenge_chain = challenge_1.freeze().chain(challenge_2.freeze());
 
+        let advertised_version = {
+            let config = self.services.config.lock().await;
+            config.store.mysql.advertised_version.clone()
+        };
+
         let handshake = Handshake {
             protocol_version: 10,
-            server_version: "8.0.0-Warpgate".to_owned(),
+            server_version: advertised_version,
             connection_id: 1,
             auth_plugin_data: challenge_chain,
             server_capabilities: self.capabilities,
@@ -123,17 +130,16 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 }
                 self.stream = self.stream.upgrade(self.tls_config.clone()).await?;
                 continue;
-            } else {
-                self.send_error(1002, "Warpgate requires TLS - please enable it in your client: add `--ssl` on the CLI or add `?sslMode=PREFERRED` to your database URI").await?;
-                return Err(MySqlError::TlsNotSupportedByClient);
             }
+            self.send_error(1002, "Warpgate requires TLS - please enable it in your client: add `--ssl` on the CLI or add `?sslMode=PREFERRED` to your database URI").await?;
+            return Err(MySqlError::TlsNotSupportedByClient);
         };
 
-        if resp.auth_plugin == Some(AuthPlugin::MySqlClearPassword) {
-            if let Some(mut response) = resp.auth_response.clone() {
-                let password = Secret::new(response.get_str_nul()?);
-                return self.run_authorization(resp, password).await;
-            }
+        if resp.auth_plugin == Some(AuthPlugin::MySqlClearPassword)
+            && let Some(mut response) = resp.auth_response.clone()
+        {
+            let password = Secret::new(response.get_str_nul()?);
+            return self.run_authorization(resp, password).await;
         }
 
         let req = AuthSwitchRequest {
@@ -171,6 +177,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         password: Secret<String>,
     ) -> Result<(), MySqlError> {
         let selector: AuthSelector = handshake.username.deref().into();
+        let remote_ip = self.remote_address.ip();
 
         async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
             this: &mut MySqlSession<S>,
@@ -187,21 +194,62 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             Ok(())
         }
 
+        // Check if IP is blocked
+        match self
+            .services
+            .login_protection
+            .check_ip_blocked(&remote_ip)
+            .await
+        {
+            Ok(Some(block_info)) => {
+                warn!(
+                    ip = %remote_ip,
+                    expires_at = %block_info.expires_at,
+                    "MySQL auth from blocked IP"
+                );
+                return fail(&mut self).await;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                warn!(?e, "Failed to check IP block status");
+            }
+        }
+
         match selector {
             AuthSelector::User {
                 username,
                 target_name,
             } => {
+                // Check if user is locked
+                match self
+                    .services
+                    .login_protection
+                    .check_user_locked(&username)
+                    .await
+                {
+                    Ok(Some(_lock_info)) => {
+                        warn!(
+                            username = %username,
+                            "MySQL auth for locked user"
+                        );
+                        return fail(&mut self).await;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        warn!(?e, "Failed to check user lockout status");
+                    }
+                }
+
+                let session_id = self.server_handle.lock().await.id();
                 let state_arc = self
                     .services
-                    .auth_state_store
-                    .lock()
-                    .await
-                    .create(
-                        Some(&self.server_handle.lock().await.id()),
+                    .create_auth_state(
+                        Some(&session_id),
                         &username,
                         crate::common::PROTOCOL_NAME,
                         &[CredentialKind::Password],
+                        Some(self.remote_address.ip()),
+                        Some("password"),
                     )
                     .await?
                     .1;
@@ -210,10 +258,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 let user_auth_result = {
                     let credential = AuthCredential::Password(password);
 
-                    let mut cp = self.services.config_provider.lock().await;
-                    if cp.validate_credential(&username, &credential).await? {
-                        state.add_valid_credential(credential);
-                    }
+                    validate_and_add_credential(
+                        &mut state,
+                        &credential,
+                        &mut *self.services.config_provider.lock().await,
+                    )
+                    .await?;
 
                     state.verify()
                 };
@@ -240,11 +290,41 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                                 "Target {} not authorized for user {}",
                                 target_name, user_info.username
                             );
+                            // Record failed attempt
+                            let _ = self
+                                .services
+                                .login_protection
+                                .record_failed_attempt(FailedAttemptInfo {
+                                    username: username.clone(),
+                                    remote_ip,
+                                    protocol: "mysql".to_string(),
+                                    credential_type: "password".to_string(),
+                                })
+                                .await;
                             return fail(&mut self).await;
                         }
+                        // Clear failed attempts on successful auth
+                        let _ = self
+                            .services
+                            .login_protection
+                            .clear_failed_attempts(&remote_ip, &user_info.username)
+                            .await;
                         self.run_authorized(handshake, user_info, target_name).await
                     }
-                    AuthResult::Rejected | AuthResult::Need(_) => fail(&mut self).await, // TODO SSO
+                    AuthResult::Rejected | AuthResult::Need(_) => {
+                        // Record failed attempt
+                        let _ = self
+                            .services
+                            .login_protection
+                            .record_failed_attempt(FailedAttemptInfo {
+                                username: username.clone(),
+                                remote_ip,
+                                protocol: "mysql".to_string(),
+                                credential_type: "password".to_string(),
+                            })
+                            .await;
+                        fail(&mut self).await
+                    } // TODO SSO
                 }
             }
             AuthSelector::Ticket { secret } => {
@@ -252,14 +332,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                     .await
                     .map_err(MySqlError::other)?
                 {
-                    Some((ticket, user_info)) => {
-                        info!("Authorized for {} with a ticket", ticket.target);
+                    Some((ticket, target, user_info)) => {
+                        info!("Authorized for {} with a ticket", target.name);
                         consume_ticket(&self.services.db, &ticket.id)
                             .await
                             .map_err(MySqlError::other)?;
 
-                        self.run_authorized(handshake, user_info, ticket.target)
-                            .await
+                        self.run_authorized(handshake, user_info, target.name).await
                     }
                     _ => fail(&mut self).await,
                 }
@@ -289,15 +368,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 .config_provider
                 .lock()
                 .await
-                .list_targets()
+                .get_target_by_name(&target_name)
                 .await?
-                .iter()
-                .filter_map(|t| match t.options {
-                    TargetOptions::MySql(ref options) => Some((t, options)),
+                .and_then(|t| match t.options {
+                    TargetOptions::MySql(ref options) => Some((t.clone(), options.clone())),
                     _ => None,
                 })
-                .find(|(t, _)| t.name == target_name)
-                .map(|(t, opt)| (t.clone(), opt.clone()))
         };
 
         let Some((target, mysql_options)) = target else {
@@ -435,10 +511,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             trace!(?response, "client got packet");
             self.stream.push(&&response[..], ())?;
             self.stream.flush().await?;
-            if let Some(com) = response.first() {
-                if com == &0 || com == &0xff || com == &0xfe {
-                    break;
-                }
+            if let Some(com) = response.first()
+                && (com == &0 || com == &0xff || com == &0xfe)
+            {
+                break;
             }
         }
         Ok(())

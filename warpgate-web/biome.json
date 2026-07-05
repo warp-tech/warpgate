@@ -33,7 +33,11 @@
         }
     },
     "html": {
-        "experimentalFullSupportEnabled": true
+        "experimentalFullSupportEnabled": true,
+		"formatter": {
+			"enabled": true,
+			"indentScriptAndStyle": true
+		}
     },
     "assist": {
         "enabled": true,
@@ -42,5 +46,17 @@
                 "organizeImports": "on"
             }
         }
+    },
+  "overrides": [
+    {
+      "includes": ["**/*.svelte"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedImports": "off"
+          }
+        }
+      }
     }
+  ]
 }

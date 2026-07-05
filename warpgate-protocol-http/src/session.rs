@@ -6,15 +6,14 @@ use poem::session::{MemoryStorage, Session, SessionStorage};
 use poem::web::{Data, RemoteAddr};
 use poem::{FromRequest, Request};
 use serde_json::Value;
-use tokio::sync::Mutex;
-use tracing::*;
+use tokio::sync::{Mutex, broadcast};
+use tracing::info;
 use warpgate_common::SessionId;
-use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_core::{SessionStateInit, State, WarpgateServerHandle};
 
 use crate::common::PROTOCOL_NAME;
-use crate::session_handle::{
-    HttpSessionHandle, SessionHandleCommand, WarpgateServerHandleFromRequest,
-};
+use crate::session_handle::{HttpSessionHandle, SessionHandleCommand};
 
 #[derive(Clone)]
 pub struct SharedSessionStorage(pub Arc<Mutex<Box<MemoryStorage>>>);
@@ -59,8 +58,9 @@ impl SessionStorage for SharedSessionStorage {
 
 pub struct SessionStore {
     session_handles: HashMap<SessionId, Arc<Mutex<WarpgateServerHandle>>>,
+    session_close_senders: HashMap<SessionId, broadcast::Sender<()>>,
     session_timestamps: HashMap<SessionId, Instant>,
-    this: Weak<Mutex<SessionStore>>,
+    this: Weak<Mutex<Self>>,
 }
 
 static SESSION_ID_SESSION_KEY: &str = "session_id";
@@ -71,6 +71,7 @@ impl SessionStore {
         Arc::new_cyclic(|me| {
             Mutex::new(Self {
                 session_handles: HashMap::new(),
+                session_close_senders: HashMap::new(),
                 session_timestamps: HashMap::new(),
                 this: me.clone(),
             })
@@ -88,7 +89,7 @@ impl SessionStore {
             // } else if request_counter == 5 {
             // Start logging sessions when they've got 5 requests
             // self.create_handle_for(&req).await?;
-        };
+        }
 
         Ok(req)
     }
@@ -96,31 +97,33 @@ impl SessionStore {
     pub async fn create_handle_for(
         &mut self,
         req: &Request,
-    ) -> poem::Result<WarpgateServerHandleFromRequest> {
+        ctx: &UnauthenticatedRequestContext,
+    ) -> poem::Result<Arc<Mutex<WarpgateServerHandle>>> {
         let session = <&Session>::from_request_without_body(req).await?;
 
         if let Some(handle) = self.handle_for(session) {
-            return Ok(handle.into());
+            return Ok(handle);
         }
 
-        let services = Data::<&Services>::from_request_without_body(req).await?;
         let remote_address = <&RemoteAddr>::from_request_without_body(req).await?;
         let session_storage = Data::<&SharedSessionStorage>::from_request_without_body(req).await?;
 
         let (session_handle, mut session_handle_rx) = HttpSessionHandle::new();
 
         let server_handle = State::register_session(
-            &services.state,
+            &ctx.services().state,
             &PROTOCOL_NAME,
             SessionStateInit {
-                remote_address: remote_address.0.as_socket_addr().cloned(),
+                remote_address: remote_address.0.as_socket_addr().copied(),
                 handle: Box::new(session_handle),
             },
         )
         .await?;
 
         let id = server_handle.lock().await.id();
+        let (session_close_sender, _) = broadcast::channel(1);
         self.session_handles.insert(id, server_handle.clone());
+        self.session_close_senders.insert(id, session_close_sender);
 
         session.set(SESSION_ID_SESSION_KEY, id);
 
@@ -139,8 +142,7 @@ impl SessionStore {
                             }
                             info!(%id, "Removed HTTP session");
                             let mut that = this.lock().await;
-                            that.session_handles.remove(&id);
-                            that.session_timestamps.remove(&id);
+                            that.remove_session_by_id(id);
                         }
                     }
                 }
@@ -150,7 +152,7 @@ impl SessionStore {
 
         self.session_timestamps.insert(id, Instant::now());
 
-        Ok(server_handle.into())
+        Ok(server_handle)
     }
 
     pub fn handle_for(&self, session: &Session) -> Option<Arc<Mutex<WarpgateServerHandle>>> {
@@ -159,24 +161,40 @@ impl SessionStore {
             .and_then(|id| self.session_handles.get(&id).cloned())
     }
 
+    pub fn close_receiver_for(&self, session: &Session) -> Option<broadcast::Receiver<()>> {
+        session
+            .get::<SessionId>(SESSION_ID_SESSION_KEY)
+            .and_then(|id| {
+                self.session_close_senders
+                    .get(&id)
+                    .map(|sender| sender.subscribe())
+            })
+    }
+
     pub fn remove_session(&mut self, session: &Session) {
         if let Some(id) = session.get::<SessionId>(SESSION_ID_SESSION_KEY) {
-            self.session_handles.remove(&id);
-            self.session_timestamps.remove(&id);
+            self.remove_session_by_id(id);
         }
     }
 
-    pub async fn vacuum(&mut self, session_max_age: Duration) {
+    pub fn vacuum(&mut self, session_max_age: Duration) {
         let now = Instant::now();
         let mut to_remove = vec![];
-        for (id, timestamp) in self.session_timestamps.iter() {
+        for (id, timestamp) in &self.session_timestamps {
             if now.duration_since(*timestamp) > session_max_age {
                 to_remove.push(*id);
             }
         }
         for id in to_remove {
-            self.session_handles.remove(&id);
-            self.session_timestamps.remove(&id);
+            self.remove_session_by_id(id);
         }
+    }
+
+    fn remove_session_by_id(&mut self, id: SessionId) {
+        if let Some(sender) = self.session_close_senders.remove(&id) {
+            let _ = sender.send(());
+        }
+        self.session_handles.remove(&id);
+        self.session_timestamps.remove(&id);
     }
 }

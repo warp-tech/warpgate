@@ -1,12 +1,15 @@
 mod db;
+mod sso_user;
 use std::sync::Arc;
 
 pub use db::DatabaseConfigProvider;
 use enum_dispatch::enum_dispatch;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+pub use sso_user::resolve_and_map_sso_user;
+use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::*;
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthStateUserInfo, CredentialKind, CredentialPolicy};
 use warpgate_common::{Secret, Target, User, WarpgateError};
@@ -24,6 +27,13 @@ pub trait ConfigProvider {
     async fn list_users(&mut self) -> Result<Vec<User>, WarpgateError>;
 
     async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError>;
+
+    async fn get_target_by_name(&mut self, name: &str) -> Result<Option<Target>, WarpgateError>;
+
+    async fn get_target_by_hostname(
+        &mut self,
+        hostname: &str,
+    ) -> Result<Option<Target>, WarpgateError>;
 
     async fn validate_credential(
         &mut self,
@@ -43,6 +53,14 @@ pub trait ConfigProvider {
         username: &str,
         managed_role_names: Option<Vec<String>>,
         active_role_names: Vec<String>,
+    ) -> Result<(), WarpgateError>;
+
+    /// Similar to `apply_sso_role_mappings` but operates on *admin* roles.
+    async fn apply_sso_admin_role_mappings(
+        &mut self,
+        username: &str,
+        managed_admin_role_names: Option<Vec<String>>,
+        active_admin_role_names: Vec<String>,
     ) -> Result<(), WarpgateError>;
 
     async fn get_credential_policy(
@@ -69,7 +87,7 @@ pub trait ConfigProvider {
 pub async fn authorize_ticket(
     db: &Arc<Mutex<DatabaseConnection>>,
     secret: &Secret<String>,
-) -> Result<Option<(e::Ticket::Model, AuthStateUserInfo)>, WarpgateError> {
+) -> Result<Option<(e::Ticket::Model, e::Target::Model, AuthStateUserInfo)>, WarpgateError> {
     let db = db.lock().await;
     let ticket = {
         e::Ticket::Entity::find()
@@ -77,36 +95,42 @@ pub async fn authorize_ticket(
             .one(&*db)
             .await?
     };
-    match ticket {
-        Some(ticket) => {
-            if let Some(0) = ticket.uses_left {
-                warn!("Ticket is used up: {}", &ticket.id);
-                return Ok(None);
-            }
-
-            if let Some(datetime) = ticket.expiry {
-                if datetime < chrono::Utc::now() {
-                    warn!("Ticket has expired: {}", &ticket.id);
-                    return Ok(None);
-                }
-            }
-
-            // TODO maybe Ticket could properly reference the user model and then
-            // AuthStateUserInfo could be constructed from it
-            let Some(ticket_user) = e::User::Entity::find()
-                .filter(e::User::Column::Username.eq(ticket.username.clone()))
-                .one(&*db)
-                .await?
-            else {
-                return Err(WarpgateError::UserNotFound(ticket.username.clone()));
-            };
-
-            Ok(Some((ticket, (&User::try_from(ticket_user)?).into())))
+    if let Some(ticket) = ticket {
+        if ticket.uses_left == Some(0) {
+            warn!("Ticket is used up: {}", &ticket.id);
+            return Ok(None);
         }
-        None => {
-            warn!("Ticket not found: {}", &secret.expose_secret());
-            Ok(None)
+
+        if let Some(datetime) = ticket.expiry
+            && datetime < OffsetDateTime::now_utc()
+        {
+            warn!("Ticket has expired: {}", &ticket.id);
+            return Ok(None);
         }
+
+        let Some(ticket_user) = e::User::Entity::find_by_id(ticket.user_id)
+            .one(&*db)
+            .await?
+        else {
+            return Err(WarpgateError::UserNotFound(ticket.user_id.to_string()));
+        };
+
+        let Some(ticket_target) = e::Target::Entity::find_by_id(ticket.target_id)
+            .one(&*db)
+            .await?
+        else {
+            warn!("Ticket target not found: {}", &ticket.target_id);
+            return Ok(None);
+        };
+
+        Ok(Some((
+            ticket,
+            ticket_target,
+            (&User::try_from(ticket_user)?).into(),
+        )))
+    } else {
+        warn!("Ticket not found");
+        Ok(None)
     }
 }
 

@@ -39,7 +39,7 @@ targets = [
 # If true, metadata will be collected with `--all-features`. Note that this can't
 # be toggled off if true, if you want to conditionally enable `--all-features` it
 # is recommended to pass `--all-features` on the cmd line instead
-all-features = false
+all-features = true
 # If true, metadata will be collected with `--no-default-features`. The same
 # caveat with `all-features` applies
 no-default-features = false
@@ -67,9 +67,16 @@ feature-depth = 1
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    "RUSTSEC-2023-0071",
-    "RUSTSEC-2021-0139", # ansi-term is unmaintained
+    "RUSTSEC-2023-0071", # Marvin Attack: potential key recovery through timing sidechannels
+    "RUSTSEC-2024-0436", # paste is unmaintained, used transitively by russh
     "RUSTSEC-2025-0134", # rustls-pemfile is deprecated but poem is still using it
+    "RUSTSEC-2026-0002", # lru: IterMut violates Stacked Borrows - transitive dep, no update available
+    "RUSTSEC-2026-0099", # rustls: Name constraints were accepted for certificates asserting a wildcard name
+    "RUSTSEC-2026-0098", # rustls: Name constraints for URI names were incorrectly accepted
+    "RUSTSEC-2026-0104", # an older pinned version of rustls-webpki used by AWS SDK
+    "RUSTSEC-2026-0173", # proc-macro-error2 is unmaintained - waiting for a sea-orm update
+    "RUSTSEC-2026-0195", # quick-xml memory exhaustion - we don't parse untrusted XML
+    "RUSTSEC-2026-0194", # quick-xml quadratic time - see above
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -83,9 +90,10 @@ ignore = [
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
 [bans]
 # Lint level for when multiple versions of the same crate are detected
-# multiple-versions = "warn"
+multiple-versions = "allow"
 # Lint level for when a crate version requirement is `*`
 wildcards = "warn"
+allow-wildcard-paths = true
 # The graph highlighting used when creating dotgraphs for crates
 # with multiple versions
 # * lowest-version - The path to the lowest versioned duplicate is highlighted
@@ -95,7 +103,7 @@ highlight = "all"
 # The default lint level for `default` features for crates that are members of
 # the workspace that is being checked. This can be overridden by allowing/denying
 # `default` on a crate-by-crate basis if desired.
-workspace-default-features = "warn"
+workspace-default-features = "allow"
 # The default lint level for `default` features for external crates that are not
 # members of the workspace. This can be overridden by allowing/denying `default`
 # on a crate-by-crate basis if desired.
@@ -120,12 +128,6 @@ deny = [
 # crate = "rustls"
 # # Features to not allow
 # deny = ["ring"]
-
-[[bans.features]]
-crate = "reqwest"
-# Features to not allow
-deny = ["rustls-tls-webpki-roots"]
-
 
 
 # Features to allow
@@ -164,15 +166,16 @@ deny = ["rustls-tls-webpki-roots"]
 [sources]
 # Lint level for what to happen when a crate from a crate registry that is not
 # in the allow list is encountered
-unknown-registry = "warn"
+unknown-registry = "deny"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
-unknown-git = "warn"
+unknown-git = "deny"
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = []
+allow-git = [
+]
 
 [sources.allow-org]
 # github.com organizations to allow git sources for
@@ -188,16 +191,16 @@ allow = [
     "MIT",
     "Apache-2.0",
     "Unicode-3.0",
+    "Unicode-DFS-2016",
     "ISC",
-    "OpenSSL",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "Zlib",
     "WTFPL",
     "CC0-1.0",
-    "LGPL-3.0",
     "MPL-2.0",
     "CDLA-Permissive-2.0",
+    "Unlicense",
 ]
 
 [[licenses.clarify]]

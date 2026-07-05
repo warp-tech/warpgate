@@ -1,17 +1,91 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::net::IpAddr;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
-use once_cell::sync::Lazy;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
-use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
-use warpgate_common::{SessionId, WarpgateError};
+use warpgate_common::auth::{AuthResult, AuthState, CredentialKind, CredentialPolicy};
+use warpgate_common::helpers::ipnet::WarpgateIpNet;
+use warpgate_common::helpers::username::username_eq_ci;
+use warpgate_common::{SessionId, User, WarpgateError};
 
+use crate::login_protection::{FailedAttemptInfo, LoginProtectionService};
 use crate::{ConfigProvider, ConfigProviderEnum};
 
 #[allow(clippy::unwrap_used)]
-pub static TIMEOUT: Lazy<Duration> = Lazy::new(|| Duration::from_secs(60 * 10));
+pub static TIMEOUT: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs(60 * 10));
+
+/// If the address is an IPv4-mapped IPv6 address (e.g. `::ffff:192.168.1.1`),
+/// extract the inner IPv4 address. Otherwise return as-is.
+const fn normalize_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => IpAddr::V4(v4),
+            None => ip,
+        },
+        IpAddr::V4(_) => ip,
+    }
+}
+
+/// Checks whether the given IP is allowed by the user's `allowed_ip_ranges` setting.
+/// Returns `Ok(())` if access is allowed, or an appropriate `WarpgateError` if denied.
+fn check_ip_allowed(
+    allowed_ip_ranges: Option<&Vec<WarpgateIpNet>>,
+    remote_ip: Option<IpAddr>,
+    username: &str,
+) -> Result<(), WarpgateError> {
+    let Some(ranges) = allowed_ip_ranges else {
+        return Ok(());
+    };
+    if ranges.is_empty() {
+        return Ok(());
+    }
+    let Some(raw_ip) = remote_ip else {
+        return Ok(());
+    };
+    let ip = normalize_ip(raw_ip);
+    for network in ranges {
+        if network.contains(&ip) {
+            return Ok(());
+        }
+    }
+    tracing::warn!(
+        "Access denied for IP '{}' (not in any allowed range for user '{}')",
+        ip,
+        username
+    );
+    Err(WarpgateError::IpAddrNotAllowed(
+        ip.to_string(),
+        username.into(),
+    ))
+}
+
+/// Record a failed attempt for an unknown username so that username
+/// enumeration counts toward IP blocking, just like a wrong password would.
+///
+/// `credential_type` is `None` for contexts that must not be penalised —
+/// notably SSH public-key offers, which legitimately fail as clients try
+/// each agent key in turn — in which case nothing is recorded.
+async fn record_unknown_user_attempt(
+    login_protection: &LoginProtectionService,
+    username: &str,
+    protocol: &str,
+    remote_ip: Option<IpAddr>,
+    credential_type: Option<&str>,
+) {
+    let (Some(remote_ip), Some(credential_type)) = (remote_ip, credential_type) else {
+        return;
+    };
+    let _ = login_protection
+        .record_failed_attempt(FailedAttemptInfo {
+            username: username.to_string(),
+            remote_ip,
+            protocol: protocol.to_string(),
+            credential_type: credential_type.to_string(),
+        })
+        .await;
+}
 
 struct AuthCompletionSignal {
     sender: broadcast::Sender<AuthResult>,
@@ -25,17 +99,21 @@ impl AuthCompletionSignal {
 }
 
 pub struct AuthStateStore {
-    config_provider: Arc<Mutex<ConfigProviderEnum>>,
     store: HashMap<Uuid, (Arc<Mutex<AuthState>>, Instant)>,
     completion_signals: HashMap<Uuid, AuthCompletionSignal>,
     web_auth_request_signal: broadcast::Sender<Uuid>,
 }
 
+impl Default for AuthStateStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthStateStore {
-    pub fn new(config_provider: Arc<Mutex<ConfigProviderEnum>>) -> Self {
+    pub fn new() -> Self {
         Self {
             store: HashMap::new(),
-            config_provider,
             completion_signals: HashMap::new(),
             web_auth_request_signal: broadcast::channel(100).0,
         }
@@ -45,27 +123,14 @@ impl AuthStateStore {
         self.store.contains_key(id)
     }
 
-    pub async fn all_pending_web_auths_for_user(
-        &self,
-        username: &str,
-    ) -> Vec<Arc<Mutex<AuthState>>> {
-        let mut results = vec![];
-        for auth in self.store.values() {
-            {
-                let inner = auth.0.lock().await;
-                if inner.user_info().username != username {
-                    continue;
-                }
-                let AuthResult::Need(need) = inner.verify() else {
-                    continue;
-                };
-                if !need.contains(&CredentialKind::WebUserApproval) {
-                    continue;
-                }
-            }
-            results.push(auth.0.clone())
-        }
-        results
+    /// Returns cloned `Arc` handles to every stored [`AuthState`].
+    ///
+    /// This only clones the handles and never locks the inner states, so the
+    /// store lock is held for the shortest possible time. Callers can then
+    /// inspect each state (which requires locking it) *after* releasing the
+    /// store lock, avoiding lock convoys on the store under concurrent logins.
+    pub fn snapshot_states(&self) -> Vec<Arc<Mutex<AuthState>>> {
+        self.store.values().map(|auth| auth.0.clone()).collect()
     }
 
     pub fn get(&self, id: &Uuid) -> Option<Arc<Mutex<AuthState>>> {
@@ -76,37 +141,79 @@ impl AuthStateStore {
         self.web_auth_request_signal.subscribe()
     }
 
-    pub async fn create(
-        &mut self,
-        session_id: Option<&SessionId>,
+    /// Resolves the user record and credential policy for an authentication
+    /// attempt.
+    ///
+    /// This performs the config-provider database lookups (`list_users`,
+    /// `get_credential_policy`) and the IP-range check **without** holding the
+    /// [`AuthStateStore`] lock. Callers must run this before locking the store
+    /// and pass the result to [`AuthStateStore::create`], so that concurrent
+    /// logins don't serialise on the store lock while doing database I/O.
+    pub(crate) async fn resolve_user_and_policy(
+        config_provider: &Arc<Mutex<ConfigProviderEnum>>,
+        login_protection: &LoginProtectionService,
         username: &str,
         protocol: &str,
         supported_credential_types: &[CredentialKind],
-    ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
-        let id = Uuid::new_v4();
-
-        let Some(user) = self
-            .config_provider
+        remote_ip: Option<IpAddr>,
+        rate_limit_credential_type: Option<&str>,
+    ) -> Result<(User, Box<dyn CredentialPolicy + Sync + Send>), WarpgateError> {
+        let Some(user) = config_provider
             .lock()
             .await
             .list_users()
             .await?
             .iter()
-            .find(|u| u.username == username)
+            .find(|u| username_eq_ci(&u.username, username))
             .cloned()
         else {
+            record_unknown_user_attempt(
+                login_protection,
+                username,
+                protocol,
+                remote_ip,
+                rate_limit_credential_type,
+            )
+            .await;
             return Err(WarpgateError::UserNotFound(username.into()));
         };
 
-        let policy = self
-            .config_provider
+        check_ip_allowed(user.allowed_ip_ranges.as_ref(), remote_ip, username)?;
+
+        let policy = config_provider
             .lock()
             .await
             .get_credential_policy(username, supported_credential_types)
             .await?;
         let Some(policy) = policy else {
+            record_unknown_user_attempt(
+                login_protection,
+                username,
+                protocol,
+                remote_ip,
+                rate_limit_credential_type,
+            )
+            .await;
             return Err(WarpgateError::UserNotFound(username.into()));
         };
+
+        Ok((user, policy))
+    }
+
+    /// Creates and stores a new [`AuthState`] from an already-resolved user and
+    /// credential policy (see [`AuthStateStore::resolve_user_and_policy`]).
+    ///
+    /// This is deliberately synchronous and does no database I/O, so the store
+    /// lock is only held for the in-memory insert.
+    pub(crate) fn create(
+        &mut self,
+        session_id: Option<&SessionId>,
+        user: &User,
+        protocol: &str,
+        policy: Box<dyn CredentialPolicy + Sync + Send>,
+        remote_ip: Option<IpAddr>,
+    ) -> (Uuid, Arc<Mutex<AuthState>>) {
+        let id = Uuid::new_v4();
 
         let (state_change_tx, mut state_change_rx) = broadcast::channel(1);
         let web_auth_request_signal = self.web_auth_request_signal.clone();
@@ -121,16 +228,16 @@ impl AuthStateStore {
         let state = AuthState::new(
             id,
             session_id.copied(),
-            (&user).into(),
+            remote_ip,
+            user.into(),
             protocol.to_string(),
             policy,
             state_change_tx,
         );
-        self.store
-            .insert(id, (Arc::new(Mutex::new(state)), Instant::now()));
+        let state_arc = Arc::new(Mutex::new(state));
+        self.store.insert(id, (state_arc.clone(), Instant::now()));
 
-        #[allow(clippy::unwrap_used)]
-        Ok((id, self.get(&id).unwrap()))
+        (id, state_arc)
     }
 
     pub fn subscribe(&mut self, id: Uuid) -> broadcast::Receiver<AuthResult> {
@@ -154,11 +261,103 @@ impl AuthStateStore {
         }
     }
 
-    pub async fn vacuum(&mut self) {
+    pub fn vacuum(&mut self) {
         self.store
             .retain(|_, (_, started_at)| started_at.elapsed() < *TIMEOUT);
 
         self.completion_signals
             .retain(|_, signal| !signal.is_expired());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use ipnet::IpNet;
+
+    use super::*;
+
+    #[test]
+    fn ip_allowed_no_restriction() {
+        let ip: IpAddr = "10.0.0.5".parse().unwrap();
+        assert!(check_ip_allowed(None, Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ip_allowed_no_remote_ip() {
+        let range = Some(vec![IpNet::from_str("10.0.0.0/8").unwrap().into()]);
+        assert!(check_ip_allowed(range.as_ref(), None, "user").is_ok());
+    }
+
+    #[test]
+    fn ip_allowed_within_range() {
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
+        let ip: IpAddr = "192.168.1.42".parse().unwrap();
+        assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ip_denied_outside_range() {
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        let err = check_ip_allowed(range.as_ref(), Some(ip), "testuser").unwrap_err();
+        assert!(
+            matches!(err, WarpgateError::IpAddrNotAllowed(addr, user) if addr == "10.0.0.1" && user == "testuser")
+        );
+    }
+
+    #[test]
+    fn ip_allowed_exact_match() {
+        let range = Some(vec![IpNet::from_str("10.20.30.40/32").unwrap().into()]);
+        let ip: IpAddr = "10.20.30.40".parse().unwrap();
+        assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ip_denied_exact_mismatch() {
+        let range = Some(vec![IpNet::from_str("10.20.30.40/32").unwrap().into()]);
+        let ip: IpAddr = "10.20.30.41".parse().unwrap();
+        assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_err());
+    }
+
+    #[test]
+    fn ipv6_allowed_within_range() {
+        let range = Some(vec![IpNet::from_str("fd00::/8").unwrap().into()]);
+        let ip: IpAddr = "fd12:3456::1".parse().unwrap();
+        assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ipv6_denied_outside_range() {
+        let range = Some(vec![IpNet::from_str("fd00::/8").unwrap().into()]);
+        let ip: IpAddr = "2001:db8::1".parse().unwrap();
+        assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_err());
+    }
+
+    #[test]
+    fn ip_allowed_both_none() {
+        assert!(check_ip_allowed(None, None, "user").is_ok());
+    }
+
+    #[test]
+    fn ip_allowed_empty_ranges_treated_as_no_restriction() {
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(check_ip_allowed(Some(&vec![]), Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_matches_ipv4_range() {
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
+        // ::ffff:192.168.1.42 is the IPv4-mapped IPv6 form of 192.168.1.42
+        let ip: IpAddr = "::ffff:192.168.1.42".parse().unwrap();
+        assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_ok());
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_denied_outside_ipv4_range() {
+        let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
+        let ip: IpAddr = "::ffff:10.0.0.1".parse().unwrap();
+        assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_err());
     }
 }

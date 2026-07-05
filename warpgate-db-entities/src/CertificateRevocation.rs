@@ -1,6 +1,6 @@
-use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize)]
@@ -9,7 +9,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub serial_number_base64: String,
-    pub date_added: DateTime<Utc>,
+    pub date_added: OffsetDateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

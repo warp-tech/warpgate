@@ -16,6 +16,7 @@
         ...rest
     }: Props = $props()
 
+    // svelte-ignore state_referenced_locally
     if (allowEmpty) {
         placeholder ??= 'Unlimited'
     }

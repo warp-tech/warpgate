@@ -1,17 +1,17 @@
-use chrono::{DateTime, Utc};
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, ModelTrait, QueryFilter, Set};
+use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
-use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common::WarpgateError;
-use warpgate_core::Services;
-use warpgate_db_entities::ApiToken;
+use warpgate_common::helpers::hash::generate_ticket_secret;
+use warpgate_common_http::auth::AuthenticatedRequestContext;
+use warpgate_db_entities::{ApiToken, Parameters};
 
 use super::common::get_user;
-use crate::common::{endpoint_auth, RequestAuthorization};
+use crate::common::endpoint_auth;
 
 pub struct Api;
 
@@ -26,15 +26,15 @@ enum GetApiTokensResponse {
 #[derive(Object)]
 struct NewApiToken {
     label: String,
-    expiry: DateTime<Utc>,
+    expiry: OffsetDateTime,
 }
 
 #[derive(Object)]
 struct ExistingApiToken {
     id: Uuid,
     label: String,
-    created: DateTime<Utc>,
-    expiry: DateTime<Utc>,
+    created: OffsetDateTime,
+    expiry: OffsetDateTime,
 }
 
 impl From<ApiToken::Model> for ExistingApiToken {
@@ -58,6 +58,8 @@ struct TokenAndSecret {
 enum CreateApiTokenResponse {
     #[oai(status = 201)]
     Created(Json<TokenAndSecret>),
+    #[oai(status = 400)]
+    BadRequest(Json<String>),
     #[oai(status = 401)]
     Unauthorized,
 }
@@ -82,12 +84,12 @@ impl Api {
     )]
     async fn api_get_api_tokens(
         &self,
-        auth: Data<&RequestAuthorization>,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
     ) -> Result<GetApiTokensResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let auth = &ctx.auth;
+        let db = ctx.services().db.lock().await;
 
-        let Some(user_model) = get_user(*auth, &db).await? else {
+        let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(GetApiTokensResponse::Unauthorized);
         };
 
@@ -106,24 +108,34 @@ impl Api {
     )]
     async fn api_create_api_token(
         &self,
-        auth: Data<&RequestAuthorization>,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<NewApiToken>,
     ) -> Result<CreateApiTokenResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let auth = &ctx.auth;
+        let db = ctx.services().db.lock().await;
 
-        let Some(user_model) = get_user(&auth, &db).await? else {
+        let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(CreateApiTokenResponse::Unauthorized);
         };
+
+        let parameters = Parameters::Entity::get(&db).await?;
+        if let Some(max_seconds) = parameters.max_api_token_duration_seconds {
+            let max_expiry = OffsetDateTime::now_utc() + Duration::seconds(max_seconds);
+            if body.expiry > max_expiry {
+                return Ok(CreateApiTokenResponse::BadRequest(Json(format!(
+                    "Token expiry exceeds maximum allowed duration of {max_seconds} seconds"
+                ))));
+            }
+        }
 
         let secret = generate_ticket_secret();
         let object = ApiToken::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user_model.id),
-            created: Set(Utc::now()),
+            created: Set(OffsetDateTime::now_utc()),
             expiry: Set(body.expiry),
             label: Set(body.label.clone()),
-            secret: Set(secret.expose_secret().to_string()),
+            secret: Set(secret.expose_secret().clone()),
         }
         .insert(&*db)
         .await
@@ -131,7 +143,7 @@ impl Api {
 
         Ok(CreateApiTokenResponse::Created(Json(TokenAndSecret {
             token: object.into(),
-            secret: secret.expose_secret().to_string(),
+            secret: secret.expose_secret().clone(),
         })))
     }
 
@@ -143,13 +155,13 @@ impl Api {
     )]
     async fn api_delete_api_token(
         &self,
-        auth: Data<&RequestAuthorization>,
-        services: Data<&Services>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
     ) -> Result<DeleteApiTokenResponse, WarpgateError> {
-        let db = services.db.lock().await;
+        let auth = &ctx.auth;
+        let db = ctx.services().db.lock().await;
 
-        let Some(user_model) = get_user(&auth, &db).await? else {
+        let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(DeleteApiTokenResponse::Unauthorized);
         };
 

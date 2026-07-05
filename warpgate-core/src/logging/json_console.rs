@@ -1,12 +1,13 @@
 use std::io::{self, Write};
 
-use chrono::Utc;
 use serde::Serialize;
 use serde_json::json;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use tracing::{Event, Level, Subscriber};
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
 
 use super::values::{RecordVisitor, SerializedRecordValues};
 
@@ -27,8 +28,12 @@ where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        // Only log warpgate events (same filter as ValuesLogLayer)
-        if !event.metadata().target().starts_with("warpgate") {
+        // Log warpgate events plus audit events (`audit` target). The env
+        // filter (e.g. `audit=info,warpgate=info`) already gates what reaches
+        // this layer and the text console layer prints audit events on that
+        // basis; mirror it here so the JSON console is not missing them.
+        let target = event.metadata().target();
+        if !target.starts_with("warpgate") && target != "audit" {
             return;
         }
 
@@ -37,12 +42,12 @@ where
 
         let current = ctx.current_span();
         let parent_id = event.parent().or_else(|| current.id());
-        if let Some(parent_id) = parent_id {
-            if let Some(span) = ctx.span(parent_id) {
-                for span in span.scope().from_root() {
-                    if let Some(other_values) = span.extensions().get::<SerializedRecordValues>() {
-                        values.extend((*other_values).clone().into_iter());
-                    }
+        if let Some(parent_id) = parent_id
+            && let Some(span) = ctx.span(parent_id)
+        {
+            for span in span.scope().from_root() {
+                if let Some(other_values) = span.extensions().get::<SerializedRecordValues>() {
+                    values.extend((*other_values).clone().into_iter());
                 }
             }
         }
@@ -50,12 +55,19 @@ where
         // Record event fields
         event.record(&mut RecordVisitor::new(&mut values));
 
+        // `_type` is a rich-JSON marker normally hidden from console output,
+        // but for audit events it is the event-type discriminator (e.g.
+        // "TargetSessionStarted1"), so keep it there.
+        if target != "audit" {
+            values.remove("_type");
+        }
+
         // Extract message before moving values
         let message = values.remove("message").unwrap_or_default();
-
+        #[allow(clippy::unwrap_used, reason = "never fails")]
         let entry = JsonLogEntry {
-            timestamp: Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            level: level_to_str(event.metadata().level()),
+            timestamp: OffsetDateTime::now_utc().format(&Rfc3339).unwrap(),
+            level: level_to_str(*event.metadata().level()),
             target: event.metadata().target().to_string(),
             message,
             fields: values,
@@ -74,7 +86,7 @@ where
             .to_string(),
         };
 
-        let _ = writeln!(io::stdout(), "{}", json);
+        let _ = writeln!(io::stdout(), "{json}");
     }
 
     fn on_new_span(
@@ -102,8 +114,8 @@ where
     JsonConsoleLayer
 }
 
-fn level_to_str(level: &Level) -> &'static str {
-    match *level {
+const fn level_to_str(level: Level) -> &'static str {
+    match level {
         Level::TRACE => "trace",
         Level::DEBUG => "debug",
         Level::INFO => "info",

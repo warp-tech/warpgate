@@ -2,15 +2,15 @@
     import { Observable, from, map } from 'rxjs'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { type Target, type TargetGroup, api } from 'admin/lib/api'
+    import { adminPermissions } from '../../lib/store'
     import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
     import { link } from 'svelte-spa-router'
     import { TargetKind } from 'gateway/lib/api'
     import EmptyState from 'common/EmptyState.svelte'
     import { onMount } from 'svelte'
-    import { Dropdown, DropdownToggle, DropdownMenu, DropdownItem } from '@sveltestrap/sveltestrap'
+    import { Dropdown, DropdownToggle, DropdownMenu, DropdownItem, Alert } from '@sveltestrap/sveltestrap'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { firstBy } from 'thenby'
 
     let error: string|undefined = $state()
@@ -42,11 +42,14 @@
             })
         ).pipe(
             map(targets => {
+                if (options.search) {
+                    return targets
+                }
+
                 const natural = naturalCompareFactory()
 
                 return targets.sort(
-                    firstBy<Target, boolean>(x => x.options.kind !== TargetKind.WebAdmin)
-                        .thenBy((x: Target) => !x.groupId)
+                    firstBy((x: Target) => !x.groupId)
                         // Natural sort between groups
                         .thenBy(
                             (a: Target, b: Target) =>
@@ -105,6 +108,7 @@
             <a
                 class="btn btn-primary"
                 href="/config/targets/create"
+                class:disabled={!$adminPermissions.targetsCreate}
                 use:link>
                 Add a target
             </a>
@@ -126,7 +130,6 @@
         {#snippet item(target)}
             <a
                 class="list-group-item list-group-item-action"
-                class:disabled={target.options.kind === TargetKind.WebAdmin}
                 href="/config/targets/{target.id}"
                 use:link>
                 <div class="me-auto">
@@ -164,8 +167,11 @@
                     {#if target.options.kind === TargetKind.Kubernetes}
                         Kubernetes
                     {/if}
-                    {#if target.options.kind === TargetKind.WebAdmin}
-                        This web admin interface
+                    {#if target.options.kind === TargetKind.Vnc}
+                        VNC
+                    {/if}
+                    {#if target.options.kind === TargetKind.Rdp}
+                        RDP
                     {/if}
                 </small>
             </a>

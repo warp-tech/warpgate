@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 
-use poem_openapi::{Object, Union};
+use poem_openapi::{Enum, Object, Union};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warpgate_tls::TlsMode;
 
-use super::defaults::*;
+use super::defaults::{
+    _default_empty_string, _default_empty_vec, _default_mysql_port,
+    _default_postgres_idle_timeout_str, _default_rdp_port, _default_ssh_port, _default_true,
+    _default_username, _default_vnc_port,
+};
 use crate::Secret;
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -34,16 +38,20 @@ pub struct TargetSSHOptions {
     pub allow_insecure_algos: Option<bool>,
     #[serde(default)]
     pub auth: SSHTargetAuth,
+    #[serde(default)]
+    pub jump_host: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
-#[serde(untagged)]
+#[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum SSHTargetAuth {
     #[serde(rename = "password")]
     Password(SshTargetPasswordAuth),
     #[serde(rename = "publickey")]
     PublicKey(SshTargetPublicKeyAuth),
+    #[serde(rename = "iam_role")]
+    IamRole(SshTargetIamRoleAuth),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -54,9 +62,12 @@ pub struct SshTargetPasswordAuth {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct SshTargetPublicKeyAuth {}
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct SshTargetIamRoleAuth {}
+
 impl Default for SSHTargetAuth {
     fn default() -> Self {
-        SSHTargetAuth::PublicKey(SshTargetPublicKeyAuth::default())
+        Self::PublicKey(SshTargetPublicKeyAuth::default())
     }
 }
 
@@ -94,6 +105,40 @@ impl Default for Tls {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[serde(tag = "kind")]
+#[oai(discriminator_name = "kind", one_of)]
+pub enum DatabaseTargetAuth {
+    #[serde(rename = "password")]
+    Password(DatabaseTargetPasswordAuth),
+    #[serde(rename = "iam_role")]
+    IamRole(DatabaseTargetIamRoleAuth),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct DatabaseTargetPasswordAuth {
+    #[serde(default)]
+    pub password: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct DatabaseTargetIamRoleAuth {}
+
+impl Default for DatabaseTargetAuth {
+    fn default() -> Self {
+        Self::Password(DatabaseTargetPasswordAuth::default())
+    }
+}
+
+impl DatabaseTargetAuth {
+    pub const fn password(&self) -> Option<&str> {
+        match self {
+            Self::Password(auth) => Some(auth.password.as_str()),
+            Self::IamRole(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetMySqlOptions {
     #[serde(default = "_default_empty_string")]
@@ -106,13 +151,53 @@ pub struct TargetMySqlOptions {
     pub username: String,
 
     #[serde(default)]
-    pub password: Option<String>,
+    auth: Option<DatabaseTargetAuth>,
+
+    /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
+    #[serde(default, skip_serializing)]
+    #[oai(deprecated)]
+    password: Option<String>,
 
     #[serde(default)]
     pub tls: Tls,
 
     #[serde(default)]
     pub default_database_name: Option<String>,
+}
+
+impl TargetMySqlOptions {
+    pub fn effective_auth(&self) -> DatabaseTargetAuth {
+        if let Some(auth) = &self.auth {
+            auth.clone()
+        } else {
+            DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: self.password.clone().unwrap_or_default(),
+            })
+        }
+    }
+
+    pub fn normalize(&mut self) {
+        if let Some(password) = self.password.take() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password,
+            }));
+        } else if self.auth.is_none() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: String::new(),
+            }));
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
+pub enum PostgresProtocolVersion {
+    #[serde(rename = "3.0")]
+    #[oai(rename = "3.0")]
+    V3_0,
+    #[default]
+    #[serde(rename = "3.2")]
+    #[oai(rename = "3.2")]
+    V3_2,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
@@ -127,7 +212,12 @@ pub struct TargetPostgresOptions {
     pub username: String,
 
     #[serde(default)]
-    pub password: Option<String>,
+    auth: Option<DatabaseTargetAuth>,
+
+    /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
+    #[serde(default, skip_serializing)]
+    #[oai(deprecated)]
+    password: Option<String>,
 
     #[serde(default)]
     pub tls: Tls,
@@ -137,18 +227,119 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub default_database_name: Option<String>,
+
+    #[serde(default)]
+    pub protocol_version: Option<PostgresProtocolVersion>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
-pub struct TargetWebAdminOptions {}
+impl TargetPostgresOptions {
+    pub fn effective_auth(&self) -> DatabaseTargetAuth {
+        if let Some(auth) = &self.auth {
+            auth.clone()
+        } else {
+            DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: self.password.clone().unwrap_or_default(),
+            })
+        }
+    }
+
+    pub fn normalize(&mut self) {
+        if let Some(password) = self.password.take() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password,
+            }));
+        } else if self.auth.is_none() {
+            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: String::new(),
+            }));
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct TargetVncOptions {
+    #[serde(default = "_default_empty_string")]
+    pub host: String,
+
+    #[serde(default = "_default_vnc_port")]
+    pub port: u16,
+
+    #[serde(default)]
+    pub auth: VncTargetAuth,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[serde(tag = "kind")]
+#[oai(discriminator_name = "kind", one_of)]
+pub enum VncTargetAuth {
+    #[serde(rename = "none")]
+    None(VncTargetNoneAuth),
+    #[serde(rename = "password")]
+    Password(VncTargetPasswordAuth),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct VncTargetNoneAuth {}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct VncTargetPasswordAuth {
+    pub password: Secret<String>,
+}
+
+impl Default for VncTargetAuth {
+    fn default() -> Self {
+        Self::None(VncTargetNoneAuth::default())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+pub struct TargetRdpOptions {
+    #[serde(default = "_default_empty_string")]
+    pub host: String,
+
+    #[serde(default = "_default_rdp_port")]
+    pub port: u16,
+
+    #[serde(default = "_default_username")]
+    pub username: String,
+
+    #[serde(default)]
+    pub domain: Option<String>,
+
+    #[serde(default)]
+    pub auth: RdpTargetAuth,
+
+    /// Verify the RDP server's TLS certificate against the system root store.
+    /// RDP servers commonly use self-signed certificates, so this is off by default.
+    #[serde(default)]
+    pub verify_tls: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[serde(tag = "kind")]
+#[oai(discriminator_name = "kind", one_of)]
+pub enum RdpTargetAuth {
+    #[serde(rename = "password")]
+    Password(RdpTargetPasswordAuth),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct RdpTargetPasswordAuth {
+    pub password: Secret<String>,
+}
+
+impl Default for RdpTargetAuth {
+    fn default() -> Self {
+        Self::Password(RdpTargetPasswordAuth {
+            password: Secret::new(String::new()),
+        })
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetKubernetesOptions {
     #[serde(default = "_default_empty_string")]
     pub cluster_url: String,
-
-    #[serde(default = "_default_empty_string")]
-    pub namespace: String,
 
     #[serde(default)]
     pub tls: Tls,
@@ -158,13 +349,15 @@ pub struct TargetKubernetesOptions {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
-#[serde(untagged)]
+#[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum KubernetesTargetAuth {
     #[serde(rename = "token")]
     Token(KubernetesTargetTokenAuth),
     #[serde(rename = "certificate")]
     Certificate(KubernetesTargetCertificateAuth),
+    #[serde(rename = "iam_role")]
+    IamRole(KubernetesTargetIamRoleAuth),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -172,9 +365,12 @@ pub struct KubernetesTargetTokenAuth {
     pub token: Secret<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct KubernetesTargetIamRoleAuth {}
+
 impl Default for KubernetesTargetAuth {
     fn default() -> Self {
-        KubernetesTargetAuth::Certificate(KubernetesTargetCertificateAuth::default())
+        Self::Certificate(KubernetesTargetCertificateAuth::default())
     }
 }
 
@@ -190,6 +386,10 @@ pub struct Target {
     pub options: TargetOptions,
     pub rate_limit_bytes_per_second: Option<u32>,
     pub group_id: Option<Uuid>,
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_requests_disabled: bool,
+    pub ticket_require_approval: bool,
+    pub ticket_max_uses: Option<i16>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Union)]
@@ -205,6 +405,8 @@ pub enum TargetOptions {
     MySql(TargetMySqlOptions),
     #[serde(rename = "postgres")]
     Postgres(TargetPostgresOptions),
-    #[serde(rename = "web_admin")]
-    WebAdmin(TargetWebAdminOptions),
+    #[serde(rename = "vnc")]
+    Vnc(TargetVncOptions),
+    #[serde(rename = "rdp")]
+    Rdp(TargetRdpOptions),
 }

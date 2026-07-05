@@ -31,26 +31,20 @@ def _wait_timeout(fn, msg, timeout=60):
         raise Exception(msg)
 
 
-def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None):
+def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None, connect_timeout=5, read_timeout=5):
     logging.debug(f"Waiting for port {port}")
 
-    data = b""
-
     def wait():
-        nonlocal data
         while True:
             try:
-                s = socket.create_connection(("localhost", port), timeout=5)
+                s = socket.create_connection(("localhost", port), timeout=connect_timeout)
                 if recv:
-                    while True:
-                        data = s.recv(100)
-                        if data:
-                            break
-                else:
-                    data = b""
+                    s.settimeout(read_timeout)
+                    if not s.recv(100):
+                        raise Exception("Port is open but not responding")
                 s.close()
                 logging.debug(f"Port {port} is up")
-                return data
+                return
             except socket.error:
                 if for_process:
                     try:
@@ -62,7 +56,6 @@ def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None)
                     time.sleep(0.1)
 
     _wait_timeout(wait, f"Port {port} is not up", timeout=timeout)
-    return data
 
 
 def wait_mysql_port(port):

@@ -3,6 +3,7 @@ use std::string::FromUtf8Error;
 
 use pgwire::error::PgWireError;
 use pgwire::messages::response::ErrorResponse;
+use pgwire::messages::startup::NegotiateProtocolVersion;
 use rsasl::prelude::{SASLError, SessionError};
 use warpgate_common::WarpgateError;
 use warpgate_tls::{MaybeTlsStreamError, RustlsSetupError};
@@ -29,6 +30,8 @@ pub enum PostgresError {
     Tls(#[from] MaybeTlsStreamError),
     #[error("Invalid domain name")]
     InvalidDomainName,
+    #[error("Server requested downgrade to unknown version: {0:?}")]
+    InvalidVersionDowngradeRequested(NegotiateProtocolVersion),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("UTF-8: {0}")]
@@ -37,8 +40,6 @@ pub enum PostgresError {
     Sasl(#[from] SASLError),
     #[error("SASL session: {0}")]
     SaslSession(#[from] SessionError),
-    #[error("Password is required for authentication")]
-    PasswordRequired,
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
     #[error(transparent)]
@@ -53,6 +54,6 @@ impl PostgresError {
 
 impl From<ErrorResponse> for PostgresError {
     fn from(e: ErrorResponse) -> Self {
-        PostgresError::RemoteError(e)
+        Self::RemoteError(e)
     }
 }

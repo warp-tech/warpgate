@@ -1,7 +1,8 @@
 <script lang="ts">
     import NavListItem from 'common/NavListItem.svelte'
     import { wrap } from 'svelte-spa-router/wrap'
-    import Router from 'svelte-spa-router'
+    import Router, { type RouteDetail } from 'svelte-spa-router'
+    import { serverInfo } from 'gateway/lib/store'
 
     const routes = {
         '/targets/create/:kind': wrap({
@@ -13,26 +14,35 @@
         '/targets/:id': wrap({
             asyncComponent: () => import('./targets/Target.svelte') as any,
         }),
-        '/roles/create': wrap({
+        '/access-roles/create': wrap({
             asyncComponent: () => import('./CreateRole.svelte') as any,
         }),
-        '/roles/:id': wrap({
-            asyncComponent: () => import('./Role.svelte') as any,
+        '/access-roles/:id': wrap({
+            asyncComponent: () => import('./AccessRole.svelte') as any,
+        }),
+        '/admin-roles/create': wrap({
+            asyncComponent: () => import('./CreateAdminRole.svelte') as any,
+        }),
+        '/admin-roles/:id': wrap({
+            asyncComponent: () => import('./AdminRole.svelte') as any,
         }),
         '/users/create': wrap({
             asyncComponent: () => import('./CreateUser.svelte') as any,
         }),
         '/users/:id': wrap({
-            asyncComponent: () => import('./User.svelte') as any,
+            asyncComponent: () => import('./users/User.svelte') as any,
+        }),
+        '/users': wrap({
+            asyncComponent: () => import('./users/Users.svelte') as any,
         }),
         '/parameters': wrap({
             asyncComponent: () => import('./Parameters.svelte') as any,
         }),
-        '/users': wrap({
-            asyncComponent: () => import('./Users.svelte') as any,
+        '/access-roles': wrap({
+            asyncComponent: () => import('./AccessRoles.svelte') as any,
         }),
-        '/roles': wrap({
-            asyncComponent: () => import('./Roles.svelte') as any,
+        '/admin-roles': wrap({
+            asyncComponent: () => import('./AdminRoles.svelte') as any,
         }),
         '/targets': wrap({
             asyncComponent: () => import('./targets/Targets.svelte') as any,
@@ -67,9 +77,16 @@
         '/target-groups': wrap({
             asyncComponent: () => import('./target-groups/TargetGroups.svelte') as any,
         }),
+        '/login-protection': wrap({
+            asyncComponent: () => import('./LoginProtection.svelte') as any,
+        }),
     }
 
     let sidebarMode = $state(false)
+
+    function onRouteLoading (detail: RouteDetail) {
+        sidebarMode = detail.route !== ''
+    }
 </script>
 
 {#snippet navItems()}
@@ -99,16 +116,26 @@
 
     <NavListItem
         class="mb-2"
-        title="Roles"
-        description="Group users together"
-        href="/config/roles"
+        title="Access roles"
+        description="Grant users access to roles"
+        href="/config/access-roles"
+        small={sidebarMode}
+    />
+
+    <NavListItem
+        class="mb-2"
+        title="Admin roles"
+        description="Grant users access to the admin UI"
+        href="/config/admin-roles"
         small={sidebarMode}
     />
 
     <NavListItem
         class="mb-2"
         title="Tickets"
-        description="Temporary access credentials"
+        description={$serverInfo?.ticketSelfServiceEnabled
+            ? 'Access credentials — users can request tickets from their profile'
+            : 'Temporary access credentials'}
         href="/config/tickets"
         small={sidebarMode}
     />
@@ -136,6 +163,14 @@
         href="/config/parameters"
         small={sidebarMode}
     />
+
+    <NavListItem
+        class="mb-2"
+        title="Login protection"
+        description="View blocked IPs and locked users"
+        href="/config/login-protection"
+        small={sidebarMode}
+    />
 {/snippet}
 
 <div class="wrapper" class:d-none={!sidebarMode}>
@@ -145,9 +180,7 @@
     </div>
 
     <div class="main">
-        <Router {routes} prefix="/config" on:routeLoading={e => {
-            sidebarMode = e.detail.route !== ''
-        }} />
+        <Router {routes} prefix="/config" {onRouteLoading} />
     </div>
 </div>
 
@@ -171,6 +204,7 @@
 
         > .main {
             flex: 1 0 0;
+            max-width: 100%;
         }
     }
 

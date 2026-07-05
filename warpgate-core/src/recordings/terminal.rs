@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use warpgate_db_entities::Recording::RecordingKind;
 
-use super::writer::RecordingWriter;
-use super::{Error, Recorder, Result};
+use super::{Recorder, Result};
+use crate::recordings::RecordingWriterOpener;
+use crate::recordings::writer::NDJsonRecordingWriter;
 
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -28,11 +29,11 @@ pub enum TerminalRecordingStreamId {
 }
 
 impl TerminalRecordingStreamId {
-    pub fn from_usual_fd_number(fd: u8) -> Option<Self> {
+    pub const fn from_usual_fd_number(fd: u8) -> Option<Self> {
         match fd {
-            0 => Some(TerminalRecordingStreamId::Input),
-            1 => Some(TerminalRecordingStreamId::Output),
-            2 => Some(TerminalRecordingStreamId::Error),
+            0 => Some(Self::Input),
+            1 => Some(Self::Output),
+            2 => Some(Self::Error),
             _ => None,
         }
     }
@@ -58,7 +59,7 @@ pub enum TerminalRecordingItem {
 impl From<TerminalRecordingItem> for AsciiCast {
     fn from(item: TerminalRecordingItem) -> Self {
         match item {
-            TerminalRecordingItem::Data { time, stream, data } => AsciiCast::Output(
+            TerminalRecordingItem::Data { time, stream, data } => Self::Output(
                 time,
                 match stream {
                     TerminalRecordingStreamId::Input => "i".to_string(),
@@ -67,19 +68,19 @@ impl From<TerminalRecordingItem> for AsciiCast {
                 },
                 String::from_utf8_lossy(&data[..]).to_string(),
             ),
-            TerminalRecordingItem::PtyResize { time, cols, rows } => AsciiCast::Header {
+            TerminalRecordingItem::PtyResize { time, cols, rows } => Self::Header {
                 time,
                 version: 2,
                 width: cols,
                 height: rows,
-                title: "".to_string(),
+                title: "".into(),
             },
         }
     }
 }
 
 pub struct TerminalRecorder {
-    writer: RecordingWriter,
+    writer: NDJsonRecordingWriter,
     started_at: Instant,
 }
 
@@ -88,29 +89,26 @@ impl TerminalRecorder {
         self.started_at.elapsed().as_secs_f32()
     }
 
-    async fn write_item(&mut self, item: &TerminalRecordingItem) -> Result<()> {
-        let mut serialized_item = serde_json::to_vec(&item).map_err(Error::Serialization)?;
-        serialized_item.push(b'\n');
-        self.writer.write(&serialized_item).await?;
+    pub async fn write(&self, stream: TerminalRecordingStreamId, data: &[u8]) -> Result<()> {
+        self.writer
+            .write_json_line(&TerminalRecordingItem::Data {
+                time: self.get_time(),
+                stream,
+                data: Bytes::from(data.to_vec()),
+            })
+            .await?;
         Ok(())
     }
 
-    pub async fn write(&mut self, stream: TerminalRecordingStreamId, data: &[u8]) -> Result<()> {
-        self.write_item(&TerminalRecordingItem::Data {
-            time: self.get_time(),
-            stream,
-            data: Bytes::from(data.to_vec()),
-        })
-        .await
-    }
-
-    pub async fn write_pty_resize(&mut self, cols: u32, rows: u32) -> Result<()> {
-        self.write_item(&TerminalRecordingItem::PtyResize {
-            time: self.get_time(),
-            rows,
-            cols,
-        })
-        .await
+    pub async fn write_pty_resize(&self, cols: u32, rows: u32) -> Result<()> {
+        self.writer
+            .write_json_line(&TerminalRecordingItem::PtyResize {
+                time: self.get_time(),
+                rows,
+                cols,
+            })
+            .await?;
+        Ok(())
     }
 }
 
@@ -119,10 +117,10 @@ impl Recorder for TerminalRecorder {
         RecordingKind::Terminal
     }
 
-    fn new(writer: RecordingWriter) -> Self {
-        TerminalRecorder {
-            writer,
+    async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
+        Ok(Self {
+            writer: opener.open_ndjson_data().await?,
             started_at: Instant::now(),
-        }
+        })
     }
 }

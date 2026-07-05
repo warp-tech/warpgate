@@ -1,8 +1,8 @@
 use anyhow::Result;
 use bytes::Bytes;
-use russh::client::Msg;
 use russh::Channel;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use russh::client::Msg;
+use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::SessionId;
@@ -14,20 +14,20 @@ pub struct SessionChannel {
     client_channel: Channel<Msg>,
     channel_id: Uuid,
     ops_rx: UnboundedReceiver<ChannelOperation>,
-    events_tx: UnboundedSender<RCEvent>,
+    events_tx: Sender<RCEvent>,
     session_id: SessionId,
     closed: bool,
 }
 
 impl SessionChannel {
-    pub fn new(
+    pub const fn new(
         client_channel: Channel<Msg>,
         channel_id: Uuid,
         ops_rx: UnboundedReceiver<ChannelOperation>,
-        events_tx: UnboundedSender<RCEvent>,
+        events_tx: Sender<RCEvent>,
         session_id: SessionId,
     ) -> Self {
-        SessionChannel {
+        Self {
             client_channel,
             channel_id,
             ops_rx,
@@ -85,10 +85,7 @@ impl SessionChannel {
                         Some(ChannelOperation::Signal(signal)) => {
                             self.client_channel.signal(signal).await?;
                         },
-                        Some(ChannelOperation::OpenShell) => unreachable!(),
-                        Some(ChannelOperation::OpenDirectTCPIP { .. }) => unreachable!(),
-                        Some(ChannelOperation::OpenDirectStreamlocal { .. }) => unreachable!(),
-                        Some(ChannelOperation::OpenX11 { .. }) => unreachable!(),
+                        Some(ChannelOperation::OpenShell | ChannelOperation::OpenDirectTCPIP { .. } | ChannelOperation::OpenDirectStreamlocal { .. } | ChannelOperation::OpenX11 { .. }) => unreachable!(),
                         Some(ChannelOperation::RequestX11(request)) => {
                             self.client_channel.request_x11(
                                 true,
@@ -103,8 +100,8 @@ impl SessionChannel {
                                 true,
                             ).await?;
                         }
-                        Some(ChannelOperation::Close) => break,
-                        None => break,
+                        Some(ChannelOperation::Close)
+                        | None => break,
                     }
                 }
                 channel_event = self.client_channel.wait() => {
@@ -115,40 +112,38 @@ impl SessionChannel {
                             self.events_tx.send(RCEvent::Output(
                                 self.channel_id,
                                 Bytes::from(bytes.to_vec()),
-                            )).map_err(|_| SshClientError::MpscError)?;
+                            )).await.map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(russh::ChannelMsg::Close) => {
                             break;
                         },
                         Some(russh::ChannelMsg::Success) => {
-                            self.events_tx.send(RCEvent::Success(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
+                            self.events_tx.send(RCEvent::Success(self.channel_id)).await.map_err(|_| SshClientError::MpscError)?;
                         },
                         Some(russh::ChannelMsg::Failure) => {
-                            self.events_tx.send(RCEvent::ChannelFailure(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
+                            self.events_tx.send(RCEvent::ChannelFailure(self.channel_id)).await.map_err(|_| SshClientError::MpscError)?;
                         },
                         Some(russh::ChannelMsg::Eof) => {
-                            self.events_tx.send(RCEvent::Eof(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
+                            self.events_tx.send(RCEvent::Eof(self.channel_id)).await.map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
-                            self.events_tx.send(RCEvent::ExitStatus(self.channel_id, exit_status)).map_err(|_| SshClientError::MpscError)?;
+                            self.events_tx.send(RCEvent::ExitStatus(self.channel_id, exit_status)).await.map_err(|_| SshClientError::MpscError)?;
                         }
-                        Some(russh::ChannelMsg::WindowAdjusted { .. }) => { },
                         Some(russh::ChannelMsg::ExitSignal {
                             core_dumped, error_message, lang_tag, signal_name
                         }) => {
                             self.events_tx.send(RCEvent::ExitSignal {
                                 channel: self.channel_id, core_dumped, error_message, lang_tag, signal_name
-                            }).map_err(|_| SshClientError::MpscError)?;
+                            }).await.map_err(|_| SshClientError::MpscError)?;
                         },
-                        Some(russh::ChannelMsg::XonXoff { client_can_do: _ }) => {
-                        }
+                        Some(russh::ChannelMsg::WindowAdjusted { .. } | russh::ChannelMsg::XonXoff { .. }) => { }
                         Some(russh::ChannelMsg::ExtendedData { data, ext }) => {
                             let data: &[u8] = &data;
                             self.events_tx.send(RCEvent::ExtendedData {
                                 channel: self.channel_id,
                                 data: Bytes::from(data.to_vec()),
                                 ext,
-                            }).map_err(|_| SshClientError::MpscError)?;
+                            }).await.map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(msg) => {
                             warn!("unhandled channel message: {:?}", msg);
@@ -160,25 +155,21 @@ impl SessionChannel {
                 }
             }
         }
-        self.close()?;
+        self.close();
         Ok(())
     }
 
-    fn close(&mut self) -> Result<(), SshClientError> {
+    fn close(&mut self) {
         if !self.closed {
-            let _ = self
-                .events_tx
-                .send(RCEvent::Close(self.channel_id))
-                .map_err(|_| SshClientError::MpscError);
+            let _ = self.events_tx.try_send(RCEvent::Close(self.channel_id));
             self.closed = true;
         }
-        Ok(())
     }
 }
 
 impl Drop for SessionChannel {
     fn drop(&mut self) {
-        let _ = self.close();
+        let () = self.close();
         info!(channel=%self.channel_id, session=%self.session_id, "Closed");
     }
 }

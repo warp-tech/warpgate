@@ -1,37 +1,43 @@
 [package]
-edition = "2021"
-license = "Apache-2.0"
 name = "warpgate-protocol-http"
-version = "0.20.2"
+version = "0.26.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
 
 [dependencies]
-anyhow = "1.0"
-async-trait = "0.1"
-chrono = { version = "0.4", default-features = false, features = ["serde"] }
-cookie = "0.18"
+anyhow.workspace = true
+async-trait.workspace = true
+cookie = { version = "0.18", default-features = false }
 data-encoding.workspace = true
 delegate.workspace = true
 futures.workspace = true
-http = { version = "1.0", default-features = false }
-once_cell = { version = "1.17", default-features = false }
+html-escape.workspace = true
+http.workspace = true
+percent-encoding = { version = "2.1", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
-reqwest.workspace = true
+regex.workspace = true
+reqwest = { workspace = true, features = ["json"] }
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+subtle.workspace = true
+time.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
-warpgate-admin = { version = "*", path = "../warpgate-admin", default-features = false }
-warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
-warpgate-ca = { version = "*", path = "../warpgate-ca", default-features = false }
-warpgate-tls = { version = "*", path = "../warpgate-tls", default-features = false }
-warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
-warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
-warpgate-web = { version = "*", path = "../warpgate-web", default-features = false }
-warpgate-sso = { version = "*", path = "../warpgate-sso", default-features = false }
-percent-encoding = { version = "2.1", default-features = false }
+url.workspace = true
 uuid.workspace = true
-regex.workspace = true
-url = { version = "2.4", default-features = false }
+warpgate-admin = { path = "../warpgate-admin", default-features = false }
+warpgate-web-ssh = { path = "../warpgate-web-ssh", default-features = false }
+warpgate-web-desktop = { path = "../warpgate-web-desktop", default-features = false }
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
+warpgate-ca = { path = "../warpgate-ca", default-features = false }
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
+warpgate-sso = { path = "../warpgate-sso", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
+warpgate-web = { path = "../warpgate-web", default-features = false }

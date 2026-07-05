@@ -6,6 +6,7 @@
     import EmptyState from 'common/EmptyState.svelte'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import { compare as naturalCompareFactory } from 'natural-orderby'
+    import { adminPermissions } from 'admin/lib/store'
 
     function getTargetGroups(): Observable<PaginatedResponse<TargetGroup>> {
         return from(api.listTargetGroups()).pipe(
@@ -33,6 +34,7 @@
         <a
             class="btn btn-primary ms-auto"
             href="/config/target-groups/create"
+            class:disabled={!$adminPermissions.targetsCreate}
             use:link>
             Add a group
         </a>

@@ -14,11 +14,12 @@ pub enum TlsMode {
 
 impl From<&str> for TlsMode {
     fn from(s: &str) -> Self {
+        #[allow(clippy::match_same_arms)]
         match s {
-            "Disabled" => TlsMode::Disabled,
-            "Preferred" => TlsMode::Preferred,
-            "Required" => TlsMode::Required,
-            _ => TlsMode::Preferred,
+            "Disabled" => Self::Disabled,
+            "Preferred" => Self::Preferred,
+            "Required" => Self::Required,
+            _ => Self::Preferred,
         }
     }
 }

@@ -1,11 +1,11 @@
 [package]
-edition = "2021"
-license = "Apache-2.0"
 name = "warpgate-web"
-version = "0.20.2"
+version = "0.26.0"
+edition = "2024"
+license = "Apache-2.0"
 
 [dependencies]
-serde.workspace = true
 rust-embed = { version = "8.3", default-features = false }
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

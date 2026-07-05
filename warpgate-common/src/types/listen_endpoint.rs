@@ -1,22 +1,24 @@
 use std::fmt::Debug;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
+use std::time::Duration;
 
-use futures::stream::{iter, FuturesUnordered};
+use futures::stream::{FuturesUnordered, iter};
 use futures::{Stream, StreamExt, TryStreamExt};
 use poem::listener::Listener;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::wrappers::TcpListenerStream;
+use tracing::warn;
 
 use crate::WarpgateError;
 
-#[derive(Clone, JsonSchema)]
+#[derive(Clone, PartialEq, Eq, JsonSchema)]
 pub struct ListenEndpoint(SocketAddr);
 
 impl ListenEndpoint {
-    pub fn address(&self) -> SocketAddr {
+    pub const fn address(&self) -> SocketAddr {
         self.0
     }
 
@@ -50,7 +52,7 @@ impl ListenEndpoint {
             .await?)
     }
 
-    pub async fn poem_listener(&self) -> Result<poem::listener::BoxListener, WarpgateError> {
+    pub fn poem_listener(&self) -> Result<poem::listener::BoxListener, WarpgateError> {
         let addrs = self.addresses_to_listen_on()?;
         #[allow(clippy::unwrap_used)] // length known >=1
         let (first, rest) = addrs.split_first().unwrap();
@@ -67,17 +69,30 @@ impl ListenEndpoint {
 
     pub async fn tcp_accept_stream(
         &self,
-    ) -> Result<impl Stream<Item = std::io::Result<TcpStream>>, WarpgateError> {
+    ) -> Result<impl Stream<Item = TcpStream> + Unpin + Send + 'static, WarpgateError> {
         Ok(iter(
             self.tcp_listeners()
                 .await?
                 .into_iter()
                 .map(TcpListenerStream::new),
         )
-        .flatten_unordered(None))
+        .flatten_unordered(None)
+        .filter_map(|result| async {
+            match result {
+                Ok(stream) => Some(stream),
+                Err(error) => {
+                    // #1962 - accept errors as transient (e.g. EMFILE)
+                    // and don't kill the listener
+                    warn!(%error, "Failed to accept connection");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    None
+                }
+            }
+        })
+        .boxed())
     }
 
-    pub fn port(&self) -> u16 {
+    pub const fn port(&self) -> u16 {
         self.0.port()
     }
 }

@@ -7,13 +7,14 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { replace } from 'svelte-spa-router'
+    import { adminPermissions } from 'admin/lib/store'
 
     interface Props {
         params: { id: string };
     }
 
     let { params }: Props = $props()
-    let groupId = params.id
+    let groupId = $derived(params.id)
 
     let group: TargetGroup | undefined = $state()
     let error: string | undefined = $state()
@@ -142,8 +143,16 @@
             </FormGroup>
 
             <div class="d-flex gap-2 mt-5">
-                <AsyncButton click={update} color="primary">Update</AsyncButton>
-                <Button color="danger" onclick={remove}>Remove</Button>
+                <AsyncButton
+                    click={update}
+                    color="primary"
+                    disabled={!$adminPermissions.targetsEdit}
+                >Update</AsyncButton>
+                <Button
+                    color="danger"
+                    onclick={remove}
+                    disabled={!$adminPermissions.targetsDelete}
+                >Remove</Button>
             </div>
         </form>
     </div>

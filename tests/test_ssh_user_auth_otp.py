@@ -2,7 +2,6 @@ from asyncio import subprocess
 from base64 import b64decode
 from uuid import uuid4
 import pyotp
-import pytest
 from pathlib import Path
 from textwrap import dedent
 

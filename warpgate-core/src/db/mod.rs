@@ -3,22 +3,18 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
-    ModelTrait, QueryFilter, TransactionTrait,
+    ConnectOptions, Database, DatabaseConnection, EntityOrSelect, EntityTrait, ModelTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
-use tracing::*;
-use uuid::Uuid;
+use time::OffsetDateTime;
+use tracing::error;
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{
-    GlobalParams, TargetOptions, TargetWebAdminOptions, WarpgateConfig, WarpgateError,
-};
-use warpgate_db_entities::Target::TargetKind;
-use warpgate_db_entities::{LogEntry, Role, Target, TargetRoleAssignment};
-use warpgate_db_migrations::migrate_database;
+use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateError};
+use warpgate_db_migrations::{migrate_database, migrate_database_down, migrate_database_up};
 
-use crate::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_TARGET_NAME};
 use crate::recordings::SessionRecordings;
 
+/// Open a connection to the configured database without running migrations.
 pub async fn connect_to_db(
     config: &WarpgateConfig,
     params: &GlobalParams,
@@ -31,7 +27,7 @@ pub async fn connect_to_db(
         abs_path.push("db.sqlite3");
 
         if let Some(parent) = abs_path.parent() {
-            std::fs::create_dir_all(parent)?
+            std::fs::create_dir_all(parent)?;
         }
 
         url.set_path(
@@ -60,12 +56,32 @@ pub async fn connect_to_db(
 
     let connection = Database::connect(opt).await?;
 
+    Ok(connection)
+}
+
+pub async fn connect_to_db_and_migrate(
+    config: &WarpgateConfig,
+    params: &GlobalParams,
+) -> Result<DatabaseConnection> {
+    let connection = connect_to_db(config, params).await?;
     migrate_database(&connection).await?;
     Ok(connection)
 }
 
+/// Apply `steps` pending migrations.
+pub async fn migrate_up(connection: &DatabaseConnection, steps: u32) -> Result<()> {
+    migrate_database_up(connection, steps).await?;
+    Ok(())
+}
+
+/// Revert `steps` applied migrations.
+pub async fn migrate_down(connection: &DatabaseConnection, steps: u32) -> Result<()> {
+    migrate_database_down(connection, steps).await?;
+    Ok(())
+}
+
 pub async fn populate_db(
-    db: &mut DatabaseConnection,
+    db: &DatabaseConnection,
     _config: &mut WarpgateConfig,
 ) -> Result<(), WarpgateError> {
     use sea_orm::ActiveValue::Set;
@@ -73,7 +89,7 @@ pub async fn populate_db(
 
     Recording::Entity::update_many()
         .set(Recording::ActiveModel {
-            ended: Set(Some(chrono::Utc::now())),
+            ended: Set(Some(OffsetDateTime::now_utc())),
             ..Default::default()
         })
         .filter(Expr::col(Recording::Column::Ended).is_null())
@@ -83,7 +99,7 @@ pub async fn populate_db(
 
     Session::Entity::update_many()
         .set(Session::ActiveModel {
-            ended: Set(Some(chrono::Utc::now())),
+            ended: Set(Some(OffsetDateTime::now_utc())),
             ..Default::default()
         })
         .filter(Expr::col(Session::Column::Ended).is_null())
@@ -91,82 +107,63 @@ pub async fn populate_db(
         .await
         .map_err(WarpgateError::from)?;
 
-    let admin_role = match Role::Entity::find()
-        .filter(Role::Column::Name.eq(BUILTIN_ADMIN_ROLE_NAME))
-        .all(db)
-        .await?
-        .first()
-    {
-        Some(x) => x.to_owned(),
-        None => {
-            let values = Role::ActiveModel {
-                id: Set(Uuid::new_v4()),
-                description: Set("Built-in admin role".into()),
-                name: Set(BUILTIN_ADMIN_ROLE_NAME.to_owned()),
-            };
-            values.insert(&*db).await.map_err(WarpgateError::from)?
-        }
-    };
-
-    let admin_target = match Target::Entity::find()
-        .filter(Target::Column::Kind.eq(TargetKind::WebAdmin))
-        .all(db)
-        .await?
-        .first()
-    {
-        Some(x) => x.to_owned(),
-        None => {
-            let values = Target::ActiveModel {
-                id: Set(Uuid::new_v4()),
-                name: Set(BUILTIN_ADMIN_TARGET_NAME.to_owned()),
-                description: Set("".into()),
-                kind: Set(TargetKind::WebAdmin),
-                options: Set(serde_json::to_value(TargetOptions::WebAdmin(
-                    TargetWebAdminOptions {},
-                ))
-                .map_err(WarpgateError::from)?),
-                rate_limit_bytes_per_second: Set(None),
-                group_id: Set(None),
-            };
-
-            values.insert(&*db).await.map_err(WarpgateError::from)?
-        }
-    };
-
-    if TargetRoleAssignment::Entity::find()
-        .filter(TargetRoleAssignment::Column::TargetId.eq(admin_target.id))
-        .filter(TargetRoleAssignment::Column::RoleId.eq(admin_role.id))
-        .all(db)
-        .await?
-        .is_empty()
-    {
-        let values = TargetRoleAssignment::ActiveModel {
-            target_id: Set(admin_target.id),
-            role_id: Set(admin_role.id),
-            ..Default::default()
-        };
-        values.insert(&*db).await.map_err(WarpgateError::from)?;
-    }
-
     Ok(())
 }
 
 pub async fn cleanup_db(
-    db: &mut DatabaseConnection,
-    recordings: &mut SessionRecordings,
+    db: &DatabaseConnection,
+    recordings: &SessionRecordings,
     retention: &Duration,
+    audit_retention: &Duration,
 ) -> Result<()> {
-    use warpgate_db_entities::{Recording, Session};
-    let cutoff = chrono::Utc::now() - chrono::Duration::from_std(*retention)?;
+    use warpgate_db_entities::{LogEntry, Recording, Session, Ticket, TicketRequest};
+    let audit_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*audit_retention)?;
+    let recording_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*retention)?;
 
     LogEntry::Entity::delete_many()
-        .filter(Expr::col(LogEntry::Column::Timestamp).lt(cutoff))
+        .filter(Expr::col(LogEntry::Column::Target).eq("audit"))
+        .filter(Expr::col(LogEntry::Column::Timestamp).lt(audit_cutoff))
         .exec(db)
         .await?;
 
+    LogEntry::Entity::delete_many()
+        .filter(Expr::col(LogEntry::Column::Target).ne("audit"))
+        .filter(Expr::col(LogEntry::Column::Timestamp).lt(recording_cutoff))
+        .exec(db)
+        .await?;
+
+    {
+        let active_ticket_ids = Ticket::Entity::find()
+            .select()
+            .column(Ticket::Column::Id)
+            .filter(
+                Expr::col(Ticket::Column::Expiry)
+                    .is_null()
+                    .or(Expr::col(Ticket::Column::Expiry).gt(OffsetDateTime::now_utc())),
+            )
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|x| x.id)
+            .collect::<Vec<_>>();
+
+        let mut request_deletion = TicketRequest::Entity::delete_many()
+            .filter(Expr::col(TicketRequest::Column::Created).lt(audit_cutoff));
+
+        if !active_ticket_ids.is_empty() {
+            request_deletion = request_deletion.filter(
+                Expr::col(TicketRequest::Column::TicketId)
+                    .is_null()
+                    .or(Expr::col(TicketRequest::Column::TicketId).is_not_in(active_ticket_ids)),
+            );
+        }
+
+        request_deletion.exec(db).await?;
+    }
+
     let recordings_to_delete = Recording::Entity::find()
         .filter(Expr::col(Session::Column::Ended).is_not_null())
-        .filter(Expr::col(Session::Column::Ended).lt(cutoff))
+        .filter(Expr::col(Session::Column::Ended).lt(recording_cutoff))
         .all(db)
         .await?;
 
@@ -182,7 +179,7 @@ pub async fn cleanup_db(
 
     Session::Entity::delete_many()
         .filter(Expr::col(Session::Column::Ended).is_not_null())
-        .filter(Expr::col(Session::Column::Ended).lt(cutoff))
+        .filter(Expr::col(Session::Column::Ended).lt(recording_cutoff))
         .exec(db)
         .await?;
 

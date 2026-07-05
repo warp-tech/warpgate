@@ -3,6 +3,7 @@ use sea_orm_migration::prelude::*;
 
 pub mod recording {
     use sea_orm::entity::prelude::*;
+    use time::OffsetDateTime;
     use uuid::Uuid;
 
     use crate::m00002_create_session::session;
@@ -24,8 +25,8 @@ pub mod recording {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: Uuid,
         pub name: String,
-        pub started: DateTimeUtc,
-        pub ended: Option<DateTimeUtc>,
+        pub started: OffsetDateTime,
+        pub ended: Option<OffsetDateTime>,
         pub session_id: Uuid,
         pub kind: RecordingKind,
     }

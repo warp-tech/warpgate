@@ -4,10 +4,10 @@ import AsyncButton from 'common/AsyncButton.svelte'
 import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
 import { TargetKind } from 'gateway/lib/api'
 import { link } from 'svelte-spa-router'
-import { FormGroup } from '@sveltestrap/sveltestrap'
+import { FormGroup, Alert } from '@sveltestrap/sveltestrap'
 import { firstBy } from 'thenby'
 import { stringifyError } from 'common/errors'
-import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+import { handleReauthError } from 'common/reauth'
 
 let error: string|null = $state(null)
 let targets: Target[]|undefined = $state()
@@ -24,7 +24,6 @@ async function load () {
         api.getTargets(),
         api.getUsers(),
     ])
-    targets = targets.filter(x => x.options.kind !== TargetKind.WebAdmin)
     targets.sort(firstBy('name'))
     users.sort(firstBy('username'))
 }
@@ -40,14 +39,17 @@ async function create () {
     try {
         result = await api.createTicket({
             createTicketRequest: {
-                username: selectedUser.username,
-                targetName: selectedTarget.name,
+                userId: selectedUser.id,
+                targetId: selectedTarget.id,
                 expiry: selectedExpiry ? new Date(selectedExpiry) : undefined,
                 numberOfUses: selectedNumberOfUses,
                 description: selectedDescription,
             },
         })
     } catch (err) {
+        if (await handleReauthError(err)) {
+            return
+        }
         error = await stringifyError(err)
     }
 }
@@ -71,14 +73,7 @@ async function create () {
         {#if selectedTarget && selectedUser}
         <ConnectionInstructions
             targetName={selectedTarget.name}
-            targetKind={{
-                Http: TargetKind.Http,
-                MySql: TargetKind.MySql,
-                Ssh: TargetKind.Ssh,
-                Postgres: TargetKind.Postgres,
-                WebAdmin: TargetKind.WebAdmin,
-                Kubernetes: TargetKind.Ssh, // Use SSH as placeholder since Kubernetes isn't in gateway TargetKind
-            }[selectedTarget.options.kind]}
+            targetKind={selectedTarget.options.kind}
             username={selectedUser.username}
             targetExternalHost={selectedTarget.options.kind === 'Http' ? selectedTarget.options.externalHost : undefined}
             ticketSecret={result.secret}

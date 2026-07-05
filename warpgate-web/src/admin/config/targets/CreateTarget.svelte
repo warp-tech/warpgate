@@ -1,14 +1,14 @@
 <script lang="ts">
     import { api, type TargetOptions, type TargetGroup, TlsMode } from 'admin/lib/api'
     import { replace } from 'svelte-spa-router'
-    import { Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
+    import { Button, Form, FormGroup, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { onMount } from 'svelte'
     import { TargetKind } from 'gateway/lib/api'
+    import { adminPermissions } from '../../lib/store'
 
     interface Props {
-        params: { kind: string };
+        params: { kind: string }
     }
 
     let { params }: Props = $props()
@@ -47,7 +47,10 @@
                         verify: true,
                     },
                     username: 'root',
-                    password: '',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
                 },
                 Postgres: {
                     kind: TargetKind.Postgres,
@@ -58,12 +61,14 @@
                         verify: true,
                     },
                     username: 'postgres',
-                    password: '',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
                 },
                 Kubernetes: {
                     kind: TargetKind.Kubernetes,
                     clusterUrl: 'https://kubernetes.example.com:6443',
-                    namespace: 'default',
                     tls: {
                         mode: TlsMode.Preferred,
                         verify: true,
@@ -74,7 +79,25 @@
                         privateKey: '',
                     },
                 },
-                WebAdmin: null as any,
+                Vnc: {
+                    kind: TargetKind.Vnc,
+                    host: '192.168.0.1',
+                    port: 5900,
+                    auth: {
+                        kind: 'None' as const,
+                    },
+                },
+                Rdp: {
+                    kind: TargetKind.Rdp,
+                    host: '192.168.0.1',
+                    port: 3389,
+                    username: 'Administrator',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
+                    verifyTls: false,
+                },
             }[params.kind]
             if (!options) {
                 return
@@ -102,6 +125,9 @@
 </script>
 
 <div class="container-max-md">
+    {#if !$adminPermissions.targetsCreate}
+        <Alert color="warning">You do not have permission to create targets.</Alert>
+    {/if}
     {#if error}
     <Alert color="danger">{error}</Alert>
     {/if}
@@ -119,6 +145,7 @@
             <Button class="d-none" type="submit"></Button>
 
             <FormGroup floating label="Name">
+                <!-- svelte-ignore a11y_autofocus -->
                 <input class="form-control" autofocus required bind:value={name} />
             </FormGroup>
 

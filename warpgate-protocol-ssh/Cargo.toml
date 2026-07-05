@@ -1,28 +1,41 @@
 [package]
-edition = "2021"
-license = "Apache-2.0"
 name = "warpgate-protocol-ssh"
-version = "0.20.2"
+version = "0.26.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
 
 [dependencies]
-ansi_term = { version = "0.12", default-features = false }
 anyhow.workspace = true
-async-trait = { version = "0.1", default-features = false }
+async-trait.workspace = true
 bimap = { version = "0.6", default-features = false, features = ["std"] }
 bytes.workspace = true
-dialoguer.workspace = true
 curve25519-dalek = { version = "4.0.0", default-features = false } # pin due to build fail on x86
+dialoguer.workspace = true
 ed25519-dalek = { version = "2.0.0", default-features = false } # pin due to build fail on x86 in 2.1
 futures.workspace = true
+ratatui = { version = "0.30", default-features = false, features = [
+    "crossterm",
+    "unstable-backend-writer",
+] }
 russh.workspace = true
-serde.workspace = true
 sea-orm.workspace = true
+serde.workspace = true
+termcolor = { version = "1", default-features = false }
+termwiz = { version = "0.23", default-features = false }
 thiserror.workspace = true
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tracing.workspace = true
+tui-input = { version = "0.14", default-features = false, features = [
+    "ratatui-crossterm",
+] }
+url.workspace = true
 uuid.workspace = true
-warpgate-common = { version = "*", path = "../warpgate-common", default-features = false }
-warpgate-core = { version = "*", path = "../warpgate-core", default-features = false }
-warpgate-db-entities = { version = "*", path = "../warpgate-db-entities", default-features = false }
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
+warpgate-tls = { path = "../warpgate-tls" }
 zeroize = { version = "^1.5", default-features = false }

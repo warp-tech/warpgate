@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
-use tracing::*;
+use tracing::info;
 use warpgate_common::GlobalParams;
 use warpgate_tls::{TlsCertificateBundle, TlsPrivateKey};
 
 use crate::config::load_config;
 
-pub(crate) async fn command(params: &GlobalParams) -> Result<()> {
+pub async fn command(params: &GlobalParams) -> Result<()> {
     let config = load_config(params, true)?;
     TlsCertificateBundle::from_file(
         params

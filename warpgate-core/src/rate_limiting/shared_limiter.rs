@@ -31,7 +31,7 @@ pub struct SharedWarpgateRateLimiterGuard<'a> {
 }
 
 impl<'a> SharedWarpgateRateLimiterGuard<'a> {
-    pub fn new(inner: std::sync::MutexGuard<'a, WarpgateRateLimiter>) -> Self {
+    pub const fn new(inner: std::sync::MutexGuard<'a, WarpgateRateLimiter>) -> Self {
         Self {
             inner,
             _non_sendable: std::marker::PhantomData,

@@ -1,19 +1,16 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, ModelTrait, QueryFilter,
-    Set,
-};
-use tokio::sync::Mutex;
+use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
-use warpgate_common::{UserSsoCredential, WarpgateError};
-use warpgate_db_entities::SsoCredential;
+use warpgate_common::{AdminPermission, UserSsoCredential, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_db_entities::{SsoCredential, User};
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 #[derive(Object)]
 struct ExistingSsoCredential {
@@ -57,6 +54,8 @@ enum GetSsoCredentialsResponse {
 enum CreateSsoCredentialResponse {
     #[oai(status = 201)]
     Created(Json<ExistingSsoCredential>),
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -78,11 +77,13 @@ impl ListApi {
     )]
     async fn api_get_all(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSsoCredentialsResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services().db.lock().await;
 
         let objects = SsoCredential::Entity::find()
             .filter(SsoCredential::Column::UserId.eq(*user_id))
@@ -101,12 +102,14 @@ impl ListApi {
     )]
     async fn api_create(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<NewSsoCredential>,
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateSsoCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services().db.lock().await;
 
         let object = SsoCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -116,6 +119,21 @@ impl ListApi {
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
+
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(CreateSsoCredentialResponse::NotFound);
+        };
+
+        let credential_name = body.email.clone();
+        AuditEvent::CredentialCreated {
+            credential_type: "sso".to_string(),
+            credential_name: Some(credential_name),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username,
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
 
         Ok(CreateSsoCredentialResponse::Created(Json(object.into())))
     }
@@ -140,13 +158,15 @@ impl DetailApi {
     )]
     async fn api_update(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<NewSsoCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateSsoCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services().db.lock().await;
 
         let model = SsoCredential::ActiveModel {
             id: Set(id.0),
@@ -170,12 +190,14 @@ impl DetailApi {
     )]
     async fn api_delete(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services().db.lock().await;
 
         let Some(role) = SsoCredential::Entity::find_by_id(id.0)
             .filter(SsoCredential::Column::UserId.eq(*user_id))
@@ -185,7 +207,24 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(DeleteCredentialResponse::NotFound);
+        };
+
+        let credential_name = role.email.clone();
+
         role.delete(&*db).await?;
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "sso".to_string(),
+            credential_name: Some(credential_name.clone()),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
         Ok(DeleteCredentialResponse::Deleted)
     }
 }

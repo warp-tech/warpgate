@@ -1,7 +1,14 @@
-projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-database-protocols warpgate-protocol-ssh warpgate-protocol-mysql warpgate-protocol-postgres warpgate-protocol-kubernetes warpgate-protocol-http warpgate-core warpgate-sso"
+projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-database-protocols warpgate-protocol-ssh warpgate-protocol-mysql warpgate-protocol-postgres warpgate-protocol-kubernetes warpgate-protocol-http warpgate-protocol-rdp warpgate-protocol-vnc warpgate-core warpgate-sso"
 
-run $RUST_BACKTRACE='1' *ARGS='run':
-     cargo run --all-features -- --config config.yaml {{ARGS}}
+run *ARGS='run':
+    RUST_BACKTRACE=1 cargo run --all-features -- --config config.yaml {{ARGS}}
+
+run-release *ARGS='run':
+    RUST_BACKTRACE=1 cargo run --all-features --release -- --config config.yaml {{ARGS}}
+
+# Run before `cargo build` so warpgate-protocol-rdp's build script can embed it into the main binary.
+build-rdp-helper *ARGS:
+    cd warpgate-rdp-helper && cargo build --release {{ARGS}}
 
 fmt:
     for p in {{projects}}; do cargo fmt -p $p -v; done
@@ -11,6 +18,9 @@ fix *ARGS:
 
 clippy *ARGS:
     for p in {{projects}}; do cargo cranky --all-features -p $p {{ARGS}}; done
+
+bless *ARGS:
+    for p in {{projects}}; do cargo bless --manifest-path $p/Cargo.toml {{ARGS}}; done
 
 test:
     for p in {{projects}}; do cargo test --all-features -p $p; done

@@ -1,21 +1,87 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::sync::LazyLock;
 use std::time::SystemTime;
 
 use data_encoding::BASE64;
-use once_cell::sync::Lazy;
 use openidconnect::{AuthType, ClientId, ClientSecret, IssuerUrl};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::SsoError;
 
-#[allow(clippy::unwrap_used)]
-pub static GOOGLE_ISSUER_URL: Lazy<IssuerUrl> =
-    Lazy::new(|| IssuerUrl::new("https://accounts.google.com".to_string()).unwrap());
+/// A role mapping value that accepts either a single role or a list of roles.
+/// In YAML config: `"group": "role"` or `"group": ["role1", "role2"]`
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum RoleMapping {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl RoleMapping {
+    pub fn roles(&self) -> Vec<String> {
+        match self {
+            Self::Single(s) => vec![s.clone()],
+            Self::Multiple(v) => v.clone(),
+        }
+    }
+}
 
 #[allow(clippy::unwrap_used)]
-pub static APPLE_ISSUER_URL: Lazy<IssuerUrl> =
-    Lazy::new(|| IssuerUrl::new("https://appleid.apple.com".to_string()).unwrap());
+pub static GOOGLE_ISSUER_URL: LazyLock<IssuerUrl> =
+    LazyLock::new(|| IssuerUrl::new("https://accounts.google.com".to_string()).unwrap());
+
+#[allow(clippy::unwrap_used)]
+pub static APPLE_ISSUER_URL: LazyLock<IssuerUrl> =
+    LazyLock::new(|| IssuerUrl::new("https://appleid.apple.com".to_string()).unwrap());
+
+#[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema)]
+pub enum SsoProviderReturnUrlPrefix {
+    #[serde(rename = "@")]
+    #[default]
+    AtSign,
+    #[serde(rename = "_")]
+    Underscore,
+}
+
+impl Display for SsoProviderReturnUrlPrefix {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AtSign => write!(f, "@"),
+            Self::Underscore => write!(f, "_"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub enum SsoReturnUrlDomainPreference {
+    #[default]
+    #[serde(rename = "external_host")]
+    ExternalHost,
+    #[serde(rename = "host_header")]
+    HostHeader,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SsoProviderKubernetesConfig {
+    /// Public OIDC client id used by kubectl (kubelogin). Must be listed in the
+    /// provider's `additional_trusted_audiences`.
+    pub client_id: String,
+    /// Extra scopes for kubelogin. Defaults to openid/email/profile when unset.
+    pub scopes: Option<Vec<String>>,
+    /// Optional client secret (only for confidential kubectl clients).
+    pub client_secret: Option<String>,
+}
+
+impl SsoProviderKubernetesConfig {
+    /// kubelogin scopes, falling back to the OIDC defaults when unset.
+    pub fn scopes_or_default(&self) -> Vec<String> {
+        self.scopes
+            .clone()
+            .unwrap_or_else(|| ["openid", "email", "profile"].map(String::from).to_vec())
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SsoProviderConfig {
@@ -24,7 +90,18 @@ pub struct SsoProviderConfig {
     pub provider: SsoInternalProviderConfig,
     pub return_domain_whitelist: Option<Vec<String>>,
     #[serde(default)]
+    pub return_url_domain: SsoReturnUrlDomainPreference,
+    #[serde(default)]
+    pub return_url_prefix: SsoProviderReturnUrlPrefix,
+    #[serde(default)]
     pub auto_create_users: bool,
+    /// Default credential policy for auto-created users.
+    /// Keys: "http", "ssh", "mysql", "postgres"
+    /// Values: list of credential kinds e.g. ["sso"], ["web"], []
+    pub default_credential_policy: Option<serde_json::Value>,
+    /// kubectl OIDC parameters for generating a kubelogin kubeconfig.
+    #[serde(default)]
+    pub kubernetes: Option<SsoProviderKubernetesConfig>,
 }
 
 impl SsoProviderConfig {
@@ -44,6 +121,16 @@ pub enum SsoInternalProviderConfig {
         client_id: ClientId,
         #[schemars(with = "String")]
         client_secret: ClientSecret,
+        /// Service account email for Google Directory API group lookups
+        service_account_email: Option<String>,
+        /// PEM private key from the service account JSON key file
+        service_account_key: Option<String>,
+        /// A Google Workspace admin email for domain-wide delegation
+        admin_email: Option<String>,
+        /// Maps Google group email addresses to Warpgate role names.
+        /// Use "*" as a key to set a default role for any group not explicitly mapped.
+        role_mappings: Option<HashMap<String, RoleMapping>>,
+        admin_role_mappings: Option<HashMap<String, RoleMapping>>,
     },
     #[serde(rename = "apple")]
     Apple {
@@ -71,7 +158,13 @@ pub enum SsoInternalProviderConfig {
         #[schemars(with = "String")]
         issuer_url: IssuerUrl,
         scopes: Vec<String>,
-        role_mappings: Option<HashMap<String, String>>,
+        role_mappings: Option<HashMap<String, RoleMapping>>,
+        admin_role_mappings: Option<HashMap<String, RoleMapping>>,
+        /// OIDC claim to read group memberships from (e.g. "groups").
+        /// Its values are mapped to roles via role_mappings / admin_role_mappings.
+        /// When unset, the warpgate_roles / warpgate_admin_roles claims are used.
+        roles_claim: Option<String>,
+        admin_roles_claim: Option<String>,
         additional_trusted_audiences: Option<Vec<String>>,
         #[serde(default)]
         trust_unknown_audiences: bool,
@@ -89,32 +182,32 @@ struct AppleIDClaims<'a> {
 
 impl SsoInternalProviderConfig {
     #[inline]
-    pub fn label(&self) -> &'static str {
+    pub const fn label(&self) -> &'static str {
         match self {
-            SsoInternalProviderConfig::Google { .. } => "Google",
-            SsoInternalProviderConfig::Apple { .. } => "Apple",
-            SsoInternalProviderConfig::Azure { .. } => "Azure",
-            SsoInternalProviderConfig::Custom { .. } => "SSO",
+            Self::Google { .. } => "Google",
+            Self::Apple { .. } => "Apple",
+            Self::Azure { .. } => "Azure",
+            Self::Custom { .. } => "SSO",
         }
     }
 
     #[inline]
-    pub fn client_id(&self) -> &ClientId {
+    pub const fn client_id(&self) -> &ClientId {
         match self {
-            SsoInternalProviderConfig::Google { client_id, .. }
-            | SsoInternalProviderConfig::Apple { client_id, .. }
-            | SsoInternalProviderConfig::Azure { client_id, .. }
-            | SsoInternalProviderConfig::Custom { client_id, .. } => client_id,
+            Self::Google { client_id, .. }
+            | Self::Apple { client_id, .. }
+            | Self::Azure { client_id, .. }
+            | Self::Custom { client_id, .. } => client_id,
         }
     }
 
     #[inline]
     pub fn client_secret(&self) -> Result<ClientSecret, SsoError> {
         Ok(match self {
-            SsoInternalProviderConfig::Google { client_secret, .. }
-            | SsoInternalProviderConfig::Azure { client_secret, .. }
-            | SsoInternalProviderConfig::Custom { client_secret, .. } => client_secret.clone(),
-            SsoInternalProviderConfig::Apple {
+            Self::Google { client_secret, .. }
+            | Self::Azure { client_secret, .. }
+            | Self::Custom { client_secret, .. } => client_secret.clone(),
+            Self::Apple {
                 client_secret,
                 client_id,
                 key_id,
@@ -162,12 +255,12 @@ impl SsoInternalProviderConfig {
     #[inline]
     pub fn issuer_url(&self) -> Result<IssuerUrl, SsoError> {
         Ok(match self {
-            SsoInternalProviderConfig::Google { .. } => GOOGLE_ISSUER_URL.clone(),
-            SsoInternalProviderConfig::Apple { .. } => APPLE_ISSUER_URL.clone(),
-            SsoInternalProviderConfig::Azure { tenant, .. } => {
+            Self::Google { .. } => GOOGLE_ISSUER_URL.clone(),
+            Self::Apple { .. } => APPLE_ISSUER_URL.clone(),
+            Self::Azure { tenant, .. } => {
                 IssuerUrl::new(format!("https://login.microsoftonline.com/{tenant}/v2.0"))?
             }
-            SsoInternalProviderConfig::Custom { issuer_url, .. } => {
+            Self::Custom { issuer_url, .. } => {
                 let mut url = issuer_url.url().clone();
                 let path = url.path().to_owned();
                 if let Some(path) = path.strip_suffix("/.well-known/openid-configuration") {
@@ -184,18 +277,18 @@ impl SsoInternalProviderConfig {
     #[inline]
     pub fn scopes(&self) -> Vec<String> {
         match self {
-            SsoInternalProviderConfig::Google { .. } | SsoInternalProviderConfig::Azure { .. } => {
+            Self::Google { .. } | Self::Azure { .. } => {
                 vec!["email".into(), "profile".into()]
             }
-            SsoInternalProviderConfig::Custom { scopes, .. } => scopes.clone(),
-            SsoInternalProviderConfig::Apple { .. } => vec![],
+            Self::Custom { scopes, .. } => scopes.clone(),
+            Self::Apple { .. } => vec![],
         }
     }
 
     #[inline]
     pub fn extra_parameters(&self) -> HashMap<String, String> {
         match self {
-            SsoInternalProviderConfig::Apple { .. } => {
+            Self::Apple { .. } => {
                 let mut map = HashMap::new();
                 map.insert("response_mode".to_string(), "form_post".to_string());
                 map
@@ -205,37 +298,75 @@ impl SsoInternalProviderConfig {
     }
 
     #[inline]
-    pub fn auth_type(&self) -> AuthType {
+    pub const fn auth_type(&self) -> AuthType {
         #[allow(clippy::match_like_matches_macro)]
         match self {
-            SsoInternalProviderConfig::Apple { .. } => AuthType::RequestBody,
+            Self::Apple { .. } => AuthType::RequestBody,
             _ => AuthType::BasicAuth,
         }
     }
 
     #[inline]
-    pub fn needs_pkce_verifier(&self) -> bool {
+    pub const fn needs_pkce_verifier(&self) -> bool {
         #[allow(clippy::match_like_matches_macro)]
         match self {
-            SsoInternalProviderConfig::Apple { .. } => false,
+            Self::Apple { .. } => false,
             _ => true,
         }
     }
 
     #[inline]
-    pub fn role_mappings(&self) -> Option<HashMap<String, String>> {
+    pub fn role_mappings(&self) -> Option<HashMap<String, RoleMapping>> {
         #[allow(clippy::match_like_matches_macro)]
         match self {
-            SsoInternalProviderConfig::Custom { role_mappings, .. } => role_mappings.clone(),
+            Self::Google { role_mappings, .. } | Self::Custom { role_mappings, .. } => {
+                role_mappings.clone()
+            }
             _ => None,
         }
     }
 
     #[inline]
-    pub fn additional_trusted_audiences(&self) -> Option<&Vec<String>> {
+    pub fn admin_role_mappings(&self) -> Option<HashMap<String, RoleMapping>> {
         #[allow(clippy::match_like_matches_macro)]
         match self {
-            SsoInternalProviderConfig::Custom {
+            Self::Google {
+                admin_role_mappings,
+                ..
+            }
+            | Self::Custom {
+                admin_role_mappings,
+                ..
+            } => admin_role_mappings.clone(),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn roles_claim(&self) -> &str {
+        match self {
+            Self::Custom { roles_claim, .. } => roles_claim.as_deref(),
+            _ => None,
+        }
+        .unwrap_or("warpgate_roles")
+    }
+
+    #[inline]
+    pub fn admin_roles_claim(&self) -> &str {
+        match self {
+            Self::Custom {
+                admin_roles_claim, ..
+            } => admin_roles_claim.as_deref(),
+            _ => None,
+        }
+        .unwrap_or("warpgate_admin_roles")
+    }
+
+    #[inline]
+    pub const fn additional_trusted_audiences(&self) -> Option<&Vec<String>> {
+        #[allow(clippy::match_like_matches_macro)]
+        match self {
+            Self::Custom {
                 additional_trusted_audiences,
                 ..
             } => additional_trusted_audiences.as_ref(),
@@ -244,10 +375,10 @@ impl SsoInternalProviderConfig {
     }
 
     #[inline]
-    pub fn trust_unknown_audiences(&self) -> bool {
+    pub const fn trust_unknown_audiences(&self) -> bool {
         #[allow(clippy::match_like_matches_macro)]
         match self {
-            SsoInternalProviderConfig::Custom {
+            Self::Custom {
                 trust_unknown_audiences,
                 ..
             } => *trust_unknown_audiences,

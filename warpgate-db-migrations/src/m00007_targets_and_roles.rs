@@ -1,7 +1,7 @@
 use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
 
-pub(crate) mod role {
+pub mod role {
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
 
@@ -62,7 +62,7 @@ pub mod target {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-mod target_role_assignment {
+pub mod target_role_assignment {
     use sea_orm::entity::prelude::*;
     use uuid::Uuid;
 

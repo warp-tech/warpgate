@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use time::{format_description, UtcOffset};
+use time::{UtcOffset, format_description};
 use tracing_log::LogTracer;
 use tracing_subscriber::filter::dynamic_filter_fn;
 use tracing_subscriber::fmt::time::OffsetTime;
@@ -17,11 +17,14 @@ use crate::Cli;
 
 pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<()> {
     if std::env::var("RUST_LOG").is_err() {
-        match cli.debug {
-            0 => std::env::set_var("RUST_LOG", "warpgate=info"),
-            1 => std::env::set_var("RUST_LOG", "warpgate=debug"),
-            2 => std::env::set_var("RUST_LOG", "warpgate=debug,russh=debug"),
-            _ => std::env::set_var("RUST_LOG", "debug"),
+        #[allow(unsafe_code)]
+        unsafe {
+            match cli.debug {
+                0 => std::env::set_var("RUST_LOG", "audit=info,warpgate=info"),
+                1 => std::env::set_var("RUST_LOG", "audit=info,warpgate=debug"),
+                2 => std::env::set_var("RUST_LOG", "audit=info,warpgate=debug,russh=debug"),
+                _ => std::env::set_var("RUST_LOG", "debug"),
+            }
         }
     }
 
@@ -35,7 +38,7 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
     // Determine effective log format (CLI overrides config)
     let log_format = cli
         .log_format
-        .or(config.map(|c| c.store.log.format))
+        .or_else(|| config.map(|c| c.store.log.format))
         .unwrap_or_default();
 
     let registry = tracing_subscriber::registry();
@@ -68,8 +71,10 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
                     .with_timer(OffsetTime::new(
                         offset,
                         #[allow(clippy::unwrap_used)]
-                        format_description::parse("[day].[month].[year] [hour]:[minute]:[second]")
-                            .unwrap(),
+                        format_description::parse_borrowed::<1>(
+                            "[day].[month].[year] [hour]:[minute]:[second]",
+                        )
+                        .unwrap(),
                     ))
                     .with_filter(dynamic_filter_fn(move |m, c| {
                         env_filter.enabled(m, c.clone())
@@ -86,7 +91,7 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
                 .with_timer(OffsetTime::new(
                     offset,
                     #[allow(clippy::unwrap_used)]
-                    format_description::parse("[hour]:[minute]:[second]").unwrap(),
+                    format_description::parse_borrowed::<1>("[hour]:[minute]:[second]").unwrap(),
                 ))
                 .with_filter(dynamic_filter_fn(move |m, c| {
                     env_filter.enabled(m, c.clone())

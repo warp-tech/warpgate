@@ -1,6 +1,6 @@
-use chrono::{DateTime, Utc};
 use poem_openapi::Object;
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{SessionId, Target};
 use warpgate_db_entities::Session;
@@ -10,8 +10,8 @@ pub struct SessionSnapshot {
     pub id: SessionId,
     pub username: Option<String>,
     pub target: Option<Target>,
-    pub started: DateTime<Utc>,
-    pub ended: Option<DateTime<Utc>>,
+    pub started: OffsetDateTime,
+    pub ended: Option<OffsetDateTime>,
     pub ticket_id: Option<Uuid>,
     pub protocol: String,
 }

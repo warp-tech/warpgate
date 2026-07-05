@@ -1,29 +1,37 @@
-use std::ops::DerefMut;
+use std::net::IpAddr;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use anyhow::bail;
 use futures::{SinkExt, StreamExt};
 use poem::session::Session;
-use poem::web::websocket::{Message, WebSocket};
 use poem::web::Data;
-use poem::{handler, IntoResponse, Request};
+use poem::web::websocket::{Message, WebSocket};
+use poem::{IntoResponse, Request, handler};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
-use tokio::sync::Mutex;
-use tracing::*;
+use time::OffsetDateTime;
+use tokio::sync::{Mutex, broadcast};
+use tracing::{error, warn};
 use uuid::Uuid;
+use warpgate_admin::api::AnySecurityScheme;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
+use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, WarpgateError};
-use warpgate_core::{ConfigProvider, Services};
+use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
+use warpgate_common_http::logging::get_client_ip;
+use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
+use warpgate_core::Services;
+use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::login_protection::FailedAttemptInfo;
+use warpgate_db_entities::Parameters;
 
-use super::common::logout;
+use super::common::{emit_unknown_authentication_failed_event, logout};
 use crate::common::{
-    authorize_session, endpoint_auth, get_auth_state_for_request, RequestAuthorization,
-    SessionAuthorization, SessionExt,
+    SessionExt, authorize_session, endpoint_auth, get_auth_state_for_request,
+    get_or_create_auth_state_for_request, session_id_for_request,
 };
 use crate::session::SessionStore;
-
 pub struct Api;
 
 #[derive(Object)]
@@ -47,11 +55,38 @@ enum ApiAuthState {
     WebUserApprovalNeeded,
     PublicKeyNeeded,
     Success,
+    IpBlocked,
+    UserLocked,
+    IpRejected,
 }
 
 #[derive(Object)]
 struct LoginFailureResponse {
     state: ApiAuthState,
+    /// True when the credential the client just submitted was rejected
+    /// (as opposed to merely needing another factor). Lets the UI show an
+    /// "incorrect credentials" message and avoid auto-advancing to another
+    /// authentication method.
+    credential_rejected: bool,
+}
+
+impl LoginFailureResponse {
+    /// A failure that is not caused by an invalid credential (e.g. blocked IP,
+    /// locked user, or simply a credential still being required).
+    fn state(state: ApiAuthState) -> Self {
+        Self {
+            state,
+            credential_rejected: false,
+        }
+    }
+
+    /// A failure caused by the client submitting an invalid credential.
+    fn credential_rejected(state: ApiAuthState) -> Self {
+        Self {
+            state,
+            credential_rejected: true,
+        }
+    }
 }
 
 #[derive(ApiResponse)]
@@ -74,7 +109,7 @@ struct AuthStateResponseInternal {
     pub id: String,
     pub protocol: String,
     pub address: Option<String>,
-    pub started: DateTime<Utc>,
+    pub started: OffsetDateTime,
     pub state: ApiAuthState,
     pub identification_string: String,
 }
@@ -106,27 +141,27 @@ const PREFERRED_NEED_CRED_ORDER: &[CredentialKind] = &[
 impl From<AuthResult> for ApiAuthState {
     fn from(state: AuthResult) -> Self {
         match state {
-            AuthResult::Rejected => ApiAuthState::Failed,
+            AuthResult::Rejected => Self::Failed,
             AuthResult::Need(kinds) => {
                 let kind = PREFERRED_NEED_CRED_ORDER
                     .iter()
                     .find(|x| kinds.contains(x))
-                    .or(kinds.iter().next());
+                    .or_else(|| kinds.iter().next());
                 match kind {
-                    Some(CredentialKind::Password) => ApiAuthState::PasswordNeeded,
-                    Some(CredentialKind::Totp) => ApiAuthState::OtpNeeded,
-                    Some(CredentialKind::Sso) => ApiAuthState::SsoNeeded,
-                    Some(CredentialKind::WebUserApproval) => ApiAuthState::WebUserApprovalNeeded,
-                    Some(CredentialKind::PublicKey) => ApiAuthState::PublicKeyNeeded,
+                    Some(CredentialKind::Password) => Self::PasswordNeeded,
+                    Some(CredentialKind::Totp) => Self::OtpNeeded,
+                    Some(CredentialKind::Sso) => Self::SsoNeeded,
+                    Some(CredentialKind::WebUserApproval) => Self::WebUserApprovalNeeded,
+                    Some(CredentialKind::PublicKey) => Self::PublicKeyNeeded,
                     Some(CredentialKind::Certificate) => {
                         // Certificate authentication is not supported for HTTP protocol
                         // This credential type is primarily for Kubernetes
-                        ApiAuthState::Failed
+                        Self::Failed
                     }
-                    None => ApiAuthState::Failed,
+                    None => Self::Failed,
                 }
             }
-            AuthResult::Accepted { .. } => ApiAuthState::Success,
+            AuthResult::Accepted { .. } => Self::Success,
         }
     }
 }
@@ -137,47 +172,140 @@ impl Api {
     async fn api_auth_login(
         &self,
         req: &Request,
-        session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
         body: Json<LoginRequest>,
     ) -> poem::Result<LoginResponse> {
-        let mut auth_state_store = services.auth_state_store.lock().await;
-        let state_arc = match get_auth_state_for_request(
-            &body.username,
-            session,
-            &mut auth_state_store,
-        )
-        .await
-        {
-            Err(WarpgateError::UserNotFound(_)) => {
-                return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                    state: ApiAuthState::Failed,
-                })))
+        let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
+        let services = ctx.services();
+        let client_ip: Option<IpAddr> = get_client_ip(req, services)
+            .await
+            .and_then(|s| s.parse().ok());
+
+        // Check if IP is blocked
+        if let Some(ip) = client_ip {
+            if let Some(block_info) = services.login_protection.check_ip_blocked(&ip).await? {
+                warn!(
+                    ip = %ip,
+                    expires_at = %block_info.expires_at,
+                    "Login attempt from blocked IP"
+                );
+                return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                    ApiAuthState::IpBlocked,
+                ))));
             }
-            x => x,
-        }?;
-        let mut state = state_arc.lock().await;
+        }
 
-        let mut cp = services.config_provider.lock().await;
+        // Password login can be disabled globally (e.g. SSO-only deployments).
+        if Parameters::Entity::get(&*services.db.lock().await)
+            .await
+            .map_err(WarpgateError::from)?
+            .password_login_mode
+            == Parameters::PasswordLoginMode::Disabled
+        {
+            warn!(username = %body.username, "Password login attempt while disabled");
+            return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                ApiAuthState::Failed,
+            ))));
+        }
 
-        let password_cred = AuthCredential::Password(Secret::new(body.password.clone()));
-        if cp
-            .validate_credential(&state.user_info().username, &password_cred)
+        // Check if user is locked
+        if let Some(_lock_info) = services
+            .login_protection
+            .check_user_locked(&body.username)
             .await?
         {
-            state.add_valid_credential(password_cred);
+            warn!(
+                username = %body.username,
+                "Login attempt for locked user"
+            );
+            return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                ApiAuthState::UserLocked,
+            ))));
         }
+
+        let state_arc =
+            match get_or_create_auth_state_for_request(req, &body.username, &ctx, Some("password"))
+                .await
+            {
+                Err(WarpgateError::UserNotFound(_)) => {
+                    let session_id = session_id_for_request(req, &ctx).await?;
+                    emit_unknown_authentication_failed_event(
+                        session_id,
+                        remote_ip,
+                        &body.username,
+                        "password",
+                        "unknown user",
+                    );
+                    return Ok(LoginResponse::Failure(Json(
+                        LoginFailureResponse::credential_rejected(ApiAuthState::Failed),
+                    )));
+                }
+                Err(WarpgateError::IpAddrNotAllowed(..)) => {
+                    let session_id = session_id_for_request(req, &ctx).await?;
+                    emit_unknown_authentication_failed_event(
+                        session_id,
+                        remote_ip,
+                        &body.username,
+                        "password",
+                        "IP address not allowed",
+                    );
+                    return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                        ApiAuthState::IpRejected,
+                    ))));
+                }
+                x => x,
+            }?;
+        let mut state = state_arc.lock().await;
+
+        let credential_valid = validate_and_add_credential(
+            &mut state,
+            &AuthCredential::Password(Secret::new(body.password.clone())),
+            &mut *ctx.services().config_provider.lock().await,
+        )
+        .await?;
 
         match state.verify() {
             AuthResult::Accepted { user_info } => {
-                auth_state_store.complete(state.id()).await;
-                authorize_session(req, user_info).await?;
+                let username = user_info.username.clone();
+                authorize_session(req, &ctx, user_info).await?;
+                state.emit_authenticated_event_once();
+                let state_id = *state.id();
+                drop(state);
+                ctx.services()
+                    .auth_state_store
+                    .lock()
+                    .await
+                    .complete(&state_id)
+                    .await;
+                // Clear failed attempts on successful login
+                if let Some(ip) = client_ip {
+                    let _ = services
+                        .login_protection
+                        .clear_failed_attempts(&ip, &username)
+                        .await;
+                }
                 Ok(LoginResponse::Success)
             }
             x => {
-                error!("Auth rejected");
+                // Only an invalid password counts as a failed attempt; a valid
+                // password that merely needs a second factor is not a failure.
+                if !credential_valid {
+                    error!("Password authentication failed");
+                    if let Some(ip) = client_ip {
+                        let _ = services
+                            .login_protection
+                            .record_failed_attempt(FailedAttemptInfo {
+                                username: state.user_info().username.clone(),
+                                remote_ip: ip,
+                                protocol: "http".to_string(),
+                                credential_type: "password".to_string(),
+                            })
+                            .await;
+                    }
+                }
                 Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                     state: x.into(),
+                    credential_rejected: !credential_valid,
                 })))
             }
         }
@@ -187,43 +315,100 @@ impl Api {
     async fn api_auth_otp_login(
         &self,
         req: &Request,
-        session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
         body: Json<OtpLoginRequest>,
     ) -> poem::Result<LoginResponse> {
-        let state_id = session.get_auth_state_id();
+        let services = ctx.services();
+        let client_ip: Option<IpAddr> = get_client_ip(req, services)
+            .await
+            .and_then(|s| s.parse().ok());
 
-        let mut auth_state_store = services.auth_state_store.lock().await;
+        // Check if IP is blocked
+        if let Some(ip) = client_ip {
+            if let Some(block_info) = services.login_protection.check_ip_blocked(&ip).await? {
+                warn!(
+                    ip = %ip,
+                    expires_at = %block_info.expires_at,
+                    "OTP login attempt from blocked IP"
+                );
+                return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                    ApiAuthState::IpBlocked,
+                ))));
+            }
+        }
 
-        let Some(state_arc) = state_id.and_then(|id| auth_state_store.get(&id.0)) else {
-            return Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                state: ApiAuthState::NotStarted,
-            })));
+        let Some(state_arc) = get_auth_state_for_request(req, &ctx).await? else {
+            return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                ApiAuthState::NotStarted,
+            ))));
         };
 
         let mut state = state_arc.lock().await;
 
-        let mut cp = services.config_provider.lock().await;
-
-        let otp_cred = AuthCredential::Otp(body.otp.clone().into());
-        if cp
-            .validate_credential(&state.user_info().username, &otp_cred)
+        // Check if user is locked
+        if let Some(_lock_info) = services
+            .login_protection
+            .check_user_locked(&state.user_info().username)
             .await?
         {
-            state.add_valid_credential(otp_cred);
-        } else {
-            warn!("Invalid OTP for user {}", state.user_info().username);
+            warn!(
+                username = %state.user_info().username,
+                "OTP login attempt for locked user"
+            );
+            return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                ApiAuthState::UserLocked,
+            ))));
         }
+
+        let credential_valid = validate_and_add_credential(
+            &mut state,
+            &AuthCredential::Otp(body.otp.clone().into()),
+            &mut *services.config_provider.lock().await,
+        )
+        .await?;
 
         match state.verify() {
             AuthResult::Accepted { user_info } => {
-                auth_state_store.complete(state.id()).await;
-                authorize_session(req, user_info).await?;
+                let username = user_info.username.clone();
+                authorize_session(req, &ctx, user_info).await?;
+                state.emit_authenticated_event_once();
+                let state_id = *state.id();
+                drop(state);
+                services
+                    .auth_state_store
+                    .lock()
+                    .await
+                    .complete(&state_id)
+                    .await;
+                // Clear failed attempts on successful login
+                if let Some(ip) = client_ip {
+                    let _ = services
+                        .login_protection
+                        .clear_failed_attempts(&ip, &username)
+                        .await;
+                }
                 Ok(LoginResponse::Success)
             }
-            x => Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                state: x.into(),
-            }))),
+            x => {
+                // Only an invalid OTP counts as a failed attempt.
+                if !credential_valid {
+                    if let Some(ip) = client_ip {
+                        let _ = services
+                            .login_protection
+                            .record_failed_attempt(FailedAttemptInfo {
+                                username: state.user_info().username.clone(),
+                                remote_ip: ip,
+                                protocol: "http".to_string(),
+                                credential_type: "otp".to_string(),
+                            })
+                            .await;
+                    }
+                }
+                Ok(LoginResponse::Failure(Json(LoginFailureResponse {
+                    state: x.into(),
+                    credential_rejected: !credential_valid,
+                })))
+            }
         }
     }
 
@@ -233,7 +418,7 @@ impl Api {
         session: &Session,
         session_middleware: Data<&Arc<Mutex<SessionStore>>>,
     ) -> poem::Result<LogoutResponse> {
-        logout(session, session_middleware.lock().await.deref_mut());
+        logout(session, &mut *session_middleware.lock().await);
         Ok(LogoutResponse::Success)
     }
 
@@ -245,16 +430,20 @@ impl Api {
     async fn api_default_auth_state(
         &self,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
     ) -> poem::Result<AuthStateResponse> {
+        let services = ctx.services();
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
-        let store = services.auth_state_store.lock().await;
-        let Some(state_arc) = store.get(&state_id.0) else {
+        let state_arc = {
+            let store = services.auth_state_store.lock().await;
+            store.get(&state_id.0)
+        };
+        let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
-        serialize_auth_state_inner(state_arc, *services)
+        serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)
             .map(AuthStateResponse::Ok)
@@ -268,20 +457,29 @@ impl Api {
     async fn api_cancel_default_auth(
         &self,
         session: &Session,
-        services: Data<&Services>,
+        ctx: Data<&UnauthenticatedRequestContext>,
     ) -> poem::Result<AuthStateResponse> {
+        let services = ctx.services();
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
-        let mut store = services.auth_state_store.lock().await;
-        let Some(state_arc) = store.get(&state_id.0) else {
+        let state_arc = {
+            let store = services.auth_state_store.lock().await;
+            store.get(&state_id.0)
+        };
+        let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
         state_arc.lock().await.reject();
-        store.complete(&state_id.0).await;
+        services
+            .auth_state_store
+            .lock()
+            .await
+            .complete(&state_id.0)
+            .await;
         session.clear_auth_state();
 
-        serialize_auth_state_inner(state_arc, *services)
+        serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)
             .map(AuthStateResponse::Ok)
@@ -295,23 +493,40 @@ impl Api {
     )]
     async fn get_web_auth_requests(
         &self,
-        services: Data<&Services>,
-        auth: Option<Data<&RequestAuthorization>>,
+        ctx: Data<&AuthenticatedRequestContext>,
+        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<AuthStateListResponse> {
-        let store = services.auth_state_store.lock().await;
+        let services = ctx.services();
 
-        let Some(RequestAuthorization::Session(SessionAuthorization::User(username))) =
-            auth.map(|x| x.0)
+        let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
         else {
             return Ok(AuthStateListResponse::NotFound);
         };
 
-        let state_arcs = store.all_pending_web_auths_for_user(username).await;
+        // Snapshot the state handles while briefly holding the store lock, then
+        // release it before inspecting/serialising each state. Inspecting a
+        // state locks its inner mutex (and `serialize_auth_state_inner` locks
+        // the session state store), so doing that work under the auth state
+        // store lock would serialise every login against this endpoint.
+        let state_arcs = {
+            let store = services.auth_state_store.lock().await;
+            store.snapshot_states()
+        };
 
         let mut results = vec![];
 
         for state_arc in state_arcs {
-            results.push(serialize_auth_state_inner(state_arc, *services).await?)
+            let is_pending_web_approval = {
+                let state = state_arc.lock().await;
+                username_eq_ci(&state.user_info().username, username)
+                    && matches!(
+                        state.verify(),
+                        AuthResult::Need(need) if need.contains(&CredentialKind::WebUserApproval)
+                    )
+            };
+            if is_pending_web_approval {
+                results.push(serialize_auth_state_inner(state_arc, services).await?);
+            }
         }
 
         Ok(AuthStateListResponse::Ok(Json(results)))
@@ -325,15 +540,15 @@ impl Api {
     )]
     async fn api_auth_state(
         &self,
-        services: Data<&Services>,
-        auth: Option<Data<&RequestAuthorization>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let state_arc = get_auth_state(&id, &services, auth.map(|x| x.0)).await;
+        let services = ctx.services();
+        let state_arc = get_foreign_auth_state(&id, &ctx).await;
         let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
-        serialize_auth_state_inner(state_arc, *services)
+        serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)
             .map(AuthStateResponse::Ok)
@@ -347,11 +562,12 @@ impl Api {
     )]
     async fn api_approve_auth(
         &self,
-        services: Data<&Services>,
-        auth: Option<Data<&RequestAuthorization>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x| x.0)).await else {
+        let services = ctx.services();
+        let Some(state_arc) = get_foreign_auth_state(&id, &ctx).await else {
             return Ok(AuthStateResponse::NotFound);
         };
 
@@ -362,9 +578,10 @@ impl Api {
         };
 
         if let AuthResult::Accepted { .. } = auth_result {
-            services.auth_state_store.lock().await.complete(&id).await;
+            let mut store = services.auth_state_store.lock().await;
+            store.complete(&id).await;
         }
-        serialize_auth_state_inner(state_arc, *services)
+        serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)
             .map(AuthStateResponse::Ok)
@@ -378,38 +595,47 @@ impl Api {
     )]
     async fn api_reject_auth(
         &self,
-        services: Data<&Services>,
-        auth: Option<Data<&RequestAuthorization>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<AuthStateResponse> {
-        let Some(state_arc) = get_auth_state(&id, &services, auth.map(|x| x.0)).await else {
+        let services = ctx.services();
+        let Some(state_arc) = get_foreign_auth_state(&id, &ctx).await else {
             return Ok(AuthStateResponse::NotFound);
         };
-        state_arc.lock().await.reject();
+        {
+            let mut state = state_arc.lock().await;
+            let credential = AuthCredential::WebUserApproval;
+            state.emit_authentication_failed_event(Some(&credential), "rejected by user");
+            state.reject();
+        }
         services.auth_state_store.lock().await.complete(&id).await;
-        serialize_auth_state_inner(state_arc, *services)
+        serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)
             .map(AuthStateResponse::Ok)
     }
 }
 
-async fn get_auth_state(
+/// Used to obtain an AuthState that is not for this request
+/// like when doing a web approval of an SSH session
+async fn get_foreign_auth_state(
     id: &Uuid,
-    services: &Services,
-    auth: Option<&RequestAuthorization>,
+    ctx: &AuthenticatedRequestContext,
 ) -> Option<Arc<Mutex<AuthState>>> {
-    let store = services.auth_state_store.lock().await;
-
-    let RequestAuthorization::Session(SessionAuthorization::User(username)) = auth? else {
+    let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
+    else {
         return None;
     };
 
-    let state_arc = store.get(id)?;
+    let state_arc = {
+        let store = ctx.services().auth_state_store.lock().await;
+        store.get(id)?
+    };
 
     {
         let state = state_arc.lock().await;
-        if &state.user_info().username != username {
+        if !username_eq_ci(&state.user_info().username, username) {
             return None;
         }
     }
@@ -423,10 +649,15 @@ async fn serialize_auth_state_inner(
 ) -> poem::Result<AuthStateResponseInternal> {
     let state = state_arc.lock().await;
 
-    let session_state_store = services.state.lock().await;
-    let session_state = state
-        .session_id()
-        .and_then(|session_id| session_state_store.sessions.get(&session_id));
+    // Clone the session state handle under a brief session-store lock, then
+    // release it before locking the per-session mutex, so we never hold the
+    // session state store lock across another lock acquisition.
+    let session_state = {
+        let session_state_store = services.state.lock().await;
+        state
+            .session_id()
+            .and_then(|session_id| session_state_store.sessions.get(session_id).cloned())
+    };
 
     let peer_addr = match session_state {
         Some(x) => x.lock().await.remote_address,
@@ -446,14 +677,16 @@ async fn serialize_auth_state_inner(
 #[handler]
 pub async fn api_get_web_auth_requests_stream(
     ws: WebSocket,
-    auth: Option<Data<&RequestAuthorization>>,
-    services: Data<&Services>,
+    ctx: Data<&AuthenticatedRequestContext>,
 ) -> anyhow::Result<impl IntoResponse> {
+    let services = ctx.services();
     let auth_state_store = services.auth_state_store.clone();
 
-    let username = match auth.map(|x| x.0.clone()) {
-        Some(RequestAuthorization::Session(SessionAuthorization::User(username))) => Some(username),
-        _ => None,
+    let username = match &ctx.auth {
+        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => {
+            username.clone()
+        }
+        _ => bail!("Only session-based user auth is supported for this endpoint"),
     };
 
     let mut rx = {
@@ -464,13 +697,30 @@ pub async fn api_get_web_auth_requests_stream(
     Ok(ws.on_upgrade(|socket| async move {
         let (mut sink, _) = socket.split();
 
-        while let Ok(id) = rx.recv().await {
-            let auth_state_store = auth_state_store.lock().await;
-            if let Some(state) = auth_state_store.get(&id) {
-                let state = state.lock().await;
-                if Some(state.user_info().username.as_ref()) == username.as_deref() {
-                    sink.send(Message::Text(id.to_string())).await?;
-                }
+        loop {
+            let id = match rx.recv().await {
+                Ok(id) => id,
+                // The signal channel only carries wake-ups; if we lag behind we
+                // can safely resync on the next event instead of tearing down.
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            };
+
+            // Clone the state handle under a brief store lock, then release it
+            // before locking the inner state, so we never hold the store lock
+            // across an inner-state lock (which protocol sessions hold across
+            // DB I/O) or the socket write.
+            let state_arc = {
+                let store = auth_state_store.lock().await;
+                store.get(&id)
+            };
+            let belongs_to_user = match state_arc {
+                Some(state) => username_eq_ci(&state.lock().await.user_info().username, &username),
+                None => false,
+            };
+
+            if belongs_to_user {
+                sink.send(Message::Text(id.to_string())).await?;
             }
         }
 

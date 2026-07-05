@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { get } from 'svelte/store'
     import { serverInfo, reloadServerInfo } from 'gateway/lib/store'
 
     import Router, { link, type WrappedComponent } from 'svelte-spa-router'
@@ -8,9 +9,27 @@
     import AuthBar from 'common/AuthBar.svelte'
     import Brand from 'common/Brand.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import AnalyticsConsentModal from './AnalyticsConsentModal.svelte'
+
+    let showAnalyticsModal = $state(false)
+    $effect(() => {
+        if (($serverInfo?.shouldPromptAnalytics ?? false) && $serverInfo?.adminPermissions?.configEdit) {
+            setTimeout(() => {
+                showAnalyticsModal = true
+            }, 1000)
+        }
+    })
 
     async function init () {
         await reloadServerInfo()
+        if (!get(serverInfo)?.username) {
+            // Not logged in: redirect to the (gateway) login page, preserving this admin
+            // URL — hash route included — as `next` so we return exactly here afterwards.
+            // (The admin shell is no longer server-gated, so this runs client-side where
+            // the SPA hash route is known.)
+            const next = location.pathname + location.hash
+            location.assign('/@warpgate#/login?next=' + encodeURIComponent(next))
+        }
     }
 
     const initPromise = init()
@@ -27,6 +46,24 @@
         }),
         '/log': wrap({
             asyncComponent: () => import('./Log.svelte') as any,
+        }),
+        '/log/user/:id': wrap({
+            asyncComponent: () => import('./Log.svelte') as any,
+            props: {
+                filterKind: 'user',
+            },
+        }),
+        '/log/access-role/:id': wrap({
+            asyncComponent: () => import('./Log.svelte') as any,
+            props: {
+                filterKind: 'access-role',
+            },
+        }),
+        '/log/admin-role/:id': wrap({
+            asyncComponent: () => import('./Log.svelte') as any,
+            props: {
+                filterKind: 'admin-role',
+            },
         }),
         '/config': wrap({
             asyncComponent: () => import('./config/Config.svelte') as any,
@@ -47,7 +84,9 @@
                 <a use:link use:active href="/log">Log</a>
             {/if}
             <span class="ms-3"></span>
-            <AuthBar />
+            <div class="ms-auto">
+                <AuthBar />
+            </div>
         </header>
         <main>
             <Router {routes}/>
@@ -61,6 +100,10 @@
         </footer>
     </div>
 </Loadable>
+
+{#if showAnalyticsModal}
+    <AnalyticsConsentModal bind:isOpen={showAnalyticsModal} />
+{/if}
 
 <style lang="scss">
     @media (max-width: 767px) {

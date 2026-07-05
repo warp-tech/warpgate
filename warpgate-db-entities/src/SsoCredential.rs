@@ -1,6 +1,6 @@
+use sea_orm::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ForeignKeyAction;
-use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{UserAuthCredential, UserSsoCredential};
@@ -42,7 +42,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<Model> for UserSsoCredential {
     fn from(credential: Model) -> Self {
-        UserSsoCredential {
+        Self {
             provider: credential.provider,
             email: credential.email,
         }

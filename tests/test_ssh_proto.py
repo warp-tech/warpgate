@@ -1,4 +1,5 @@
 from uuid import uuid4
+import os
 import requests
 import subprocess
 import tempfile
@@ -122,8 +123,7 @@ class Test:
         )
 
         output = ssh_client.communicate(timeout=timeout)[0]
-        assert b"Warpgate" in output
-        assert b"Selected target:" in output
+        assert ssh_target.name.encode() in output
         assert b"hello\r\n" in output
 
     def test_signals(
@@ -182,6 +182,47 @@ class Test:
         response = s.get(f"https://localhost:{local_port}", timeout=timeout, verify=False)
         assert response.status_code == 200
         ssh_client.kill()
+
+    def test_agent_forwarding_parallel(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+        timeout,
+    ):
+        # Parallel access to the forwarded agent used to deadlock the
+        # session event loop (#1459)
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
+
+        agent_dir = tempfile.mkdtemp()
+        agent_sock = f"{agent_dir}/agent.sock"
+        processes.start(["ssh-agent", "-D", "-a", agent_sock])
+        for _ in range(100):
+            if os.path.exists(agent_sock):
+                break
+            time.sleep(0.1)
+
+        key_path = f"{agent_dir}/key"
+        subprocess.check_call(["ssh-keygen", "-t", "ed25519", "-N", "", "-f", key_path])
+        env = {**os.environ, "SSH_AUTH_SOCK": agent_sock}
+        subprocess.check_call(["ssh-add", key_path], env=env)
+
+        ssh_client = processes.start_ssh_client(
+            f"{user.username}:{ssh_target.name}@localhost",
+            "-p",
+            str(shared_wg.ssh_port),
+            "-v",
+            *common_args,
+            "-A",
+            "ssh-add -L & ssh-add -L & ssh-add -L & wait",
+            password="123",
+            env=env,
+        )
+        output = ssh_client.communicate(timeout=timeout)[0]
+        assert ssh_client.returncode == 0
+        assert output.count(b"ssh-ed25519") == 3
 
     def test_tcpip_forward(
         self,

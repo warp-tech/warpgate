@@ -1,18 +1,19 @@
-use std::sync::Arc;
-
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter, Set,
-};
-use tokio::sync::Mutex;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
-use warpgate_common::{Secret, UserPasswordCredential, WarpgateError};
-use warpgate_db_entities::PasswordCredential;
+use warpgate_common::{
+    AdminPermission, PasswordPolicyViolation, Secret, UserPasswordCredential, WarpgateError,
+    validate_password,
+};
+use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_db_entities::{Parameters, PasswordCredential, User};
 
 use super::AnySecurityScheme;
+use crate::api::common::require_admin_permission;
 
 #[derive(Object)]
 struct ExistingPasswordCredential {
@@ -40,6 +41,10 @@ enum GetPasswordCredentialsResponse {
 enum CreatePasswordCredentialResponse {
     #[oai(status = 201)]
     Created(Json<ExistingPasswordCredential>),
+    #[oai(status = 404)]
+    NotFound,
+    #[oai(status = 422)]
+    PolicyViolation(Json<Vec<PasswordPolicyViolation>>),
 }
 
 pub struct ListApi;
@@ -53,11 +58,13 @@ impl ListApi {
     )]
     async fn api_get_all(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetPasswordCredentialsResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services().db.lock().await;
 
         let objects = PasswordCredential::Entity::find()
             .filter(PasswordCredential::Column::UserId.eq(*user_id))
@@ -76,12 +83,23 @@ impl ListApi {
     )]
     async fn api_create(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         body: Json<NewPasswordCredential>,
         user_id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePasswordCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services().db.lock().await;
+
+        let parameters = Parameters::Entity::get(&db).await?;
+        let policy = parameters.password_policy();
+        let violations = validate_password(body.password.expose_secret(), &policy);
+        if !violations.is_empty() {
+            return Ok(CreatePasswordCredentialResponse::PolicyViolation(Json(
+                violations,
+            )));
+        }
 
         let object = PasswordCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -93,6 +111,20 @@ impl ListApi {
         .insert(&*db)
         .await
         .map_err(WarpgateError::from)?;
+
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(CreatePasswordCredentialResponse::NotFound);
+        };
+
+        AuditEvent::CredentialCreated {
+            credential_type: "password".to_string(),
+            credential_name: None,
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username,
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
 
         Ok(CreatePasswordCredentialResponse::Created(Json(
             object.into(),
@@ -119,12 +151,14 @@ impl DetailApi {
     )]
     async fn api_delete(
         &self,
-        db: Data<&Arc<Mutex<DatabaseConnection>>>,
+        ctx: Data<&AuthenticatedRequestContext>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        let db = db.lock().await;
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+
+        let db = ctx.services().db.lock().await;
 
         let Some(model) = PasswordCredential::Entity::find_by_id(id.0)
             .filter(PasswordCredential::Column::UserId.eq(*user_id))
@@ -135,6 +169,21 @@ impl DetailApi {
         };
 
         model.delete(&*db).await?;
+
+        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+            return Ok(DeleteCredentialResponse::NotFound);
+        };
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "password".to_string(),
+            credential_name: None,
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username,
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
         Ok(DeleteCredentialResponse::Deleted)
     }
 }

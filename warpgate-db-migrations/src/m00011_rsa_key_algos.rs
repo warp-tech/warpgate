@@ -19,7 +19,7 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let connection = manager.get_connection();
         let creds = PKC::Entity::find().all(connection).await?;
-        for cred in creds.into_iter() {
+        for cred in creds {
             let parsed = match russh::keys::PublicKey::from_openssh(&cred.openssh_public_key) {
                 Ok(parsed) => parsed,
                 Err(e) => {
