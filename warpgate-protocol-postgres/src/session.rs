@@ -23,8 +23,7 @@ use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
-    AuthStateStore, ConfigProvider, Services, WarpgateServerHandle, authorize_ticket,
-    consume_ticket,
+    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 use warpgate_tls::ServerTlsStream;
 
@@ -228,29 +227,18 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     }
                 }
 
-                let (user, policy) = AuthStateStore::resolve_user_and_policy(
-                    &self.services.config_provider,
-                    &self.services.login_protection,
-                    &username,
-                    crate::common::PROTOCOL_NAME,
-                    &[CredentialKind::Password],
-                    Some(self.remote_address.ip()),
-                    Some("password"),
-                )
-                .await?;
                 let session_id = self.server_handle.lock().await.id();
                 let state_arc = self
                     .services
-                    .auth_state_store
-                    .lock()
-                    .await
-                    .create(
+                    .create_auth_state(
                         Some(&session_id),
-                        &user,
+                        &username,
                         crate::common::PROTOCOL_NAME,
-                        policy,
+                        &[CredentialKind::Password],
                         Some(self.remote_address.ip()),
+                        Some("password"),
                     )
+                    .await?
                     .1;
 
                 let mut auth_ok_sent = false;

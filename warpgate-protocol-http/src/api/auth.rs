@@ -436,8 +436,11 @@ impl Api {
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
-        let store = services.auth_state_store.lock().await;
-        let Some(state_arc) = store.get(&state_id.0) else {
+        let state_arc = {
+            let store = services.auth_state_store.lock().await;
+            store.get(&state_id.0)
+        };
+        let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
         serialize_auth_state_inner(state_arc, services)
@@ -460,12 +463,20 @@ impl Api {
         let Some(state_id) = session.get_auth_state_id() else {
             return Ok(AuthStateResponse::NotFound);
         };
-        let mut store = services.auth_state_store.lock().await;
-        let Some(state_arc) = store.get(&state_id.0) else {
+        let state_arc = {
+            let store = services.auth_state_store.lock().await;
+            store.get(&state_id.0)
+        };
+        let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
         state_arc.lock().await.reject();
-        store.complete(&state_id.0).await;
+        services
+            .auth_state_store
+            .lock()
+            .await
+            .complete(&state_id.0)
+            .await;
         session.clear_auth_state();
 
         serialize_auth_state_inner(state_arc, services)
@@ -612,14 +623,15 @@ async fn get_foreign_auth_state(
     id: &Uuid,
     ctx: &AuthenticatedRequestContext,
 ) -> Option<Arc<Mutex<AuthState>>> {
-    let store = ctx.services().auth_state_store.lock().await;
-
     let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
     else {
         return None;
     };
 
-    let state_arc = store.get(id)?;
+    let state_arc = {
+        let store = ctx.services().auth_state_store.lock().await;
+        store.get(id)?
+    };
 
     {
         let state = state_arc.lock().await;
@@ -694,16 +706,17 @@ pub async fn api_get_web_auth_requests_stream(
                 Err(broadcast::error::RecvError::Closed) => break,
             };
 
-            // Only hold the store/inner locks to decide whether this request
-            // belongs to the connected user; never across the socket write.
-            let belongs_to_user = {
+            // Clone the state handle under a brief store lock, then release it
+            // before locking the inner state, so we never hold the store lock
+            // across an inner-state lock (which protocol sessions hold across
+            // DB I/O) or the socket write.
+            let state_arc = {
                 let store = auth_state_store.lock().await;
-                match store.get(&id) {
-                    Some(state) => {
-                        username_eq_ci(&state.lock().await.user_info().username, &username)
-                    }
-                    None => false,
-                }
+                store.get(&id)
+            };
+            let belongs_to_user = match state_arc {
+                Some(state) => username_eq_ci(&state.lock().await.user_info().username, &username),
+                None => false,
             };
 
             if belongs_to_user {

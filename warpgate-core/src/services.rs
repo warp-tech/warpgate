@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,7 +6,9 @@ use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use tracing::warn;
-use warpgate_common::{GlobalParams, WarpgateConfig};
+use uuid::Uuid;
+use warpgate_common::auth::{AuthState, CredentialKind};
+use warpgate_common::{GlobalParams, SessionId, WarpgateConfig, WarpgateError};
 
 use crate::db::{connect_to_db_and_migrate, populate_db};
 use crate::login_protection::LoginProtectionService;
@@ -94,5 +97,35 @@ impl Services {
             login_protection,
             global_params: Arc::new(params),
         })
+    }
+
+    /// Resolves the user/policy (without the store lock) and inserts a new
+    /// [`AuthState`] under a brief store lock. This is the only sanctioned way
+    /// to create an auth state, so the "no DB I/O while holding the store lock"
+    /// invariant is enforced structurally rather than by convention.
+    pub async fn create_auth_state(
+        &self,
+        session_id: Option<&SessionId>,
+        username: &str,
+        protocol: &str,
+        supported_credential_types: &[CredentialKind],
+        remote_ip: Option<IpAddr>,
+        rate_limit_credential_type: Option<&str>,
+    ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
+        let (user, policy) = AuthStateStore::resolve_user_and_policy(
+            &self.config_provider,
+            &self.login_protection,
+            username,
+            protocol,
+            supported_credential_types,
+            remote_ip,
+            rate_limit_credential_type,
+        )
+        .await?;
+        Ok(self
+            .auth_state_store
+            .lock()
+            .await
+            .create(session_id, &user, protocol, policy, remote_ip))
     }
 }

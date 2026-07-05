@@ -149,7 +149,7 @@ impl AuthStateStore {
     /// [`AuthStateStore`] lock. Callers must run this before locking the store
     /// and pass the result to [`AuthStateStore::create`], so that concurrent
     /// logins don't serialise on the store lock while doing database I/O.
-    pub async fn resolve_user_and_policy(
+    pub(crate) async fn resolve_user_and_policy(
         config_provider: &Arc<Mutex<ConfigProviderEnum>>,
         login_protection: &LoginProtectionService,
         username: &str,
@@ -205,7 +205,7 @@ impl AuthStateStore {
     ///
     /// This is deliberately synchronous and does no database I/O, so the store
     /// lock is only held for the in-memory insert.
-    pub fn create(
+    pub(crate) fn create(
         &mut self,
         session_id: Option<&SessionId>,
         user: &User,
@@ -234,11 +234,10 @@ impl AuthStateStore {
             policy,
             state_change_tx,
         );
-        self.store
-            .insert(id, (Arc::new(Mutex::new(state)), Instant::now()));
+        let state_arc = Arc::new(Mutex::new(state));
+        self.store.insert(id, (state_arc.clone(), Instant::now()));
 
-        #[allow(clippy::unwrap_used)]
-        (id, self.get(&id).unwrap())
+        (id, state_arc)
     }
 
     pub fn subscribe(&mut self, id: Uuid) -> broadcast::Receiver<AuthResult> {

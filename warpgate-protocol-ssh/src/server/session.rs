@@ -34,8 +34,7 @@ use warpgate_core::recordings::{
     TrafficRecorder,
 };
 use warpgate_core::{
-    AuthStateStore, ConfigProvider, Services, WarpgateServerHandle, authorize_ticket,
-    consume_ticket,
+    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
 };
 use warpgate_db_entities::Parameters;
 
@@ -299,8 +298,8 @@ impl ServerSession {
         kinds
     }
 
-    /// `rate_limit_credential_type` is forwarded to `AuthStateStore::create` so
-    /// an unknown username is recorded as a failed attempt for IP blocking —
+    /// `rate_limit_credential_type` is forwarded to `Services::create_auth_state`
+    /// so an unknown username is recorded as a failed attempt for IP blocking —
     /// `None` for benign contexts (public-key offers) that must not be counted.
     async fn get_auth_state(
         &mut self,
@@ -321,28 +320,17 @@ impl ServerSession {
                 username,
             )
         {
-            let (user, policy) = AuthStateStore::resolve_user_and_policy(
-                &self.services.config_provider,
-                &self.services.login_protection,
-                username,
-                crate::PROTOCOL_NAME,
-                &self.supported_credential_kinds(),
-                Some(self.remote_address.ip()),
-                rate_limit_credential_type,
-            )
-            .await?;
             let state = self
                 .services
-                .auth_state_store
-                .lock()
-                .await
-                .create(
+                .create_auth_state(
                     Some(&self.id),
-                    &user,
+                    username,
                     crate::PROTOCOL_NAME,
-                    policy,
+                    &self.supported_credential_kinds(),
                     Some(self.remote_address.ip()),
+                    rate_limit_credential_type,
                 )
+                .await?
                 .1;
             self.auth_state = Some(state);
         }
