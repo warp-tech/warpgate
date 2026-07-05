@@ -1,7 +1,7 @@
 <script lang="ts">
     import { api, type AdminRole } from 'admin/lib/api'
     import { link } from 'svelte-spa-router'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { Alert } from '@sveltestrap/sveltestrap'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import * as rx from 'rxjs'
     import { adminPermissions } from '../lib/store'

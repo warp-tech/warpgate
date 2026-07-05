@@ -10,7 +10,7 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { Alert } from '@sveltestrap/sveltestrap'
 
     interface Props {
         isOpen: boolean

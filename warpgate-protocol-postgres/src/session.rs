@@ -227,13 +227,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     }
                 }
 
+                let session_id = self.server_handle.lock().await.id();
                 let state_arc = self
                     .services
-                    .auth_state_store
-                    .lock()
-                    .await
-                    .create(
-                        Some(&self.server_handle.lock().await.id()),
+                    .create_auth_state(
+                        Some(&session_id),
                         &username,
                         crate::common::PROTOCOL_NAME,
                         &[CredentialKind::Password],

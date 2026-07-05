@@ -2,9 +2,8 @@
     import { api, type AdminRole } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { replace } from 'svelte-spa-router'
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { FormGroup, Input, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { emptyPermissions } from '../lib/store'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
 

@@ -1,7 +1,7 @@
 <script lang="ts">
     import { api, type CheckSshHostKeyResponseBody, type SSHKnownHost, type TargetOptionsTargetSSHOptions } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { Alert } from '@sveltestrap/sveltestrap'
     import KeyCheckerResult, { Key, type CheckResult } from './KeyCheckerResult.svelte'
     import { stringifyError } from 'common/errors'
 
