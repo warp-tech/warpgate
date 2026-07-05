@@ -6,8 +6,7 @@
 //! Only the message type and the protocol-specific `create_session`/event-loop differ,
 //! so those live in each crate; everything here is generic over the message type `M`.
 
-use std::collections::HashMap;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

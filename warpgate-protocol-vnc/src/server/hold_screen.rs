@@ -72,8 +72,20 @@ where
     let mut approval = services.auth_state_store.lock().await.subscribe(state_id);
 
     'next_prompt: loop {
-        let need = match state.lock().await.verify() {
-            AuthResult::Accepted { .. } => return Ok(()),
+        // Bind to a local so the state guard drops before `complete()` re-locks the same
+        // AuthState mutex — holding a match-scrutinee guard across it deadlocks (same reason
+        // RDP's `run_hold_screen` does this).
+        let verification = state.lock().await.verify();
+        let need = match verification {
+            AuthResult::Accepted { .. } => {
+                services
+                    .auth_state_store
+                    .lock()
+                    .await
+                    .complete(&state_id)
+                    .await;
+                return Ok(());
+            }
             AuthResult::Rejected => bail!("VNC authentication rejected"),
             AuthResult::Need(need) => need,
         };

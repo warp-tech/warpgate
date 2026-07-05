@@ -74,45 +74,45 @@ impl ProtocolServer for MySQLProtocolServer {
                 let tls_config = tls_config.clone();
                 let services = services.clone();
                 tokio::spawn(async move {
-                let (session_handle, mut abort_rx) = MySqlSessionHandle::new();
+                    let (session_handle, mut abort_rx) = MySqlSessionHandle::new();
 
-                let server_handle = State::register_session(
-                    &services.state,
-                    &crate::common::PROTOCOL_NAME,
-                    SessionStateInit {
-                        remote_address: Some(remote_address),
-                        handle: Box::new(session_handle),
-                    },
-                )
-                .await
-                .context("registering session")?;
+                    let server_handle = State::register_session(
+                        &services.state,
+                        &crate::common::PROTOCOL_NAME,
+                        SessionStateInit {
+                            remote_address: Some(remote_address),
+                            handle: Box::new(session_handle),
+                        },
+                    )
+                    .await
+                    .context("registering session")?;
 
-                let wrapped_stream = {
-                    let guard = server_handle.lock().await;
-                    guard.wrap_stream(stream).await?
-                };
+                    let wrapped_stream = {
+                        let guard = server_handle.lock().await;
+                        guard.wrap_stream(stream).await?
+                    };
 
-                let session = MySqlSession::new(
-                    server_handle,
-                    services,
-                    wrapped_stream,
-                    tls_config,
-                    remote_address,
-                )
-                .await;
-                let span = session.make_logging_span();
-                tokio::select! {
-                    result = session.run().instrument(span) => match result {
-                        Ok(()) => info!("Session ended"),
-                        Err(e) => error!(error=%e, "Session failed"),
-                    },
-                    _ = abort_rx.recv() => {
-                        warn!("Session aborted by admin");
-                    },
-                }
+                    let session = MySqlSession::new(
+                        server_handle,
+                        services,
+                        wrapped_stream,
+                        tls_config,
+                        remote_address,
+                    )
+                    .await;
+                    let span = session.make_logging_span();
+                    tokio::select! {
+                        result = session.run().instrument(span) => match result {
+                            Ok(()) => info!("Session ended"),
+                            Err(e) => error!(error=%e, "Session failed"),
+                        },
+                        _ = abort_rx.recv() => {
+                            warn!("Session aborted by admin");
+                        },
+                    }
 
-                Ok::<(), anyhow::Error>(())
-            });
+                    Ok::<(), anyhow::Error>(())
+                });
             }
         }
         .boxed())

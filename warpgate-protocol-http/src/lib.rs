@@ -194,8 +194,7 @@ impl ProtocolServer for HTTPProtocolServer {
                     // auth-gated, and the SPA redirects to login client-side so the login
                     // `next` can include its hash route (a server redirect can't see it).
                     "/admin",
-                    EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html")
-                        .with(cache_bust()),
+                    EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html").with(cache_bust()),
                 )
                 .at(
                     "/api/auth/web-auth-requests/stream",

@@ -86,8 +86,13 @@ impl From<ClientMessage> for Option<DesktopInput> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
-    ConnectionState { state: &'static str },
-    Resize { width: u16, height: u16 },
+    ConnectionState {
+        state: &'static str,
+    },
+    Resize {
+        width: u16,
+        height: u16,
+    },
     RawImage {
         rect: WsRect,
         #[serde(with = "warpgate_common::helpers::serde_base64")]
@@ -98,15 +103,23 @@ pub enum ServerMessage {
         #[serde(with = "warpgate_common::helpers::serde_base64")]
         data: Bytes,
     },
-    CopyRect { dst: WsRect, src_x: u16, src_y: u16 },
+    CopyRect {
+        dst: WsRect,
+        src_x: u16,
+        src_y: u16,
+    },
     Cursor {
         rect: WsRect,
         #[serde(with = "warpgate_common::helpers::serde_base64")]
         data: Bytes,
     },
-    Clipboard { text: String },
+    Clipboard {
+        text: String,
+    },
     Bell,
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 impl ServerMessage {

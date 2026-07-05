@@ -77,9 +77,11 @@ impl Framebuffer {
 
     /// Blit an RGB rectangle (decoded JPEG) at (x, y).
     pub(crate) fn blit_rgb(&mut self, x: u32, y: u32, w: u32, h: u32, data: &[u8]) {
-        self.blit::<3>(x, y, w, h, data, |px| match (px.first(), px.get(1), px.get(2)) {
-            (Some(&r), Some(&g), Some(&b)) => [r, g, b, 255],
-            _ => [0, 0, 0, 255],
+        self.blit::<3>(x, y, w, h, data, |px| {
+            match (px.first(), px.get(1), px.get(2)) {
+                (Some(&r), Some(&g), Some(&b)) => [r, g, b, 255],
+                _ => [0, 0, 0, 255],
+            }
         });
     }
 
@@ -297,10 +299,16 @@ mod tests {
     fn copy_region_rgba_extracts_and_clips() {
         let mut fb = Framebuffer::default();
         fb.resize(2, 2);
-        fb.blit_bgra(0, 0, 2, 2, &[
-            0, 0, 255, 255, 0, 255, 0, 255, // red, green
-            255, 0, 0, 255, 255, 255, 255, 255, // blue, white
-        ]);
+        fb.blit_bgra(
+            0,
+            0,
+            2,
+            2,
+            &[
+                0, 0, 255, 255, 0, 255, 0, 255, // red, green
+                255, 0, 0, 255, 255, 255, 255, 255, // blue, white
+            ],
+        );
         let mut out = Vec::new();
         let rect = |x, y, width, height| Rect {
             x,
@@ -309,13 +317,18 @@ mod tests {
             height,
         };
         // Bottom-right 1x1 pixel (white).
-        assert_eq!(fb.copy_region_rgba(rect(1, 1, 1, 1), &mut out), Some(rect(1, 1, 1, 1)));
+        assert_eq!(
+            fb.copy_region_rgba(rect(1, 1, 1, 1), &mut out),
+            Some(rect(1, 1, 1, 1))
+        );
         assert_eq!(out, vec![255, 255, 255, 255]);
         // A region overflowing the edge clips to what's on-screen.
-        assert_eq!(fb.copy_region_rgba(rect(1, 0, 5, 5), &mut out), Some(rect(1, 0, 1, 2)));
+        assert_eq!(
+            fb.copy_region_rgba(rect(1, 0, 5, 5), &mut out),
+            Some(rect(1, 0, 1, 2))
+        );
         assert_eq!(out.len(), 1 * 2 * 4);
         // Fully off-screen origin yields nothing.
         assert_eq!(fb.copy_region_rgba(rect(2, 0, 1, 1), &mut out), None);
     }
-
 }

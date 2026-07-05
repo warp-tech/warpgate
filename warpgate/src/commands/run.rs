@@ -170,8 +170,16 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     }
 
     supervisors.push(tls_listener!("MySQL", MySQLProtocolServer, mysql));
-    supervisors.push(tls_listener!("PostgreSQL", PostgresProtocolServer, postgres));
-    supervisors.push(tls_listener!("Kubernetes", KubernetesProtocolServer, kubernetes));
+    supervisors.push(tls_listener!(
+        "PostgreSQL",
+        PostgresProtocolServer,
+        postgres
+    ));
+    supervisors.push(tls_listener!(
+        "Kubernetes",
+        KubernetesProtocolServer,
+        kubernetes
+    ));
     supervisors.push(tls_listener!("VNC", VncProtocolServer, vnc));
     supervisors.push(tls_listener!("RDP", RdpProtocolServer, rdp));
 

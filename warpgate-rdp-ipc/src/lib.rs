@@ -21,8 +21,8 @@
 //! Kept dependency-light (serde + serde_json) so it slots into the helper's isolated
 //! lockfile (which pins IronRDP's RustCrypto pre-releases).
 
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 pub const KIND_JSON: u8 = 0;
 pub const KIND_IMAGE: u8 = 1;
@@ -106,7 +106,14 @@ pub fn encode_json_into<T: Serialize>(msg: &T, out: &mut Vec<u8>) {
 }
 
 /// Encode a framebuffer rectangle as a binary IMAGE frame body into `out` (cleared first).
-pub fn encode_image_into(x: u16, y: u16, width: u16, height: u16, pixels: &[u8], out: &mut Vec<u8>) {
+pub fn encode_image_into(
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    pixels: &[u8],
+    out: &mut Vec<u8>,
+) {
     out.clear();
     out.reserve(ImageHeader::LEN + pixels.len());
     ImageHeader {
@@ -156,10 +163,24 @@ pub mod client {
     #[derive(Serialize, Deserialize)]
     #[serde(tag = "type", rename_all = "snake_case")]
     pub enum Input {
-        Pointer { x: u16, y: u16, buttons: u8 },
-        Key { keysym: u32, down: bool },
-        Scancode { code: u8, extended: bool, down: bool },
-        Wheel { vertical: bool, delta: i16 },
+        Pointer {
+            x: u16,
+            y: u16,
+            buttons: u8,
+        },
+        Key {
+            keysym: u32,
+            down: bool,
+        },
+        Scancode {
+            code: u8,
+            extended: bool,
+            down: bool,
+        },
+        Wheel {
+            vertical: bool,
+            delta: i16,
+        },
     }
 
     impl Input {
@@ -303,11 +324,29 @@ pub mod server {
             #[serde(default)]
             domain: Option<String>,
         },
-        Pointer { x: u16, y: u16, buttons: u8 },
-        Scancode { code: u8, extended: bool, down: bool },
-        Key { keysym: u32, down: bool },
-        Wheel { x: u16, y: u16, vertical: bool, delta: i16 },
-        Error { message: String },
+        Pointer {
+            x: u16,
+            y: u16,
+            buttons: u8,
+        },
+        Scancode {
+            code: u8,
+            extended: bool,
+            down: bool,
+        },
+        Key {
+            keysym: u32,
+            down: bool,
+        },
+        Wheel {
+            x: u16,
+            y: u16,
+            vertical: bool,
+            delta: i16,
+        },
+        Error {
+            message: String,
+        },
         Disconnected,
     }
 
@@ -345,8 +384,13 @@ mod tests {
         }
         .encode_into(&mut buf);
         assert_eq!(frame_kind(&buf), KIND_IMAGE);
-        let Some(server::Input::Frame { x, y, width, height, data }) =
-            server::Input::decode(bytes::Bytes::from(buf))
+        let Some(server::Input::Frame {
+            x,
+            y,
+            width,
+            height,
+            data,
+        }) = server::Input::decode(bytes::Bytes::from(buf))
         else {
             panic!("wrong variant");
         };
@@ -357,11 +401,18 @@ mod tests {
     #[test]
     fn control_frame_roundtrips_json() {
         let mut buf = Vec::new();
-        server::Input::Resize { width: 640, height: 480 }.encode_into(&mut buf);
+        server::Input::Resize {
+            width: 640,
+            height: 480,
+        }
+        .encode_into(&mut buf);
         assert_eq!(frame_kind(&buf), KIND_JSON);
         assert!(matches!(
             server::Input::decode(bytes::Bytes::from(buf)),
-            Some(server::Input::Resize { width: 640, height: 480 })
+            Some(server::Input::Resize {
+                width: 640,
+                height: 480
+            })
         ));
     }
 }

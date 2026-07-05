@@ -271,7 +271,9 @@ impl DesktopRecorder {
         let Some(r) = region else {
             return Ok(());
         };
-        let png = self.png_encode_scratch_rgba_buffer(st, r.width, r.height).await?;
+        let png = self
+            .png_encode_scratch_rgba_buffer(st, r.width, r.height)
+            .await?;
         let item = DesktopRecordingItem::PngImage {
             time,
             rect: RecordingRect {
