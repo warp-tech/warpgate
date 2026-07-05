@@ -10,8 +10,10 @@ use tokio_stream::StreamExt;
 use tracing::warn;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
 use warpgate_core::Services;
-use warpgate_desktop_auth::{InteractiveAuth, OtpAction, OtpEntry, auth_prompt};
-use warpgate_desktop_ui as ui;
+use warpgate_desktop_auth::{
+    InteractiveAuth, OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt,
+};
+use warpgate_desktop_ui::{self as ui, AuthPrompt};
 use warpgate_rdp_ipc::server::{Event as ServerHelperEvent, Input as ServerHelperInput};
 
 use super::HelperReader;
@@ -78,43 +80,55 @@ pub(super) async fn run_hold_screen(
             AuthResult::Need(need) => need,
         };
 
-        let Some(prompt) = auth_prompt(services, &state, &need, otp.entered()).await else {
+        let Some(mut prompt) = auth_prompt(services, &state, &need, otp.entered()).await else {
             warn!(
                 "RDP auth policy requires a factor that can't be collected on the holding screen"
             );
             return Ok(None);
         };
+
         let awaiting_web = matches!(prompt, ui::AuthPrompt::WebApproval { .. });
 
-        render_hold_frame(helper_in_tx, tick, &prompt)?;
-
-        tokio::select! {
-            // Browser approval landed (or the signal lagged/closed); re-verify on the next loop.
-            _ = approval.recv(), if awaiting_web => {}
-            frame = frames.next() => {
-                let Some(frame) = frame else {
-                    return Ok(None);
-                };
-                let frame = frame.context("reading serve helper output")?;
-                let action = match ServerHelperEvent::decode(&frame) {
-                    Some(ServerHelperEvent::Disconnected) => return Ok(None),
-                    Some(ServerHelperEvent::Scancode { code, down, .. }) if down => {
-                        scancode_otp_action(code)
-                    }
-                    Some(ServerHelperEvent::Key { keysym, down }) if down => key_otp_action(keysym),
-                    _ => None,
-                };
-                if !awaiting_web
-                    && let Some(action) = action
-                    && otp
-                        .apply(action, services, &state, &interactive.username, interactive.remote_ip)
-                        .await
-                {
-                    warn!("too many incorrect one-time passwords");
-                    return Ok(None);
-                }
+        loop {
+            tokio::select! {
+                // Browser approval landed (or the signal lagged/closed); re-verify on the next loop.
+                _ = approval.recv(), if awaiting_web => break,
+                frame = frames.next() => {
+                    let Some(frame) = frame else {
+                        return Ok(None);
+                    };
+                    let frame = frame.context("reading serve helper output")?;
+                    let action = match ServerHelperEvent::decode(&frame) {
+                        Some(ServerHelperEvent::Disconnected) => return Ok(None),
+                        Some(ServerHelperEvent::Scancode { code, down, .. }) if down => {
+                            scancode_otp_action(code)
+                        }
+                        Some(ServerHelperEvent::Key { keysym, down }) if down => key_otp_action(keysym),
+                        _ => None,
+                    };
+                    if !awaiting_web
+                        && let Some(action) = action
+                        && let AuthPrompt::Otp { entered } = &mut prompt
+                        {
+                        match otp
+                            .apply(action, services, &state, &interactive.username, interactive.remote_ip)
+                            .await {
+                                OtpActionApplyOutcome::Applied =>  {
+                                    *entered = otp.entered().to_string();
+                                },
+                                OtpActionApplyOutcome::AcceptedAndValidated => break,
+                                OtpActionApplyOutcome::TooManyFailures => {
+                                    warn!("too many incorrect one-time passwords");
+                                    return Ok(None);
+                                }
+                            }
+                        }
+                },
+                _ = ticker.tick() => {
+                    render_hold_frame(helper_in_tx, tick, &prompt)?;
+                    tick = tick.wrapping_add(1)
+                },
             }
-            _ = ticker.tick() => tick = tick.wrapping_add(1),
         }
     }
 }

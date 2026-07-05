@@ -35,6 +35,13 @@ pub struct OtpEntry {
     protocol_label: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OtpActionApplyOutcome {
+    Applied,
+    AcceptedAndValidated,
+    TooManyFailures,
+}
+
 impl OtpEntry {
     pub fn new(protocol_label: &'static str) -> Self {
         Self {
@@ -59,7 +66,7 @@ impl OtpEntry {
         state: &Arc<Mutex<AuthState>>,
         username: &str,
         remote_ip: IpAddr,
-    ) -> bool {
+    ) -> OtpActionApplyOutcome {
         let submit = match action {
             OtpAction::Digit(c) => {
                 // OTP chars are always ASCII digits, so byte length == char count.
@@ -75,7 +82,7 @@ impl OtpEntry {
             OtpAction::Submit => !self.entered.is_empty(),
         };
         if !submit {
-            return false;
+            return OtpActionApplyOutcome::Applied;
         }
 
         let credential = AuthCredential::Otp(Secret::new(std::mem::take(&mut self.entered)));
@@ -89,7 +96,7 @@ impl OtpEntry {
         .await
         .unwrap_or(false);
         if valid {
-            return false;
+            return OtpActionApplyOutcome::AcceptedAndValidated;
         }
 
         warn!(
@@ -106,6 +113,11 @@ impl OtpEntry {
                 credential_type: "otp".to_string(),
             })
             .await;
-        self.failures >= MAX_OTP_ATTEMPTS
+
+        if self.failures >= MAX_OTP_ATTEMPTS {
+            OtpActionApplyOutcome::TooManyFailures
+        } else {
+            OtpActionApplyOutcome::Applied
+        }
     }
 }

@@ -13,8 +13,8 @@ use tokio::time::sleep;
 use uuid::Uuid;
 use warpgate_common::auth::AuthResult;
 use warpgate_core::Services;
-use warpgate_desktop_auth::{OtpAction, OtpEntry, auth_prompt};
-use warpgate_desktop_ui as ui;
+use warpgate_desktop_auth::{OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt};
+use warpgate_desktop_ui::{self as ui, AuthPrompt};
 
 use super::RenderState;
 use super::protocol::{ClientEvent, write_server_cut_text};
@@ -78,11 +78,11 @@ where
             AuthResult::Need(need) => need,
         };
 
-        let Some(prompt) = auth_prompt(services, &state, &need, otp.entered()).await else {
+        let Some(mut prompt) = auth_prompt(services, &state, &need, otp.entered()).await else {
             bail!("authentication policy requires a factor that cannot be collected over VNC");
         };
 
-        if let ui::AuthPrompt::WebApproval { url, .. } = &prompt {
+        if let AuthPrompt::WebApproval { url, .. } = &prompt {
             if let Some(url) = url {
                 write_server_cut_text(viewer_wr, &url).await.ok();
             }
@@ -96,12 +96,20 @@ where
                 }
                 event = events_rx.recv(), if !render.reader_done => {
                     if let Some(keysym) = render.note_event(event)
-                        && matches!(prompt, ui::AuthPrompt::Otp { ..})
+                        && let AuthPrompt::Otp { entered } = &mut prompt
                     {
                         if let Some(action) = keysym_otp_action(keysym)
-                            && otp.apply(action, services, &state, username, remote_ip).await
+
                         {
-                            bail!("too many incorrect one-time passwords");
+                            match otp.apply(action, services, &state, username, remote_ip).await {
+                                OtpActionApplyOutcome::Applied => {
+                                    *entered = otp.entered().to_string();
+                                },
+                                OtpActionApplyOutcome::AcceptedAndValidated => break,
+                                OtpActionApplyOutcome::TooManyFailures => {
+                                    bail!("too many incorrect one-time passwords");
+                                }
+                            }
                         }
                         render.pending_request = true; // reflect the input on the next paint
                         continue 'next_prompt // OTP might have been accepted or rejected

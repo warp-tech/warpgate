@@ -13,7 +13,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-pub use otp::{MAX_OTP_ATTEMPTS, OtpAction, OtpEntry};
+pub use otp::{MAX_OTP_ATTEMPTS, OtpAction, OtpActionApplyOutcome, OtpEntry};
 use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
@@ -245,10 +245,7 @@ async fn find_target<P: DesktopProtocol>(
 
 /// Build the browser web-approval URL for the current auth state, or `None` if the external
 /// URL can't be constructed.
-pub async fn web_approval_url(
-    services: &Services,
-    state: &Arc<Mutex<AuthState>>,
-) -> Option<String> {
+async fn web_approval_url(services: &Services, state: &Arc<Mutex<AuthState>>) -> Option<String> {
     let external_url = {
         let config = services.config.lock().await;
         construct_external_url(None, &config, None)
