@@ -204,42 +204,41 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                     <Fa icon={faArrowRight} fw />
                 </Button>
             {/if}
-            {#if target.kind === TargetKind.Ssh || canEditTargets}
-                <Dropdown>
-                    <DropdownToggle color="link" size="sm" onclick={e => {
+            <Dropdown>
+                <DropdownToggle color="link" size="sm" onclick={e => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                }}>
+                    <Fa icon={faEllipsisV} fw />
+                </DropdownToggle>
+                <DropdownMenu end>
+                    {#if target.kind === TargetKind.Ssh && webClientsEnabled}
+                        <DropdownItem onclick={e => {
+                            openWebSsh(target)
+                            e.preventDefault()
+                            e.stopPropagation()
+                        }}>Web terminal</DropdownItem>
+                    {/if}
+                    {#if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) && webClientsEnabled}
+                        <DropdownItem onclick={e => {
+                            openWebDesktop(target)
+                            e.preventDefault()
+                            e.stopPropagation()
+                        }}>Web desktop</DropdownItem>
+                    {/if}
+                    <DropdownItem onclick={e => {
+                        showInstructions(target)
                         e.preventDefault()
                         e.stopPropagation()
-                    }}>
-                        <Fa icon={faEllipsisV} fw />
-                    </DropdownToggle>
-                    <DropdownMenu end>
-                        {#if target.kind === TargetKind.Ssh}
-                            {#if webClientsEnabled}
-                                <DropdownItem onclick={e => {
-                                    openWebSsh(target)
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                }}>Web terminal</DropdownItem>
-                            {/if}
-                            <DropdownItem onclick={e => {
-                                showInstructions(target)
-                                e.preventDefault()
-                                e.stopPropagation()
-                            }}>Connection instructions</DropdownItem>
-                        {/if}
-                        {#if canEditTargets}
-                            <DropdownItem
-                                href={`/@warpgate/admin#/config/targets/${target.id}`}
-                                onclick={e => e.stopPropagation()}
-                            >Edit target</DropdownItem>
-                        {/if}
-                    </DropdownMenu>
-                </Dropdown>
-            {:else if target.kind !== TargetKind.Http}
-                <Button disabled color="link" size="sm" tabindex={-1} style="visibility: hidden">
-                    <Fa icon={faEllipsisV} fw />
-                </Button>
-            {/if}
+                    }}>Connection instructions</DropdownItem>
+                    {#if canEditTargets}
+                        <DropdownItem
+                            href={`/@warpgate/admin#/config/targets/${target.id}`}
+                            onclick={e => e.stopPropagation()}
+                        >Edit target</DropdownItem>
+                    {/if}
+                </DropdownMenu>
+            </Dropdown>
         </a>
     {/snippet}
 </ItemList>

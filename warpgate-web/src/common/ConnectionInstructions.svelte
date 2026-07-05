@@ -2,7 +2,7 @@
     import { Button, FormGroup, ListGroup, ListGroupItem } from '@sveltestrap/sveltestrap'
     import { api, TargetKind, type ExistingCertificateCredential } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import { makeExampleSSHCommand, makeSSHUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand } from 'common/protocols'
+    import { makeExampleSSHCommand, makeCommonSelectorUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand, protocolHost, protocolPort, protocolPortString } from 'common/protocols'
     import { getCertificateKey, getAllCertificateKeys } from 'gateway/lib/certificateStore'
     import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
     import CopyButton from 'common/CopyButton.svelte'
@@ -130,7 +130,7 @@
         clientPrivateKeyPem,
     }))
 
-    let sshUsername = $derived(makeSSHUsername(opts))
+    let commonSelectorUsername = $derived(makeCommonSelectorUsername(opts))
     let exampleSSHCommand = $derived(makeExampleSSHCommand(opts))
     let exampleSCPCommand = $derived(makeExampleSCPCommand(opts))
     let mySQLUsername = $derived(makeMySQLUsername(opts))
@@ -143,12 +143,14 @@
     let authHeader = $derived(`Authorization: Warpgate ${ticketSecret}`)
     let kubeconfig = $derived(makeKubeconfig(opts))
     let exampleKubectlCommand = $derived(makeExampleKubectlCommand(opts))
+    let rdpEndpoint = $derived(`${protocolHost(opts, 'rdp')}:${protocolPortString(opts, 'rdp')}`)
+    let vncEndpoint = $derived(`${protocolHost(opts, 'vnc')}:${protocolPortString(opts, 'vnc')}`)
 </script>
 
 {#if targetKind === TargetKind.Ssh}
     <FormGroup floating label="SSH username" class="d-flex align-items-center">
-        <input type="text" class="form-control" readonly value={sshUsername} />
-        <CopyButton text={sshUsername} />
+        <input type="text" class="form-control" readonly value={commonSelectorUsername} />
+        <CopyButton text={commonSelectorUsername} />
     </FormGroup>
 
     <FormGroup floating label="Example SSH command" class="d-flex align-items-center">
@@ -329,4 +331,28 @@
     storeInBrowserByDefault={true}
     onClose={() => { issuingCertificate = false; loadCertificates() }}
 />
+{/if}
+
+{#if targetKind === TargetKind.Rdp}
+<FormGroup floating label="RDP username" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={commonSelectorUsername} />
+    <CopyButton text={commonSelectorUsername} />
+</FormGroup>
+
+<FormGroup floating label="RDP endpoint" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={rdpEndpoint} />
+    <CopyButton text={rdpEndpoint} />
+</FormGroup>
+{/if}
+
+{#if targetKind === TargetKind.Vnc}
+<FormGroup floating label="VNC username" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={commonSelectorUsername} />
+    <CopyButton text={commonSelectorUsername} />
+</FormGroup>
+
+<FormGroup floating label="VNC endpoint" class="d-flex align-items-center">
+    <input type="text" class="form-control" readonly value={vncEndpoint} />
+    <CopyButton text={vncEndpoint} />
+</FormGroup>
 {/if}

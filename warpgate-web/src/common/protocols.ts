@@ -13,39 +13,33 @@ export interface ConnectionOptions {
     clientPrivateKeyPem?: string
 }
 
-export function makeSSHUsername (opt: ConnectionOptions): string {
+export function makeCommonSelectorUsername (opt: ConnectionOptions): string {
     if (opt.ticketSecret) {
         return `ticket-${opt.ticketSecret}`
     }
     return `${opt.username ?? 'username'}:${opt.targetName ?? 'target'}`
 }
 
-function protocolHost (opt: ConnectionOptions, protocol: 'ssh'|'http'|'mysql'|'postgres'|'kubernetes'): string {
+export function protocolHost (opt: ConnectionOptions, protocol: 'ssh'|'http'|'mysql'|'postgres'|'kubernetes'|'rdp'|'vnc'): string {
     const globalHost = opt.serverInfo?.externalHost ?? 'warpgate-host'
     const hosts = opt.serverInfo?.externalHosts
+    return hosts?.[protocol] ?? opt.targetExternalHost ?? globalHost
+}
 
-    switch (protocol) {
-        case 'ssh':
-            return hosts?.ssh ?? globalHost
-        case 'http':
-            return hosts?.http ?? globalHost
-        case 'mysql':
-            return hosts?.mysql ?? globalHost
-        case 'postgres':
-            return hosts?.postgres ?? globalHost
-        case 'kubernetes':
-            return hosts?.kubernetes ?? globalHost
-        default:
-            return globalHost
-    }
+export function protocolPort (opt: ConnectionOptions, protocol: 'ssh'|'http'|'mysql'|'postgres'|'kubernetes'|'rdp'|'vnc'): number | undefined {
+    return opt.serverInfo?.ports[protocol]
+}
+
+export function protocolPortString (opt: ConnectionOptions, protocol: 'ssh'|'http'|'mysql'|'postgres'|'kubernetes'|'rdp'|'vnc'): string {
+    return protocolPort(opt, protocol)?.toString() ?? `warpgate-${protocol}-port`
 }
 
 export function makeExampleSSHCommand (opt: ConnectionOptions): string {
     return shellEscape([
         'ssh',
-        `${makeSSHUsername(opt)}@${protocolHost(opt, 'ssh')}`,
+        `${makeCommonSelectorUsername(opt)}@${protocolHost(opt, 'ssh')}`,
         '-p',
-        (opt.serverInfo?.ports.ssh ?? 'warpgate-ssh-port').toString(),
+        protocolPortString(opt, 'ssh'),
     ])
 }
 
@@ -53,9 +47,9 @@ export function makeExampleSCPCommand (opt: ConnectionOptions): string {
     return shellEscape([
         'scp',
         '-o',
-        `User="${makeSSHUsername(opt)}"`,
+        `User="${makeCommonSelectorUsername(opt)}"`,
         '-P',
-        (opt.serverInfo?.ports.ssh ?? 'warpgate-ssh-port').toString(),
+        protocolPortString(opt, 'ssh'),
         'local-file',
         `${protocolHost(opt, 'ssh')}:remote-file`,
     ])
@@ -70,7 +64,15 @@ export function makeMySQLUsername (opt: ConnectionOptions): string {
 
 export function makeExampleMySQLCommand (opt: ConnectionOptions): string {
     const dbName = opt.targetDefaultDatabaseName?.trim() || 'database-name'
-    let cmd = shellEscape(['mysql', '-u', makeMySQLUsername(opt), '--host', protocolHost(opt, 'mysql'), '--port', (opt.serverInfo?.ports.mysql ?? 'warpgate-mysql-port').toString(), '--ssl', dbName])
+    let cmd = shellEscape([
+        'mysql',
+        '-u', makeMySQLUsername(opt),
+        '--host', protocolHost(opt, 'mysql'),
+        '--port',
+        protocolPortString(opt, 'mysql'),
+        '--ssl',
+        dbName,
+    ])
     if (!opt.ticketSecret) {
         cmd += ' -p'
     }
@@ -80,14 +82,14 @@ export function makeExampleMySQLCommand (opt: ConnectionOptions): string {
 export function makeExampleMySQLURI (opt: ConnectionOptions): string {
     const pwSuffix = opt.ticketSecret ? '' : ':<password>'
     const dbName = opt.targetDefaultDatabaseName?.trim() || 'database-name'
-    return `mysql://${makeMySQLUsername(opt)}${pwSuffix}@${protocolHost(opt, 'mysql')}:${opt.serverInfo?.ports.mysql ?? 'warpgate-mysql-port'}/${dbName}?sslMode=required`
+    return `mysql://${makeMySQLUsername(opt)}${pwSuffix}@${protocolHost(opt, 'mysql')}:${protocolPortString(opt, 'mysql')}/${dbName}?sslMode=required`
 }
 
 export const makePostgreSQLUsername = makeMySQLUsername
 
 export function makeExamplePostgreSQLCommand (opt: ConnectionOptions): string {
     const dbName = opt.targetDefaultDatabaseName?.trim() || 'database-name'
-    const args = ['psql', '-U', makeMySQLUsername(opt), '--host', protocolHost(opt, 'postgres'), '--port', (opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port').toString()]
+    const args = ['psql', '-U', makeMySQLUsername(opt), '--host', protocolHost(opt, 'postgres'), '--port', protocolPortString(opt, 'postgres')]
     if (!opt.ticketSecret) {
         args.push('-W')
     }
@@ -98,11 +100,11 @@ export function makeExamplePostgreSQLCommand (opt: ConnectionOptions): string {
 export function makeExamplePostgreSQLURI (opt: ConnectionOptions): string {
     const pwSuffix = opt.ticketSecret ? '' : ':<password>'
     const dbName = opt.targetDefaultDatabaseName?.trim() || 'database-name'
-    return `postgresql://${makePostgreSQLUsername(opt)}${pwSuffix}@${protocolHost(opt, 'postgres')}:${opt.serverInfo?.ports.postgres ?? 'warpgate-postgres-port'}/${dbName}?sslmode=require`
+    return `postgresql://${makePostgreSQLUsername(opt)}${pwSuffix}@${protocolHost(opt, 'postgres')}:${protocolPortString(opt, 'postgres')}/${dbName}?sslmode=require`
 }
 
 export function makeTargetURL (opt: ConnectionOptions): string {
-    const host = `${opt.targetExternalHost ?? protocolHost(opt, 'http')}:${opt.serverInfo?.ports.http ?? 443}`
+    const host = `${opt.targetExternalHost ?? protocolHost(opt, 'http')}:${protocolPort(opt, 'http') ?? 443}`
 
     if (opt.ticketSecret) {
         return `${location.protocol}//${host}/?warpgate-ticket=${opt.ticketSecret}`
@@ -137,7 +139,7 @@ export function makeKubernetesNamespace (_opt: ConnectionOptions): string {
 }
 
 export function makeKubernetesClusterUrl (opt: ConnectionOptions): string {
-    const baseUrl = `https://${protocolHost(opt, 'kubernetes')}:${opt.serverInfo?.ports.kubernetes ?? 'warpgate-kubernetes-port'}`
+    const baseUrl = `https://${protocolHost(opt, 'kubernetes')}:${protocolPortString(opt, 'kubernetes')}`
     return `${baseUrl}/${encodeURIComponent(opt.targetName ?? 'target')}`
 }
 

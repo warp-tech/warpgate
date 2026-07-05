@@ -448,13 +448,6 @@
         align-content: center;
     }
 
-    .not-playable {
-        color: #eee;
-        padding: 2rem;
-        text-align: center;
-        font-size: 0.9rem;
-    }
-
     .stage {
         position: relative;
         display: inline-block;
