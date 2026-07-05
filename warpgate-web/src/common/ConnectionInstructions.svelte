@@ -2,17 +2,17 @@
     import { Button, FormGroup, ListGroup, ListGroupItem } from '@sveltestrap/sveltestrap'
     import { api, TargetKind, type ExistingCertificateCredential } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import { makeExampleSSHCommand, makeCommonSelectorUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand, protocolHost, protocolPort, protocolPortString } from 'common/protocols'
+    import { makeExampleSSHCommand, makeCommonSelectorUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand, protocolHost, protocolPortString } from 'common/protocols'
     import { getCertificateKey, getAllCertificateKeys } from 'gateway/lib/certificateStore'
     import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
     import CopyButton from 'common/CopyButton.svelte'
-    import Alert from './sveltestrap-s5-ports/Alert.svelte'
+    import {Alert} from '@sveltestrap/sveltestrap'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import InfoBox from './InfoBox.svelte'
     import { faCertificate, faPlus } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
-    import Badge from './sveltestrap-s5-ports/Badge.svelte'
-    import Tooltip from './sveltestrap-s5-ports/Tooltip.svelte'
+    import {Badge} from '@sveltestrap/sveltestrap'
+    import {Tooltip} from '@sveltestrap/sveltestrap'
 
     interface Props {
         targetName?: string;

@@ -12,7 +12,7 @@
     import { saveCertificateKey } from 'gateway/lib/certificateStore'
     import AsyncButton from 'common/AsyncButton.svelte'
     import CopyButton from 'common/CopyButton.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { Alert } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
     import { downloadBlob } from 'common/helpers'
 

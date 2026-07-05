@@ -1,5 +1,5 @@
 <script lang="ts">
-    import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
+    import { Badge } from '@sveltestrap/sveltestrap'
     import type { KubernetesRecordingItem } from './lib/api'
     import { firstBy } from 'thenby'
     interface Props {

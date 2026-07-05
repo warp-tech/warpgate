@@ -1,6 +1,6 @@
 <script lang="ts" generics="T">
     import type { Snippet } from 'svelte'
-    import Alert from './sveltestrap-s5-ports/Alert.svelte'
+    import { Alert } from '@sveltestrap/sveltestrap'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import { stringifyError } from './errors'
 

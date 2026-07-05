@@ -1,9 +1,8 @@
 <script lang="ts">
     import { api, type TargetOptions, type TargetGroup, TlsMode } from 'admin/lib/api'
     import { replace } from 'svelte-spa-router'
-    import { Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
+    import { Button, Form, FormGroup, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { onMount } from 'svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { adminPermissions } from '../../lib/store'

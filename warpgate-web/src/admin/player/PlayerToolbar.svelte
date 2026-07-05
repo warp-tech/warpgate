@@ -2,7 +2,7 @@
     import Fa from 'svelte-fa'
     import { faPlay, faPause, faExpand, faCircle, faFastForward } from '@fortawesome/free-solid-svg-icons'
     import formatDuration from 'format-duration'
-    import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte';
+    import { Tooltip } from '@sveltestrap/sveltestrap'
 
     // Shared controls for the recording players (terminal + desktop): play/pause,
     // elapsed time, optional LIVE button, a scrubber with an optional input-density

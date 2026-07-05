@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Button, FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { Button, FormGroup, Input, Alert } from '@sveltestrap/sveltestrap'
     import { link } from 'svelte-spa-router'
     import { api, TargetClickAction, PasswordLoginMode, AnalyticsConsent, type ParameterValues } from 'admin/lib/api'
     import { api as gatewayApi } from 'gateway/lib/api'
@@ -7,7 +7,6 @@
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import InfoBox from 'common/InfoBox.svelte'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { humantimeDuration } from 'common/duration'
     import { reloadServerInfo } from 'gateway/lib/store'

@@ -3,8 +3,7 @@
     import { reloadServerInfo } from 'gateway/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import AnalyticsPreview from './AnalyticsPreview.svelte'
-    import { Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
-    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
+    import { Modal, ModalBody, ModalFooter, ModalHeader } from '@sveltestrap/sveltestrap'
     import HelpText from './lib/HelpText.svelte'
 
     interface Props {

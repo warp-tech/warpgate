@@ -1,9 +1,8 @@
 <script lang="ts">
     import { api, type SSHKey, type SSHKnownHost } from 'admin/lib/api'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CopyButton from 'common/CopyButton.svelte'
     import { stringifyError } from 'common/errors'
-    import { Button } from '@sveltestrap/sveltestrap'
+    import { Button, Alert } from '@sveltestrap/sveltestrap'
     import { adminPermissions } from 'admin/lib/store'
 
     let error: string|undefined = $state()
