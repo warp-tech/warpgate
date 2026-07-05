@@ -1,0 +1,27 @@
+[package]
+edition = "2024"
+license = "Apache-2.0"
+name = "warpgate-web-desktop"
+version = "0.23.4"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+poem.workspace = true
+poem-openapi.workspace = true
+sea-orm.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+warpgate-common = { path = "../warpgate-common" }
+warpgate-common-http = { path = "../warpgate-common-http" }
+warpgate-core = { path = "../warpgate-core" }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
+warpgate-protocol-vnc = { path = "../warpgate-protocol-vnc" }
+warpgate-protocol-rdp = { path = "../warpgate-protocol-rdp" }
+warpgate-web-clients-common = { path = "../warpgate-web-clients-common" }

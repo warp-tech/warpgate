@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.26.0-beta.1-modified"
+    "version": "v0.26.0-35-g86c7d219-modified"
   },
   "servers": [
     {
@@ -1187,6 +1187,9 @@
               }
             }
           },
+          "401": {
+            "description": ""
+          },
           "403": {
             "description": ""
           },
@@ -1282,6 +1285,129 @@
           }
         ],
         "operationId": "delete_web_ssh_session"
+      }
+    },
+    "/web-desktop/sessions": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebDesktopSessionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebDesktopSessionCreated"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "429": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "create_web_desktop_session"
+      }
+    },
+    "/web-desktop/sessions/{session_id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "session_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebDesktopSessionInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_web_desktop_session"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "session_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_web_desktop_session"
       }
     }
   },
@@ -1471,6 +1597,19 @@
           },
           "description": {
             "type": "string"
+          }
+        }
+      },
+      "CreateWebDesktopSessionBody": {
+        "type": "object",
+        "title": "CreateWebDesktopSessionBody",
+        "required": [
+          "target_id"
+        ],
+        "properties": {
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -1701,6 +1840,12 @@
           },
           "kubernetes": {
             "type": "string"
+          },
+          "vnc": {
+            "type": "string"
+          },
+          "rdp": {
+            "type": "string"
           }
         }
       },
@@ -1738,7 +1883,7 @@
           "ticket_require_description",
           "ticket_request_show_all_targets",
           "target_click_action",
-          "web_ssh_enabled",
+          "web_clients_enabled",
           "has_ldap",
           "should_prompt_analytics"
         ],
@@ -1801,7 +1946,7 @@
             "type": "integer",
             "format": "int64"
           },
-          "web_ssh_enabled": {
+          "web_clients_enabled": {
             "type": "boolean"
           },
           "has_ldap": {
@@ -1817,8 +1962,7 @@
             "type": "boolean"
           },
           "should_prompt_analytics": {
-            "type": "boolean",
-            "description": "Whether the admin UI should show the one-time analytics opt-in prompt:\ntrue only for a config-editing admin of an undecided instance that is\nolder than a week and has finished or dismissed the Getting Started steps."
+            "type": "boolean"
           }
         }
       },
@@ -2064,6 +2208,14 @@
           "kubernetes": {
             "type": "integer",
             "format": "uint16"
+          },
+          "vnc": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "rdp": {
+            "type": "integer",
+            "format": "uint16"
           }
         }
       },
@@ -2154,7 +2306,9 @@
           "Kubernetes",
           "MySql",
           "Ssh",
-          "Postgres"
+          "Postgres",
+          "Vnc",
+          "Rdp"
         ]
       },
       "TargetSnapshot": {
@@ -2395,6 +2549,47 @@
             "items": {
               "$ref": "#/components/schemas/CredentialKind"
             }
+          },
+          "vnc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "rdp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          }
+        }
+      },
+      "WebDesktopSessionCreated": {
+        "type": "object",
+        "title": "WebDesktopSessionCreated",
+        "required": [
+          "session_id"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "WebDesktopSessionInfo": {
+        "type": "object",
+        "title": "WebDesktopSessionInfo",
+        "required": [
+          "target_name",
+          "target_kind"
+        ],
+        "properties": {
+          "target_name": {
+            "type": "string"
+          },
+          "target_kind": {
+            "$ref": "#/components/schemas/TargetKind"
           }
         }
       },

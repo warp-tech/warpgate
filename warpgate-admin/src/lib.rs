@@ -21,11 +21,23 @@ pub fn admin_api_app() -> impl IntoEndpoint {
         )
         .at(
             "/recordings/:id/stream",
-            crate::api::recordings_detail::api_get_recording_stream,
+            crate::api::recordings_detail::api_get_recording_terminal_stream,
         )
         .at(
             "/recordings/:id/tcpdump",
             crate::api::recordings_detail::api_get_recording_tcpdump,
+        )
+        .at(
+            "/recordings/:id/desktop",
+            crate::api::recordings_detail::api_get_recording_desktop,
+        )
+        .at(
+            "/recordings/:id/desktop/index",
+            crate::api::recordings_detail::api_get_recording_desktop_index,
+        )
+        .at(
+            "/recordings/:id/desktop-stream",
+            crate::api::recordings_detail::api_get_recording_desktop_stream,
         )
         .at(
             "/sessions/changes",

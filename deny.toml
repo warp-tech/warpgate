@@ -75,6 +75,8 @@ ignore = [
     "RUSTSEC-2026-0098", # rustls: Name constraints for URI names were incorrectly accepted
     "RUSTSEC-2026-0104", # an older pinned version of rustls-webpki used by AWS SDK
     "RUSTSEC-2026-0173", # proc-macro-error2 is unmaintained - waiting for a sea-orm update
+    "RUSTSEC-2026-0195", # quick-xml memory exhaustion - we don't parse untrusted XML
+    "RUSTSEC-2026-0194", # quick-xml quadratic time - see above
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -198,6 +200,7 @@ allow = [
     "CC0-1.0",
     "MPL-2.0",
     "CDLA-Permissive-2.0",
+    "Unlicense",
 ]
 
 [[licenses.clarify]]

@@ -8,10 +8,9 @@
     import { TargetKind } from 'gateway/lib/api'
     import EmptyState from 'common/EmptyState.svelte'
     import { onMount } from 'svelte'
-    import { Dropdown, DropdownToggle, DropdownMenu, DropdownItem } from '@sveltestrap/sveltestrap'
+    import { Dropdown, DropdownToggle, DropdownMenu, DropdownItem, Alert } from '@sveltestrap/sveltestrap'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import { firstBy } from 'thenby'
 
     let error: string|undefined = $state()
@@ -167,6 +166,12 @@
                     {/if}
                     {#if target.options.kind === TargetKind.Kubernetes}
                         Kubernetes
+                    {/if}
+                    {#if target.options.kind === TargetKind.Vnc}
+                        VNC
+                    {/if}
+                    {#if target.options.kind === TargetKind.Rdp}
+                        RDP
                     {/if}
                 </small>
             </a>

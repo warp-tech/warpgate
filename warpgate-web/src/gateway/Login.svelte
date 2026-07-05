@@ -1,7 +1,7 @@
 <script lang="ts">
     import { get } from 'svelte/store'
     import { querystring, replace } from 'svelte-spa-router'
-    import { Button, FormGroup } from '@sveltestrap/sveltestrap'
+    import { Button, FormGroup, Alert } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
@@ -9,7 +9,6 @@
     import { api, ApiAuthState, LoginFailureResponseFromJSON, PasswordLoginMode, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
 
     let error: string|null = $state(null)
@@ -28,6 +27,7 @@
     const passwordLoginMinimized = $derived(passwordLoginMode === PasswordLoginMode.Minimized)
 
     const nextURL = new URLSearchParams(get(querystring)).get('next') ?? undefined
+    const reauthRequired = new URLSearchParams(get(querystring)).get('reauth') === '1'
     const serverErrorMessage = new URLSearchParams(location.search).get('login_error')
     const initPromise = init()
 
@@ -43,7 +43,7 @@
                 throw err
             }
         }
-        continueWithState()
+        await continueWithState()
     }
 
     function success () {
@@ -223,6 +223,9 @@
 
         <div class="mt-3"></div>
 
+        {#if reauthRequired}
+            <Alert color="warning">The security policy requires you to sign in again before accessing this function.</Alert>
+        {/if}
         {#if credentialRejected || authState === ApiAuthState.Failed}
             <Alert color="danger">Incorrect credentials</Alert>
         {/if}

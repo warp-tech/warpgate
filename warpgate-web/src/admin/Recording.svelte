@@ -1,7 +1,8 @@
 <script lang="ts">
     import { api, RecordingKind, type Recording } from 'admin/lib/api'
     import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import DesktopRecordingPlayer from 'admin/player/DesktopRecordingPlayer.svelte'
+    import { Alert } from '@sveltestrap/sveltestrap'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
     import KubernetesRecording from './KubernetesRecording.svelte'
@@ -51,6 +52,9 @@
 {/if}
 {#if recording?.kind === RecordingKind.Terminal}
     <TerminalRecordingPlayer recording={recording} />
+{/if}
+{#if recording?.kind === RecordingKind.Desktop}
+    <DesktopRecordingPlayer recording={recording} />
 {/if}
 {#if recording?.kind === RecordingKind.Kubernetes}
     <Loadable promise={api.getKubernetesRecording({ id: recording.id })}>

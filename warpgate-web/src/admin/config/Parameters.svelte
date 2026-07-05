@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Button, FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { Button, FormGroup, Input, Alert } from '@sveltestrap/sveltestrap'
     import { link } from 'svelte-spa-router'
     import { api, TargetClickAction, PasswordLoginMode, AnalyticsConsent, type ParameterValues } from 'admin/lib/api'
     import { api as gatewayApi } from 'gateway/lib/api'
@@ -7,7 +7,6 @@
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import InfoBox from 'common/InfoBox.svelte'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { humantimeDuration } from 'common/duration'
     import { reloadServerInfo } from 'gateway/lib/store'
@@ -55,7 +54,16 @@
     async function save () {
         updateError = undefined
         try {
-            await api.updateParameters({ parameterUpdate: parameters! })
+            // Cleared nullable fields must be sent as explicit null: undefined
+            // is dropped by JSON.stringify, so the server keeps the old value.
+            const parameterUpdate = {
+                ...parameters!,
+                ticketMaxDurationSeconds: parameters!.ticketMaxDurationSeconds ?? null,
+                ticketMaxUses: parameters!.ticketMaxUses ?? null,
+                maxApiTokenDurationSeconds: parameters!.maxApiTokenDurationSeconds ?? null,
+                webAuthMaxAgeSeconds: parameters!.webAuthMaxAgeSeconds ?? null,
+            } as unknown as ParameterValues
+            await api.updateParameters({ parameterUpdate })
             await reloadServerInfo()
         } catch (err) {
             updateError = await stringifyError(err)
@@ -184,20 +192,6 @@
                 </Section>
 
                 <Section id="ssh" title="SSH">
-                    <Subsection title="Web SSH">
-                        <label
-                            for="webSshEnabled"
-                            class="d-flex align-items-center"
-                        >
-                            <Input
-                                id="webSshEnabled"
-                                class="mb-0 me-2"
-                                type="switch"
-                                bind:checked={parameters.webSshEnabled} />
-                            <div>Enable Web SSH (in-browser terminal)</div>
-                        </label>
-                    </Subsection>
-
                     <Subsection title="Allowed authentication methods">
                         <label
                             for="sshClientAuthPublickey"
@@ -366,6 +360,21 @@
                 </Section>
 
                 <Section id="ui" title="UI">
+                    <label
+                        for="webClientsEnabled"
+                        class="d-flex align-items-center"
+                    >
+                        <Input
+                            id="webClientsEnabled"
+                            class="mb-0 me-2"
+                            type="switch"
+                            bind:checked={parameters.webClientsEnabled} />
+                        <div>Enable in-browser clients (SSH terminal, RDP/VNC desktop)</div>
+                    </label>
+                    <HelpText>
+                        Lets users open SSH, RDP and VNC targets directly in the browser from the portal. When off, only native-client connection instructions are shown.
+                    </HelpText>
+
                     <FormGroup floating label="SSH target click action">
                         <select
                             id="targetClickAction"
@@ -410,6 +419,18 @@
                     </FormGroup>
                     <HelpText>
                         Minimized hides the username and password fields behind a link, with the focus on the SSO buttons. Disabled removes password login entirely and the server rejects password attempts — make sure all users can sign in via SSO first.
+                    </HelpText>
+
+                    <FormGroup floating label="Require re-authentication after (blank = never)">
+                        <input
+                            type="text"
+                            class="form-control"
+                            placeholder="e.g. 8h, 30m, 1d"
+                            use:humantimeDuration={{ seconds: parameters.webAuthMaxAgeSeconds, onChange: v => { parameters!.webAuthMaxAgeSeconds = v } }}
+                        />
+                    </FormGroup>
+                    <HelpText>
+                        Forces users to sign in again once before accessing Web SSH or creating tickets if at least this much time has passed since they've logged in. Native SSH/database sessions are unaffected.
                     </HelpText>
                 </Section>
                 {/if}

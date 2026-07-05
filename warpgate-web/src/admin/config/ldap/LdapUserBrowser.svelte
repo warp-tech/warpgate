@@ -2,7 +2,7 @@
     import { api, stringifyError } from 'admin/lib/api'
     import Loadable from 'common/Loadable.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { Alert } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
     import { faRefresh } from '@fortawesome/free-solid-svg-icons'
 

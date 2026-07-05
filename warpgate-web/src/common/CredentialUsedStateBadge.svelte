@@ -1,7 +1,6 @@
 <script lang="ts">
-    import { uuid } from './sveltestrap-s5-ports/_sveltestrapUtils'
-    import Badge from './sveltestrap-s5-ports/Badge.svelte'
-    import Tooltip from './sveltestrap-s5-ports/Tooltip.svelte'
+    import { Badge, Tooltip } from '@sveltestrap/sveltestrap'
+    import { uuid } from './helpers'
 
     interface DatedCredential {
         lastUsed?: Date

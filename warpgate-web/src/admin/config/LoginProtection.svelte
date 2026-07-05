@@ -1,9 +1,8 @@
 <script lang="ts">
     import { api, type SecurityStatus, type BlockedIpInfo, type LockedUserInfo } from 'admin/lib/api'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
-    import { Button } from '@sveltestrap/sveltestrap'
+    import { Button, Alert } from '@sveltestrap/sveltestrap'
     import RelativeDate from '../RelativeDate.svelte'
     import { onMount } from 'svelte'
     import AsyncButton from 'common/AsyncButton.svelte'

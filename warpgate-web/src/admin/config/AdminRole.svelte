@@ -3,12 +3,10 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import { link, replace } from 'svelte-spa-router'
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { FormGroup, Input, Alert, Tooltip } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import Loadable from 'common/Loadable.svelte'
     import * as rx from 'rxjs'
-    import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
     import { adminPermissions, ADMIN_PERMISSIONS, type AdminPermissionDef } from '../lib/store'
 
     interface Props {

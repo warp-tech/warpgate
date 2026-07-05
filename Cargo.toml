@@ -9,6 +9,7 @@ members = [
     "warpgate-common-http",
     "warpgate-tls",
     "warpgate-core",
+    "warpgate-desktop-auth",
     "warpgate-db-migrations",
     "warpgate-db-entities",
     "warpgate-database-protocols",
@@ -17,11 +18,25 @@ members = [
     "warpgate-protocol-kubernetes",
     "warpgate-protocol-mysql",
     "warpgate-protocol-postgres",
+    "warpgate-protocol-rdp",
+    "warpgate-rdp-ipc",
     "warpgate-protocol-ssh",
+    "warpgate-protocol-vnc",
+    "warpgate-desktop-ui",
     "warpgate-sso",
     "warpgate-web",
+    "warpgate-web-clients-common",
+    "warpgate-web-desktop",
     "warpgate-web-ssh",
 ]
+# warpgate-rdp-helper is intentionally excluded: IronRDP's NLA/CredSSP stack (sspi/picky)
+# exact-pins RustCrypto pre-release crates that conflict with russh's exact pins, so RDP
+# support is built as a standalone helper binary with its own lockfile and integrated over
+# a subprocess IPC channel. The helper carries both the target-facing client (`connect`)
+# and viewer-facing server (`serve`) as subcommands.
+# vendor/vnc-rs is a vendored third-party fork (path dep of warpgate-protocol-vnc); it is
+# excluded from the workspace so Cranky's deny lints don't apply to its upstream code.
+exclude = ["warpgate-rdp-helper", "vendor/vnc-rs"]
 default-members = ["warpgate"]
 resolver = "2"
 
@@ -156,6 +171,10 @@ url = { version = "2.4", default-features = false }
 lto = true
 panic = "abort"
 strip = "debuginfo"
+
+[profile.release-no-lto]
+inherits = "release"
+lto = false
 
 [profile.coverage]
 inherits = "dev"

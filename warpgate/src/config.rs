@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use config::{Config, Environment, File, FileFormat};
 use notify::{RecursiveMode, Watcher, recommended_watcher};
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::sync::{Mutex, mpsc, watch};
 use tracing::{error, info, warn};
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateConfigStore};
@@ -104,10 +104,14 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
     }
 }
 
-pub fn watch_config(
+/// Watch the config file and push each successfully reloaded [`WarpgateConfig`]
+/// onto a [`watch`] channel. The `config` mutex remains the canonical store that
+/// existing readers lock; the returned receiver is the change stream that drives
+/// realtime consumers such as the port-listener supervisors.
+pub async fn watch_config(
     params: &GlobalParams,
     config: Arc<Mutex<WarpgateConfig>>,
-) -> Result<broadcast::Receiver<()>> {
+) -> Result<watch::Receiver<WarpgateConfig>> {
     let params = params.clone();
 
     let (tx, mut rx) = mpsc::channel(16);
@@ -116,33 +120,43 @@ pub fn watch_config(
     })?;
     watcher.watch(params.config_path().as_ref(), RecursiveMode::NonRecursive)?;
 
-    let (tx2, rx2) = broadcast::channel(16);
+    let (tx2, rx2) = watch::channel(config.lock().await.clone());
     tokio::spawn(async move {
         let _watcher = watcher; // avoid dropping the watcher
         loop {
+            // Block until a modify event, then debounce: editors emit several
+            // events per save, so wait for 500ms of quiet before reloading once.
             match rx.recv().await {
-                Some(Ok(event)) => {
-                    if event.kind.is_modify() {
-                        match load_config(&params, false) {
-                            Ok(new_config) => {
-                                *(config.lock().await) = new_config;
-                                let _ = tx2.send(());
-                                info!("Reloaded config");
-                            }
-                            Err(error) => error!(?error, "Failed to reload config"),
-                        }
-                    }
+                Some(Ok(event)) if event.kind.is_modify() => {}
+                Some(Ok(_)) => continue,
+                Some(Err(error)) => {
+                    error!(?error, "Failed to watch config");
+                    continue;
                 }
-                Some(Err(error)) => error!(?error, "Failed to watch config"),
                 None => {
                     error!("Config watch failed");
                     break;
                 }
             }
-        }
+            while let Ok(pending) =
+                tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await
+            {
+                match pending {
+                    Some(Err(error)) => error!(?error, "Failed to watch config"),
+                    None => return,
+                    Some(Ok(_)) => {} // more activity, keep debouncing
+                }
+            }
 
-        #[allow(unreachable_code)]
-        Ok::<_, anyhow::Error>(())
+            match load_config(&params, false) {
+                Ok(new_config) => {
+                    *(config.lock().await) = new_config.clone();
+                    let _ = tx2.send(new_config);
+                    info!("Reloaded config");
+                }
+                Err(error) => error!(?error, "Failed to reload config"),
+            }
+        }
     });
 
     Ok(rx2)

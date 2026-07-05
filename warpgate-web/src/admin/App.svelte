@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { get } from 'svelte/store'
     import { serverInfo, reloadServerInfo } from 'gateway/lib/store'
 
     import Router, { link, type WrappedComponent } from 'svelte-spa-router'
@@ -21,6 +22,14 @@
 
     async function init () {
         await reloadServerInfo()
+        if (!get(serverInfo)?.username) {
+            // Not logged in: redirect to the (gateway) login page, preserving this admin
+            // URL — hash route included — as `next` so we return exactly here afterwards.
+            // (The admin shell is no longer server-gated, so this runs client-side where
+            // the SPA hash route is known.)
+            const next = location.pathname + location.hash
+            location.assign('/@warpgate#/login?next=' + encodeURIComponent(next))
+        }
     }
 
     const initPromise = init()

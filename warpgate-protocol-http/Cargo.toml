@@ -30,6 +30,8 @@ tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
 warpgate-admin = { path = "../warpgate-admin", default-features = false }
+warpgate-web-ssh = { path = "../warpgate-web-ssh", default-features = false }
+warpgate-web-desktop = { path = "../warpgate-web-desktop", default-features = false }
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-ca = { path = "../warpgate-ca", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
@@ -39,4 +41,3 @@ warpgate-db-entities = { path = "../warpgate-db-entities", default-features = fa
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
 warpgate-web = { path = "../warpgate-web", default-features = false }
-warpgate-web-ssh = { path = "../warpgate-web-ssh", default-features = false }

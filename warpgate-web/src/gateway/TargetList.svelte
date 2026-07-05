@@ -12,17 +12,37 @@ import { firstBy } from 'thenby'
 import GettingStarted from 'common/GettingStarted.svelte'
 import EmptyState from 'common/EmptyState.svelte'
 import GroupColorCircle from 'common/GroupColorCircle.svelte'
+import { handleReauthError } from 'common/reauth'
 
 let instructionsTarget: TargetSnapshot|undefined = $state()
 
 const canEditTargets = $derived($serverInfo?.adminPermissions?.targetsEdit ?? false)
-const webSshEnabled = $derived($serverInfo?.webSshEnabled ?? true)
+const webClientsEnabled = $derived($serverInfo?.webClientsEnabled ?? true)
 
 async function openWebSsh (target: TargetSnapshot) {
-    const { sessionId } = await api.createWebSshSession({
-        createWebSshSessionBody: { targetId: target.id },
-    })
-    window.open(`/@warpgate#/web-ssh/${sessionId}`, '_blank')
+    try {
+        const { sessionId } = await api.createWebSshSession({
+            createWebSshSessionBody: { targetId: target.id },
+        })
+        window.open(`/@warpgate#/web-ssh/${sessionId}`, '_blank')
+    } catch (err) {
+        if (!(await handleReauthError(err))) {
+            throw err
+        }
+    }
+}
+
+async function openWebDesktop (target: TargetSnapshot) {
+    try {
+        const { sessionId } = await api.createWebDesktopSession({
+            createWebDesktopSessionBody: { targetId: target.id },
+        })
+        window.open(`/@warpgate#/web-desktop/${sessionId}`, '_blank')
+    } catch (err) {
+        if (!(await handleReauthError(err))) {
+            throw err
+        }
+    }
 }
 
 function loadTargets(
@@ -69,10 +89,16 @@ function selectTarget (target: TargetSnapshot) {
         }
     } else if (target.kind === TargetKind.Ssh) {
         const targetClickAction = $serverInfo?.targetClickAction
-        if (!webSshEnabled || targetClickAction === TargetClickAction.ShowInstructions) {
+        if (!webClientsEnabled || targetClickAction === TargetClickAction.ShowInstructions) {
             instructionsTarget = target
         } else {
             openWebSsh(target)
+        }
+    } else if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) {
+        if (!webClientsEnabled) {
+            instructionsTarget = target
+        } else {
+            openWebDesktop(target)
         }
     } else {
         instructionsTarget = target
@@ -166,48 +192,53 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
                 {#if target.kind === TargetKind.Ssh}
                     SSH
                 {/if}
+                {#if target.kind === TargetKind.Vnc}
+                    VNC
+                {/if}
+                {#if target.kind === TargetKind.Rdp}
+                    RDP
+                {/if}
             </small>
             {#if target.kind === TargetKind.Http}
                 <Button color="link" size="sm" tabindex={-1}>
                     <Fa icon={faArrowRight} fw />
                 </Button>
             {/if}
-            {#if target.kind === TargetKind.Ssh || canEditTargets}
-                <Dropdown>
-                    <DropdownToggle color="link" size="sm" onclick={e => {
+            <Dropdown>
+                <DropdownToggle color="link" size="sm" onclick={e => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                }}>
+                    <Fa icon={faEllipsisV} fw />
+                </DropdownToggle>
+                <DropdownMenu end>
+                    {#if target.kind === TargetKind.Ssh && webClientsEnabled}
+                        <DropdownItem onclick={e => {
+                            openWebSsh(target)
+                            e.preventDefault()
+                            e.stopPropagation()
+                        }}>Web terminal</DropdownItem>
+                    {/if}
+                    {#if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) && webClientsEnabled}
+                        <DropdownItem onclick={e => {
+                            openWebDesktop(target)
+                            e.preventDefault()
+                            e.stopPropagation()
+                        }}>Web desktop</DropdownItem>
+                    {/if}
+                    <DropdownItem onclick={e => {
+                        showInstructions(target)
                         e.preventDefault()
                         e.stopPropagation()
-                    }}>
-                        <Fa icon={faEllipsisV} fw />
-                    </DropdownToggle>
-                    <DropdownMenu end>
-                        {#if target.kind === TargetKind.Ssh}
-                            {#if webSshEnabled}
-                                <DropdownItem onclick={e => {
-                                    openWebSsh(target)
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                }}>Web terminal</DropdownItem>
-                            {/if}
-                            <DropdownItem onclick={e => {
-                                showInstructions(target)
-                                e.preventDefault()
-                                e.stopPropagation()
-                            }}>Connection instructions</DropdownItem>
-                        {/if}
-                        {#if canEditTargets}
-                            <DropdownItem
-                                href={`/@warpgate/admin#/config/targets/${target.id}`}
-                                onclick={e => e.stopPropagation()}
-                            >Edit target</DropdownItem>
-                        {/if}
-                    </DropdownMenu>
-                </Dropdown>
-            {:else if target.kind !== TargetKind.Http}
-                <Button disabled color="link" size="sm" tabindex={-1} style="visibility: hidden">
-                    <Fa icon={faEllipsisV} fw />
-                </Button>
-            {/if}
+                    }}>Connection instructions</DropdownItem>
+                    {#if canEditTargets}
+                        <DropdownItem
+                            href={`/@warpgate/admin#/config/targets/${target.id}`}
+                            onclick={e => e.stopPropagation()}
+                        >Edit target</DropdownItem>
+                    {/if}
+                </DropdownMenu>
+            </Dropdown>
         </a>
     {/snippet}
 </ItemList>
@@ -232,7 +263,7 @@ function groupInfoFromTarget (target: TargetSnapshot): GroupInfo {
         {/if}
     </ModalBody>
     <ModalFooter>
-        {#if instructionsTarget?.kind === TargetKind.Ssh && webSshEnabled}
+        {#if instructionsTarget?.kind === TargetKind.Ssh && webClientsEnabled}
             <Button
                 color="primary"
                 class="d-flex align-items-center justify-content-center gap-2 modal-button"

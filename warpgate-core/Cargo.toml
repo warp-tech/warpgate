@@ -21,6 +21,7 @@ ipnet.workspace = true
 ldap3.workspace = true
 packet = { version = "0.1", default-features = false }
 password-hash.workspace = true
+png = "0.18"
 poem.workspace = true
 poem-openapi.workspace = true
 rand.workspace = true
@@ -45,8 +46,10 @@ warpgate-common = { path = "../warpgate-common" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-db-migrations = { path = "../warpgate-db-migrations" }
 warpgate-ldap = { path = "../warpgate-ldap" }
+warpgate-tls = { path = "../warpgate-tls" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 webpki = { version = "0.22", default-features = false }
+zune-jpeg = "0.4"
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]

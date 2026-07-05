@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod listener_supervisor;
 mod logging;
 
 use std::path::PathBuf;
@@ -78,6 +79,14 @@ pub(crate) enum Commands {
         /// Enable Kubernetes and set port
         #[clap(long)]
         kubernetes_port: Option<u16>,
+
+        /// Enable VNC and set port
+        #[clap(long)]
+        vnc_port: Option<u16>,
+
+        /// Enable RDP and set port
+        #[clap(long)]
+        rdp_port: Option<u16>,
 
         /// Enable session recording
         #[clap(long)]

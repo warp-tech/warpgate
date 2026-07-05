@@ -2,11 +2,9 @@
     import { api, type Role, type User, type UserRoleAssignmentResponse, type AdminRole } from 'admin/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle, FormGroup, Input, Button, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
-    import ModalHeader from 'common/sveltestrap-s5-ports/ModalHeader.svelte'
+    import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle, FormGroup, Input, Button, Modal, ModalBody, ModalFooter, Alert, Tooltip, ModalHeader } from '@sveltestrap/sveltestrap'
     import { replace, link } from 'svelte-spa-router'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
     import CredentialEditor from './CredentialEditor.svelte'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
@@ -17,7 +15,6 @@
     import { onMount, onDestroy } from 'svelte'
     import { adminPermissions } from 'admin/lib/store'
     import AdminRolePermissionsBadge from '../AdminRolePermissionsBadge.svelte'
-    import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
     import { formatDistanceToNow } from 'date-fns'
     import StickyActionBar from 'common/StickyActionBar.svelte'
     import PageSummaryBar from 'common/PageSummaryBar.svelte'
@@ -274,7 +271,7 @@
     <Loadable promise={initPromise}>
         {#if user}
         {#if error}
-            <Alert color="danger" dismissible on:dismiss={() => error = null}>{error}</Alert>
+            <Alert color="danger">{error}</Alert>
         {/if}
 
         <PageSummaryBar title={user?.username ?? ''} subtitle="User" />
@@ -501,7 +498,7 @@
         {/if}
 
         {#if error}
-            <Alert color="danger" dismissible on:dismiss={() => error = null}>
+            <Alert color="danger">
                 {error}
             </Alert>
         {/if}

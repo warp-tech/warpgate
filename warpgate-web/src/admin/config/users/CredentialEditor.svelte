@@ -12,7 +12,7 @@
     import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type UserRequireCredentialsPolicy, type ParameterValues, type ExistingCertificateCredential } from 'admin/lib/api'
     import { SvelteSet } from 'svelte/reactivity'
     import Fa from 'svelte-fa'
-    import { Button } from '@sveltestrap/sveltestrap'
+    import { Button, Tooltip } from '@sveltestrap/sveltestrap'
     import CreatePasswordModal from '../../CreatePasswordModal.svelte'
     import SsoCredentialModal from '../../SsoCredentialModal.svelte'
     import PublicKeyCredentialModal from '../../PublicKeyCredentialModal.svelte'
@@ -23,7 +23,6 @@
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import Loadable from 'common/Loadable.svelte'
     import EmptyState from 'common/EmptyState.svelte'
-    import Tooltip from 'common/sveltestrap-s5-ports/Tooltip.svelte'
     import { adminPermissions } from 'admin/lib/store'
 
     interface Props {
@@ -47,12 +46,14 @@
 
     const loadPromise = load()
 
-    const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres' | 'kubernetes', name: string }[] = [
+    const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres' | 'kubernetes' | 'vnc' | 'rdp', name: string }[] = [
         { id: 'ssh', name: 'SSH' },
         { id: 'http', name: 'HTTP' },
         { id: 'mysql', name: 'MySQL' },
         { id: 'postgres', name: 'PostgreSQL' },
         { id: 'kubernetes', name: 'Kubernetes' },
+        { id: 'vnc', name: 'VNC' },
+        { id: 'rdp', name: 'RDP' },
     ]
 
     // Get effective possible credentials for a protocol, considering global SSH auth settings

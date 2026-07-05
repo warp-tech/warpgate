@@ -312,6 +312,7 @@ pub async fn authorize_session(
         user_id: user_info.id,
         username: user_info.username,
     });
+    warpgate_common_http::auth::stamp_session_auth_time(session);
 
     Ok(())
 }

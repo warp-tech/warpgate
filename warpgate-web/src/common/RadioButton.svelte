@@ -1,6 +1,6 @@
 <script lang="ts" generics="T">
     import { Button, Input } from '@sveltestrap/sveltestrap'
-    import { classnames } from './sveltestrap-s5-ports/_sveltestrapUtils'
+    import { classnames } from './helpers'
 
     type Props = {
         group: T,

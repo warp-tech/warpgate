@@ -76,6 +76,15 @@ class Child:
     stop_timeout: float
 
 
+# Geometry of the e2e VNC backend (images/vnc-server); passed to the container and
+# asserted by the VNC tests as the size the relay resizes the viewer to.
+VNC_BACKEND_SIZE = (800, 600)
+
+# Framebuffer size Warpgate's RDP helper requests from the target (see
+# warpgate-protocol-rdp `connect()`), i.e. the size desktop frames arrive at.
+RDP_BACKEND_SIZE = (1280, 800)
+
+
 @dataclass
 class WarpgateProcess:
     config_path: Path
@@ -85,6 +94,8 @@ class WarpgateProcess:
     mysql_port: int
     postgres_port: int
     kubernetes_port: int
+    vnc_port: int
+    rdp_port: int
 
 
 class ProcessManager:
@@ -193,6 +204,43 @@ class ProcessManager:
         port = alloc_port()
         self.start(
             ["docker", "run", "--rm", "-p", f"{port}:3306", "warpgate-e2e-mysql-server"]
+        )
+        return port
+
+    def start_vnc_server(self, require_password=False):
+        port = alloc_port()
+        args = [
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            f"warpgate-e2e-vnc-server-{uuid.uuid4()}",
+            "-p",
+            f"{port}:5900",
+            "-e",
+            f"VNC_GEOMETRY={VNC_BACKEND_SIZE[0]}x{VNC_BACKEND_SIZE[1]}",
+        ]
+        if require_password:
+            args += ["-e", "VNC_SECURITY=VncAuth", "-e", "VNC_PASSWORD=123"]
+        args.append("warpgate-e2e-vnc-server")
+        self.start(args)
+        return port
+
+    def start_rdp_server(self):
+        # Headless RDP backend (images/rdp-server) with a fixed login user:pass of
+        # `user`:`123`. Warpgate authenticates to it over NLA using the target password.
+        port = alloc_port()
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                f"warpgate-e2e-rdp-server-{uuid.uuid4()}",
+                "-p",
+                f"{port}:3389",
+                "warpgate-e2e-rdp-server",
+            ]
         )
         return port
 
@@ -640,12 +688,16 @@ class ProcessManager:
             postgres_port = share_with.postgres_port
             http_port = share_with.http_port
             kubernetes_port = share_with.kubernetes_port
+            vnc_port = share_with.vnc_port
+            rdp_port = share_with.rdp_port
         else:
             ssh_port = alloc_port()
             http_port = http_port or alloc_port()
             mysql_port = alloc_port()
             postgres_port = alloc_port()
             kubernetes_port = alloc_port()
+            vnc_port = alloc_port()
+            rdp_port = alloc_port()
 
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
@@ -723,6 +775,25 @@ class ProcessManager:
 
             config = yaml.safe_load(config_path.open())
             config["ssh"]["host_key_verification"] = "auto_accept"
+            # unattended-setup has no --vnc-port, so enable the VNC listener here,
+            # reusing the TLS cert/key already copied into the data dir (for VeNCrypt).
+            config["vnc"] = {
+                "enable": True,
+                "listen": f"0.0.0.0:{vnc_port}",
+                "certificate": "tls.certificate.pem",
+                "key": "tls.key.pem",
+            }
+            # Likewise no --rdp-port in unattended-setup; the RDP serve helper
+            # terminates TLS itself, so hand it the same cert/key.
+            config["rdp"] = {
+                "enable": True,
+                "listen": f"0.0.0.0:{rdp_port}",
+                "certificate": "tls.certificate.pem",
+                "key": "tls.key.pem",
+            }
+            # Record all sessions so tests can assert on recordings (unattended-setup
+            # already picked a path under the data dir; just turn it on).
+            config.setdefault("recordings", {})["enable"] = True
             if config_patch:
                 always_merger.merge(config, config_patch)
             with config_path.open("w") as f:
@@ -737,6 +808,8 @@ class ProcessManager:
             mysql_port=mysql_port,
             postgres_port=postgres_port,
             kubernetes_port=kubernetes_port,
+            vnc_port=vnc_port,
+            rdp_port=rdp_port,
         )
 
     def start_ssh_client(self, *args, password=None, **kwargs):
@@ -883,6 +956,25 @@ def otp_key_base32():
 @pytest.fixture(scope="session")
 def password_123_hash():
     return "$argon2id$v=19$m=4096,t=3,p=1$cxT6YKZS7r3uBT4nPJXEJQ$GhjTXyGi5vD2H/0X8D3VgJCZSXM4I8GiXRzl4k5ytk0"
+
+
+def rdp_session_authorized(api, username):
+    """Whether Warpgate has an authorized session for `username`.
+
+    Warpgate stamps a session's username only on successful authorization, so this is a
+    direct, client-independent read of the RDP auth verdict (the native RDP client can't
+    observe a post-handshake rejection — see `rdp_client`).
+    """
+    return len(api.get_sessions(username=username).items) > 0
+
+
+def wait_rdp_session_authorized(api, username, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if rdp_session_authorized(api, username):
+            return True
+        time.sleep(0.2)
+    return False
 
 
 logging.basicConfig(level=logging.DEBUG)
