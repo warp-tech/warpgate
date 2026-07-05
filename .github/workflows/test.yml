@@ -39,6 +39,13 @@ jobs:
           cargo clean
           rustup component add llvm-tools-preview
 
+      - name: Build UI
+        run: |
+          just npm ci
+          just openapi
+          just npm run openapi:tests-sdk
+          just npm run build
+
       # Built separately (own lockfile) so the workspace coverage build embeds it
       # and warpgate-protocol-rdp's extraction test runs.
       - name: Build RDP helper
@@ -46,13 +53,6 @@ jobs:
 
       - name: Run Rust unit tests
         run: cargo llvm-cov test --workspace
-
-      - name: Build UI
-        run: |
-          just npm ci
-          just openapi
-          just npm run openapi:tests-sdk
-          just npm run build
 
       - name: Build images
         working-directory: tests
