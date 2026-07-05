@@ -21,10 +21,10 @@
 </script>
 <script lang="ts">
     import { faCheck, faWarning } from '@fortawesome/free-solid-svg-icons'
-    import CopyButton from 'common/CopyButton.svelte'
 
     import { Alert } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
+    import CopyableTextArea from 'common/CopyableTextArea.svelte'
 
     interface Props {
         result: CheckResult,
@@ -43,7 +43,7 @@
 {#if result.state === 'key-unknown'}
 <Alert color="warning">
     <div>Remote host key is not trusted yet</div>
-    <pre class="key-value">{result.actualKey} <CopyButton link text={result.actualKey.toString()} class="copy-button" /></pre>
+    <CopyableTextArea label="Remote key" value={`${result.actualKey.type} ${result.actualKey.publicKeyBase64}`} />
 </Alert>
 {/if}
 
@@ -53,32 +53,13 @@
     <div style="min-width: 0">
         <h5>Remote host key has changed!</h5>
         {#if result.trustedKeys.length}
-            <strong>Known trusted keys:</strong>
             <div class="mb-2">
                 {#each result.trustedKeys as key (key)}
-                    <pre class="key-value">{key} <CopyButton link text={key.toString()} class="copy-button" /></pre>
+                    <CopyableTextArea label='Known trusted key' value={`${key.type} ${key.publicKeyBase64}`} />
                 {/each}
             </div>
         {/if}
-        <strong>Current remote key:</strong>
-        <pre class="key-value">{result.actualKey} <CopyButton link text={result.actualKey.toString()} class="copy-button" /></pre>
+        <CopyableTextArea label="Current remote key" value={`${result.actualKey.type} ${result.actualKey.publicKeyBase64}`} />
     </div>
 </Alert>
 {/if}
-
-<style lang="scss">
-    .key-value {
-        word-wrap: break-word;
-        margin-bottom: 0;
-        white-space: break-spaces;
-
-        background: rgba(0, 0, 0, .5);
-        border-radius: 3px;
-        padding: 5px 10px;
-
-        :global(.copy-button) {
-            float: right;
-            margin-left: 0.5rem;
-        }
-    }
-</style>

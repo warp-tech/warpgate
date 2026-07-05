@@ -5,14 +5,12 @@
     import { faKey } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
     import CreateApiTokenModal from './CreateApiTokenModal.svelte'
-    import {Alert} from '@sveltestrap/sveltestrap'
-    import CopyButton from 'common/CopyButton.svelte'
-    import {Badge} from '@sveltestrap/sveltestrap'
+    import { Alert, Badge, Button } from '@sveltestrap/sveltestrap'
     import EmptyState from 'common/EmptyState.svelte'
-    import { Button } from '@sveltestrap/sveltestrap'
     import { querystring } from 'svelte-spa-router'
     import { get } from 'svelte/store'
     import { parseHumantimeDuration } from 'common/duration'
+    import CopyableTextArea from 'common/CopyableTextArea.svelte'
 
     let tokens: ExistingApiToken[] = $state([])
     let creatingToken = $state(false)
@@ -62,13 +60,7 @@
 {/if}
 
 {#if lastCreatedSecret}
-<Alert color="info">
-    <div>Your token - shown only once:</div>
-    <div class="d-flex align-items-center mt-2">
-        <code style="min-width: 0">{lastCreatedSecret}</code>
-        <CopyButton class="ms-auto" text={lastCreatedSecret} />
-    </div>
-</Alert>
+    <CopyableTextArea class="border-warning" label="Your new token (shown only once)" value={lastCreatedSecret} />
 {/if}
 
 <Loadable promise={api.getMyApiTokens()} bind:data={tokens}>
