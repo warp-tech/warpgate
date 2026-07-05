@@ -695,6 +695,18 @@
         "default_credential_policy": {
           "description": "Default credential policy for auto-created users.\nKeys: \"http\", \"ssh\", \"mysql\", \"postgres\"\nValues: list of credential kinds e.g. [\"sso\"], [\"web\"], []"
         },
+        "kubernetes": {
+          "description": "kubectl OIDC parameters for generating a kubelogin kubeconfig.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SsoProviderKubernetesConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "label": {
           "type": [
             "string",
@@ -728,6 +740,35 @@
       "required": [
         "name",
         "provider"
+      ]
+    },
+    "SsoProviderKubernetesConfig": {
+      "type": "object",
+      "properties": {
+        "client_id": {
+          "description": "Public OIDC client id used by kubectl (kubelogin). Must be listed in the\nprovider's `additional_trusted_audiences`.",
+          "type": "string"
+        },
+        "client_secret": {
+          "description": "Optional client secret (only for confidential kubectl clients).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scopes": {
+          "description": "Extra scopes for kubelogin. Defaults to openid/email/profile when unset.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "client_id"
       ]
     },
     "SsoProviderReturnUrlPrefix": {

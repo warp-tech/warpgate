@@ -1,9 +1,9 @@
 <script lang="ts">
     import { api, type SSHKey, type SSHKnownHost } from 'admin/lib/api'
-    import CopyButton from 'common/CopyButton.svelte'
     import { stringifyError } from 'common/errors'
     import { Button, Alert } from '@sveltestrap/sveltestrap'
     import { adminPermissions } from 'admin/lib/store'
+    import CopyableTextArea from 'common/CopyableTextArea.svelte'
 
     let error: string|undefined = $state()
     let knownHosts: SSHKnownHost[]|undefined = $state()
@@ -40,12 +40,7 @@
     <Alert color="info">Add these keys to the targets' <code>authorized_keys</code> files</Alert>
     <div class="list-group list-group-flush">
         {#each ownKeys as key (key)}
-            <div class="list-group-item d-flex">
-                <pre>{key.kind} {key.publicKeyBase64}</pre>
-                <div class="ms-auto">
-                    <CopyButton class="ms-3 px-0" text={key.kind + ' ' + key.publicKeyBase64} />
-                </div>
-            </div>
+            <CopyableTextArea label={key.kind} value={key.publicKeyBase64} />
         {/each}
     </div>
 {/if}

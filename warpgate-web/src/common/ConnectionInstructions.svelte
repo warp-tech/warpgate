@@ -1,18 +1,15 @@
 <script lang="ts">
-    import { Button, FormGroup, ListGroup, ListGroupItem } from '@sveltestrap/sveltestrap'
-    import { api, TargetKind, type ExistingCertificateCredential } from 'gateway/lib/api'
+    import { Button, FormGroup, ListGroup, ListGroupItem, Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
+    import { api, TargetKind, type ExistingCertificateCredential, type SsoKubernetesConfigDescription } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import { makeExampleSSHCommand, makeCommonSelectorUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand, protocolHost, protocolPortString } from 'common/protocols'
+    import { makeExampleSSHCommand, makeCommonSelectorUsername, makeExampleMySQLCommand, makeExampleMySQLURI, makeMySQLUsername, makeTargetURL, makeExamplePostgreSQLCommand, makePostgreSQLUsername, makeExamplePostgreSQLURI, makeKubeconfig, makeExampleKubectlCommand, makeExampleSCPCommand, protocolHost, protocolPortString, makeOidcKubeconfig } from 'common/protocols'
     import { getCertificateKey, getAllCertificateKeys } from 'gateway/lib/certificateStore'
     import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
-    import CopyButton from 'common/CopyButton.svelte'
-    import {Alert} from '@sveltestrap/sveltestrap'
+    import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import InfoBox from './InfoBox.svelte'
     import { faCertificate, faPlus } from '@fortawesome/free-solid-svg-icons'
     import Fa from 'svelte-fa'
-    import {Badge} from '@sveltestrap/sveltestrap'
-    import {Tooltip} from '@sveltestrap/sveltestrap'
 
     interface Props {
         targetName?: string;
@@ -39,6 +36,10 @@
     let selectedCertId: string = $state('')
     let issuingCertificate = $state(false)
     let pendingSelectCertId: string | undefined = $state()
+
+    let k8sOidcConfigs: SsoKubernetesConfigDescription[] = $state([])
+    let selectedOidcProvider: string | undefined = $state()
+    let kubeconfigMode: 'oidc' | 'certificate' = $state('certificate')
 
     interface CertificateWithKeyStatus {
         credential: ExistingCertificateCredential
@@ -70,6 +71,22 @@
             certificates = []
         } finally {
             certLoading = false
+        }
+    }
+
+    async function loadOidcConfigs () {
+        kubeconfigMode = 'certificate'
+        k8sOidcConfigs = []
+        selectedOidcProvider = undefined
+        try {
+            k8sOidcConfigs = await api.getSsoKubernetesConfigs()
+        } catch {
+            k8sOidcConfigs = []
+        }
+        const first = k8sOidcConfigs[0]
+        if (first) {
+            selectedOidcProvider = first.name
+            kubeconfigMode = 'oidc'
         }
     }
 
@@ -115,8 +132,11 @@
     $effect(() => {
         if (targetKind === TargetKind.Kubernetes && !ticketSecret) {
             loadCertificates()
+            loadOidcConfigs()
         }
     })
+
+    let selectedOidc = $derived(k8sOidcConfigs.find(c => c.name === selectedOidcProvider))
 
     // Create a reactive opts object that updates when any prop or serverInfo changes
     let opts = $derived.by(() => ({
@@ -128,72 +148,44 @@
         targetDefaultDatabaseName,
         clientCertificatePem,
         clientPrivateKeyPem,
+        oidcIssuerUrl: selectedOidc?.issuerUrl,
+        oidcClientId: selectedOidc?.clientId,
+        oidcScopes: selectedOidc?.scopes,
+        oidcClientSecret: selectedOidc?.clientSecret ?? undefined,
     }))
 
     let commonSelectorUsername = $derived(makeCommonSelectorUsername(opts))
-    let exampleSSHCommand = $derived(makeExampleSSHCommand(opts))
-    let exampleSCPCommand = $derived(makeExampleSCPCommand(opts))
-    let mySQLUsername = $derived(makeMySQLUsername(opts))
-    let exampleMySQLCommand = $derived(makeExampleMySQLCommand(opts))
-    let exampleMySQLURI = $derived(makeExampleMySQLURI(opts))
-    let postgreSQLUsername = $derived(makePostgreSQLUsername(opts))
-    let examplePostgreSQLCommand = $derived(makeExamplePostgreSQLCommand(opts))
-    let examplePostgreSQLURI = $derived(makeExamplePostgreSQLURI(opts))
-    let targetURL = $derived(targetName ? makeTargetURL(opts) : '')
     let authHeader = $derived(`Authorization: Warpgate ${ticketSecret}`)
     let kubeconfig = $derived(makeKubeconfig(opts))
+    let oidcKubeconfig = $derived(makeOidcKubeconfig(opts))
     let exampleKubectlCommand = $derived(makeExampleKubectlCommand(opts))
-    let rdpEndpoint = $derived(`${protocolHost(opts, 'rdp')}:${protocolPortString(opts, 'rdp')}`)
-    let vncEndpoint = $derived(`${protocolHost(opts, 'vnc')}:${protocolPortString(opts, 'vnc')}`)
+
+    function protocolEndpoint(protocol: 'ssh' | 'mysql' | 'postgres' | 'rdp' | 'vnc') {
+        return `${protocolHost(opts, protocol)}:${protocolPortString(opts, protocol)}`
+    }
 </script>
 
 {#if targetKind === TargetKind.Ssh}
-    <FormGroup floating label="SSH username" class="d-flex align-items-center">
-        <input type="text" class="form-control" readonly value={commonSelectorUsername} />
-        <CopyButton text={commonSelectorUsername} />
-    </FormGroup>
-
-    <FormGroup floating label="Example SSH command" class="d-flex align-items-center">
-        <input type="text" class="form-control" readonly value={exampleSSHCommand} />
-        <CopyButton text={exampleSSHCommand} />
-    </FormGroup>
-
-    <FormGroup floating label="Example SCP command" class="d-flex align-items-center">
-        <input type="text" class="form-control" readonly value={exampleSCPCommand} />
-        <CopyButton text={exampleSCPCommand} />
-    </FormGroup>
+    <CopyableTextArea label="SSH endpoint" value={protocolEndpoint('ssh')} />
+    <CopyableTextArea label="SSH username" value={commonSelectorUsername} />
+    <CopyableTextArea label="Example SSH command" value={makeExampleSSHCommand(opts)} />
+    <CopyableTextArea label="Example SCP command" value={makeExampleSCPCommand(opts)} />
 {/if}
 
 {#if targetKind === TargetKind.Http}
-    <FormGroup floating label="Access URL" class="d-flex align-items-center">
-        <input type="text" class="form-control" readonly value={targetURL} />
-        <CopyButton text={targetURL} />
-    </FormGroup>
+    <CopyableTextArea label="Access URL" value={targetName ? makeTargetURL(opts) : ''} />
 
     {#if ticketSecret}
         Alternatively, set the <code>Authorization</code> header when accessing the URL:
-        <FormGroup floating label="Authorization header" class="d-flex align-items-center">
-            <input type="text" class="form-control" readonly value={authHeader} />
-            <CopyButton text={authHeader} />
-        </FormGroup>
+        <CopyableTextArea label="Authorization header" value={authHeader} />
     {/if}
 {/if}
 
 {#if targetKind === TargetKind.MySql}
-    <FormGroup floating label="MySQL username" class="d-flex align-items-center">
-        <input type="text" class="form-control" readonly value={mySQLUsername} />
-        <CopyButton text={mySQLUsername} />
-    </FormGroup>
-
-    <FormGroup floating label="Example command" class="d-flex align-items-center">
-        <input type="text" class="form-control" readonly value={exampleMySQLCommand} />
-        <CopyButton text={exampleMySQLCommand} />
-    </FormGroup>
-
-    <FormGroup floating label="Example database URL" class="d-flex align-items-center">
-        <input type="text" class="form-control" readonly value={exampleMySQLURI} />
-        <CopyButton text={exampleMySQLURI} />
-    </FormGroup>
+    <CopyableTextArea label="MySQL endpoint" value={protocolEndpoint('mysql')} />
+    <CopyableTextArea label="MySQL username" value={makeMySQLUsername(opts)} />
+    <CopyableTextArea label="Example MySQL command" value={makeExampleMySQLCommand(opts)} />
+    <CopyableTextArea label="Example database URL" value={makeExampleMySQLURI(opts)} />
 
     <Alert color="info">
         Make sure you've set your client to require TLS and allowed cleartext password authentication.
@@ -201,158 +193,150 @@
 {/if}
 
 {#if targetKind === TargetKind.Postgres}
-<FormGroup floating label="PostgreSQL username" class="d-flex align-items-center">
-    <input type="text" class="form-control" readonly value={postgreSQLUsername} />
-    <CopyButton text={postgreSQLUsername} />
-</FormGroup>
+    <CopyableTextArea label="PostgreSQL endpoint" value={protocolEndpoint('postgres')} />
+    <CopyableTextArea label="PostgreSQL username" value={makePostgreSQLUsername(opts)} />
+    <CopyableTextArea label="Example PostgreSQL command" value={makeExamplePostgreSQLCommand(opts)} />
+    <CopyableTextArea label="Example database URL" value={makeExamplePostgreSQLURI(opts)} />
 
-<FormGroup floating label="Example command" class="d-flex align-items-center">
-    <input type="text" class="form-control" readonly value={examplePostgreSQLCommand} />
-    <CopyButton text={examplePostgreSQLCommand} />
-</FormGroup>
-
-<FormGroup floating label="Example database URL" class="d-flex align-items-center">
-    <input type="text" class="form-control" readonly value={examplePostgreSQLURI} />
-    <CopyButton text={examplePostgreSQLURI} />
-</FormGroup>
-
-<Alert color="info">
-    Make sure you've set your client to require TLS and allowed cleartext password authentication.
-</Alert>
+    <Alert color="info">
+        Make sure you've set your client to require TLS and allowed cleartext password authentication.
+    </Alert>
 {/if}
 
 {#if targetKind === TargetKind.Kubernetes}
-<h4 class="mb-3">Connect with kubectl</h4>
-<div class="row">
-    <div class="col-12 col-lg-6">
-        <!-- svelte-ignore a11y_label_has_associated_control -->
-        {#if !ticketSecret}
-            {#if certificates.length > 0}
-                <label class="form-label">Choose a certificate</label>
-            {/if}
-            {#if certLoading}
-                <DelayedSpinner />
-            {:else}
-                <ListGroup flush class="mb-2">
-                    {#each certificates as cert (cert.credential.id)}
-                        <ListGroupItem tag="a" href="#" action class="list-group-item list-group-item-action d-flex align-items-center gap-3"
-                            active={cert.credential.id === selectedCertId}
-                            onclick={e => {
-                                e.preventDefault()
-                                selectCertificate(cert.credential.id)
-                            }}
-                            >
-                            <Fa fw icon={faCertificate} />
-                            <div class="me-auto">{cert.credential.label}</div>
-                            {#if cert.hasLocalKey}
-                                <Badge
-                                    id="cert-status-badge-{cert.credential.id}"
-                                    color="success"
-                                >Key available</Badge>
-                            {:else}
-                                <Badge
-                                id="cert-status-badge-{cert.credential.id}"
-                                    color="warning"
-                                >No private key</Badge>
-                            {/if}
-                            <Tooltip target={'cert-status-badge-' + cert.credential.id} placement="top" delay={500}>
+    {#if k8sOidcConfigs.length > 0}
+        <ul class="nav nav-pills mb-3">
+            <li class="nav-item"><button class="nav-link {kubeconfigMode === 'oidc' ? 'active' : ''}" onclick={() => kubeconfigMode = 'oidc'}>OIDC with kubelogin</button></li>
+            <li class="nav-item"><button class="nav-link {kubeconfigMode === 'certificate' ? 'active' : ''}" onclick={() => kubeconfigMode = 'certificate'}>Certificate authentication</button></li>
+        </ul>
+    {/if}
+
+    {#if kubeconfigMode === 'oidc' && k8sOidcConfigs.length > 0}
+        {#if k8sOidcConfigs.length > 1}
+            <label class="form-label" for="oidc-provider-select">SSO provider</label>
+            <select id="oidc-provider-select" class="form-select mb-3" bind:value={selectedOidcProvider}>
+                {#each k8sOidcConfigs as c (c.name)}
+                    <option value={c.name}>{c.label}</option>
+                {/each}
+            </select>
+        {/if}
+        <CopyableTextArea label="Kubeconfig file" value={oidcKubeconfig} />
+        <div class="text-muted small mb-3">Requires the <a href="https://github.com/int128/kubelogin" target="_blank" rel="noreferrer noopener">kubelogin</a> (oidc-login) kubectl plugin.</div>
+    {/if}
+
+    {#if kubeconfigMode === 'certificate' || k8sOidcConfigs.length === 0}
+    <div class="row">
+        <div class="col-12 col-lg">
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            {#if !ticketSecret}
+                {#if certificates.length > 0}
+                    <label class="form-label">Choose a certificate</label>
+                {/if}
+                {#if certLoading}
+                    <DelayedSpinner />
+                {:else}
+                    <ListGroup flush class="mb-2">
+                        {#each certificates as cert (cert.credential.id)}
+                            <ListGroupItem tag="a" href="#" action class="list-group-item list-group-item-action d-flex align-items-center gap-3"
+                                active={cert.credential.id === selectedCertId}
+                                onclick={e => {
+                                    e.preventDefault()
+                                    selectCertificate(cert.credential.id)
+                                }}
+                                >
+                                <Fa fw icon={faCertificate} />
+                                <div class="me-auto">{cert.credential.label}</div>
                                 {#if cert.hasLocalKey}
-                                    This certificate's private key is stored locally in this browser and can be used to generate a kubeconfig with working credentials.
+                                    <Badge
+                                        id="cert-status-badge-{cert.credential.id}"
+                                        color="success"
+                                    >Key available</Badge>
                                 {:else}
-                                    This certificate's private key is not stored locally in this browser. You can still generate a kubeconfig, but it will contain placeholders for authentication and won't work until you fill in the actual certificate and key data.
+                                    <Badge
+                                    id="cert-status-badge-{cert.credential.id}"
+                                        color="warning"
+                                    >No private key</Badge>
                                 {/if}
-                            </Tooltip>
-                        </ListGroupItem>
-                    {/each}
-                </ListGroup>
+                                <Tooltip target={'cert-status-badge-' + cert.credential.id} placement="top" delay={500}>
+                                    {#if cert.hasLocalKey}
+                                        This certificate's private key is stored locally in this browser and can be used to generate a kubeconfig with working credentials.
+                                    {:else}
+                                        This certificate's private key is not stored locally in this browser. You can still generate a kubeconfig, but it will contain placeholders for authentication and won't work until you fill in the actual certificate and key data.
+                                    {/if}
+                                </Tooltip>
+                            </ListGroupItem>
+                        {/each}
+                    </ListGroup>
 
-                {#if $serverInfo?.ownCredentialManagementAllowed}
-                <Button
-                    color={certificates.length > 0 ? 'secondary' : 'primary'}
-                    class="d-flex w-100 text-center justify-content-center align-items-center gap-2 my-3"
-                    onclick={() => {
-                        issuingCertificate = true
-                    }}
-                    >
-                    <Fa fw icon={faPlus} />
-                    <div>
-                        {#if certificates.length > 0}
-                            Issue a new certificate
-                        {:else}
-                            Issue a certificate
-                        {/if}
-                    </div>
-                </Button>
-                {/if}
-
-                {#if !selectedCertId || !clientPrivateKeyPem}
-                    <InfoBox class="mb-2">
-                        {#if certificates.length > 0}
-                            {#if !selectedCertId}
-                                There is no certificate selected.
+                    {#if $serverInfo?.ownCredentialManagementAllowed}
+                    <Button
+                        color={certificates.length > 0 ? 'secondary' : 'primary'}
+                        class="d-flex w-100 text-center justify-content-center align-items-center gap-2 my-3"
+                        onclick={() => {
+                            issuingCertificate = true
+                        }}
+                        >
+                        <Fa fw icon={faPlus} />
+                        <div>
+                            {#if certificates.length > 0}
+                                Issue a new certificate
                             {:else}
-                                The private key for this certificate is not stored in this browser.
+                                Issue a certificate
                             {/if}
-                            The kubeconfig will contain placeholders for authentication.
-                        {:else}
-                            You need a certificate credential to connect to this target.
-                        {/if}
-                    </InfoBox>
-                    <InfoBox>
-                        You can issue a new certificate using the button above and enable the "Store in browser" option to generate a ready-to-use kubeconfig.
-                    </InfoBox>
+                        </div>
+                    </Button>
+                    {/if}
+
+                    {#if !selectedCertId || !clientPrivateKeyPem}
+                        <InfoBox class="mb-2">
+                            {#if certificates.length > 0}
+                                {#if !selectedCertId}
+                                    There is no certificate selected.
+                                {:else}
+                                    The private key for this certificate is not stored in this browser.
+                                {/if}
+                                The kubeconfig will contain placeholders for authentication.
+                            {:else}
+                                You need a certificate credential to connect to this target.
+                            {/if}
+                        </InfoBox>
+                        <InfoBox>
+                            You can issue a new certificate using the button above and enable the "Store in browser" option to generate a ready-to-use kubeconfig.
+                        </InfoBox>
+                    {/if}
                 {/if}
             {/if}
+        </div>
+        {#if certificates.length > 0}
+        <div class="col-12 col-lg">
+            <CopyableTextArea label="Kubeconfig file" value={kubeconfig} />
+            <CopyableTextArea label="Example kubectl command" value={exampleKubectlCommand} />
+
+            <InfoBox class="mt-3">
+                Save the kubeconfig above to a file (e.g. <code>warpgate-kubeconfig.yaml</code>) and use it with kubectl.
+            </InfoBox>
+        </div>
         {/if}
     </div>
-    <div class="col-12 col-lg-6">
-        <FormGroup floating label="Kubeconfig file" class="d-flex align-items-center">
-            <textarea class="form-control" readonly style="height: 27rem; font-family: monospace; font-size: 0.9em;">{kubeconfig}</textarea>
-            <CopyButton text={kubeconfig} />
-        </FormGroup>
-
-        <FormGroup floating label="Example kubectl command" class="d-flex align-items-center">
-            <input type="text" class="form-control" readonly value={exampleKubectlCommand} />
-            <CopyButton text={exampleKubectlCommand} />
-        </FormGroup>
-
-        <InfoBox class="mt-3">
-            Save the kubeconfig above to a file (e.g. <code>warpgate-kubeconfig.yaml</code>) and use it with kubectl.
-        </InfoBox>
-    </div>
-</div>
+    {/if}
 {/if}
 
 {#if issuingCertificate}
-<CertificateCredentialModal
-    bind:isOpen={issuingCertificate}
-    save={issueCertificate}
-    username={username ?? ''}
-    storeInBrowserByDefault={true}
-    onClose={() => { issuingCertificate = false; loadCertificates() }}
-/>
+    <CertificateCredentialModal
+        bind:isOpen={issuingCertificate}
+        save={issueCertificate}
+        username={username ?? ''}
+        storeInBrowserByDefault={true}
+        onClose={() => { issuingCertificate = false; loadCertificates() }}
+    />
 {/if}
 
 {#if targetKind === TargetKind.Rdp}
-<FormGroup floating label="RDP username" class="d-flex align-items-center">
-    <input type="text" class="form-control" readonly value={commonSelectorUsername} />
-    <CopyButton text={commonSelectorUsername} />
-</FormGroup>
-
-<FormGroup floating label="RDP endpoint" class="d-flex align-items-center">
-    <input type="text" class="form-control" readonly value={rdpEndpoint} />
-    <CopyButton text={rdpEndpoint} />
-</FormGroup>
+    <CopyableTextArea label="RDP endpoint" value={protocolEndpoint('rdp')} />
+    <CopyableTextArea label="RDP username" value={commonSelectorUsername} />
 {/if}
 
 {#if targetKind === TargetKind.Vnc}
-<FormGroup floating label="VNC username" class="d-flex align-items-center">
-    <input type="text" class="form-control" readonly value={commonSelectorUsername} />
-    <CopyButton text={commonSelectorUsername} />
-</FormGroup>
-
-<FormGroup floating label="VNC endpoint" class="d-flex align-items-center">
-    <input type="text" class="form-control" readonly value={vncEndpoint} />
-    <CopyButton text={vncEndpoint} />
-</FormGroup>
+    <CopyableTextArea label="VNC endpoint" value={protocolEndpoint('vnc')} />
+    <CopyableTextArea label="VNC username" value={commonSelectorUsername} />
 {/if}

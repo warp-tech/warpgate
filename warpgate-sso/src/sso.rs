@@ -9,18 +9,17 @@ use openidconnect::core::{
 use openidconnect::url::Url;
 use openidconnect::{
     AccessTokenHash, AdditionalClaims, Audience, AuthorizationCode, Client, CsrfToken,
-    DiscoveryError, EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet,
-    HttpClientError, IdToken, IdTokenClaims, IdTokenFields, LogoutRequest, Nonce,
-    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl,
-    ProviderMetadataWithLogout, RedirectUrl, RequestTokenError, Scope, StandardErrorResponse,
-    StandardTokenResponse, TokenResponse, UserInfoClaims, reqwest,
+    EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet, HttpClientError, IdToken,
+    IdTokenClaims, IdTokenFields, LogoutRequest, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
+    PkceCodeVerifier, PostLogoutRedirectUrl, RedirectUrl, RequestTokenError, Scope,
+    StandardErrorResponse, StandardTokenResponse, TokenResponse, UserInfoClaims, reqwest,
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
-use crate::SsoError;
 use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
+use crate::{SsoError, discover_metadata};
 
 /// A single entry in a group-style claim: either a bare string, or a
 /// SCIM-style object (RFC 7643) from which we take `value` (stable group ID)
@@ -132,18 +131,21 @@ pub struct SsoClient {
     http_client: reqwest::Client,
 }
 
-pub async fn discover_metadata(
-    config: &SsoInternalProviderConfig,
-    http_client: &reqwest::Client,
-) -> Result<ProviderMetadataWithLogout, SsoError> {
-    ProviderMetadataWithLogout::discover_async(config.issuer_url()?, http_client)
-        .await
-        .map_err(|e| {
-            SsoError::Discovery(match e {
-                DiscoveryError::Request(inner) => format!("Request error: {inner:?}"),
-                e => format!("{e}"),
-            })
-        })
+/// Extract the `iss` claim from a raw JWT **without** verifying its signature.
+///
+/// Used only as a routing hint to pick which SSO provider should fully verify a
+/// bearer token, so we can skip issuer discovery for unrelated providers. The
+/// result is never trusted for any security decision.
+pub fn unverified_issuer(id_token_str: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct IssuerClaim {
+        iss: Option<String>,
+    }
+
+    jsonwebtoken::dangerous::insecure_decode::<IssuerClaim>(id_token_str)
+        .ok()?
+        .claims
+        .iss
 }
 
 async fn make_client(
@@ -304,6 +306,74 @@ impl SsoClient {
             userinfo_claims,
             claims: claims.clone(),
         })
+    }
+
+    /// Verify a raw OIDC ID token (e.g. from a kubectl exec plugin) without a
+    /// code exchange or nonce. Validates signature against the issuer JWKS and
+    /// checks `iss`, `exp` and `aud` (honouring the provider's trusted-audience
+    /// configuration).
+    pub async fn verify_id_token(&self, id_token_str: &str) -> Result<SsoResult, SsoError> {
+        // Parse first, so a non-JWT bearer token (e.g. an API token) is rejected
+        // before we make any network call to the issuer.
+        let id_token: WarpgateIdToken = id_token_str
+            .parse()
+            .map_err(|e| SsoError::Verification(format!("Malformed ID token: {e}")))?;
+
+        // Capture audience-check configuration before building the verifier.
+        let trusted: Vec<String> = self
+            .config
+            .additional_trusted_audiences()
+            .cloned()
+            .unwrap_or_default();
+        let trust_unknown = self.config.trust_unknown_audiences();
+        let client_id = self.config.client_id().as_str().to_owned();
+
+        let client: WarpgateClient = make_client(&self.config, &self.http_client).await?;
+
+        // Disable the built-in audience check so we can enforce it ourselves
+        // below.  Signature / iss / exp are still fully enforced.
+        let token_verifier = client.id_token_verifier().require_audience_match(false);
+
+        // No nonce in a non-interactive flow: accept any (absent) nonce.
+        let claims = id_token
+            .claims(&token_verifier, |_: Option<&Nonce>| Ok::<(), String>(()))?
+            .clone();
+
+        // Manual audience enforcement: a token is accepted iff its audience
+        // contains Warpgate's own client_id OR any configured trusted audience.
+        // When trust_unknown_audiences is true we skip the check entirely
+        // (documented semantics), but signature/iss/exp are always enforced.
+        if !trust_unknown {
+            let auds = claims.audiences();
+            let ok = auds.iter().any(|a| {
+                let a = a.as_str();
+                a == client_id || trusted.iter().any(|t| t == a)
+            });
+            if !ok {
+                return Err(SsoError::Verification(format!(
+                    "ID token audience not trusted (audiences: {})",
+                    auds.iter()
+                        .map(|a| a.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
+        }
+
+        Ok(SsoResult {
+            token: id_token,
+            claims,
+            userinfo_claims: None,
+        })
+    }
+
+    /// Verify a raw ID token and map it to a SsoLoginResponse in one call.
+    pub async fn verify_id_token_to_response(
+        &self,
+        id_token_str: &str,
+    ) -> Result<crate::SsoLoginResponse, SsoError> {
+        let result = self.verify_id_token(id_token_str).await?;
+        Ok(crate::request::map_sso_result(&self.config, result).await)
     }
 
     pub async fn logout(&self, token: WarpgateIdToken, redirect_url: Url) -> Result<Url, SsoError> {

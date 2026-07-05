@@ -1,10 +1,12 @@
 mod db;
+mod sso_user;
 use std::sync::Arc;
 
 pub use db::DatabaseConfigProvider;
 use enum_dispatch::enum_dispatch;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+pub use sso_user::resolve_and_map_sso_user;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::warn;

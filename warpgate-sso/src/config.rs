@@ -64,6 +64,26 @@ pub enum SsoReturnUrlDomainPreference {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SsoProviderKubernetesConfig {
+    /// Public OIDC client id used by kubectl (kubelogin). Must be listed in the
+    /// provider's `additional_trusted_audiences`.
+    pub client_id: String,
+    /// Extra scopes for kubelogin. Defaults to openid/email/profile when unset.
+    pub scopes: Option<Vec<String>>,
+    /// Optional client secret (only for confidential kubectl clients).
+    pub client_secret: Option<String>,
+}
+
+impl SsoProviderKubernetesConfig {
+    /// kubelogin scopes, falling back to the OIDC defaults when unset.
+    pub fn scopes_or_default(&self) -> Vec<String> {
+        self.scopes
+            .clone()
+            .unwrap_or_else(|| ["openid", "email", "profile"].map(String::from).to_vec())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SsoProviderConfig {
     pub name: String,
     pub label: Option<String>,
@@ -79,6 +99,9 @@ pub struct SsoProviderConfig {
     /// Keys: "http", "ssh", "mysql", "postgres"
     /// Values: list of credential kinds e.g. ["sso"], ["web"], []
     pub default_credential_policy: Option<serde_json::Value>,
+    /// kubectl OIDC parameters for generating a kubelogin kubeconfig.
+    #[serde(default)]
+    pub kubernetes: Option<SsoProviderKubernetesConfig>,
 }
 
 impl SsoProviderConfig {

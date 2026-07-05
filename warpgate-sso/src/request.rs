@@ -41,67 +41,73 @@ impl SsoLoginRequest {
     }
 
     pub async fn verify_code(self, code: String) -> Result<SsoLoginResponse, SsoError> {
-        let config = self.config;
+        let config = self.config.clone();
         let result = SsoClient::new(config.clone())?
             .finish_login(self.pkce_verifier, self.redirect_url, &self.nonce, code)
             .await?;
+        Ok(map_sso_result(&config, result).await)
+    }
+}
 
-        debug!("OIDC claims: {:?}", result.claims);
-        debug!("OIDC userinfo claims: {:?}", result.userinfo_claims);
+/// Map verified OIDC claims (+ optional userinfo claims) into a SsoLoginResponse.
+/// Shared by the interactive code flow and the bearer-token (kubectl) flow.
+pub async fn map_sso_result(
+    config: &SsoInternalProviderConfig,
+    result: SsoResult,
+) -> SsoLoginResponse {
+    debug!("OIDC claims: {:?}", result.claims);
+    debug!("OIDC userinfo claims: {:?}", result.userinfo_claims);
 
-        macro_rules! get_claim {
-            ($method:ident) => {
-                result
-                    .claims
-                    .$method()
-                    .or(result.userinfo_claims.as_ref().and_then(|x| x.$method()))
-            };
-        }
+    macro_rules! get_claim {
+        ($method:ident) => {
+            result
+                .claims
+                .$method()
+                .or(result.userinfo_claims.as_ref().and_then(|x| x.$method()))
+        };
+    }
 
-        // If preferred_username is absent, fall back to `email`
-        let preferred_username = get_claim!(preferred_username)
-            .map(|x| x.as_str())
-            .map(ToString::to_string)
-            .or_else(|| {
-                get_claim!(email)
-                    .map(|x| x.as_str())
-                    .map(ToString::to_string)
-            });
+    // If preferred_username is absent, fall back to `email`
+    let preferred_username = get_claim!(preferred_username)
+        .map(|x| x.as_str())
+        .map(ToString::to_string)
+        .or_else(|| {
+            get_claim!(email)
+                .map(|x| x.as_str())
+                .map(ToString::to_string)
+        });
 
-        let name = get_claim!(name)
-            .and_then(|x| x.get(None))
-            .map(|x| x.as_str())
-            .map(ToString::to_string);
+    let name = get_claim!(name)
+        .and_then(|x| x.get(None))
+        .map(|x| x.as_str())
+        .map(ToString::to_string);
 
-        let email = get_claim!(email)
-            .map(|x| x.as_str())
-            .map(ToString::to_string);
+    let email = get_claim!(email)
+        .map(|x| x.as_str())
+        .map(ToString::to_string);
+    let email_verified = get_claim!(email_verified);
 
-        let email_verified = get_claim!(email_verified);
+    let (access_groups, admin_groups) =
+        match crate::google_groups::fetch_groups_if_configured(config, email.as_deref()).await {
+            Ok(Some(google_groups)) => (Some(google_groups.clone()), Some(google_groups)),
+            Ok(None) => (
+                extract_groups(&result, config.roles_claim()),
+                extract_groups(&result, config.admin_roles_claim()),
+            ),
+            Err(e) => {
+                error!("Failed to fetch Google groups: {e}");
+                (None, None)
+            }
+        };
 
-        let (access_groups, admin_groups) =
-            match crate::google_groups::fetch_groups_if_configured(&config, email.as_deref()).await
-            {
-                Ok(Some(google_groups)) => (Some(google_groups.clone()), Some(google_groups)),
-                Ok(None) => (
-                    extract_groups(&result, config.roles_claim()),
-                    extract_groups(&result, config.admin_roles_claim()),
-                ),
-                Err(e) => {
-                    error!("Failed to fetch Google groups: {e}");
-                    (None, None)
-                }
-            };
-
-        Ok(SsoLoginResponse {
-            preferred_username,
-            name,
-            email,
-            email_verified,
-            access_roles: access_groups,
-            admin_roles: admin_groups,
-            id_token: result.token.clone(),
-        })
+    SsoLoginResponse {
+        preferred_username,
+        name,
+        email,
+        email_verified,
+        access_roles: access_groups,
+        admin_roles: admin_groups,
+        id_token: result.token.clone(),
     }
 }
 

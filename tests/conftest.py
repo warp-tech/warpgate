@@ -542,6 +542,7 @@ class ProcessManager:
         users_override=None,
         extra_identity_resources=None,
         redirect_uris=None,
+        extra_clients=None,
     ):
         port = alloc_port()
         container_name = f"warpgate-e2e-oidc-mock-{uuid.uuid4()}"
@@ -567,11 +568,21 @@ class ProcessManager:
                 "AllowedGrantTypes": ["authorization_code"],
                 "AllowedScopes": allowed_scopes,
                 "ClientClaimsPrefix": "",
+                # Emit identity-resource claims (email, preferred_username,
+                # warpgate_roles, ...) directly in the ID token in addition to
+                # the userinfo endpoint.  This is required by the Kubernetes
+                # OIDC-Bearer auth path, which validates a raw ID token and does
+                # not call userinfo.  Harmless for the interactive flows that
+                # also read claims from userinfo.
+                "AlwaysIncludeUserClaimsInIdToken": True,
                 "RedirectUris": redirect_uris or [
                     f"https://127.0.0.1:{warpgate_http_port}/@warpgate/api/sso/return"
                 ],
             }
         ]
+
+        if extra_clients:
+            clients_config.extend(extra_clients)
 
         clients_config_path = oidc_data_dir / "clients-config.json"
         with open(clients_config_path, "w") as f:
