@@ -185,6 +185,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/theharold"><img src="https://avatars.githubusercontent.com/u/19338240?v=4?s=100" width="100px;" alt="theharold"/><br /><sub><b>theharold</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=theharold" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/noammeltzer-ax"><img src="https://avatars.githubusercontent.com/u/240492416?v=4?s=100" width="100px;" alt="noammeltzer-ax"/><br /><sub><b>noammeltzer-ax</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=noammeltzer-ax" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/snvtac"><img src="https://avatars.githubusercontent.com/u/18233097?v=4?s=100" width="100px;" alt="Haoqian"/><br /><sub><b>Haoqian</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=snvtac" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/alistarle"><img src="https://avatars.githubusercontent.com/u/4499513?v=4?s=100" width="100px;" alt="Victor Coutellier"/><br /><sub><b>Victor Coutellier</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=alistarle" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
