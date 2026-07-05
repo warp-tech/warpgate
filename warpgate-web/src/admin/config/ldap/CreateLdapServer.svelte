@@ -2,7 +2,13 @@
     import { FormGroup, Input, Alert } from '@sveltestrap/sveltestrap'
     import { push } from 'svelte-spa-router'
     import { reloadServerInfo } from 'gateway/lib/store'
-    import { api, LdapUsernameAttribute, stringifyError, TlsMode, type Tls } from 'admin/lib/api'
+    import {
+        api,
+        LdapUsernameAttribute,
+        stringifyError,
+        TlsMode,
+        type Tls,
+    } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import LdapConnectionFields from './LdapConnectionFields.svelte'
     import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
@@ -25,7 +31,11 @@
         mode: TlsMode.Preferred,
         verify: true,
     })
-    let testResult = $state<{ success: boolean; message: string; baseDns?: string[] } | null>(null)
+    let testResult = $state<{
+        success: boolean
+        message: string
+        baseDns?: string[]
+    } | null>(null)
 
     // Auto-update port based on TLS mode
     $effect(() => {
@@ -92,10 +102,7 @@
 
     <form onsubmit={e => {e.preventDefault(); create()}}>
         <FormGroup floating label="Name">
-            <Input
-                bind:value={name}
-                required
-            />
+            <Input bind:value={name} required />
         </FormGroup>
 
         <LdapConnectionFields
@@ -111,7 +118,10 @@
         />
 
         {#if testResult}
-            <div class="alert {testResult.success ? 'alert-success' : 'alert-danger'}" role="alert">
+            <div
+                class="alert {testResult.success ? 'alert-success' : 'alert-danger'}"
+                role="alert"
+            >
                 {testResult.message}
                 {#if testResult.baseDns && testResult.baseDns.length > 0}
                     <div class="mt-2">

@@ -9,14 +9,14 @@
 
     let { normal }: Props = $props()
 
-    let preview = $state<{ url: string, payload: string } | undefined>()
+    let preview = $state<{ url: string; payload: string } | undefined>()
     let error = $state<string | undefined>()
 
     $effect(() => {
         load(normal)
     })
 
-    async function load (n: boolean) {
+    async function load(n: boolean) {
         error = undefined
         try {
             preview = await api.getAnalyticsPreview({ normal: n })

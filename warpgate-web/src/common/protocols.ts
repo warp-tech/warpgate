@@ -17,28 +17,60 @@ export interface ConnectionOptions {
     oidcClientSecret?: string
 }
 
-export function makeCommonSelectorUsername (opt: ConnectionOptions): string {
+export function makeCommonSelectorUsername(opt: ConnectionOptions): string {
     if (opt.ticketSecret) {
         return `ticket-${opt.ticketSecret}`
     }
     return `${opt.username ?? 'username'}:${opt.targetName ?? 'target'}`
 }
 
-export function protocolHost (opt: ConnectionOptions, protocol: 'ssh'|'http'|'mysql'|'postgres'|'kubernetes'|'rdp'|'vnc'): string {
+export function protocolHost(
+    opt: ConnectionOptions,
+    protocol:
+        | 'ssh'
+        | 'http'
+        | 'mysql'
+        | 'postgres'
+        | 'kubernetes'
+        | 'rdp'
+        | 'vnc',
+): string {
     const globalHost = opt.serverInfo?.externalHost ?? 'warpgate-host'
     const hosts = opt.serverInfo?.externalHosts
     return hosts?.[protocol] ?? opt.targetExternalHost ?? globalHost
 }
 
-export function protocolPort (opt: ConnectionOptions, protocol: 'ssh'|'http'|'mysql'|'postgres'|'kubernetes'|'rdp'|'vnc'): number | undefined {
+export function protocolPort(
+    opt: ConnectionOptions,
+    protocol:
+        | 'ssh'
+        | 'http'
+        | 'mysql'
+        | 'postgres'
+        | 'kubernetes'
+        | 'rdp'
+        | 'vnc',
+): number | undefined {
     return opt.serverInfo?.ports[protocol]
 }
 
-export function protocolPortString (opt: ConnectionOptions, protocol: 'ssh'|'http'|'mysql'|'postgres'|'kubernetes'|'rdp'|'vnc'): string {
-    return protocolPort(opt, protocol)?.toString() ?? `warpgate-${protocol}-port`
+export function protocolPortString(
+    opt: ConnectionOptions,
+    protocol:
+        | 'ssh'
+        | 'http'
+        | 'mysql'
+        | 'postgres'
+        | 'kubernetes'
+        | 'rdp'
+        | 'vnc',
+): string {
+    return (
+        protocolPort(opt, protocol)?.toString() ?? `warpgate-${protocol}-port`
+    )
 }
 
-export function makeExampleSSHCommand (opt: ConnectionOptions): string {
+export function makeExampleSSHCommand(opt: ConnectionOptions): string {
     return shellEscape([
         'ssh',
         `${makeCommonSelectorUsername(opt)}@${protocolHost(opt, 'ssh')}`,
@@ -47,7 +79,7 @@ export function makeExampleSSHCommand (opt: ConnectionOptions): string {
     ])
 }
 
-export function makeExampleSCPCommand (opt: ConnectionOptions): string {
+export function makeExampleSCPCommand(opt: ConnectionOptions): string {
     return shellEscape([
         'scp',
         '-o',
@@ -59,19 +91,21 @@ export function makeExampleSCPCommand (opt: ConnectionOptions): string {
     ])
 }
 
-export function makeMySQLUsername (opt: ConnectionOptions): string {
+export function makeMySQLUsername(opt: ConnectionOptions): string {
     if (opt.ticketSecret) {
         return `ticket-${opt.ticketSecret}`
     }
     return `${opt.username ?? 'username'}#${opt.targetName ?? 'target'}`
 }
 
-export function makeExampleMySQLCommand (opt: ConnectionOptions): string {
+export function makeExampleMySQLCommand(opt: ConnectionOptions): string {
     const dbName = opt.targetDefaultDatabaseName?.trim() || 'database-name'
     let cmd = shellEscape([
         'mysql',
-        '-u', makeMySQLUsername(opt),
-        '--host', protocolHost(opt, 'mysql'),
+        '-u',
+        makeMySQLUsername(opt),
+        '--host',
+        protocolHost(opt, 'mysql'),
         '--port',
         protocolPortString(opt, 'mysql'),
         '--ssl',
@@ -83,7 +117,7 @@ export function makeExampleMySQLCommand (opt: ConnectionOptions): string {
     return cmd
 }
 
-export function makeExampleMySQLURI (opt: ConnectionOptions): string {
+export function makeExampleMySQLURI(opt: ConnectionOptions): string {
     const pwSuffix = opt.ticketSecret ? '' : ':<password>'
     const dbName = opt.targetDefaultDatabaseName?.trim() || 'database-name'
     return `mysql://${makeMySQLUsername(opt)}${pwSuffix}@${protocolHost(opt, 'mysql')}:${protocolPortString(opt, 'mysql')}/${dbName}?sslMode=required`
@@ -91,9 +125,17 @@ export function makeExampleMySQLURI (opt: ConnectionOptions): string {
 
 export const makePostgreSQLUsername = makeMySQLUsername
 
-export function makeExamplePostgreSQLCommand (opt: ConnectionOptions): string {
+export function makeExamplePostgreSQLCommand(opt: ConnectionOptions): string {
     const dbName = opt.targetDefaultDatabaseName?.trim() || 'database-name'
-    const args = ['psql', '-U', makeMySQLUsername(opt), '--host', protocolHost(opt, 'postgres'), '--port', protocolPortString(opt, 'postgres')]
+    const args = [
+        'psql',
+        '-U',
+        makeMySQLUsername(opt),
+        '--host',
+        protocolHost(opt, 'postgres'),
+        '--port',
+        protocolPortString(opt, 'postgres'),
+    ]
     if (!opt.ticketSecret) {
         args.push('-W')
     }
@@ -101,13 +143,13 @@ export function makeExamplePostgreSQLCommand (opt: ConnectionOptions): string {
     return shellEscape(args)
 }
 
-export function makeExamplePostgreSQLURI (opt: ConnectionOptions): string {
+export function makeExamplePostgreSQLURI(opt: ConnectionOptions): string {
     const pwSuffix = opt.ticketSecret ? '' : ':<password>'
     const dbName = opt.targetDefaultDatabaseName?.trim() || 'database-name'
     return `postgresql://${makePostgreSQLUsername(opt)}${pwSuffix}@${protocolHost(opt, 'postgres')}:${protocolPortString(opt, 'postgres')}/${dbName}?sslmode=require`
 }
 
-export function makeTargetURL (opt: ConnectionOptions): string {
+export function makeTargetURL(opt: ConnectionOptions): string {
     const host = `${opt.targetExternalHost ?? protocolHost(opt, 'http')}:${protocolPort(opt, 'http') ?? 443}`
 
     if (opt.ticketSecret) {
@@ -117,37 +159,60 @@ export function makeTargetURL (opt: ConnectionOptions): string {
 }
 
 export const possibleCredentials: Record<string, Set<CredentialKind>> = {
-    ssh: new Set([CredentialKind.Password, CredentialKind.PublicKey, CredentialKind.Totp, CredentialKind.WebUserApproval]),
-    http: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.Sso]),
+    ssh: new Set([
+        CredentialKind.Password,
+        CredentialKind.PublicKey,
+        CredentialKind.Totp,
+        CredentialKind.WebUserApproval,
+    ]),
+    http: new Set([
+        CredentialKind.Password,
+        CredentialKind.Totp,
+        CredentialKind.Sso,
+    ]),
     mysql: new Set([CredentialKind.Password]),
-    postgres: new Set([CredentialKind.Password, CredentialKind.WebUserApproval]),
-    kubernetes: new Set([CredentialKind.Certificate, CredentialKind.WebUserApproval]),
-    vnc: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.WebUserApproval]),
+    postgres: new Set([
+        CredentialKind.Password,
+        CredentialKind.WebUserApproval,
+    ]),
+    kubernetes: new Set([
+        CredentialKind.Certificate,
+        CredentialKind.WebUserApproval,
+    ]),
+    vnc: new Set([
+        CredentialKind.Password,
+        CredentialKind.Totp,
+        CredentialKind.WebUserApproval,
+    ]),
     // Password over NLA, then TOTP / web approval gathered on the holding screen.
-    rdp: new Set([CredentialKind.Password, CredentialKind.Totp, CredentialKind.WebUserApproval]),
+    rdp: new Set([
+        CredentialKind.Password,
+        CredentialKind.Totp,
+        CredentialKind.WebUserApproval,
+    ]),
 }
 
-export function abbreviatePublicKey (key: string): string {
+export function abbreviatePublicKey(key: string): string {
     return key.slice(0, 16) + '...' + key.slice(-8)
 }
 
-export function makeKubernetesContext (opt: ConnectionOptions): string {
+export function makeKubernetesContext(opt: ConnectionOptions): string {
     if (opt.ticketSecret) {
         return `ticket-${opt.ticketSecret}`
     }
     return `${opt.username ?? 'username'}:${opt.targetName ?? 'target'}`
 }
 
-export function makeKubernetesNamespace (_opt: ConnectionOptions): string {
+export function makeKubernetesNamespace(_opt: ConnectionOptions): string {
     return 'default'
 }
 
-export function makeKubernetesClusterUrl (opt: ConnectionOptions): string {
+export function makeKubernetesClusterUrl(opt: ConnectionOptions): string {
     const baseUrl = `https://${protocolHost(opt, 'kubernetes')}:${protocolPortString(opt, 'kubernetes')}`
     return `${baseUrl}/${encodeURIComponent(opt.targetName ?? 'target')}`
 }
 
-export function makeKubeconfig (opt: ConnectionOptions): string {
+export function makeKubeconfig(opt: ConnectionOptions): string {
     const clusterUrl = makeKubernetesClusterUrl(opt)
     const context = makeKubernetesContext(opt)
     const namespace = makeKubernetesNamespace(opt)
@@ -198,13 +263,16 @@ users:
     }
 }
 
-export function makeOidcKubeconfig (opt: ConnectionOptions): string {
+export function makeOidcKubeconfig(opt: ConnectionOptions): string {
     const clusterUrl = makeKubernetesClusterUrl(opt)
     const context = makeKubernetesContext(opt)
     const namespace = makeKubernetesNamespace(opt)
     const issuer = opt.oidcIssuerUrl ?? '<oidc-issuer-url>'
     const clientId = opt.oidcClientId ?? '<oidc-client-id>'
-    const scopes = (opt.oidcScopes && opt.oidcScopes.length ? opt.oidcScopes : ['openid', 'email', 'profile'])
+    const scopes =
+        opt.oidcScopes && opt.oidcScopes.length
+            ? opt.oidcScopes
+            : ['openid', 'email', 'profile']
     const args = [
         'oidc-login',
         'get-token',
@@ -244,10 +312,15 @@ ${argsYaml}
 `
 }
 
-export function makeExampleKubectlCommand (_opt: ConnectionOptions): string {
-    return shellEscape(['kubectl', '--kubeconfig', 'warpgate-kubeconfig.yaml', 'get', 'pods'])
+export function makeExampleKubectlCommand(_opt: ConnectionOptions): string {
+    return shellEscape([
+        'kubectl',
+        '--kubeconfig',
+        'warpgate-kubeconfig.yaml',
+        'get',
+        'pods',
+    ])
 }
-
 
 export interface ProtocolProperties {
     sessionsCanBeClosed: boolean

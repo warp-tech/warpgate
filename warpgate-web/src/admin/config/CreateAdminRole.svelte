@@ -7,7 +7,7 @@
     import { emptyPermissions } from '../lib/store'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
 
-    let error: string|null = $state(null)
+    let error: string | null = $state(null)
     let role: AdminRole = $state({
         id: '',
         name: '',
@@ -15,8 +15,7 @@
         ...emptyPermissions(),
     })
 
-
-    async function create () {
+    async function create() {
         try {
             const r = await api.createAdminRole({ adminRoleDataRequest: role })
             replace(`/config/admin-roles/${r.id}`)
@@ -27,32 +26,32 @@
 </script>
 
 <div class="container-max-md">
-    <PermissionGate perm="adminRolesManage" message="You have no permission to manage admin roles.">
+    <PermissionGate
+        perm="adminRolesManage"
+        message="You have no permission to manage admin roles."
+    >
         <div class="page-summary-bar">
             <h1>create admin role</h1>
         </div>
 
         <div class="narrow-page">
-        <FormGroup floating label="Name">
-            <Input bind:value={role.name} autofocus />
-        </FormGroup>
+            <FormGroup floating label="Name">
+                <Input bind:value={role.name} autofocus />
+            </FormGroup>
 
-        <FormGroup floating label="Description">
-            <Input bind:value={role.description} />
-        </FormGroup>
+            <FormGroup floating label="Description">
+                <Input bind:value={role.description} />
+            </FormGroup>
 
+            {#if error}
+                <Alert color="danger">{error}</Alert>
+            {/if}
 
-        {#if error}
-            <Alert color="danger">{error}</Alert>
-        {/if}
-
-        <div class="d-flex mt-3">
-            <AsyncButton
-                color="primary"
-                class="ms-auto"
-                click={create}
-            >Create</AsyncButton>
-        </div>
+            <div class="d-flex mt-3">
+                <AsyncButton color="primary" class="ms-auto" click={create}
+                    >Create</AsyncButton
+                >
+            </div>
         </div>
     </PermissionGate>
 </div>

@@ -19,19 +19,19 @@
     let webAuthRequests: AuthStateResponseInternal[] = $state([])
     let doNotShowAuthRequests = $state(false)
 
-    async function init () {
+    async function init() {
         await serverInfoPromise
     }
 
-    function onPageResume () {
+    function onPageResume() {
         redirecting = false
     }
 
-    async function reloadWebAuthRequests () {
+    async function reloadWebAuthRequests() {
         webAuthRequests = await api.getWebAuthRequests()
     }
 
-    async function requireLogin (detail: RouteDetail) {
+    async function requireLogin(detail: RouteDetail) {
         await serverInfoPromise
         if (!get(serverInfo)?.username) {
             let url = location.pathname + '#' + detail.location
@@ -48,7 +48,7 @@
         '/': wrap({
             asyncComponent: () => import('./TargetList.svelte') as any,
             props: {
-                'on:navigation': () => redirecting = true,
+                'on:navigation': () => (redirecting = true),
             },
             conditions: [requireLogin],
         }),
@@ -93,7 +93,9 @@
         }
         socket = null
         if ($serverInfo?.username) {
-            socket = new WebSocket(`wss://${location.host}/@warpgate/api/auth/web-auth-requests/stream`)
+            socket = new WebSocket(
+                `wss://${location.host}/@warpgate/api/auth/web-auth-requests/stream`,
+            )
             socket.addEventListener('message', () => {
                 reloadWebAuthRequests()
             })
@@ -101,12 +103,14 @@
         }
     })
 
-    function onRouteLoaded (detail: RouteDetail) {
-        doNotShowAuthRequests = !!(detail.userData as any)?.['doNotShowAuthRequests']
+    function onRouteLoaded(detail: RouteDetail) {
+        doNotShowAuthRequests = !!(detail.userData as any)?.[
+            'doNotShowAuthRequests'
+        ]
     }
 </script>
 
-<svelte:window on:pageshow={onPageResume}/>
+<svelte:window on:pageshow={onPageResume} />
 
 <div class="container">
     <Loadable promise={initPromise}>
@@ -120,10 +124,13 @@
 
                 <div class="ms-auto d-flex align-items-center">
                     {#if $hasAdminAccess}
-                    <a href="/@warpgate/admin" class="btn btn-warning btn-sm d-flex align-items-center gap-1 me-3">
-                        <Fa icon={faCog} class="mx-1" />
-                        <span class="me-1">Admin</span>
-                    </a>
+                        <a
+                            href="/@warpgate/admin"
+                            class="btn btn-warning btn-sm d-flex align-items-center gap-1 me-3"
+                        >
+                            <Fa icon={faCog} class="mx-1" />
+                            <span class="me-1">Admin</span>
+                        </a>
                     {/if}
 
                     <AuthBar />
@@ -131,27 +138,26 @@
             </div>
 
             {#if !doNotShowAuthRequests}
-            {#each webAuthRequests as authRequest (authRequest.id)}
-                <Button
-                    color="success"
-                    class="mb-4 d-flex align-items-center w-100 text-start"
-                    on:click={() => {
+                {#each webAuthRequests as authRequest (authRequest.id)}
+                    <Button
+                        color="success"
+                        class="mb-4 d-flex align-items-center w-100 text-start"
+                        on:click={() => {
                         push('/login/' + authRequest.id)
                     }}
-                >
-                    <div>
-                        <strong class="d-block">
-                            {authRequest.protocol} authentication request
-                        </strong>
-                        {#if authRequest.address}
-                            <small>
-                                From {authRequest.address}
-                            </small>
-                        {/if}
-                    </div>
-                    <Fa class="ms-auto" icon={faArrowRight} />
-                </Button>
-            {/each}
+                    >
+                        <div>
+                            <strong class="d-block">
+                                {authRequest.protocol}
+                                authentication request
+                            </strong>
+                            {#if authRequest.address}
+                                <small> From {authRequest.address} </small>
+                            {/if}
+                        </div>
+                        <Fa class="ms-auto" icon={faArrowRight} />
+                    </Button>
+                {/each}
             {/if}
 
             <main>
@@ -160,11 +166,11 @@
 
             <footer class="mt-5">
                 {#if $serverInfo?.version}
-                <span class="ms-3 me-auto">
-                    {$serverInfo.version}
-                </span>
+                    <span class="ms-3 me-auto">
+                        {$serverInfo.version}
+                    </span>
                 {:else}
-                <div class="me-auto"></div>
+                    <div class="me-auto"></div>
                 {/if}
                 <ThemeSwitcher />
             </footer>

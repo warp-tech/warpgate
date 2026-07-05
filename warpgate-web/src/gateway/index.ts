@@ -6,4 +6,4 @@ mount(Root, {
     target: document.getElementById('app')!,
 })
 
-export { }
+export {}

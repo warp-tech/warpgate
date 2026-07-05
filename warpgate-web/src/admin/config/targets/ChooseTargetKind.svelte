@@ -4,9 +4,9 @@
     import { Badge } from '@sveltestrap/sveltestrap'
 
     const kinds: {
-        name: string,
-        value: TargetKind,
-        description: string,
+        name: string
+        value: TargetKind
+        description: string
         experimental?: boolean
     }[] = [
         {
@@ -32,7 +32,8 @@
         {
             name: 'Kubernetes',
             value: TargetKind.Kubernetes,
-            description: 'Expose Kubernetes API protocol for tools like kubectl',
+            description:
+                'Expose Kubernetes API protocol for tools like kubectl',
             experimental: true,
         },
         {

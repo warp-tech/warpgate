@@ -37,7 +37,7 @@
     let selectedUnit = $state(units[0]!)
     let lastExternalValue: number | undefined = $state()
 
-    function isValidValue (v: number | undefined): boolean {
+    function isValidValue(v: number | undefined): boolean {
         if (v === undefined) {
             return allowEmpty
         }
@@ -100,7 +100,7 @@
         maybeUpdateValue(toBytes())
     }
 
-    function maybeUpdateValue (v: number | undefined) {
+    function maybeUpdateValue(v: number | undefined) {
         if (!isValidValue(v)) {
             return
         }

@@ -23,13 +23,13 @@
         link = false,
         color = 'link',
         label,
-        'class': className = '',
+        class: className = '',
         children,
     }: Props = $props()
     let successVisible = $state(false)
     let button: HTMLElement | undefined = $state()
 
-    async function _click () {
+    async function _click() {
         if (disabled) {
             return
         }
@@ -39,7 +39,6 @@
             successVisible = false
         }, 2000)
     }
-
 </script>
 
 {#if link}
@@ -54,7 +53,9 @@
         }}
         bind:this={button}
     >
-        {#if children}{@render children()}{:else}
+        {#if children}
+            {@render children()}
+        {:else}
             {#if successVisible}
                 Copied
             {:else}
@@ -67,11 +68,13 @@
         class={className}
         bind:inner={button}
         on:click={_click}
-        outline={outline}
-        color={color}
-        disabled={disabled}
+        {outline}
+        {color}
+        {disabled}
     >
-        {#if children}{@render children()}{:else}
+        {#if children}
+            {@render children()}
+        {:else}
             {#if successVisible}
                 <Fa fw icon={faCheck} />
             {:else}

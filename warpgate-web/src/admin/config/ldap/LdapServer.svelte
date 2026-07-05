@@ -1,6 +1,13 @@
 <script lang="ts">
     import { push } from 'svelte-spa-router'
-    import { api, LdapUsernameAttribute, stringifyError, TlsMode, type LdapServerResponse, type Tls } from 'admin/lib/api'
+    import {
+        api,
+        LdapUsernameAttribute,
+        stringifyError,
+        TlsMode,
+        type LdapServerResponse,
+        type Tls,
+    } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
@@ -29,7 +36,9 @@
     let enabled = $state(true)
     let autoLinkSsoUsers = $state(false)
     let description = $state('')
-    let usernameAttribute = $state<LdapUsernameAttribute>(LdapUsernameAttribute.Cn)
+    let usernameAttribute = $state<LdapUsernameAttribute>(
+        LdapUsernameAttribute.Cn,
+    )
     let sshKeyAttribute = $state('sshPublicKey')
     let uuidAttribute = $state('')
     let error = $state<string | null>(null)
@@ -128,7 +137,7 @@
         }
     }
 
-    async function importUsers () {
+    async function importUsers() {
         await save()
         push(`/config/ldap-servers/${params.id}/users`)
     }
@@ -201,18 +210,22 @@
                         type="checkbox"
                         id="autoLinkSsoUsers"
                         bind:checked={autoLinkSsoUsers}
-                    />
+                    >
                     <label class="form-check-label" for="autoLinkSsoUsers">
                         Auto-link SSO users
                     </label>
                 </div>
                 <div class="form-text">
-                    Automatically link SSO users to their LDAP accounts when they log in
+                    Automatically link SSO users to their LDAP accounts when
+                    they log in
                 </div>
             </div>
 
             {#if testResult}
-                <div class="alert {testResult.success ? 'alert-success' : 'alert-danger'}" role="alert">
+                <div
+                    class="alert {testResult.success ? 'alert-success' : 'alert-danger'}"
+                    role="alert"
+                >
                     {testResult.message}
                 </div>
             {/if}
@@ -224,7 +237,11 @@
             {/if}
 
             <div class="d-flex gap-2 mt-5">
-                <AsyncButton type="button" class="btn btn-secondary" click={testConnection}>
+                <AsyncButton
+                    type="button"
+                    class="btn btn-secondary"
+                    click={testConnection}
+                >
                     Test Connection
                 </AsyncButton>
                 <AsyncButton
@@ -238,7 +255,11 @@
                 <AsyncButton type="button" class="btn btn-primary" click={save}>
                     Save
                 </AsyncButton>
-                <AsyncButton type="button" class="btn btn-danger" click={remove}>
+                <AsyncButton
+                    type="button"
+                    class="btn btn-danger"
+                    click={remove}
+                >
                     Remove
                 </AsyncButton>
             </div>

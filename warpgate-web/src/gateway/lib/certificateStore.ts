@@ -8,18 +8,22 @@ export interface StoredCertificateKey {
     certificatePem: string
 }
 
-function openDB (): Promise<IDBDatabase> {
+function openDB(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION)
         request.onupgradeneeded = () => {
-            request.result.createObjectStore(STORE_NAME, { keyPath: 'credentialId' })
+            request.result.createObjectStore(STORE_NAME, {
+                keyPath: 'credentialId',
+            })
         }
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error)
     })
 }
 
-export async function saveCertificateKey (entry: StoredCertificateKey): Promise<void> {
+export async function saveCertificateKey(
+    entry: StoredCertificateKey,
+): Promise<void> {
     const db = await openDB()
     return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite')
@@ -29,7 +33,9 @@ export async function saveCertificateKey (entry: StoredCertificateKey): Promise<
     })
 }
 
-export async function getCertificateKey (credentialId: string): Promise<StoredCertificateKey | null> {
+export async function getCertificateKey(
+    credentialId: string,
+): Promise<StoredCertificateKey | null> {
     const db = await openDB()
     return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readonly')
@@ -39,7 +45,9 @@ export async function getCertificateKey (credentialId: string): Promise<StoredCe
     })
 }
 
-export async function deleteCertificateKey (credentialId: string): Promise<void> {
+export async function deleteCertificateKey(
+    credentialId: string,
+): Promise<void> {
     const db = await openDB()
     return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite')
@@ -49,7 +57,7 @@ export async function deleteCertificateKey (credentialId: string): Promise<void>
     })
 }
 
-export async function getAllCertificateKeys (): Promise<StoredCertificateKey[]> {
+export async function getAllCertificateKeys(): Promise<StoredCertificateKey[]> {
     const db = await openDB()
     return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readonly')

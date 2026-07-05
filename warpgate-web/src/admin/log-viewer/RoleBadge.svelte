@@ -12,7 +12,7 @@
     const color = type === 'admin' ? 'info' : 'warning'
 </script>
 
-<Badge color={color} class="d-flex align-items-center">
+<Badge {color} class="d-flex align-items-center">
     <Fa icon={faCog} class="me-2" />
     <a href="/config/{path}/{id}" use:link>{name}</a>
 </Badge>

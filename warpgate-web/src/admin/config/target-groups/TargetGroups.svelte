@@ -14,8 +14,8 @@
                 const sorted = groups.sort((a, b) =>
                     naturalCompareFactory()(
                         a.name.toLowerCase(),
-                        b.name.toLowerCase()
-                    )
+                        b.name.toLowerCase(),
+                    ),
                 )
 
                 return {
@@ -23,7 +23,7 @@
                     offset: 0,
                     total: sorted.length,
                 }
-            })
+            }),
         )
     }
 </script>
@@ -35,7 +35,8 @@
             class="btn btn-primary ms-auto"
             href="/config/target-groups/create"
             class:disabled={!$adminPermissions.targetsCreate}
-            use:link>
+            use:link
+        >
             Add a group
         </a>
     </div>
@@ -51,7 +52,8 @@
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/target-groups/{group.id}"
-                use:link>
+                use:link
+            >
                 <div class="me-auto">
                     <div class="d-flex align-items-center gap-2">
                         {#if group.color}
@@ -60,7 +62,9 @@
                         <strong>{group.name}</strong>
                     </div>
                     {#if group.description}
-                        <small class="d-block text-muted">{group.description}</small>
+                        <small class="d-block text-muted"
+                            >{group.description}</small
+                        >
                     {/if}
                 </div>
             </a>

@@ -1,5 +1,16 @@
 <script lang="ts">
-    import { api, type SessionSnapshot, type Recording, type TargetSSHOptions, type TargetHTTPOptions, type TargetMySqlOptions, type TargetPostgresOptions, type TargetKubernetesOptions, type TargetVncOptions, type TargetRdpOptions } from 'admin/lib/api'
+    import {
+        api,
+        type SessionSnapshot,
+        type Recording,
+        type TargetSSHOptions,
+        type TargetHTTPOptions,
+        type TargetMySqlOptions,
+        type TargetPostgresOptions,
+        type TargetKubernetesOptions,
+        type TargetVncOptions,
+        type TargetRdpOptions,
+    } from 'admin/lib/api'
     import { timeAgo } from 'admin/lib/time'
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
@@ -16,7 +27,10 @@
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import { Tooltip } from '@sveltestrap/sveltestrap'
     import { PROTOCOL_PROPERTIES } from 'common/protocols'
-    import { recordingMetadataToFieldSet, recordingTypeLabel } from 'common/recordings'
+    import {
+        recordingMetadataToFieldSet,
+        recordingTypeLabel,
+    } from 'common/recordings'
 
     interface Props {
         params: { id: string }
@@ -24,20 +38,20 @@
 
     let { params = { id: '' } }: Props = $props()
 
-    let error: string|null = $state(null)
-    let session: SessionSnapshot|null = $state(null)
-    let recordings: Recording[]|null = $state(null)
+    let error: string | null = $state(null)
+    let session: SessionSnapshot | null = $state(null)
+    let recordings: Recording[] | null = $state(null)
 
-    async function load () {
+    async function load() {
         session = await api.getSession(params)
         recordings = await api.getSessionRecordings(params)
     }
 
-    async function close () {
+    async function close() {
         api.closeSession(session!)
     }
 
-    function getTargetDescription () {
+    function getTargetDescription() {
         if (session?.target) {
             let address = '<unknown>'
             if (session.target.options.kind === 'Ssh') {
@@ -53,11 +67,13 @@
                 address = `${options.host}:${options?.port}`
             }
             if (session.target.options.kind === 'Http') {
-                const options = session.target.options as unknown as TargetHTTPOptions
+                const options = session.target
+                    .options as unknown as TargetHTTPOptions
                 address = options.url
             }
             if (session.target.options.kind === 'Kubernetes') {
-                const options = session.target.options as unknown as TargetKubernetesOptions
+                const options = session.target
+                    .options as unknown as TargetKubernetesOptions
                 address = options.clusterUrl
             }
             if (session.target.options.kind === 'Vnc') {
@@ -80,7 +96,6 @@
 
     const interval = setInterval(load, 1000)
     onDestroy(() => clearInterval(interval))
-
 </script>
 
 {#if !session && !error}
@@ -96,10 +111,18 @@
         <div>
             <h1>session</h1>
             <div class="d-flex align-items-center mt-1">
-                <Tooltip delay="250" target="usernameBadge" animation>Authenticated user</Tooltip>
-                <Tooltip delay="250" target="targetBadge" animation>Selected target</Tooltip>
+                <Tooltip delay="250" target="usernameBadge" animation
+                    >Authenticated user</Tooltip
+                >
+                <Tooltip delay="250" target="targetBadge" animation
+                    >Selected target</Tooltip
+                >
 
-                <Badge id="usernameBadge" color="success" class="me-2 d-flex align-items-center">
+                <Badge
+                    id="usernameBadge"
+                    color="success"
+                    class="me-2 d-flex align-items-center"
+                >
                     {#if session.username}
                         <Fa icon={faUser} class="me-2" />
                         {session.username}
@@ -108,14 +131,19 @@
                     {/if}
                 </Badge>
                 {#if session.target}
-                    <Badge id="targetBadge" color="info" class="me-2 d-flex align-items-center">
+                    <Badge
+                        id="targetBadge"
+                        color="info"
+                        class="me-2 d-flex align-items-center"
+                    >
                         <Fa icon={faArrowRight} class="me-2" />
                         {getTargetDescription()}
                     </Badge>
                 {/if}
                 <span class="text-muted">
                     {#if session.ended}
-                        {formatDistance(new Date(session.started), new Date(session.ended))} long, <RelativeDate date={session.started} />
+                        {formatDistance(new Date(session.started), new Date(session.ended))}
+                        long, <RelativeDate date={session.started} />
                     {:else}
                         {formatDistanceToNow(new Date(session.started))}
                     {/if}
@@ -131,7 +159,7 @@
         {/if}
     </div>
 
-    {#if recordings?.length }
+    {#if recordings?.length}
         <h3 class="mt-4">Recordings</h3>
         <div class="list-group list-group-flush">
             {#each recordings as recording (recording.id)}
@@ -139,7 +167,8 @@
                 <a
                     class="list-group-item list-group-item-action"
                     href="/recordings/{recording.id}"
-                    use:link>
+                    use:link
+                >
                     <div class="main gap-1">
                         <strong>
                             {recordingTypeLabel(recording)}
@@ -150,7 +179,8 @@
                         {#if metadata}
                             {#each recordingMetadataToFieldSet(metadata) as item (item[0])}
                                 <div>
-                                    <span class="text-muted">{item[0]}:</span> {item[1]}
+                                    <span class="text-muted">{item[0]}:</span>
+                                    {item[1]}
                                 </div>
                             {/each}
                         {/if}
@@ -164,10 +194,11 @@
     {/if}
 
     <h3 class="mt-4">Log</h3>
-    <LogViewer filters={{
+    <LogViewer
+        filters={{
         sessionId: session.id,
-    }} />
-
+    }}
+    />
 {/if}
 
 <style lang="scss">

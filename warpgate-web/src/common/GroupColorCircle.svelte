@@ -5,7 +5,10 @@
     export let color: BootstrapThemeColor | ''
 </script>
 
-<div class="circle" style="background-color: {getCSSColorFromThemeColor(color || undefined)})"></div>
+<div
+    class="circle"
+    style="background-color: {getCSSColorFromThemeColor(color || undefined)})"
+></div>
 
 <style lang="scss">
     .circle {

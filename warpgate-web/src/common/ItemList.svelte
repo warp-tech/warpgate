@@ -13,7 +13,17 @@
 </script>
 
 <script lang="ts" generics="T, G = unknown, GK = unknown">
-    import { Subject, switchMap, map, Observable, distinctUntilChanged, share, combineLatest, tap, debounceTime } from 'rxjs'
+    import {
+        Subject,
+        switchMap,
+        map,
+        Observable,
+        distinctUntilChanged,
+        share,
+        combineLatest,
+        tap,
+        debounceTime,
+    } from 'rxjs'
     import Pagination from './Pagination.svelte'
     import { observe } from 'svelte-observable'
     import { Input } from '@sveltestrap/sveltestrap'
@@ -23,7 +33,7 @@
 
     interface Props {
         page?: number
-        pageSize?: number|undefined
+        pageSize?: number | undefined
         load: (_: LoadOptions) => Observable<PaginatedResponse<T>>
         groupObject?: (_: T) => G
         groupKey?: (_: G) => GK
@@ -81,11 +91,13 @@
     )
 
     const total = observe<number>(responses.pipe(map(x => x.total)), 0)
-    const items = observe<T[]|null>(responses.pipe(map(x => x.items)), null)
+    const items = observe<T[] | null>(responses.pipe(map(x => x.items)), null)
 
     onMount(() => {
         if (groupHeader && (!groupObject || !groupKey)) {
-            throw new Error('groupObject and groupKey must be provided when using groupHeader')
+            throw new Error(
+                'groupObject and groupKey must be provided when using groupHeader',
+            )
         }
     })
 
@@ -112,7 +124,11 @@
     <div class="d-flex mb-2" hidden={!loaded}>
         <!-- either filtering or not filtering and there are at least some items at all -->
         {#if showSearch && (filter || !!_items?.length)}
-            <Input bind:value={filter} placeholder="Search..." class="flex-grow-1 border-0" />
+            <Input
+                bind:value={filter}
+                placeholder="Search..."
+                class="flex-grow-1 border-0"
+            />
         {/if}
         {@render header?.()}
     </div>
@@ -143,7 +159,7 @@
 
 {#await $total then _total}
     {#if pageSize && _total > pageSize}
-        <Pagination total={_total} bind:page={page} pageSize={pageSize} />
+        <Pagination total={_total} bind:page {pageSize} />
     {/if}
 {/await}
 

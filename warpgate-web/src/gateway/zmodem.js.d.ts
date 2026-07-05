@@ -1,1 +1,1 @@
-declare module 'zmodem.js';
+declare module 'zmodem.js'

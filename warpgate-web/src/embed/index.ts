@@ -1,16 +1,16 @@
 import { api } from 'gateway/lib/api'
 import EmbeddedUI from './EmbeddedUI.svelte'
 
-export { }
+export {}
 
 // When proxying a non-secure HTTP target through Warpgate, if
 // its internal JS tries to establish a WebSocket connection
 // to a ws:// URI, it will fail due to browser restrictions
 // So we patch WebSocket to rewrite URIs to wss://
-function forceSecureWebSocketURLs () {
+function forceSecureWebSocketURLs() {
     const OriginalWebSocket = window.WebSocket
 
-    function makeUrlSecure (url: string | URL): string | URL {
+    function makeUrlSecure(url: string | URL): string | URL {
         if (url instanceof URL) {
             if (url.protocol === 'ws:') {
                 url.protocol = 'wss:'
@@ -25,7 +25,7 @@ function forceSecureWebSocketURLs () {
     }
 
     class SecureWebSocket extends OriginalWebSocket {
-        constructor (url: string | URL, protocols?: string | string[]) {
+        constructor(url: string | URL, protocols?: string | string[]) {
             super(makeUrlSecure(url), protocols)
         }
     }
@@ -47,8 +47,11 @@ const container = document.createElement('div')
 container.id = 'warpgate-embedded-ui'
 document.body.appendChild(container)
 
-setTimeout(() => new EmbeddedUI({
-    target: container,
-}))
+setTimeout(
+    () =>
+        new EmbeddedUI({
+            target: container,
+        }),
+)
 
 forceSecureWebSocketURLs()

@@ -7,20 +7,20 @@
     import { classnames } from './helpers'
 
     interface Props {
-        class?: string,
-        title?: string,
-        titleSnippet?: Snippet<[]>,
-        description?: string,
-        descriptionSnippet?: Snippet<[]>,
-        addonSnippet?: Snippet<[]>,
-        href: string,
-        small?: boolean,
+        class?: string
+        title?: string
+        titleSnippet?: Snippet<[]>
+        description?: string
+        descriptionSnippet?: Snippet<[]>
+        addonSnippet?: Snippet<[]>
+        href: string
+        small?: boolean
     }
 
     let {
         title,
         titleSnippet,
-        'class': className,
+        class: className,
         description,
         descriptionSnippet,
         addonSnippet,
@@ -28,19 +28,10 @@
         small,
     }: Props = $props()
 
-    let classes = $derived(classnames(
-        className,
-        'link',
-        small ? 'sm' : false,
-    ))
+    let classes = $derived(classnames(className, 'link', small ? 'sm' : false))
 </script>
 
-<a
-    class={classes}
-    href={href}
-    use:link
-    use:active
->
+<a class={classes} {href} use:link use:active>
     <div class="text">
         <div class="title">
             {#if titleSnippet}
@@ -62,7 +53,6 @@
         <Fa class="icon" icon={faArrowRight} />
     </div>
 </a>
-
 
 <style lang="scss">
     a {

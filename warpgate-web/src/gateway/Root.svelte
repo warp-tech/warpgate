@@ -14,7 +14,6 @@
         }),
     }
     routes['/*'] = routes['/']!
-
 </script>
 
 <Router {routes} />

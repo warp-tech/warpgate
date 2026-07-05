@@ -13,14 +13,17 @@
 
     let showAnalyticsModal = $state(false)
     $effect(() => {
-        if (($serverInfo?.shouldPromptAnalytics ?? false) && $serverInfo?.adminPermissions?.configEdit) {
+        if (
+            ($serverInfo?.shouldPromptAnalytics ?? false) &&
+            $serverInfo?.adminPermissions?.configEdit
+        ) {
             setTimeout(() => {
                 showAnalyticsModal = true
             }, 1000)
         }
     })
 
-    async function init () {
+    async function init() {
         await reloadServerInfo()
         if (!get(serverInfo)?.username) {
             // Not logged in: redirect to the (gateway) login page, preserving this admin
@@ -28,7 +31,9 @@
             // (The admin shell is no longer server-gated, so this runs client-side where
             // the SPA hash route is known.)
             const next = location.pathname + location.hash
-            location.assign('/@warpgate#/login?next=' + encodeURIComponent(next))
+            location.assign(
+                '/@warpgate#/login?next=' + encodeURIComponent(next),
+            )
         }
     }
 
@@ -89,7 +94,7 @@
             </div>
         </header>
         <main>
-            <Router {routes}/>
+            <Router {routes} />
         </main>
 
         <footer class="mt-5">

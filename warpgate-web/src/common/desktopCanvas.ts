@@ -5,7 +5,12 @@
 // image decodes don't race). gen-2 recordings encode framebuffer rects as PNG (`png_image`,
 // with `keyframe` full-canvas snapshots); the live interactive client still sends raw BGRA.
 
-export interface Rect { x: number, y: number, width: number, height: number }
+export interface Rect {
+    x: number
+    y: number
+    width: number
+    height: number
+}
 
 // Image payloads arrive base64-encoded from recordings (JSON) and as raw bytes from the
 // live binary WebSocket; accept either.
@@ -14,18 +19,23 @@ type FrameImageData = string | Uint8Array<ArrayBuffer>
 
 /** The visual subset of desktop messages that mutate the framebuffer. */
 export type DesktopFrame =
-    | { type: 'resize', width: number, height: number }
-    | { type: 'raw_image', rect: Rect, data: FrameImageData }
-    | { type: 'png_image', rect: Rect, keyframe?: boolean, data: FrameImageData }
-    | { type: 'jpeg_image', rect: Rect, data: FrameImageData }
-    | { type: 'copy_rect', dst: Rect, src_x: number, src_y: number }
-    | { type: 'cursor', rect: Rect, data: FrameImageData }
+    | { type: 'resize'; width: number; height: number }
+    | { type: 'raw_image'; rect: Rect; data: FrameImageData }
+    | {
+          type: 'png_image'
+          rect: Rect
+          keyframe?: boolean
+          data: FrameImageData
+      }
+    | { type: 'jpeg_image'; rect: Rect; data: FrameImageData }
+    | { type: 'copy_rect'; dst: Rect; src_x: number; src_y: number }
+    | { type: 'cursor'; rect: Rect; data: FrameImageData }
 
 /**
  * A frame that only touches part of the surface and can be dropped to catch up
  * under load. `resize` and full-frame keyframes are structural and never dropped.
  */
-export function isIncrementalFrame (msg: DesktopFrame): boolean {
+export function isIncrementalFrame(msg: DesktopFrame): boolean {
     switch (msg.type) {
         case 'raw_image':
         case 'jpeg_image':
@@ -39,7 +49,7 @@ export function isIncrementalFrame (msg: DesktopFrame): boolean {
     }
 }
 
-export function base64ToBytes (b64: string): Uint8Array<ArrayBuffer> {
+export function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
     const binary = atob(b64)
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) {
@@ -49,18 +59,22 @@ export function base64ToBytes (b64: string): Uint8Array<ArrayBuffer> {
 }
 
 /** Normalize an image payload (base64 from recordings, raw bytes from the live WS). */
-function toBytes (data: FrameImageData): Uint8Array<ArrayBuffer> {
+function toBytes(data: FrameImageData): Uint8Array<ArrayBuffer> {
     return typeof data === 'string' ? base64ToBytes(data) : data
 }
 
-export function ensureCanvasSize (canvas: HTMLCanvasElement, width: number, height: number): void {
+export function ensureCanvasSize(
+    canvas: HTMLCanvasElement,
+    width: number,
+    height: number,
+): void {
     if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width
         canvas.height = height
     }
 }
 
-function ensureForRect (canvas: HTMLCanvasElement, rect: Rect): void {
+function ensureForRect(canvas: HTMLCanvasElement, rect: Rect): void {
     ensureCanvasSize(
         canvas,
         Math.max(canvas.width, rect.x + rect.width),
@@ -68,7 +82,11 @@ function ensureForRect (canvas: HTMLCanvasElement, rect: Rect): void {
     )
 }
 
-function drawRaw (ctx: CanvasRenderingContext2D, rect: Rect, bgra: Uint8Array): void {
+function drawRaw(
+    ctx: CanvasRenderingContext2D,
+    rect: Rect,
+    bgra: Uint8Array,
+): void {
     const count = rect.width * rect.height
     const rgba = new Uint8ClampedArray(count * 4)
     for (let i = 0; i < count; i++) {
@@ -79,10 +97,14 @@ function drawRaw (ctx: CanvasRenderingContext2D, rect: Rect, bgra: Uint8Array): 
         rgba[s + 2] = bgra[s] ?? 0
         rgba[s + 3] = 255
     }
-    ctx.putImageData(new ImageData(rgba, rect.width, rect.height), rect.x, rect.y)
+    ctx.putImageData(
+        new ImageData(rgba, rect.width, rect.height),
+        rect.x,
+        rect.y,
+    )
 }
 
-async function drawImageBlob (
+async function drawImageBlob(
     ctx: CanvasRenderingContext2D,
     rect: Rect,
     bytes: Uint8Array<ArrayBuffer>,
@@ -96,7 +118,7 @@ async function drawImageBlob (
 /** Apply one framebuffer message. Awaiting the result renders frames strictly in order
  * (recording player: a keyframe must fully paint before the deltas that follow it); the
  * live client fire-and-forgets it (`void`), matching single-frame-at-a-time streaming. */
-export async function applyDesktopFrame (
+export async function applyDesktopFrame(
     canvas: HTMLCanvasElement,
     ctx: CanvasRenderingContext2D,
     msg: DesktopFrame,
@@ -120,8 +142,14 @@ export async function applyDesktopFrame (
         case 'copy_rect':
             ctx.drawImage(
                 canvas,
-                msg.src_x, msg.src_y, msg.dst.width, msg.dst.height,
-                msg.dst.x, msg.dst.y, msg.dst.width, msg.dst.height,
+                msg.src_x,
+                msg.src_y,
+                msg.dst.width,
+                msg.dst.height,
+                msg.dst.x,
+                msg.dst.y,
+                msg.dst.width,
+                msg.dst.height,
             )
             break
         case 'cursor':

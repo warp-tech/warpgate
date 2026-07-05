@@ -24,11 +24,11 @@
 
     .heading {
         display: block;
-        font-size: .75rem;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: .06em;
+        letter-spacing: 0.06em;
         color: var(--bs-secondary-color);
-        margin: 1rem 0 .5rem;
+        margin: 1rem 0 0.5rem;
     }
 </style>

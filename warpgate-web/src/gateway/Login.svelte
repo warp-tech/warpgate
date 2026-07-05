@@ -3,34 +3,56 @@
     import { Button, FormGroup, Alert } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
-    import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
+    import {
+        faGoogle,
+        faMicrosoft,
+        faApple,
+    } from '@fortawesome/free-brands-svg-icons'
 
-    import { api, ApiAuthState, LoginFailureResponseFromJSON, PasswordLoginMode, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
+    import {
+        api,
+        ApiAuthState,
+        LoginFailureResponseFromJSON,
+        PasswordLoginMode,
+        type SsoProviderDescription,
+        SsoProviderKind,
+        ResponseError,
+    } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
 
-    let error: string|null = $state(null)
+    let error: string | null = $state(null)
     let username = $state('')
     let password = $state('')
     let otp = $state('')
     let busy = $state(false)
     let credentialRejected = $state(false)
-    let otpInput: HTMLInputElement|undefined = $state()
-    let authState: ApiAuthState|undefined = $state()
+    let otpInput: HTMLInputElement | undefined = $state()
+    let authState: ApiAuthState | undefined = $state()
     let ssoProvidersPromise = api.getSsoProviders()
     let showPasswordLogin = $state(false)
 
-    const passwordLoginMode = $derived($serverInfo?.passwordLoginMode ?? PasswordLoginMode.Enabled)
-    const passwordLoginAllowed = $derived(passwordLoginMode !== PasswordLoginMode.Disabled)
-    const passwordLoginMinimized = $derived(passwordLoginMode === PasswordLoginMode.Minimized)
+    const passwordLoginMode = $derived(
+        $serverInfo?.passwordLoginMode ?? PasswordLoginMode.Enabled,
+    )
+    const passwordLoginAllowed = $derived(
+        passwordLoginMode !== PasswordLoginMode.Disabled,
+    )
+    const passwordLoginMinimized = $derived(
+        passwordLoginMode === PasswordLoginMode.Minimized,
+    )
 
-    const nextURL = new URLSearchParams(router.querystring ?? '').get('next') ?? undefined
-    const reauthRequired = new URLSearchParams(router.querystring ?? '').get('reauth') === '1'
-    const serverErrorMessage = new URLSearchParams(location.search).get('login_error')
+    const nextURL =
+        new URLSearchParams(router.querystring ?? '').get('next') ?? undefined
+    const reauthRequired =
+        new URLSearchParams(router.querystring ?? '').get('reauth') === '1'
+    const serverErrorMessage = new URLSearchParams(location.search).get(
+        'login_error',
+    )
     const initPromise = init()
 
-    async function init () {
+    async function init() {
         try {
             authState = (await api.getDefaultAuthState()).state
         } catch (err) {
@@ -45,7 +67,7 @@
         await continueWithState()
     }
 
-    function success () {
+    function success() {
         if (nextURL) {
             location.assign(nextURL)
         } else {
@@ -53,7 +75,7 @@
         }
     }
 
-    async function continueWithState ({ allowSsoRedirect = true } = {}) {
+    async function continueWithState({ allowSsoRedirect = true } = {}) {
         if (authState === ApiAuthState.Success) {
             success()
         }
@@ -70,7 +92,7 @@
         }
     }
 
-    async function login () {
+    async function login() {
         busy = true
         try {
             await _login()
@@ -79,7 +101,7 @@
         }
     }
 
-    async function _login () {
+    async function _login() {
         error = null
         credentialRejected = false
         try {
@@ -102,7 +124,9 @@
         } catch (err) {
             if (err instanceof ResponseError) {
                 if (err.response.status === 401) {
-                    const failure = LoginFailureResponseFromJSON(await err.response.json())
+                    const failure = LoginFailureResponseFromJSON(
+                        await err.response.json(),
+                    )
                     authState = failure.state
                     credentialRejected = failure.credentialRejected ?? false
 
@@ -119,12 +143,12 @@
         }
     }
 
-    async function cancel () {
+    async function cancel() {
         await api.cancelDefaultAuth()
         location.reload()
     }
 
-    async function startSSO (provider: SsoProviderDescription) {
+    async function startSSO(provider: SsoProviderDescription) {
         busy = true
         try {
             const p = await api.startSso({ name: provider.name, next: nextURL })
@@ -137,10 +161,13 @@
 </script>
 
 {#snippet localLoginForm()}
-    <form autocomplete="on" onsubmit={e => {
+    <form
+        autocomplete="on"
+        onsubmit={e => {
         login()
         e.preventDefault()
-    }}>
+    }}
+    >
         <FormGroup floating label="Username">
             <!-- svelte-ignore a11y_autofocus -->
             <input
@@ -150,7 +177,8 @@
                 disabled={busy}
                 class="form-control"
                 required
-                autofocus />
+                autofocus
+            >
         </FormGroup>
 
         <FormGroup floating label="Password">
@@ -161,7 +189,8 @@
                 autocomplete="current-password"
                 disabled={busy}
                 required
-                class="form-control" />
+                class="form-control"
+            >
         </FormGroup>
 
         <Button
@@ -177,7 +206,6 @@
 {/snippet}
 
 <Loadable promise={initPromise}>
-
     <div class="mt-5">
         <div class="page-summary-bar">
             {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
@@ -187,10 +215,13 @@
             {/if}
         </div>
         {#if authState === ApiAuthState.OtpNeeded}
-            <form class="d-flex align-items-stretch gap-2" onsubmit={e => {
+            <form
+                class="d-flex align-items-stretch gap-2"
+                onsubmit={e => {
                 login()
                 e.preventDefault()
-            }}>
+            }}
+            >
                 <FormGroup floating label="One-time password" class="w-100">
                     <!-- svelte-ignore a11y_autofocus -->
                     <input
@@ -202,11 +233,12 @@
                         autofocus
                         inputmode="numeric"
                         disabled={busy}
-                        class="form-control" />
+                        class="form-control"
+                    >
                 </FormGroup>
 
                 <Button
-                class="mb-3"
+                    class="mb-3"
                     color="primary"
                     type="submit"
                     disabled={busy}
@@ -223,13 +255,19 @@
         <div class="mt-3"></div>
 
         {#if reauthRequired}
-            <Alert color="warning">The security policy requires you to sign in again before accessing this function.</Alert>
+            <Alert color="warning"
+                >The security policy requires you to sign in again before
+                accessing this function.</Alert
+            >
         {/if}
         {#if credentialRejected || authState === ApiAuthState.Failed}
             <Alert color="danger">Incorrect credentials</Alert>
         {/if}
         {#if authState === ApiAuthState.IpRejected}
-            <Alert color="danger">Login denied: your IP address is not in the allowed range for this user</Alert>
+            <Alert color="danger"
+                >Login denied: your IP address is not in the allowed range for
+                this user</Alert
+            >
         {/if}
         {#if serverErrorMessage}
             <Alert color="danger">{serverErrorMessage}</Alert>
@@ -283,10 +321,7 @@
     {/if}
 
     {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed && authState !== ApiAuthState.IpRejected}
-        <button
-            class="btn w-100 mt-3 btn-secondary"
-            onclick={cancel}
-        >
+        <button class="btn w-100 mt-3 btn-secondary" onclick={cancel}>
             Cancel
         </button>
     {/if}

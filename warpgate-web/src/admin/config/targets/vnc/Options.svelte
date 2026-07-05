@@ -3,12 +3,12 @@
     import { type TargetOptionsTargetVncOptions } from 'admin/lib/api'
 
     interface Props {
-        options: TargetOptionsTargetVncOptions,
+        options: TargetOptionsTargetVncOptions
     }
 
     let { options = $bindable() }: Props = $props()
 
-    function setAuthKind (kind: 'None' | 'Password') {
+    function setAuthKind(kind: 'None' | 'Password') {
         if (kind === 'Password') {
             options.auth = { kind: 'Password', password: '' }
         } else {
@@ -22,12 +22,19 @@
 <div class="row">
     <div class="col-8">
         <FormGroup floating label="Target host">
-            <input class="form-control" bind:value={options.host} />
+            <input class="form-control" bind:value={options.host}>
         </FormGroup>
     </div>
     <div class="col-4">
         <FormGroup floating label="Target port">
-            <input class="form-control" type="number" bind:value={options.port} min="1" max="65535" step="1" />
+            <input
+                class="form-control"
+                type="number"
+                bind:value={options.port}
+                min="1"
+                max="65535"
+                step="1"
+            >
         </FormGroup>
     </div>
 </div>
@@ -47,6 +54,10 @@
 
 {#if options.auth.kind === 'Password'}
     <FormGroup floating label="Password">
-        <input class="form-control" type="password" bind:value={options.auth.password} />
+        <input
+            class="form-control"
+            type="password"
+            bind:value={options.auth.password}
+        >
     </FormGroup>
 {/if}

@@ -12,9 +12,9 @@
         userFilter: string
         passwordPlaceholder?: string
         passwordRequired?: boolean
-        usernameAttribute: LdapUsernameAttribute,
-        sshKeyAttribute: string,
-        uuidAttribute: string,
+        usernameAttribute: LdapUsernameAttribute
+        sshKeyAttribute: string
+        uuidAttribute: string
     }
 
     let {
@@ -34,8 +34,14 @@
     const usernameAttributeOptions = [
         { value: LdapUsernameAttribute.Cn, name: 'CN' },
         { value: LdapUsernameAttribute.Email, name: 'E-mail' },
-        { value: LdapUsernameAttribute.UserPrincipalName, name: 'User principal name' },
-        { value: LdapUsernameAttribute.SamAccountName, name: 'SAM account name' },
+        {
+            value: LdapUsernameAttribute.UserPrincipalName,
+            name: 'User principal name',
+        },
+        {
+            value: LdapUsernameAttribute.SamAccountName,
+            name: 'SAM account name',
+        },
         { value: LdapUsernameAttribute.Uid, name: 'UID' },
     ]
 </script>
@@ -59,10 +65,7 @@
 <div class="mt-4 row">
     <div class="col-md-6">
         <FormGroup floating label="Bind username / DN">
-            <Input
-                bind:value={bindDn}
-                required
-            />
+            <Input bind:value={bindDn} required />
         </FormGroup>
     </div>
     <div class="col-md-6">
@@ -80,17 +83,12 @@
 <div class="mt-4 row">
     <div class="col-md-6">
         <FormGroup floating label="User query filter">
-            <Input
-                bind:value={userFilter}
-            />
+            <Input bind:value={userFilter} />
         </FormGroup>
     </div>
     <div class="col-md-6">
         <FormGroup floating label="LDAP attribute to read usernames from">
-            <select
-                class="form-control"
-                bind:value={usernameAttribute}
-            >
+            <select class="form-control" bind:value={usernameAttribute}>
                 {#each usernameAttributeOptions as item (item.value)}
                     <option value={item.value}>{item.name}</option>
                 {/each}
@@ -100,7 +98,10 @@
             <Input bind:value={sshKeyAttribute} placeholder="sshPublicKey" />
         </FormGroup>
         <FormGroup floating label="LDAP object UUID attribute">
-            <Input bind:value={uuidAttribute} placeholder="Automatic (objectGUID / entryUUID)" />
+            <Input
+                bind:value={uuidAttribute}
+                placeholder="Automatic (objectGUID / entryUUID)"
+            />
         </FormGroup>
     </div>
 </div>

@@ -1,27 +1,26 @@
 <script lang="ts">
-import { api } from 'admin/lib/api'
-import AsyncButton from 'common/AsyncButton.svelte'
-import { replace } from 'svelte-spa-router'
-import { Form, FormGroup, Alert } from '@sveltestrap/sveltestrap'
-import { stringifyError } from 'common/errors'
+    import { api } from 'admin/lib/api'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import { replace } from 'svelte-spa-router'
+    import { Form, FormGroup, Alert } from '@sveltestrap/sveltestrap'
+    import { stringifyError } from 'common/errors'
 
-let error: string|null = $state(null)
-let name = $state('')
+    let error: string | null = $state(null)
+    let name = $state('')
 
-async function create () {
-    try {
-        const role = await api.createRole({
-            roleDataRequest: {
-                name,
-                isDefault: false,
-            },
-        })
-        replace(`/config/access-roles/${role.id}`)
-    } catch (err) {
-        error = await stringifyError(err)
+    async function create() {
+        try {
+            const role = await api.createRole({
+                roleDataRequest: {
+                    name,
+                    isDefault: false,
+                },
+            })
+            replace(`/config/access-roles/${role.id}`)
+        } catch (err) {
+            error = await stringifyError(err)
+        }
     }
-}
-
 </script>
 
 <div class="container-max-md">
@@ -37,13 +36,17 @@ async function create () {
         <Form>
             <FormGroup floating label="Name">
                 <!-- svelte-ignore a11y_autofocus -->
-                <input class="form-control" bind:value={name} required autofocus />
+                <input
+                    class="form-control"
+                    bind:value={name}
+                    required
+                    autofocus
+                >
             </FormGroup>
 
-            <AsyncButton
-                color="primary"
-                click={create}
-            >Create role</AsyncButton>
+            <AsyncButton color="primary" click={create}
+                >Create role</AsyncButton
+            >
         </Form>
     </div>
 </div>

@@ -1,6 +1,12 @@
 <script lang="ts">
     import Fa from 'svelte-fa'
-    import { faPlay, faPause, faExpand, faCircle, faFastForward } from '@fortawesome/free-solid-svg-icons'
+    import {
+        faPlay,
+        faPause,
+        faExpand,
+        faCircle,
+        faFastForward,
+    } from '@fortawesome/free-solid-svg-icons'
     import formatDuration from 'format-duration'
     import { Tooltip } from '@sveltestrap/sveltestrap'
 
@@ -29,7 +35,9 @@
     <button class="btn btn-link" on:click={onTogglePlaying}>
         <Fa icon={playing ? faPause : faPlay} fw />
     </button>
-    <pre class="timestamp">{ formatDuration(timestamp * 1000, { leading: true }) }</pre>
+    <pre
+        class="timestamp"
+    >{ formatDuration(timestamp * 1000, { leading: true }) }</pre>
     {#if isLive}
         {#if liveActive}
             <div class="live-indicator gap-2 m-2">
@@ -60,10 +68,13 @@
         <input
             class="w-100"
             type="range"
-            min="0" max="100" step="0.001"
+            min="0"
+            max="100"
+            step="0.001"
             style="background-size: {seekInputValue}% 100%;"
             bind:value={seekInputValue}
-            on:input={() => onSeek(seekInputValue)} />
+            on:input={() => onSeek(seekInputValue)}
+        >
     </div>
     <button class="btn btn-link" on:click={onToggleFullscreen}>
         <Fa icon={faExpand} fw />

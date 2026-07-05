@@ -6,10 +6,12 @@
 
     const routes = {
         '/targets/create/:kind': wrap({
-            asyncComponent: () => import('./targets/CreateTarget.svelte') as any,
+            asyncComponent: () =>
+                import('./targets/CreateTarget.svelte') as any,
         }),
         '/targets/create': wrap({
-            asyncComponent: () => import('./targets/ChooseTargetKind.svelte') as any,
+            asyncComponent: () =>
+                import('./targets/ChooseTargetKind.svelte') as any,
         }),
         '/targets/:id': wrap({
             asyncComponent: () => import('./targets/Target.svelte') as any,
@@ -60,22 +62,27 @@
             asyncComponent: () => import('./ldap/LdapServers.svelte') as any,
         }),
         '/ldap-servers/create': wrap({
-            asyncComponent: () => import('./ldap/CreateLdapServer.svelte') as any,
+            asyncComponent: () =>
+                import('./ldap/CreateLdapServer.svelte') as any,
         }),
         '/ldap-servers/:id': wrap({
             asyncComponent: () => import('./ldap/LdapServer.svelte') as any,
         }),
         '/ldap-servers/:id/users': wrap({
-            asyncComponent: () => import('./ldap/LdapUserBrowser.svelte') as any,
+            asyncComponent: () =>
+                import('./ldap/LdapUserBrowser.svelte') as any,
         }),
         '/target-groups/create': wrap({
-            asyncComponent: () => import('./target-groups/CreateTargetGroup.svelte') as any,
+            asyncComponent: () =>
+                import('./target-groups/CreateTargetGroup.svelte') as any,
         }),
         '/target-groups/:id': wrap({
-            asyncComponent: () => import('./target-groups/TargetGroup.svelte') as any,
+            asyncComponent: () =>
+                import('./target-groups/TargetGroup.svelte') as any,
         }),
         '/target-groups': wrap({
-            asyncComponent: () => import('./target-groups/TargetGroups.svelte') as any,
+            asyncComponent: () =>
+                import('./target-groups/TargetGroups.svelte') as any,
         }),
         '/login-protection': wrap({
             asyncComponent: () => import('./LoginProtection.svelte') as any,
@@ -84,7 +91,7 @@
 
     let sidebarMode = $state(false)
 
-    function onRouteLoading (detail: RouteDetail) {
+    function onRouteLoading(detail: RouteDetail) {
         sidebarMode = detail.route !== ''
     }
 </script>

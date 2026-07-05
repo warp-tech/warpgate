@@ -1,64 +1,70 @@
 <script lang="ts">
-import { api } from 'gateway/lib/api'
-import { onMount } from 'svelte'
-import logo from '../../public/assets/favicon.svg'
+    import { api } from 'gateway/lib/api'
+    import { onMount } from 'svelte'
+    import logo from '../../public/assets/favicon.svg'
 
-let ready = false
-let menuVisible = false
-let dragging = false
-let savedPosition = { x: 0.1, y: 0.8 }
-let position = { x: 0.1, y: 0.8 }
-let dragStartCoords = { x: 0, y: 0 }
-let externalHost: string | undefined = undefined
+    let ready = false
+    let menuVisible = false
+    let dragging = false
+    let savedPosition = { x: 0.1, y: 0.8 }
+    let position = { x: 0.1, y: 0.8 }
+    let dragStartCoords = { x: 0, y: 0 }
+    let externalHost: string | undefined = undefined
 
-if (localStorage.warpgateMenuLocation) {
-    position = JSON.parse(localStorage.warpgateMenuLocation)
-    savedPosition = position
-}
-
-onMount(async () => {
-    ready = true
-    const info = await api.getInfo()
-    externalHost = `${info.externalHosts?.http ?? info.externalHost}:${info.ports.http ?? 443}`
-})
-
-function drag (e: MouseEvent) {
-    if (!dragging) {
-        return
+    if (localStorage.warpgateMenuLocation) {
+        position = JSON.parse(localStorage.warpgateMenuLocation)
+        savedPosition = position
     }
-    const { x, y } = dragStartCoords
-    const { clientX, clientY } = e
-    const dx = clientX - x
-    const dy = clientY - y
-    position = {
-        x: Math.max(0, Math.min(1, savedPosition.x + dx / window.innerWidth)),
-        y: Math.max(0, Math.min(1, savedPosition.y + dy / window.innerHeight)),
+
+    onMount(async () => {
+        ready = true
+        const info = await api.getInfo()
+        externalHost = `${info.externalHosts?.http ?? info.externalHost}:${info.ports.http ?? 443}`
+    })
+
+    function drag(e: MouseEvent) {
+        if (!dragging) {
+            return
+        }
+        const { x, y } = dragStartCoords
+        const { clientX, clientY } = e
+        const dx = clientX - x
+        const dy = clientY - y
+        position = {
+            x: Math.max(
+                0,
+                Math.min(1, savedPosition.x + dx / window.innerWidth),
+            ),
+            y: Math.max(
+                0,
+                Math.min(1, savedPosition.y + dy / window.innerHeight),
+            ),
+        }
     }
-}
 
-function startDragging (e: MouseEvent) {
-    dragStartCoords = { x: e.clientX, y: e.clientY }
-    dragging = true
-}
-
-function stopDragging () {
-    dragging = false
-    savedPosition = position
-    localStorage.warpgateMenuLocation = JSON.stringify(position)
-}
-
-function goHome () {
-    if (externalHost) {
-        location.href = `https://${externalHost}/@warpgate`
-    } else {
-        location.href = '/@warpgate'
+    function startDragging(e: MouseEvent) {
+        dragStartCoords = { x: e.clientX, y: e.clientY }
+        dragging = true
     }
-}
 
-async function logout () {
-    await api.logout()
-    location.reload()
-}
+    function stopDragging() {
+        dragging = false
+        savedPosition = position
+        localStorage.warpgateMenuLocation = JSON.stringify(position)
+    }
+
+    function goHome() {
+        if (externalHost) {
+            location.href = `https://${externalHost}/@warpgate`
+        } else {
+            location.href = '/@warpgate'
+        }
+    }
+
+    async function logout() {
+        await api.logout()
+        location.reload()
+    }
 </script>
 
 <svelte:window
@@ -77,7 +83,8 @@ async function logout () {
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
     <img
         class="menu-toggle"
-        src={logo} alt="Warpgate"
+        src={logo}
+        alt="Warpgate"
         on:mouseup|stopPropagation|preventDefault={() => {
             if (!dragging) {
                 menuVisible = !menuVisible
