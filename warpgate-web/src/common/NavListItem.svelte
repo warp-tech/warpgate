@@ -1,9 +1,9 @@
 <script lang="ts">
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+    import type { Snippet } from 'svelte'
     import Fa from 'svelte-fa'
     import { link } from 'svelte-spa-router'
     import active from 'svelte-spa-router/active'
-    import type { Snippet } from 'svelte'
     import { classnames } from './helpers'
 
     interface Props {

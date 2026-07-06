@@ -1,12 +1,12 @@
 <script lang="ts">
-    import { api, RecordingKind, type Recording } from 'admin/lib/api'
-    import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
-    import DesktopRecordingPlayer from 'admin/player/DesktopRecordingPlayer.svelte'
     import { Alert } from '@sveltestrap/sveltestrap'
+    import { api, type Recording, RecordingKind } from 'admin/lib/api'
+    import DesktopRecordingPlayer from 'admin/player/DesktopRecordingPlayer.svelte'
+    import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
-    import KubernetesRecording from './KubernetesRecording.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import KubernetesRecording from './KubernetesRecording.svelte'
 
     interface Props {
         params: { id: string }
@@ -15,7 +15,9 @@
     let { params = { id: '' } }: Props = $props()
 
     let error: string | null = $state(null)
+
     import { adminPermissions } from './lib/store'
+
     let recording: Recording | null = $state(null)
 
     async function load() {

@@ -1,5 +1,6 @@
 <script lang="ts">
     import { timeAgo } from 'admin/lib/time'
+
     interface Props {
         date: Date
     }

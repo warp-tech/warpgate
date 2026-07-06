@@ -1,50 +1,50 @@
 <script lang="ts">
     import {
-        api,
-        type Role,
-        type User,
-        type UserRoleAssignmentResponse,
-        type AdminRole,
-    } from 'admin/lib/api'
-    import { serverInfo } from 'gateway/lib/store'
-    import AsyncButton from 'common/AsyncButton.svelte'
+        faCaretDown,
+        faLink,
+        faUnlink,
+        faWrench,
+    } from '@fortawesome/free-solid-svg-icons'
     import {
+        Alert,
+        Button,
         Dropdown,
         DropdownItem,
         DropdownMenu,
         DropdownToggle,
         FormGroup,
         Input,
-        Button,
         Modal,
         ModalBody,
         ModalFooter,
-        Alert,
-        Tooltip,
         ModalHeader,
+        Tooltip,
     } from '@sveltestrap/sveltestrap'
-    import { replace, link } from 'svelte-spa-router'
-    import { stringifyError } from 'common/errors'
-    import CredentialEditor from './CredentialEditor.svelte'
-    import Loadable from 'common/Loadable.svelte'
-    import RateLimitInput from 'common/RateLimitInput.svelte'
-    import AllowedIpRangesEditor from './AllowedIpRangesEditor.svelte'
-    import Fa from 'svelte-fa'
     import {
-        faCaretDown,
-        faLink,
-        faUnlink,
-        faWrench,
-    } from '@fortawesome/free-solid-svg-icons'
-    import RelativeDate from '../../RelativeDate.svelte'
-    import { onMount, onDestroy } from 'svelte'
-    import { adminPermissions } from 'admin/lib/store'
-    import AdminRolePermissionsBadge from '../AdminRolePermissionsBadge.svelte'
-    import { formatDistanceToNow } from 'date-fns'
-    import StickyActionBar from 'common/StickyActionBar.svelte'
-    import PageSummaryBar from 'common/PageSummaryBar.svelte'
-    import SectionedForm from 'admin/lib/SectionedForm.svelte'
+        type AdminRole,
+        api,
+        type Role,
+        type User,
+        type UserRoleAssignmentResponse,
+    } from 'admin/lib/api'
     import Section from 'admin/lib/Section.svelte'
+    import SectionedForm from 'admin/lib/SectionedForm.svelte'
+    import { adminPermissions } from 'admin/lib/store'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import { stringifyError } from 'common/errors'
+    import Loadable from 'common/Loadable.svelte'
+    import PageSummaryBar from 'common/PageSummaryBar.svelte'
+    import RateLimitInput from 'common/RateLimitInput.svelte'
+    import StickyActionBar from 'common/StickyActionBar.svelte'
+    import { formatDistanceToNow } from 'date-fns'
+    import { serverInfo } from 'gateway/lib/store'
+    import { onDestroy, onMount } from 'svelte'
+    import Fa from 'svelte-fa'
+    import { link, replace } from 'svelte-spa-router'
+    import RelativeDate from '../../RelativeDate.svelte'
+    import AdminRolePermissionsBadge from '../AdminRolePermissionsBadge.svelte'
+    import AllowedIpRangesEditor from './AllowedIpRangesEditor.svelte'
+    import CredentialEditor from './CredentialEditor.svelte'
 
     interface Props {
         params: { id: string }

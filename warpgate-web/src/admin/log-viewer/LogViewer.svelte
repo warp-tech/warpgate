@@ -1,23 +1,23 @@
 <script lang="ts">
-    import { api, type GetLogsRequest, type LogEntry } from 'admin/lib/api'
-    import { firstBy } from 'thenby'
-    import IntersectionObserver from 'svelte-intersection-observer'
-    import { link } from 'svelte-spa-router'
-    import { onDestroy, onMount, untrack } from 'svelte'
-    import { createVirtualizer } from '@tanstack/svelte-virtual'
-    import { stringifyError } from 'common/errors'
-    import { Alert, Tooltip } from '@sveltestrap/sveltestrap'
-    import UserBadge from './UserBadge.svelte'
-    import AccessRoleBadge from './AccessRoleBadge.svelte'
-    import AdminRoleBadge from './AdminRoleBadge.svelte'
-    import TargetBadge from './TargetBadge.svelte'
-    import AsyncButton from 'common/AsyncButton.svelte'
-    import Fa from 'svelte-fa'
     import {
         faDownload,
         faRotateRight,
     } from '@fortawesome/free-solid-svg-icons'
+    import { Alert, Tooltip } from '@sveltestrap/sveltestrap'
+    import { createVirtualizer } from '@tanstack/svelte-virtual'
+    import { api, type GetLogsRequest, type LogEntry } from 'admin/lib/api'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import { stringifyError } from 'common/errors'
     import { downloadBlob } from 'common/helpers'
+    import { onDestroy, onMount, untrack } from 'svelte'
+    import Fa from 'svelte-fa'
+    import IntersectionObserver from 'svelte-intersection-observer'
+    import { link } from 'svelte-spa-router'
+    import { firstBy } from 'thenby'
+    import AccessRoleBadge from './AccessRoleBadge.svelte'
+    import AdminRoleBadge from './AdminRoleBadge.svelte'
+    import TargetBadge from './TargetBadge.svelte'
+    import UserBadge from './UserBadge.svelte'
 
     interface Props {
         filters?: {
@@ -734,6 +734,7 @@
                         }}
                         >
                             <button
+                                type="button"
                                 bind:this={loadOlderButton}
                                 class="btn btn-secondary"
                                 onclick={() => loadOlder()}

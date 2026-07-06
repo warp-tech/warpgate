@@ -1,7 +1,7 @@
 <script lang="ts">
-    import { Input, Button } from '@sveltestrap/sveltestrap'
-    import Fa from 'svelte-fa'
     import { faPlus, faTrash } from '@fortawesome/free-solid-svg-icons'
+    import { Button, Input } from '@sveltestrap/sveltestrap'
+    import Fa from 'svelte-fa'
 
     interface Props {
         ranges: string[] | null | undefined

@@ -1,20 +1,20 @@
 <script lang="ts">
-    import { Observable, from, map } from 'rxjs'
-    import { type LdapServerResponse, type User, api } from 'admin/lib/api'
-    import { adminPermissions } from 'admin/lib/store'
-    import ItemList, {
-        type LoadOptions,
-        type PaginatedResponse,
-    } from 'common/ItemList.svelte'
-    import { link, push } from 'svelte-spa-router'
-    import { onMount } from 'svelte'
     import {
         Dropdown,
         DropdownItem,
         DropdownMenu,
         DropdownToggle,
     } from '@sveltestrap/sveltestrap'
+    import { api, type LdapServerResponse, type User } from 'admin/lib/api'
+    import { adminPermissions } from 'admin/lib/store'
+    import ItemList, {
+        type LoadOptions,
+        type PaginatedResponse,
+    } from 'common/ItemList.svelte'
     import { compare as naturalCompareFactory } from 'natural-orderby'
+    import { from, map, type Observable } from 'rxjs'
+    import { onMount } from 'svelte'
+    import { link, push } from 'svelte-spa-router'
 
     let ldapServers = $state<LdapServerResponse[]>([])
 

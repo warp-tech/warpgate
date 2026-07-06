@@ -1,18 +1,18 @@
 <script lang="ts">
-    import { push } from 'svelte-spa-router'
+    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import {
         api,
-        LdapUsernameAttribute,
-        stringifyError,
-        TlsMode,
         type LdapServerResponse,
+        LdapUsernameAttribute,
         type Tls,
+        TlsMode,
     } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
-    import LdapConnectionFields from './LdapConnectionFields.svelte'
+    import { push } from 'svelte-spa-router'
     import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
+    import LdapConnectionFields from './LdapConnectionFields.svelte'
 
     interface Props {
         params: { id: string }
@@ -89,7 +89,7 @@
                 tlsMode: tls.mode,
                 tlsVerify: tls.verify,
             })
-        } catch (e: any) {
+        } catch (e) {
             error = await stringifyError(e)
         }
     }
@@ -119,7 +119,7 @@
             })
             await load()
             bindPassword = ''
-        } catch (e: any) {
+        } catch (e) {
             error = await stringifyError(e)
         }
     }
@@ -132,7 +132,7 @@
         try {
             await api.deleteLdapServer({ id: params.id })
             push('/config/ldap-servers')
-        } catch (e: any) {
+        } catch (e) {
             error = await stringifyError(e)
         }
     }

@@ -1,7 +1,7 @@
 <script lang="ts">
-    import { TargetKind } from 'gateway/lib/api'
-    import NavListItem from 'common/NavListItem.svelte'
     import { Badge } from '@sveltestrap/sveltestrap'
+    import NavListItem from 'common/NavListItem.svelte'
+    import { TargetKind } from 'gateway/lib/api'
 
     const kinds: {
         name: string

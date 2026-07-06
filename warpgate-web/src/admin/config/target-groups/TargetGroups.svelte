@@ -1,12 +1,12 @@
 <script lang="ts">
-    import { Observable, from, map } from 'rxjs'
-    import { type TargetGroup, api } from 'admin/lib/api'
-    import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
-    import { link } from 'svelte-spa-router'
+    import { api, type TargetGroup } from 'admin/lib/api'
+    import { adminPermissions } from 'admin/lib/store'
     import EmptyState from 'common/EmptyState.svelte'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import { compare as naturalCompareFactory } from 'natural-orderby'
-    import { adminPermissions } from 'admin/lib/store'
+    import { from, map, type Observable } from 'rxjs'
+    import { link } from 'svelte-spa-router'
 
     function getTargetGroups(): Observable<PaginatedResponse<TargetGroup>> {
         return from(api.listTargetGroups()).pipe(

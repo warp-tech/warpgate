@@ -1,4 +1,8 @@
-import { DefaultApi, Configuration, ResponseError } from './api-client/dist'
+import {
+    Configuration,
+    DefaultApi,
+    type ResponseError,
+} from './api-client/dist'
 
 const configuration = new Configuration({
     basePath: '/@warpgate/admin/api',

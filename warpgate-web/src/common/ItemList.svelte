@@ -13,23 +13,23 @@
 </script>
 
 <script lang="ts" generics="T, G = unknown, GK = unknown">
-    import {
-        Subject,
-        switchMap,
-        map,
-        Observable,
-        distinctUntilChanged,
-        share,
-        combineLatest,
-        tap,
-        debounceTime,
-    } from 'rxjs'
-    import Pagination from './Pagination.svelte'
-    import { observe } from 'svelte-observable'
     import { Input } from '@sveltestrap/sveltestrap'
-    import DelayedSpinner from './DelayedSpinner.svelte'
+    import {
+        combineLatest,
+        debounceTime,
+        distinctUntilChanged,
+        map,
+        type Observable,
+        Subject,
+        share,
+        switchMap,
+        tap,
+    } from 'rxjs'
     import { onDestroy, onMount, type Snippet } from 'svelte'
+    import { observe } from 'svelte-observable'
+    import DelayedSpinner from './DelayedSpinner.svelte'
     import EmptyState from './EmptyState.svelte'
+    import Pagination from './Pagination.svelte'
 
     interface Props {
         page?: number

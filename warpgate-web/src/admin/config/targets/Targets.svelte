@@ -1,26 +1,26 @@
 <script lang="ts">
-    import { Observable, from, map } from 'rxjs'
-    import { compare as naturalCompareFactory } from 'natural-orderby'
-    import { type Target, type TargetGroup, api } from 'admin/lib/api'
-    import { adminPermissions } from '../../lib/store'
+    import {
+        Alert,
+        Dropdown,
+        DropdownItem,
+        DropdownMenu,
+        DropdownToggle,
+    } from '@sveltestrap/sveltestrap'
+    import { api, type Target, type TargetGroup } from 'admin/lib/api'
+    import EmptyState from 'common/EmptyState.svelte'
+    import { stringifyError } from 'common/errors'
+    import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
-    import { link } from 'svelte-spa-router'
     import { TargetKind } from 'gateway/lib/api'
-    import EmptyState from 'common/EmptyState.svelte'
+    import { compare as naturalCompareFactory } from 'natural-orderby'
+    import { from, map, type Observable } from 'rxjs'
     import { onMount } from 'svelte'
-    import {
-        Dropdown,
-        DropdownToggle,
-        DropdownMenu,
-        DropdownItem,
-        Alert,
-    } from '@sveltestrap/sveltestrap'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
-    import { stringifyError } from 'common/errors'
+    import { link } from 'svelte-spa-router'
     import { firstBy } from 'thenby'
+    import { adminPermissions } from '../../lib/store'
 
     let error: string | undefined = $state()
     let groups: TargetGroup[] = $state([])

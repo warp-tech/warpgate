@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { serverInfo } from 'gateway/lib/store'
     import NavListItem from 'common/NavListItem.svelte'
+    import { serverInfo } from 'gateway/lib/store'
 </script>
 
 <div class="page-summary-bar">

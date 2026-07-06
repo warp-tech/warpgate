@@ -1,13 +1,13 @@
 <script lang="ts">
-    import Fa from 'svelte-fa'
-    import { onDestroy, onMount } from 'svelte'
-    import { Terminal } from '@xterm/xterm'
-    import { SerializeAddon } from '@xterm/addon-serialize'
     import { faPlay } from '@fortawesome/free-solid-svg-icons'
     import { Spinner } from '@sveltestrap/sveltestrap'
+    import { SerializeAddon } from '@xterm/addon-serialize'
+    import { Terminal } from '@xterm/xterm'
     import type { Recording } from 'admin/lib/api'
-    import PlayerToolbar from './PlayerToolbar.svelte'
+    import { onDestroy, onMount } from 'svelte'
+    import Fa from 'svelte-fa'
     import { latestWins } from './latestWins'
+    import PlayerToolbar from './PlayerToolbar.svelte'
 
     export let recording: Recording
 
@@ -71,6 +71,7 @@
         '#fafaff',
     ]
     for (let i = 0; i < COLOR_NAMES.length; i++) {
+        // biome-ignore lint/style/noNonNullAssertion: x
         theme[COLOR_NAMES[i]!] = colors[i]!
     }
 
@@ -89,7 +90,7 @@
     }
 
     function isAsciiCastData(data: AsciiCastItem): data is AsciiCastData {
-        if (data instanceof Array) {
+        if (Array.isArray(data)) {
             return data[1] === 'o' || data[1] === 'e'
         } else {
             return false
@@ -144,7 +145,7 @@
         socket = new WebSocket(
             `wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/stream`,
         )
-        socket.addEventListener('message', function (event) {
+        socket.addEventListener('message', event => {
             let message = JSON.parse(event.data)
             if ('data' in message) {
                 let item: AsciiCastItem = message.data
@@ -211,7 +212,10 @@
     let metricsCanvas: HTMLCanvasElement
     function fitSize() {
         metricsCanvas ??= document.createElement('canvas')
-        const context = metricsCanvas.getContext('2d')!
+        const context = metricsCanvas.getContext('2d')
+        if (!context) {
+            throw new Error('Failed to get canvas context')
+        }
         context.font = `10px ${term.options.fontFamily ?? 'monospace'}`
         const metrics = context.measureText('abcdef')
 
@@ -251,6 +255,7 @@
         let lastSize = { cols: term.cols, rows: term.rows }
 
         for (let i = 0; i <= index; i++) {
+            // biome-ignore lint/style/noNonNullAssertion: x
             let event = events[i]!
             if ('cols' in event) {
                 lastSize = { cols: event.cols, rows: event.rows }
@@ -268,12 +273,13 @@
 
         for (let i = index; i < events.length; i++) {
             let shouldSnapshot = false
+            // biome-ignore lint/style/noNonNullAssertion: x
             let event = events[i]!
             if (event.time > time) {
                 break
             }
             if ('snapshot' in event) {
-                output += '\x1bc' + event.snapshot
+                output += `\x1bc${event.snapshot}`
             }
             if ('cols' in event) {
                 await flush()

@@ -20,7 +20,11 @@
 <div class="getting-started-help border-secondary">
     <div class="d-flex align-items-center mb-3">
         <h2 class="mb-0">getting started</h2>
-        <button class="btn btn-link ms-auto p-0 text-muted" onclick={dismiss}>
+        <button
+            type="button"
+            class="btn btn-link ms-auto p-0 text-muted"
+            onclick={dismiss}
+        >
             Dismiss
         </button>
     </div>

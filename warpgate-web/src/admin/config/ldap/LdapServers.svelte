@@ -1,15 +1,15 @@
 <script lang="ts">
-    import { Observable, from, map } from 'rxjs'
     import { api } from 'admin/lib/api'
+    import PermissionGate from 'admin/lib/PermissionGate.svelte'
+    import { adminPermissions } from 'admin/lib/store'
+    import EmptyState from 'common/EmptyState.svelte'
+    import InfoBox from 'common/InfoBox.svelte'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
+    import { from, map, type Observable } from 'rxjs'
     import { link } from 'svelte-spa-router'
-    import EmptyState from 'common/EmptyState.svelte'
-    import InfoBox from 'common/InfoBox.svelte'
-    import { adminPermissions } from 'admin/lib/store'
-    import PermissionGate from 'admin/lib/PermissionGate.svelte'
 
     interface LdapServer {
         id: string

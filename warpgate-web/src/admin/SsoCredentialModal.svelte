@@ -1,5 +1,6 @@
 <script lang="ts">
     import {
+        Alert,
         Button,
         Form,
         FormGroup,
@@ -7,12 +8,10 @@
         Modal,
         ModalBody,
         ModalFooter,
-        Alert,
     } from '@sveltestrap/sveltestrap'
-
-    import { type ExistingSsoCredential } from './lib/api'
-    import { api } from 'gateway/lib/api'
     import Loadable from 'common/Loadable.svelte'
+    import { api } from 'gateway/lib/api'
+    import type { ExistingSsoCredential } from './lib/api'
 
     interface Props {
         isOpen: boolean

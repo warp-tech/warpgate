@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { serverInfo } from 'gateway/lib/store'
     import { Alert } from '@sveltestrap/sveltestrap'
+    import { serverInfo } from 'gateway/lib/store'
     import CredentialManager from './CredentialManager.svelte'
 </script>
 

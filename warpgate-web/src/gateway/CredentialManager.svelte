@@ -1,30 +1,30 @@
 <script lang="ts">
     import {
-        api,
-        CredentialKind,
-        PasswordState,
-        type CredentialsState,
-        type ExistingOtpCredential,
-        type ExistingPublicKeyCredential,
-        type ExistingCertificateCredential,
-    } from 'gateway/lib/api'
-    import { serverInfo } from 'gateway/lib/store'
-    import { deleteCertificateKey } from 'gateway/lib/certificateStore'
-    import {
         faCertificate,
         faIdBadge,
         faKey,
         faKeyboard,
         faMobilePhone,
     } from '@fortawesome/free-solid-svg-icons'
-    import Fa from 'svelte-fa'
-    import PublicKeyCredentialModal from 'admin/PublicKeyCredentialModal.svelte'
+    import { Alert, Button, Tooltip } from '@sveltestrap/sveltestrap'
     import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
-    import CreatePasswordModal from 'admin/CreatePasswordModal.svelte'
     import CreateOtpModal from 'admin/CreateOtpModal.svelte'
+    import CreatePasswordModal from 'admin/CreatePasswordModal.svelte'
+    import PublicKeyCredentialModal from 'admin/PublicKeyCredentialModal.svelte'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import { Button, Alert, Tooltip } from '@sveltestrap/sveltestrap'
+    import {
+        api,
+        CredentialKind,
+        type CredentialsState,
+        type ExistingCertificateCredential,
+        type ExistingOtpCredential,
+        type ExistingPublicKeyCredential,
+        PasswordState,
+    } from 'gateway/lib/api'
+    import { deleteCertificateKey } from 'gateway/lib/certificateStore'
+    import { serverInfo } from 'gateway/lib/store'
+    import Fa from 'svelte-fa'
 
     let creds: CredentialsState | undefined = $state()
 

@@ -1,19 +1,19 @@
 <script lang="ts">
-    import { onDestroy, onMount } from 'svelte'
     import { Button } from '@sveltestrap/sveltestrap'
-    import { api, ResponseError, type WebDesktopSessionInfo } from './lib/api'
-    import InfoBox from 'common/InfoBox.svelte'
-    import {
-        ReconnectingWebSocket,
-        ConnectionState,
-    } from './lib/ReconnectingWebSocket.svelte'
-    import { loadTheme } from 'theme'
     import {
         applyDesktopFrame,
-        isIncrementalFrame,
         type DesktopFrame,
+        isIncrementalFrame,
         type Rect,
     } from 'common/desktopCanvas'
+    import InfoBox from 'common/InfoBox.svelte'
+    import { onDestroy, onMount } from 'svelte'
+    import { loadTheme } from 'theme'
+    import { api, ResponseError, type WebDesktopSessionInfo } from './lib/api'
+    import {
+        ConnectionState,
+        ReconnectingWebSocket,
+    } from './lib/ReconnectingWebSocket.svelte'
 
     interface Props {
         params: { sessionId: string }
@@ -231,13 +231,14 @@
             CapsLock: 0xffe5,
             ' ': 0x0020,
         }
-        if (e.key in special) {
-            return special[e.key]!
+        const specialKey = special[e.key]
+        if (specialKey) {
+            return specialKey
         }
         if (
             e.key.startsWith('F') &&
             e.key.length <= 3 &&
-            !isNaN(Number(e.key.slice(1)))
+            !Number.isNaN(Number(e.key.slice(1)))
         ) {
             return 0xffbe + (Number(e.key.slice(1)) - 1) // F1 = 0xffbe
         }

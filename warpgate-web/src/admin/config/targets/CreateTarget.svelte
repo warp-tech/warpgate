@@ -1,15 +1,15 @@
 <script lang="ts">
+    import { Alert, Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import {
         api,
-        type TargetOptions,
         type TargetGroup,
+        type TargetOptions,
         TlsMode,
     } from 'admin/lib/api'
-    import { replace } from 'svelte-spa-router'
-    import { Button, Form, FormGroup, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import { onMount } from 'svelte'
     import { TargetKind } from 'gateway/lib/api'
+    import { onMount } from 'svelte'
+    import { replace } from 'svelte-spa-router'
     import { adminPermissions } from '../../lib/store'
 
     interface Props {

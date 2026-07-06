@@ -3,12 +3,12 @@
         faAngleLeft,
         faAngleRight,
     } from '@fortawesome/free-solid-svg-icons'
-    import Fa from 'svelte-fa'
     import {
         Pagination,
         PaginationItem,
         PaginationLink,
     } from '@sveltestrap/sveltestrap'
+    import Fa from 'svelte-fa'
 
     interface Props {
         page?: number

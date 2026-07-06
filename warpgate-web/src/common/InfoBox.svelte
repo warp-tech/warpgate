@@ -4,8 +4,8 @@
         faTriangleExclamation,
         type IconDefinition,
     } from '@fortawesome/free-solid-svg-icons'
-    import Fa from 'svelte-fa'
     import type { Snippet } from 'svelte'
+    import Fa from 'svelte-fa'
 
     interface Props {
         class?: string

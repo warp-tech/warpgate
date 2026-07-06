@@ -1,19 +1,23 @@
 <script lang="ts">
-    import { api, BootstrapThemeColor, type TargetGroup } from 'admin/lib/api'
     import {
+        Alert,
         Button,
         FormGroup,
         Input,
         Label,
-        Alert,
     } from '@sveltestrap/sveltestrap'
-    import { stringifyError } from 'common/errors'
-    import { VALID_CHOICES } from './common'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import {
+        api,
+        type BootstrapThemeColor,
+        type TargetGroup,
+    } from 'admin/lib/api'
+    import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import { stringifyError } from 'common/errors'
+    import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { replace } from 'svelte-spa-router'
-    import { adminPermissions } from 'admin/lib/store'
+    import { VALID_CHOICES } from './common'
 
     interface Props {
         params: { id: string }

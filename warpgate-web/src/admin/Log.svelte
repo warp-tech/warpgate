@@ -1,7 +1,7 @@
 <script lang="ts">
-    import LogViewer from './log-viewer/LogViewer.svelte'
     import { Input } from '@sveltestrap/sveltestrap'
     import { autosave } from 'common/autosave'
+    import LogViewer from './log-viewer/LogViewer.svelte'
 
     interface Props {
         params?: {

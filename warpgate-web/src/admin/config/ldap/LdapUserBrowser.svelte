@@ -1,10 +1,15 @@
 <script lang="ts">
-    import { api, stringifyError } from 'admin/lib/api'
-    import Loadable from 'common/Loadable.svelte'
-    import AsyncButton from 'common/AsyncButton.svelte'
-    import { Alert } from '@sveltestrap/sveltestrap'
-    import Fa from 'svelte-fa'
     import { faRefresh } from '@fortawesome/free-solid-svg-icons'
+    import { Alert } from '@sveltestrap/sveltestrap'
+    import {
+        api,
+        type LdapServerResponse,
+        type LdapUserResponse,
+    } from 'admin/lib/api'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import { stringifyError } from 'common/errors'
+    import Loadable from 'common/Loadable.svelte'
+    import Fa from 'svelte-fa'
 
     interface Props {
         params: { id: string }
@@ -12,8 +17,8 @@
 
     let { params }: Props = $props()
 
-    let server = $state<any>(null)
-    let users = $state<any[]>([])
+    let server = $state<LdapServerResponse | null>(null)
+    let users = $state<LdapUserResponse[]>([])
     let error = $state<string | null>(null)
     let success = $state<string | null>(null)
     let searchTerm = $state('')
@@ -29,7 +34,7 @@
         error = null
         try {
             users = await api.getLdapUsers({ id: params.id })
-        } catch (e: any) {
+        } catch (e) {
             error = await stringifyError(e)
         }
     }
@@ -64,7 +69,7 @@
             await loadUsers()
             success = `Successfully imported ${selectedUserDns.length} users.`
             selectedUserDns = []
-        } catch (e: any) {
+        } catch (e) {
             error = await stringifyError(e)
         }
     }

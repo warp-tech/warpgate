@@ -1,5 +1,5 @@
 import { BehaviorSubject } from 'rxjs'
-import { get, writable, type Writable } from 'svelte/store'
+import { get, type Writable, writable } from 'svelte/store'
 
 export function autosave<T>(
     key: string,

@@ -1,8 +1,8 @@
 import {
     api,
-    TlsMode,
     type TestLdapServerRequest,
     type TestLdapServerResponse,
+    TlsMode,
 } from 'admin/lib/api'
 
 export async function testLdapConnection(

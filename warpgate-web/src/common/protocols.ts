@@ -1,6 +1,6 @@
-import { shellEscape } from 'gateway/lib/shellEscape'
-import type { Info } from 'gateway/lib/api'
 import { CredentialKind } from 'admin/lib/api'
+import type { Info } from 'gateway/lib/api'
+import { shellEscape } from 'gateway/lib/shellEscape'
 
 export interface ConnectionOptions {
     targetName?: string

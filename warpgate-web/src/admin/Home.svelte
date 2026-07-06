@@ -1,31 +1,31 @@
 <script lang="ts">
-    import Fa from 'svelte-fa'
     import { faCircleDot as iconActive } from '@fortawesome/free-regular-svg-icons'
-    import { onDestroy } from 'svelte'
-    import { link } from 'svelte-spa-router'
+    import { Input } from '@sveltestrap/sveltestrap'
     import { api, type SessionSnapshot } from 'admin/lib/api'
-    import { formatDistance } from 'date-fns'
-    import {
-        timer,
-        Observable,
-        switchMap,
-        from,
-        combineLatest,
-        fromEvent,
-        merge,
-    } from 'rxjs'
-    import RelativeDate from './RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import { autosave } from 'common/autosave'
+    import GettingStarted from 'common/GettingStarted.svelte'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
-    import { Input } from '@sveltestrap/sveltestrap'
-    import { autosave } from 'common/autosave'
-    import GettingStarted from 'common/GettingStarted.svelte'
+    import { formatDistance } from 'date-fns'
     import { serverInfo } from 'gateway/lib/store'
-    import { adminPermissions } from './lib/store'
+    import {
+        combineLatest,
+        from,
+        fromEvent,
+        merge,
+        type Observable,
+        switchMap,
+        timer,
+    } from 'rxjs'
+    import { onDestroy } from 'svelte'
+    import Fa from 'svelte-fa'
+    import { link } from 'svelte-spa-router'
     import PermissionGate from './lib/PermissionGate.svelte'
+    import { adminPermissions } from './lib/store'
+    import RelativeDate from './RelativeDate.svelte'
 
     let [showActiveOnly, showActiveOnly$] = autosave(
         'sessions-list:show-active-only',

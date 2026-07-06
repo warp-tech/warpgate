@@ -3,9 +3,9 @@
         faFileContract,
         faFlaskVial,
     } from '@fortawesome/free-solid-svg-icons'
+    import InfoBox from 'common/InfoBox.svelte'
     import Fa from 'svelte-fa'
     import ApiTokenManager from './ApiTokenManager.svelte'
-    import InfoBox from 'common/InfoBox.svelte'
 </script>
 
 <ApiTokenManager />

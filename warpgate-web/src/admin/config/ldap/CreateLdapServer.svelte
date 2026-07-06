@@ -1,17 +1,17 @@
 <script lang="ts">
-    import { FormGroup, Input, Alert } from '@sveltestrap/sveltestrap'
-    import { push } from 'svelte-spa-router'
-    import { reloadServerInfo } from 'gateway/lib/store'
+    import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import {
         api,
         LdapUsernameAttribute,
-        stringifyError,
-        TlsMode,
         type Tls,
+        TlsMode,
     } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import LdapConnectionFields from './LdapConnectionFields.svelte'
+    import { stringifyError } from 'common/errors'
+    import { reloadServerInfo } from 'gateway/lib/store'
+    import { push } from 'svelte-spa-router'
     import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
+    import LdapConnectionFields from './LdapConnectionFields.svelte'
 
     let name = $state('')
     let host = $state('')
@@ -55,7 +55,7 @@
                 tlsMode: tls.mode,
                 tlsVerify: tls.verify,
             })
-        } catch (e: any) {
+        } catch (e) {
             error = await stringifyError(e)
         }
     }
@@ -85,7 +85,7 @@
 
             reloadServerInfo() // update hasLdap flag
             push(`/config/ldap-servers/${result.id}`)
-        } catch (e: any) {
+        } catch (e) {
             error = await stringifyError(e)
         }
     }

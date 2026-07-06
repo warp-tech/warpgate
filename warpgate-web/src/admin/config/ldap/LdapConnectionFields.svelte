@@ -1,7 +1,7 @@
 <script lang="ts">
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { LdapUsernameAttribute, type Tls } from 'admin/lib/api'
     import TlsConfiguration from 'admin/TlsConfiguration.svelte'
-    import { type Tls, LdapUsernameAttribute } from 'admin/lib/api'
 
     interface Props {
         host: string

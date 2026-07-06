@@ -1,6 +1,6 @@
 <script lang="ts">
     import { FormGroup } from '@sveltestrap/sveltestrap'
-    import { type TargetOptionsTargetVncOptions } from 'admin/lib/api'
+    import type { TargetOptionsTargetVncOptions } from 'admin/lib/api'
 
     interface Props {
         options: TargetOptionsTargetVncOptions

@@ -1,34 +1,34 @@
 <script lang="ts">
     import {
-        api,
-        type Ticket,
-        TicketRequestStatus,
-        type TicketRequest,
-    } from 'admin/lib/api'
-    import { link } from 'svelte-spa-router'
-    import RelativeDate from '../RelativeDate.svelte'
-    import Fa from 'svelte-fa'
-    import {
-        faCalendarXmark,
         faCalendarCheck,
-        faSquareXmark,
+        faCalendarXmark,
         faSquareCheck,
+        faSquareXmark,
     } from '@fortawesome/free-solid-svg-icons'
-    import { stringifyError } from 'common/errors'
-    import EmptyState from 'common/EmptyState.svelte'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import {
+        Alert,
         Button,
         FormGroup,
         Modal,
         ModalBody,
         ModalFooter,
-        Alert,
     } from '@sveltestrap/sveltestrap'
+    import {
+        api,
+        type Ticket,
+        type TicketRequest,
+        TicketRequestStatus,
+    } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
-    import { statusIcon, statusColor } from 'common/ticketRequestStatus'
+    import AsyncButton from 'common/AsyncButton.svelte'
     import { formatDurationAsHumantime } from 'common/duration'
+    import EmptyState from 'common/EmptyState.svelte'
+    import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
+    import { statusColor, statusIcon } from 'common/ticketRequestStatus'
+    import Fa from 'svelte-fa'
+    import { link } from 'svelte-spa-router'
+    import RelativeDate from '../RelativeDate.svelte'
 
     let error: string | undefined = $state()
     let success: string | undefined = $state()
@@ -88,7 +88,7 @@
         try {
             await api.deleteTicket({ id: ticket.id })
             await loadTickets()
-        } catch (err: any) {
+        } catch (err) {
             error = await stringifyError(err)
         }
     }
@@ -102,7 +102,7 @@
             const targetName = targetMap.get(result.targetId) ?? result.targetId
             success = `Approved ticket request for ${userName} to ${targetName}. The user can now activate it.`
             await loadRequests()
-        } catch (err: any) {
+        } catch (err) {
             error = await stringifyError(err)
             throw err
         }
@@ -125,7 +125,7 @@
             denyModalRequest = undefined
             denyReason = ''
             await loadRequests()
-        } catch (err: any) {
+        } catch (err) {
             denyError = await stringifyError(err)
             throw err
         }

@@ -1,9 +1,9 @@
 <script lang="ts">
+    import { Alert, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import { api } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import { replace } from 'svelte-spa-router'
-    import { Form, FormGroup, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
+    import { replace } from 'svelte-spa-router'
 
     let error: string | null = $state(null)
     let name = $state('')

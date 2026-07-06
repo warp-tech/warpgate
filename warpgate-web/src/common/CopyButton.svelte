@@ -1,8 +1,9 @@
 <script lang="ts">
     import { faCheck, faCopy } from '@fortawesome/free-solid-svg-icons'
-    import Fa from 'svelte-fa'
     import { Button, type Color } from '@sveltestrap/sveltestrap'
     import copyTextToClipboard from 'copy-text-to-clipboard'
+    import type { Snippet } from 'svelte'
+    import Fa from 'svelte-fa'
 
     interface Props {
         text: string
@@ -12,7 +13,7 @@
         color?: Color | 'link'
         class?: string
         label?: string
-        children?: () => any
+        children?: Snippet
     }
 
     // eslint-disable-next-line svelte/no-unused-props

@@ -1,38 +1,38 @@
 <script lang="ts">
     import {
-        api,
-        type Role,
-        type Target,
-        type TargetGroup,
-    } from 'admin/lib/api'
-    import { adminPermissions } from 'admin/lib/store'
-    import AsyncButton from 'common/AsyncButton.svelte'
-    import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
-    import { TargetKind } from 'gateway/lib/api'
-    import { serverInfo } from 'gateway/lib/store'
-    import { replace } from 'svelte-spa-router'
-    import {
+        Alert,
         Button,
         FormGroup,
         Input,
         Modal,
         ModalBody,
         ModalFooter,
-        Alert,
         ModalHeader,
     } from '@sveltestrap/sveltestrap'
-    import TlsConfiguration from '../../TlsConfiguration.svelte'
+    import {
+        api,
+        type Role,
+        type Target,
+        type TargetGroup,
+    } from 'admin/lib/api'
+    import Section from 'admin/lib/Section.svelte'
+    import SectionedForm from 'admin/lib/SectionedForm.svelte'
+    import { adminPermissions } from 'admin/lib/store'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
+    import { humantimeDuration } from 'common/duration'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
-    import TargetSshOptions from './ssh/Options.svelte'
-    import TargetVncOptions from './vnc/Options.svelte'
-    import TargetRdpOptions from './rdp/Options.svelte'
-    import HttpHeadersEditor from './http/HeadersEditor.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
-    import SectionedForm from 'admin/lib/SectionedForm.svelte'
-    import Section from 'admin/lib/Section.svelte'
-    import { humantimeDuration } from 'common/duration'
+    import { TargetKind } from 'gateway/lib/api'
+    import { serverInfo } from 'gateway/lib/store'
+    import { replace } from 'svelte-spa-router'
+    import TlsConfiguration from '../../TlsConfiguration.svelte'
+    import HttpHeadersEditor from './http/HeadersEditor.svelte'
+    import TargetRdpOptions from './rdp/Options.svelte'
+    import TargetSshOptions from './ssh/Options.svelte'
+    import TargetVncOptions from './vnc/Options.svelte'
 
     interface Props {
         params: { id: string }
@@ -55,24 +55,27 @@
         if (target.options.kind === 'Postgres') {
             target.options.protocolVersion ??= '3.2'
         }
+        return target
     }
 
     async function loadRoles() {
+        if (!target) return []
         const allRoles = await api.getRoles()
-        const allowedRoles = await api.getTargetRoles(target!)
+        const allowedRoles = await api.getTargetRoles(target)
         roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
         return allRoles
     }
 
     async function update() {
+        if (!target) return
         try {
-            if (target!.options.kind === 'Http') {
-                target!.options.externalHost =
-                    target!.options.externalHost || undefined
+            if (target.options.kind === 'Http') {
+                target.options.externalHost =
+                    target.options.externalHost || undefined
             }
             target = await api.updateTarget({
                 id: params.id,
-                targetDataRequest: target!,
+                targetDataRequest: target,
             })
         } catch (err) {
             error = await stringifyError(err)
@@ -80,22 +83,24 @@
     }
 
     async function remove() {
-        if (confirm(`Delete target ${target!.name}?`)) {
-            await api.deleteTarget(target!)
+        if (!target) return
+        if (confirm(`Delete target ${target.name}?`)) {
+            await api.deleteTarget(target)
             replace('/config/targets')
         }
     }
 
     async function toggleRole(role: Role) {
+        if (!target) return
         if (roleIsAllowed[role.id]) {
             await api.deleteTargetRole({
-                id: target!.id,
+                id: target.id,
                 roleId: role.id,
             })
             roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
         } else {
             await api.addTargetRole({
-                id: target!.id,
+                id: target.id,
                 roleId: role.id,
             })
             roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
@@ -105,7 +110,7 @@
 
 <div class="container-max-md">
     <Loadable promise={init()}>
-        {#if target}
+        {#snippet children(target)}
             <Modal
                 isOpen={connectionsInstructionsModalOpen}
                 toggle={() => connectionsInstructionsModalOpen = false}
@@ -249,7 +254,7 @@
                             <FormGroup floating label="Bind to a domain">
                                 <Input
                                     type="text"
-                                    placeholder={'foo.' + $serverInfo.externalHost}
+                                    placeholder={`foo.${$serverInfo.externalHost}`}
                                     bind:value={target.options.externalHost}
                                 />
                             </FormGroup>
@@ -295,31 +300,36 @@
                                 </FormGroup>
                             </div>
                             <div class="col">
-                                <FormGroup floating label="Authenticate using">
-                                    <select
-                                        class="form-control"
-                                        bind:value={target.options.auth!.kind}
+                                {#if target.options.auth}
+                                    <FormGroup
+                                        floating
+                                        label="Authenticate using"
                                     >
-                                        <option value="Password">
-                                            Password
-                                        </option>
-                                        {#if $serverInfo?.runningOnEc2}
-                                            <option value="IamRole">
-                                                IAM Role (experimental)
+                                        <select
+                                            class="form-control"
+                                            bind:value={target.options.auth.kind}
+                                        >
+                                            <option value="Password">
+                                                Password
                                             </option>
-                                        {/if}
-                                    </select>
-                                </FormGroup>
+                                            {#if $serverInfo?.runningOnEc2}
+                                                <option value="IamRole">
+                                                    IAM Role (experimental)
+                                                </option>
+                                            {/if}
+                                        </select>
+                                    </FormGroup>
+                                {/if}
                             </div>
                         </div>
 
-                        {#if target.options.auth!.kind === 'Password'}
+                        {#if target.options.auth?.kind === 'Password'}
                             <FormGroup floating label="Password">
                                 <input
                                     class="form-control"
                                     type="password"
                                     autocomplete="off"
-                                    bind:value={target.options.auth!.password}
+                                    bind:value={target.options.auth.password}
                                 >
                             </FormGroup>
                         {/if}
@@ -543,9 +553,9 @@
                                 class="mb-0 me-2"
                                 type="switch"
                                 on:change={() => {
-                            target!.ticketRequestsDisabled = !target!.ticketRequestsDisabled
-                            update()
-                        }}
+                                    target.ticketRequestsDisabled = !target.ticketRequestsDisabled
+                                    update()
+                                }}
                                 checked={target.ticketRequestsDisabled}
                             />
                             <div>Disable ticket requests for this target</div>
@@ -560,9 +570,9 @@
                                 class="mb-0 me-2"
                                 type="switch"
                                 on:change={() => {
-                            target!.ticketRequireApproval = !target!.ticketRequireApproval
-                            update()
-                        }}
+                                    target.ticketRequireApproval = !target.ticketRequireApproval
+                                    update()
+                                }}
                                 checked={target.ticketRequireApproval}
                             />
                             <div>Always require admin approval</div>
@@ -576,7 +586,7 @@
                                 class="form-control"
                                 type="text"
                                 placeholder="Use global default"
-                                use:humantimeDuration={{ seconds: target.ticketMaxDurationSeconds, onChange: v => { target!.ticketMaxDurationSeconds = v; update() } }}
+                                use:humantimeDuration={{ seconds: target.ticketMaxDurationSeconds, onChange: v => { target.ticketMaxDurationSeconds = v; update() } }}
                             >
                             <small class="form-text text-muted">
                                 Examples: 30m, 8h, 1d. Leave empty to use the
@@ -591,10 +601,10 @@
                                 class="form-control"
                                 value={target.ticketMaxUses ?? ''}
                                 onchange={e => {
-                            const v = parseInt(e.currentTarget.value)
-                            target!.ticketMaxUses = isNaN(v) ? undefined : v
-                            update()
-                        }}
+                                    const v = parseInt(e.currentTarget.value, 10)
+                                    target.ticketMaxUses = Number.isNaN(v) ? undefined : v
+                                    update()
+                                }}
                             >
                             <small class="form-text text-muted">
                                 Leave empty to use the global default.
@@ -603,7 +613,7 @@
                     </Section>
                 {/if}
             </SectionedForm>
-        {/if}
+        {/snippet}
     </Loadable>
 
     {#if error}

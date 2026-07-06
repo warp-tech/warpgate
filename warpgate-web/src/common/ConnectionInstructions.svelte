@@ -1,46 +1,46 @@
 <script lang="ts">
+    import { faCertificate, faPlus } from '@fortawesome/free-solid-svg-icons'
     import {
+        Alert,
+        Badge,
         Button,
         ListGroup,
         ListGroupItem,
-        Alert,
-        Badge,
         Tooltip,
     } from '@sveltestrap/sveltestrap'
-    import {
-        api,
-        TargetKind,
-        type ExistingCertificateCredential,
-        type SsoKubernetesConfigDescription,
-    } from 'gateway/lib/api'
-    import { serverInfo } from 'gateway/lib/store'
-    import {
-        makeExampleSSHCommand,
-        makeCommonSelectorUsername,
-        makeExampleMySQLCommand,
-        makeExampleMySQLURI,
-        makeMySQLUsername,
-        makeTargetURL,
-        makeExamplePostgreSQLCommand,
-        makePostgreSQLUsername,
-        makeExamplePostgreSQLURI,
-        makeKubeconfig,
-        makeExampleKubectlCommand,
-        makeExampleSCPCommand,
-        protocolHost,
-        protocolPortString,
-        makeOidcKubeconfig,
-    } from 'common/protocols'
-    import {
-        getCertificateKey,
-        getAllCertificateKeys,
-    } from 'gateway/lib/certificateStore'
     import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
+    import {
+        makeCommonSelectorUsername,
+        makeExampleKubectlCommand,
+        makeExampleMySQLCommand,
+        makeExampleMySQLURI,
+        makeExamplePostgreSQLCommand,
+        makeExamplePostgreSQLURI,
+        makeExampleSCPCommand,
+        makeExampleSSHCommand,
+        makeKubeconfig,
+        makeMySQLUsername,
+        makeOidcKubeconfig,
+        makePostgreSQLUsername,
+        makeTargetURL,
+        protocolHost,
+        protocolPortString,
+    } from 'common/protocols'
+    import {
+        api,
+        type ExistingCertificateCredential,
+        type SsoKubernetesConfigDescription,
+        TargetKind,
+    } from 'gateway/lib/api'
+    import {
+        getAllCertificateKeys,
+        getCertificateKey,
+    } from 'gateway/lib/certificateStore'
+    import { serverInfo } from 'gateway/lib/store'
+    import Fa from 'svelte-fa'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import InfoBox from './InfoBox.svelte'
-    import { faCertificate, faPlus } from '@fortawesome/free-solid-svg-icons'
-    import Fa from 'svelte-fa'
 
     interface Props {
         targetName?: string
@@ -281,6 +281,7 @@
         <ul class="nav nav-pills mb-3">
             <li class="nav-item">
                 <button
+                    type="button"
                     class="nav-link {kubeconfigMode === 'oidc' ? 'active' : ''}"
                     onclick={() => kubeconfigMode = 'oidc'}
                 >
@@ -289,6 +290,7 @@
             </li>
             <li class="nav-item">
                 <button
+                    type="button"
                     class="nav-link {kubeconfigMode === 'certificate' ? 'active' : ''}"
                     onclick={() => kubeconfigMode = 'certificate'}
                 >

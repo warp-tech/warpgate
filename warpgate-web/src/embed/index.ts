@@ -1,8 +1,6 @@
 import { api } from 'gateway/lib/api'
 import EmbeddedUI from './EmbeddedUI.svelte'
 
-export {}
-
 // When proxying a non-secure HTTP target through Warpgate, if
 // its internal JS tries to establish a WebSocket connection
 // to a ws:// URI, it will fail due to browser restrictions

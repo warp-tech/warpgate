@@ -9,7 +9,7 @@
     let savedPosition = { x: 0.1, y: 0.8 }
     let position = { x: 0.1, y: 0.8 }
     let dragStartCoords = { x: 0, y: 0 }
-    let externalHost: string | undefined = undefined
+    let externalHost: string | undefined
 
     if (localStorage.warpgateMenuLocation) {
         position = JSON.parse(localStorage.warpgateMenuLocation)
@@ -102,8 +102,8 @@
 
     {#if menuVisible}
         <div class="menu">
-            <button on:mouseup={goHome}>Home</button>
-            <button on:mouseup={logout}>Log out</button>
+            <button type="button" on:mouseup={goHome}>Home</button>
+            <button type="button" on:mouseup={logout}>Log out</button>
         </div>
     {/if}
 </div>

@@ -1,10 +1,10 @@
 <script lang="ts">
+    import { Alert, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import { api } from 'admin/lib/api'
-    import { adminPermissions } from '../lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import { replace } from 'svelte-spa-router'
-    import { Form, FormGroup, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
+    import { replace } from 'svelte-spa-router'
+    import { adminPermissions } from '../lib/store'
 
     let error: string | null = $state(null)
     let username = $state('')

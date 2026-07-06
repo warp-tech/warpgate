@@ -1,34 +1,34 @@
 <script lang="ts">
+    import { faUser } from '@fortawesome/free-regular-svg-icons'
+    import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+    import { Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
     import {
         api,
-        type SessionSnapshot,
         type Recording,
-        type TargetSSHOptions,
+        type SessionSnapshot,
         type TargetHTTPOptions,
+        type TargetKubernetesOptions,
         type TargetMySqlOptions,
         type TargetPostgresOptions,
-        type TargetKubernetesOptions,
-        type TargetVncOptions,
         type TargetRdpOptions,
+        type TargetSSHOptions,
+        type TargetVncOptions,
     } from 'admin/lib/api'
     import { timeAgo } from 'admin/lib/time'
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
-    import { formatDistance, formatDistanceToNow } from 'date-fns'
-    import { onDestroy } from 'svelte'
-    import { link } from 'svelte-spa-router'
-    import LogViewer from './log-viewer/LogViewer.svelte'
-    import RelativeDate from './RelativeDate.svelte'
     import { stringifyError } from 'common/errors'
-    import { Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
-    import Fa from 'svelte-fa'
-    import { faUser } from '@fortawesome/free-regular-svg-icons'
-    import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import { PROTOCOL_PROPERTIES } from 'common/protocols'
     import {
         recordingMetadataToFieldSet,
         recordingTypeLabel,
     } from 'common/recordings'
+    import { formatDistance, formatDistanceToNow } from 'date-fns'
+    import { onDestroy } from 'svelte'
+    import Fa from 'svelte-fa'
+    import { link } from 'svelte-spa-router'
+    import LogViewer from './log-viewer/LogViewer.svelte'
+    import RelativeDate from './RelativeDate.svelte'
 
     interface Props {
         params: { id: string }
@@ -46,7 +46,8 @@
     }
 
     async function close() {
-        api.closeSession(session!)
+        if (!session) return
+        api.closeSession(session)
     }
 
     function getTargetDescription() {

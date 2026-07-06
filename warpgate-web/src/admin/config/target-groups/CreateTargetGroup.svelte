@@ -1,11 +1,11 @@
 <script lang="ts">
+    import { Alert, FormGroup, Input, Label } from '@sveltestrap/sveltestrap'
     import { api, type BootstrapThemeColor } from 'admin/lib/api'
-    import { link, replace } from 'svelte-spa-router'
-    import { FormGroup, Input, Label, Alert } from '@sveltestrap/sveltestrap'
+    import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import { link, replace } from 'svelte-spa-router'
     import { VALID_CHOICES } from './common'
-    import AsyncButton from 'common/AsyncButton.svelte'
 
     let name = $state('')
     let description = $state('')

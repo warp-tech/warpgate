@@ -1,7 +1,8 @@
 <script lang="ts">
     import { faCheck, faTimes } from '@fortawesome/free-solid-svg-icons'
+    import { Button, type Color, Spinner } from '@sveltestrap/sveltestrap'
+    import type { Snippet } from 'svelte'
     import Fa from 'svelte-fa'
-    import { Button, Spinner, type Color } from '@sveltestrap/sveltestrap'
 
     // svelte-ignore non_reactive_update
     enum State {
@@ -21,7 +22,7 @@
         class?: string
         size?: 'sm' | 'lg'
         id?: string
-        children: () => any
+        children?: Snippet
     }
 
     // eslint-disable-next-line svelte/no-unused-props
@@ -91,7 +92,9 @@
     disabled={disabled || st === State.Progress || st === State.ProgressWithSpinner}
 >
     {#if st === State.Normal || st === State.Progress}
-        {@render children?.()}
+        {#if children}
+            {@render children()}
+        {/if}
     {/if}
     <div class="overlay">
         {#if st === State.ProgressWithSpinner}

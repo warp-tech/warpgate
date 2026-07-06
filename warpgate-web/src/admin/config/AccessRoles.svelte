@@ -1,12 +1,12 @@
 <script lang="ts">
-    import { Observable, from, map } from 'rxjs'
-    import { type Role, api } from 'admin/lib/api'
+    import { api, type Role } from 'admin/lib/api'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
-    import { link } from 'svelte-spa-router'
     import { compare as naturalCompareFactory } from 'natural-orderby'
+    import { from, map, type Observable } from 'rxjs'
+    import { link } from 'svelte-spa-router'
     import { adminPermissions } from '../lib/store'
 
     function getRoles(

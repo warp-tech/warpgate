@@ -1,11 +1,11 @@
 <script lang="ts">
-    import { api, type AdminRole } from 'admin/lib/api'
-    import AsyncButton from 'common/AsyncButton.svelte'
-    import { replace } from 'svelte-spa-router'
-    import { FormGroup, Input, Alert } from '@sveltestrap/sveltestrap'
-    import { stringifyError } from 'common/errors'
-    import { emptyPermissions } from '../lib/store'
+    import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { type AdminRole, api } from 'admin/lib/api'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import { stringifyError } from 'common/errors'
+    import { replace } from 'svelte-spa-router'
+    import { emptyPermissions } from '../lib/store'
 
     let error: string | null = $state(null)
     let role: AdminRole = $state({

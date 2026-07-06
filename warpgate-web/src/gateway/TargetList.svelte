@@ -1,24 +1,9 @@
 <script lang="ts">
-    import { Observable, from, map } from 'rxjs'
-    import { compare as naturalCompareFactory } from 'natural-orderby'
     import {
         faArrowRight,
         faEllipsisV,
         faTerminal,
     } from '@fortawesome/free-solid-svg-icons'
-    import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
-    import ItemList, {
-        type LoadOptions,
-        type PaginatedResponse,
-    } from 'common/ItemList.svelte'
-    import {
-        api,
-        type TargetSnapshot,
-        TargetKind,
-        BootstrapThemeColor,
-        TargetClickAction,
-    } from 'gateway/lib/api'
-    import Fa from 'svelte-fa'
     import {
         Button,
         Dropdown,
@@ -29,12 +14,27 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
-    import { serverInfo } from './lib/store'
-    import { firstBy } from 'thenby'
-    import GettingStarted from 'common/GettingStarted.svelte'
+    import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import EmptyState from 'common/EmptyState.svelte'
+    import GettingStarted from 'common/GettingStarted.svelte'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import ItemList, {
+        type LoadOptions,
+        type PaginatedResponse,
+    } from 'common/ItemList.svelte'
     import { handleReauthError } from 'common/reauth'
+    import {
+        api,
+        BootstrapThemeColor,
+        TargetClickAction,
+        TargetKind,
+        type TargetSnapshot,
+    } from 'gateway/lib/api'
+    import { compare as naturalCompareFactory } from 'natural-orderby'
+    import { from, map, type Observable } from 'rxjs'
+    import Fa from 'svelte-fa'
+    import { firstBy } from 'thenby'
+    import { serverInfo } from './lib/store'
 
     let instructionsTarget: TargetSnapshot | undefined = $state()
 

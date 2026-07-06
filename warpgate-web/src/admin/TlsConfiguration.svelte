@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { type Tls, TlsMode } from 'admin/lib/api'
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { type Tls, TlsMode } from 'admin/lib/api'
 
     interface Props {
         value: Tls

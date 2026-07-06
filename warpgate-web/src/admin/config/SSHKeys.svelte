@@ -1,9 +1,9 @@
 <script lang="ts">
+    import { Alert, Button } from '@sveltestrap/sveltestrap'
     import { api, type SSHKey, type SSHKnownHost } from 'admin/lib/api'
-    import { stringifyError } from 'common/errors'
-    import { Button, Alert } from '@sveltestrap/sveltestrap'
     import { adminPermissions } from 'admin/lib/store'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
+    import { stringifyError } from 'common/errors'
 
     let error: string | undefined = $state()
     let knownHosts: SSHKnownHost[] | undefined = $state()

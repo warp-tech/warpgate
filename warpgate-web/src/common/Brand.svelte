@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onDestroy, onMount } from 'svelte'
-    import logo from '../../public/assets/brand.svg?raw'
-    import { currentThemeFile } from 'theme'
     import { get } from 'svelte/store'
+    import { currentThemeFile } from 'theme'
+    import logo from '../../public/assets/brand.svg?raw'
 
     let element: HTMLElement | undefined = $state()
 

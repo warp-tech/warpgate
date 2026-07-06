@@ -82,7 +82,9 @@
         ) as NodeListOf<HTMLElement>
         if (sectionElements) {
             sections = Array.from(sectionElements).map(el => ({
+                // biome-ignore lint/style/noNonNullAssertion: x
                 id: el.dataset.section!,
+                // biome-ignore lint/style/noNonNullAssertion: x
                 title: el.dataset.sectionTitle!,
                 element: el,
             }))

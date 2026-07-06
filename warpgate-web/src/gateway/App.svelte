@@ -1,18 +1,18 @@
 <script lang="ts">
-    import Router, { push, type RouteDetail } from 'svelte-spa-router'
-    import { wrap } from 'svelte-spa-router/wrap'
-    import { get } from 'svelte/store'
-    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
-    import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
-    import DelayedSpinner from 'common/DelayedSpinner.svelte'
+    import { faArrowRight, faCog } from '@fortawesome/free-solid-svg-icons'
+    import { Button } from '@sveltestrap/sveltestrap'
+    import { hasAdminAccess } from 'admin/lib/store'
     import AuthBar from 'common/AuthBar.svelte'
     import Brand from 'common/Brand.svelte'
+    import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import { api, type AuthStateResponseInternal } from './lib/api'
-    import { Button } from '@sveltestrap/sveltestrap'
+    import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
+    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
-    import { faArrowRight, faCog } from '@fortawesome/free-solid-svg-icons'
-    import { hasAdminAccess } from 'admin/lib/store'
+    import Router, { push, type RouteDetail } from 'svelte-spa-router'
+    import { wrap } from 'svelte-spa-router/wrap'
+    import { type AuthStateResponseInternal, api } from './lib/api'
 
     let redirecting = $state(false)
     let serverInfoPromise = reloadServerInfo()

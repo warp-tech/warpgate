@@ -1,18 +1,18 @@
 <script lang="ts">
+    import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
     import {
         api,
-        type User,
         type Target,
         type TicketAndSecret,
+        type User,
     } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
-    import { TargetKind } from 'gateway/lib/api'
-    import { link } from 'svelte-spa-router'
-    import { FormGroup, Alert } from '@sveltestrap/sveltestrap'
-    import { firstBy } from 'thenby'
     import { stringifyError } from 'common/errors'
     import { handleReauthError } from 'common/reauth'
+    import { TargetKind } from 'gateway/lib/api'
+    import { link } from 'svelte-spa-router'
+    import { firstBy } from 'thenby'
 
     let error: string | null = $state(null)
     let targets: Target[] | undefined = $state()

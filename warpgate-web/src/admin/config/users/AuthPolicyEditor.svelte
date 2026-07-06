@@ -4,9 +4,9 @@
         CredentialKind,
         type UserRequireCredentialsPolicy,
     } from 'admin/lib/api'
-    import type { ExistingCredential } from './CredentialEditor.svelte'
     import InfoBox from 'common/InfoBox.svelte'
     import { SvelteSet } from 'svelte/reactivity'
+    import type { ExistingCredential } from './CredentialEditor.svelte'
 
     type ProtocolID =
         | 'http'
@@ -122,19 +122,22 @@
         if (requirePassword && type === CredentialKind.Password) {
             return
         }
-        if (value[protocolId]!.includes(type)) {
-            value[protocolId] = value[protocolId]!.filter(
+        if (!value[protocolId]) {
+            return
+        }
+        if (value[protocolId].includes(type)) {
+            value[protocolId] = value[protocolId].filter(
                 (x: CredentialKind) => x !== type,
             )
         } else {
-            value[protocolId]!.push(type)
+            value[protocolId].push(type)
         }
     }
 </script>
 
 <div class="d-flex wrapper">
     <Input
-        id={'policy-editor-' + protocolId}
+        id={`policy-editor-${protocolId}`}
         type="switch"
         bind:checked={isAny}
         label="Any credential"
@@ -144,7 +147,7 @@
         {#each [...validCredentials] as type (type)}
             {#if possibleCredentials.has(type)}
                 <Input
-                    id={'policy-editor-' + protocolId + type}
+                    id={`policy-editor-${protocolId}${type}`}
                     type="switch"
                     checked={value[protocolId]?.includes(type) || (requirePassword && type === CredentialKind.Password)}
                     disabled={requirePassword && type === CredentialKind.Password}

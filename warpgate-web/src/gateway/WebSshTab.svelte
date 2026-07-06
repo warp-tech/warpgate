@@ -24,25 +24,32 @@
     }
 </script>
 <script lang="ts">
-    import { onDestroy } from 'svelte'
-    import { Terminal } from '@xterm/xterm'
-    import { FitAddon } from '@xterm/addon-fit'
-    import { Unicode11Addon } from '@xterm/addon-unicode11'
-    import * as Zmodem from 'zmodem.js'
     import {
         Button,
         Modal,
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
+    import { FitAddon } from '@xterm/addon-fit'
+    import { Unicode11Addon } from '@xterm/addon-unicode11'
+    import { Terminal } from '@xterm/xterm'
+    import { onDestroy } from 'svelte'
+    import * as Zmodem from 'zmodem.js'
 
     enum ZmodemFeedResult {
         Consumed = 'consumed',
         Passthrough = 'passthrough',
     }
 
+    interface ZmodemDetection {
+        deny: () => void
+        confirm: () => unknown
+    }
+
     class ZmodemSession {
+        // biome-ignore lint/suspicious/noExplicitAny: no types
         private sentry: any
+        // biome-ignore lint/suspicious/noExplicitAny: no types
         private session: any = null
         private active = false
 
@@ -62,7 +69,7 @@
                 sender: (octets: number[]) => {
                     this.sendToHost(Uint8Array.from(octets))
                 },
-                on_detect: (detection: any) => {
+                on_detect: (detection: ZmodemDetection) => {
                     this.handleDetect(detection)
                 },
                 on_retract: () => {
@@ -113,7 +120,7 @@
             })
         }
 
-        private async handleDetect(detection: any): Promise<void> {
+        private async handleDetect(detection: ZmodemDetection): Promise<void> {
             const accepted = await this.askConfirm()
             if (!accepted) {
                 detection.deny()
@@ -127,6 +134,7 @@
                 if (this.session.type === 'send') {
                     await this.sendFile()
                 } else {
+                    // biome-ignore lint/suspicious/noExplicitAny: no types
                     this.session.on('offer', (xfer: any) => {
                         this.receiveFile(xfer).catch(() => {
                             try {
@@ -153,6 +161,7 @@
             }
         }
 
+        // biome-ignore lint/suspicious/noExplicitAny: no types
         private async receiveFile(xfer: any): Promise<void> {
             const chunks: Uint8Array[] = []
             await xfer.accept({
@@ -196,7 +205,7 @@
             const xfer = await this.session.send_offer({
                 name: file.name,
                 size: file.size,
-                mode: parseInt('0666', 8),
+                mode: 0o0666,
                 mtime: Math.floor(file.lastModified / 1000),
             })
 

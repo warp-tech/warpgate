@@ -1,5 +1,4 @@
 <script lang="ts">
-    import Fa from 'svelte-fa'
     import {
         faCloudSun,
         faMoon,
@@ -7,6 +6,7 @@
     } from '@fortawesome/free-solid-svg-icons'
     import { Button, Tooltip } from '@sveltestrap/sveltestrap'
     import { get } from 'svelte/store'
+    import Fa from 'svelte-fa'
 
     import { currentTheme, setCurrentTheme } from 'theme'
 

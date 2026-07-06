@@ -58,6 +58,10 @@
             "includes": ["**/*.svelte"],
             "linter": {
                 "rules": {
+                    "a11y": {
+                        "noAutofocus": "off",
+                        "noLabelWithoutControl": "off"
+                    },
                     "style": {
                         "useConst": "off"
                     },

@@ -1,14 +1,14 @@
 <script lang="ts">
-    import { api, AnalyticsConsent } from 'admin/lib/api'
-    import { reloadServerInfo } from 'gateway/lib/store'
-    import AsyncButton from 'common/AsyncButton.svelte'
-    import AnalyticsPreview from './AnalyticsPreview.svelte'
     import {
         Modal,
         ModalBody,
         ModalFooter,
         ModalHeader,
     } from '@sveltestrap/sveltestrap'
+    import { AnalyticsConsent, api } from 'admin/lib/api'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import { reloadServerInfo } from 'gateway/lib/store'
+    import AnalyticsPreview from './AnalyticsPreview.svelte'
     import HelpText from './lib/HelpText.svelte'
 
     interface Props {

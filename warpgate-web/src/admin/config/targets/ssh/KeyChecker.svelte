@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { Alert } from '@sveltestrap/sveltestrap'
     import {
         api,
         type CheckSshHostKeyResponseBody,
@@ -6,12 +7,11 @@
         type TargetOptionsTargetSSHOptions,
     } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import { Alert } from '@sveltestrap/sveltestrap'
-    import KeyCheckerResult, {
-        Key,
-        type CheckResult,
-    } from './KeyCheckerResult.svelte'
     import { stringifyError } from 'common/errors'
+    import KeyCheckerResult, {
+        type CheckResult,
+        Key,
+    } from './KeyCheckerResult.svelte'
 
     type State =
         | {
@@ -81,6 +81,8 @@
         knownHosts: SSHKnownHost[] | null,
         remoteHostKey: CheckSshHostKeyResponseBody,
     ): CheckResult {
+        if (!remoteHostKey) throw new Error('Remote host key not loaded')
+
         const actualKey = new Key(
             remoteHostKey.remoteKeyType,
             remoteHostKey.remoteKeyBase64,
@@ -89,8 +91,8 @@
         if (
             knownHosts?.some(
                 k =>
-                    k.keyType === remoteHostKey!.remoteKeyType &&
-                    k.keyBase64 === remoteHostKey!.remoteKeyBase64,
+                    k.keyType === remoteHostKey.remoteKeyType &&
+                    k.keyBase64 === remoteHostKey.remoteKeyBase64,
             )
         ) {
             return {
@@ -138,13 +140,14 @@
     }
 
     async function trustRemoteKey() {
+        if (!remoteHostKey) return
         try {
             await api.addSshKnownHost({
                 addSshKnownHostRequest: {
                     host: options.host,
                     port: options.port,
-                    keyBase64: remoteHostKey!.remoteKeyBase64,
-                    keyType: remoteHostKey!.remoteKeyType,
+                    keyBase64: remoteHostKey.remoteKeyBase64,
+                    keyType: remoteHostKey.remoteKeyType,
                 },
             })
         } catch (err) {

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { faRefresh } from '@fortawesome/free-solid-svg-icons'
     import {
         Button,
         Form,
@@ -8,13 +9,11 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
-
-    import QRCode from 'qrcode'
-    import * as OTPAuth from 'otpauth'
     import base32Encode from 'base32-encode'
-    import Fa from 'svelte-fa'
-    import { faRefresh } from '@fortawesome/free-solid-svg-icons'
     import CopyButton from 'common/CopyButton.svelte'
+    import * as OTPAuth from 'otpauth'
+    import QRCode from 'qrcode'
+    import Fa from 'svelte-fa'
 
     interface Props {
         isOpen: boolean
@@ -25,7 +24,7 @@
     let { isOpen = $bindable(true), username, create }: Props = $props()
     let secretKey: number[] = $state([])
     let qrImage: HTMLImageElement | undefined = $state()
-    let totpUri: string | undefined = $state()
+    let totpUri = $state('')
     let totpValidationValue: string | undefined = $state()
     let field: HTMLInputElement | undefined = $state()
     let validated = $state(false)
@@ -136,7 +135,7 @@
                 <CopyButton
                     class="d-flex align-items-center"
                     color="secondary"
-                    text={totpUri!}
+                    text={totpUri}
                     label="Copy URI"
                 />
             </div>

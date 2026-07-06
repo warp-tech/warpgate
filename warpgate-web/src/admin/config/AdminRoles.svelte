@@ -1,11 +1,11 @@
 <script lang="ts">
-    import { api, type AdminRole } from 'admin/lib/api'
-    import { link } from 'svelte-spa-router'
     import { Alert } from '@sveltestrap/sveltestrap'
+    import { type AdminRole, api } from 'admin/lib/api'
+    import PermissionGate from 'admin/lib/PermissionGate.svelte'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import * as rx from 'rxjs'
+    import { link } from 'svelte-spa-router'
     import { adminPermissions } from '../lib/store'
-    import PermissionGate from 'admin/lib/PermissionGate.svelte'
     import AdminRolePermissionsBadge from './AdminRolePermissionsBadge.svelte'
 
     function loadRoles(): rx.Observable<PaginatedResponse<AdminRole>> {

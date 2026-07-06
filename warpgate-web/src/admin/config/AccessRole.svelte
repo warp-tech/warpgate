@@ -1,12 +1,12 @@
 <script lang="ts">
+    import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { api, type Role, type Target, type User } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import { link, replace } from 'svelte-spa-router'
-    import { FormGroup, Input, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Loadable from 'common/Loadable.svelte'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
+    import Loadable from 'common/Loadable.svelte'
     import * as rx from 'rxjs'
+    import { link, replace } from 'svelte-spa-router'
     import { adminPermissions } from '../lib/store'
 
     interface Props {
@@ -21,6 +21,7 @@
 
     async function init() {
         role = await api.getRole({ id: params.id })
+        return role
     }
 
     function loadUsers(): rx.Observable<PaginatedResponse<User>> {
@@ -56,10 +57,11 @@
     }
 
     async function update() {
+        if (!role) return
         try {
             role = await api.updateRole({
                 id: params.id,
-                roleDataRequest: role!,
+                roleDataRequest: role,
             })
         } catch (err) {
             error = await stringifyError(err)
@@ -67,8 +69,9 @@
     }
 
     async function remove() {
-        if (confirm(`Delete role ${role!.name}?`)) {
-            await api.deleteRole(role!)
+        if (!role) return
+        if (confirm(`Delete role ${role.name}?`)) {
+            await api.deleteRole(role)
             replace('/config/access-roles')
         }
     }
@@ -76,31 +79,33 @@
 
 <div class="container-max-md">
     <Loadable promise={initPromise}>
-        <div class="page-summary-bar">
-            <div>
-                <h1>{role!.name}</h1>
-                <div class="text-muted">role</div>
+        {#snippet children(role)}
+            <div class="page-summary-bar">
+                <div>
+                    <h1>{role.name}</h1>
+                    <div class="text-muted">role</div>
+                </div>
             </div>
-        </div>
 
-        <FormGroup floating label="Name">
-            <Input bind:value={role!.name} />
-        </FormGroup>
+            <FormGroup floating label="Name">
+                <Input bind:value={role.name} />
+            </FormGroup>
 
-        <FormGroup floating label="Description">
-            <Input bind:value={role!.description} />
-        </FormGroup>
+            <FormGroup floating label="Description">
+                <Input bind:value={role.description} />
+            </FormGroup>
 
-        <div class="mb-4">
-            <label class="d-flex align-items-center" for="isDefault">
-                <Input
-                    id="isDefault"
-                    type="switch"
-                    bind:checked={role!.isDefault}
-                />
-                <div>Automatically assign to all new users</div>
-            </label>
-        </div>
+            <div class="mb-4">
+                <label class="d-flex align-items-center" for="isDefault">
+                    <Input
+                        id="isDefault"
+                        type="switch"
+                        bind:checked={role.isDefault}
+                    />
+                    <div>Automatically assign to all new users</div>
+                </label>
+            </div>
+        {/snippet}
     </Loadable>
 
     {#if error}

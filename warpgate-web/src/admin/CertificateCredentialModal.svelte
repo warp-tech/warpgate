@@ -1,20 +1,20 @@
 <script lang="ts">
     import { faCheck, faInfoCircle } from '@fortawesome/free-solid-svg-icons'
     import {
+        Alert,
         Button,
         FormGroup,
         Input,
         Modal,
         ModalBody,
         ModalFooter,
-        Alert,
     } from '@sveltestrap/sveltestrap'
     import type { IssuedCertificateCredential } from 'admin/lib/api'
-    import { saveCertificateKey } from 'gateway/lib/certificateStore'
     import AsyncButton from 'common/AsyncButton.svelte'
     import CopyButton from 'common/CopyButton.svelte'
-    import Fa from 'svelte-fa'
     import { downloadBlob } from 'common/helpers'
+    import { saveCertificateKey } from 'gateway/lib/certificateStore'
+    import Fa from 'svelte-fa'
 
     interface Props {
         isOpen: boolean

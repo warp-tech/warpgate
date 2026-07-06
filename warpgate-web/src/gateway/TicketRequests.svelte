@@ -1,36 +1,36 @@
 <script lang="ts">
+    import { faEyeSlash, faTicket } from '@fortawesome/free-solid-svg-icons'
     import {
-        api,
-        TargetKind,
-        TicketRequestStatus,
-        type MyTicketModel,
-        type TargetSnapshot,
-        type TicketRequestTarget,
-        type TicketRequestModel,
-    } from 'gateway/lib/api'
-    import { serverInfo } from 'gateway/lib/store'
-    import AsyncButton from 'common/AsyncButton.svelte'
-    import RelativeDate from 'admin/RelativeDate.svelte'
-    import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
-    import InfoBox from 'common/InfoBox.svelte'
-    import Fa from 'svelte-fa'
-    import { faTicket, faEyeSlash } from '@fortawesome/free-solid-svg-icons'
-    import { stringifyError } from 'common/errors'
-    import {
-        FormGroup,
+        Alert,
         Button,
+        FormGroup,
         Modal,
         ModalBody,
         ModalFooter,
-        Alert,
     } from '@sveltestrap/sveltestrap'
-    import EmptyState from 'common/EmptyState.svelte'
-    import Loadable from 'common/Loadable.svelte'
-    import { statusIcon, statusColor } from 'common/ticketRequestStatus'
+    import RelativeDate from 'admin/RelativeDate.svelte'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import {
         formatDurationAsHumantime,
         parseHumantimeDuration,
     } from 'common/duration'
+    import EmptyState from 'common/EmptyState.svelte'
+    import { stringifyError } from 'common/errors'
+    import InfoBox from 'common/InfoBox.svelte'
+    import Loadable from 'common/Loadable.svelte'
+    import { statusColor, statusIcon } from 'common/ticketRequestStatus'
+    import {
+        api,
+        type MyTicketModel,
+        TargetKind,
+        type TargetSnapshot,
+        type TicketRequestModel,
+        TicketRequestStatus,
+        type TicketRequestTarget,
+    } from 'gateway/lib/api'
+    import { serverInfo } from 'gateway/lib/store'
+    import Fa from 'svelte-fa'
 
     let error: string | undefined = $state()
     let success: string | undefined = $state()
@@ -96,8 +96,8 @@
         tickets = t
         ticketRequestTargets = trt
         targets = tgts
-        if (ticketRequestTargets.length && !selectedTarget) {
-            selectedTarget = ticketRequestTargets[0]!.name
+        if (ticketRequestTargets[0] && !selectedTarget) {
+            selectedTarget = ticketRequestTargets[0].name
         }
     }
 
@@ -130,7 +130,7 @@
             description = ''
             descriptionTouched = false
             await load()
-        } catch (err: any) {
+        } catch (err) {
             error = await stringifyError(err)
             throw err
         }
@@ -159,7 +159,7 @@
             }
             showForm = false
             await load()
-        } catch (err: any) {
+        } catch (err) {
             error = await stringifyError(err)
             throw err
         }
@@ -169,7 +169,7 @@
         try {
             await api.deleteMyTicket({ id: ticket.id })
             await load()
-        } catch (err: any) {
+        } catch (err) {
             error = await stringifyError(err)
         }
     }
@@ -177,7 +177,11 @@
 
 <div class="page-summary-bar">
     <h1>Ticket requests</h1>
-    <button class="btn btn-primary ms-auto" onclick={openRequestForm}>
+    <button
+        type="button"
+        class="btn btn-primary ms-auto"
+        onclick={openRequestForm}
+    >
         Request a ticket
     </button>
 </div>
@@ -289,7 +293,7 @@
                 color="primary"
                 class="modal-button"
                 click={createRequest}
-                disabled={formInvalid || !(ticketRequestTargets && ticketRequestTargets.length)}
+                disabled={formInvalid || !ticketRequestTargets?.length}
             >
                 Request ticket
             </AsyncButton>

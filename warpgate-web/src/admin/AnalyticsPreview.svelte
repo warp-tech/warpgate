@@ -1,7 +1,7 @@
 <script lang="ts">
+    import { Alert } from '@sveltestrap/sveltestrap'
     import { api } from 'admin/lib/api'
     import { stringifyError } from 'common/errors'
-    import { Alert } from '@sveltestrap/sveltestrap'
 
     interface Props {
         normal: boolean

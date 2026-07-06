@@ -6,7 +6,7 @@
         ) {}
 
         toString(): string {
-            return this.type + ' ' + this.publicKeyBase64
+            return `${this.type} ${this.publicKeyBase64}`
         }
     }
 
@@ -28,8 +28,8 @@
     import { faCheck, faWarning } from '@fortawesome/free-solid-svg-icons'
 
     import { Alert } from '@sveltestrap/sveltestrap'
-    import Fa from 'svelte-fa'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
+    import Fa from 'svelte-fa'
 
     interface Props {
         result: CheckResult

@@ -1,4 +1,4 @@
-import { type Recording } from 'admin/lib/api'
+import type { Recording } from 'admin/lib/api'
 
 export type RecordingMetadata =
     | {

@@ -1,7 +1,7 @@
 <script lang="ts">
+    import { Tooltip } from '@sveltestrap/sveltestrap'
     import type { AdminRole } from 'admin/lib/api'
     import { ADMIN_PERMISSIONS } from '../lib/store'
-    import { Tooltip } from '@sveltestrap/sveltestrap'
 
     export let role: AdminRole
 
@@ -38,7 +38,7 @@
 </span>
 <Tooltip target={id} delay="250">
     <div class="text-start">
-        {#each permissionLists(role) as [ category, perms ] (category + '$' + JSON.stringify(perms))}
+        {#each permissionLists(role) as [ category, perms ] (`${category}:${JSON.stringify(perms)}`)}
             <div>{category}: <span class="text-muted">{perms}</span></div>
         {/each}
     </div>

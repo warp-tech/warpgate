@@ -1,14 +1,13 @@
 <script lang="ts">
-    import { get } from 'svelte/store'
-    import { serverInfo, reloadServerInfo } from 'gateway/lib/store'
-
-    import Router, { link, type WrappedComponent } from 'svelte-spa-router'
-    import active from 'svelte-spa-router/active'
-    import { wrap } from 'svelte-spa-router/wrap'
-    import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
     import AuthBar from 'common/AuthBar.svelte'
     import Brand from 'common/Brand.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
+    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import { get } from 'svelte/store'
+    import Router, { link, type WrappedComponent } from 'svelte-spa-router'
+    import active from 'svelte-spa-router/active'
+    import { wrap } from 'svelte-spa-router/wrap'
     import AnalyticsConsentModal from './AnalyticsConsentModal.svelte'
 
     let showAnalyticsModal = $state(false)
@@ -32,7 +31,7 @@
             // the SPA hash route is known.)
             const next = location.pathname + location.hash
             location.assign(
-                '/@warpgate#/login?next=' + encodeURIComponent(next),
+                `/@warpgate#/login?next=${encodeURIComponent(next)}`,
             )
         }
     }
@@ -41,39 +40,40 @@
 
     const routes: Record<string, WrappedComponent> = {
         '/': wrap({
-            asyncComponent: () => import('./Home.svelte') as any,
+            asyncComponent: () => import('./Home.svelte'),
         }),
         '/sessions/:id': wrap({
-            asyncComponent: () => import('./Session.svelte') as any,
+            asyncComponent: () => import('./Session.svelte'),
         }),
         '/recordings/:id': wrap({
-            asyncComponent: () => import('./Recording.svelte') as any,
+            asyncComponent: () => import('./Recording.svelte'),
         }),
         '/log': wrap({
-            asyncComponent: () => import('./Log.svelte') as any,
+            asyncComponent: () => import('./Log.svelte'),
         }),
         '/log/user/:id': wrap({
-            asyncComponent: () => import('./Log.svelte') as any,
+            asyncComponent: () => import('./Log.svelte'),
             props: {
                 filterKind: 'user',
             },
         }),
         '/log/access-role/:id': wrap({
-            asyncComponent: () => import('./Log.svelte') as any,
+            asyncComponent: () => import('./Log.svelte'),
             props: {
                 filterKind: 'access-role',
             },
         }),
         '/log/admin-role/:id': wrap({
-            asyncComponent: () => import('./Log.svelte') as any,
+            asyncComponent: () => import('./Log.svelte'),
             props: {
                 filterKind: 'admin-role',
             },
         }),
         '/config': wrap({
-            asyncComponent: () => import('./config/Config.svelte') as any,
+            asyncComponent: () => import('./config/Config.svelte'),
         }),
     }
+    // biome-ignore lint/style/noNonNullAssertion: x
     routes['/config/*'] = routes['/config']!
 </script>
 

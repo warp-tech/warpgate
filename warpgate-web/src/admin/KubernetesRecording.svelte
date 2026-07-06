@@ -1,7 +1,8 @@
 <script lang="ts">
     import { Badge } from '@sveltestrap/sveltestrap'
-    import type { KubernetesRecordingItem } from './lib/api'
     import { firstBy } from 'thenby'
+    import type { KubernetesRecordingItem } from './lib/api'
+
     interface Props {
         items: KubernetesRecordingItem[]
     }

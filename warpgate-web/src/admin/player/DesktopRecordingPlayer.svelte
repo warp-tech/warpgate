@@ -1,20 +1,20 @@
 <script lang="ts">
-    import { onDestroy, onMount } from 'svelte'
     import { Spinner } from '@sveltestrap/sveltestrap'
     import type { Recording } from 'admin/lib/api'
     import {
         applyDesktopFrame,
-        ensureCanvasSize,
         type DesktopFrame,
+        ensureCanvasSize,
     } from 'common/desktopCanvas'
     import {
+        type Click,
+        type KeyPress,
         keysymLabel,
         scancodeLabel,
-        type KeyPress,
-        type Click,
     } from 'common/desktopInput'
-    import PlayerToolbar from './PlayerToolbar.svelte'
+    import { onDestroy, onMount } from 'svelte'
     import { latestWins } from './latestWins'
+    import PlayerToolbar from './PlayerToolbar.svelte'
 
     // Playback modes. `live` tails the growing recording (deltas applied as they stream);
     // `playing` advances through recorded time; `paused` holds a frame. Grabbing the

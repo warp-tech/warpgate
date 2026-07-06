@@ -1,13 +1,13 @@
 <script lang="ts">
+    import { Alert } from '@sveltestrap/sveltestrap'
+    import RelativeDate from 'admin/RelativeDate.svelte'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import Loadable from 'common/Loadable.svelte'
     import {
-        api,
         ApiAuthState,
         type AuthStateResponseInternal,
+        api,
     } from 'gateway/lib/api'
-    import { Alert } from '@sveltestrap/sveltestrap'
-    import AsyncButton from 'common/AsyncButton.svelte'
-    import RelativeDate from 'admin/RelativeDate.svelte'
-    import Loadable from 'common/Loadable.svelte'
 
     interface Props {
         params: { stateId: string }

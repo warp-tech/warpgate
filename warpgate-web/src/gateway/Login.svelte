@@ -1,26 +1,26 @@
 <script lang="ts">
-    import { router, replace } from 'svelte-spa-router'
-    import { Button, FormGroup, Alert } from '@sveltestrap/sveltestrap'
-    import Fa from 'svelte-fa'
-    import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import {
+        faApple,
         faGoogle,
         faMicrosoft,
-        faApple,
     } from '@fortawesome/free-brands-svg-icons'
-
-    import {
-        api,
-        ApiAuthState,
-        LoginFailureResponseFromJSON,
-        PasswordLoginMode,
-        type SsoProviderDescription,
-        SsoProviderKind,
-        ResponseError,
-    } from 'gateway/lib/api'
-    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+    import { Alert, Button, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
+
+    import {
+        ApiAuthState,
+        api,
+        LoginFailureResponseFromJSON,
+        PasswordLoginMode,
+        ResponseError,
+        type SsoProviderDescription,
+        SsoProviderKind,
+    } from 'gateway/lib/api'
+    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import Fa from 'svelte-fa'
+    import { replace, router } from 'svelte-spa-router'
 
     let error: string | null = $state(null)
     let username = $state('')
@@ -283,6 +283,7 @@
                 <div class="mt-3 sso-buttons">
                     {#each ssoProviders as ssoProvider (ssoProvider.name)}
                         <button
+                            type="button"
                             class="btn btn-secondary"
                             disabled={busy}
                             onclick={() => startSSO(ssoProvider)}
@@ -321,7 +322,11 @@
     {/if}
 
     {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed && authState !== ApiAuthState.IpRejected}
-        <button class="btn w-100 mt-3 btn-secondary" onclick={cancel}>
+        <button
+            type="button"
+            class="btn w-100 mt-3 btn-secondary"
+            onclick={cancel}
+        >
             Cancel
         </button>
     {/if}

@@ -1,5 +1,10 @@
 <script lang="ts">
-    import { onDestroy, onMount, tick } from 'svelte'
+    import {
+        faGear,
+        faMinus,
+        faPlus,
+        faTimes,
+    } from '@fortawesome/free-solid-svg-icons'
     import {
         Button,
         Dropdown,
@@ -10,24 +15,19 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
-    import Fa from 'svelte-fa'
-    import {
-        faPlus,
-        faTimes,
-        faGear,
-        faMinus,
-    } from '@fortawesome/free-solid-svg-icons'
-    import { api, ResponseError, type WebSshSessionInfo } from './lib/api'
-    import SshTerminalTab, { THEME } from './WebSshTab.svelte'
-    import { SvelteMap } from 'svelte/reactivity'
-    import InfoBox from 'common/InfoBox.svelte'
-    import {
-        ReconnectingWebSocket,
-        ConnectionState,
-    } from './lib/ReconnectingWebSocket.svelte'
-    import { loadTheme } from 'theme'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
+    import InfoBox from 'common/InfoBox.svelte'
     import { serverInfo } from 'gateway/lib/store'
+    import { onDestroy, onMount, tick } from 'svelte'
+    import { SvelteMap } from 'svelte/reactivity'
+    import Fa from 'svelte-fa'
+    import { loadTheme } from 'theme'
+    import { api, ResponseError, type WebSshSessionInfo } from './lib/api'
+    import {
+        ConnectionState,
+        ReconnectingWebSocket,
+    } from './lib/ReconnectingWebSocket.svelte'
+    import SshTerminalTab, { THEME } from './WebSshTab.svelte'
 
     interface Props {
         params: { sessionId: string }
@@ -265,7 +265,8 @@
 >
     <div class="terminal-area flex-grow-1 position-relative">
         {#each channelOrder as id (id)}
-            {#if channels.get(id)}
+            {@const channel = channels.get(id)}
+            {#if channel}
                 <SshTerminalTab
                     bind:this={tabs[id]}
                     active={id === activeChannelId}
@@ -275,7 +276,7 @@
                     onResize={(cols, rows) => send({ type: 'resize', channel_id: id, cols, rows })}
                     onTitleChange={title => {
                         channels.set(id, {
-                            ...channels.get(id)!,
+                            ...channel,
                             terminalTitle: title,
                         })
                     }}
@@ -300,6 +301,7 @@
                 {#each channelOrder as id (id)}
                     {@const ch = channels.get(id)}
                     {#if ch}
+                        <!-- biome-ignore lint/a11y/useSemanticElements: nested -->
                         <div
                             class="tab btn btn-secondary d-flex align-items-center"
                             class:active={id === activeChannelId}
@@ -312,6 +314,7 @@
                                 >{ch.terminalTitle ?? ch.label}</span
                             >
                             <button
+                                type="button"
                                 class="btn btn-link btn-sm close-button"
                                 onclick={e => { e.stopPropagation(); closeTab(id) }}
                             >
@@ -323,6 +326,7 @@
 
                 {#if ws.state === ConnectionState.Connected}
                     <button
+                        type="button"
                         class="btn btn-secondary px-3"
                         onclick={requestNewChannel}
                     >
@@ -353,6 +357,7 @@
                         class="dropdown-item disabled font-size-row d-flex align-items-center gap-2"
                     >
                         <button
+                            type="button"
                             class="btn btn-sm btn-secondary"
                             disabled={fontSize <= FONT_SIZE_MIN}
                             onclick={() => { zoomOut(); menuOpen = true }}
@@ -364,6 +369,7 @@
                             >{fontSize}px</span
                         >
                         <button
+                            type="button"
                             class="btn btn-sm btn-secondary"
                             disabled={fontSize >= FONT_SIZE_MAX}
                             onclick={() => { zoomIn(); menuOpen = true }}

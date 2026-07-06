@@ -1,9 +1,5 @@
 <script lang="ts">
     import { faSignOut } from '@fortawesome/free-solid-svg-icons'
-    import Fa from 'svelte-fa'
-
-    import { api } from 'gateway/lib/api'
-    import { serverInfo, reloadServerInfo } from 'gateway/lib/store'
     import {
         Button,
         Dropdown,
@@ -11,6 +7,10 @@
         DropdownMenu,
         DropdownToggle,
     } from '@sveltestrap/sveltestrap'
+
+    import { api } from 'gateway/lib/api'
+    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import Fa from 'svelte-fa'
 
     async function logout() {
         await api.logout()

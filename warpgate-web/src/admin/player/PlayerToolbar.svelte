@@ -1,14 +1,14 @@
 <script lang="ts">
-    import Fa from 'svelte-fa'
     import {
-        faPlay,
-        faPause,
-        faExpand,
         faCircle,
+        faExpand,
         faFastForward,
+        faPause,
+        faPlay,
     } from '@fortawesome/free-solid-svg-icons'
-    import formatDuration from 'format-duration'
     import { Tooltip } from '@sveltestrap/sveltestrap'
+    import formatDuration from 'format-duration'
+    import Fa from 'svelte-fa'
 
     // Shared controls for the recording players (terminal + desktop): play/pause,
     // elapsed time, optional LIVE button, a scrubber with an optional input-density
@@ -32,7 +32,7 @@
 </script>
 
 <div class="toolbar" class:invisible={hidden}>
-    <button class="btn btn-link" on:click={onTogglePlaying}>
+    <button type="button" class="btn btn-link" on:click={onTogglePlaying}>
         <Fa icon={playing ? faPause : faPlay} fw />
     </button>
     <pre
@@ -46,6 +46,7 @@
             </div>
         {:else}
             <button
+                type="button"
                 id="go-live-button"
                 class="btn btn-link text-danger d-flex align-items-center gap-2"
                 on:click={onGoLive}
@@ -76,7 +77,7 @@
             on:input={() => onSeek(seekInputValue)}
         >
     </div>
-    <button class="btn btn-link" on:click={onToggleFullscreen}>
+    <button type="button" class="btn btn-link" on:click={onToggleFullscreen}>
         <Fa icon={faExpand} fw />
     </button>
 </div>

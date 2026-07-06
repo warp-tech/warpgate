@@ -9,7 +9,7 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
 
-    import { type ExistingPublicKeyCredential } from './lib/api'
+    import type { ExistingPublicKeyCredential } from './lib/api'
 
     interface Props {
         isOpen: boolean

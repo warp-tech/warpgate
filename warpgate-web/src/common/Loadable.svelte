@@ -1,20 +1,19 @@
 <script lang="ts" generics="T">
-    import type { Snippet } from 'svelte'
     import { Alert } from '@sveltestrap/sveltestrap'
+    import type { Snippet } from 'svelte'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import { stringifyError } from './errors'
 
     let {
         promise,
         children,
-        data = $bindable(),
     }: {
         promise: Promise<T>
-        data?: T
         children: Snippet<[T]>
     } = $props()
 
     let loaded = $state(false)
+    let data = $state<T | undefined>()
     let error: string | undefined = $state()
 
     $effect(() => {

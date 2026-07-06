@@ -21,31 +21,31 @@
         faKeyboard,
         faMobileScreen,
     } from '@fortawesome/free-solid-svg-icons'
+    import { Button, Tooltip } from '@sveltestrap/sveltestrap'
     import {
         api,
         CredentialKind,
+        type ExistingCertificateCredential,
+        type ExistingOtpCredential,
         type ExistingPasswordCredential,
         type ExistingPublicKeyCredential,
         type ExistingSsoCredential,
-        type ExistingOtpCredential,
-        type UserRequireCredentialsPolicy,
         type ParameterValues,
-        type ExistingCertificateCredential,
+        type UserRequireCredentialsPolicy,
     } from 'admin/lib/api'
+    import { adminPermissions } from 'admin/lib/store'
+    import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
+    import EmptyState from 'common/EmptyState.svelte'
+    import Loadable from 'common/Loadable.svelte'
+    import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
     import { SvelteSet } from 'svelte/reactivity'
     import Fa from 'svelte-fa'
-    import { Button, Tooltip } from '@sveltestrap/sveltestrap'
-    import CreatePasswordModal from '../../CreatePasswordModal.svelte'
-    import SsoCredentialModal from '../../SsoCredentialModal.svelte'
-    import PublicKeyCredentialModal from '../../PublicKeyCredentialModal.svelte'
     import CertificateCredentialModal from '../../CertificateCredentialModal.svelte'
     import CreateOtpModal from '../../CreateOtpModal.svelte'
+    import CreatePasswordModal from '../../CreatePasswordModal.svelte'
+    import PublicKeyCredentialModal from '../../PublicKeyCredentialModal.svelte'
+    import SsoCredentialModal from '../../SsoCredentialModal.svelte'
     import AuthPolicyEditor from './AuthPolicyEditor.svelte'
-    import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
-    import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
-    import Loadable from 'common/Loadable.svelte'
-    import EmptyState from 'common/EmptyState.svelte'
-    import { adminPermissions } from 'admin/lib/store'
 
     interface Props {
         userId: string

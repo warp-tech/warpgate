@@ -1,10 +1,6 @@
 <script lang="ts">
-    import { ResponseError as AdminApiResponseError } from 'admin/lib/api'
     import {
-        ResponseError as GatewayApiResponseError,
-        PasswordPolicyViolation,
-    } from 'gateway/lib/api'
-    import {
+        Alert,
         Button,
         Form,
         FormGroup,
@@ -12,8 +8,12 @@
         Modal,
         ModalBody,
         ModalFooter,
-        Alert,
     } from '@sveltestrap/sveltestrap'
+    import { ResponseError as AdminApiResponseError } from 'admin/lib/api'
+    import {
+        ResponseError as GatewayApiResponseError,
+        PasswordPolicyViolation,
+    } from 'gateway/lib/api'
 
     interface Props {
         isOpen: boolean
