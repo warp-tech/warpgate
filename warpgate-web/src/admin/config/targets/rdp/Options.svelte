@@ -1,7 +1,7 @@
 <script lang="ts">
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { type TargetOptionsTargetRdpOptions } from 'admin/lib/api'
-    import HelpText from 'admin/lib/HelpText.svelte';
+    import HelpText from 'admin/lib/HelpText.svelte'
 
     interface Props {
         options: TargetOptionsTargetRdpOptions,
