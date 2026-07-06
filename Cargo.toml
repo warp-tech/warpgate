@@ -55,7 +55,7 @@ data-encoding = { version = "2.3", default-features = false, features = [
 ipnet = { version = "2", default-features = false }
 serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json = { version = "1.0", default-features = false }
-russh = { version = "0.62.1", features = [
+russh = { version = "0.62.2", features = [
     "des",
     "rsa",
     "aws-lc-rs",
