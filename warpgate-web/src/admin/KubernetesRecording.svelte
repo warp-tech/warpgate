@@ -69,7 +69,6 @@
                             <tbody>
                                 {#each item.responseBody.rows as row (row)}
                                     <tr>
-                                        <!-- eslint-disable-next-line svelte/require-each-key -->
                                         {#each row.cells as cell}
                                             <td>{cell}</td>
                                         {/each}

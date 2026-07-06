@@ -25,7 +25,6 @@
         children?: Snippet
     }
 
-    // eslint-disable-next-line svelte/no-unused-props
     let {
         children,
         click,

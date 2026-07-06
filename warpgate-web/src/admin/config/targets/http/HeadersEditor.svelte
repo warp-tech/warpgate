@@ -3,7 +3,6 @@
     import { FormGroup } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
 
-    // eslint-disable-next-line @typescript-eslint/no-type-alias
     type Headers = Record<string, string>
 
     interface Props {

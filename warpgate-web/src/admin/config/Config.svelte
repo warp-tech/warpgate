@@ -176,7 +176,6 @@
 
 <div class="wrapper" class:d-none={!sidebarMode}>
     <div class="sidebar">
-        <!-- eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -->
         {@render navItems()}
     </div>
 
@@ -186,7 +185,6 @@
 </div>
 
 <div class="container-max-md" class:d-none={sidebarMode}>
-    <!-- eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -->
     {@render navItems()}
 </div>
 

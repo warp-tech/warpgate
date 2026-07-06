@@ -62,7 +62,6 @@
                 Ensure this security key matches your authentication prompt:
             </div>
             <div class="identification-string">
-                <!-- eslint-disable-next-line svelte/require-each-key -->
                 {#each authState?.identificationString as char}
                     <div class="card bg-secondary text-light">
                         <div class="card-body">{char}</div>

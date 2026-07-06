@@ -7,7 +7,6 @@
         class?: string
     }
 
-    // eslint-disable-next-line svelte/no-unused-props
     let { value = $bindable(), class: className = '' }: Props = $props()
 </script>
 

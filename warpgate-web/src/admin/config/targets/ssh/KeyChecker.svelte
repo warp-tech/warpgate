@@ -49,7 +49,6 @@
 
     $effect(() => {
         ;(async () => {
-            // eslint-disable-next-line @typescript-eslint/no-unused-expressions
             options // run effect when options get reassigned after saving, since changes in host/ip invalidate the currenty loaded known hosts
             _state = { state: 'initializing' }
             await reloadKnownHosts()

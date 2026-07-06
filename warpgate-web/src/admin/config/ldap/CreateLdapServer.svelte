@@ -15,7 +15,6 @@
 
     let name = $state('')
     let host = $state('')
-    // eslint-disable-next-line svelte/prefer-writable-derived
     let port = $state(389)
     let bindDn = $state('')
     let bindPassword = $state('')

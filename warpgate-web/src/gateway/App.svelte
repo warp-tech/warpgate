@@ -84,7 +84,6 @@
     let socket: WebSocket | null = null
 
     $effect(() => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
         $serverInfo?.username // trigger effect on username change
         try {
             socket?.close()

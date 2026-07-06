@@ -120,11 +120,8 @@ export const ADMIN_PERMISSIONS = [
     } as const,
 ]
 
-// eslint-disable-next-line @typescript-eslint/no-type-alias
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]
-// eslint-disable-next-line @typescript-eslint/no-type-alias
 export type AdminPermissionKey = AdminPermission['key']
-// eslint-disable-next-line @typescript-eslint/no-type-alias
 export type AdminPermissionCategory = AdminPermission['category']
 
 export function emptyPermissions(): AdminPermissions {

@@ -14,7 +14,6 @@
         icon?: IconDefinition
     }
 
-    // eslint-disable-next-line svelte/no-unused-props
     let {
         children,
         class: className = 'mt-3 mb-4',

@@ -162,7 +162,6 @@
 
             <h4 class="mt-4">Permissions</h4>
             <div class="row g-3">
-                <!-- eslint-disable-next-line svelte/require-each-key -->
                 {#each permGroups as { category, perms }}
                     <div class="col-6">
                         <h5 class="mt-3">{category}</h5>

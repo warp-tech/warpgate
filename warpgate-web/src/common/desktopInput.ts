@@ -4,7 +4,6 @@
 
 // Hex keys are intentional (they mirror the wire values); quoting them would change
 // the property name, so keep them as numeric literals.
-/* eslint-disable quote-props */
 
 export interface KeyPress {
     time: number

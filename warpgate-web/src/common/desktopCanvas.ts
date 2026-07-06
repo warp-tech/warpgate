@@ -14,7 +14,6 @@ export interface Rect {
 
 // Image payloads arrive base64-encoded from recordings (JSON) and as raw bytes from the
 // live binary WebSocket; accept either.
-// eslint-disable-next-line @typescript-eslint/no-type-alias
 type FrameImageData = string | Uint8Array<ArrayBuffer>
 
 /** The visual subset of desktop messages that mutate the framebuffer. */

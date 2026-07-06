@@ -24,7 +24,6 @@
     let sshTargets = $state<Target[]>([])
 
     $effect(() => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
         options // run effect when options get reassigned after saving
         hostKeyCheckInvalidated = false
     })

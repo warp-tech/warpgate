@@ -81,7 +81,6 @@
         width: number
         height: number
     }
-    // eslint-disable-next-line @typescript-eslint/no-type-alias
     type AsciiCastData = [number, 'o', string]
     type AsciiCastItem = AsciiCastData | AsciiCastHeader
 

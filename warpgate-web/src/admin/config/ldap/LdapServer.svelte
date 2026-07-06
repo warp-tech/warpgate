@@ -20,7 +20,6 @@
 
     let { params }: Props = $props()
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     let server = $state<LdapServerResponse | null>(null)
     let name = $state('')
     let host = $state('')

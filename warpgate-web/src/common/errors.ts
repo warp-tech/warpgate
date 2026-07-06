@@ -1,7 +1,6 @@
 import * as admin from 'admin/lib/api'
 import * as gw from 'gateway/lib/api'
 
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export async function stringifyError(err: unknown): Promise<string> {
     if (err instanceof gw.ResponseError) {
         return gw.stringifyError(err)

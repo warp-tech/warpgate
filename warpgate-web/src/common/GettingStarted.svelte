@@ -30,7 +30,6 @@
     </div>
 
     <ListGroup flush>
-        <!-- eslint-disable-next-line svelte/no-target-blank -->
         <a
             href="https://warpgate.null.page/docs/"
             target="_blank"

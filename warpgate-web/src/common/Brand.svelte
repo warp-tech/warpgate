@@ -38,7 +38,6 @@
 </script>
 
 <div bind:this={element} class="brand">
-    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
     {@html logo}
 </div>
 
