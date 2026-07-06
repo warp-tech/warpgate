@@ -45,7 +45,7 @@ export function parseHumantimeDuration(str: string): number | undefined {
     let total = 0
     let matched = false
     const regex = /(\d+)\s*(d|h|m|s)/gi
-    let match: RegExpExecArray
+    let match: RegExpExecArray | null = null
     // biome-ignore lint/suspicious/noAssignInExpressions: x
     while ((match = regex.exec(trimmed)) !== null) {
         const [, digits, unit] = match
