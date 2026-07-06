@@ -9,7 +9,7 @@
         class?: string
     }
 
-    const { label, value, class: className = '' }: Props = $props()
+    let { label, value, class: className = '' }: Props = $props()
 </script>
 
 <FormGroup floating {label} class="copyable-textarea">

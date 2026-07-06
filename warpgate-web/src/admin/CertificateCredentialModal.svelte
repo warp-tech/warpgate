@@ -7,12 +7,12 @@
         Modal,
         ModalBody,
         ModalFooter,
+        Alert,
     } from '@sveltestrap/sveltestrap'
     import type { IssuedCertificateCredential } from 'admin/lib/api'
     import { saveCertificateKey } from 'gateway/lib/certificateStore'
     import AsyncButton from 'common/AsyncButton.svelte'
     import CopyButton from 'common/CopyButton.svelte'
-    import { Alert } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
     import { downloadBlob } from 'common/helpers'
 

@@ -12,8 +12,8 @@
         Modal,
         ModalBody,
         ModalFooter,
+        Alert,
     } from '@sveltestrap/sveltestrap'
-    import { Alert } from '@sveltestrap/sveltestrap'
 
     interface Props {
         isOpen: boolean

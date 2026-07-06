@@ -20,12 +20,10 @@
     import LogViewer from './log-viewer/LogViewer.svelte'
     import RelativeDate from './RelativeDate.svelte'
     import { stringifyError } from 'common/errors'
-    import { Alert } from '@sveltestrap/sveltestrap'
+    import { Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
     import { faUser } from '@fortawesome/free-regular-svg-icons'
-    import { Badge } from '@sveltestrap/sveltestrap'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
-    import { Tooltip } from '@sveltestrap/sveltestrap'
     import { PROTOCOL_PROPERTIES } from 'common/protocols'
     import {
         recordingMetadataToFieldSet,
