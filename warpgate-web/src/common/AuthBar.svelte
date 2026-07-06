@@ -1,52 +1,64 @@
 <script lang="ts">
-import { faSignOut } from '@fortawesome/free-solid-svg-icons'
-import Fa from 'svelte-fa'
+    import { faSignOut } from '@fortawesome/free-solid-svg-icons'
+    import {
+        Button,
+        Dropdown,
+        DropdownItem,
+        DropdownMenu,
+        DropdownToggle,
+    } from '@sveltestrap/sveltestrap'
 
-import { api } from 'gateway/lib/api'
-import { serverInfo, reloadServerInfo } from 'gateway/lib/store'
-import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownToggle } from '@sveltestrap/sveltestrap'
+    import { api } from 'gateway/lib/api'
+    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import Fa from 'svelte-fa'
 
-async function logout () {
-    await api.logout()
-    await reloadServerInfo()
-    location.href = '/@warpgate'
-}
+    async function logout() {
+        await api.logout()
+        await reloadServerInfo()
+        location.href = '/@warpgate'
+    }
 
-async function singleLogout () {
-    const response = await api.initiateSsoLogout()
-    location.href = response.url
-}
+    async function singleLogout() {
+        const response = await api.initiateSsoLogout()
+        location.href = response.url
+    }
 </script>
 
 {#if $serverInfo?.username}
-<div class="d-flex align-items-center">
-    <a href="/@warpgate/#/profile">
-        {$serverInfo.username}
-    </a>
-    {#if $serverInfo.authorizedViaTicket}
-        <span class="ml-2">(ticket auth)</span>
-    {/if}
+    <div class="d-flex align-items-center">
+        <a href="/@warpgate/#/profile">
+            {$serverInfo.username}
+        </a>
+        {#if $serverInfo.authorizedViaTicket}
+            <span class="ml-2">(ticket auth)</span>
+        {/if}
 
-    {#if $serverInfo?.authorizedViaSsoWithSingleLogout}
-        <Dropdown>
-            <DropdownToggle color="link" title="Log out options" size="sm">
+        {#if $serverInfo?.authorizedViaSsoWithSingleLogout}
+            <Dropdown>
+                <DropdownToggle color="link" title="Log out options" size="sm">
+                    <Fa icon={faSignOut} fw />
+                </DropdownToggle>
+                <DropdownMenu right={true}>
+                    <DropdownItem on:click={logout}>
+                        <Fa icon={faSignOut} fw />
+                        Log out of Warpgate
+                    </DropdownItem>
+                    <DropdownItem on:click={singleLogout}>
+                        <Fa icon={faSignOut} fw />
+                        Log out everywhere
+                    </DropdownItem>
+                </DropdownMenu>
+            </Dropdown>
+        {:else}
+            <Button
+                color="link"
+                on:click={logout}
+                title="Log out"
+                size="sm"
+                class="p-0 ms-2"
+            >
                 <Fa icon={faSignOut} fw />
-            </DropdownToggle>
-            <DropdownMenu right={true}>
-                <DropdownItem on:click={logout}>
-                    <Fa icon={faSignOut} fw />
-                    Log out of Warpgate
-                </DropdownItem>
-                <DropdownItem on:click={singleLogout}>
-                    <Fa icon={faSignOut} fw />
-                    Log out everywhere
-                </DropdownItem>
-            </DropdownMenu>
-        </Dropdown>
-    {:else}
-        <Button color="link" on:click={logout} title="Log out" size="sm" class="p-0 ms-2">
-            <Fa icon={faSignOut} fw />
-        </Button>
-    {/if}
-</div>
+            </Button>
+        {/if}
+    </div>
 {/if}

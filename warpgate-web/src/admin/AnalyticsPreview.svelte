@@ -1,7 +1,7 @@
 <script lang="ts">
+    import { Alert } from '@sveltestrap/sveltestrap'
     import { api } from 'admin/lib/api'
     import { stringifyError } from 'common/errors'
-    import { Alert } from '@sveltestrap/sveltestrap'
 
     interface Props {
         normal: boolean
@@ -9,14 +9,14 @@
 
     let { normal }: Props = $props()
 
-    let preview = $state<{ url: string, payload: string } | undefined>()
+    let preview = $state<{ url: string; payload: string } | undefined>()
     let error = $state<string | undefined>()
 
     $effect(() => {
         load(normal)
     })
 
-    async function load (n: boolean) {
+    async function load(n: boolean) {
         error = undefined
         try {
             preview = await api.getAnalyticsPreview({ normal: n })

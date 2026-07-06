@@ -5,12 +5,14 @@
 //
 // This is the cancel + coalesce + serialize pattern the players kept hand-rolling for
 // seeking. Extracted so the terminal and desktop players share one implementation.
-export function latestWins<T> (task: (arg: T, signal: AbortSignal) => Promise<void>): (arg: T) => void {
+export function latestWins<T>(
+    task: (arg: T, signal: AbortSignal) => Promise<void>,
+): (arg: T) => void {
     let draining = false
     let queued: { arg: T } | null = null
     let current: AbortController | null = null
 
-    async function drain (): Promise<void> {
+    async function drain(): Promise<void> {
         draining = true
         try {
             while (queued) {
@@ -25,7 +27,9 @@ export function latestWins<T> (task: (arg: T, signal: AbortSignal) => Promise<vo
                     // stream was cancelled) — expected, not a failure. `signal.aborted` can
                     // still read false when the abort arrives via `reader.cancel()`, so also
                     // match by name.
-                    const aborted = signal.aborted || (err instanceof Error && err.name === 'AbortError')
+                    const aborted =
+                        signal.aborted ||
+                        (err instanceof Error && err.name === 'AbortError')
                     if (!aborted) {
                         console.error('latestWins task failed', err)
                     }
@@ -37,9 +41,9 @@ export function latestWins<T> (task: (arg: T, signal: AbortSignal) => Promise<vo
         }
     }
 
-    return function run (arg: T): void {
-        current?.abort()   // supersede any in-flight task (its signal is now aborted)
-        queued = { arg }   // …and coalesce: only this newest arg will run next
+    return function run(arg: T): void {
+        current?.abort() // supersede any in-flight task (its signal is now aborted)
+        queued = { arg } // …and coalesce: only this newest arg will run next
         if (!draining) {
             void drain()
         }

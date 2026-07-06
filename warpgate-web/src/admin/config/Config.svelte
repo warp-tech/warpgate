@@ -1,90 +1,91 @@
 <script lang="ts">
     import NavListItem from 'common/NavListItem.svelte'
-    import { wrap } from 'svelte-spa-router/wrap'
-    import Router, { type RouteDetail } from 'svelte-spa-router'
     import { serverInfo } from 'gateway/lib/store'
+    import Router, { type RouteDetail } from 'svelte-spa-router'
+    import { wrap } from 'svelte-spa-router/wrap'
 
     const routes = {
         '/targets/create/:kind': wrap({
-            asyncComponent: () => import('./targets/CreateTarget.svelte') as any,
+            asyncComponent: () => import('./targets/CreateTarget.svelte'),
         }),
         '/targets/create': wrap({
-            asyncComponent: () => import('./targets/ChooseTargetKind.svelte') as any,
+            asyncComponent: () => import('./targets/ChooseTargetKind.svelte'),
         }),
         '/targets/:id': wrap({
-            asyncComponent: () => import('./targets/Target.svelte') as any,
+            asyncComponent: () => import('./targets/Target.svelte'),
         }),
         '/access-roles/create': wrap({
-            asyncComponent: () => import('./CreateRole.svelte') as any,
+            asyncComponent: () => import('./CreateRole.svelte'),
         }),
         '/access-roles/:id': wrap({
-            asyncComponent: () => import('./AccessRole.svelte') as any,
+            asyncComponent: () => import('./AccessRole.svelte'),
         }),
         '/admin-roles/create': wrap({
-            asyncComponent: () => import('./CreateAdminRole.svelte') as any,
+            asyncComponent: () => import('./CreateAdminRole.svelte'),
         }),
         '/admin-roles/:id': wrap({
-            asyncComponent: () => import('./AdminRole.svelte') as any,
+            asyncComponent: () => import('./AdminRole.svelte'),
         }),
         '/users/create': wrap({
-            asyncComponent: () => import('./CreateUser.svelte') as any,
+            asyncComponent: () => import('./CreateUser.svelte'),
         }),
         '/users/:id': wrap({
-            asyncComponent: () => import('./users/User.svelte') as any,
+            asyncComponent: () => import('./users/User.svelte'),
         }),
         '/users': wrap({
-            asyncComponent: () => import('./users/Users.svelte') as any,
+            asyncComponent: () => import('./users/Users.svelte'),
         }),
         '/parameters': wrap({
-            asyncComponent: () => import('./Parameters.svelte') as any,
+            asyncComponent: () => import('./Parameters.svelte'),
         }),
         '/access-roles': wrap({
-            asyncComponent: () => import('./AccessRoles.svelte') as any,
+            asyncComponent: () => import('./AccessRoles.svelte'),
         }),
         '/admin-roles': wrap({
-            asyncComponent: () => import('./AdminRoles.svelte') as any,
+            asyncComponent: () => import('./AdminRoles.svelte'),
         }),
         '/targets': wrap({
-            asyncComponent: () => import('./targets/Targets.svelte') as any,
+            asyncComponent: () => import('./targets/Targets.svelte'),
         }),
         '/ssh': wrap({
-            asyncComponent: () => import('./SSHKeys.svelte') as any,
+            asyncComponent: () => import('./SSHKeys.svelte'),
         }),
         '/tickets': wrap({
-            asyncComponent: () => import('./Tickets.svelte') as any,
+            asyncComponent: () => import('./Tickets.svelte'),
         }),
         '/tickets/create': wrap({
-            asyncComponent: () => import('./CreateTicket.svelte') as any,
+            asyncComponent: () => import('./CreateTicket.svelte'),
         }),
         '/ldap-servers': wrap({
-            asyncComponent: () => import('./ldap/LdapServers.svelte') as any,
+            asyncComponent: () => import('./ldap/LdapServers.svelte'),
         }),
         '/ldap-servers/create': wrap({
-            asyncComponent: () => import('./ldap/CreateLdapServer.svelte') as any,
+            asyncComponent: () => import('./ldap/CreateLdapServer.svelte'),
         }),
         '/ldap-servers/:id': wrap({
-            asyncComponent: () => import('./ldap/LdapServer.svelte') as any,
+            asyncComponent: () => import('./ldap/LdapServer.svelte'),
         }),
         '/ldap-servers/:id/users': wrap({
-            asyncComponent: () => import('./ldap/LdapUserBrowser.svelte') as any,
+            asyncComponent: () => import('./ldap/LdapUserBrowser.svelte'),
         }),
         '/target-groups/create': wrap({
-            asyncComponent: () => import('./target-groups/CreateTargetGroup.svelte') as any,
+            asyncComponent: () =>
+                import('./target-groups/CreateTargetGroup.svelte'),
         }),
         '/target-groups/:id': wrap({
-            asyncComponent: () => import('./target-groups/TargetGroup.svelte') as any,
+            asyncComponent: () => import('./target-groups/TargetGroup.svelte'),
         }),
         '/target-groups': wrap({
-            asyncComponent: () => import('./target-groups/TargetGroups.svelte') as any,
+            asyncComponent: () => import('./target-groups/TargetGroups.svelte'),
         }),
         '/login-protection': wrap({
-            asyncComponent: () => import('./LoginProtection.svelte') as any,
+            asyncComponent: () => import('./LoginProtection.svelte'),
         }),
     }
 
     let sidebarMode = $state(false)
 
-    function onRouteLoading (detail: RouteDetail) {
+    function onRouteLoading(detail: RouteDetail) {
         sidebarMode = detail.route !== ''
     }
 </script>
@@ -175,7 +176,6 @@
 
 <div class="wrapper" class:d-none={!sidebarMode}>
     <div class="sidebar">
-        <!-- eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -->
         {@render navItems()}
     </div>
 
@@ -185,7 +185,6 @@
 </div>
 
 <div class="container-max-md" class:d-none={sidebarMode}>
-    <!-- eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -->
     {@render navItems()}
 </div>
 

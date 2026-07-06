@@ -1,12 +1,17 @@
-import { derived } from 'svelte/store'
-import { serverInfo } from 'gateway/lib/store'
 import type { AdminPermissions } from 'gateway/lib/api'
+import { serverInfo } from 'gateway/lib/store'
+import { derived } from 'svelte/store'
+import type { AdminRole } from './api'
+
+export type AdminRolePermissionKey = {
+    [K in keyof AdminRole]: AdminRole[K] extends boolean ? K : never
+}[keyof AdminRole]
 
 export interface AdminPermissionDef {
-    key: string
+    key: AdminRolePermissionKey
     label: string
     category?: string
-    deps?: string[]
+    deps?: AdminRolePermissionKey[]
     dangerous?: boolean
 }
 
@@ -15,7 +20,7 @@ export const ADMIN_PERMISSIONS = [
         key: 'targetsCreate' as const,
         label: 'Create',
         category: 'Targets' as const,
-        deps: ['targetsEdit'],
+        deps: ['targetsEdit'] as AdminRolePermissionKey[],
     },
     {
         key: 'targetsEdit' as const,
@@ -23,15 +28,16 @@ export const ADMIN_PERMISSIONS = [
         category: 'Targets' as const,
     },
     {
-        key: 'targetsDelete' as const, label: 'Delete',
+        key: 'targetsDelete' as const,
+        label: 'Delete',
         category: 'Targets' as const,
-        deps: ['targetsCreate', 'targetsEdit'],
+        deps: ['targetsCreate', 'targetsEdit'] as AdminRolePermissionKey[],
     },
     {
         key: 'usersCreate' as const,
         label: 'Create',
         category: 'Users' as const,
-        deps: ['usersEdit'],
+        deps: ['usersEdit'] as AdminRolePermissionKey[],
     },
     {
         key: 'usersEdit' as const,
@@ -39,15 +45,16 @@ export const ADMIN_PERMISSIONS = [
         category: 'Users' as const,
     },
     {
-        key: 'usersDelete' as const, label: 'Delete',
+        key: 'usersDelete' as const,
+        label: 'Delete',
         category: 'Users' as const,
-        deps: ['usersCreate', 'usersEdit'],
+        deps: ['usersCreate', 'usersEdit'] as AdminRolePermissionKey[],
     },
     {
         key: 'accessRolesCreate' as const,
         label: 'Create',
         category: 'Access roles' as const,
-        deps: ['accessRolesEdit'],
+        deps: ['accessRolesEdit'] as AdminRolePermissionKey[],
     },
     {
         key: 'accessRolesEdit' as const,
@@ -55,9 +62,13 @@ export const ADMIN_PERMISSIONS = [
         category: 'Access roles' as const,
     },
     {
-        key: 'accessRolesDelete' as const, label: 'Delete',
+        key: 'accessRolesDelete' as const,
+        label: 'Delete',
         category: 'Access roles' as const,
-        deps: ['accessRolesCreate', 'accessRolesEdit'],
+        deps: [
+            'accessRolesCreate',
+            'accessRolesEdit',
+        ] as AdminRolePermissionKey[],
     },
     {
         key: 'accessRolesAssign' as const,
@@ -70,9 +81,10 @@ export const ADMIN_PERMISSIONS = [
         category: 'Sessions' as const,
     },
     {
-        key: 'sessionsTerminate' as const, label: 'Terminate',
+        key: 'sessionsTerminate' as const,
+        label: 'Terminate',
         category: 'Sessions' as const,
-        deps: ['sessionsView'],
+        deps: ['sessionsView'] as AdminRolePermissionKey[],
     },
     {
         key: 'recordingsView' as const,
@@ -85,9 +97,10 @@ export const ADMIN_PERMISSIONS = [
         category: 'Tickets' as const,
     },
     {
-        key: 'ticketsDelete' as const, label: 'Delete',
+        key: 'ticketsDelete' as const,
+        label: 'Delete',
         category: 'Tickets' as const,
-        deps: ['ticketsCreate'],
+        deps: ['ticketsCreate'] as AdminRolePermissionKey[],
     },
     {
         key: 'configEdit' as const,
@@ -102,21 +115,19 @@ export const ADMIN_PERMISSIONS = [
     {
         key: 'adminRolesManage' as const,
         label: 'Manage admin roles',
-        category: 'Configuration', dangerous: true } as const,
+        category: 'Configuration',
+        dangerous: true,
+    } as const,
 ]
 
-// eslint-disable-next-line @typescript-eslint/no-type-alias
-export type AdminPermission = typeof ADMIN_PERMISSIONS[number]
-// eslint-disable-next-line @typescript-eslint/no-type-alias
+export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]
 export type AdminPermissionKey = AdminPermission['key']
-// eslint-disable-next-line @typescript-eslint/no-type-alias
 export type AdminPermissionCategory = AdminPermission['category']
 
 export function emptyPermissions(): AdminPermissions {
     return ADMIN_PERMISSIONS.reduce(
-        (acc, {
-            key }) => ({ ...acc,
-            [key]: false }),
+        // biome-ignore lint/performance/noAccumulatingSpread: small
+        (acc, { key }) => ({ ...acc, [key]: false }),
         {} as unknown as AdminPermissions,
     )
 }

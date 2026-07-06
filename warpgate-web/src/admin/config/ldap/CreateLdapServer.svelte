@@ -1,15 +1,20 @@
 <script lang="ts">
-    import { FormGroup, Input, Alert } from '@sveltestrap/sveltestrap'
-    import { push } from 'svelte-spa-router'
-    import { reloadServerInfo } from 'gateway/lib/store'
-    import { api, LdapUsernameAttribute, stringifyError, TlsMode, type Tls } from 'admin/lib/api'
+    import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import {
+        api,
+        LdapUsernameAttribute,
+        type Tls,
+        TlsMode,
+    } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import LdapConnectionFields from './LdapConnectionFields.svelte'
+    import { stringifyError } from 'common/errors'
+    import { reloadServerInfo } from 'gateway/lib/store'
+    import { push } from 'svelte-spa-router'
     import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
+    import LdapConnectionFields from './LdapConnectionFields.svelte'
 
     let name = $state('')
     let host = $state('')
-    // eslint-disable-next-line svelte/prefer-writable-derived
     let port = $state(389)
     let bindDn = $state('')
     let bindPassword = $state('')
@@ -25,7 +30,11 @@
         mode: TlsMode.Preferred,
         verify: true,
     })
-    let testResult = $state<{ success: boolean; message: string; baseDns?: string[] } | null>(null)
+    let testResult = $state<{
+        success: boolean
+        message: string
+        baseDns?: string[]
+    } | null>(null)
 
     // Auto-update port based on TLS mode
     $effect(() => {
@@ -45,7 +54,7 @@
                 tlsMode: tls.mode,
                 tlsVerify: tls.verify,
             })
-        } catch (e: any) {
+        } catch (e) {
             error = await stringifyError(e)
         }
     }
@@ -75,7 +84,7 @@
 
             reloadServerInfo() // update hasLdap flag
             push(`/config/ldap-servers/${result.id}`)
-        } catch (e: any) {
+        } catch (e) {
             error = await stringifyError(e)
         }
     }
@@ -92,10 +101,7 @@
 
     <form onsubmit={e => {e.preventDefault(); create()}}>
         <FormGroup floating label="Name">
-            <Input
-                bind:value={name}
-                required
-            />
+            <Input bind:value={name} required />
         </FormGroup>
 
         <LdapConnectionFields
@@ -111,7 +117,10 @@
         />
 
         {#if testResult}
-            <div class="alert {testResult.success ? 'alert-success' : 'alert-danger'}" role="alert">
+            <div
+                class="alert {testResult.success ? 'alert-success' : 'alert-danger'}"
+                role="alert"
+            >
                 {testResult.message}
                 {#if testResult.baseDns && testResult.baseDns.length > 0}
                     <div class="mt-2">

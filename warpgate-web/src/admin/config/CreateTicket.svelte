@@ -1,64 +1,70 @@
 <script lang="ts">
-import { api, type User, type Target, type TicketAndSecret } from 'admin/lib/api'
-import AsyncButton from 'common/AsyncButton.svelte'
-import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
-import { TargetKind } from 'gateway/lib/api'
-import { link } from 'svelte-spa-router'
-import { FormGroup, Alert } from '@sveltestrap/sveltestrap'
-import { firstBy } from 'thenby'
-import { stringifyError } from 'common/errors'
-import { handleReauthError } from 'common/reauth'
+    import { Alert, FormGroup } from '@sveltestrap/sveltestrap'
+    import {
+        api,
+        type Target,
+        type TicketAndSecret,
+        type User,
+    } from 'admin/lib/api'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
+    import { stringifyError } from 'common/errors'
+    import { handleReauthError } from 'common/reauth'
+    import { TargetKind } from 'gateway/lib/api'
+    import { link } from 'svelte-spa-router'
+    import { firstBy } from 'thenby'
 
-let error: string|null = $state(null)
-let targets: Target[]|undefined = $state()
-let users: User[]|undefined = $state()
-let selectedTarget: Target|undefined = $state()
-let selectedUser: User|undefined = $state()
-let selectedExpiry: string|undefined = $state()
-let selectedNumberOfUses: number|undefined = $state()
-let result: TicketAndSecret|undefined = $state()
-let selectedDescription: string = $state('')
+    let error: string | null = $state(null)
+    let targets: Target[] | undefined = $state()
+    let users: User[] | undefined = $state()
+    let selectedTarget: Target | undefined = $state()
+    let selectedUser: User | undefined = $state()
+    let selectedExpiry: string | undefined = $state()
+    let selectedNumberOfUses: number | undefined = $state()
+    let result: TicketAndSecret | undefined = $state()
+    let selectedDescription: string = $state('')
 
-async function load () {
-    [targets, users] = await Promise.all([
-        api.getTargets(),
-        api.getUsers(),
-    ])
-    targets.sort(firstBy('name'))
-    users.sort(firstBy('username'))
-}
-
-load().catch(async e => {
-    error = await stringifyError(e)
-})
-
-async function create () {
-    if (!selectedTarget || !selectedUser) {
-        return
+    async function load() {
+        ;[targets, users] = await Promise.all([
+            api.getTargets(),
+            api.getUsers(),
+        ])
+        targets.sort(firstBy('name'))
+        users.sort(firstBy('username'))
     }
-    try {
-        result = await api.createTicket({
-            createTicketRequest: {
-                userId: selectedUser.id,
-                targetId: selectedTarget.id,
-                expiry: selectedExpiry ? new Date(selectedExpiry) : undefined,
-                numberOfUses: selectedNumberOfUses,
-                description: selectedDescription,
-            },
-        })
-    } catch (err) {
-        if (await handleReauthError(err)) {
+
+    load().catch(async e => {
+        error = await stringifyError(e)
+    })
+
+    async function create() {
+        if (!selectedTarget || !selectedUser) {
             return
         }
-        error = await stringifyError(err)
+        try {
+            result = await api.createTicket({
+                createTicketRequest: {
+                    userId: selectedUser.id,
+                    targetId: selectedTarget.id,
+                    expiry: selectedExpiry
+                        ? new Date(selectedExpiry)
+                        : undefined,
+                    numberOfUses: selectedNumberOfUses,
+                    description: selectedDescription,
+                },
+            })
+        } catch (err) {
+            if (await handleReauthError(err)) {
+                return
+            }
+            error = await stringifyError(err)
+        }
     }
-}
-
 </script>
 
 <div class="container-max-md">
     {#if error}
-    <Alert color="danger">{error}</Alert>
+        <Alert color="danger">{error}</Alert>
     {/if}
 
     {#if result}
@@ -71,69 +77,77 @@ async function create () {
         </Alert>
 
         {#if selectedTarget && selectedUser}
-        <ConnectionInstructions
-            targetName={selectedTarget.name}
-            targetKind={selectedTarget.options.kind}
-            username={selectedUser.username}
-            targetExternalHost={selectedTarget.options.kind === 'Http' ? selectedTarget.options.externalHost : undefined}
-            ticketSecret={result.secret}
-            targetDefaultDatabaseName={
-                (selectedTarget.options.kind === TargetKind.MySql || selectedTarget.options.kind === TargetKind.Postgres)
+            <ConnectionInstructions
+                targetName={selectedTarget.name}
+                targetKind={selectedTarget.options.kind}
+                username={selectedUser.username}
+                targetExternalHost={selectedTarget.options.kind === 'Http' ? selectedTarget.options.externalHost : undefined}
+                ticketSecret={result.secret}
+                targetDefaultDatabaseName={(selectedTarget.options.kind === TargetKind.MySql || selectedTarget.options.kind === TargetKind.Postgres)
                     ? selectedTarget.options.defaultDatabaseName : undefined}
-        />
+            />
         {/if}
 
-        <a
-            class="btn btn-secondary"
-            href="/config/tickets"
-            use:link
-        >Done</a>
+        <a class="btn btn-secondary" href="/config/tickets" use:link>Done</a>
     {:else}
-    <div class="narrow-page">
-        <div class="page-summary-bar">
-            <h1>create an access ticket</h1>
+        <div class="narrow-page">
+            <div class="page-summary-bar">
+                <h1>create an access ticket</h1>
+            </div>
+
+            {#if users}
+                <FormGroup floating label="Authorize as user">
+                    <select bind:value={selectedUser} class="form-control">
+                        {#each users as user (user.id)}
+                            <option value={user}>
+                                {user.username}
+                            </option>
+                        {/each}
+                    </select>
+                </FormGroup>
+            {/if}
+
+            {#if targets}
+                <FormGroup floating label="Target">
+                    <select bind:value={selectedTarget} class="form-control">
+                        {#each targets as target (target.id)}
+                            <option value={target}>
+                                {target.name}
+                            </option>
+                        {/each}
+                    </select>
+                </FormGroup>
+            {/if}
+
+            <FormGroup floating label="Description">
+                <input
+                    type="text"
+                    bind:value={selectedDescription}
+                    class="form-control"
+                    placeholder="Optional description"
+                >
+            </FormGroup>
+
+            <FormGroup floating label="Expiry (optional)">
+                <input
+                    type="datetime-local"
+                    bind:value={selectedExpiry}
+                    class="form-control"
+                >
+            </FormGroup>
+
+            <FormGroup floating label="Number of uses (optional)">
+                <input
+                    type="number"
+                    min="1"
+                    bind:value={selectedNumberOfUses}
+                    class="form-control"
+                >
+            </FormGroup>
+
+            <AsyncButton color="primary" click={create}
+                >Create ticket</AsyncButton
+            >
         </div>
-
-        {#if users}
-        <FormGroup floating label="Authorize as user">
-            <select bind:value={selectedUser} class="form-control">
-                {#each users as user (user.id)}
-                    <option value={user}>
-                        {user.username}
-                    </option>
-                {/each}
-            </select>
-        </FormGroup>
-        {/if}
-
-        {#if targets}
-        <FormGroup floating label="Target">
-            <select bind:value={selectedTarget} class="form-control">
-                {#each targets as target (target.id)}
-                    <option value={target}>
-                        {target.name}
-                    </option>
-                {/each}
-            </select>
-        </FormGroup>
-        {/if}
-
-        <FormGroup floating label="Description">
-            <input type="text" bind:value={selectedDescription} class="form-control" placeholder="Optional description"/>
-        </FormGroup>
-
-        <FormGroup floating label="Expiry (optional)">
-            <input type="datetime-local" bind:value={selectedExpiry} class="form-control"/>
-        </FormGroup>
-
-        <FormGroup floating label="Number of uses (optional)">
-            <input type="number" min="1" bind:value={selectedNumberOfUses} class="form-control"/>
-        </FormGroup>
-
-        <AsyncButton
-        color="primary"
-            click={create}
-        >Create ticket</AsyncButton>
-    </div>
     {/if}
 </div>

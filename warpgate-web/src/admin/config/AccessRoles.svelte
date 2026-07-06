@@ -1,23 +1,28 @@
 <script lang="ts">
-    import { Observable, from, map } from 'rxjs'
-    import { type Role, api } from 'admin/lib/api'
-    import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
-    import { link } from 'svelte-spa-router'
+    import { api, type Role } from 'admin/lib/api'
+    import ItemList, {
+        type LoadOptions,
+        type PaginatedResponse,
+    } from 'common/ItemList.svelte'
     import { compare as naturalCompareFactory } from 'natural-orderby'
+    import { from, map, type Observable } from 'rxjs'
+    import { link } from 'svelte-spa-router'
     import { adminPermissions } from '../lib/store'
 
-    function getRoles(options: LoadOptions): Observable<PaginatedResponse<Role>> {
+    function getRoles(
+        options: LoadOptions,
+    ): Observable<PaginatedResponse<Role>> {
         return from(
             api.getRoles({
                 search: options.search,
-            })
+            }),
         ).pipe(
             map(roles => {
                 const sorted = roles.sort((a, b) =>
                     naturalCompareFactory()(
                         a.name.toLowerCase(),
-                        b.name.toLowerCase()
-                    )
+                        b.name.toLowerCase(),
+                    ),
                 )
 
                 return {
@@ -25,7 +30,7 @@
                     offset: 0,
                     total: sorted.length,
                 }
-            })
+            }),
         )
     }
 </script>
@@ -37,7 +42,8 @@
             class="btn btn-primary ms-auto"
             href="/config/access-roles/create"
             class:disabled={!$adminPermissions.accessRolesCreate}
-            use:link>
+            use:link
+        >
             Add a role
         </a>
     </div>
@@ -47,13 +53,16 @@
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/access-roles/{role.id}"
-                use:link>
+                use:link
+            >
                 <div>
                     <strong class="me-auto">
                         {role.name}
                     </strong>
                     {#if role.description}
-                        <small class="d-block text-muted">{role.description}</small>
+                        <small class="d-block text-muted"
+                            >{role.description}</small
+                        >
                     {/if}
                 </div>
             </a>

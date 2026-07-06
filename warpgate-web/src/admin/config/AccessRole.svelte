@@ -1,66 +1,77 @@
 <script lang="ts">
+    import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { api, type Role, type Target, type User } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import { link, replace } from 'svelte-spa-router'
-    import { FormGroup, Input, Alert } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Loadable from 'common/Loadable.svelte'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
+    import Loadable from 'common/Loadable.svelte'
     import * as rx from 'rxjs'
+    import { link, replace } from 'svelte-spa-router'
     import { adminPermissions } from '../lib/store'
 
     interface Props {
-        params: { id: string };
+        params: { id: string }
     }
 
     let { params }: Props = $props()
 
-    let error: string|null = $state(null)
+    let error: string | null = $state(null)
     let role: Role | undefined = $state()
     const initPromise = init()
 
-    async function init () {
+    async function init() {
         role = await api.getRole({ id: params.id })
+        return role
     }
 
-    function loadUsers (): rx.Observable<PaginatedResponse<User>> {
-        return rx.from(api.getRoleUsers({
-            id: params.id,
-        })).pipe(
-            rx.map(targets => ({
-                items: targets,
-                offset: 0,
-                total: targets.length,
-            })),
-        )
+    function loadUsers(): rx.Observable<PaginatedResponse<User>> {
+        return rx
+            .from(
+                api.getRoleUsers({
+                    id: params.id,
+                }),
+            )
+            .pipe(
+                rx.map(targets => ({
+                    items: targets,
+                    offset: 0,
+                    total: targets.length,
+                })),
+            )
     }
 
-    function loadTargets (): rx.Observable<PaginatedResponse<Target>> {
-        return rx.from(api.getRoleTargets({
-            id: params.id,
-        })).pipe(
-            rx.map(targets => ({
-                items: targets,
-                offset: 0,
-                total: targets.length,
-            })),
-        )
+    function loadTargets(): rx.Observable<PaginatedResponse<Target>> {
+        return rx
+            .from(
+                api.getRoleTargets({
+                    id: params.id,
+                }),
+            )
+            .pipe(
+                rx.map(targets => ({
+                    items: targets,
+                    offset: 0,
+                    total: targets.length,
+                })),
+            )
     }
 
-    async function update () {
+    async function update() {
+        if (!role) return
         try {
             role = await api.updateRole({
                 id: params.id,
-                roleDataRequest: role!,
+                roleDataRequest: role,
             })
         } catch (err) {
             error = await stringifyError(err)
         }
     }
 
-    async function remove () {
-        if (confirm(`Delete role ${role!.name}?`)) {
-            await api.deleteRole(role!)
+    async function remove() {
+        if (!role) return
+        if (confirm(`Delete role ${role.name}?`)) {
+            await api.deleteRole(role)
             replace('/config/access-roles')
         }
     }
@@ -68,34 +79,33 @@
 
 <div class="container-max-md">
     <Loadable promise={initPromise}>
-        <div class="page-summary-bar">
-            <div>
-                <h1>{role!.name}</h1>
-                <div class="text-muted">role</div>
+        {#snippet children(role)}
+            <div class="page-summary-bar">
+                <div>
+                    <h1>{role.name}</h1>
+                    <div class="text-muted">role</div>
+                </div>
             </div>
-        </div>
 
-        <FormGroup floating label="Name">
-            <Input bind:value={role!.name} />
-        </FormGroup>
+            <FormGroup floating label="Name">
+                <Input bind:value={role.name} />
+            </FormGroup>
 
-        <FormGroup floating label="Description">
-            <Input bind:value={role!.description} />
-        </FormGroup>
+            <FormGroup floating label="Description">
+                <Input bind:value={role.description} />
+            </FormGroup>
 
-        <div class="mb-4">
-            <label
-                class="d-flex align-items-center"
-                for="isDefault"
-            >
-                <Input
-                    id="isDefault"
-                    type="switch"
-                    bind:checked={role!.isDefault}
-                />
-                <div>Automatically assign to all new users</div>
-            </label>
-        </div>
+            <div class="mb-4">
+                <label class="d-flex align-items-center" for="isDefault">
+                    <Input
+                        id="isDefault"
+                        type="switch"
+                        bind:checked={role.isDefault}
+                    />
+                    <div>Automatically assign to all new users</div>
+                </label>
+            </div>
+        {/snippet}
     </Loadable>
 
     {#if error}
@@ -103,23 +113,29 @@
     {/if}
 
     <div class="d-flex">
-        <a href="/log/access-role/{params.id}" use:link class="btn btn-secondary">
+        <a
+            href="/log/access-role/{params.id}"
+            use:link
+            class="btn btn-secondary"
+        >
             Audit log
         </a>
 
         <AsyncButton
-        color="primary"
+            color="primary"
             disabled={!$adminPermissions.accessRolesEdit}
             class="ms-auto"
             click={update}
-        >Update</AsyncButton>
+            >Update</AsyncButton
+        >
 
         <AsyncButton
             class="ms-2"
             disabled={!$adminPermissions.accessRolesDelete}
             color="danger"
             click={remove}
-        >Remove</AsyncButton>
+            >Remove</AsyncButton
+        >
     </div>
 
     <h4 class="mt-5">Assigned users</h4>
@@ -129,13 +145,16 @@
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/users/{user.id}"
-                use:link>
+                use:link
+            >
                 <div>
                     <strong class="me-auto">
                         {user.username}
                     </strong>
                     {#if user.description}
-                        <small class="d-block text-muted">{user.description}</small>
+                        <small class="d-block text-muted"
+                            >{user.description}</small
+                        >
                     {/if}
                 </div>
             </a>
@@ -152,13 +171,16 @@
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/targets/{target.id}"
-                use:link>
+                use:link
+            >
                 <div class="me-auto">
                     <strong>
                         {target.name}
                     </strong>
                     {#if target.description}
-                        <small class="d-block text-muted">{target.description}</small>
+                        <small class="d-block text-muted"
+                            >{target.description}</small
+                        >
                     {/if}
                 </div>
             </a>

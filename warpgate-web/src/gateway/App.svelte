@@ -1,44 +1,44 @@
 <script lang="ts">
-    import Router, { push, type RouteDetail } from 'svelte-spa-router'
-    import { wrap } from 'svelte-spa-router/wrap'
-    import { get } from 'svelte/store'
-    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
-    import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
-    import DelayedSpinner from 'common/DelayedSpinner.svelte'
+    import { faArrowRight, faCog } from '@fortawesome/free-solid-svg-icons'
+    import { Button } from '@sveltestrap/sveltestrap'
+    import { hasAdminAccess } from 'admin/lib/store'
     import AuthBar from 'common/AuthBar.svelte'
     import Brand from 'common/Brand.svelte'
+    import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import { api, type AuthStateResponseInternal } from './lib/api'
-    import { Button } from '@sveltestrap/sveltestrap'
+    import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
+    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
-    import { faArrowRight, faCog } from '@fortawesome/free-solid-svg-icons'
-    import { hasAdminAccess } from 'admin/lib/store'
+    import Router, { push, type RouteDetail } from 'svelte-spa-router'
+    import { wrap } from 'svelte-spa-router/wrap'
+    import { type AuthStateResponseInternal, api } from './lib/api'
 
     let redirecting = $state(false)
     let serverInfoPromise = reloadServerInfo()
     let webAuthRequests: AuthStateResponseInternal[] = $state([])
     let doNotShowAuthRequests = $state(false)
 
-    async function init () {
+    async function init() {
         await serverInfoPromise
     }
 
-    function onPageResume () {
+    function onPageResume() {
         redirecting = false
     }
 
-    async function reloadWebAuthRequests () {
+    async function reloadWebAuthRequests() {
         webAuthRequests = await api.getWebAuthRequests()
     }
 
-    async function requireLogin (detail: RouteDetail) {
+    async function requireLogin(detail: RouteDetail) {
         await serverInfoPromise
         if (!get(serverInfo)?.username) {
-            let url = location.pathname + '#' + detail.location
+            let url = `${location.pathname}#${detail.location}`
             if (detail.querystring) {
-                url += '?' + detail.querystring
+                url += `?${detail.querystring}`
             }
-            push('/login?next=' + encodeURIComponent(url))
+            push(`/login?next=${encodeURIComponent(url)}`)
             return false
         }
         return true
@@ -46,33 +46,33 @@
 
     const routes = {
         '/': wrap({
-            asyncComponent: () => import('./TargetList.svelte') as any,
+            asyncComponent: () => import('./TargetList.svelte'),
             props: {
-                'on:navigation': () => redirecting = true,
+                'on:navigation': () => (redirecting = true),
             },
             conditions: [requireLogin],
         }),
         '/profile': wrap({
-            asyncComponent: () => import('./Profile.svelte') as any,
+            asyncComponent: () => import('./Profile.svelte'),
             conditions: [requireLogin],
         }),
         '/profile/api-tokens': wrap({
-            asyncComponent: () => import('./ProfileApiTokens.svelte') as any,
+            asyncComponent: () => import('./ProfileApiTokens.svelte'),
             conditions: [requireLogin],
         }),
         '/profile/credentials': wrap({
-            asyncComponent: () => import('./ProfileCredentials.svelte') as any,
+            asyncComponent: () => import('./ProfileCredentials.svelte'),
             conditions: [requireLogin],
         }),
         '/ticket-requests': wrap({
-            asyncComponent: () => import('./TicketRequests.svelte') as any,
+            asyncComponent: () => import('./TicketRequests.svelte'),
             conditions: [requireLogin],
         }),
         '/login': wrap({
-            asyncComponent: () => import('./Login.svelte') as any,
+            asyncComponent: () => import('./Login.svelte'),
         }),
         '/login/:stateId': wrap({
-            asyncComponent: () => import('./OutOfBandAuth.svelte') as any,
+            asyncComponent: () => import('./OutOfBandAuth.svelte'),
             conditions: [requireLogin],
             userData: {
                 doNotShowAuthRequests: true,
@@ -84,7 +84,6 @@
     let socket: WebSocket | null = null
 
     $effect(() => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
         $serverInfo?.username // trigger effect on username change
         try {
             socket?.close()
@@ -93,7 +92,9 @@
         }
         socket = null
         if ($serverInfo?.username) {
-            socket = new WebSocket(`wss://${location.host}/@warpgate/api/auth/web-auth-requests/stream`)
+            socket = new WebSocket(
+                `wss://${location.host}/@warpgate/api/auth/web-auth-requests/stream`,
+            )
             socket.addEventListener('message', () => {
                 reloadWebAuthRequests()
             })
@@ -101,12 +102,14 @@
         }
     })
 
-    function onRouteLoaded (detail: RouteDetail) {
-        doNotShowAuthRequests = !!(detail.userData as any)?.['doNotShowAuthRequests']
+    function onRouteLoaded(detail: RouteDetail) {
+        doNotShowAuthRequests = !!(
+            detail.userData as { doNotShowAuthRequests?: boolean }
+        )?.doNotShowAuthRequests
     }
 </script>
 
-<svelte:window on:pageshow={onPageResume}/>
+<svelte:window on:pageshow={onPageResume} />
 
 <div class="container">
     <Loadable promise={initPromise}>
@@ -120,10 +123,13 @@
 
                 <div class="ms-auto d-flex align-items-center">
                     {#if $hasAdminAccess}
-                    <a href="/@warpgate/admin" class="btn btn-warning btn-sm d-flex align-items-center gap-1 me-3">
-                        <Fa icon={faCog} class="mx-1" />
-                        <span class="me-1">Admin</span>
-                    </a>
+                        <a
+                            href="/@warpgate/admin"
+                            class="btn btn-warning btn-sm d-flex align-items-center gap-1 me-3"
+                        >
+                            <Fa icon={faCog} class="mx-1" />
+                            <span class="me-1">Admin</span>
+                        </a>
                     {/if}
 
                     <AuthBar />
@@ -131,27 +137,26 @@
             </div>
 
             {#if !doNotShowAuthRequests}
-            {#each webAuthRequests as authRequest (authRequest.id)}
-                <Button
-                    color="success"
-                    class="mb-4 d-flex align-items-center w-100 text-start"
-                    on:click={() => {
-                        push('/login/' + authRequest.id)
+                {#each webAuthRequests as authRequest (authRequest.id)}
+                    <Button
+                        color="success"
+                        class="mb-4 d-flex align-items-center w-100 text-start"
+                        on:click={() => {
+                        push(`/login/${authRequest.id}`)
                     }}
-                >
-                    <div>
-                        <strong class="d-block">
-                            {authRequest.protocol} authentication request
-                        </strong>
-                        {#if authRequest.address}
-                            <small>
-                                From {authRequest.address}
-                            </small>
-                        {/if}
-                    </div>
-                    <Fa class="ms-auto" icon={faArrowRight} />
-                </Button>
-            {/each}
+                    >
+                        <div>
+                            <strong class="d-block">
+                                {authRequest.protocol}
+                                authentication request
+                            </strong>
+                            {#if authRequest.address}
+                                <small> From {authRequest.address} </small>
+                            {/if}
+                        </div>
+                        <Fa class="ms-auto" icon={faArrowRight} />
+                    </Button>
+                {/each}
             {/if}
 
             <main>
@@ -160,11 +165,11 @@
 
             <footer class="mt-5">
                 {#if $serverInfo?.version}
-                <span class="ms-3 me-auto">
-                    {$serverInfo.version}
-                </span>
+                    <span class="ms-3 me-auto">
+                        {$serverInfo.version}
+                    </span>
                 {:else}
-                <div class="me-auto"></div>
+                    <div class="me-auto"></div>
                 {/if}
                 <ThemeSwitcher />
             </footer>

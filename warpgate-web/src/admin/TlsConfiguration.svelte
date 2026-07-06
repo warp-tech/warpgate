@@ -1,17 +1,13 @@
 <script lang="ts">
-    import { type Tls, TlsMode } from 'admin/lib/api'
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { type Tls, TlsMode } from 'admin/lib/api'
 
     interface Props {
         value: Tls
         class?: string
     }
 
-    // eslint-disable-next-line svelte/no-unused-props
-    let {
-        value = $bindable(),
-        'class': className = '',
-    }: Props = $props()
+    let { value = $bindable(), class: className = '' }: Props = $props()
 </script>
 
 <div class="row align-items-center {className}">
@@ -26,7 +22,12 @@
     </div>
     {#if value.mode !== TlsMode.Disabled}
         <div class="col mb-3">
-            <Input class="ms-3" type="switch" label="Verify certificate" bind:checked={value.verify} />
+            <Input
+                class="ms-3"
+                type="switch"
+                label="Verify certificate"
+                bind:checked={value.verify}
+            />
         </div>
     {/if}
 </div>

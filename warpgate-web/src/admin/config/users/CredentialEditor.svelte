@@ -1,37 +1,64 @@
 <script lang="ts" module>
     export type ExistingCredential =
-        { kind: typeof CredentialKind.Password } & ExistingPasswordCredential
-        | { kind: typeof CredentialKind.Sso } & ExistingSsoCredential
-        | { kind: typeof CredentialKind.PublicKey } & ExistingPublicKeyCredential
-        | { kind: typeof CredentialKind.Certificate } & ExistingCertificateCredential
-        | { kind: typeof CredentialKind.Totp } & ExistingOtpCredential
+        | ({
+              kind: typeof CredentialKind.Password
+          } & ExistingPasswordCredential)
+        | ({ kind: typeof CredentialKind.Sso } & ExistingSsoCredential)
+        | ({
+              kind: typeof CredentialKind.PublicKey
+          } & ExistingPublicKeyCredential)
+        | ({
+              kind: typeof CredentialKind.Certificate
+          } & ExistingCertificateCredential)
+        | ({ kind: typeof CredentialKind.Totp } & ExistingOtpCredential)
 </script>
 
 <script lang="ts">
-    import { faCertificate, faIdBadge, faKey, faKeyboard, faMobileScreen } from '@fortawesome/free-solid-svg-icons'
-    import { api, CredentialKind, type ExistingPasswordCredential, type ExistingPublicKeyCredential, type ExistingSsoCredential, type ExistingOtpCredential, type UserRequireCredentialsPolicy, type ParameterValues, type ExistingCertificateCredential } from 'admin/lib/api'
+    import {
+        faCertificate,
+        faIdBadge,
+        faKey,
+        faKeyboard,
+        faMobileScreen,
+    } from '@fortawesome/free-solid-svg-icons'
+    import { Button, Tooltip } from '@sveltestrap/sveltestrap'
+    import {
+        api,
+        CredentialKind,
+        type ExistingCertificateCredential,
+        type ExistingOtpCredential,
+        type ExistingPasswordCredential,
+        type ExistingPublicKeyCredential,
+        type ExistingSsoCredential,
+        type ParameterValues,
+        type UserRequireCredentialsPolicy,
+    } from 'admin/lib/api'
+    import { adminPermissions } from 'admin/lib/store'
+    import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
+    import EmptyState from 'common/EmptyState.svelte'
+    import Loadable from 'common/Loadable.svelte'
+    import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
     import { SvelteSet } from 'svelte/reactivity'
     import Fa from 'svelte-fa'
-    import { Button, Tooltip } from '@sveltestrap/sveltestrap'
-    import CreatePasswordModal from '../../CreatePasswordModal.svelte'
-    import SsoCredentialModal from '../../SsoCredentialModal.svelte'
-    import PublicKeyCredentialModal from '../../PublicKeyCredentialModal.svelte'
     import CertificateCredentialModal from '../../CertificateCredentialModal.svelte'
     import CreateOtpModal from '../../CreateOtpModal.svelte'
+    import CreatePasswordModal from '../../CreatePasswordModal.svelte'
+    import PublicKeyCredentialModal from '../../PublicKeyCredentialModal.svelte'
+    import SsoCredentialModal from '../../SsoCredentialModal.svelte'
     import AuthPolicyEditor from './AuthPolicyEditor.svelte'
-    import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
-    import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
-    import Loadable from 'common/Loadable.svelte'
-    import EmptyState from 'common/EmptyState.svelte'
-    import { adminPermissions } from 'admin/lib/store'
 
     interface Props {
         userId: string
         username: string
-        credentialPolicy: UserRequireCredentialsPolicy,
+        credentialPolicy: UserRequireCredentialsPolicy
         ldapLinked?: boolean
     }
-    let { userId, username, credentialPolicy = $bindable(), ldapLinked = false }: Props = $props()
+    let {
+        userId,
+        username,
+        credentialPolicy = $bindable(),
+        ldapLinked = false,
+    }: Props = $props()
 
     let credentials: ExistingCredential[] = $state([])
     let globalParameters: ParameterValues | undefined = $state()
@@ -39,14 +66,19 @@
     let creatingPassword = $state(false)
     let creatingOtp = $state(false)
     let editingSsoCredential = $state(false)
-    let editingSsoCredentialInstance: ExistingSsoCredential|null = $state(null)
+    let editingSsoCredentialInstance: ExistingSsoCredential | null =
+        $state(null)
     let editingPublicKeyCredential = $state(false)
-    let editingPublicKeyCredentialInstance: ExistingPublicKeyCredential|null = $state(null)
+    let editingPublicKeyCredentialInstance: ExistingPublicKeyCredential | null =
+        $state(null)
     let editingCertificateCredential = $state(false)
 
     const loadPromise = load()
 
-    const policyProtocols: { id: 'ssh' | 'http' | 'mysql' | 'postgres' | 'kubernetes' | 'vnc' | 'rdp', name: string }[] = [
+    const policyProtocols: {
+        id: 'ssh' | 'http' | 'mysql' | 'postgres' | 'kubernetes' | 'vnc' | 'rdp'
+        name: string
+    }[] = [
         { id: 'ssh', name: 'SSH' },
         { id: 'http', name: 'HTTP' },
         { id: 'mysql', name: 'MySQL' },
@@ -57,7 +89,9 @@
     ]
 
     // Get effective possible credentials for a protocol, considering global SSH auth settings
-    function getEffectivePossibleCredentials(protocolId: string): SvelteSet<CredentialKind> {
+    function getEffectivePossibleCredentials(
+        protocolId: string,
+    ): SvelteSet<CredentialKind> {
         const base = possibleCredentials[protocolId]
         if (!base) {
             return new SvelteSet()
@@ -68,15 +102,25 @@
             const filtered = new SvelteSet<CredentialKind>()
             for (const kind of base) {
                 // PublicKey requires publickey auth enabled
-                if (kind === CredentialKind.PublicKey && !globalParameters.sshClientAuthPublickey) {
+                if (
+                    kind === CredentialKind.PublicKey &&
+                    !globalParameters.sshClientAuthPublickey
+                ) {
                     continue
                 }
                 // Password requires password auth enabled
-                if (kind === CredentialKind.Password && !globalParameters.sshClientAuthPassword) {
+                if (
+                    kind === CredentialKind.Password &&
+                    !globalParameters.sshClientAuthPassword
+                ) {
                     continue
                 }
                 // Totp and WebUserApproval require keyboard-interactive auth enabled
-                if ((kind === CredentialKind.Totp || kind === CredentialKind.WebUserApproval) && !globalParameters.sshClientAuthKeyboardInteractive) {
+                if (
+                    (kind === CredentialKind.Totp ||
+                        kind === CredentialKind.WebUserApproval) &&
+                    !globalParameters.sshClientAuthKeyboardInteractive
+                ) {
                     continue
                 }
                 filtered.add(kind)
@@ -87,7 +131,7 @@
         return new SvelteSet(base)
     }
 
-    async function load () {
+    async function load() {
         await Promise.all([
             loadPasswords(),
             loadSso(),
@@ -98,48 +142,62 @@
         ])
     }
 
-    async function loadParameters () {
+    async function loadParameters() {
         globalParameters = await api.getParameters({})
     }
 
-    async function loadPasswords () {
-        credentials.push(...(await api.getPasswordCredentials({ userId })).map(c => ({
-            kind: CredentialKind.Password,
-            ...c,
-        })))
+    async function loadPasswords() {
+        credentials.push(
+            ...(await api.getPasswordCredentials({ userId })).map(c => ({
+                kind: CredentialKind.Password,
+                ...c,
+            })),
+        )
     }
 
-    async function loadSso () {
-        credentials.push(...(await api.getSsoCredentials({ userId })).map(c => ({
-            kind: CredentialKind.Sso,
-            ...c,
-        })))
+    async function loadSso() {
+        credentials.push(
+            ...(await api.getSsoCredentials({ userId })).map(c => ({
+                kind: CredentialKind.Sso,
+                ...c,
+            })),
+        )
     }
 
-    async function loadPublicKeys () {
-        credentials.push(...(await api.getPublicKeyCredentials({ userId })).map(c => ({
-            kind: CredentialKind.PublicKey,
-            ...c,
-        })))
+    async function loadPublicKeys() {
+        credentials.push(
+            ...(await api.getPublicKeyCredentials({ userId })).map(c => ({
+                kind: CredentialKind.PublicKey,
+                ...c,
+            })),
+        )
     }
 
-    async function loadCertificates () {
-        credentials.push(...(await api.getCertificateCredentials({ userId })).map(c => ({
-            kind: CredentialKind.Certificate,
-            ...c,
-        })))
+    async function loadCertificates() {
+        credentials.push(
+            ...(await api.getCertificateCredentials({ userId })).map(c => ({
+                kind: CredentialKind.Certificate,
+                ...c,
+            })),
+        )
     }
 
-    async function loadOtp () {
-        credentials.push(...(await api.getOtpCredentials({ userId })).map(c => ({
-            kind: CredentialKind.Totp,
-            ...c,
-        })))
+    async function loadOtp() {
+        credentials.push(
+            ...(await api.getOtpCredentials({ userId })).map(c => ({
+                kind: CredentialKind.Totp,
+                ...c,
+            })),
+        )
     }
 
-    async function deleteCredential (credential: ExistingCredential) {
+    async function deleteCredential(credential: ExistingCredential) {
         if (credential.kind === CredentialKind.Certificate) {
-            if (!confirm('Permanently revoke certificate? This cannot be undone.')) {
+            if (
+                !confirm(
+                    'Permanently revoke certificate? This cannot be undone.',
+                )
+            ) {
                 return
             }
         }
@@ -178,7 +236,7 @@
         }
     }
 
-    async function createPassword (password: string) {
+    async function createPassword(password: string) {
         const credential = await api.createPasswordCredential({
             userId,
             newPasswordCredential: {
@@ -191,7 +249,7 @@
         })
     }
 
-    async function createOtp (secretKey: number[]) {
+    async function createOtp(secretKey: number[]) {
         const credential = await api.createOtpCredential({
             userId,
             newOtpCredential: {
@@ -204,16 +262,19 @@
         })
 
         // Automatically set up a 2FA policy when adding an OTP
-        for (const protocol of ['http', 'ssh'] as ('http'|'ssh')[]) {
-            for (const ck of [CredentialKind.Password, CredentialKind.PublicKey]) {
+        for (const protocol of ['http', 'ssh'] as ('http' | 'ssh')[]) {
+            for (const ck of [
+                CredentialKind.Password,
+                CredentialKind.PublicKey,
+            ]) {
                 const effectiveCreds = getEffectivePossibleCredentials(protocol)
                 if (
-                    !credentialPolicy[protocol]
-                    && credentials.some(x => x.kind === ck)
-                    && effectiveCreds.has(ck)
+                    !credentialPolicy[protocol] &&
+                    credentials.some(x => x.kind === ck) &&
+                    effectiveCreds.has(ck)
                 ) {
                     credentialPolicy = {
-                        ...credentialPolicy ?? {},
+                        ...(credentialPolicy ?? {}),
                         [protocol]: [ck, CredentialKind.Totp],
                     }
                 }
@@ -221,7 +282,7 @@
         }
     }
 
-    async function saveSsoCredential (provider: string|null, email: string) {
+    async function saveSsoCredential(provider: string | null, email: string) {
         if (editingSsoCredentialInstance) {
             editingSsoCredentialInstance.provider = provider ?? undefined
             editingSsoCredentialInstance.email = email
@@ -234,7 +295,7 @@
             const credential = await api.createSsoCredential({
                 userId,
                 newSsoCredential: {
-                    provider:provider ?? undefined,
+                    provider: provider ?? undefined,
                     email,
                 },
             })
@@ -247,10 +308,14 @@
         editingSsoCredentialInstance = null
     }
 
-    async function savePublicKeyCredential (label: string, opensshPublicKey: string) {
+    async function savePublicKeyCredential(
+        label: string,
+        opensshPublicKey: string,
+    ) {
         if (editingPublicKeyCredentialInstance) {
             editingPublicKeyCredentialInstance.label = label
-            editingPublicKeyCredentialInstance.opensshPublicKey = opensshPublicKey
+            editingPublicKeyCredentialInstance.opensshPublicKey =
+                opensshPublicKey
             await api.updatePublicKeyCredential({
                 userId,
                 id: editingPublicKeyCredentialInstance.id,
@@ -273,7 +338,10 @@
         editingPublicKeyCredentialInstance = null
     }
 
-    async function saveCertificateCredential (label: string, publicKeyPem: string) {
+    async function saveCertificateCredential(
+        label: string,
+        publicKeyPem: string,
+    ) {
         const response = await api.issueCertificateCredential({
             userId,
             issueCertificateCredentialRequest: {
@@ -295,32 +363,47 @@
     <h4 class="m-0">Credentials</h4>
     <span class="ms-auto"></span>
     {#if $adminPermissions.usersEdit}
-    <Button size="sm" color="link" on:click={() => creatingPassword = true}>
-        Add password
-    </Button>
-    <Button size="sm" color="link" on:click={() => {
+        <Button size="sm" color="link" on:click={() => creatingPassword = true}>
+            Add password
+        </Button>
+        <Button
+            size="sm"
+            color="link"
+            on:click={() => {
         editingCertificateCredential = true
-    }}>Issue certificate</Button>
-    <Button
-        id="addPublicKeyCredentialButton"
-        size="sm"
-        color="link"
-        on:click={() => {
+    }}
+            >Issue certificate</Button
+        >
+        <Button
+            id="addPublicKeyCredentialButton"
+            size="sm"
+            color="link"
+            on:click={() => {
             if (ldapLinked) {
                 return
             }
             editingPublicKeyCredentialInstance = null
             editingPublicKeyCredential = true
         }}
-        title={ldapLinked ? 'SSH keys are managed by LDAP' : ''}
-    >Add public key</Button>
-    <Tooltip delay="250" target="addPublicKeyCredentialButton" animation>Public key credentials will be loaded from LDAP</Tooltip>
+            title={ldapLinked ? 'SSH keys are managed by LDAP' : ''}
+            >Add public key</Button
+        >
+        <Tooltip delay="250" target="addPublicKeyCredentialButton" animation
+            >Public key credentials will be loaded from LDAP</Tooltip
+        >
 
-    <Button size="sm" color="link" on:click={() => creatingOtp = true}>Add OTP</Button>
-    <Button size="sm" color="link" on:click={() => {
+        <Button size="sm" color="link" on:click={() => creatingOtp = true}
+            >Add OTP</Button
+        >
+        <Button
+            size="sm"
+            color="link"
+            on:click={() => {
         editingSsoCredentialInstance = null
         editingSsoCredential = true
-    }}>Add SSO</Button>
+    }}
+            >Add SSO</Button
+        >
     {/if}
 </div>
 
@@ -333,50 +416,57 @@
     {/if}
     <div class="list-group list-group-flush mb-3">
         {#each credentials as credential (credential.id)}
-        <div class="list-group-item credential gap-2">
-            {#if credential.kind === CredentialKind.Password }
-                <Fa fw icon={faKeyboard} />
-                <span class="label me-auto">Password</span>
-            {/if}
-            {#if credential.kind === 'PublicKey'}
-                <Fa fw icon={faKey} />
-                <div class="main me-auto">
-                    <div class="label d-flex align-items-center">
-                        {credential.label}
+            <div class="list-group-item credential gap-2">
+                {#if credential.kind === CredentialKind.Password}
+                    <Fa fw icon={faKeyboard} />
+                    <span class="label me-auto">Password</span>
+                {/if}
+                {#if credential.kind === 'PublicKey'}
+                    <Fa fw icon={faKey} />
+                    <div class="main me-auto">
+                        <div class="label d-flex align-items-center">
+                            {credential.label}
+                        </div>
+                        <small class="d-block text-muted"
+                            >{abbreviatePublicKey(credential.opensshPublicKey)}</small
+                        >
                     </div>
-                    <small class="d-block text-muted">{abbreviatePublicKey(credential.opensshPublicKey)}</small>
-                </div>
-                <CredentialUsedStateBadge credential={credential} />
-            {/if}
-            {#if credential.kind === CredentialKind.Certificate}
-                <Fa fw icon={faCertificate} />
-                <div class="main me-auto abbreviate">
-                    <div class="label d-flex align-items-center">
-                        {credential.label}
+                    <CredentialUsedStateBadge {credential} />
+                {/if}
+                {#if credential.kind === CredentialKind.Certificate}
+                    <Fa fw icon={faCertificate} />
+                    <div class="main me-auto abbreviate">
+                        <div class="label d-flex align-items-center">
+                            {credential.label}
+                        </div>
+                        <small class="d-block text-muted abbreviate"
+                            >SHA-256:
+                            <code>{credential.fingerprint}</code></small
+                        >
                     </div>
-                    <small class="d-block text-muted abbreviate">SHA-256: <code>{credential.fingerprint}</code></small>
-                </div>
-                <CredentialUsedStateBadge credential={credential} />
-            {/if}
-            {#if credential.kind === 'Totp'}
-                <Fa fw icon={faMobileScreen} />
-                <span class="label me-auto">One-time password</span>
-            {/if}
-            {#if credential.kind === CredentialKind.Sso}
-                <Fa fw icon={faIdBadge} />
-                <span class="label">Single sign-on</span>
-                <span class="text-muted me-auto">
-                    {credential.email}
-                    {#if credential.provider} ({credential.provider}){/if}
-                </span>
-            {/if}
+                    <CredentialUsedStateBadge {credential} />
+                {/if}
+                {#if credential.kind === 'Totp'}
+                    <Fa fw icon={faMobileScreen} />
+                    <span class="label me-auto">One-time password</span>
+                {/if}
+                {#if credential.kind === CredentialKind.Sso}
+                    <Fa fw icon={faIdBadge} />
+                    <span class="label">Single sign-on</span>
+                    <span class="text-muted me-auto">
+                        {credential.email}
+                        {#if credential.provider}
+                            ({credential.provider})
+                        {/if}
+                    </span>
+                {/if}
 
-            {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
-            <Button
-                class="px-0"
-                color="link"
-                disabled={credential.kind === CredentialKind.PublicKey && (ldapLinked || !$adminPermissions.usersEdit)}
-                onclick={e => {
+                {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
+                    <Button
+                        class="px-0"
+                        color="link"
+                        disabled={credential.kind === CredentialKind.PublicKey && (ldapLinked || !$adminPermissions.usersEdit)}
+                        onclick={e => {
                     if (credential.kind === CredentialKind.Sso) {
                         editingSsoCredentialInstance = credential
                         editingSsoCredential = true
@@ -386,21 +476,23 @@
                         editingPublicKeyCredential = true
                     }
                     e.preventDefault()
-                }}>
-                Change
-            </Button>
-            {/if}
-            <Button
-                class="px-0"
-                color="link"
-                disabled={credential.kind === CredentialKind.PublicKey && (ldapLinked || !$adminPermissions.usersEdit)}
-                onclick={e => {
+                }}
+                    >
+                        Change
+                    </Button>
+                {/if}
+                <Button
+                    class="px-0"
+                    color="link"
+                    disabled={credential.kind === CredentialKind.PublicKey && (ldapLinked || !$adminPermissions.usersEdit)}
+                    onclick={e => {
                     deleteCredential(credential)
                     e.preventDefault()
-                }}>
-                Delete
-            </Button>
-        </div>
+                }}
+                >
+                    Delete
+                </Button>
+            </div>
         {/each}
     </div>
 
@@ -420,7 +512,9 @@
                         protocolId={protocol.id}
                     />
                 {:else}
-                    <span class="text-muted">No authentication methods available for this protocol</span>
+                    <span class="text-muted"
+                        >No authentication methods available for this protocol</span
+                    >
                 {/if}
             </div>
         {/each}
@@ -428,45 +522,41 @@
 </Loadable>
 
 {#if creatingPassword}
-<CreatePasswordModal
-    bind:isOpen={creatingPassword}
-    create={createPassword}
-/>
+    <CreatePasswordModal
+        bind:isOpen={creatingPassword}
+        create={createPassword}
+    />
 {/if}
 
 {#if creatingOtp}
-<CreateOtpModal
-    bind:isOpen={creatingOtp}
-    {username}
-    create={createOtp}
-/>
+    <CreateOtpModal bind:isOpen={creatingOtp} {username} create={createOtp} />
 {/if}
 
 {#if editingSsoCredential}
-<SsoCredentialModal
-    bind:isOpen={editingSsoCredential}
-    instance={editingSsoCredentialInstance}
-    save={saveSsoCredential}
-/>
+    <SsoCredentialModal
+        bind:isOpen={editingSsoCredential}
+        instance={editingSsoCredentialInstance}
+        save={saveSsoCredential}
+    />
 {/if}
 
 {#if editingPublicKeyCredential}
-<PublicKeyCredentialModal
-    bind:isOpen={editingPublicKeyCredential}
-    instance={editingPublicKeyCredentialInstance ?? undefined}
-    save={savePublicKeyCredential}
-/>
+    <PublicKeyCredentialModal
+        bind:isOpen={editingPublicKeyCredential}
+        instance={editingPublicKeyCredentialInstance ?? undefined}
+        save={savePublicKeyCredential}
+    />
 {/if}
 
 {#if editingCertificateCredential}
-<CertificateCredentialModal
-    bind:isOpen={editingCertificateCredential}
-    save={saveCertificateCredential}
-    {username}
-    onClose={() => {
+    <CertificateCredentialModal
+        bind:isOpen={editingCertificateCredential}
+        save={saveCertificateCredential}
+        {username}
+        onClose={() => {
         editingCertificateCredential = false
     }}
-/>
+    />
 {/if}
 
 <style lang="scss">

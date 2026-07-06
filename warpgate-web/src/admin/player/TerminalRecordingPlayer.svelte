@@ -1,13 +1,13 @@
 <script lang="ts">
-    import Fa from 'svelte-fa'
-    import { onDestroy, onMount } from 'svelte'
-    import { Terminal } from '@xterm/xterm'
-    import { SerializeAddon } from '@xterm/addon-serialize'
     import { faPlay } from '@fortawesome/free-solid-svg-icons'
     import { Spinner } from '@sveltestrap/sveltestrap'
+    import { SerializeAddon } from '@xterm/addon-serialize'
+    import { Terminal } from '@xterm/xterm'
     import type { Recording } from 'admin/lib/api'
-    import PlayerToolbar from './PlayerToolbar.svelte'
+    import { onDestroy, onMount } from 'svelte'
+    import Fa from 'svelte-fa'
     import { latestWins } from './latestWins'
+    import PlayerToolbar from './PlayerToolbar.svelte'
 
     export let recording: Recording
 
@@ -17,20 +17,34 @@
     let timestamp = 0
     let seekInputValue = 0
     let duration = 0
-    let resizeObserver: ResizeObserver|undefined
+    let resizeObserver: ResizeObserver | undefined
     let events: (DataEvent | SizeEvent | SnapshotEvent)[] = []
     let playing = false
     let loading = true
-    let sessionIsLive: boolean|null = null
-    let socket: WebSocket|null = null
+    let sessionIsLive: boolean | null = null
+    let socket: WebSocket | null = null
     let isStreaming = false
     let ptyMode = false
 
     $: isStreaming = timestamp === duration && playing
 
     const COLOR_NAMES = [
-        'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
-        'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
+        'black',
+        'red',
+        'green',
+        'yellow',
+        'blue',
+        'magenta',
+        'cyan',
+        'white',
+        'brightBlack',
+        'brightRed',
+        'brightGreen',
+        'brightYellow',
+        'brightBlue',
+        'brightMagenta',
+        'brightCyan',
+        'brightWhite',
     ]
 
     const theme: Record<string, string> = {
@@ -57,6 +71,7 @@
         '#fafaff',
     ]
     for (let i = 0; i < COLOR_NAMES.length; i++) {
+        // biome-ignore lint/style/noNonNullAssertion: x
         theme[COLOR_NAMES[i]!] = colors[i]!
     }
 
@@ -66,25 +81,34 @@
         width: number
         height: number
     }
-    // eslint-disable-next-line @typescript-eslint/no-type-alias
     type AsciiCastData = [number, 'o', string]
     type AsciiCastItem = AsciiCastData | AsciiCastHeader
 
-    function isAsciiCastHeader (data: AsciiCastItem): data is AsciiCastHeader {
+    function isAsciiCastHeader(data: AsciiCastItem): data is AsciiCastHeader {
         return 'version' in data
     }
 
-    function isAsciiCastData (data: AsciiCastItem): data is AsciiCastData {
-        if (data instanceof Array) {
+    function isAsciiCastData(data: AsciiCastItem): data is AsciiCastData {
+        if (Array.isArray(data)) {
             return data[1] === 'o' || data[1] === 'e'
         } else {
             return false
         }
     }
 
-    interface SizeEvent { time: number, cols: number, rows: number }
-    interface DataEvent { time: number, data: string }
-    interface SnapshotEvent { time: number, snapshot: string }
+    interface SizeEvent {
+        time: number
+        cols: number
+        rows: number
+    }
+    interface DataEvent {
+        time: number
+        data: string
+    }
+    interface SnapshotEvent {
+        time: number
+        snapshot: string
+    }
 
     const term = new Terminal()
     const serializeAddon = new SerializeAddon()
@@ -117,38 +141,44 @@
         // only once the terminal reflects the recording.
         await _seekInternal(duration)
 
-        socket = new WebSocket(`wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/stream`)
-        socket.addEventListener('message', function (event) {
+        socket = new WebSocket(
+            `wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/stream`,
+        )
+        socket.addEventListener('message', event => {
             let message = JSON.parse(event.data)
             if ('data' in message) {
                 let item: AsciiCastItem = message.data
                 addData(item)
-            } if ('start' in message) {
+            }
+            if ('start' in message) {
                 sessionIsLive = message.live
                 if (!sessionIsLive) {
                     seek(0)
                 } else {
                     playing = true
                 }
-            } if ('end' in message) {
+            }
+            if ('end' in message) {
                 sessionIsLive = false
             } else {
                 console.log('Message from server ', message)
             }
         })
-        socket.addEventListener('close', () => console.info('Live stream closed'))
+        socket.addEventListener('close', () =>
+            console.info('Live stream closed'),
+        )
 
         loading = false
     })
 
-    async function writeToTerminal (data: string) {
+    async function writeToTerminal(data: string) {
         if (!ptyMode) {
             data = data.replace(/\n/g, '\r\n')
         }
         await new Promise<void>(r => term.write(data, r))
     }
 
-    function addData (data: AsciiCastItem) {
+    function addData(data: AsciiCastItem) {
         if (isAsciiCastHeader(data)) {
             if (data.width) {
                 ptyMode = true
@@ -179,14 +209,17 @@
     }
 
     let metricsCanvas: HTMLCanvasElement
-    function fitSize () {
+    function fitSize() {
         metricsCanvas ??= document.createElement('canvas')
-        const context = metricsCanvas.getContext('2d')!
+        const context = metricsCanvas.getContext('2d')
+        if (!context) {
+            throw new Error('Failed to get canvas context')
+        }
         context.font = `10px ${term.options.fontFamily ?? 'monospace'}`
         const metrics = context.measureText('abcdef')
 
         const fontWidth = containerElement.clientWidth / term.cols
-        term.options.fontSize = fontWidth / (metrics.width / 6) * 10
+        term.options.fontSize = (fontWidth / (metrics.width / 6)) * 10
     }
 
     // Shared latest-wins runner: serializes seeks and coalesces rapid scrubs to the newest
@@ -194,12 +227,12 @@
     // wasted work). Reconstructing state at `time` is independent of skipped seeks.
     const runSeek = latestWins((time: number) => _seekInternal(time))
 
-    function seek (time: number) {
+    function seek(time: number) {
         runSeek(time)
     }
 
-    async function _seekInternal (time: number) {
-        let nearestSnapshot: SnapshotEvent|null = null
+    async function _seekInternal(time: number) {
+        let nearestSnapshot: SnapshotEvent | null = null
 
         for (const event of events) {
             if (event.time > time) {
@@ -221,6 +254,7 @@
         let lastSize = { cols: term.cols, rows: term.rows }
 
         for (let i = 0; i <= index; i++) {
+            // biome-ignore lint/style/noNonNullAssertion: x
             let event = events[i]!
             if ('cols' in event) {
                 lastSize = { cols: event.cols, rows: event.rows }
@@ -231,19 +265,20 @@
 
         let output = ''
 
-        async function flush () {
+        async function flush() {
             await writeToTerminal(output)
             output = ''
         }
 
         for (let i = index; i < events.length; i++) {
             let shouldSnapshot = false
+            // biome-ignore lint/style/noNonNullAssertion: x
             let event = events[i]!
             if (event.time > time) {
                 break
             }
             if ('snapshot' in event) {
-                output += '\x1bc' + event.snapshot
+                output += `\x1bc${event.snapshot}`
             }
             if ('cols' in event) {
                 await flush()
@@ -269,10 +304,10 @@
         await flush()
 
         timestamp = time
-        seekInputValue = 100 * time / duration
+        seekInputValue = (100 * time) / duration
     }
 
-    function resize (cols: number, rows: number) {
+    function resize(cols: number, rows: number) {
         if (term.cols === cols && term.rows === rows) {
             return
         }
@@ -285,9 +320,9 @@
     onDestroy(() => resizeObserver?.disconnect())
 
     let destroyed = false
-    onDestroy(() => destroyed = true)
+    onDestroy(() => (destroyed = true))
 
-    function step () {
+    function step() {
         if (destroyed) {
             return
         }
@@ -297,11 +332,11 @@
         setTimeout(step, 100)
     }
 
-    function togglePlaying () {
+    function togglePlaying() {
         playing = !playing
     }
 
-    function keyPressHandler (event: KeyboardEvent) {
+    function keyPressHandler(event: KeyboardEvent) {
         if (event.key === ' ') {
             togglePlaying()
         }
@@ -309,7 +344,7 @@
 
     step()
 
-    function toggleFullscreen () {
+    function toggleFullscreen() {
         if (document.fullscreenElement) {
             document.exitFullscreen()
         } else {
@@ -318,15 +353,19 @@
     }
 </script>
 
-<div class="root" bind:this={rootElement} style="background: {theme.background}">
+<div
+    class="root"
+    bind:this={rootElement}
+    style="background: {theme.background}"
+>
     {#if loading}
-    <Spinner color="primary" />
+        <Spinner color="primary" />
     {/if}
 
     {#if !loading && !playing}
-    <div class="pause-overlay">
-        <Fa icon={faPlay} size="2x" fw />
-    </div>
+        <div class="pause-overlay">
+            <Fa icon={faPlay} size="2x" fw />
+        </div>
     {/if}
 
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->

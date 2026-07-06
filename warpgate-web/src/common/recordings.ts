@@ -1,46 +1,57 @@
-import { type Recording } from 'admin/lib/api'
+import type { Recording } from 'admin/lib/api'
 
-export type RecordingMetadata ={
-    type: 'kubernetes-exec',
-    namespace: string
-    pod: string
-    container: string
-    command: string
-} | {
-    type: 'kubernetes-attach',
-    namespace: string
-    pod: string
-    container: string
-} | {
-    type: 'kubernetes-api',
-} | {
-    type: 'ssh-shell',
-    channel: number
-} | {
-    type: 'ssh-exec',
-    channel: number
-} | {
-    type: 'ssh-direct-tcpip',
-    host: string
-    port: number
-} | {
-    type: 'ssh-direct-socket',
-    path: string
-} | {
-    type: 'ssh-forwarded-tcpip',
-    host: string
-    port: number
-} | {
-    type: 'ssh-forwarded-socket',
-    path: string
-} | {
-    type: 'desktop',
-    protocol: string
-    target: string
-}
+export type RecordingMetadata =
+    | {
+          type: 'kubernetes-exec'
+          namespace: string
+          pod: string
+          container: string
+          command: string
+      }
+    | {
+          type: 'kubernetes-attach'
+          namespace: string
+          pod: string
+          container: string
+      }
+    | {
+          type: 'kubernetes-api'
+      }
+    | {
+          type: 'ssh-shell'
+          channel: number
+      }
+    | {
+          type: 'ssh-exec'
+          channel: number
+      }
+    | {
+          type: 'ssh-direct-tcpip'
+          host: string
+          port: number
+      }
+    | {
+          type: 'ssh-direct-socket'
+          path: string
+      }
+    | {
+          type: 'ssh-forwarded-tcpip'
+          host: string
+          port: number
+      }
+    | {
+          type: 'ssh-forwarded-socket'
+          path: string
+      }
+    | {
+          type: 'desktop'
+          protocol: string
+          target: string
+      }
 
-
-export function recordingMetadataToFieldSet(metadata: RecordingMetadata): [string, string][] {
+export function recordingMetadataToFieldSet(
+    metadata: RecordingMetadata,
+): [string, string][] {
     const fieldSets: [string, string][] = []
 
     switch (metadata.type) {

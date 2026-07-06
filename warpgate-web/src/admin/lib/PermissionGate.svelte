@@ -1,6 +1,6 @@
 <script lang="ts">
     import { Alert } from '@sveltestrap/sveltestrap'
-    import { adminPermissions, type AdminPermissionKey } from './store'
+    import { type AdminPermissionKey, adminPermissions } from './store'
 
     /**
      * Render children only if the given admin permission is granted.

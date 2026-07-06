@@ -2,7 +2,7 @@ export enum ConnectionState {
     Connecting = 'Connecting',
     Connected = 'Connected',
     Disconnected = 'Disconnected',
-    Error = 'Error'
+    Error = 'Error',
 }
 
 export interface ReconnectingWebSocketOptions {
@@ -23,13 +23,13 @@ export class ReconnectingWebSocket {
     private readonly onMessage: (data: string | ArrayBuffer) => void
     private readonly maxAttempts = 5
 
-    constructor (opts: ReconnectingWebSocketOptions) {
+    constructor(opts: ReconnectingWebSocketOptions) {
         this.url = opts.url
         this.onOpen = opts.onOpen
         this.onMessage = opts.onMessage
     }
 
-    connect (): void {
+    connect(): void {
         if (this.closed) {
             return
         }
@@ -60,17 +60,17 @@ export class ReconnectingWebSocket {
         })
     }
 
-    send (data: string): void {
+    send(data: string): void {
         this.socket?.send(data)
     }
 
-    close (): void {
+    close(): void {
         this.closed = true
         this.cancelTimer()
         this.socket?.close()
     }
 
-    private scheduleReconnect () {
+    private scheduleReconnect() {
         if (this.attempt >= this.maxAttempts) {
             this.state = ConnectionState.Disconnected
             return
@@ -84,7 +84,7 @@ export class ReconnectingWebSocket {
         }, delay)
     }
 
-    private cancelTimer () {
+    private cancelTimer() {
         if (this.timer !== null) {
             clearTimeout(this.timer)
             this.timer = null

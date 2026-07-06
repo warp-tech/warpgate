@@ -1,18 +1,12 @@
 <script lang="ts">
     interface Props {
-        value: string | number,
-        label: string,
-        color?: string,
-        class?: string,
+        value: string | number
+        label: string
+        color?: string
+        class?: string
     }
 
-    // eslint-disable-next-line svelte/no-unused-props
-    let {
-        value,
-        label,
-        color,
-        'class': className = '',
-    }: Props = $props()
+    let { value, label, color, class: className = '' }: Props = $props()
 </script>
 
 <div class="stat-card {color ? `text-${color}` : ''} {className}">

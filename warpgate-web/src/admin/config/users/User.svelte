@@ -1,37 +1,62 @@
 <script lang="ts">
-    import { api, type Role, type User, type UserRoleAssignmentResponse, type AdminRole } from 'admin/lib/api'
-    import { serverInfo } from 'gateway/lib/store'
-    import AsyncButton from 'common/AsyncButton.svelte'
-    import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle, FormGroup, Input, Button, Modal, ModalBody, ModalFooter, Alert, Tooltip, ModalHeader } from '@sveltestrap/sveltestrap'
-    import { replace, link } from 'svelte-spa-router'
-    import { stringifyError } from 'common/errors'
-    import CredentialEditor from './CredentialEditor.svelte'
-    import Loadable from 'common/Loadable.svelte'
-    import RateLimitInput from 'common/RateLimitInput.svelte'
-    import AllowedIpRangesEditor from './AllowedIpRangesEditor.svelte'
-    import Fa from 'svelte-fa'
-    import { faCaretDown, faLink, faUnlink, faWrench } from '@fortawesome/free-solid-svg-icons'
-    import RelativeDate from '../../RelativeDate.svelte'
-    import { onMount, onDestroy } from 'svelte'
-    import { adminPermissions } from 'admin/lib/store'
-    import AdminRolePermissionsBadge from '../AdminRolePermissionsBadge.svelte'
-    import { formatDistanceToNow } from 'date-fns'
-    import StickyActionBar from 'common/StickyActionBar.svelte'
-    import PageSummaryBar from 'common/PageSummaryBar.svelte'
-    import SectionedForm from 'admin/lib/SectionedForm.svelte'
+    import {
+        faCaretDown,
+        faLink,
+        faUnlink,
+        faWrench,
+    } from '@fortawesome/free-solid-svg-icons'
+    import {
+        Alert,
+        Button,
+        Dropdown,
+        DropdownItem,
+        DropdownMenu,
+        DropdownToggle,
+        FormGroup,
+        Input,
+        Modal,
+        ModalBody,
+        ModalFooter,
+        ModalHeader,
+        Tooltip,
+    } from '@sveltestrap/sveltestrap'
+    import {
+        type AdminRole,
+        api,
+        type Role,
+        type User,
+        type UserRoleAssignmentResponse,
+    } from 'admin/lib/api'
     import Section from 'admin/lib/Section.svelte'
+    import SectionedForm from 'admin/lib/SectionedForm.svelte'
+    import { adminPermissions } from 'admin/lib/store'
+    import AsyncButton from 'common/AsyncButton.svelte'
+    import { stringifyError } from 'common/errors'
+    import Loadable from 'common/Loadable.svelte'
+    import PageSummaryBar from 'common/PageSummaryBar.svelte'
+    import RateLimitInput from 'common/RateLimitInput.svelte'
+    import StickyActionBar from 'common/StickyActionBar.svelte'
+    import { formatDistanceToNow } from 'date-fns'
+    import { serverInfo } from 'gateway/lib/store'
+    import { onDestroy, onMount } from 'svelte'
+    import Fa from 'svelte-fa'
+    import { link, replace } from 'svelte-spa-router'
+    import RelativeDate from '../../RelativeDate.svelte'
+    import AdminRolePermissionsBadge from '../AdminRolePermissionsBadge.svelte'
+    import AllowedIpRangesEditor from './AllowedIpRangesEditor.svelte'
+    import CredentialEditor from './CredentialEditor.svelte'
 
     interface Props {
-        params: { id: string };
+        params: { id: string }
     }
 
     let { params }: Props = $props()
 
-    let error: string|null = $state(null)
+    let error: string | null = $state(null)
     let user: User | undefined = $state()
     let allRoles: Role[] = $state([])
     let userRoles: UserRoleAssignmentResponse[] = $state([])
-    let roleIsAllowed: Record<string, any> = $state({})
+    let roleIsAllowed: Record<string, boolean> = $state({})
 
     // Modal states
     let showExpiryModal = $state(false)
@@ -44,7 +69,9 @@
     let _tickInterval: ReturnType<typeof setInterval> | null = null
 
     onMount(() => {
-        _tickInterval = setInterval(() => { _tick++ }, 60_000)
+        _tickInterval = setInterval(() => {
+            _tick++
+        }, 60_000)
     })
 
     onDestroy(() => {
@@ -66,7 +93,7 @@
         { label: '30 days', value: '30d', ms: 30 * 24 * 60 * 60 * 1000 },
     ]
 
-    function applyPreset(presetValue: string|null) {
+    function applyPreset(presetValue: string | null) {
         selectedExpiryPreset = presetValue
         if (presetValue === null) {
             expiryDate = null
@@ -80,11 +107,11 @@
     }
 
     let allAdminRoles: AdminRole[] = $state([])
-    let adminRoleIsAllowed: Record<string, any> = $state({})
+    let adminRoleIsAllowed: Record<string, boolean> = $state({})
 
     const initPromise = init()
 
-    async function init () {
+    async function init() {
         user = await api.getUser({ id: params.id })
         user.credentialPolicy ??= {}
 
@@ -96,14 +123,19 @@
 
         allAdminRoles = await api.getAdminRoles()
         const allowedAdmins = await api.getUserAdminRoles({ id: user.id })
-        adminRoleIsAllowed = Object.fromEntries(allowedAdmins.map(r => [r.id, true]))
+        adminRoleIsAllowed = Object.fromEntries(
+            allowedAdmins.map(r => [r.id, true]),
+        )
     }
 
-    async function update () {
+    async function update() {
+        if (!user) {
+            return
+        }
         try {
             user = await api.updateUser({
                 id: params.id,
-                userDataRequest: user!,
+                userDataRequest: user,
             })
             error = null
         } catch (err) {
@@ -111,46 +143,58 @@
         }
     }
 
-    async function remove () {
-        if (confirm(`Delete user ${user!.username}?`)) {
-            await api.deleteUser(user!)
+    async function remove() {
+        if (!user) {
+            return
+        }
+        if (confirm(`Delete user ${user.username}?`)) {
+            await api.deleteUser(user)
             replace('/config/users')
         }
     }
 
-    async function toggleRole (role: Role) {
+    async function toggleRole(role: Role) {
+        if (!user) {
+            return
+        }
         // Check if there's an active (non-expired) assignment
-        const activeAssignment = userRoles.find(r => r.id === role.id && r.isActive)
+        const activeAssignment = userRoles.find(
+            r => r.id === role.id && r.isActive,
+        )
         // Check if there's an expired assignment
-        const expiredAssignment = userRoles.find(r => r.id === role.id && r.isExpired)
+        const expiredAssignment = userRoles.find(
+            r => r.id === role.id && r.isExpired,
+        )
 
         if (activeAssignment) {
             await api.deleteUserRole({
-                id: user!.id,
+                id: user.id,
                 roleId: role.id,
             })
             roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
         } else if (expiredAssignment) {
             await api.updateUserRole({
-                id: user!.id,
+                id: user.id,
                 roleId: role.id,
                 updateUserRoleRequest: { expiresAt: undefined },
             })
             roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
         } else {
             await api.addUserRole({
-                id: user!.id,
+                id: user.id,
                 roleId: role.id,
             })
             roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
         }
 
-        userRoles = await api.getUserRoles(user!)
+        userRoles = await api.getUserRoles(user)
     }
 
-    function toLocalISO (date: Date): string {
+    function toLocalISO(date: Date): string {
         const tzOffset = date.getTimezoneOffset() * 60000
-        const localISOTime = new Date(date.getTime() - tzOffset).toISOString().slice(0, -5)
+        const localISOTime = new Date(date.getTime() - tzOffset)
+            .toISOString()
+            .slice(0, -5)
         return localISOTime
     }
 
@@ -160,12 +204,17 @@
 
     function openExpiryModal(roleAssignment: UserRoleAssignmentResponse) {
         editingRole = roleAssignment
-        expiryDate = roleAssignment.expiresAt ? toLocalISO(roleAssignment.expiresAt) : null
+        expiryDate = roleAssignment.expiresAt
+            ? toLocalISO(roleAssignment.expiresAt)
+            : null
         selectedExpiryPreset = expiryDate ? 'custom' : null
         showExpiryModal = true
     }
 
     async function saveExpiry() {
+        if (!user || !editingRole) {
+            return
+        }
         try {
             const expiresAt = expiryDate ? new Date(expiryDate) : undefined
 
@@ -177,35 +226,38 @@
 
             if (expiresAt) {
                 await api.updateUserRole({
-                    id: user!.id,
-                    roleId: editingRole!.id,
+                    id: user.id,
+                    roleId: editingRole.id,
                     updateUserRoleRequest: { expiresAt },
                 })
             } else {
                 await api.updateUserRole({
-                    id: user!.id,
-                    roleId: editingRole!.id,
+                    id: user.id,
+                    roleId: editingRole.id,
                     updateUserRoleRequest: { expiresAt: undefined },
                 })
             }
 
             showExpiryModal = false
-            userRoles = await api.getUserRoles(user!)
+            userRoles = await api.getUserRoles(user)
             error = null
         } catch (err) {
             error = await stringifyError(err)
         }
     }
 
-    function getExpiryStatus(assignment: UserRoleAssignmentResponse): { text: string, 'class': string } {
+    function getExpiryStatus(assignment: UserRoleAssignmentResponse): {
+        text: string
+        class: string
+    } {
         // Reference _tick to make this reactive to the interval
         void _tick
 
         if (assignment.isExpired) {
-            return { text: 'Expired', 'class': 'text-danger' }
+            return { text: 'Expired', class: 'text-danger' }
         }
         if (!assignment.expiresAt) {
-            return { text: 'Permanent', 'class': 'text-muted' }
+            return { text: 'Permanent', class: 'text-muted' }
         }
 
         const expiry = new Date(assignment.expiresAt)
@@ -213,7 +265,7 @@
         const msUntilExpiry = expiry.getTime() - now.getTime()
 
         if (msUntilExpiry <= 0) {
-            return { text: 'Expired', 'class': 'text-danger' }
+            return { text: 'Expired', class: 'text-danger' }
         }
 
         const totalHours = Math.round(msUntilExpiry / (1000 * 60 * 60))
@@ -221,32 +273,36 @@
 
         const text = `Expires in ${formatDistanceToNow(expiry)}`
 
-        const urgencyClass = totalHours < 1
-            ? 'text-danger'
-            : totalDays <= 7
-                ? 'text-warning'
-                : 'text-muted'
+        const urgencyClass =
+            totalHours < 1
+                ? 'text-danger'
+                : totalDays <= 7
+                  ? 'text-warning'
+                  : 'text-muted'
 
-        return { text, 'class': urgencyClass }
+        return { text, class: urgencyClass }
     }
 
-    async function toggleAdminRole (role: AdminRole) {
+    async function toggleAdminRole(role: AdminRole) {
+        if (!user) {
+            return
+        }
         if (adminRoleIsAllowed[role.id]) {
             await api.deleteUserAdminRole({
-                id: user!.id,
+                id: user.id,
                 roleId: role.id,
             })
             adminRoleIsAllowed = { ...adminRoleIsAllowed, [role.id]: false }
         } else {
             await api.addUserAdminRole({
-                id: user!.id,
+                id: user.id,
                 roleId: role.id,
             })
             adminRoleIsAllowed = { ...adminRoleIsAllowed, [role.id]: true }
         }
     }
 
-    async function unlinkFromLdap () {
+    async function unlinkFromLdap() {
         try {
             user = await api.unlinkUserFromLdap({ id: params.id })
             error = null
@@ -255,7 +311,7 @@
         }
     }
 
-    async function autoLinkToLdap () {
+    async function autoLinkToLdap() {
         try {
             user = await api.autoLinkUserToLdap({ id: params.id })
             error = null
@@ -263,193 +319,241 @@
             error = await stringifyError(err)
         }
     }
-
-
 </script>
 
 <div class="container-max-md user-page-wrapper">
     <Loadable promise={initPromise}>
         {#if user}
-        {#if error}
-            <Alert color="danger">{error}</Alert>
-        {/if}
-
-        <PageSummaryBar title={user?.username ?? ''} subtitle="User" />
-
-        <SectionedForm class="user-form">
-            <Section id="info" title="General">
-                <div class="d-flex align-items-center gap-3">
-                    <FormGroup floating label="Username" class="flex-grow-1">
-                        <Input bind:value={user.username} disabled={!user.ldapServerId} />
-                    </FormGroup>
-
-                    {#if $serverInfo?.hasLdap}
-                    <Dropdown class="mb-3">
-                        <DropdownToggle color={user.ldapServerId ? 'info' : 'secondary'} class="d-flex align-items-center gap-2">
-                            {#if user.ldapServerId}
-                                <Fa icon={faLink} fw />
-                            {/if}
-                            LDAP
-                            <Fa icon={faCaretDown} />
-                        </DropdownToggle>
-                        <DropdownMenu right={true}>
-                            {#if user.ldapServerId}
-                            <DropdownItem on:click={unlinkFromLdap}>
-                                <Fa icon={faUnlink} fw />
-                                Unlink from LDAP
-                            </DropdownItem>
-                            {:else}
-                            <DropdownItem on:click={autoLinkToLdap}>
-                                <Fa icon={faLink} fw />
-                                Auto-link to LDAP
-                            </DropdownItem>
-                            {/if}
-                        </DropdownMenu>
-                    </Dropdown>
-                    {/if}
-                </div>
-
-                <FormGroup floating label="Description">
-                    <Input bind:value={user.description} />
-                </FormGroup>
-            </Section>
-
-            {#if $adminPermissions.usersEdit}
-            <Section id="credentials" title="Credentials" hideHeading>
-                <CredentialEditor
-                    userId={user.id}
-                    username={user.username}
-                    bind:credentialPolicy={user.credentialPolicy!}
-                    ldapLinked={!!user.ldapServerId}
-                />
-            </Section>
+            {#if error}
+                <Alert color="danger">{error}</Alert>
             {/if}
 
-            <Section id="roles" title="Access roles">
-                <div class="list-group list-group-flush">
-                    {#each allRoles as role (role.id)}
-                        {@const activeAssignment = userRoles.find(ur => ur.id === role.id && ur.isActive)}
-                        {@const expiredAssignment = userRoles.find(ur => ur.id === role.id && ur.isExpired)}
-                        {@const isActive = !!activeAssignment}
-                        {@const isExpired = !!expiredAssignment && !isActive}
-                        {@const assignment = activeAssignment ?? expiredAssignment}
-                        {@const status = assignment ? getExpiryStatus(assignment) : null}
-                        <div class="list-group-item d-flex align-items-center justify-content-between {isExpired ? 'opacity-75' : ''}">
-                            <div class="d-flex align-items-center gap-3">
-                                <Input
-                                    id="role-{role.id}"
-                                    class="mb-0"
-                                    type="switch"
-                                    on:change={() => toggleRole(role)}
-                                    checked={isActive} />
-                                <div>
-                                    <div class="{isExpired ? 'text-decoration-line-through text-muted' : ''}">{role.name}</div>
+            <PageSummaryBar title={user?.username ?? ''} subtitle="User" />
+
+            <SectionedForm class="user-form">
+                <Section id="info" title="General">
+                    <div class="d-flex align-items-center gap-3">
+                        <FormGroup
+                            floating
+                            label="Username"
+                            class="flex-grow-1"
+                        >
+                            <Input
+                                bind:value={user.username}
+                                disabled={!user.ldapServerId}
+                            />
+                        </FormGroup>
+
+                        {#if $serverInfo?.hasLdap}
+                            <Dropdown class="mb-3">
+                                <DropdownToggle
+                                    color={user.ldapServerId ? 'info' : 'secondary'}
+                                    class="d-flex align-items-center gap-2"
+                                >
+                                    {#if user.ldapServerId}
+                                        <Fa icon={faLink} fw />
+                                    {/if}
+                                    LDAP
+                                    <Fa icon={faCaretDown} />
+                                </DropdownToggle>
+                                <DropdownMenu right={true}>
+                                    {#if user.ldapServerId}
+                                        <DropdownItem on:click={unlinkFromLdap}>
+                                            <Fa icon={faUnlink} fw />
+                                            Unlink from LDAP
+                                        </DropdownItem>
+                                    {:else}
+                                        <DropdownItem on:click={autoLinkToLdap}>
+                                            <Fa icon={faLink} fw />
+                                            Auto-link to LDAP
+                                        </DropdownItem>
+                                    {/if}
+                                </DropdownMenu>
+                            </Dropdown>
+                        {/if}
+                    </div>
+
+                    <FormGroup floating label="Description">
+                        <Input bind:value={user.description} />
+                    </FormGroup>
+                </Section>
+
+                {#if $adminPermissions.usersEdit && user.credentialPolicy}
+                    <Section id="credentials" title="Credentials" hideHeading>
+                        <CredentialEditor
+                            userId={user.id}
+                            username={user.username}
+                            bind:credentialPolicy={user.credentialPolicy}
+                            ldapLinked={!!user.ldapServerId}
+                        />
+                    </Section>
+                {/if}
+
+                <Section id="roles" title="Access roles">
+                    <div class="list-group list-group-flush">
+                        {#each allRoles as role (role.id)}
+                            {@const activeAssignment = userRoles.find(ur => ur.id === role.id && ur.isActive)}
+                            {@const expiredAssignment = userRoles.find(ur => ur.id === role.id && ur.isExpired)}
+                            {@const isActive = !!activeAssignment}
+                            {@const isExpired = !!expiredAssignment && !isActive}
+                            {@const assignment = activeAssignment ?? expiredAssignment}
+                            {@const expiryStatus = assignment ? getExpiryStatus(assignment) : null}
+                            <div
+                                class="list-group-item d-flex align-items-center justify-content-between {isExpired ? 'opacity-75' : ''}"
+                            >
+                                <div class="d-flex align-items-center gap-3">
+                                    <Input
+                                        id="role-{role.id}"
+                                        class="mb-0"
+                                        type="switch"
+                                        on:change={() => toggleRole(role)}
+                                        checked={isActive}
+                                    />
+                                    <div>
+                                        <div
+                                            class="{isExpired ? 'text-decoration-line-through text-muted' : ''}"
+                                        >
+                                            {role.name}
+                                        </div>
+                                        {#if isActive && activeAssignment}
+                                            <div
+                                                class="d-flex gap-2 align-items-center flex-wrap"
+                                            >
+                                                <small
+                                                    class={expiryStatus?.class ?? ''}
+                                                >
+                                                    {expiryStatus?.text ?? ''}
+                                                </small>
+                                                {#if activeAssignment.grantedAt}
+                                                    <small
+                                                        class="text-muted"
+                                                        title={new Date(activeAssignment.grantedAt).toLocaleString()}
+                                                    >
+                                                        &bull;
+                                                        <RelativeDate
+                                                            date={new Date(activeAssignment.grantedAt)}
+                                                        />
+                                                    </small>
+                                                {/if}
+                                            </div>
+                                        {:else if isExpired && expiredAssignment}
+                                            <div
+                                                class="d-flex gap-2 align-items-center flex-wrap"
+                                            >
+                                                <small class="text-danger">
+                                                    <span
+                                                        class="badge bg-danger bg-opacity-10 text-danger"
+                                                        >Expired</span
+                                                    >
+                                                </small>
+                                                {#if expiredAssignment.expiresAt}
+                                                    <small class="text-muted">
+                                                        <RelativeDate
+                                                            date={expiredAssignment.expiresAt}
+                                                        />
+                                                    </small>
+                                                {/if}
+                                            </div>
+                                        {:else if role.description}
+                                            <small class="text-muted"
+                                                >{role.description}</small
+                                            >
+                                        {/if}
+                                    </div>
+                                </div>
+                                <div class="d-flex gap-2">
                                     {#if isActive && activeAssignment}
-                                        <div class="d-flex gap-2 align-items-center flex-wrap">
-                                            <small class={status?.class ?? ''}>
-                                                {status?.text ?? ''}
-                                            </small>
-                                            {#if activeAssignment.grantedAt}
-                                                <small class="text-muted" title={new Date(activeAssignment.grantedAt).toLocaleString()}>
-                                                    &bull; <RelativeDate date={new Date(activeAssignment.grantedAt)} />
-                                                </small>
-                                            {/if}
-                                        </div>
-                                    {:else if isExpired && expiredAssignment}
-                                        <div class="d-flex gap-2 align-items-center flex-wrap">
-                                            <small class="text-danger">
-                                                <span class="badge bg-danger bg-opacity-10 text-danger">Expired</span>
-                                            </small>
-                                            {#if expiredAssignment.expiresAt}
-                                                <small class="text-muted">
-                                                    <RelativeDate date={expiredAssignment.expiresAt} />
-                                                </small>
-                                            {/if}
-                                        </div>
-                                    {:else if role.description}
-                                        <small class="text-muted">{role.description}</small>
+                                        <Button
+                                            id="options-button-{role.id}"
+                                            color="link"
+                                            on:click={() => openExpiryModal(activeAssignment)}
+                                        >
+                                            <Fa icon={faWrench} />
+                                        </Button>
+                                        <Tooltip
+                                            target="options-button-{role.id}"
+                                            delay="500"
+                                        >
+                                            Options
+                                        </Tooltip>
                                     {/if}
                                 </div>
                             </div>
-                            <div class="d-flex gap-2">
-                                {#if isActive && activeAssignment}
-                                    <Button
-                                        id="options-button-{role.id}"
-                                        color="link"
-                                        on:click={() => openExpiryModal(activeAssignment)}
-                                    >
-                                        <Fa icon={faWrench}/>
-                                    </Button>
-                                    <Tooltip target="options-button-{role.id}" delay="500">
-                                        Options
-                                    </Tooltip>
-                                {/if}
-                            </div>
-                        </div>
-                    {/each}
-                </div>
-            </Section>
+                        {/each}
+                    </div>
+                </Section>
 
-            <Section id="admin-roles" title="Admin roles">
-                <div class="list-group list-group-flush">
-                    {#each allAdminRoles as role (role.id)}
-                        <label
-                            for="admin-role-{role.id}"
-                            class="list-group-item list-group-item-action d-flex align-items-center"
+                <Section id="admin-roles" title="Admin roles">
+                    <div class="list-group list-group-flush">
+                        {#each allAdminRoles as role (role.id)}
+                            <label
+                                for="admin-role-{role.id}"
+                                class="list-group-item list-group-item-action d-flex align-items-center"
+                            >
+                                <Input
+                                    id="admin-role-{role.id}"
+                                    class="mb-0 me-2"
+                                    type="switch"
+                                    on:change={() => toggleAdminRole(role)}
+                                    disabled={!$adminPermissions.adminRolesManage}
+                                    checked={adminRoleIsAllowed[role.id]}
+                                />
+                                <div>
+                                    <div>{role.name}</div>
+                                    {#if role.description}
+                                        <small class="text-muted"
+                                            >{role.description}</small
+                                        >
+                                    {/if}
+                                </div>
+                                <span class="ms-auto">
+                                    <AdminRolePermissionsBadge {role} />
+                                </span>
+                            </label>
+                        {/each}
+                    </div>
+                </Section>
+
+                <Section id="traffic" title="Network">
+                    <FormGroup class="mb-3">
+                        <label for="rateLimitBytesPerSecond"
+                            >Global bandwidth limit</label
                         >
-                            <Input
-                                id="admin-role-{role.id}"
-                                class="mb-0 me-2"
-                                type="switch"
-                                on:change={() => toggleAdminRole(role)}
-                                disabled={!$adminPermissions.adminRolesManage}
-                                checked={adminRoleIsAllowed[role.id]} />
-                            <div>
-                                <div>{role.name}</div>
-                                {#if role.description}
-                                    <small class="text-muted">{role.description}</small>
-                                {/if}
-                            </div   >
-                            <span class="ms-auto">
-                                <AdminRolePermissionsBadge {role} />
-                            </span>
-                        </label>
-                    {/each}
-                </div>
-            </Section>
+                        <RateLimitInput
+                            id="rateLimitBytesPerSecond"
+                            bind:value={user.rateLimitBytesPerSecond}
+                        />
+                    </FormGroup>
 
-            <Section id="traffic" title="Network">
-                <FormGroup class="mb-3">
-                    <label for="rateLimitBytesPerSecond">Global bandwidth limit</label>
-                    <RateLimitInput
-                        id="rateLimitBytesPerSecond"
-                        bind:value={user.rateLimitBytesPerSecond}
-                    />
-                </FormGroup>
+                    <AllowedIpRangesEditor bind:ranges={user.allowedIpRanges} />
+                </Section>
+            </SectionedForm>
 
-                <AllowedIpRangesEditor bind:ranges={user.allowedIpRanges} />
-            </Section>
-        </SectionedForm>
+            <StickyActionBar>
+                {#snippet start()}
+                    <a
+                        href="/log/user/{params.id}"
+                        use:link
+                        class="btn btn-secondary"
+                    >
+                        Audit log
+                    </a>
+                {/snippet}
 
-        <StickyActionBar>
-            {#snippet start()}
-                <a href="/log/user/{params.id}" use:link class="btn btn-secondary">
-                    Audit log
-                </a>
-            {/snippet}
+                <AsyncButton
+                    color="primary"
+                    click={update}
+                    disabled={!$adminPermissions.usersEdit}
+                    >Update</AsyncButton
+                >
 
-            <AsyncButton
-                color="primary"
-                click={update}
-                disabled={!$adminPermissions.usersEdit}
-            >Update</AsyncButton>
-
-            <AsyncButton
-                color="danger"
-                click={remove}
-                disabled={!$adminPermissions.usersDelete}
-            >Remove</AsyncButton>
-        </StickyActionBar>
+                <AsyncButton
+                    color="danger"
+                    click={remove}
+                    disabled={!$adminPermissions.usersDelete}
+                    >Remove</AsyncButton
+                >
+            </StickyActionBar>
         {/if}
     </Loadable>
 </div>
@@ -469,9 +573,7 @@
 
 <!-- Expiry Modal -->
 <Modal isOpen={showExpiryModal} toggle={() => showExpiryModal = false}>
-    <ModalHeader>
-        Edit assignment: {editingRole?.name}
-    </ModalHeader>
+    <ModalHeader> Edit assignment: {editingRole?.name} </ModalHeader>
     <ModalBody>
         <!-- Quick expiry presets -->
         <FormGroup floating label="Expiry date">
@@ -511,11 +613,7 @@
         >
             Cancel
         </Button>
-        <AsyncButton
-            color="primary"
-            class="modal-button"
-            click={saveExpiry}
-        >
+        <AsyncButton color="primary" class="modal-button" click={saveExpiry}>
             Save
         </AsyncButton>
     </ModalFooter>

@@ -1,5 +1,6 @@
 <script lang="ts">
     import {
+        Alert,
         Button,
         Form,
         FormGroup,
@@ -7,30 +8,24 @@
         Modal,
         ModalBody,
         ModalFooter,
-        Alert,
     } from '@sveltestrap/sveltestrap'
-
-    import { type ExistingSsoCredential } from './lib/api'
-    import { api } from 'gateway/lib/api'
     import Loadable from 'common/Loadable.svelte'
+    import { api } from 'gateway/lib/api'
+    import type { ExistingSsoCredential } from './lib/api'
 
     interface Props {
         isOpen: boolean
-        instance: ExistingSsoCredential|null
-        save: (provider: string|null, email: string) => void
+        instance: ExistingSsoCredential | null
+        save: (provider: string | null, email: string) => void
     }
 
-    let {
-        isOpen = $bindable(true),
-        instance,
-        save,
-    }: Props = $props()
+    let { isOpen = $bindable(true), instance, save }: Props = $props()
 
-    let provider: string|null = $state(null)
+    let provider: string | null = $state(null)
     let email: string = $state('')
     let validated = $state(false)
 
-    function _save () {
+    function _save() {
         if (!email) {
             return
         }
@@ -38,44 +33,48 @@
         save(provider, email)
     }
 
-    function _cancel () {
+    function _cancel() {
         isOpen = false
     }
 </script>
 
-<Modal toggle={_cancel} isOpen={isOpen} on:open={() => {
+<Modal
+    toggle={_cancel}
+    {isOpen}
+    on:open={() => {
     if (instance) {
         provider = instance.provider ?? null
         email = instance.email
     }
-}}>
-    <Form {validated} on:submit={e => {
+}}
+>
+    <Form
+        {validated}
+        on:submit={e => {
         _save()
         e.preventDefault()
-    }}>
+    }}
+    >
         <ModalBody>
             <FormGroup floating label="E-mail">
-                <Input
-                    type="email"
-                    required
-                    bind:value={email} />
+                <Input type="email" required bind:value={email} />
             </FormGroup>
 
             <Loadable promise={api.getSsoProviders()}>
                 {#snippet children(providers)}
                     {#if !providers.length}
-                    <Alert color="warning">
-                        You don't have any SSO providers configured. Add them to your config file first.
-                    </Alert>
+                        <Alert color="warning">
+                            You don't have any SSO providers configured. Add
+                            them to your config file first.
+                        </Alert>
                     {/if}
                     <FormGroup floating label="SSO provider" spacing="0">
-                        <Input
-                            bind:value={provider}
-                            type="select"
-                        >
+                        <Input bind:value={provider} type="select">
                             <option value={null} selected>Any</option>
                             {#each providers as provider (provider.name)}
-                            <option value={provider.name}>{provider.label ?? provider.name}</option>
+                                <option value={provider.name}>
+                                    {provider.label ?? provider.name}
+                                </option>
                             {/each}
                         </Input>
                     </FormGroup>
@@ -88,13 +87,12 @@
                 color="primary"
                 class="modal-button"
                 on:click={() => validated = true}
-            >Save</Button>
+                >Save</Button
+            >
 
-            <Button
-                class="modal-button"
-                color="danger"
-                on:click={_cancel}
-            >Cancel</Button>
+            <Button class="modal-button" color="danger" on:click={_cancel}
+                >Cancel</Button
+            >
         </ModalFooter>
     </Form>
 </Modal>

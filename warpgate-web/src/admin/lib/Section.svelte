@@ -13,7 +13,12 @@
     const props: Props = $props()
 </script>
 
-<section data-section={props.id} data-section-title={props.title} class="sectioned-form-section {props.class ?? ''}" id={`${props.id}-heading`}>
+<section
+    data-section={props.id}
+    data-section-title={props.title}
+    class="sectioned-form-section {props.class ?? ''}"
+    id={`${props.id}-heading`}
+>
     {#if !props.hideHeading}
         <h4>{props.bodyTitle ?? props.title}</h4>
     {/if}

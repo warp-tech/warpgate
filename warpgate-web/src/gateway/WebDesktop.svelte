@@ -1,11 +1,19 @@
 <script lang="ts">
-    import { onDestroy, onMount } from 'svelte'
     import { Button } from '@sveltestrap/sveltestrap'
-    import { api, ResponseError, type WebDesktopSessionInfo } from './lib/api'
+    import {
+        applyDesktopFrame,
+        type DesktopFrame,
+        isIncrementalFrame,
+        type Rect,
+    } from 'common/desktopCanvas'
     import InfoBox from 'common/InfoBox.svelte'
-    import { ReconnectingWebSocket, ConnectionState } from './lib/ReconnectingWebSocket.svelte'
+    import { onDestroy, onMount } from 'svelte'
     import { loadTheme } from 'theme'
-    import { applyDesktopFrame, isIncrementalFrame, type DesktopFrame, type Rect } from 'common/desktopCanvas'
+    import { api, ResponseError, type WebDesktopSessionInfo } from './lib/api'
+    import {
+        ConnectionState,
+        ReconnectingWebSocket,
+    } from './lib/ReconnectingWebSocket.svelte'
 
     interface Props {
         params: { sessionId: string }
@@ -40,7 +48,7 @@
     let rafHandle: number | null = null
     // Latest pointer position, flushed at most once per frame (mousemove fires far faster
     // than we need to forward); button presses/releases are sent immediately.
-    let pendingPointer: { x: number, y: number, buttons: number } | null = null
+    let pendingPointer: { x: number; y: number; buttons: number } | null = null
 
     const ws = new ReconnectingWebSocket({
         url: `wss://${location.host}/@warpgate/api/web-desktop/sessions/${sessionId}/stream`,
@@ -48,13 +56,13 @@
         onMessage: onWsMessage,
     })
 
-    function send (msg: unknown) {
+    function send(msg: unknown) {
         ws.send(JSON.stringify(msg))
     }
 
     // Pixel frames arrive as binary (see the backend's `ws_payload`); control messages
     // (connection state, resize, copy-rect, clipboard, error) arrive as JSON text.
-    function onWsMessage (data: string | ArrayBuffer) {
+    function onWsMessage(data: string | ArrayBuffer) {
         if (typeof data !== 'string') {
             const frame = decodeBinaryFrame(data)
             if (frame) {
@@ -86,7 +94,7 @@
     }
 
     // `[kind: u8][x,y,w,h: u16 LE][pixels…]` — the compact binary framing sent for pixels.
-    function decodeBinaryFrame (buf: ArrayBuffer): DesktopFrame | null {
+    function decodeBinaryFrame(buf: ArrayBuffer): DesktopFrame | null {
         if (buf.byteLength < 9) {
             return null
         }
@@ -99,17 +107,21 @@
         }
         const data = new Uint8Array(buf, 9)
         switch (view.getUint8(0)) {
-            case 1: return { type: 'raw_image', rect, data }
-            case 2: return { type: 'jpeg_image', rect, data }
-            case 3: return { type: 'cursor', rect, data }
-            default: return null
+            case 1:
+                return { type: 'raw_image', rect, data }
+            case 2:
+                return { type: 'jpeg_image', rect, data }
+            case 3:
+                return { type: 'cursor', rect, data }
+            default:
+                return null
         }
     }
 
     // Queue a framebuffer message for the next paint. When we fall behind, shed the
     // oldest droppable frame so the backlog (and per-frame work) stays bounded; structural
     // frames (resize / keyframes) are kept.
-    function queueFrame (frame: DesktopFrame) {
+    function queueFrame(frame: DesktopFrame) {
         pendingFrames.push(frame)
         if (pendingFrames.length > MAX_PENDING_FRAMES) {
             const idx = pendingFrames.findIndex(isIncrementalFrame)
@@ -118,7 +130,7 @@
     }
 
     // Single rAF loop: paint whatever has arrived, then forward the latest pointer.
-    function tick () {
+    function tick() {
         if (ctx && canvas && pendingFrames.length) {
             const batch = pendingFrames
             pendingFrames = []
@@ -134,7 +146,7 @@
     }
 
     // RFB button mask: bit0=left, bit1=middle, bit2=right
-    function rfbButtons (e: MouseEvent): number {
+    function rfbButtons(e: MouseEvent): number {
         let mask = 0
         if (e.buttons & 1) {
             mask |= 1
@@ -148,7 +160,7 @@
         return mask
     }
 
-    function canvasCoords (e: MouseEvent): { x: number, y: number } {
+    function canvasCoords(e: MouseEvent): { x: number; y: number } {
         if (!canvas) {
             return { x: 0, y: 0 }
         }
@@ -159,32 +171,44 @@
     }
 
     // Coalesce high-frequency moves: keep only the latest, forwarded once per frame by `tick`.
-    function onPointerMove (e: MouseEvent) {
+    function onPointerMove(e: MouseEvent) {
         const { x, y } = canvasCoords(e)
         pendingPointer = { x, y, buttons: rfbButtons(e) }
     }
 
     // Button transitions must not be delayed or coalesced away, so send them immediately.
-    function onPointerButton (e: MouseEvent) {
+    function onPointerButton(e: MouseEvent) {
         const { x, y } = canvasCoords(e)
         pendingPointer = null
         send({ type: 'pointer_event', x, y, buttons: rfbButtons(e) })
     }
 
-    function onWheel (e: WheelEvent) {
+    function onWheel(e: WheelEvent) {
         e.preventDefault()
         const { x, y } = canvasCoords(e)
         // delta is a signed notch count: positive = up / right.
         if (e.deltaY !== 0) {
-            send({ type: 'wheel_event', x, y, vertical: true, delta: e.deltaY < 0 ? 1 : -1 })
+            send({
+                type: 'wheel_event',
+                x,
+                y,
+                vertical: true,
+                delta: e.deltaY < 0 ? 1 : -1,
+            })
         }
         if (e.deltaX !== 0) {
-            send({ type: 'wheel_event', x, y, vertical: false, delta: e.deltaX > 0 ? 1 : -1 })
+            send({
+                type: 'wheel_event',
+                x,
+                y,
+                vertical: false,
+                delta: e.deltaX > 0 ? 1 : -1,
+            })
         }
     }
 
     // Map a KeyboardEvent to an X11 keysym.
-    function keysym (e: KeyboardEvent): number | null {
+    function keysym(e: KeyboardEvent): number | null {
         const special: Record<string, number> = {
             Backspace: 0xff08,
             Tab: 0xff09,
@@ -207,10 +231,15 @@
             CapsLock: 0xffe5,
             ' ': 0x0020,
         }
-        if (e.key in special) {
-            return special[e.key]!
+        const specialKey = special[e.key]
+        if (specialKey) {
+            return specialKey
         }
-        if (e.key.startsWith('F') && e.key.length <= 3 && !isNaN(Number(e.key.slice(1)))) {
+        if (
+            e.key.startsWith('F') &&
+            e.key.length <= 3 &&
+            !Number.isNaN(Number(e.key.slice(1)))
+        ) {
             return 0xffbe + (Number(e.key.slice(1)) - 1) // F1 = 0xffbe
         }
         if (e.key.length === 1) {
@@ -220,7 +249,7 @@
         return null
     }
 
-    function onKey (e: KeyboardEvent, down: boolean) {
+    function onKey(e: KeyboardEvent, down: boolean) {
         const ks = keysym(e)
         if (ks === null) {
             return
@@ -229,7 +258,7 @@
         send({ type: 'key_event', keysym: ks, down })
     }
 
-    async function disconnect () {
+    async function disconnect() {
         ws.close()
         try {
             await api.deleteWebDesktopSession({ sessionId })
@@ -247,7 +276,8 @@
         try {
             sessionInfo = await api.getWebDesktopSession({ sessionId })
         } catch (e) {
-            connectionError = e instanceof Error ? e.message : 'Failed to load session info'
+            connectionError =
+                e instanceof Error ? e.message : 'Failed to load session info'
             if (e instanceof ResponseError && e.response.status === 404) {
                 sessionNotFound = true
             }
@@ -266,20 +296,24 @@
     loadTheme('dark')
 </script>
 
-<svelte:window
-    onkeydown={e => onKey(e, true)}
-    onkeyup={e => onKey(e, false)}
-/>
+<svelte:window onkeydown={e => onKey(e, true)} onkeyup={e => onKey(e, false)} />
 
 <div class="desktop-web-client d-flex flex-column">
     <div class="toolbar d-flex align-items-center gap-2 p-2">
-        <span class="me-auto text-muted small">{sessionInfo?.targetName ?? ''}</span>
+        <span class="me-auto text-muted small"
+            >{sessionInfo?.targetName ?? ''}</span
+        >
         {#if !sessionNotFound}
             <span class="text-muted small me-3">
-                {ws.state}{#if ws.state === ConnectionState.Connecting && ws.attempt > 0}&nbsp;(attempt {ws.attempt}){/if}
+                {ws.state}
+                {#if ws.state === ConnectionState.Connecting && ws.attempt > 0}
+                    &nbsp;(attempt {ws.attempt})
+                {/if}
             </span>
         {/if}
-        <Button color="danger" size="sm" onclick={disconnect}>Disconnect</Button>
+        <Button color="danger" size="sm" onclick={disconnect}
+            >Disconnect</Button
+        >
     </div>
 
     {#if connectionError}
@@ -294,7 +328,9 @@
         </div>
     {/if}
 
-    <div class="canvas-area flex-grow-1 d-flex align-items-center justify-content-center">
+    <div
+        class="canvas-area flex-grow-1 d-flex align-items-center justify-content-center"
+    >
         <canvas
             bind:this={canvas}
             tabindex="0"

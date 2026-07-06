@@ -1,12 +1,12 @@
 <script lang="ts">
-    import { api, RecordingKind, type Recording } from 'admin/lib/api'
-    import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
-    import DesktopRecordingPlayer from 'admin/player/DesktopRecordingPlayer.svelte'
     import { Alert } from '@sveltestrap/sveltestrap'
+    import { api, type Recording, RecordingKind } from 'admin/lib/api'
+    import DesktopRecordingPlayer from 'admin/player/DesktopRecordingPlayer.svelte'
+    import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
-    import KubernetesRecording from './KubernetesRecording.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import KubernetesRecording from './KubernetesRecording.svelte'
 
     interface Props {
         params: { id: string }
@@ -14,11 +14,13 @@
 
     let { params = { id: '' } }: Props = $props()
 
-    let error: string|null = $state(null)
-    import { adminPermissions } from './lib/store'
-    let recording: Recording|null = $state(null)
+    let error: string | null = $state(null)
 
-    async function load () {
+    import { adminPermissions } from './lib/store'
+
+    let recording: Recording | null = $state(null)
+
+    async function load() {
         if (!$adminPermissions.recordingsView) {
             error = 'You do not have permission to view recordings.'
             return
@@ -26,7 +28,7 @@
         recording = await api.getRecording(params)
     }
 
-    function getTCPDumpURL () {
+    function getTCPDumpURL() {
         return `/@warpgate/admin/api/recordings/${recording?.id}/tcpdump`
     }
 
@@ -44,22 +46,22 @@
 {/if}
 
 {#if error}
-<Alert color="danger">{error}</Alert>
+    <Alert color="danger">{error}</Alert>
 {/if}
 
 {#if recording?.kind === RecordingKind.Traffic}
     <a href={getTCPDumpURL()}>Download tcpdump file</a>
 {/if}
 {#if recording?.kind === RecordingKind.Terminal}
-    <TerminalRecordingPlayer recording={recording} />
+    <TerminalRecordingPlayer {recording} />
 {/if}
 {#if recording?.kind === RecordingKind.Desktop}
-    <DesktopRecordingPlayer recording={recording} />
+    <DesktopRecordingPlayer {recording} />
 {/if}
 {#if recording?.kind === RecordingKind.Kubernetes}
     <Loadable promise={api.getKubernetesRecording({ id: recording.id })}>
         {#snippet children(items)}
-            <KubernetesRecording items={items} />
+            <KubernetesRecording {items} />
         {/snippet}
     </Loadable>
 {/if}

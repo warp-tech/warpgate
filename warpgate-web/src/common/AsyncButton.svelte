@@ -1,72 +1,81 @@
 <script lang="ts">
-import { faCheck, faTimes } from '@fortawesome/free-solid-svg-icons'
-import Fa from 'svelte-fa'
-import { Button, Spinner, type Color } from '@sveltestrap/sveltestrap'
+    import { faCheck, faTimes } from '@fortawesome/free-solid-svg-icons'
+    import { Button, type Color, Spinner } from '@sveltestrap/sveltestrap'
+    import type { Snippet } from 'svelte'
+    import Fa from 'svelte-fa'
 
-// svelte-ignore non_reactive_update
-enum State {
-    Normal = 'n',
-    Progress = 'p',
-    ProgressWithSpinner = 'ps',
-    Done = 'd',
-    Failed = 'f'
-}
-
-interface Props {
-    click: CallableFunction
-    color?: Color | 'link'
-    disabled?: boolean
-    outline?: boolean
-    type?: 'button' | 'submit' | 'reset'
-    class?: string
-    size?: 'sm' | 'lg'
-    id?: string
-    children: () => any
-}
-
-// eslint-disable-next-line svelte/no-unused-props
-let { children, click, color  = 'secondary', disabled = false, outline = false, type = 'submit', 'class': cls = '', id = '', size }: Props = $props()
-
-let button: HTMLElement | undefined = $state()
-let lastWidth = $state(0)
-let st = $state(State.Normal)
-
-async function _click () {
-    if (!button) {
-        return
+    // svelte-ignore non_reactive_update
+    enum State {
+        Normal = 'n',
+        Progress = 'p',
+        ProgressWithSpinner = 'ps',
+        Done = 'd',
+        Failed = 'f',
     }
 
-    const parentForm = button.closest<HTMLFormElement>('form')
-    if (parentForm) {
-        parentForm.classList.add('was-validated')
-        if (!parentForm.checkValidity()) {
+    interface Props {
+        click: CallableFunction
+        color?: Color | 'link'
+        disabled?: boolean
+        outline?: boolean
+        type?: 'button' | 'submit' | 'reset'
+        class?: string
+        size?: 'sm' | 'lg'
+        id?: string
+        children?: Snippet
+    }
+
+    let {
+        children,
+        click,
+        color = 'secondary',
+        disabled = false,
+        outline = false,
+        type = 'submit',
+        class: cls = '',
+        id = '',
+        size,
+    }: Props = $props()
+
+    let button: HTMLElement | undefined = $state()
+    let lastWidth = $state(0)
+    let st = $state(State.Normal)
+
+    async function _click() {
+        if (!button) {
             return
         }
-    }
 
-    lastWidth = button.offsetWidth
-    st = State.Progress
-    setTimeout(() => {
-        if (st === State.Progress) {
-            st = State.ProgressWithSpinner
-        }
-    }, 500)
-    try {
-        await click()
-        st = State.Done
-    } catch (e) {
-        st = State.Failed
-        throw e
-    } finally {
-        setTimeout(() => {
-            if (st === State.Done || st === State.Failed) {
-                st = State.Normal
-                lastWidth = 0
+        const parentForm = button.closest<HTMLFormElement>('form')
+        if (parentForm) {
+            parentForm.classList.add('was-validated')
+            if (!parentForm.checkValidity()) {
+                return
             }
-        }, 1000)
-    }
-}
+        }
 
+        lastWidth = button.offsetWidth
+        st = State.Progress
+        setTimeout(() => {
+            if (st === State.Progress) {
+                st = State.ProgressWithSpinner
+            }
+        }, 500)
+        try {
+            await click()
+            st = State.Done
+        } catch (e) {
+            st = State.Failed
+            throw e
+        } finally {
+            setTimeout(() => {
+                if (st === State.Done || st === State.Failed) {
+                    st = State.Normal
+                    lastWidth = 0
+                }
+            }, 1000)
+        }
+    }
 </script>
 
 <Button
@@ -74,15 +83,17 @@ async function _click () {
     bind:inner={button}
     style="min-width: {lastWidth}px;"
     class={cls}
-    outline={outline}
-    color={color}
-    type={type}
-    size={size}
-    id={id}
+    {outline}
+    {color}
+    {type}
+    {size}
+    {id}
     disabled={disabled || st === State.Progress || st === State.ProgressWithSpinner}
 >
     {#if st === State.Normal || st === State.Progress}
-        {@render children?.()}
+        {#if children}
+            {@render children()}
+        {/if}
     {/if}
     <div class="overlay">
         {#if st === State.ProgressWithSpinner}

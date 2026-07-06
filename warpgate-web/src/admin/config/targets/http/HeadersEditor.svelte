@@ -3,7 +3,6 @@
     import { FormGroup } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
 
-    // eslint-disable-next-line @typescript-eslint/no-type-alias
     type Headers = Record<string, string>
 
     interface Props {
@@ -22,12 +21,12 @@
     let headerRows: HeaderRow[] = $state([])
     let lastSerializedValue = $state('')
 
-    function serializeHeaders (headers: Headers | undefined): string {
+    function serializeHeaders(headers: Headers | undefined): string {
         const entries = Object.entries(headers ?? {}).sort()
         return JSON.stringify(entries)
     }
 
-    function syncRowsFromValue () {
+    function syncRowsFromValue() {
         const serializedValue = serializeHeaders(value)
         if (serializedValue === lastSerializedValue) {
             return
@@ -41,11 +40,10 @@
         }))
     }
 
-    function syncValueFromRows () {
+    function syncValueFromRows() {
         const headers = Object.fromEntries(
             headerRows
-                .map(({ name, value }) =>
-                    [name.trim(), value] as const)
+                .map(({ name, value }) => [name.trim(), value] as const)
                 .filter(([name]) => name.length > 0),
         )
 
@@ -59,7 +57,7 @@
         value = nextValue
     }
 
-    function addHeaderRow () {
+    function addHeaderRow() {
         headerRows = [
             ...headerRows,
             { id: nextHeaderId++, name: '', value: '' },
@@ -67,7 +65,7 @@
         syncValueFromRows()
     }
 
-    function removeHeaderRow (id: number) {
+    function removeHeaderRow(id: number) {
         headerRows = headerRows.filter(header => header.id !== id)
         syncValueFromRows()
     }
@@ -78,7 +76,14 @@
 </script>
 
 <small class="form-text text-muted d-block mt-2 mb-3">
-    Headers are added to all requests forwarded to the target. <a href="https://warpgate.null.page/targets/http/#built-in-headers" target="_blank" rel="noopener noreferrer">Some headers</a> are automatically set by Warpgate.
+    Headers are added to all requests forwarded to the target.
+    <a
+        href="https://warpgate.null.page/targets/http/#built-in-headers"
+        target="_blank"
+        rel="noopener noreferrer"
+        >Some headers</a
+    >
+    are automatically set by Warpgate.
 </small>
 
 <FormGroup>
@@ -90,14 +95,14 @@
                 placeholder="Header name"
                 bind:value={header.name}
                 oninput={syncValueFromRows}
-            />
+            >
             <input
                 class="form-control flex-grow-1"
                 type="text"
                 placeholder="Header value"
                 bind:value={header.value}
                 oninput={syncValueFromRows}
-            />
+            >
             <button
                 type="button"
                 class="btn btn-link px-0"

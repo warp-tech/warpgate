@@ -1,33 +1,46 @@
 <script lang="ts">
-    import { api, type CheckSshHostKeyResponseBody, type SSHKnownHost, type TargetOptionsTargetSSHOptions } from 'admin/lib/api'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { Alert } from '@sveltestrap/sveltestrap'
-    import KeyCheckerResult, { Key, type CheckResult } from './KeyCheckerResult.svelte'
+    import {
+        api,
+        type CheckSshHostKeyResponseBody,
+        type SSHKnownHost,
+        type TargetOptionsTargetSSHOptions,
+    } from 'admin/lib/api'
+    import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
+    import KeyCheckerResult, {
+        type CheckResult,
+        Key,
+    } from './KeyCheckerResult.svelte'
 
-    type State = {
-        state: 'initializing'
-    } | {
-        state: 'not-checked',
-        hasTrustedKeys: boolean
-    } | {
-        state: 'checking',
-        previousResult: CheckResult | null
-    } | {
-        state: 'ready',
-        result: CheckResult
-    } | {
-        state: 'error',
-        error: string
-    }
+    type State =
+        | {
+              state: 'initializing'
+          }
+        | {
+              state: 'not-checked'
+              hasTrustedKeys: boolean
+          }
+        | {
+              state: 'checking'
+              previousResult: CheckResult | null
+          }
+        | {
+              state: 'ready'
+              result: CheckResult
+          }
+        | {
+              state: 'error'
+              error: string
+          }
 
     let _state: State = $state({
         state: 'initializing',
     })
 
     interface Props {
-        id: string,
-        options: TargetOptionsTargetSSHOptions;
+        id: string
+        options: TargetOptionsTargetSSHOptions
     }
 
     let { id, options }: Props = $props()
@@ -35,8 +48,7 @@
     let remoteHostKey: CheckSshHostKeyResponseBody | null = $state(null)
 
     $effect(() => {
-        (async function () {
-            // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+        ;(async () => {
             options // run effect when options get reassigned after saving, since changes in host/ip invalidate the currenty loaded known hosts
             _state = { state: 'initializing' }
             await reloadKnownHosts()
@@ -44,40 +56,64 @@
         })()
     })
 
-    function updateReadyState () {
+    function updateReadyState() {
         if (!remoteHostKey) {
             if (knownHosts === null) {
                 _state = { state: 'initializing' }
                 return
             } else {
-                _state = { state: 'not-checked', hasTrustedKeys: knownHosts.length > 0 }
+                _state = {
+                    state: 'not-checked',
+                    hasTrustedKeys: knownHosts.length > 0,
+                }
                 return
             }
         }
 
-        _state = { state: 'ready', result: getCheckResult(knownHosts, remoteHostKey) }
-    }
-
-    function getCheckResult (knownHosts: SSHKnownHost[] | null, remoteHostKey: CheckSshHostKeyResponseBody): CheckResult {
-        const actualKey = new Key(remoteHostKey.remoteKeyType, remoteHostKey.remoteKeyBase64)
-
-        if (knownHosts?.some(k => k.keyType === remoteHostKey!.remoteKeyType && k.keyBase64 === remoteHostKey!.remoteKeyBase64)) {
-            return  {
-                state: 'key-valid',
-            }
-        } else {
-            return knownHosts?.length ? {
-                state: 'key-invalid',
-                actualKey,
-                trustedKeys: knownHosts.map(k => new Key(k.keyType, k.keyBase64)),
-            } : {
-                state: 'key-unknown',
-                actualKey,
-            }
+        _state = {
+            state: 'ready',
+            result: getCheckResult(knownHosts, remoteHostKey),
         }
     }
 
-    async function reloadKnownHosts () {
+    function getCheckResult(
+        knownHosts: SSHKnownHost[] | null,
+        remoteHostKey: CheckSshHostKeyResponseBody,
+    ): CheckResult {
+        if (!remoteHostKey) throw new Error('Remote host key not loaded')
+
+        const actualKey = new Key(
+            remoteHostKey.remoteKeyType,
+            remoteHostKey.remoteKeyBase64,
+        )
+
+        if (
+            knownHosts?.some(
+                k =>
+                    k.keyType === remoteHostKey.remoteKeyType &&
+                    k.keyBase64 === remoteHostKey.remoteKeyBase64,
+            )
+        ) {
+            return {
+                state: 'key-valid',
+            }
+        } else {
+            return knownHosts?.length
+                ? {
+                      state: 'key-invalid',
+                      actualKey,
+                      trustedKeys: knownHosts.map(
+                          k => new Key(k.keyType, k.keyBase64),
+                      ),
+                  }
+                : {
+                      state: 'key-unknown',
+                      actualKey,
+                  }
+        }
+    }
+
+    async function reloadKnownHosts() {
         try {
             knownHosts = await api.getSshTargetKnownSshHostKeys({ id })
         } catch (err) {
@@ -86,8 +122,11 @@
         }
     }
 
-    async function checkRemoteHostKey () {
-        _state = { state: 'checking', previousResult: _state.state === 'ready' ? _state.result : null }
+    async function checkRemoteHostKey() {
+        _state = {
+            state: 'checking',
+            previousResult: _state.state === 'ready' ? _state.result : null,
+        }
         try {
             remoteHostKey = await api.checkSshHostKey({
                 checkSshHostKeyRequest: { targetId: id },
@@ -99,14 +138,15 @@
         updateReadyState()
     }
 
-    async function trustRemoteKey () {
+    async function trustRemoteKey() {
+        if (!remoteHostKey) return
         try {
             await api.addSshKnownHost({
                 addSshKnownHostRequest: {
                     host: options.host,
                     port: options.port,
-                    keyBase64: remoteHostKey!.remoteKeyBase64,
-                    keyType: remoteHostKey!.remoteKeyType,
+                    keyBase64: remoteHostKey.remoteKeyBase64,
+                    keyType: remoteHostKey.remoteKeyType,
                 },
             })
         } catch (err) {
@@ -120,28 +160,24 @@
 
 <div class="d-flex host-key-status">
     {#if _state.state === 'initializing'}
-    <Alert color="secondary">
-        Looking for trusted keys...
-    </Alert>
+        <Alert color="secondary">Looking for trusted keys...</Alert>
     {/if}
 
     {#if _state.state === 'not-checked'}
-    <Alert color="secondary">
-        {#if _state.hasTrustedKeys}
-            There is a saved trusted key
-        {:else}
-            There are no trusted host keys yet
-        {/if}
-    </Alert>
+        <Alert color="secondary">
+            {#if _state.hasTrustedKeys}
+                There is a saved trusted key
+            {:else}
+                There are no trusted host keys yet
+            {/if}
+        </Alert>
     {/if}
 
     {#if _state.state === 'checking'}
         {#if _state.previousResult}
             <KeyCheckerResult result={_state.previousResult} />
         {:else}
-            <Alert color="secondary">
-                Retrieving remote host key...
-            </Alert>
+            <Alert color="secondary">Retrieving remote host key...</Alert>
         {/if}
     {/if}
 

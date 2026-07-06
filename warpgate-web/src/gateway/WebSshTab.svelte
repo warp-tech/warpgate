@@ -24,27 +24,39 @@
     }
 </script>
 <script lang="ts">
-    import { onDestroy } from 'svelte'
-    import { Terminal } from '@xterm/xterm'
+    import {
+        Button,
+        Modal,
+        ModalBody,
+        ModalFooter,
+    } from '@sveltestrap/sveltestrap'
     import { FitAddon } from '@xterm/addon-fit'
     import { Unicode11Addon } from '@xterm/addon-unicode11'
+    import { Terminal } from '@xterm/xterm'
+    import { onDestroy } from 'svelte'
     import * as Zmodem from 'zmodem.js'
-    import { Button, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
 
     enum ZmodemFeedResult {
         Consumed = 'consumed',
-        Passthrough = 'passthrough'
+        Passthrough = 'passthrough',
+    }
+
+    interface ZmodemDetection {
+        deny: () => void
+        confirm: () => unknown
     }
 
     class ZmodemSession {
+        // biome-ignore lint/suspicious/noExplicitAny: no types
         private sentry: any
+        // biome-ignore lint/suspicious/noExplicitAny: no types
         private session: any = null
         private active = false
 
         confirmPending = $state(false)
         private confirmResolve: ((accepted: boolean) => void) | null = null
 
-        constructor (
+        constructor(
             private writeToTerminal: (data: Uint8Array) => void,
             private sendToHost: (data: Uint8Array) => void,
         ) {
@@ -57,7 +69,7 @@
                 sender: (octets: number[]) => {
                     this.sendToHost(Uint8Array.from(octets))
                 },
-                on_detect: (detection: any) => {
+                on_detect: (detection: ZmodemDetection) => {
                     this.handleDetect(detection)
                 },
                 on_retract: () => {
@@ -67,7 +79,7 @@
             })
         }
 
-        feed (data: Uint8Array): ZmodemFeedResult {
+        feed(data: Uint8Array): ZmodemFeedResult {
             if (this.active || this.session) {
                 try {
                     this.sentry.consume(data)
@@ -91,24 +103,24 @@
             return ZmodemFeedResult.Passthrough
         }
 
-        resolveConfirm (accepted: boolean): void {
+        resolveConfirm(accepted: boolean): void {
             this.confirmPending = false
             this.confirmResolve?.(accepted)
             this.confirmResolve = null
         }
 
-        destroy (): void {
+        destroy(): void {
             this.sentry.destroy?.()
         }
 
-        private askConfirm (): Promise<boolean> {
+        private askConfirm(): Promise<boolean> {
             return new Promise(resolve => {
                 this.confirmResolve = resolve
                 this.confirmPending = true
             })
         }
 
-        private async handleDetect (detection: any): Promise<void> {
+        private async handleDetect(detection: ZmodemDetection): Promise<void> {
             const accepted = await this.askConfirm()
             if (!accepted) {
                 detection.deny()
@@ -122,6 +134,7 @@
                 if (this.session.type === 'send') {
                     await this.sendFile()
                 } else {
+                    // biome-ignore lint/suspicious/noExplicitAny: no types
                     this.session.on('offer', (xfer: any) => {
                         this.receiveFile(xfer).catch(() => {
                             try {
@@ -132,7 +145,9 @@
                         })
                     })
                     this.session.start()
-                    await new Promise(resolve => this.session.on('session_end', resolve))
+                    await new Promise(resolve =>
+                        this.session.on('session_end', resolve),
+                    )
                 }
             } catch {
                 try {
@@ -146,7 +161,8 @@
             }
         }
 
-        private async receiveFile (xfer: any): Promise<void> {
+        // biome-ignore lint/suspicious/noExplicitAny: no types
+        private async receiveFile(xfer: any): Promise<void> {
             const chunks: Uint8Array[] = []
             await xfer.accept({
                 on_input: (chunk: ArrayLike<number>) => {
@@ -155,7 +171,9 @@
             })
 
             const { name } = xfer.get_details() as { name: string }
-            const blob = new Blob(chunks as unknown as BlobPart[], { type: 'application/octet-stream' })
+            const blob = new Blob(chunks as unknown as BlobPart[], {
+                type: 'application/octet-stream',
+            })
 
             const url = URL.createObjectURL(blob)
             const link = document.createElement('a')
@@ -170,7 +188,7 @@
             }, 100)
         }
 
-        private async sendFile (): Promise<void> {
+        private async sendFile(): Promise<void> {
             const file = await new Promise<File | null>(resolve => {
                 const input = document.createElement('input')
                 input.type = 'file'
@@ -187,7 +205,7 @@
             const xfer = await this.session.send_offer({
                 name: file.name,
                 size: file.size,
-                mode: parseInt('0666', 8),
+                mode: 0o0666,
                 mtime: Math.floor(file.lastModified / 1000),
             })
 
@@ -209,7 +227,14 @@
         onTitleChange: (title: string) => void
     }
 
-    let { active, fontSize, readOnly, onInput, onResize, onTitleChange }: Props = $props()
+    let {
+        active,
+        fontSize,
+        readOnly,
+        onInput,
+        onResize,
+        onTitleChange,
+    }: Props = $props()
 
     const terminal = new Terminal({
         allowProposedApi: true,
@@ -273,22 +298,22 @@
         })
     })
 
-    export function write (data: Uint8Array): void {
+    export function write(data: Uint8Array): void {
         if (zmodem.feed(data) === ZmodemFeedResult.Passthrough) {
             terminal.write(data)
         }
     }
 
-    export function fit (): void {
+    export function fit(): void {
         fitAddon.fit()
         onResize(terminal.cols, terminal.rows)
     }
 
-    export function getSize (): { cols: number; rows: number } {
+    export function getSize(): { cols: number; rows: number } {
         return { cols: terminal.cols, rows: terminal.rows }
     }
 
-    function mountTerminal (el: HTMLDivElement) {
+    function mountTerminal(el: HTMLDivElement) {
         terminal.open(el)
         requestAnimationFrame(() => {
             fitAddon.fit()
@@ -297,7 +322,7 @@
                 terminal.focus()
             }
         })
-        return { destroy () {} }
+        return { destroy() {} }
     }
 
     onDestroy(() => {
@@ -320,13 +345,15 @@
         <Button
             color="secondary"
             class="modal-button"
-            onclick={() => zmodem.resolveConfirm(false)
-        }>Reject</Button>
+            onclick={() => zmodem.resolveConfirm(false)}
+            >Reject</Button
+        >
         <Button
             color="primary"
             class="modal-button"
-            onclick={() => zmodem.resolveConfirm(true)
-        }>Accept</Button>
+            onclick={() => zmodem.resolveConfirm(true)}
+            >Accept</Button
+        >
     </ModalFooter>
 </Modal>
 

@@ -33,7 +33,7 @@
         let closestSection: Section | null = null
         let closestDistance = Infinity
 
-        sections.forEach((section) => {
+        sections.forEach(section => {
             if (!section.element) {
                 return
             }
@@ -43,7 +43,11 @@
             const distanceFromTabs = rect.top - tabsBottomInViewport
 
             // Find the section closest to (just below) the sticky tabs
-            if (rect.top < window.innerHeight && distanceFromTabs >= -100 && distanceFromTabs < closestDistance) {
+            if (
+                rect.top < window.innerHeight &&
+                distanceFromTabs >= -100 &&
+                distanceFromTabs < closestDistance
+            ) {
                 closestDistance = distanceFromTabs
                 closestSection = section
             }
@@ -73,10 +77,14 @@
 
     onMount(() => {
         // Find all section elements
-        const sectionElements = containerElement?.querySelectorAll('[data-section]') as NodeListOf<HTMLElement>
+        const sectionElements = containerElement?.querySelectorAll(
+            '[data-section]',
+        ) as NodeListOf<HTMLElement>
         if (sectionElements) {
-            sections = Array.from(sectionElements).map((el) => ({
+            sections = Array.from(sectionElements).map(el => ({
+                // biome-ignore lint/style/noNonNullAssertion: x
                 id: el.dataset.section!,
+                // biome-ignore lint/style/noNonNullAssertion: x
                 title: el.dataset.sectionTitle!,
                 element: el,
             }))
@@ -107,18 +115,20 @@
         const headingElement = document.getElementById(`${sectionId}-heading`)
         if (headingElement) {
             activeSection = sectionId
-            headingElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            headingElement.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+            })
         }
     }
 </script>
 
 <div class="sectioned-form-container {props.class ?? ''}">
     {#if sections.length > 0}
-        <div class="sectioned-form-tabs-slot {showSectionLinks ? 'is-visible' : 'is-hidden'}">
-            <nav
-                class="sectioned-form-tabs"
-                bind:this={tabsElement}
-            >
+        <div
+            class="sectioned-form-tabs-slot {showSectionLinks ? 'is-visible' : 'is-hidden'}"
+        >
+            <nav class="sectioned-form-tabs" bind:this={tabsElement}>
                 <div class="nav nav-pills gap-2 p-2 overflow-x-auto">
                     {#each sections as section (section.id)}
                         <a

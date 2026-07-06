@@ -1,4 +1,4 @@
-import { DefaultApi, Configuration, ResponseError } from './api-client'
+import { Configuration, DefaultApi, type ResponseError } from './api-client'
 
 const configuration = new Configuration({
     basePath: '/@warpgate/api',
@@ -7,6 +7,6 @@ const configuration = new Configuration({
 export const api = new DefaultApi(configuration)
 export * from './api-client'
 
-export async function stringifyError (err: ResponseError): Promise<string> {
+export async function stringifyError(err: ResponseError): Promise<string> {
     return `API error: ${await err.response.text()}`
 }

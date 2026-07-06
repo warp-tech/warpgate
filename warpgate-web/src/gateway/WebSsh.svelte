@@ -1,16 +1,33 @@
 <script lang="ts">
-    import { onDestroy, onMount, tick } from 'svelte'
-    import { Button, Dropdown, DropdownItem, DropdownMenu, DropdownToggle, Modal, ModalBody, ModalFooter } from '@sveltestrap/sveltestrap'
-    import Fa from 'svelte-fa'
-    import { faPlus, faTimes, faGear, faMinus } from '@fortawesome/free-solid-svg-icons'
-    import { api, ResponseError, type WebSshSessionInfo } from './lib/api'
-    import SshTerminalTab, { THEME } from './WebSshTab.svelte'
-    import { SvelteMap } from 'svelte/reactivity'
-    import InfoBox from 'common/InfoBox.svelte'
-    import { ReconnectingWebSocket, ConnectionState } from './lib/ReconnectingWebSocket.svelte'
-    import { loadTheme } from 'theme'
+    import {
+        faGear,
+        faMinus,
+        faPlus,
+        faTimes,
+    } from '@fortawesome/free-solid-svg-icons'
+    import {
+        Button,
+        Dropdown,
+        DropdownItem,
+        DropdownMenu,
+        DropdownToggle,
+        Modal,
+        ModalBody,
+        ModalFooter,
+    } from '@sveltestrap/sveltestrap'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
+    import InfoBox from 'common/InfoBox.svelte'
     import { serverInfo } from 'gateway/lib/store'
+    import { onDestroy, onMount, tick } from 'svelte'
+    import { SvelteMap } from 'svelte/reactivity'
+    import Fa from 'svelte-fa'
+    import { loadTheme } from 'theme'
+    import { api, ResponseError, type WebSshSessionInfo } from './lib/api'
+    import {
+        ConnectionState,
+        ReconnectingWebSocket,
+    } from './lib/ReconnectingWebSocket.svelte'
+    import SshTerminalTab, { THEME } from './WebSshTab.svelte'
 
     interface Props {
         params: { sessionId: string }
@@ -33,7 +50,13 @@
         | { type: 'eof'; channel_id: string }
         | { type: 'exit_status'; channel_id: string; code: number }
         | { type: 'error'; message: string }
-        | { type: 'host_key_unknown'; host: string; port: number; key_type: string; key_base64: string }
+        | {
+              type: 'host_key_unknown'
+              host: string
+              port: number
+              key_type: string
+              key_base64: string
+          }
 
     interface ChannelState {
         id: string
@@ -47,7 +70,10 @@
     let activeChannelId: string | null = $state(null)
     let connectionError: string | null = $state(null)
     let sessionNotFound = $state(false)
-    let pendingHostKey: Extract<ServerMessage, { type: 'host_key_unknown' }> | null = $state(null)
+    let pendingHostKey: Extract<
+        ServerMessage,
+        { type: 'host_key_unknown' }
+    > | null = $state(null)
     const tabs: Record<string, SshTerminalTab> = {}
 
     // svelte-ignore state_referenced_locally
@@ -58,16 +84,18 @@
     const FONT_SIZE_MIN = 8
     const FONT_SIZE_MAX = 32
     const FONT_SIZE_STEP = 1
-    let fontSize = $state(parseInt(localStorage.warpgateWebSSHFontSize ?? '14', 10))
+    let fontSize = $state(
+        parseInt(localStorage.warpgateWebSSHFontSize ?? '14', 10),
+    )
 
     $effect(() => {
         localStorage.warpgateWebSSHFontSize = String(fontSize)
     })
 
-    function zoomIn () {
+    function zoomIn() {
         fontSize = Math.min(FONT_SIZE_MAX, fontSize + FONT_SIZE_STEP)
     }
-    function zoomOut () {
+    function zoomOut() {
         fontSize = Math.max(FONT_SIZE_MIN, fontSize - FONT_SIZE_STEP)
     }
 
@@ -77,14 +105,15 @@
     const ws = new ReconnectingWebSocket({
         url: `wss://${location.host}/@warpgate/api/web-ssh/sessions/${sessionId}/stream`,
         onOpen: () => requestNewChannel(),
-        onMessage: data => onMessage(JSON.parse(data as string) as ServerMessage),
+        onMessage: data =>
+            onMessage(JSON.parse(data as string) as ServerMessage),
     })
 
-    function send (msg: ClientMessage) {
+    function send(msg: ClientMessage) {
         ws.send(JSON.stringify(msg))
     }
 
-    function bytesToBase64 (bytes: Uint8Array): string {
+    function bytesToBase64(bytes: Uint8Array): string {
         let binary = ''
         const chunkSize = 0x8000
         for (let i = 0; i < bytes.length; i += chunkSize) {
@@ -94,12 +123,16 @@
         return btoa(binary)
     }
 
-    function requestNewChannel () {
+    function requestNewChannel() {
         const size = activeChannelId ? tabs[activeChannelId]?.getSize() : null
-        send({ type: 'open_channel', cols: size?.cols ?? 80, rows: size?.rows ?? 24 })
+        send({
+            type: 'open_channel',
+            cols: size?.cols ?? 80,
+            rows: size?.rows ?? 24,
+        })
     }
 
-    function onMessage (msg: ServerMessage) {
+    function onMessage(msg: ServerMessage) {
         switch (msg.type) {
             case 'connection_state':
                 ws.state = msg.state
@@ -108,7 +141,9 @@
                 openChannel(msg.channel_id)
                 break
             case 'output':
-                tabs[msg.channel_id]?.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)))
+                tabs[msg.channel_id]?.write(
+                    Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)),
+                )
                 break
             case 'channel_closed':
             case 'eof': {
@@ -121,7 +156,12 @@
             case 'exit_status': {
                 const ch = channels.get(msg.channel_id)
                 if (ch) {
-                    tabs[msg.channel_id]?.write(Uint8Array.from(`\r\n[Process exited with code ${msg.code}]\r\n`, c => c.charCodeAt(0)))
+                    tabs[msg.channel_id]?.write(
+                        Uint8Array.from(
+                            `\r\n[Process exited with code ${msg.code}]\r\n`,
+                            c => c.charCodeAt(0),
+                        ),
+                    )
                 }
                 break
             }
@@ -135,13 +175,18 @@
         }
     }
 
-    function openChannel (id: string) {
-        channels.set(id, { id, label: `Shell ${channelOrder.length + 1}`, terminalTitle: undefined, closed: false })
+    function openChannel(id: string) {
+        channels.set(id, {
+            id,
+            label: `Shell ${channelOrder.length + 1}`,
+            terminalTitle: undefined,
+            closed: false,
+        })
         channelOrder = [...channelOrder, id]
         activeChannelId = id
     }
 
-    async function switchToChannel (id: string) {
+    async function switchToChannel(id: string) {
         activeChannelId = id
         // wait until visible
         await tick()
@@ -150,7 +195,7 @@
         })
     }
 
-    function closeTab (id: string) {
+    function closeTab(id: string) {
         send({ type: 'close_channel', channel_id: id })
         channels.delete(id)
         channelOrder = channelOrder.filter(x => x !== id)
@@ -159,17 +204,21 @@
         }
     }
 
-    function observeResize (node: HTMLElement) {
+    function observeResize(node: HTMLElement) {
         const resizeObserver = new ResizeObserver(() => {
             if (activeChannelId) {
                 tabs[activeChannelId]?.fit()
             }
         })
         resizeObserver.observe(node)
-        return { destroy () { resizeObserver.disconnect() } }
+        return {
+            destroy() {
+                resizeObserver.disconnect()
+            },
+        }
     }
 
-    async function disconnect () {
+    async function disconnect() {
         ws.close()
         await api.deleteWebSshSession({ sessionId })
         window.close()
@@ -179,7 +228,8 @@
         try {
             sessionInfo = await api.getWebSshSession({ sessionId })
         } catch (e) {
-            connectionError = e instanceof Error ? e.message : 'Failed to load session info'
+            connectionError =
+                e instanceof Error ? e.message : 'Failed to load session info'
             if (e instanceof ResponseError && e.response.status === 404) {
                 sessionNotFound = true
             }
@@ -190,12 +240,16 @@
 
     const originalTitle = document.title
     const windowTitle = $derived.by(() => {
-        const activeTerminalTitle = activeChannelId ? channels.get(activeChannelId)?.terminalTitle : undefined
+        const activeTerminalTitle = activeChannelId
+            ? channels.get(activeChannelId)?.terminalTitle
+            : undefined
         const baseTitle = activeTerminalTitle ?? originalTitle
         const targetName = sessionInfo?.targetName
         return targetName ? `${targetName} - ${baseTitle}` : baseTitle
     })
-    $effect(() => { document.title = windowTitle })
+    $effect(() => {
+        document.title = windowTitle
+    })
 
     onDestroy(() => {
         ws.close()
@@ -204,11 +258,15 @@
     loadTheme('dark')
 </script>
 
-<div class="ssh-web-client d-flex flex-column" use:observeResize style={`background-color: ${THEME.background}`}>
-
+<div
+    class="ssh-web-client d-flex flex-column"
+    use:observeResize
+    style={`background-color: ${THEME.background}`}
+>
     <div class="terminal-area flex-grow-1 position-relative">
         {#each channelOrder as id (id)}
-            {#if channels.get(id)}
+            {@const channel = channels.get(id)}
+            {#if channel}
                 <SshTerminalTab
                     bind:this={tabs[id]}
                     active={id === activeChannelId}
@@ -218,7 +276,7 @@
                     onResize={(cols, rows) => send({ type: 'resize', channel_id: id, cols, rows })}
                     onTitleChange={title => {
                         channels.set(id, {
-                            ...channels.get(id)!,
+                            ...channel,
                             terminalTitle: title,
                         })
                     }}
@@ -243,27 +301,32 @@
                 {#each channelOrder as id (id)}
                     {@const ch = channels.get(id)}
                     {#if ch}
-                    <div
-                        class="tab btn btn-secondary d-flex align-items-center"
-                        class:active={id === activeChannelId}
-                        tabindex="0"
-                        role="button"
-                        onclick={() => switchToChannel(id)}
-                        onkeydown={e => e.key === 'Enter' && switchToChannel(id)}
-                    >
-                        <span class="label">{ch.terminalTitle ?? ch.label}</span>
-                        <button
-                            class="btn btn-link btn-sm close-button"
-                            onclick={e => { e.stopPropagation(); closeTab(id) }}
+                        <!-- biome-ignore lint/a11y/useSemanticElements: nested -->
+                        <div
+                            class="tab btn btn-secondary d-flex align-items-center"
+                            class:active={id === activeChannelId}
+                            tabindex="0"
+                            role="button"
+                            onclick={() => switchToChannel(id)}
+                            onkeydown={e => e.key === 'Enter' && switchToChannel(id)}
                         >
-                            <Fa icon={faTimes} />
-                        </button>
-                    </div>
+                            <span class="label"
+                                >{ch.terminalTitle ?? ch.label}</span
+                            >
+                            <button
+                                type="button"
+                                class="btn btn-link btn-sm close-button"
+                                onclick={e => { e.stopPropagation(); closeTab(id) }}
+                            >
+                                <Fa icon={faTimes} />
+                            </button>
+                        </div>
                     {/if}
                 {/each}
 
                 {#if ws.state === ConnectionState.Connected}
                     <button
+                        type="button"
                         class="btn btn-secondary px-3"
                         onclick={requestNewChannel}
                     >
@@ -274,10 +337,12 @@
 
             {#if !sessionNotFound}
                 <span class="text-muted small me-3">
-                    {ws.state}{#if ws.state === ConnectionState.Connecting && ws.attempt > 0}&nbsp;(attempt {ws.attempt}){/if}
+                    {ws.state}
+                    {#if ws.state === ConnectionState.Connecting && ws.attempt > 0}
+                        &nbsp;(attempt {ws.attempt})
+                    {/if}
                 </span>
             {/if}
-
 
             {#if ws.state === ConnectionState.Connected}
                 <Button color="danger" onclick={disconnect}>Disconnect</Button>
@@ -288,24 +353,36 @@
                     <Fa icon={faGear} />
                 </DropdownToggle>
                 <DropdownMenu end>
-                    <div class="dropdown-item disabled font-size-row d-flex align-items-center gap-2">
+                    <div
+                        class="dropdown-item disabled font-size-row d-flex align-items-center gap-2"
+                    >
                         <button
+                            type="button"
                             class="btn btn-sm btn-secondary"
                             disabled={fontSize <= FONT_SIZE_MIN}
                             onclick={() => { zoomOut(); menuOpen = true }}
                             aria-label="Zoom out"
-                        ><Fa icon={faMinus} /></button>
-                        <span class="text-nowrap ms-auto me-auto">{fontSize}px</span>
+                        >
+                            <Fa icon={faMinus} />
+                        </button>
+                        <span class="text-nowrap ms-auto me-auto"
+                            >{fontSize}px</span
+                        >
                         <button
+                            type="button"
                             class="btn btn-sm btn-secondary"
                             disabled={fontSize >= FONT_SIZE_MAX}
                             onclick={() => { zoomIn(); menuOpen = true }}
                             aria-label="Zoom in"
-                        ><Fa icon={faPlus} /></button>
+                        >
+                            <Fa icon={faPlus} />
+                        </button>
                     </div>
                     {#if sessionInfo}
                         <DropdownItem divider />
-                        <DropdownItem onclick={() => { showInstructions = true; menuOpen = false }}>
+                        <DropdownItem
+                            onclick={() => { showInstructions = true; menuOpen = false }}
+                        >
                             Connect from your machine
                         </DropdownItem>
                     {/if}
@@ -316,48 +393,61 @@
 </div>
 
 {#if sessionInfo}
-<Modal isOpen={showInstructions} toggle={() => showInstructions = false} size="lg">
-    <ModalBody>
-        <ConnectionInstructions
-            targetName={sessionInfo.targetName}
-            targetKind={sessionInfo.targetKind}
-            username={$serverInfo?.username}
-        />
-    </ModalBody>
-    <ModalFooter>
-        <Button color="secondary" class="modal-button" onclick={() => showInstructions = false}>Close</Button>
-    </ModalFooter>
-</Modal>
+    <Modal
+        isOpen={showInstructions}
+        toggle={() => showInstructions = false}
+        size="lg"
+    >
+        <ModalBody>
+            <ConnectionInstructions
+                targetName={sessionInfo.targetName}
+                targetKind={sessionInfo.targetKind}
+                username={$serverInfo?.username}
+            />
+        </ModalBody>
+        <ModalFooter>
+            <Button
+                color="secondary"
+                class="modal-button"
+                onclick={() => showInstructions = false}
+                >Close</Button
+            >
+        </ModalFooter>
+    </Modal>
 {/if}
 
 {#if pendingHostKey}
-<Modal isOpen={true} backdrop="static" keyboard={false}>
-    <ModalBody>
-        <div class="mb-3">
-            There is currently no trusted {pendingHostKey.key_type} key for the SSH server at {pendingHostKey.host}:{pendingHostKey.port}. Trust this key?
-        </div>
-        <code>{pendingHostKey.key_type} {pendingHostKey.key_base64}</code>
-    </ModalBody>
-    <ModalFooter>
-        <Button
-            color="danger"
-            class="modal-button"
-            onclick={() => {
+    <Modal isOpen={true} backdrop="static" keyboard={false}>
+        <ModalBody>
+            <div class="mb-3">
+                There is currently no trusted {pendingHostKey.key_type} key for
+                the SSH server at {pendingHostKey.host}:{pendingHostKey.port}.
+                Trust this key?
+            </div>
+            <code>{pendingHostKey.key_type} {pendingHostKey.key_base64}</code>
+        </ModalBody>
+        <ModalFooter>
+            <Button
+                color="danger"
+                class="modal-button"
+                onclick={() => {
                 send({ type: 'reject_host_key' })
                 pendingHostKey = null
                 disconnect()
             }}
-        >Reject and disconnect</Button>
-        <Button
-            color="primary"
-            class="modal-button"
-            onclick={() => {
+                >Reject and disconnect</Button
+            >
+            <Button
+                color="primary"
+                class="modal-button"
+                onclick={() => {
                 send({ type: 'accept_host_key' })
                 pendingHostKey = null
             }}
-        >Accept and connect</Button>
-    </ModalFooter>
-</Modal>
+                >Accept and connect</Button
+            >
+        </ModalFooter>
+    </Modal>
 {/if}
 
 <style lang="scss">

@@ -9,12 +9,7 @@
         class?: string
     }
 
-    // eslint-disable-next-line svelte/no-unused-props
-    let {
-        label,
-        value,
-        'class': className = '',
-    }: Props = $props()
+    let { label, value, class: className = '' }: Props = $props()
 </script>
 
 <FormGroup floating {label} class="copyable-textarea">
