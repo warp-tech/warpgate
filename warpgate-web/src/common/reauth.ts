@@ -18,7 +18,7 @@ export async function handleReauthError(err: unknown): Promise<boolean> {
 
         const next = location.pathname + location.hash
         location.assign(
-            '/@warpgate#/login?next=' + encodeURIComponent(next) + '&reauth=1',
+            `/@warpgate#/login?next=${encodeURIComponent(next)}&reauth=1`,
         )
         return true
     }

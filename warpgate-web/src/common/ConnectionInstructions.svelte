@@ -370,7 +370,7 @@
                                         >
                                     {/if}
                                     <Tooltip
-                                        target={'cert-status-badge-' + cert.credential.id}
+                                        target={`cert-status-badge-${cert.credential.id}`}
                                         placement="top"
                                         delay={500}
                                     >

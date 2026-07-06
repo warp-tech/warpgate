@@ -56,7 +56,7 @@
     let user: User | undefined = $state()
     let allRoles: Role[] = $state([])
     let userRoles: UserRoleAssignmentResponse[] = $state([])
-    let roleIsAllowed: Record<string, any> = $state({})
+    let roleIsAllowed: Record<string, boolean> = $state({})
 
     // Modal states
     let showExpiryModal = $state(false)
@@ -107,7 +107,7 @@
     }
 
     let allAdminRoles: AdminRole[] = $state([])
-    let adminRoleIsAllowed: Record<string, any> = $state({})
+    let adminRoleIsAllowed: Record<string, boolean> = $state({})
 
     const initPromise = init()
 
@@ -129,10 +129,13 @@
     }
 
     async function update() {
+        if (!user) {
+            return
+        }
         try {
             user = await api.updateUser({
                 id: params.id,
-                userDataRequest: user!,
+                userDataRequest: user,
             })
             error = null
         } catch (err) {
@@ -141,13 +144,19 @@
     }
 
     async function remove() {
-        if (confirm(`Delete user ${user!.username}?`)) {
-            await api.deleteUser(user!)
+        if (!user) {
+            return
+        }
+        if (confirm(`Delete user ${user.username}?`)) {
+            await api.deleteUser(user)
             replace('/config/users')
         }
     }
 
     async function toggleRole(role: Role) {
+        if (!user) {
+            return
+        }
         // Check if there's an active (non-expired) assignment
         const activeAssignment = userRoles.find(
             r => r.id === role.id && r.isActive,
@@ -159,26 +168,26 @@
 
         if (activeAssignment) {
             await api.deleteUserRole({
-                id: user!.id,
+                id: user.id,
                 roleId: role.id,
             })
             roleIsAllowed = { ...roleIsAllowed, [role.id]: false }
         } else if (expiredAssignment) {
             await api.updateUserRole({
-                id: user!.id,
+                id: user.id,
                 roleId: role.id,
                 updateUserRoleRequest: { expiresAt: undefined },
             })
             roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
         } else {
             await api.addUserRole({
-                id: user!.id,
+                id: user.id,
                 roleId: role.id,
             })
             roleIsAllowed = { ...roleIsAllowed, [role.id]: true }
         }
 
-        userRoles = await api.getUserRoles(user!)
+        userRoles = await api.getUserRoles(user)
     }
 
     function toLocalISO(date: Date): string {
@@ -203,6 +212,9 @@
     }
 
     async function saveExpiry() {
+        if (!user || !editingRole) {
+            return
+        }
         try {
             const expiresAt = expiryDate ? new Date(expiryDate) : undefined
 
@@ -214,20 +226,20 @@
 
             if (expiresAt) {
                 await api.updateUserRole({
-                    id: user!.id,
-                    roleId: editingRole!.id,
+                    id: user.id,
+                    roleId: editingRole.id,
                     updateUserRoleRequest: { expiresAt },
                 })
             } else {
                 await api.updateUserRole({
-                    id: user!.id,
-                    roleId: editingRole!.id,
+                    id: user.id,
+                    roleId: editingRole.id,
                     updateUserRoleRequest: { expiresAt: undefined },
                 })
             }
 
             showExpiryModal = false
-            userRoles = await api.getUserRoles(user!)
+            userRoles = await api.getUserRoles(user)
             error = null
         } catch (err) {
             error = await stringifyError(err)
@@ -272,15 +284,18 @@
     }
 
     async function toggleAdminRole(role: AdminRole) {
+        if (!user) {
+            return
+        }
         if (adminRoleIsAllowed[role.id]) {
             await api.deleteUserAdminRole({
-                id: user!.id,
+                id: user.id,
                 roleId: role.id,
             })
             adminRoleIsAllowed = { ...adminRoleIsAllowed, [role.id]: false }
         } else {
             await api.addUserAdminRole({
-                id: user!.id,
+                id: user.id,
                 roleId: role.id,
             })
             adminRoleIsAllowed = { ...adminRoleIsAllowed, [role.id]: true }
@@ -363,12 +378,12 @@
                     </FormGroup>
                 </Section>
 
-                {#if $adminPermissions.usersEdit}
+                {#if $adminPermissions.usersEdit && user.credentialPolicy}
                     <Section id="credentials" title="Credentials" hideHeading>
                         <CredentialEditor
                             userId={user.id}
                             username={user.username}
-                            bind:credentialPolicy={user.credentialPolicy!}
+                            bind:credentialPolicy={user.credentialPolicy}
                             ldapLinked={!!user.ldapServerId}
                         />
                     </Section>
@@ -382,7 +397,7 @@
                             {@const isActive = !!activeAssignment}
                             {@const isExpired = !!expiredAssignment && !isActive}
                             {@const assignment = activeAssignment ?? expiredAssignment}
-                            {@const status = assignment ? getExpiryStatus(assignment) : null}
+                            {@const expiryStatus = assignment ? getExpiryStatus(assignment) : null}
                             <div
                                 class="list-group-item d-flex align-items-center justify-content-between {isExpired ? 'opacity-75' : ''}"
                             >
@@ -405,9 +420,9 @@
                                                 class="d-flex gap-2 align-items-center flex-wrap"
                                             >
                                                 <small
-                                                    class={status?.class ?? ''}
+                                                    class={expiryStatus?.class ?? ''}
                                                 >
-                                                    {status?.text ?? ''}
+                                                    {expiryStatus?.text ?? ''}
                                                 </small>
                                                 {#if activeAssignment.grantedAt}
                                                     <small

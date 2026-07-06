@@ -193,7 +193,7 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
 }
 
 export function abbreviatePublicKey(key: string): string {
-    return key.slice(0, 16) + '...' + key.slice(-8)
+    return `${key.slice(0, 16)}...${key.slice(-8)}`
 }
 
 export function makeKubernetesContext(opt: ConnectionOptions): string {
@@ -269,10 +269,9 @@ export function makeOidcKubeconfig(opt: ConnectionOptions): string {
     const namespace = makeKubernetesNamespace(opt)
     const issuer = opt.oidcIssuerUrl ?? '<oidc-issuer-url>'
     const clientId = opt.oidcClientId ?? '<oidc-client-id>'
-    const scopes =
-        opt.oidcScopes && opt.oidcScopes.length
-            ? opt.oidcScopes
-            : ['openid', 'email', 'profile']
+    const scopes = opt.oidcScopes?.length
+        ? opt.oidcScopes
+        : ['openid', 'email', 'profile']
     const args = [
         'oidc-login',
         'get-token',

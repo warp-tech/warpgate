@@ -9,7 +9,6 @@
         text: string
         disabled?: boolean
         outline?: boolean
-        link?: boolean
         color?: Color | 'link'
         class?: string
         label?: string
@@ -21,14 +20,12 @@
         text,
         disabled = false,
         outline = false,
-        link = false,
         color = 'link',
         label,
         class: className = '',
         children,
     }: Props = $props()
     let successVisible = $state(false)
-    let button: HTMLElement | undefined = $state()
 
     async function _click() {
         if (disabled) {
@@ -42,48 +39,17 @@
     }
 </script>
 
-{#if link}
-    <!-- svelte-ignore a11y_invalid_attribute -->
-    <a
-        href="#"
-        class={className}
-        class:disabled={disabled}
-        onclick={e => {
-            _click()
-            e.preventDefault()
-        }}
-        bind:this={button}
-    >
-        {#if children}
-            {@render children()}
+<Button class={className} on:click={_click} {outline} {color} {disabled}>
+    {#if children}
+        {@render children()}
+    {:else}
+        {#if successVisible}
+            <Fa fw icon={faCheck} />
         {:else}
-            {#if successVisible}
-                Copied
-            {:else}
-                Copy
-            {/if}
+            <Fa fw icon={faCopy} />
         {/if}
-    </a>
-{:else}
-    <Button
-        class={className}
-        bind:inner={button}
-        on:click={_click}
-        {outline}
-        {color}
-        {disabled}
-    >
-        {#if children}
-            {@render children()}
-        {:else}
-            {#if successVisible}
-                <Fa fw icon={faCheck} />
-            {:else}
-                <Fa fw icon={faCopy} />
-            {/if}
-            {#if label}
-                <span class="ms-2">{label}</span>
-            {/if}
+        {#if label}
+            <span class="ms-2">{label}</span>
         {/if}
-    </Button>
-{/if}
+    {/if}
+</Button>

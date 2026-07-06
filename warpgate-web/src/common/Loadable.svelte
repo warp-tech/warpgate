@@ -13,12 +13,13 @@
     } = $props()
 
     let loaded = $state(false)
-    let data = $state<T | undefined>()
+    const EMPTY = Symbol()
+    let data = $state<T | typeof EMPTY>(EMPTY)
     let error: string | undefined = $state()
 
     $effect(() => {
         loaded = false
-        data = undefined
+        data = EMPTY
         promise
             .then(d => {
                 data = d
@@ -38,7 +39,9 @@
     <DelayedSpinner />
 {:else}
     {#if !error}
-        {@render children?.(data!)}
+        {#if data !== EMPTY}
+            {@render children?.(data)}
+        {/if}
     {:else}
         <Alert color="danger">
             {error}

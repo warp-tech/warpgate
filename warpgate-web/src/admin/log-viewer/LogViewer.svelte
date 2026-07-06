@@ -94,9 +94,9 @@
             return
         }
         items ??= []
-        const prepended = !(
-            (items?.[0]?.timestamp ?? 0) > newItems[0]!.timestamp
-        )
+        // biome-ignore lint/style/noNonNullAssertion: newItems is non-empty (guarded above)
+        const firstNewTimestamp = newItems[0]!.timestamp
+        const prepended = !((items?.[0]?.timestamp ?? 0) > firstNewTimestamp)
         if (!prepended) {
             items = items.concat(newItems)
         } else {

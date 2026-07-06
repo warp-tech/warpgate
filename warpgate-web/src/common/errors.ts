@@ -9,5 +9,5 @@ export async function stringifyError(err: unknown): Promise<string> {
     if (err instanceof admin.ResponseError) {
         return admin.stringifyError(err)
     }
-    return err.toString()
+    return String(err)
 }

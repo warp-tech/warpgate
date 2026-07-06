@@ -82,6 +82,7 @@
         if (authState === ApiAuthState.SsoNeeded && allowSsoRedirect) {
             const providers = await ssoProvidersPromise
             if (providers.length === 1) {
+                // biome-ignore lint/style/noNonNullAssertion: length checked above
                 startSSO(providers[0]!)
             }
         }
@@ -307,17 +308,13 @@
 
     {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginMinimized && !showPasswordLogin}
         <div class="mt-3 text-center">
-            <!-- svelte-ignore a11y_invalid_attribute -->
-            <a
-                href="#"
-                class="password-login-link"
-                onclick={e => {
-                    e.preventDefault()
-                    showPasswordLogin = true
-                }}
+            <button
+                type="button"
+                class="btn btn-link"
+                onclick={() => showPasswordLogin = true}
             >
                 Password login
-            </a>
+            </button>
         </div>
     {/if}
 

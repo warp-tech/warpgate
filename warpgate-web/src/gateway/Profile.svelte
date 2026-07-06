@@ -4,7 +4,9 @@
 </script>
 
 <div class="page-summary-bar">
-    <h1>{$serverInfo!.username}</h1>
+    {#if $serverInfo}
+        <h1>{$serverInfo.username}</h1>
+    {/if}
 </div>
 
 <NavListItem

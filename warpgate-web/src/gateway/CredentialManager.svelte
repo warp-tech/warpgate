@@ -40,40 +40,53 @@
     }
 
     async function changePassword(password: string) {
+        if (!creds) {
+            return
+        }
         const state = await api.changeMyPassword({
             changePasswordRequest: { password },
         })
-        creds!.password = state
+        creds.password = state
     }
 
     async function createPublicKey(label: string, opensshPublicKey: string) {
+        if (!creds) {
+            return
+        }
         const credential = await api.addMyPublicKey({
             newPublicKeyCredential: {
                 label,
                 opensshPublicKey,
             },
         })
-        creds!.publicKeys.push(credential)
+        creds.publicKeys.push(credential)
     }
 
     async function deletePublicKey(credential: ExistingPublicKeyCredential) {
-        creds!.publicKeys = creds!.publicKeys.filter(
-            c => c.id !== credential.id,
-        )
+        if (!creds) {
+            return
+        }
+        creds.publicKeys = creds.publicKeys.filter(c => c.id !== credential.id)
         await api.deleteMyPublicKey(credential)
     }
 
     async function createOtp(secretKey: number[]) {
+        if (!creds) {
+            return
+        }
         const credential = await api.addMyOtp({
             newOtpCredential: {
                 secretKey,
             },
         })
-        creds!.otp.push(credential)
+        creds.otp.push(credential)
     }
 
     async function deleteOtp(credential: ExistingOtpCredential) {
-        creds!.otp = creds!.otp.filter(c => c.id !== credential.id)
+        if (!creds) {
+            return
+        }
+        creds.otp = creds.otp.filter(c => c.id !== credential.id)
         await api.deleteMyOtp(credential)
     }
 
@@ -84,15 +97,20 @@
                 publicKeyPem,
             },
         })
-        creds!.certificates.push(response.credential)
+        if (creds) {
+            creds.certificates.push(response.credential)
+        }
         return response
     }
 
     async function deleteCertificate(
         credential: ExistingCertificateCredential,
     ) {
+        if (!creds) {
+            return
+        }
         if (confirm('Permanently revoke certificate?')) {
-            creds!.certificates = creds!.certificates.filter(
+            creds.certificates = creds.certificates.filter(
                 c => c.id !== credential.id,
             )
             await api.revokeMyCertificate(credential)
@@ -331,19 +349,19 @@
     />
 {/if}
 
-{#if creatingOtpCredential}
+{#if creatingOtpCredential && $serverInfo?.username}
     <CreateOtpModal
         bind:isOpen={creatingOtpCredential}
-        username={$serverInfo!.username!}
+        username={$serverInfo.username}
         create={createOtp}
     />
 {/if}
 
-{#if issuingCertificateCredential}
+{#if issuingCertificateCredential && $serverInfo?.username}
     <CertificateCredentialModal
         bind:isOpen={issuingCertificateCredential}
         save={issueCertificate}
-        username={$serverInfo!.username!}
+        username={$serverInfo.username}
         onClose={() => {
         issuingCertificateCredential = false
     }}

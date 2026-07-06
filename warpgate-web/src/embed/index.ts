@@ -16,7 +16,7 @@ function forceSecureWebSocketURLs() {
             }
         } else {
             if (url.startsWith('ws://')) {
-                return 'wss://' + url.slice('ws://'.length)
+                return `wss://${url.slice('ws://'.length)}`
             }
         }
         return url

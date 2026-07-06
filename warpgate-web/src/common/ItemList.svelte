@@ -135,9 +135,10 @@
     {#if _items}
         <div class="list-group list-group-flush mb-3">
             {#each _items as _item, _index (_item)}
-                {#if groupHeader}
-                    {#if _index === 0 || groupKey!(groupObject!(_item)) !== groupKey!(groupObject!(_items[_index - 1]!))}
-                        {@render groupHeader(groupObject!(_item))}
+                {#if groupHeader && groupObject && groupKey}
+                    {@const prev = _items[_index - 1]}
+                    {#if _index === 0 || (prev && groupKey(groupObject(_item)) !== groupKey(groupObject(prev)))}
+                        {@render groupHeader(groupObject(_item))}
                     {/if}
                 {/if}
                 {@render item?.(_item)}

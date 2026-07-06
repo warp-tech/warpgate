@@ -34,11 +34,11 @@
     async function requireLogin(detail: RouteDetail) {
         await serverInfoPromise
         if (!get(serverInfo)?.username) {
-            let url = location.pathname + '#' + detail.location
+            let url = `${location.pathname}#${detail.location}`
             if (detail.querystring) {
-                url += '?' + detail.querystring
+                url += `?${detail.querystring}`
             }
-            push('/login?next=' + encodeURIComponent(url))
+            push(`/login?next=${encodeURIComponent(url)}`)
             return false
         }
         return true
@@ -46,33 +46,33 @@
 
     const routes = {
         '/': wrap({
-            asyncComponent: () => import('./TargetList.svelte') as any,
+            asyncComponent: () => import('./TargetList.svelte'),
             props: {
                 'on:navigation': () => (redirecting = true),
             },
             conditions: [requireLogin],
         }),
         '/profile': wrap({
-            asyncComponent: () => import('./Profile.svelte') as any,
+            asyncComponent: () => import('./Profile.svelte'),
             conditions: [requireLogin],
         }),
         '/profile/api-tokens': wrap({
-            asyncComponent: () => import('./ProfileApiTokens.svelte') as any,
+            asyncComponent: () => import('./ProfileApiTokens.svelte'),
             conditions: [requireLogin],
         }),
         '/profile/credentials': wrap({
-            asyncComponent: () => import('./ProfileCredentials.svelte') as any,
+            asyncComponent: () => import('./ProfileCredentials.svelte'),
             conditions: [requireLogin],
         }),
         '/ticket-requests': wrap({
-            asyncComponent: () => import('./TicketRequests.svelte') as any,
+            asyncComponent: () => import('./TicketRequests.svelte'),
             conditions: [requireLogin],
         }),
         '/login': wrap({
-            asyncComponent: () => import('./Login.svelte') as any,
+            asyncComponent: () => import('./Login.svelte'),
         }),
         '/login/:stateId': wrap({
-            asyncComponent: () => import('./OutOfBandAuth.svelte') as any,
+            asyncComponent: () => import('./OutOfBandAuth.svelte'),
             conditions: [requireLogin],
             userData: {
                 doNotShowAuthRequests: true,
@@ -104,9 +104,9 @@
     })
 
     function onRouteLoaded(detail: RouteDetail) {
-        doNotShowAuthRequests = !!(detail.userData as any)?.[
-            'doNotShowAuthRequests'
-        ]
+        doNotShowAuthRequests = !!(
+            detail.userData as { doNotShowAuthRequests?: boolean }
+        )?.doNotShowAuthRequests
     }
 </script>
 
@@ -143,7 +143,7 @@
                         color="success"
                         class="mb-4 d-flex align-items-center w-100 text-start"
                         on:click={() => {
-                        push('/login/' + authRequest.id)
+                        push(`/login/${authRequest.id}`)
                     }}
                     >
                         <div>

@@ -316,10 +316,11 @@
     </ModalBody>
     <ModalFooter>
         {#if instructionsTarget?.kind === TargetKind.Ssh && webClientsEnabled}
+            {@const sshTarget = instructionsTarget}
             <Button
                 color="primary"
                 class="d-flex align-items-center justify-content-center gap-2 modal-button"
-                onclick={() => openWebSsh(instructionsTarget!)}
+                onclick={() => openWebSsh(sshTarget)}
             >
                 <Fa icon={faTerminal} />
                 Open Web Terminal

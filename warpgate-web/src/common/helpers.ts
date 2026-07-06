@@ -18,20 +18,29 @@ export function downloadBlob(content: string, filename: string): void {
     URL.revokeObjectURL(url)
 }
 
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export function toClassName(value: any) {
+type ClassValue =
+    | string
+    | number
+    | boolean
+    | null
+    | undefined
+    | ClassValue[]
+    | Record<string, unknown>
+
+export function toClassName(value: ClassValue): string {
     let result = ''
 
     if (typeof value === 'string' || typeof value === 'number') {
         result += value
-    } else if (typeof value === 'object') {
+    } else if (typeof value === 'object' && value !== null) {
         if (Array.isArray(value)) {
             result = value.map(toClassName).filter(Boolean).join(' ')
         } else {
             for (const key in value) {
                 if (value[key]) {
-                    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-                    result && (result += ' ')
+                    if (result) {
+                        result += ' '
+                    }
                     result += key
                 }
             }
@@ -41,8 +50,7 @@ export function toClassName(value: any) {
     return result
 }
 
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export const classnames = (...args: any[]) =>
+export const classnames = (...args: ClassValue[]): string =>
     args.map(toClassName).filter(Boolean).join(' ')
 
 export function uuid(): string {
