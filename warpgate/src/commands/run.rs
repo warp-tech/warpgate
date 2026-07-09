@@ -264,6 +264,14 @@ pub async fn watch_config_and_reload(
     mut config_rx: watch::Receiver<WarpgateConfig>,
 ) -> Result<()> {
     while config_rx.changed().await.is_ok() {
+        // Rebuild secret backends so added/removed/renamed `secrets.backends` entries take effect
+        // without a restart; otherwise references to them fail with BackendNotConfigured.
+        {
+            let secrets = services.config.lock().await.store.secrets.clone();
+            services.secret_backend.reload(&secrets).await;
+        }
+
+
         let state = services.state.lock().await;
         let mut cp = services.config_provider.lock().await;
         // TODO no longer happens since everything is in the DB

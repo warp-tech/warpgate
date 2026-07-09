@@ -27,7 +27,9 @@ use tokio::sync::mpsc::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{Instrument, debug, error, info_span};
-use warpgate_common::{ListenEndpoint, ProtocolName, RdpTargetAuth, TargetRdpOptions};
+use warpgate_common::{
+    ListenEndpoint, ProtocolName, RdpTargetAuth, SecretBackendRef, TargetRdpOptions,
+};
 use warpgate_core::{
     DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
     ProtocolServer, Services,
@@ -89,7 +91,7 @@ pub struct RdpClientHandles {
 }
 
 /// Spawn the RDP helper for a target and bridge it to normalised desktop streams.
-pub fn connect(options: TargetRdpOptions) -> RdpClientHandles {
+pub fn connect(options: TargetRdpOptions, secret_backend: SecretBackendRef) -> RdpClientHandles {
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
     let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);
     let (abort_tx, abort_rx) = unbounded_channel::<()>();
@@ -97,7 +99,7 @@ pub fn connect(options: TargetRdpOptions) -> RdpClientHandles {
     let span = info_span!("RDP-client", host = %options.host, port = options.port);
     tokio::spawn(
         async move {
-            if let Err(error) = run(options, event_tx.clone(), input_rx, abort_rx).await {
+            if let Err(error) = run(options, secret_backend, event_tx.clone(), input_rx, abort_rx).await {
                 error!(%error, "RDP helper failed");
                 let _ = event_tx.send(DesktopEvent::Error(error.to_string())).await;
             }
@@ -117,6 +119,7 @@ pub fn connect(options: TargetRdpOptions) -> RdpClientHandles {
 
 async fn run(
     options: TargetRdpOptions,
+    secret_backend: SecretBackendRef,
     event_tx: tokio::sync::mpsc::Sender<DesktopEvent>,
     mut input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
@@ -126,9 +129,14 @@ async fn run(
         .await
         .ok();
 
-    let password = match &options.auth {
-        RdpTargetAuth::Password(auth) => auth.password.expose_secret().clone(),
-    };
+    let RdpTargetAuth::Password(auth) = &options.auth;
+    let password = auth
+        .password
+        .resolve(&*secret_backend)
+        .await
+        .context("resolving RDP password")?
+        .expose_secret()
+        .clone();
 
     // Kept in scope until after `spawn` so the Linux memfd stays open across exec.
     let helper = helper::resolve()?;

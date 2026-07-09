@@ -41,6 +41,13 @@
         <code>authorized_keys</code>
         files</Alert
     >
+    {#if ownKeys[0]?.backend}
+        <Alert color="info">
+            These keys are stored in the secret backend <code>{ownKeys[0].backend}</code>
+            (Vault/OpenBao), not on disk. See
+            <a href="/@warpgate/admin#/config/secret-backends">secret backends</a>.
+        </Alert>
+    {/if}
     <div class="list-group list-group-flush">
         {#each ownKeys as key (key)}
             <CopyableTextArea label={key.kind} value={key.publicKeyBase64} />

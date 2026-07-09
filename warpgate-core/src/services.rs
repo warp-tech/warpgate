@@ -8,14 +8,14 @@ use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, CredentialKind};
-use warpgate_common::{GlobalParams, SessionId, WarpgateConfig, WarpgateError};
+use warpgate_common::{GlobalParams, SecretBackendRef, SessionId, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Parameters;
 
 use crate::db::{connect_to_db_and_migrate, populate_db};
 use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
-use crate::{AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, State};
+use crate::{AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, SecretBackendRegistry, State};
 
 #[derive(Clone)]
 pub struct Services {
@@ -29,6 +29,7 @@ pub struct Services {
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
+    pub secret_backend: SecretBackendRef,
 }
 
 impl Services {
@@ -86,6 +87,12 @@ impl Services {
             });
         }
 
+        let config_guard = config.lock().await;
+        let secret_backend: SecretBackendRef = Arc::new(
+            SecretBackendRegistry::from_config(&config_guard.store.secrets).await?,
+        );
+        drop(config_guard);
+
         Ok(Self {
             db: db.clone(),
             recordings,
@@ -97,6 +104,7 @@ impl Services {
             admin_token: Arc::new(Mutex::new(admin_token)),
             login_protection,
             global_params: Arc::new(params),
+            secret_backend,
         })
     }
 

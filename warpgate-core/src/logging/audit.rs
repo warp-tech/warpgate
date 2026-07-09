@@ -108,6 +108,16 @@ pub enum AuditEvent {
         target: String,
         actor_user_id: Uuid,
     },
+    SecretResolved {
+        backend: String,
+        reference: String,
+        success: bool,
+    },
+    SecretStored {
+        backend: String,
+        reference: String,
+        success: bool,
+    },
 }
 
 impl AuditEvent {
@@ -357,6 +367,34 @@ impl AuditEvent {
                     target = %target,
                     related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
                     "Deleted ticket"
+                );
+            }
+            Self::SecretResolved {
+                backend,
+                reference,
+                success,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "SecretResolved1",
+                    backend = %backend,
+                    reference = %reference,
+                    success = %success,
+                    "Resolved secret from backend"
+                );
+            }
+            Self::SecretStored {
+                backend,
+                reference,
+                success,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "SecretStored1",
+                    backend = %backend,
+                    reference = %reference,
+                    success = %success,
+                    "Stored secret in backend"
                 );
             }
         }

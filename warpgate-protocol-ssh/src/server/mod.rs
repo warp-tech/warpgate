@@ -39,7 +39,8 @@ pub async fn bind_server(
     let russh_config_init = Arc::new({
         let config = services.config.lock().await;
         RusshConfigInit {
-            keys: load_keys(&config, &services.global_params, "host")?,
+            keys: load_keys(&config, &services.global_params, &*services.secret_backend, "host")
+                .await?,
         }
     });
 

@@ -70,6 +70,92 @@ class K3sInstance:
 
 
 @dataclass
+class VaultInstance:
+    """A dev-mode Vault or OpenBao server running in Docker.
+
+    OpenBao is a Vault fork that keeps the same HTTP API, so this single class -- and its
+    kv_put/kv_get/AppRole helpers -- talks to either one identically; only `start_vault()`'s
+    `engine` argument picks which server actually gets started.
+
+    Talks to the server's HTTP API directly (root token auth) so tests can seed/inspect KV v2
+    secrets independently of Warpgate, and set up AppRole auth for backend-auth tests.
+    """
+
+    port: int
+    root_token: str
+    container_name: str
+    backend_type: str = "vault"
+
+    @property
+    def addr(self) -> str:
+        return f"http://127.0.0.1:{self.port}"
+
+    def _headers(self):
+        return {"X-Vault-Token": self.root_token}
+
+    def kv_put(self, mount: str, path: str, **fields):
+        r = requests.put(
+            f"{self.addr}/v1/{mount}/data/{path}",
+            json={"data": fields},
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def kv_get(self, mount: str, path: str):
+        """Returns (data, version) for the current version of a KV v2 secret."""
+        r = requests.get(
+            f"{self.addr}/v1/{mount}/data/{path}",
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+        body = r.json()["data"]
+        return body["data"], body["metadata"]["version"]
+
+    def enable_approle(self):
+        r = requests.post(
+            f"{self.addr}/v1/sys/auth/approle",
+            json={"type": "approle"},
+            headers=self._headers(),
+        )
+        # 400 => already enabled (harmless if a previous call in the same container did this)
+        if r.status_code not in (204, 400):
+            r.raise_for_status()
+
+    def create_approle_role(self, role_name: str, policy_hcl: str):
+        """Creates a policy + AppRole role using it, returns (role_id, secret_id)."""
+        r = requests.put(
+            f"{self.addr}/v1/sys/policies/acl/{role_name}",
+            json={"policy": policy_hcl},
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+
+        r = requests.post(
+            f"{self.addr}/v1/auth/approle/role/{role_name}",
+            json={"token_policies": [role_name]},
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+
+        r = requests.get(
+            f"{self.addr}/v1/auth/approle/role/{role_name}/role-id",
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+        role_id = r.json()["data"]["role_id"]
+
+        r = requests.post(
+            f"{self.addr}/v1/auth/approle/role/{role_name}/secret-id",
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+        secret_id = r.json()["data"]["secret_id"]
+
+        return role_id, secret_id
+
+
+@dataclass
 class Child:
     process: subprocess.Popen
     stop_signal: signal.Signals
@@ -144,13 +230,17 @@ class ProcessManager:
                         pass
                 p.kill()
 
-    def start_ssh_server(self, trusted_keys=[], extra_config=""):
+    def start_ssh_server(self, trusted_keys=[], extra_config="", root_password=None):
         port = alloc_port()
         data_dir = self.ctx.tmpdir / f"sshd-{uuid.uuid4()}"
         data_dir.mkdir(parents=True)
         authorized_keys_path = data_dir / "authorized_keys"
         authorized_keys_path.write_text("\n".join(trusted_keys))
         config_path = data_dir / "sshd_config"
+        if root_password:
+            # the base image only unlocks the root account (empty password); a real
+            # password + explicit PasswordAuthentication is needed for password-auth tests
+            extra_config = f"PasswordAuthentication yes\n{extra_config}"
         config_path.write_text(
             dedent(
                 f"""\
@@ -175,11 +265,14 @@ class ProcessManager:
         authorized_keys_path.chmod(0o600)
         config_path.chmod(0o600)
 
+        container_name = f"warpgate-e2e-ssh-server-{uuid.uuid4()}"
         self.start(
             [
                 "docker",
                 "run",
                 "--rm",
+                "--name",
+                container_name,
                 "-p",
                 f"{port}:22",
                 "-v",
@@ -191,6 +284,29 @@ class ProcessManager:
                 str(config_path),
             ]
         )
+
+        if root_password:
+
+            def set_root_password():
+                while True:
+                    # busybox's `passwd` (no `shadow` package in this image) prompts for the
+                    # new password twice on stdin; feed both lines via `docker exec -i`.
+                    r = subprocess.run(
+                        ["docker", "exec", "-i", container_name, "passwd", "root"],
+                        input=f"{root_password}\n{root_password}\n".encode(),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    if r.returncode == 0:
+                        break
+                    time.sleep(0.5)
+
+            _wait_timeout(
+                set_root_password,
+                "could not set root password in ssh-server container",
+                timeout=self.timeout,
+            )
+
         return port
 
     def start_mariadb_server(self):
@@ -679,6 +795,61 @@ class ProcessManager:
         _wait_timeout(wait_oidc, "OIDC mock is not ready", timeout=self.timeout * 3)
         logging.debug(f"OIDC mock {container_name} is up on port {port}")
         return port
+
+    def start_vault(self, root_token=None, engine: str = "vault") -> VaultInstance:
+        """Runs a dev-mode Vault or OpenBao server (KV v2 auto-mounted at `secret/`).
+
+        `engine` picks the actual server implementation started in Docker: "vault" (the default)
+        for `hashicorp/vault`, or "openbao" for `openbao/openbao` -- Vault's API-compatible,
+        community-governed fork. Both env-var prefixes are set on the container regardless of
+        engine since OpenBao's dev-mode entrypoint still recognises the legacy `VAULT_*` names
+        inherited from the fork, alongside its own `BAO_*` ones.
+        """
+        assert engine in ("vault", "openbao"), f"unknown secret backend engine: {engine}"
+        image = "hashicorp/vault" if engine == "vault" else "openbao/openbao"
+
+        port = alloc_port()
+        container_name = f"warpgate-e2e-{engine}-{uuid.uuid4()}"
+        root_token = root_token or f"root-{uuid.uuid4()}"
+
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                container_name,
+                "--cap-add=IPC_LOCK",
+                "-p",
+                f"{port}:8200",
+                "-e",
+                f"VAULT_DEV_ROOT_TOKEN_ID={root_token}",
+                "-e",
+                f"BAO_DEV_ROOT_TOKEN_ID={root_token}",
+                "-e",
+                "VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200",
+                "-e",
+                "BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200",
+                image,
+            ]
+        )
+
+        def wait_vault():
+            while True:
+                try:
+                    r = requests.get(f"http://127.0.0.1:{port}/v1/sys/health", timeout=2)
+                    # dev-mode: 200 means initialized, unsealed and active
+                    if r.status_code == 200:
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.5)
+
+        _wait_timeout(wait_vault, f"{engine} is not ready", timeout=self.timeout * 3)
+        logging.debug(f"{engine} {container_name} is up on port {port}")
+        return VaultInstance(
+            port=port, root_token=root_token, container_name=container_name, backend_type=engine
+        )
 
     def start_wg(
         self,

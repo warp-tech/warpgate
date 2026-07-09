@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use tokio::net::TcpStream;
 use tracing::{debug, info, trace, warn};
-use warpgate_common::{TargetMySqlOptions, WarpgateError};
+use warpgate_common::{SecretBackend, TargetMySqlOptions, WarpgateError};
 use warpgate_database_protocols::io::Decode;
 use warpgate_database_protocols::mysql::protocol::Capabilities;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
@@ -57,6 +57,7 @@ impl MySqlClient {
     pub async fn connect(
         target: &TargetMySqlOptions,
         mut options: ConnectionOptions,
+        secret_backend: &dyn SecretBackend,
     ) -> Result<Self, MySqlError> {
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
@@ -117,9 +118,13 @@ impl MySqlClient {
             username: target.username.clone(),
         };
 
-        // Resolve the effective password (may be an IAM-generated token or legacy field)
         let effective_password = match &target.effective_auth() {
-            warpgate_common::DatabaseTargetAuth::Password(auth) => auth.password.clone(),
+            warpgate_common::DatabaseTargetAuth::Password(auth) => auth
+                .password
+                .resolve(secret_backend)
+                .await
+                .map_err(WarpgateError::SecretBackend)
+                .map(|s| s.expose_secret().clone())?,
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await

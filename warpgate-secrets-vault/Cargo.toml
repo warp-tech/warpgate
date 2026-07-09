@@ -1,0 +1,18 @@
+[package]
+name = "warpgate-secrets-vault"
+version = "0.25.5"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "time"] }
+tracing.workspace = true
+warpgate-common = { path = "../warpgate-common" }
+
+# Vault/OpenBao client — API-compatible, same binary works for both
+vaultrs = { version = "0.7", default-features = false, features = ["rustls"] }

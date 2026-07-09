@@ -3,7 +3,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use serde::Serialize;
-use warpgate_common::WarpgateError;
+use warpgate_common::{SshKeysSource, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 
 use super::AnySecurityScheme;
@@ -15,6 +15,7 @@ pub struct Api;
 struct SSHKey {
     pub kind: String,
     pub public_key_base64: String,
+    pub backend: Option<String>,
 }
 
 #[derive(ApiResponse)]
@@ -37,15 +38,26 @@ impl Api {
     ) -> Result<GetSSHOwnKeysResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let config = ctx.services().config.lock().await;
-        let keys =
-            warpgate_protocol_ssh::load_keys(&config, &ctx.services().global_params, "client")?;
+        let config = ctx.services().config.lock().await.clone();
+        let keys = warpgate_protocol_ssh::load_keys(
+            &config,
+            &ctx.services().global_params,
+            &*ctx.services().secret_backend,
+            "client",
+        )
+        .await?;
+
+        let backend = match &config.store.ssh.keys {
+            SshKeysSource::Backend(b) => Some(b.backend.clone()),
+            SshKeysSource::Path(_) => None,
+        };
 
         let keys = keys
             .into_iter()
             .map(|k| SSHKey {
                 kind: k.algorithm().to_string(),
                 public_key_base64: k.public_key_base64(),
+                backend: backend.clone(),
             })
             .collect();
         Ok(GetSSHOwnKeysResponse::Ok(Json(keys)))
