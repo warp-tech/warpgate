@@ -8,7 +8,7 @@ use data_encoding::BASE64;
 use delegate::delegate;
 use futures::{StreamExt, TryStreamExt};
 use http::header::HeaderName;
-use http::uri::{Authority, Scheme};
+use http::uri::{Authority, PathAndQuery, Scheme};
 use http::{HeaderValue, StatusCode, Uri};
 use poem::session::Session;
 use poem::web::Data;
@@ -17,7 +17,7 @@ use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio::sync::Mutex;
 use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
 use tracing::{debug, error, warn};
-use url::Url;
+use url::{Url, form_urlencoded};
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::{
     X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO, may_forward_header,
@@ -87,6 +87,26 @@ impl SomeRequestBuilder for http::request::Builder {
     }
 }
 
+fn strip_warpgate_internal_query_params(pq: &PathAndQuery) -> Result<PathAndQuery> {
+    let Some(query) = pq.query() else {
+        return Ok(pq.clone());
+    };
+    let query = form_urlencoded::parse(query.as_bytes())
+        .filter(|(key, _)| key != "warpgate-target" && key != "warpgate-ticket")
+        .fold(form_urlencoded::Serializer::new(String::new()), |mut s, (k, v)| {
+            s.append_pair(&k, &v);
+            s
+        })
+        .finish();
+    let path = pq.path();
+    let rebuilt = if query.is_empty() {
+        path.to_string()
+    } else {
+        format!("{path}?{query}")
+    };
+    Ok(PathAndQuery::from_str(&rebuilt)?)
+}
+
 fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) -> Result<Uri> {
     let target_uri = Uri::try_from(options.url.clone())?;
     let source_uri = req.uri().clone();
@@ -97,14 +117,12 @@ fn construct_uri(req: &Request, options: &TargetHTTPOptions, websocket: bool) ->
         .to_string();
 
     let authority: Authority = authority.try_into()?;
+    let path_and_query = strip_warpgate_internal_query_params(
+        source_uri.path_and_query().context("No path in the URL")?,
+    )?;
     let mut uri = http::uri::Builder::new()
         .authority(authority)
-        .path_and_query(
-            source_uri
-                .path_and_query()
-                .context("No path in the URL")?
-                .clone(),
-        );
+        .path_and_query(path_and_query);
 
     let scheme = match options.tls.mode {
         TlsMode::Disabled => &Scheme::HTTP,
@@ -671,5 +689,21 @@ mod tests {
         // A genuine persistent cookie must keep the expiry the origin set.
         let cookie = rewrite_cookie("lsws_uid=abc; Path=/; Expires=Tue, 01 Jan 2999 00:00:00 GMT");
         assert_eq!(cookie.expires(), None);
+    }
+
+    fn strip(pq: &str) -> String {
+        strip_warpgate_internal_query_params(&PathAndQuery::from_str(pq).unwrap())
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn strip_reserved_query_params() {
+        assert_eq!(strip("/"), "/");
+        assert_eq!(strip("/?a=1&b=2"), "/?a=1&b=2");
+        assert_eq!(strip("/?warpgate-target=es"), "/");
+        assert_eq!(strip("/search?warpgate-target=es&q=x"), "/search?q=x");
+        assert_eq!(strip("/?q=x&warpgate-ticket=abc"), "/?q=x");
+        assert_eq!(strip("/?warpgate-target=a&warpgate-ticket=b"), "/");
     }
 }
