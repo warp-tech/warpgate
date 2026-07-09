@@ -40,6 +40,9 @@
 @import "bootstrap/scss/containers";
 @import "bootstrap/scss/grid";
 @import "bootstrap/scss/tables";
+// Drop the "valid" state so Bootstrap never emits green :valid / .is-valid styling;
+// only invalid (red) feedback is surfaced. https://github.com/warp-tech/warpgate/issues/2161
+$form-validation-states: map.remove($form-validation-states, "valid");
 @import "bootstrap/scss/forms";
 @import "bootstrap/scss/buttons";
 @import "bootstrap/scss/transitions";
