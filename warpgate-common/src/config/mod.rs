@@ -9,8 +9,9 @@ use defaults::{
     _default_audit_retention, _default_cookie_max_age, _default_database_url, _default_false,
     _default_http_listen, _default_kubernetes_listen, _default_mysql_advertised_version,
     _default_mysql_listen, _default_postgres_listen, _default_rdp_listen, _default_recordings_path,
-    _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
-    _default_ssh_keys_path, _default_ssh_listen, _default_vnc_listen,
+    _default_retention, _default_session_max_age, _default_ssh_ephemeral_keys_ttl,
+    _default_ssh_inactivity_timeout, _default_ssh_keys_path, _default_ssh_listen,
+    _default_vnc_listen,
 };
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
@@ -150,6 +151,7 @@ pub struct User {
     pub rate_limit_bytes_per_second: Option<i64>,
     pub ldap_server_id: Option<Uuid>,
     pub allowed_ip_ranges: Option<Vec<WarpgateIpNet>>,
+    pub ephemeral_ssh_key_ttl_seconds: Option<i64>,
 }
 
 #[derive(Debug, Clone, Object)]
@@ -302,6 +304,10 @@ pub struct SshConfig {
     #[schemars(with = "String")]
     pub inactivity_timeout: Duration,
 
+    #[serde(default = "_default_ssh_ephemeral_keys_ttl", with = "humantime_serde")]
+    #[schemars(with = "String")]
+    pub ephemeral_keys_ttl: Duration,
+
     #[serde(default)]
     pub keepalive_interval: Option<Duration>,
 }
@@ -316,6 +322,7 @@ impl Default for SshConfig {
             external_port: None,
             external_host: None,
             inactivity_timeout: _default_ssh_inactivity_timeout(),
+            ephemeral_keys_ttl: _default_ssh_ephemeral_keys_ttl(),
             keepalive_interval: None,
         }
     }

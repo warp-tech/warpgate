@@ -94,6 +94,7 @@
       "$ref": "#/$defs/SshConfig",
       "default": {
         "enable": false,
+        "ephemeral_keys_ttl": "8h",
         "external_host": null,
         "external_port": null,
         "host_key_verification": "prompt",
@@ -439,6 +440,10 @@
         "enable": {
           "type": "boolean",
           "default": false
+        },
+        "ephemeral_keys_ttl": {
+          "type": "string",
+          "default": "8h"
         },
         "external_host": {
           "type": [

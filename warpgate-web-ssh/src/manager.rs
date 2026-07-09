@@ -93,6 +93,7 @@ impl WebSshClientManager {
                 .set_user_info(AuthStateUserInfo {
                     id: user_id,
                     username: username.to_owned(),
+                    ephemeral_ssh_key_ttl_seconds: None,
                 })
                 .await
                 .context("setting user info on server handle")?;

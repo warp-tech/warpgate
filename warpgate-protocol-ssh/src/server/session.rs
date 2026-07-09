@@ -117,6 +117,7 @@ pub struct ServerSession {
     auth_state: Option<Arc<Mutex<AuthState>>>,
     keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
+    last_offered_public_key: Option<PublicKey>,
     allowed_auth_methods: MethodSet,
 }
 
@@ -194,6 +195,7 @@ impl ServerSession {
             auth_state: None,
             keyboard_interactive_state: None,
             cached_successful_ticket_auth: None,
+            last_offered_public_key: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
         };
 
@@ -1695,6 +1697,8 @@ impl ServerSession {
             return russh::server::Auth::reject();
         }
 
+        self.last_offered_public_key = Some(key.clone());
+
         if matches!(
             self.try_validate_public_key_offer(
                 &selector,
@@ -1735,6 +1739,8 @@ impl ServerSession {
             warn!("Client attempted public key auth even though it was not advertised");
             return russh::server::Auth::reject();
         }
+
+        self.last_offered_public_key = Some(key.clone());
 
         let key = Some(AuthCredential::PublicKey {
             kind: key.algorithm(),
@@ -1966,6 +1972,25 @@ impl ServerSession {
                 let cp = self.services.config_provider.clone();
 
                 if let Some(credential) = credential {
+                    if let AuthCredential::PublicKey {
+                        ref kind,
+                        ref public_key_bytes,
+                    } = credential
+                    {
+                        if self
+                            .services
+                            .is_ephemeral_public_key_authorized(
+                                username,
+                                kind.clone(),
+                                public_key_bytes,
+                            )
+                            .await
+                            .is_some()
+                        {
+                            return Ok(true);
+                        }
+                    }
+
                     return Ok(cp
                         .lock()
                         .await
@@ -2045,6 +2070,43 @@ impl ServerSession {
                     return Ok(AuthResult::Rejected);
                 }
 
+                if let Some(AuthCredential::PublicKey {
+                    ref kind,
+                    ref public_key_bytes,
+                }) = credential
+                {
+                    if let Some(user_info) = self
+                        .services
+                        .is_ephemeral_public_key_authorized(
+                            username,
+                            kind.clone(),
+                            public_key_bytes,
+                        )
+                        .await
+                    {
+                        if !target_name.is_empty() {
+                            let target_auth_result = {
+                                self.services
+                                    .config_provider
+                                    .lock()
+                                    .await
+                                    .authorize_target(&user_info.username, target_name)
+                                    .await?
+                            };
+                            if !target_auth_result {
+                                warn!(
+                                    "Target {} not authorized for user {}",
+                                    target_name, username
+                                );
+                                return Ok(AuthResult::Rejected);
+                            }
+                        }
+                        self._auth_accept(user_info.clone(), target_name).await?;
+                        info!("Authorized for {target_name} via cached ephemeral OIDC public key");
+                        return Ok(AuthResult::Accepted { user_info });
+                    }
+                }
+
                 let state_arc = self
                     .get_auth_state(
                         username,
@@ -2106,6 +2168,30 @@ impl ServerSession {
                             }
                         }
                         self._auth_accept(user_info.clone(), target_name).await?;
+                         if let Some(ref key) = self.last_offered_public_key {
+                            let default_ttl_secs = self
+                                .services
+                                .config
+                                .lock()
+                                .await
+                                .store
+                                .ssh
+                                .ephemeral_keys_ttl
+                                .as_secs();
+                            let ttl_secs = user_info
+                                .ephemeral_ssh_key_ttl_seconds
+                                .and_then(|t| if t > 0 { Some(t as u64) } else { None })
+                                .unwrap_or(default_ttl_secs);
+                            self.services
+                                .register_ephemeral_public_key(
+                                    &user_info.username,
+                                    key.algorithm(),
+                                    Bytes::from(key.public_key_bytes()),
+                                    user_info.clone(),
+                                    std::time::Duration::from_secs(ttl_secs),
+                                )
+                                .await;
+                        }
                         Ok(AuthResult::Accepted { user_info })
                     }
                     x => Ok(x),

@@ -16,6 +16,15 @@ use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
 use crate::{AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, State};
 
+#[derive(Clone, Debug)]
+pub struct EphemeralPublicKeyEntry {
+    pub username: String,
+    pub kind: russh::keys::Algorithm,
+    pub public_key_bytes: bytes::Bytes,
+    pub user_info: warpgate_common::auth::AuthStateUserInfo,
+    pub expires_at: std::time::Instant,
+}
+
 #[derive(Clone)]
 pub struct Services {
     pub db: Arc<Mutex<DatabaseConnection>>,
@@ -28,6 +37,7 @@ pub struct Services {
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
+    pub ephemeral_public_keys: Arc<Mutex<Vec<EphemeralPublicKeyEntry>>>,
 }
 
 impl Services {
@@ -50,12 +60,18 @@ impl Services {
         let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
 
         let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new()));
+        let ephemeral_public_keys = Arc::new(Mutex::new(Vec::<EphemeralPublicKeyEntry>::new()));
 
         tokio::spawn({
             let auth_state_store = auth_state_store.clone();
+            let ephemeral_public_keys = ephemeral_public_keys.clone();
             async move {
                 loop {
                     auth_state_store.lock().await.vacuum();
+                    ephemeral_public_keys
+                        .lock()
+                        .await
+                        .retain(|e| e.expires_at > std::time::Instant::now());
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 }
             }
@@ -75,7 +91,7 @@ impl Services {
         {
             let login_protection = login_protection.clone();
             tokio::spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_secs(3600));
+                let mut interval = tokio::time::interval(Duration::from_secs(60 * 60));
                 loop {
                     interval.tick().await;
                     if let Err(e) = login_protection.cleanup_expired().await {
@@ -96,7 +112,56 @@ impl Services {
             admin_token: Arc::new(Mutex::new(admin_token)),
             login_protection,
             global_params: Arc::new(params),
+            ephemeral_public_keys,
         })
+    }
+
+    pub async fn register_ephemeral_public_key(
+        &self,
+        username: &str,
+        kind: russh::keys::Algorithm,
+        public_key_bytes: bytes::Bytes,
+        user_info: warpgate_common::auth::AuthStateUserInfo,
+        ttl: Duration,
+    ) {
+        let mut cache = self.ephemeral_public_keys.lock().await;
+        cache.retain(|e| {
+            !(warpgate_common::helpers::username::username_eq_ci(&e.username, username)
+                && e.kind == kind
+                && e.public_key_bytes == public_key_bytes)
+        });
+        cache.push(EphemeralPublicKeyEntry {
+            username: username.to_string(),
+            kind: kind.clone(),
+            public_key_bytes,
+            user_info,
+            expires_at: std::time::Instant::now() + ttl,
+        });
+        tracing::info!(
+            username,
+            ?kind,
+            "Registered ephemeral public key after successful authentication"
+        );
+    }
+
+    pub async fn is_ephemeral_public_key_authorized(
+        &self,
+        username: &str,
+        kind: russh::keys::Algorithm,
+        public_key_bytes: &[u8],
+    ) -> Option<warpgate_common::auth::AuthStateUserInfo> {
+        let mut cache = self.ephemeral_public_keys.lock().await;
+        let now = std::time::Instant::now();
+        cache.retain(|entry| entry.expires_at > now);
+        for entry in cache.iter() {
+            if warpgate_common::helpers::username::username_eq_ci(&entry.username, username)
+                && entry.kind == kind
+                && entry.public_key_bytes.as_ref() == public_key_bytes
+            {
+                return Some(entry.user_info.clone());
+            }
+        }
+        None
     }
 
     /// Resolves the user/policy (without the store lock) and inserts a new

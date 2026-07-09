@@ -121,6 +121,10 @@ pub const fn _default_ssh_inactivity_timeout() -> Duration {
     Duration::from_secs(60 * 5)
 }
 
+pub const fn _default_ssh_ephemeral_keys_ttl() -> Duration {
+    Duration::from_secs(60 * 60 * 8)
+}
+
 #[allow(clippy::unnecessary_wraps)]
 pub fn _default_postgres_idle_timeout_str() -> Option<String> {
     Some("10m".to_string())

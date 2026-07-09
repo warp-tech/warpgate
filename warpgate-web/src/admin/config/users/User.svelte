@@ -27,10 +27,12 @@
         type User,
         type UserRoleAssignmentResponse,
     } from 'admin/lib/api'
+    import HelpText from 'admin/lib/HelpText.svelte'
     import Section from 'admin/lib/Section.svelte'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import { humantimeDuration } from 'common/duration'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import PageSummaryBar from 'common/PageSummaryBar.svelte'
@@ -512,6 +514,27 @@
                             </label>
                         {/each}
                     </div>
+                </Section>
+
+                <Section id="ssh" title="SSH">
+                    <FormGroup class="mb-3">
+                        <label for="ephemeralSshKeyTtlSeconds">
+                            Ephemeral SSH key cache TTL
+                        </label>
+                        <input
+                            id="ephemeralSshKeyTtlSeconds"
+                            type="text"
+                            class="form-control"
+                            placeholder="e.g. 8h (leave empty for server default)"
+                            use:humantimeDuration={{
+                                seconds: user?.ephemeralSshKeyTtlSeconds,
+                                onChange: v => { if (user) user.ephemeralSshKeyTtlSeconds = v }
+                            }}
+                        />
+                        <HelpText>
+                            Duration during which an ephemeral SSH key verified via OIDC SSO remains cached for this user without requiring re-authentication. If unset, the global server configuration default (<code>ssh.ephemeral_keys_ttl</code>, default 8 hours) is used.
+                        </HelpText>
+                    </FormGroup>
                 </Section>
 
                 <Section id="traffic" title="Network">

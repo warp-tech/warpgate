@@ -24,6 +24,7 @@ pub enum AuthResult {
 pub struct AuthStateUserInfo {
     pub id: Uuid,
     pub username: String,
+    pub ephemeral_ssh_key_ttl_seconds: Option<i64>,
 }
 
 impl From<&User> for AuthStateUserInfo {
@@ -31,6 +32,7 @@ impl From<&User> for AuthStateUserInfo {
         Self {
             id: user.id,
             username: user.username.clone(),
+            ephemeral_ssh_key_ttl_seconds: user.ephemeral_ssh_key_ttl_seconds,
         }
     }
 }

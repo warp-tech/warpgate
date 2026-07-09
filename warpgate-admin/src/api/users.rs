@@ -32,6 +32,7 @@ struct UserDataRequest {
     description: Option<String>,
     rate_limit_bytes_per_second: Option<u32>,
     allowed_ip_ranges: Option<Vec<String>>,
+    ephemeral_ssh_key_ttl_seconds: Option<u32>,
 }
 
 #[derive(ApiResponse)]
@@ -108,6 +109,7 @@ impl ListApi {
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            ephemeral_ssh_key_ttl_seconds: Set(None),
         };
 
         let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
@@ -240,6 +242,7 @@ impl DetailApi {
                 .map_err(WarpgateError::from)?,
             None => serde_json::Value::Null,
         });
+        model.ephemeral_ssh_key_ttl_seconds = Set(body.ephemeral_ssh_key_ttl_seconds.map(i64::from));
         let user = model.update(&*db).await?;
 
         drop(db);

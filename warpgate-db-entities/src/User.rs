@@ -31,6 +31,7 @@ pub struct Model {
     pub ldap_object_uuid: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
     pub allowed_ip_ranges: serde_json::Value,
+    pub ephemeral_ssh_key_ttl_seconds: Option<i64>,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -171,6 +172,7 @@ impl TryFrom<Model> for User {
             ldap_server_id: model.ldap_server_id,
             allowed_ip_ranges: allowed_ip_ranges
                 .map(|ranges| ranges.into_iter().map(Into::into).collect()),
+            ephemeral_ssh_key_ttl_seconds: model.ephemeral_ssh_key_ttl_seconds,
         })
     }
 }
@@ -252,6 +254,7 @@ impl TryFrom<User> for ActiveModel {
                 )?,
                 None => serde_json::Value::Null,
             }),
+            ephemeral_ssh_key_ttl_seconds: Set(user.ephemeral_ssh_key_ttl_seconds),
         })
     }
 }

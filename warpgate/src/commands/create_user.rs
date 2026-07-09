@@ -38,6 +38,7 @@ pub async fn command(
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            ephemeral_ssh_key_ttl_seconds: Set(None),
         };
         values.insert(&*db).await.map_err(WarpgateError::from)?
     };
