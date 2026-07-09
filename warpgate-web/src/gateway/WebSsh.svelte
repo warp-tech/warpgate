@@ -17,7 +17,7 @@
     } from '@sveltestrap/sveltestrap'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import InfoBox from 'common/InfoBox.svelte'
-    import { serverInfo } from 'gateway/lib/store'
+    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { onDestroy, onMount, tick } from 'svelte'
     import { SvelteMap } from 'svelte/reactivity'
     import Fa from 'svelte-fa'
@@ -229,6 +229,8 @@
     }
 
     onMount(async () => {
+        reloadServerInfo()
+
         try {
             sessionInfo = await api.getWebSshSession({ sessionId })
         } catch (e) {
