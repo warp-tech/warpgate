@@ -216,6 +216,7 @@ pub async fn get_or_create_auth_state_for_request(
             None,
             username,
             crate::common::PROTOCOL_NAME,
+            "",
             &[
                 CredentialKind::Password,
                 CredentialKind::Sso,

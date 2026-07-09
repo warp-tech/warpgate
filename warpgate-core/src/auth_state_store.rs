@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
-use warpgate_common::auth::{AuthResult, AuthState, CredentialKind, CredentialPolicy};
+use warpgate_common::auth::{
+    AuthCredential, AuthResult, AuthState, CredentialKind, CredentialPolicy, WebApprovalMatchKey,
+};
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{SessionId, User, WarpgateError};
@@ -15,6 +17,9 @@ use crate::{ConfigProvider, ConfigProviderEnum};
 
 #[allow(clippy::unwrap_used)]
 pub static TIMEOUT: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs(60 * 10));
+
+// Absolute maximum cache duration for cleanup
+const RECENT_APPROVAL_RETENTION: Duration = Duration::from_secs(60 * 60 * 24 * 30);
 
 /// If the address is an IPv4-mapped IPv6 address (e.g. `::ffff:192.168.1.1`),
 /// extract the inner IPv4 address. Otherwise return as-is.
@@ -102,6 +107,7 @@ pub struct AuthStateStore {
     store: HashMap<Uuid, (Arc<Mutex<AuthState>>, Instant)>,
     completion_signals: HashMap<Uuid, AuthCompletionSignal>,
     web_auth_request_signal: broadcast::Sender<Uuid>,
+    recent_approvals: HashMap<WebApprovalMatchKey, Instant>,
 }
 
 impl Default for AuthStateStore {
@@ -116,6 +122,7 @@ impl AuthStateStore {
             store: HashMap::new(),
             completion_signals: HashMap::new(),
             web_auth_request_signal: broadcast::channel(100).0,
+            recent_approvals: HashMap::new(),
         }
     }
 
@@ -210,6 +217,7 @@ impl AuthStateStore {
         session_id: Option<&SessionId>,
         user: &User,
         protocol: &str,
+        target_name: &str,
         policy: Box<dyn CredentialPolicy + Sync + Send>,
         remote_ip: Option<IpAddr>,
     ) -> (Uuid, Arc<Mutex<AuthState>>) {
@@ -231,6 +239,7 @@ impl AuthStateStore {
             remote_ip,
             user.into(),
             protocol.to_string(),
+            target_name.to_string(),
             policy,
             state_change_tx,
         );
@@ -238,6 +247,44 @@ impl AuthStateStore {
         self.store.insert(id, (state_arc.clone(), Instant::now()));
 
         (id, state_arc)
+    }
+
+    /// Records a web approval for later bypass checks
+    pub fn record_web_approval(&mut self, key: WebApprovalMatchKey) {
+        self.recent_approvals.insert(key, Instant::now());
+    }
+
+    pub fn recent_approval_is_fresh(&self, key: &WebApprovalMatchKey, grace: Duration) -> bool {
+        self.recent_approvals
+            .get(key)
+            .is_some_and(|at| at.elapsed() < grace)
+    }
+
+    /// If there is a matching web approval within `grace`, accept it as a valid credential
+    pub async fn try_web_approval_bypass(
+        &self,
+        state_arc: &Arc<Mutex<AuthState>>,
+        grace: Duration,
+    ) -> Result<bool, WarpgateError> {
+        let Some(key) = state_arc.lock().await.web_approval_match_key() else {
+            return Ok(false)
+        };
+
+        if !self.recent_approval_is_fresh(&key, grace) {
+            return Ok(false);
+        }
+
+        let mut state = state_arc.lock().await;
+
+        // A concurrent change may have satisfied or cancelled the requirement.
+        if !matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval))
+        {
+            return Ok(false);
+        }
+
+        state.add_valid_credential(AuthCredential::WebUserApproval);
+        state.emit_web_approval_bypassed_event();
+        Ok(true)
     }
 
     pub fn subscribe(&mut self, id: Uuid) -> broadcast::Receiver<AuthResult> {
@@ -267,6 +314,9 @@ impl AuthStateStore {
 
         self.completion_signals
             .retain(|_, signal| !signal.is_expired());
+
+        self.recent_approvals
+            .retain(|_, at| at.elapsed() < RECENT_APPROVAL_RETENTION);
     }
 }
 
@@ -359,5 +409,33 @@ mod tests {
         let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
         let ip: IpAddr = "::ffff:10.0.0.1".parse().unwrap();
         assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_err());
+    }
+
+    fn approval_key(target: &str) -> WebApprovalMatchKey {
+        WebApprovalMatchKey {
+            remote_ip: "10.0.0.5".parse().unwrap(),
+            protocol: "ssh".into(),
+            username: "alice".into(),
+            target_name: target.into(),
+            other_credentials: vec![CredentialKind::Password],
+        }
+    }
+
+    #[test]
+    fn web_approval_bypass_requires_full_match_within_grace() {
+        let mut store = AuthStateStore::new();
+        let grace = Duration::from_secs(3600);
+
+        // No approval recorded yet.
+        assert!(!store.recent_approval_is_fresh(&approval_key("prod"), grace));
+
+        store.record_web_approval(approval_key("prod"));
+
+        // Exact match within grace bypasses.
+        assert!(store.recent_approval_is_fresh(&approval_key("prod"), grace));
+        // A different target is not a full match.
+        assert!(!store.recent_approval_is_fresh(&approval_key("staging"), grace));
+        // A zero grace never counts as fresh, so approval is required again.
+        assert!(!store.recent_approval_is_fresh(&approval_key("prod"), Duration::ZERO));
     }
 }

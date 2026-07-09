@@ -114,6 +114,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                     Some(&session_id),
                     &username,
                     P::NAME,
+                    &target_name,
                     &[
                         CredentialKind::Password,
                         CredentialKind::Totp,
@@ -146,6 +147,16 @@ pub async fn authenticate<P: DesktopProtocol>(
                         .await;
                     return Ok(DesktopAuthOutcome::Failed);
                 }
+            }
+
+            // Bypass the web-approval step when a matching approval is still
+            // within the grace period.
+            let needs_web_approval = matches!(
+                state_arc.lock().await.verify(),
+                AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval)
+            );
+            if needs_web_approval {
+                services.try_web_approval_bypass(&state_arc).await?;
             }
 
             // Bind to a local so the guard drops before `complete()` re-locks it.

@@ -341,6 +341,16 @@
         target: string
     }
 
+    interface WebApprovalBypassed1 {
+        _type: 'WebApprovalBypassed1'
+        session: string
+        client_ip: string
+        user_id: string
+        username: string
+        protocol: string
+        target: string
+    }
+
     type RichLogEntry =
         | AccessRoleGranted1
         | AccessRoleRevoked1
@@ -356,6 +366,7 @@
         | CredentialDeleted1
         | TicketCreated1
         | TicketDeleted1
+        | WebApprovalBypassed1
 
     function richLogType(entry: LogEntry): string {
         return String(entry.values?._type ?? '').replace(/^"|"$/g, '')
@@ -700,6 +711,16 @@
                                         Deleted ticket for
                                         <strong>{richEntry.username}</strong>
                                         targeting
+                                        <strong>{richEntry.target}</strong>
+                                    </div>
+                                {:else if richEntry?._type === 'WebApprovalBypassed1'}
+                                    <div class="rich-entry">
+                                        Web approval bypassed for
+                                        <UserBadge
+                                            id={richEntry.user_id}
+                                            name={richEntry.username}
+                                        />
+                                        on
                                         <strong>{richEntry.target}</strong>
                                     </div>
                                 {:else}

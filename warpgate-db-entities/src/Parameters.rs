@@ -99,6 +99,7 @@ pub struct Model {
     pub analytics_instance_id: String,
     pub instance_created_at: OffsetDateTime,
     pub web_auth_max_age_seconds: Option<i64>,
+    pub web_approval_grace_period_seconds: Option<i64>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
@@ -169,6 +170,7 @@ impl Entity {
                     analytics_instance_id: Set(Uuid::new_v4().to_string()),
                     instance_created_at: Set(OffsetDateTime::now_utc()),
                     web_auth_max_age_seconds: Set(None),
+                    web_approval_grace_period_seconds: Set(None),
                 }
                 .insert(db)
                 .await
