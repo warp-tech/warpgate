@@ -1,45 +1,17 @@
 <script lang="ts">
     import { faWarning } from '@fortawesome/free-solid-svg-icons'
-    import { Alert, Badge, Button } from '@sveltestrap/sveltestrap'
-    import {
-        api,
-        type IpEchoInfo,
-        ListenerState,
-        type ListenerStatus,
-    } from 'admin/lib/api'
+    import { Alert, Badge } from '@sveltestrap/sveltestrap'
+    import { api, ListenerState } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
-    import DelayedSpinner from 'common/DelayedSpinner.svelte'
-    import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import Fa from 'svelte-fa'
     import RelativeDate from '../RelativeDate.svelte'
-
-    let loading = $state(true)
-    let error: string | undefined = $state()
-    let listeners: ListenerStatus[] | undefined = $state()
 
     const stateBadges: Record<ListenerState, string> = {
         [ListenerState.Listening]: 'success',
         [ListenerState.Disabled]: 'secondary',
         [ListenerState.BindFailed]: 'danger',
     }
-
-    async function load() {
-        loading = true
-        error = undefined
-        try {
-            const [listenersRes] = await Promise.all([
-                api.getListenerStates(),
-            ])
-            listeners = listenersRes
-        } catch (err) {
-            error = await stringifyError(err)
-        } finally {
-            loading = false
-        }
-    }
-
-    load()
 </script>
 
 <div class="container-max-md">
@@ -47,18 +19,9 @@
         <h1>network status</h1>
     </div>
 
-    {#if error}
-        <Alert color="danger" dismissible onclose={() => { error = undefined }}>
-            {error}
-            <Button color="link" size="sm" onclick={load}>Retry</Button>
-        </Alert>
-    {/if}
-
-    {#if loading && !listeners}
-        <DelayedSpinner />
-    {:else}
-        {#if listeners}
-            <h5 class="mb-2">Protocol listeners</h5>
+    <h5 class="mb-2">Protocol listeners</h5>
+    <Loadable promise={api.getListenerStates()}>
+        {#snippet children(listeners)}
             <div class="list-group list-group-flush mb-4">
                 {#each listeners as listener (listener.name)}
                     <div class="list-group-item">
@@ -102,80 +65,77 @@
                     </div>
                 {/each}
             </div>
-        {/if}
+        {/snippet}
+    </Loadable>
 
-        <h5 class="mb-2">Client IP detection</h5>
-        <p>
-            Shows exactly how this client's IPs is being detected by Warpgate.
-        </p>
-        <HelpText>
-            Your setup must ensure that Warpgate can see the actual client's IP
-            address instead of the IP of a reverse proxy or a load balancer.
-            This ensures that both audit and login protection will work
-            correctly.
-        </HelpText>
-        <Loadable promise={api.getIpEcho()}>
-            {#snippet children(ipEcho)}
-                <div class="list-group list-group-flush mb-3">
-                    <div class="list-group-item d-flex">
-                        <span>Peer IP as seen by the server</span>
-                        <span class="ms-auto">
-                            {#if !ipEcho.peerIp}
-                                <span
-                                    class="d-flex gap-2 align-items-center text-warning"
-                                >
-                                    <Fa icon={faWarning} />
-                                    unknown
-                                </span>
-                            {:else}
-                                <code>
-                                    {ipEcho.peerIp}
-                                </code>
-                            {/if}
-                        </span>
-                    </div>
-                    <div class="list-group-item d-flex">
-                        <span>X-Forwarded-For header value</span>
-                        {#if !ipEcho.xForwardedFor}
-                            <span class="ms-auto text-muted">not present</span>
+    <h5 class="mb-2">Client IP detection</h5>
+    <p>Shows exactly how this client's IPs is being detected by Warpgate.</p>
+    <HelpText>
+        Your setup must ensure that Warpgate can see the actual client's IP
+        address instead of the IP of a reverse proxy or a load balancer. This
+        ensures that both audit and login protection will work correctly.
+    </HelpText>
+    <Loadable promise={api.getIpEcho()}>
+        {#snippet children(ipEcho)}
+            <div class="list-group list-group-flush mb-3">
+                <div class="list-group-item d-flex">
+                    <span>Peer IP as seen by the server</span>
+                    <span class="ms-auto">
+                        {#if !ipEcho.peerIp}
+                            <span
+                                class="d-flex gap-2 align-items-center text-warning"
+                            >
+                                <Fa icon={faWarning} />
+                                unknown
+                            </span>
                         {:else}
-                            <code class="ms-auto">
-                                {ipEcho.xForwardedFor}
+                            <code>
+                                {ipEcho.peerIp}
                             </code>
                         {/if}
-                    </div>
-                    <div class="list-group-item d-flex">
-                        <span>Trust X-Forwarded-* headers</span>
-                        <span class="ms-auto">
-                            {#if !ipEcho.trustXForwardedHeaders && ipEcho.xForwardedFor}
-                                <span
-                                    class="d-flex gap-2 align-items-center text-warning"
-                                >
-                                    <Fa icon={faWarning} />
-                                    disabled
-                                </span>
-                            {:else}
-                                {ipEcho.trustXForwardedHeaders ? 'enabled' : 'disabled'}
-                            {/if}
-                        </span>
-                    </div>
-                    <div class="list-group-item d-flex">
-                        <span>Detected client IP</span>
-                        <span class="ms-auto">
-                            {#if !ipEcho.clientIp}
-                                <span
-                                    class="d-flex gap-2 align-items-center text-warning"
-                                >
-                                    <Fa icon={faWarning} />
-                                    unknown
-                                </span>
-                            {:else}
-                                <code>{ipEcho.clientIp}</code>
-                            {/if}
-                        </span>
-                    </div>
+                    </span>
                 </div>
-            {/snippet}
-        </Loadable>
-    {/if}
+                <div class="list-group-item d-flex">
+                    <span>X-Forwarded-For header value</span>
+                    {#if !ipEcho.xForwardedFor}
+                        <span class="ms-auto text-muted">not present</span>
+                    {:else}
+                        <code class="ms-auto">
+                            {ipEcho.xForwardedFor}
+                        </code>
+                    {/if}
+                </div>
+                <div class="list-group-item d-flex">
+                    <span>Trust X-Forwarded-* headers</span>
+                    <span class="ms-auto">
+                        {#if !ipEcho.trustXForwardedHeaders && ipEcho.xForwardedFor}
+                            <span
+                                class="d-flex gap-2 align-items-center text-warning"
+                            >
+                                <Fa icon={faWarning} />
+                                disabled
+                            </span>
+                        {:else}
+                            {ipEcho.trustXForwardedHeaders ? 'enabled' : 'disabled'}
+                        {/if}
+                    </span>
+                </div>
+                <div class="list-group-item d-flex">
+                    <span>Detected client IP</span>
+                    <span class="ms-auto">
+                        {#if !ipEcho.clientIp}
+                            <span
+                                class="d-flex gap-2 align-items-center text-warning"
+                            >
+                                <Fa icon={faWarning} />
+                                unknown
+                            </span>
+                        {:else}
+                            <code>{ipEcho.clientIp}</code>
+                        {/if}
+                    </span>
+                </div>
+            </div>
+        {/snippet}
+    </Loadable>
 </div>
