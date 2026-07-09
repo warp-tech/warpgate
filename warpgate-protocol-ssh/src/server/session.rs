@@ -304,6 +304,7 @@ impl ServerSession {
     async fn get_auth_state(
         &mut self,
         username: &str,
+        target_name: &str,
         rate_limit_credential_type: Option<&str>,
     ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
         #[allow(clippy::unwrap_used)]
@@ -326,6 +327,7 @@ impl ServerSession {
                     Some(&self.id),
                     username,
                     crate::PROTOCOL_NAME,
+                    target_name,
                     &self.supported_credential_kinds(),
                     Some(self.remote_address.ip()),
                     rate_limit_credential_type,
@@ -2048,6 +2050,7 @@ impl ServerSession {
                 let state_arc = self
                     .get_auth_state(
                         username,
+                        target_name,
                         credential
                             .as_ref()
                             .and_then(Self::rate_limited_credential_type),
@@ -2070,6 +2073,13 @@ impl ServerSession {
                         self.record_failed_login_attempt(username, credential_type)
                             .await;
                     }
+                }
+
+                if matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval))
+                {
+                    drop(state);
+                    self.services.try_web_approval_bypass(&state_arc).await?;
+                    state = state_arc.lock().await;
                 }
 
                 let user_auth_result = state.verify();

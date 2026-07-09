@@ -75,6 +75,8 @@
                 maxApiTokenDurationSeconds:
                     parameters.maxApiTokenDurationSeconds ?? null,
                 webAuthMaxAgeSeconds: parameters.webAuthMaxAgeSeconds ?? null,
+                webApprovalGracePeriodSeconds:
+                    parameters.webApprovalGracePeriodSeconds ?? null,
             } as unknown as ParameterValues
             await api.updateParameters({ parameterUpdate })
             await reloadServerInfo()
@@ -509,8 +511,8 @@
                                 </HelpText>
                             </Section>
 
-                            {#if hasSsoProviders}
-                                <Section id="login" title="Login">
+                            <Section id="login" title="Login">
+                                {#if hasSsoProviders}
                                     <FormGroup floating label="Password login">
                                         <select
                                             id="passwordLoginMode"
@@ -557,8 +559,28 @@
                                         passed since they've logged in. Native
                                         SSH/database sessions are unaffected.
                                     </HelpText>
-                                </Section>
-                            {/if}
+                                {/if}
+
+                                <FormGroup
+                                    floating
+                                    label="Web approval cache period"
+                                >
+                                    <input
+                                        type="text"
+                                        class="form-control"
+                                        placeholder="e.g. 5m, 1h"
+                                        use:humantimeDuration={{ seconds: parameters.webApprovalGracePeriodSeconds, onChange: v => { parameters.webApprovalGracePeriodSeconds = v } }}
+                                    >
+                                </FormGroup>
+                                <HelpText>
+                                    After a user approves an in-browser
+                                    authentication request, remember the
+                                    approval for this period and do not request
+                                    it for new sessions by the same user to the
+                                    same target from the same IP. Blank = never
+                                    cache approvals.
+                                </HelpText>
+                            </Section>
 
                             <Section
                                 id="login-protection"

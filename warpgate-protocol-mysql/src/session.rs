@@ -247,6 +247,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                         Some(&session_id),
                         &username,
                         crate::common::PROTOCOL_NAME,
+                        &target_name,
                         &[CredentialKind::Password],
                         Some(self.remote_address.ip()),
                         Some("password"),
