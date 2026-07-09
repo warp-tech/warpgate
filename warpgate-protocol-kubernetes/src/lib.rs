@@ -31,9 +31,10 @@ impl ProtocolServer for KubernetesProtocolServer {
     async fn bind(
         self,
         address: ListenEndpoint,
+        proxy_protocol: bool,
         tls: Vec<TlsCertificateAndPrivateKey>,
     ) -> Result<BoxFuture<'static, Result<()>>> {
-        bind_server(self.services, address, tls).await
+        bind_server(self.services, address, proxy_protocol, tls).await
     }
 
     fn name(&self) -> &'static str {

@@ -23,6 +23,7 @@
         "external_port": null,
         "key": "",
         "listen": "[::]:8888",
+        "proxy_protocol": false,
         "session_max_age": "30m",
         "sni_certificates": [],
         "trust_x_forwarded_headers": false
@@ -37,6 +38,7 @@
         "external_port": null,
         "key": "",
         "listen": "[::]:8443",
+        "proxy_protocol": false,
         "session_max_age": "30m"
       }
     },
@@ -58,7 +60,8 @@
         "external_host": null,
         "external_port": null,
         "key": "",
-        "listen": "[::]:33306"
+        "listen": "[::]:33306",
+        "proxy_protocol": false
       }
     },
     "postgres": {
@@ -69,7 +72,8 @@
         "external_host": null,
         "external_port": null,
         "key": "",
-        "listen": "[::]:55432"
+        "listen": "[::]:55432",
+        "proxy_protocol": false
       }
     },
     "rdp": {
@@ -80,7 +84,8 @@
         "external_host": null,
         "external_port": null,
         "key": "",
-        "listen": "[::]:3389"
+        "listen": "[::]:3389",
+        "proxy_protocol": false
       }
     },
     "recordings": {
@@ -100,7 +105,8 @@
         "inactivity_timeout": "5m",
         "keepalive_interval": null,
         "keys": "./data/keys",
-        "listen": "[::]:2222"
+        "listen": "[::]:2222",
+        "proxy_protocol": false
       }
     },
     "sso_providers": {
@@ -119,7 +125,8 @@
         "external_host": null,
         "external_port": null,
         "key": "",
-        "listen": "[::]:5900"
+        "listen": "[::]:5900",
+        "proxy_protocol": false
       }
     }
   },
@@ -179,6 +186,11 @@
           "$ref": "#/$defs/ListenEndpoint",
           "default": "[::]:8888"
         },
+        "proxy_protocol": {
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "type": "boolean",
+          "default": false
+        },
         "session_max_age": {
           "type": "string",
           "default": "30m"
@@ -231,6 +243,11 @@
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",
           "default": "[::]:8443"
+        },
+        "proxy_protocol": {
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "type": "boolean",
+          "default": false
         },
         "session_max_age": {
           "type": "string",
@@ -312,6 +329,11 @@
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",
           "default": "[::]:33306"
+        },
+        "proxy_protocol": {
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "type": "boolean",
+          "default": false
         }
       }
     },
@@ -350,6 +372,11 @@
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",
           "default": "[::]:55432"
+        },
+        "proxy_protocol": {
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "type": "boolean",
+          "default": false
         }
       }
     },
@@ -388,6 +415,11 @@
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",
           "default": "[::]:3389"
+        },
+        "proxy_protocol": {
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "type": "boolean",
+          "default": false
         }
       }
     },
@@ -483,6 +515,11 @@
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",
           "default": "[::]:2222"
+        },
+        "proxy_protocol": {
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "type": "boolean",
+          "default": false
         }
       }
     },
@@ -825,6 +862,11 @@
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",
           "default": "[::]:5900"
+        },
+        "proxy_protocol": {
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "type": "boolean",
+          "default": false
         }
       }
     }
