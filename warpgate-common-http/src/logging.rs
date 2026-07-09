@@ -9,12 +9,8 @@ use warpgate_core::{Services, WarpgateServerHandle};
 
 use crate::request::trusted_client_ip;
 
-pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String> {
-    let trust_x_forwarded_headers = {
-        let config = services.config.lock().await;
-        config.store.http.trust_x_forwarded_headers
-    };
-
+/// The peer IP of the connection itself, ignoring any forwarding headers.
+pub fn raw_remote_ip(req: &Request) -> Option<String> {
     let socket_addr = match req.remote_addr() {
         // See [CertificateExtractorEndpoint]
         RemoteAddr(Addr::Custom("captured-cert", value)) => {
@@ -28,9 +24,16 @@ pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String>
         other => other.as_socket_addr().copied(),
     };
 
-    let remote_ip = socket_addr.map(|x| x.ip().to_string());
+    socket_addr.map(|x| x.ip().to_string())
+}
 
-    trusted_client_ip(req, remote_ip, trust_x_forwarded_headers)
+pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String> {
+    let trust_x_forwarded_headers = {
+        let config = services.config.lock().await;
+        config.store.http.trust_x_forwarded_headers
+    };
+
+    trusted_client_ip(req, raw_remote_ip(req), trust_x_forwarded_headers)
 }
 
 pub async fn span_for_request(

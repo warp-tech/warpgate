@@ -14,7 +14,9 @@ use crate::db::{connect_to_db_and_migrate, populate_db};
 use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
-use crate::{AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, State};
+use crate::{
+    AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry, State,
+};
 
 #[derive(Clone)]
 pub struct Services {
@@ -28,6 +30,7 @@ pub struct Services {
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
+    pub listener_status: ListenerStatusRegistry,
 }
 
 impl Services {
@@ -96,6 +99,7 @@ impl Services {
             admin_token: Arc::new(Mutex::new(admin_token)),
             login_protection,
             global_params: Arc::new(params),
+            listener_status: Default::default(),
         })
     }
 

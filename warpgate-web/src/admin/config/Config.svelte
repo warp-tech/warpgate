@@ -81,6 +81,9 @@
         '/login-protection': wrap({
             asyncComponent: () => import('./LoginProtection.svelte'),
         }),
+        '/network': wrap({
+            asyncComponent: () => import('./NetworkStatus.svelte'),
+        }),
     }
 
     let sidebarMode = $state(false)
@@ -170,6 +173,14 @@
         title="Login protection"
         description="View blocked IPs and locked users"
         href="/config/login-protection"
+        small={sidebarMode}
+    />
+
+    <NavListItem
+        class="mb-2"
+        title="Network status"
+        description="Listeners, certificates and client IP detection"
+        href="/config/network"
         small={sidebarMode}
     />
 {/snippet}

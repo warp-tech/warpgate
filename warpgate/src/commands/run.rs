@@ -14,7 +14,7 @@ use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, WarpgateConfig};
 use warpgate_core::db::cleanup_db;
 use warpgate_core::logging::install_database_logger;
-use warpgate_core::{ConfigProvider, ProtocolServer, Services};
+use warpgate_core::{ConfigProvider, ListenerStatusRegistry, ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
@@ -37,6 +37,7 @@ async fn spawn_supervisor(
     factory: ServerFactory,
     selector: ConfigSelector<WarpgateConfig>,
     config_rx: &watch::Receiver<WarpgateConfig>,
+    status_registry: ListenerStatusRegistry,
 ) -> Result<JoinHandle<()>> {
     let params = selector(&config_rx.borrow());
     if params.enabled {
@@ -54,7 +55,7 @@ async fn spawn_supervisor(
     }
     let stream = WatchStream::new(config_rx.clone());
     Ok(tokio::spawn(
-        ListenerSupervisor::new(name, factory, selector).run(stream),
+        ListenerSupervisor::new(name, factory, selector, status_registry).run(stream),
     ))
 }
 
@@ -101,6 +102,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     // HTTP has no `enable` flag — it is always on.
     {
+        let status_registry = services.listener_status.clone();
         let services = services.clone();
         let factory: ServerFactory = Arc::new(move |address, tls| {
             let services = services.clone();
@@ -125,10 +127,21 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 tls,
             }
         });
-        supervisors.push(spawn_supervisor("HTTP", true, factory, selector, &config_rx).await?);
+        supervisors.push(
+            spawn_supervisor(
+                "HTTP",
+                true,
+                factory,
+                selector,
+                &config_rx,
+                status_registry,
+            )
+            .await?,
+        );
     }
 
     {
+        let status_registry = services.listener_status.clone();
         let services = services.clone();
         let factory: ServerFactory = Arc::new(move |address, tls| {
             let services = services.clone();
@@ -144,13 +157,24 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 endpoint: c.store.ssh.listen.clone(),
                 tls: Vec::new(),
             });
-        supervisors.push(spawn_supervisor("SSH", false, factory, selector, &config_rx).await?);
+        supervisors.push(
+            spawn_supervisor(
+                "SSH",
+                false,
+                factory,
+                selector,
+                &config_rx,
+                status_registry,
+            )
+            .await?,
+        );
     }
 
     // These protocols are uniform: sync `new`, one enable flag, one cert/key pair.
     // `$cfg` is the `store` field holding their config (all share the shape).
     macro_rules! tls_listener {
         ($name:literal, $server:ident, $cfg:ident) => {{
+            let status_registry = services.listener_status.clone();
             let services = services.clone();
             let base = base.clone();
             let factory: ServerFactory = Arc::new(move |address, tls| {
@@ -165,7 +189,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                         .into_iter()
                         .collect(),
                 });
-            spawn_supervisor($name, true, factory, selector, &config_rx).await?
+            spawn_supervisor($name, true, factory, selector, &config_rx, status_registry).await?
         }};
     }
 
