@@ -34,9 +34,10 @@ members = [
 # support is built as a standalone helper binary with its own lockfile and integrated over
 # a subprocess IPC channel. The helper carries both the target-facing client (`connect`)
 # and viewer-facing server (`serve`) as subcommands.
-# vendor/vnc-rs is a vendored third-party fork (path dep of warpgate-protocol-vnc); it is
-# excluded from the workspace so Cranky's deny lints don't apply to its upstream code.
-exclude = ["warpgate-rdp-helper", "vendor/vnc-rs"]
+# vendor/vnc-rs and vendor/ironrdp-session are vendored third-party forks (path deps /
+# patches for warpgate-protocol-vnc and warpgate-rdp-helper); they are excluded from the
+# workspace so Cranky's deny lints don't apply to their upstream code. See PATCHES.md.
+exclude = ["warpgate-rdp-helper", "vendor/vnc-rs", "vendor/ironrdp-session"]
 default-members = ["warpgate"]
 resolver = "2"
 

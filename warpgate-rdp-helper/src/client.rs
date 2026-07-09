@@ -434,7 +434,9 @@ fn build_config(config: &ConnectConfig) -> connector::Config {
         platform: MajorPlatformType::UNIX,
         hardware_id: None,
         request_data: None,
-        autologon: false,
+        // Warpgate always supplies the target credentials, so request autologon to
+        // skip the server's own login UI (e.g. xrdp honours INFO_AUTOLOGON).
+        autologon: true,
         enable_audio_playback: false,
         performance_flags: PerformanceFlags::default(),
         license_cache: None,
