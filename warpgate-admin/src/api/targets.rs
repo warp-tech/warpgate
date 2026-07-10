@@ -7,13 +7,13 @@ use sea_orm::sea_query::{Func, SimpleExpr};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
+use tracing::info;
 use uuid::Uuid;
 use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions,
     WarpgateError,
 };
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
 
 use super::AnySecurityScheme;
@@ -318,16 +318,25 @@ impl DetailApi {
             .exec(&*db)
             .await?;
 
-        if target.kind == TargetKind::Ssh {
-            let options: TargetOptions = serde_json::from_value(target.options.clone())?;
-            if let TargetOptions::Ssh(ssh_options) = options {
-                use warpgate_db_entities::KnownHost;
-                KnownHost::Entity::delete_many()
-                    .filter(KnownHost::Column::Host.eq(&ssh_options.host))
-                    .filter(KnownHost::Column::Port.eq(i32::from(ssh_options.port)))
-                    .exec(&*db)
-                    .await?;
-            }
+        let options: TargetOptions = serde_json::from_value(target.options.clone())?;
+
+        if let TargetOptions::Ssh(ssh_options) = &options {
+            use warpgate_db_entities::KnownHost;
+            KnownHost::Entity::delete_many()
+                .filter(KnownHost::Column::Host.eq(&ssh_options.host))
+                .filter(KnownHost::Column::Port.eq(i32::from(ssh_options.port)))
+                .exec(&*db)
+                .await?;
+        }
+
+        for reference in options.secret_references() {
+            info!(
+                target_id = %target.id,
+                target_name = %target.name,
+                backend = %reference.backend,
+                reference = %reference,
+                "Deleting target; leaving referenced external secret intact (not stored in Warpgate)"
+            );
         }
 
         target.delete(&*db).await?;

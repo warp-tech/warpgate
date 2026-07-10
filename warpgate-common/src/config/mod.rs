@@ -1,4 +1,5 @@
 mod defaults;
+mod secrets;
 mod target;
 
 use std::ops::Deref;
@@ -15,6 +16,7 @@ use defaults::{
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+pub use secrets::*;
 pub use target::*;
 use tracing::warn;
 use uuid::Uuid;
@@ -279,6 +281,25 @@ pub enum LogFormat {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+#[serde(untagged)]
+pub enum SshKeysSource {
+    Path(String),
+    Backend(SshKeysBackend),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct SshKeysBackend {
+    pub backend: String,
+    pub path: String,
+}
+
+impl Default for SshKeysSource {
+    fn default() -> Self {
+        SshKeysSource::Path(_default_ssh_keys_path())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct SshConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -296,8 +317,8 @@ pub struct SshConfig {
     #[serde(default)]
     pub external_host: Option<String>,
 
-    #[serde(default = "_default_ssh_keys_path")]
-    pub keys: String,
+    #[serde(default)]
+    pub keys: SshKeysSource,
 
     #[serde(default)]
     pub host_key_verification: SshHostKeyVerificationMode,
@@ -315,8 +336,8 @@ impl Default for SshConfig {
         Self {
             enable: false,
             listen: _default_ssh_listen(),
+            keys: SshKeysSource::default(),
             proxy_protocol: false,
-            keys: _default_ssh_keys_path(),
             host_key_verification: <_>::default(),
             external_port: None,
             external_host: None,
@@ -771,6 +792,9 @@ pub struct WarpgateConfigStore {
 
     #[serde(default)]
     pub log: LogConfig,
+
+    #[serde(default)]
+    pub secrets: SecretsConfig,
 }
 
 impl Default for WarpgateConfigStore {
@@ -788,6 +812,7 @@ impl Default for WarpgateConfigStore {
             vnc: <_>::default(),
             rdp: <_>::default(),
             log: <_>::default(),
+            secrets: <_>::default(),
         }
     }
 }
@@ -809,5 +834,50 @@ impl WarpgateConfig {
                 "Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options."
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ssh_keys_source_deserializes_string_as_path() {
+        let s: SshKeysSource = serde_json::from_str("\"/var/lib/warpgate/ssh-keys\"").unwrap();
+        assert!(matches!(s, SshKeysSource::Path(p) if p == "/var/lib/warpgate/ssh-keys"));
+    }
+
+    #[test]
+    fn ssh_keys_source_deserializes_map_as_backend() {
+        let s: SshKeysSource =
+            serde_json::from_str(r#"{"backend":"vault-prod","path":"secret/warpgate/ssh-keys"}"#)
+                .unwrap();
+        match s {
+            SshKeysSource::Backend(b) => {
+                assert_eq!(b.backend, "vault-prod");
+                assert_eq!(b.path, "secret/warpgate/ssh-keys");
+            }
+            SshKeysSource::Path(_) => panic!("expected Backend, got Path"),
+        }
+    }
+
+    #[test]
+    fn ssh_keys_source_round_trips() {
+        for src in [
+            SshKeysSource::Path("./data/keys".into()),
+            SshKeysSource::Backend(SshKeysBackend {
+                backend: "vault-prod".into(),
+                path: "secret/warpgate/ssh-keys".into(),
+            }),
+        ] {
+            let json = serde_json::to_string(&src).unwrap();
+            let back: SshKeysSource = serde_json::from_str(&json).unwrap();
+            assert_eq!(format!("{src:?}"), format!("{back:?}"));
+        }
+    }
+
+    #[test]
+    fn ssh_keys_source_default_is_path() {
+        assert!(matches!(SshKeysSource::default(), SshKeysSource::Path(_)));
     }
 }

@@ -10,6 +10,7 @@ use super::defaults::{
     _default_postgres_idle_timeout_str, _default_rdp_port, _default_ssh_port, _default_true,
     _default_username, _default_vnc_port,
 };
+use crate::secrets::{MaybeSecretRef, SecretRef};
 use crate::Secret;
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -56,7 +57,7 @@ pub enum SSHTargetAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct SshTargetPasswordAuth {
-    pub password: Secret<String>,
+    pub password: MaybeSecretRef,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
@@ -118,7 +119,7 @@ pub enum DatabaseTargetAuth {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct DatabaseTargetPasswordAuth {
     #[serde(default)]
-    pub password: String,
+    pub password: MaybeSecretRef,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
@@ -130,14 +131,6 @@ impl Default for DatabaseTargetAuth {
     }
 }
 
-impl DatabaseTargetAuth {
-    pub const fn password(&self) -> Option<&str> {
-        match self {
-            Self::Password(auth) => Some(auth.password.as_str()),
-            Self::IamRole(_) => None,
-        }
-    }
-}
 
 #[derive(Debug, Deserialize, Serialize, Clone, Object)]
 pub struct TargetMySqlOptions {
@@ -171,7 +164,9 @@ impl TargetMySqlOptions {
             auth.clone()
         } else {
             DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: self.password.clone().unwrap_or_default(),
+                password: MaybeSecretRef::Inline(Secret::new(
+                    self.password.clone().unwrap_or_default(),
+                )),
             })
         }
     }
@@ -179,11 +174,11 @@ impl TargetMySqlOptions {
     pub fn normalize(&mut self) {
         if let Some(password) = self.password.take() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password,
+                password: MaybeSecretRef::Inline(Secret::new(password)),
             }));
         } else if self.auth.is_none() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: String::new(),
+                password: MaybeSecretRef::default(),
             }));
         }
     }
@@ -238,7 +233,9 @@ impl TargetPostgresOptions {
             auth.clone()
         } else {
             DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: self.password.clone().unwrap_or_default(),
+                password: MaybeSecretRef::Inline(Secret::new(
+                    self.password.clone().unwrap_or_default(),
+                )),
             })
         }
     }
@@ -246,11 +243,11 @@ impl TargetPostgresOptions {
     pub fn normalize(&mut self) {
         if let Some(password) = self.password.take() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password,
+                password: MaybeSecretRef::Inline(Secret::new(password)),
             }));
         } else if self.auth.is_none() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: String::new(),
+                password: MaybeSecretRef::default(),
             }));
         }
     }
@@ -283,7 +280,7 @@ pub struct VncTargetNoneAuth {}
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct VncTargetPasswordAuth {
-    pub password: Secret<String>,
+    pub password: MaybeSecretRef,
 }
 
 impl Default for VncTargetAuth {
@@ -325,13 +322,13 @@ pub enum RdpTargetAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct RdpTargetPasswordAuth {
-    pub password: Secret<String>,
+    pub password: MaybeSecretRef,
 }
 
 impl Default for RdpTargetAuth {
     fn default() -> Self {
         Self::Password(RdpTargetPasswordAuth {
-            password: Secret::new(String::new()),
+            password: MaybeSecretRef::default(),
         })
     }
 }
@@ -409,4 +406,310 @@ pub enum TargetOptions {
     Vnc(TargetVncOptions),
     #[serde(rename = "rdp")]
     Rdp(TargetRdpOptions),
+}
+
+impl TargetOptions {
+    
+    pub fn secret_references(&self) -> Vec<SecretRef> {
+        let mut refs = Vec::new();
+        let mut push = |mr: &MaybeSecretRef| {
+            if let Some(r) = mr.as_reference() {
+                refs.push(r.clone());
+            }
+        };
+
+        match self {
+            TargetOptions::Ssh(ssh) => {
+                if let SSHTargetAuth::Password(auth) = &ssh.auth {
+                    push(&auth.password);
+                }
+            }
+            TargetOptions::MySql(my) => {
+                if let DatabaseTargetAuth::Password(auth) = my.effective_auth() {
+                    push(&auth.password);
+                }
+            }
+            TargetOptions::Postgres(pg) => {
+                if let DatabaseTargetAuth::Password(auth) = pg.effective_auth() {
+                    push(&auth.password);
+                }
+            }
+            TargetOptions::Vnc(vnc) => {
+                if let VncTargetAuth::Password(auth) = &vnc.auth {
+                    push(&auth.password);
+                }
+            }
+            TargetOptions::Rdp(rdp) => {
+                let RdpTargetAuth::Password(auth) = &rdp.auth;
+                push(&auth.password);
+            }
+            TargetOptions::Kubernetes(_) => {}
+            TargetOptions::Http(_) => {}
+        }
+
+        refs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn ssh_password_reference_is_collected() {
+        let options = TargetOptions::Ssh(TargetSSHOptions {
+            host: "h".into(),
+            port: 22,
+            username: "u".into(),
+            allow_insecure_algos: None,
+            jump_host: None,
+            auth: SSHTargetAuth::Password(SshTargetPasswordAuth {
+                password: MaybeSecretRef::from_str("vault://vault-prod/secret/db#password").unwrap(),
+            }),
+        });
+
+        let refs = options.secret_references();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].to_string(), "vault://vault-prod/secret/db#password");
+    }
+
+    #[test]
+    fn inline_credentials_are_not_references() {
+        let options = TargetOptions::Ssh(TargetSSHOptions {
+            host: "h".into(),
+            port: 22,
+            username: "u".into(),
+            allow_insecure_algos: None,
+            jump_host: None,
+            auth: SSHTargetAuth::Password(SshTargetPasswordAuth {
+                password: MaybeSecretRef::from_str("hunter2").unwrap(),
+            }),
+        });
+
+        assert!(options.secret_references().is_empty());
+    }
+
+    #[test]
+    fn ssh_public_key_auth_has_no_references() {
+        let options = TargetOptions::Ssh(TargetSSHOptions {
+            host: "h".into(),
+            port: 22,
+            username: "u".into(),
+            allow_insecure_algos: None,
+            jump_host: None,
+            auth: SSHTargetAuth::PublicKey(SshTargetPublicKeyAuth::default()),
+        });
+
+        assert!(options.secret_references().is_empty());
+    }
+
+    #[test]
+    fn ssh_iam_role_auth_has_no_references() {
+        let options = TargetOptions::Ssh(TargetSSHOptions {
+            host: "h".into(),
+            port: 22,
+            username: "u".into(),
+            allow_insecure_algos: None,
+            jump_host: None,
+            auth: SSHTargetAuth::IamRole(SshTargetIamRoleAuth::default()),
+        });
+
+        assert!(options.secret_references().is_empty());
+    }
+
+    #[test]
+    fn http_and_kubernetes_targets_never_have_references() {
+        let http = TargetOptions::Http(TargetHTTPOptions {
+            url: "http://x".into(),
+            tls: Tls::default(),
+            headers: None,
+            external_host: None,
+        });
+        assert!(http.secret_references().is_empty());
+
+        let k8s = TargetOptions::Kubernetes(TargetKubernetesOptions {
+            cluster_url: "https://x".into(),
+            tls: Tls::default(),
+            auth: KubernetesTargetAuth::default(),
+        });
+        assert!(k8s.secret_references().is_empty());
+    }
+
+    fn mysql_options(auth: Option<DatabaseTargetAuth>, password: Option<String>) -> TargetMySqlOptions {
+        TargetMySqlOptions {
+            host: "h".into(),
+            port: 3306,
+            username: "u".into(),
+            auth,
+            password,
+            tls: Tls::default(),
+            default_database_name: None,
+        }
+    }
+
+    fn postgres_options(
+        auth: Option<DatabaseTargetAuth>,
+        password: Option<String>,
+    ) -> TargetPostgresOptions {
+        TargetPostgresOptions {
+            host: "h".into(),
+            port: 5432,
+            username: "u".into(),
+            auth,
+            password,
+            tls: Tls::default(),
+            idle_timeout: None,
+            default_database_name: None,
+            protocol_version: None,
+        }
+    }
+
+    #[test]
+    fn mysql_effective_auth_falls_back_to_legacy_password_field() {
+        let opts = mysql_options(None, Some("hunter2".into()));
+        match opts.effective_auth() {
+            DatabaseTargetAuth::Password(p) => {
+                assert_eq!(p.password.as_reference(), None);
+            }
+            _ => panic!("expected Password auth"),
+        }
+    }
+
+    #[test]
+    fn mysql_effective_auth_prefers_auth_field_over_legacy_password() {
+        let opts = mysql_options(
+            Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: MaybeSecretRef::from_str("vault://vault-prod/secret/db#password")
+                    .unwrap(),
+            })),
+            Some("stale-legacy-value".into()),
+        );
+        match opts.effective_auth() {
+            DatabaseTargetAuth::Password(p) => {
+                assert_eq!(
+                    p.password.as_reference().unwrap().to_string(),
+                    "vault://vault-prod/secret/db#password"
+                );
+            }
+            _ => panic!("expected Password auth"),
+        }
+    }
+
+    #[test]
+    fn mysql_legacy_password_is_never_reinterpreted_as_a_reference() {
+        // Even if the legacy plaintext field happens to look like a reference URI, it must stay
+        // inline: effective_auth() wraps it directly rather than parsing it via FromStr, so old
+        // configs with such a (coincidentally shaped) password keep working unchanged.
+        let opts = mysql_options(None, Some("vault://vault-prod/secret/db#password".into()));
+        match opts.effective_auth() {
+            DatabaseTargetAuth::Password(p) => assert_eq!(p.password.as_reference(), None),
+            _ => panic!("expected Password auth"),
+        }
+    }
+
+    #[test]
+    fn mysql_normalize_migrates_legacy_password_into_auth_and_clears_it() {
+        let mut opts = mysql_options(None, Some("hunter2".into()));
+        opts.normalize();
+        assert_eq!(opts.password, None);
+        match opts.auth {
+            Some(DatabaseTargetAuth::Password(p)) => {
+                assert_eq!(p.password.as_reference(), None)
+            }
+            _ => panic!("expected auth to be populated with Password"),
+        }
+    }
+
+    #[test]
+    fn mysql_normalize_defaults_auth_when_nothing_is_set() {
+        let mut opts = mysql_options(None, None);
+        opts.normalize();
+        assert!(matches!(opts.auth, Some(DatabaseTargetAuth::Password(_))));
+    }
+
+    #[test]
+    fn mysql_normalize_leaves_existing_auth_untouched_when_no_legacy_password() {
+        let mut opts = mysql_options(
+            Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: MaybeSecretRef::from_str("vault://vault-prod/secret/db#password")
+                    .unwrap(),
+            })),
+            None,
+        );
+        opts.normalize();
+        match opts.auth {
+            Some(DatabaseTargetAuth::Password(p)) => {
+                assert_eq!(
+                    p.password.as_reference().unwrap().to_string(),
+                    "vault://vault-prod/secret/db#password"
+                );
+            }
+            _ => panic!("expected auth to remain Password"),
+        }
+    }
+
+    #[test]
+    fn mysql_password_reference_is_collected() {
+        let options = TargetOptions::MySql(mysql_options(
+            Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: MaybeSecretRef::from_str("vault://vault-prod/secret/db#password")
+                    .unwrap(),
+            })),
+            None,
+        ));
+        let refs = options.secret_references();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].to_string(), "vault://vault-prod/secret/db#password");
+    }
+
+    #[test]
+    fn mysql_iam_role_auth_has_no_references() {
+        let options = TargetOptions::MySql(mysql_options(
+            Some(DatabaseTargetAuth::IamRole(DatabaseTargetIamRoleAuth::default())),
+            None,
+        ));
+        assert!(options.secret_references().is_empty());
+    }
+
+    #[test]
+    fn postgres_password_reference_is_collected() {
+        let options = TargetOptions::Postgres(postgres_options(
+            Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
+                password: MaybeSecretRef::from_str("vault://vault-prod/secret/pg#password")
+                    .unwrap(),
+            })),
+            None,
+        ));
+        let refs = options.secret_references();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].to_string(), "vault://vault-prod/secret/pg#password");
+    }
+
+    #[test]
+    fn postgres_effective_auth_falls_back_to_legacy_password_field() {
+        let opts = postgres_options(None, Some("hunter2".into()));
+        match opts.effective_auth() {
+            DatabaseTargetAuth::Password(p) => assert_eq!(p.password.as_reference(), None),
+            _ => panic!("expected Password auth"),
+        }
+    }
+
+    #[test]
+    fn postgres_normalize_migrates_legacy_password_into_auth_and_clears_it() {
+        let mut opts = postgres_options(None, Some("hunter2".into()));
+        opts.normalize();
+        assert_eq!(opts.password, None);
+        assert!(matches!(opts.auth, Some(DatabaseTargetAuth::Password(_))));
+    }
+
+    #[test]
+    fn postgres_iam_role_auth_has_no_references() {
+        let options = TargetOptions::Postgres(postgres_options(
+            Some(DatabaseTargetAuth::IamRole(DatabaseTargetIamRoleAuth::default())),
+            None,
+        ));
+        assert!(options.secret_references().is_empty());
+    }
 }

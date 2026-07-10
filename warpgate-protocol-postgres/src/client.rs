@@ -8,7 +8,7 @@ use rsasl::config::SASLConfig;
 use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
 use tracing::{debug, info, warn};
-use warpgate_common::{TargetPostgresOptions, WarpgateError};
+use warpgate_common::{SecretBackend, TargetPostgresOptions, WarpgateError};
 use warpgate_tls::{ClientTlsStream, TlsMode, configure_tls_connector};
 
 use crate::error::PostgresError;
@@ -58,6 +58,7 @@ impl PostgresClient {
     pub async fn connect(
         target: &TargetPostgresOptions,
         options: ConnectionOptions,
+        secret_backend: &dyn SecretBackend,
     ) -> Result<Self, PostgresError> {
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
@@ -125,7 +126,12 @@ impl PostgresClient {
 
         // Resolve effective password (may be an IAM-generated token or legacy field)
         let effective_password = match &target.effective_auth() {
-            warpgate_common::DatabaseTargetAuth::Password(auth) => auth.password.clone(),
+            warpgate_common::DatabaseTargetAuth::Password(auth) => auth
+                .password
+                .resolve(secret_backend)
+                .await
+                .map_err(WarpgateError::SecretBackend)
+                .map(|s| s.expose_secret().clone())?,
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await

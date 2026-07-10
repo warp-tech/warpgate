@@ -95,6 +95,12 @@
         "path": "./data/recordings"
       }
     },
+    "secrets": {
+      "$ref": "#/$defs/SecretsConfig",
+      "default": {
+        "backends": []
+      }
+    },
     "ssh": {
       "$ref": "#/$defs/SshConfig",
       "default": {
@@ -131,6 +137,13 @@
     }
   },
   "$defs": {
+    "BackendType": {
+      "type": "string",
+      "enum": [
+        "vault",
+        "openbao"
+      ]
+    },
     "Duration": {
       "type": "object",
       "properties": {
@@ -450,6 +463,55 @@
         }
       ]
     },
+    "SecretBackendConfig": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "auth": {
+          "$ref": "#/$defs/VaultAuthConfig"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "tls": {
+          "$ref": "#/$defs/VaultTlsConfig",
+          "default": {
+            "ca_cert": null,
+            "skip_verify": false
+          }
+        },
+        "type": {
+          "$ref": "#/$defs/BackendType"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "address",
+        "auth"
+      ]
+    },
+    "SecretsConfig": {
+      "type": "object",
+      "properties": {
+        "backends": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SecretBackendConfig"
+          }
+        }
+      }
+    },
     "SniCertificateConfig": {
       "type": "object",
       "properties": {
@@ -509,7 +571,7 @@
           "default": null
         },
         "keys": {
-          "type": "string",
+          "$ref": "#/$defs/SshKeysSource",
           "default": "./data/keys"
         },
         "listen": {
@@ -529,6 +591,31 @@
         "prompt",
         "auto_accept",
         "auto_reject"
+      ]
+    },
+    "SshKeysBackend": {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend",
+        "path"
+      ]
+    },
+    "SshKeysSource": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/SshKeysBackend"
+        }
       ]
     },
     "SsoInternalProviderConfig": {
@@ -821,6 +908,90 @@
         "external_host",
         "host_header"
       ]
+    },
+    "VaultAuthConfig": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "token"
+            },
+            "token": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "method",
+            "token"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "app_role"
+            },
+            "mount": {
+              "type": "string",
+              "default": "approle"
+            },
+            "role_id_file": {
+              "type": "string"
+            },
+            "secret_id_file": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "method",
+            "role_id_file",
+            "secret_id_file"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jwt_path": {
+              "type": "string",
+              "default": "/var/run/secrets/kubernetes.io/serviceaccount/token"
+            },
+            "method": {
+              "type": "string",
+              "const": "kubernetes"
+            },
+            "mount": {
+              "type": "string",
+              "default": "kubernetes"
+            },
+            "role": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "method",
+            "role"
+          ]
+        }
+      ]
+    },
+    "VaultTlsConfig": {
+      "type": "object",
+      "properties": {
+        "ca_cert": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "skip_verify": {
+          "type": "boolean",
+          "default": false
+        }
+      }
     },
     "VncConfig": {
       "type": "object",

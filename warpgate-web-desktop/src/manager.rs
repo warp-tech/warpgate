@@ -102,11 +102,11 @@ impl WebDesktopClientManager {
         // over the shared DesktopEvent/DesktopInput types.
         let (event_rx, input_tx, abort_tx) = match target.options.clone() {
             TargetOptions::Vnc(options) => {
-                let h = warpgate_protocol_vnc::connect(options);
+                let h = warpgate_protocol_vnc::connect(options, services.secret_backend.clone());
                 (h.event_rx, h.input_tx, h.abort_tx)
             }
             TargetOptions::Rdp(options) => {
-                let h = warpgate_protocol_rdp::connect(options);
+                let h = warpgate_protocol_rdp::connect(options, services.secret_backend.clone());
                 (h.event_rx, h.input_tx, h.abort_tx)
             }
             _ => return Err(WarpgateError::InvalidTarget),

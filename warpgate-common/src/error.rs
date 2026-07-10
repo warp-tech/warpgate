@@ -5,6 +5,7 @@ use poem_openapi::ApiResponse;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_ca::CaError;
+use crate::SecretError;
 use warpgate_sso::SsoError;
 use warpgate_tls::RustlsSetupError;
 
@@ -76,6 +77,8 @@ pub enum WarpgateError {
     InvalidNetworkAddress(String),
     #[error("session limit reached")]
     SessionLimitReached,
+    #[error("secret backend: {0}")]
+    SecretBackend(#[from] SecretError),
 }
 
 impl ResponseError for WarpgateError {

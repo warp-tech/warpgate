@@ -28,7 +28,9 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
-use warpgate_common::{SSHTargetAuth, SessionId, TargetOptions, TargetSSHOptions, WarpgateError};
+use warpgate_common::{
+    SSHTargetAuth, SessionId, TargetOptions, TargetSSHOptions, WarpgateError,
+};
 use warpgate_core::{ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
@@ -72,6 +74,12 @@ pub enum ConnectionError {
 
     #[error("Jump host target not found")]
     JumpHostTargetNotFound,
+
+    #[error("secret backend: {0}")]
+    SecretBackend(#[from] warpgate_common::SecretError),
+
+    #[error(transparent)]
+    Warpgate(#[from] warpgate_common::WarpgateError),
 }
 
 pub struct ResolvedSshChainHost {
@@ -744,8 +752,9 @@ impl RemoteClient {
         let mut auth_error_msg: Option<String> = None;
         match auth {
             SSHTargetAuth::Password(auth) => {
+                let password = auth.password.resolve(&*self.services.secret_backend).await?;
                 let response = session
-                    .authenticate_password(username.to_string(), auth.password.expose_secret())
+                    .authenticate_password(username.to_string(), password.expose_secret())
                     .await?;
                 auth_result = self
                     ._handle_auth_result(session, username.to_string(), response)
@@ -760,12 +769,14 @@ impl RemoteClient {
             }
             SSHTargetAuth::PublicKey(_) => {
                 let best_hash = session.best_supported_rsa_hash().await?.flatten();
-                #[allow(clippy::explicit_auto_deref)]
+                let config = self.services.config.lock().await.clone();
                 let keys = load_keys(
-                    &*self.services.config.lock().await,
+                    &config,
                     &self.services.global_params,
+                    &*self.services.secret_backend,
                     "client",
-                )?;
+                )
+                .await?;
                 for key in keys {
                     let key = Arc::new(key);
                     if key.key_data().is_rsa() && best_hash.is_none() && !allow_insecure_algos {
@@ -816,11 +827,14 @@ impl RemoteClient {
             SSHTargetAuth::IamRole(_) => {
                 let instance_info = warpgate_aws::find_instance_by_ip(host).await?;
 
+                let config = self.services.config.lock().await.clone();
                 let key = load_preferred_key(
-                    &*self.services.config.lock().await,
+                    &config,
                     &self.services.global_params,
+                    &*self.services.secret_backend,
                     "client",
-                )?;
+                )
+                .await?;
 
                 let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
 

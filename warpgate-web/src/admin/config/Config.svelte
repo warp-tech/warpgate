@@ -68,6 +68,9 @@
         '/ldap-servers/:id/users': wrap({
             asyncComponent: () => import('./ldap/LdapUserBrowser.svelte'),
         }),
+        '/secret-backends': wrap({
+            asyncComponent: () => import('./secret-backends/SecretBackends.svelte') as any,
+        }),
         '/target-groups/create': wrap({
             asyncComponent: () =>
                 import('./target-groups/CreateTargetGroup.svelte'),
@@ -170,6 +173,14 @@
         title="Login protection"
         description="View blocked IPs and locked users"
         href="/config/login-protection"
+        small={sidebarMode}
+    />
+
+    <NavListItem
+        class="mb-2"
+        title="Secret Backends"
+        description="Vault / OpenBao settings"
+        href="/config/secret-backends"
         small={sidebarMode}
     />
 {/snippet}

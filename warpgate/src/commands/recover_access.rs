@@ -16,8 +16,12 @@ pub async fn command(params: &GlobalParams, username: Option<&String>) -> Result
 
     let config = load_config(params, true)?;
     let services = Services::new(config.clone(), None, params.clone()).await?;
-    warpgate_protocol_ssh::generate_keys(&config, params, "host")?;
-    warpgate_protocol_ssh::generate_keys(&config, params, "client")?;
+    if let Some(backend) = warpgate_protocol_ssh::keys_managed_externally(&config) {
+        info!("SSH keys are managed by secret backend '{backend}'; skipping local key generation");
+    } else {
+        warpgate_protocol_ssh::generate_keys_on_disk(&config, params, "host")?;
+        warpgate_protocol_ssh::generate_keys_on_disk(&config, params, "client")?;
+    }
 
     let theme = ColorfulTheme::default();
     let db = services.db.lock().await;

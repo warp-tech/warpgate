@@ -1,6 +1,7 @@
 use poem_openapi::OpenApi;
 
 mod admin_roles;
+mod secret_backends;
 mod certificate_credentials;
 mod common;
 mod known_hosts_detail;
@@ -73,5 +74,6 @@ pub fn get() -> impl OpenApi {
             certificate_credentials::ListApi,
             certificate_credentials::DetailApi,
         ),
+        secret_backends::Api,
     )
 }

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.26.1-22-gc8678d72-modified"
+    "version": "v0.26.1-33-gdc9fea34-modified"
   },
   "servers": [
     {
@@ -4119,6 +4119,140 @@
         ],
         "operationId": "revoke_certificate_credential"
       }
+    },
+    "/secret-backends": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecretBackendStatus"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_secret_backends"
+      }
+    },
+    "/secret-backends/resolve-test": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/TestResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestResolveResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "test_secret_resolve"
+      }
+    },
+    "/secret-backends/usage": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecretReferenceUsage"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_secret_reference_usage"
+      }
+    },
+    "/secret-backends/{name}/health": {
+      "post": {
+        "parameters": [
+          {
+            "name": "name",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckHealthResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "check_secret_backend_health"
+      }
     }
   },
   "components": {
@@ -4409,6 +4543,21 @@
           "Light",
           "Dark"
         ]
+      },
+      "CheckHealthResponse": {
+        "type": "object",
+        "title": "CheckHealthResponse",
+        "required": [
+          "health"
+        ],
+        "properties": {
+          "health": {
+            "$ref": "#/components/schemas/HealthStatus"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
       },
       "CheckSshHostKeyRequest": {
         "type": "object",
@@ -4807,6 +4956,14 @@
             "format": "uuid"
           }
         }
+      },
+      "HealthStatus": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "error",
+          "unknown"
+        ]
       },
       "ImportLdapUsersRequest": {
         "type": "object",
@@ -5781,6 +5938,9 @@
           },
           "public_key_base64": {
             "type": "string"
+          },
+          "backend": {
+            "type": "string"
           }
         }
       },
@@ -5901,6 +6061,88 @@
             "$ref": "#/components/schemas/SshTargetPublicKeyAuth"
           }
         ]
+      },
+      "SecretBackendStatus": {
+        "type": "object",
+        "title": "SecretBackendStatus",
+        "required": [
+          "name",
+          "backendType",
+          "address",
+          "health"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "backendType": {
+            "$ref": "#/components/schemas/SecretBackendType"
+          },
+          "address": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "health": {
+            "$ref": "#/components/schemas/HealthStatus"
+          },
+          "health_error": {
+            "type": "string"
+          }
+        }
+      },
+      "SecretBackendType": {
+        "type": "string",
+        "enum": [
+          "vault",
+          "openbao"
+        ]
+      },
+      "SecretReferenceUsage": {
+        "type": "object",
+        "title": "SecretReferenceUsage",
+        "required": [
+          "reference",
+          "backend",
+          "target_count",
+          "targets"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string"
+          },
+          "backend": {
+            "type": "string"
+          },
+          "target_count": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecretReferenceUsageTarget"
+            }
+          }
+        }
+      },
+      "SecretReferenceUsageTarget": {
+        "type": "object",
+        "title": "SecretReferenceUsageTarget",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
       },
       "SecurityStatus": {
         "type": "object",
@@ -6585,6 +6827,33 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "TestResolveRequest": {
+        "type": "object",
+        "title": "TestResolveRequest",
+        "required": [
+          "reference"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string"
+          }
+        }
+      },
+      "TestResolveResponse": {
+        "type": "object",
+        "title": "TestResolveResponse",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
           }
         }
       },

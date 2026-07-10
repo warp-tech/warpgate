@@ -150,7 +150,7 @@ pub(super) async fn connect_backend(
         event_rx,
         input_tx,
         abort_tx,
-    } = crate::connect(options);
+    } = crate::connect(options, services.secret_backend.clone());
     let frame_bridge = tokio::spawn(frame_bridge(
         event_rx,
         helper_in_tx.clone(),
