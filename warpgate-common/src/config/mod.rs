@@ -338,7 +338,6 @@ impl Default for SshConfig {
             listen: _default_ssh_listen(),
             keys: SshKeysSource::default(),
             proxy_protocol: false,
-            keys: _default_ssh_keys_path(),
             host_key_verification: <_>::default(),
             external_port: None,
             external_host: None,
