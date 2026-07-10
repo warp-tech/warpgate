@@ -37,6 +37,7 @@ impl ProtocolServer for MySQLProtocolServer {
     async fn bind(
         self,
         address: ListenEndpoint,
+        proxy_protocol: bool,
         tls: Vec<TlsCertificateAndPrivateKey>,
     ) -> Result<BoxFuture<'static, Result<()>>> {
         let certificate_and_key = tls
@@ -58,18 +59,26 @@ impl ProtocolServer for MySQLProtocolServer {
         let services = self.services;
         Ok(async move {
             loop {
-                let Some(stream) = listener.next().await else {
+                let Some(mut stream) = listener.next().await else {
                     return Ok(());
-                };
-                let Ok(remote_address) = stream.peer_addr() else {
-                    // already disconnected
-                    continue;
                 };
 
                 let _ = stream.set_nodelay(true);
                 if detect_port_knock(&stream).await {
                     continue;
                 }
+                let remote_address = match warpgate_common::helpers::proxy_protocol::remote_address(
+                    &mut stream,
+                    proxy_protocol,
+                )
+                .await
+                {
+                    Ok(remote_address) => remote_address,
+                    Err(error) => {
+                        warn!(%error, "Failed to read PROXY protocol header");
+                        continue;
+                    }
+                };
 
                 let tls_config = tls_config.clone();
                 let services = services.clone();

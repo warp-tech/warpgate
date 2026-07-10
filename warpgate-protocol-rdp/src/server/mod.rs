@@ -92,6 +92,7 @@ impl BackendBridge {
 pub async fn bind_server(
     services: Services,
     address: ListenEndpoint,
+    proxy_protocol: bool,
     // The serve helper terminates TLS itself (it has its own rustls with a different
     // crypto provider), so we hand it the raw PEM rather than a built acceptor.
     cert_pem: String,
@@ -100,14 +101,23 @@ pub async fn bind_server(
     let mut listener = address.tcp_accept_stream().await?;
 
     Ok(async move {
-        while let Some(stream) = listener.next().await {
-            let Ok(remote_address) = stream.peer_addr() else {
-                continue;
-            };
+        while let Some(mut stream) = listener.next().await {
             let _ = stream.set_nodelay(true);
             if detect_port_knock(&stream).await {
                 continue;
             }
+            let remote_address = match warpgate_common::helpers::proxy_protocol::remote_address(
+                &mut stream,
+                proxy_protocol,
+            )
+            .await
+            {
+                Ok(remote_address) => remote_address,
+                Err(error) => {
+                    warn!(%error, "Failed to read PROXY protocol header");
+                    continue;
+                }
+            };
 
             let services = services.clone();
             let cert_pem = cert_pem.clone();

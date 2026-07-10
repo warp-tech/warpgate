@@ -14,11 +14,11 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use common::inject_request_authorization;
 pub use common::{PROTOCOL_NAME, SsoLoginState};
-use futures::FutureExt;
 use futures::future::BoxFuture;
+use futures::{FutureExt, future, stream};
 use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
-use poem::listener::{Listener, RustlsConfig};
+use poem::listener::{AcceptorExt, Listener, RustlsConfig};
 use poem::middleware::SetHeader;
 use poem::session::{CookieConfig, MemoryStorage, ServerSession};
 use poem::web::Data;
@@ -28,6 +28,7 @@ use tokio::sync::Mutex;
 use tracing::{Instrument, debug};
 use warpgate_admin::admin_api_app;
 use warpgate_common::ListenEndpoint;
+use warpgate_common::helpers::proxy_protocol::ProxyProtocolAcceptor;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
@@ -87,6 +88,7 @@ impl ProtocolServer for HTTPProtocolServer {
     async fn bind(
         self,
         address: ListenEndpoint,
+        proxy_protocol: bool,
         tls: Vec<TlsCertificateAndPrivateKey>,
     ) -> Result<BoxFuture<'static, Result<()>>> {
         let session_storage = make_session_storage();
@@ -302,11 +304,9 @@ impl ProtocolServer for HTTPProtocolServer {
 
         // Bind the socket now (errors here are non-fatal to the supervisor); the
         // returned future drives the accept loop (errors there restart the listener).
-        let acceptor = address
-            .poem_listener()?
-            .rustls(rustls_config)
-            .into_acceptor()
-            .await?;
+        let acceptor = address.poem_listener()?.into_acceptor().await?;
+        let acceptor = ProxyProtocolAcceptor::new(acceptor, proxy_protocol)
+            .rustls(stream::once(future::ready(rustls_config)));
 
         Ok(async move {
             Server::new_with_acceptor(acceptor).run(app).await?;
