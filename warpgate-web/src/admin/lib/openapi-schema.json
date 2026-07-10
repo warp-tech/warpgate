@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.26.1-26-gc03b8c94-modified"
+    "version": "v0.26.1-36-gfe7d3909-modified"
   },
   "servers": [
     {
@@ -1857,6 +1857,32 @@
         "operationId": "delete_target_group"
       }
     },
+    "/users/clear-ephemeral-ssh-keys": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "integer",
+                  "format": "uint64"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "clear_all_ephemeral_ssh_keys"
+      }
+    },
     "/users": {
       "get": {
         "parameters": [
@@ -2060,6 +2086,45 @@
           }
         ],
         "operationId": "delete_user"
+      }
+    },
+    "/users/{id}/clear-ephemeral-ssh-keys": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "integer",
+                  "format": "uint64"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "clear_user_ephemeral_ssh_keys"
       }
     },
     "/users/{id}/ldap-link/unlink": {

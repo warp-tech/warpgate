@@ -165,6 +165,21 @@ impl Services {
         None
     }
 
+    pub async fn clear_ephemeral_public_keys(&self, user_id: Option<Uuid>) -> usize {
+        let mut cache = self.ephemeral_public_keys.lock().await;
+        let before = cache.len();
+        if let Some(user_id) = user_id {
+            cache.retain(|entry| entry.user_info.id != user_id);
+        } else {
+            cache.clear();
+        }
+        let cleared = before.saturating_sub(cache.len());
+        if cleared > 0 {
+            tracing::info!(?user_id, cleared, "Cleared cached ephemeral SSH keys");
+        }
+        cleared
+    }
+
     /// Resolves the user/policy (without the store lock) and inserts a new
     /// [`AuthState`] under a brief store lock. This is the only sanctioned way
     /// to create an auth state, so the "no DB I/O while holding the store lock"

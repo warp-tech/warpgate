@@ -51,10 +51,31 @@ enum CreateUserResponse {
     BadRequest(Json<String>),
 }
 
+#[derive(ApiResponse)]
+enum ClearEphemeralSshKeysResponse {
+    #[oai(status = 200)]
+    Ok(Json<usize>),
+}
+
 pub struct ListApi;
 
 #[OpenApi]
 impl ListApi {
+    #[oai(
+        path = "/users/clear-ephemeral-ssh-keys",
+        method = "post",
+        operation_id = "clear_all_ephemeral_ssh_keys"
+    )]
+    async fn api_clear_all_ephemeral_ssh_keys(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<ClearEphemeralSshKeysResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        let cleared = ctx.services().clear_ephemeral_public_keys(None).await;
+        Ok(ClearEphemeralSshKeysResponse::Ok(Json(cleared)))
+    }
+
     #[oai(path = "/users", method = "get", operation_id = "get_users")]
     async fn api_get_all_users(
         &self,
@@ -292,6 +313,22 @@ impl DetailApi {
         user.delete(&*db).await?;
 
         Ok(DeleteUserResponse::Deleted)
+    }
+
+    #[oai(
+        path = "/users/:id/clear-ephemeral-ssh-keys",
+        method = "post",
+        operation_id = "clear_user_ephemeral_ssh_keys"
+    )]
+    async fn api_clear_user_ephemeral_ssh_keys(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        id: Path<Uuid>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<ClearEphemeralSshKeysResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        let cleared = ctx.services().clear_ephemeral_public_keys(Some(id.0)).await;
+        Ok(ClearEphemeralSshKeysResponse::Ok(Json(cleared)))
     }
 
     #[oai(

@@ -530,11 +530,46 @@
                                 seconds: user?.ephemeralSshKeyTtlSeconds,
                                 onChange: v => { if (user) user.ephemeralSshKeyTtlSeconds = v }
                             }}
-                        />
+                        >
                         <HelpText>
-                            Duration during which an ephemeral SSH key verified via OIDC SSO remains cached for this user without requiring re-authentication. If unset, the global server configuration default (<code>ssh.ephemeral_keys_ttl</code>, default 8 hours) is used.
+                            Duration during which an ephemeral SSH key verified
+                            via OIDC SSO remains cached for this user without
+                            requiring re-authentication. If unset, the global
+                            server configuration default (<code
+                                >ssh.ephemeral_keys_ttl</code
+                            >, default 8 hours) is used.
                         </HelpText>
                     </FormGroup>
+
+                    {#if user?.id}
+                        <FormGroup class="mb-3">
+                            <span class="d-block mb-1 fw-bold"
+                                >Cached ephemeral SSH keys</span
+                            >
+                            <div>
+                                <AsyncButton
+                                    color="warning"
+                                    size="sm"
+                                    outline
+                                    click={async () => {
+                                        if (!user?.id) return
+                                        try {
+                                            const cleared = await api.clearUserEphemeralSshKeys({ id: user.id })
+                                            alert(`Cleared ${cleared} cached ephemeral SSH key(s) for this user.`)
+                                        } catch (e) {
+                                            error = await stringifyError(e)
+                                        }
+                                    }}
+                                >
+                                    Clear cached ephemeral SSH keys
+                                </AsyncButton>
+                            </div>
+                            <HelpText>
+                                Immediately revokes any currently cached
+                                ephemeral SSH sessions for this user.
+                            </HelpText>
+                        </FormGroup>
+                    {/if}
                 </Section>
 
                 <Section id="traffic" title="Network">

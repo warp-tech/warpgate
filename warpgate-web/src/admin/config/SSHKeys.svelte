@@ -2,6 +2,7 @@
     import { Alert, Button } from '@sveltestrap/sveltestrap'
     import { api, type SSHKey, type SSHKnownHost } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
+    import AsyncButton from 'common/AsyncButton.svelte'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import { stringifyError } from 'common/errors'
 
@@ -77,6 +78,30 @@
         {/each}
     </div>
 {/if}
+
+<div class="mb-4"></div>
+<h2>Cached Ephemeral SSH Keys</h2>
+<p class="text-muted">
+    When users authenticate via OIDC SSO for SSH, their offered SSH public key
+    is temporarily cached in memory so they don't have to re-authenticate for
+    every SSH command until the TTL expires.
+</p>
+<div class="mb-3">
+    <AsyncButton
+        color="warning"
+        outline
+        click={async () => {
+            try {
+                const cleared = await api.clearAllEphemeralSshKeys()
+                alert(`Cleared ${cleared} cached ephemeral SSH key(s) across all users.`)
+            } catch (e) {
+                error = await stringifyError(e)
+            }
+        }}
+    >
+        Clear all cached ephemeral SSH keys
+    </AsyncButton>
+</div>
 
 <style lang="scss">
     pre {
