@@ -8635,7 +8635,7 @@ dependencies = [
  "ecb",
  "futures",
  "getrandom 0.2.17",
- "md-5 0.10.6",
+ "md-5 0.11.0",
  "num-bigint",
  "rustls 0.23.41",
  "thiserror 2.0.18",
