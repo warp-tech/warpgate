@@ -1,5 +1,6 @@
 use std::io::Result as IoResult;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use anyhow::{Context, bail};
 use poem::http::uri::Scheme;
@@ -8,11 +9,17 @@ use poem::web::{LocalAddr, RemoteAddr};
 use ppp::{HeaderResult, PartialResult};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::net::TcpStream;
+use tokio::time::timeout;
 use tracing::warn;
 
 const V2_MINIMUM_HEADER_LENGTH: usize = 16;
 const V1_MAX_HEADER_LENGTH: usize = 108;
 const MAX_PROXY_PROTOCOL_HEADER_LENGTH: usize = V2_MINIMUM_HEADER_LENGTH + u16::MAX as usize;
+
+/// A conforming peer sends the whole header up front, so the budget only has to
+/// outlast network latency. It bounds how long a stalled connection can hold up
+/// the accept loop of the protocols that read the header inline.
+const READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn remote_address(
     stream: &mut TcpStream,
@@ -69,6 +76,14 @@ impl<A: Acceptor> Acceptor for ProxyProtocolAcceptor<A> {
 }
 
 async fn read_header<R: AsyncRead + Unpin>(stream: &mut R) -> anyhow::Result<Option<SocketAddr>> {
+    timeout(READ_TIMEOUT, read_header_inner(stream))
+        .await
+        .context("timed out reading PROXY protocol header")?
+}
+
+async fn read_header_inner<R: AsyncRead + Unpin>(
+    stream: &mut R,
+) -> anyhow::Result<Option<SocketAddr>> {
     let mut bytes = Vec::with_capacity(V2_MINIMUM_HEADER_LENGTH);
 
     loop {
