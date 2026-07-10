@@ -307,6 +307,10 @@ pub struct SshConfig {
     #[serde(default = "_default_ssh_listen")]
     pub listen: ListenEndpoint,
 
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
     #[serde(default)]
     pub external_port: Option<u16>,
 
@@ -333,6 +337,8 @@ impl Default for SshConfig {
             enable: false,
             listen: _default_ssh_listen(),
             keys: SshKeysSource::default(),
+            proxy_protocol: false,
+            keys: _default_ssh_keys_path(),
             host_key_verification: <_>::default(),
             external_port: None,
             external_host: None,
@@ -362,6 +368,10 @@ pub struct SniCertificateConfig {
 pub struct HttpConfig {
     #[serde(default = "_default_http_listen")]
     pub listen: ListenEndpoint,
+
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
 
     #[serde(default)]
     pub external_port: Option<u16>,
@@ -394,6 +404,7 @@ impl Default for HttpConfig {
     fn default() -> Self {
         Self {
             listen: _default_http_listen(),
+            proxy_protocol: false,
             external_port: None,
             external_host: None,
             certificate: "".into(),
@@ -444,6 +455,10 @@ pub struct MySqlConfig {
     #[serde(default = "_default_mysql_listen")]
     pub listen: ListenEndpoint,
 
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
     #[serde(default)]
     pub external_port: Option<u16>,
 
@@ -468,6 +483,7 @@ impl Default for MySqlConfig {
         Self {
             enable: false,
             listen: _default_mysql_listen(),
+            proxy_protocol: false,
             external_port: None,
             external_host: None,
             certificate: "".into(),
@@ -495,6 +511,10 @@ pub struct KubernetesConfig {
     #[serde(default = "_default_kubernetes_listen")]
     pub listen: ListenEndpoint,
 
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
     #[serde(default)]
     pub external_port: Option<u16>,
 
@@ -517,6 +537,7 @@ impl Default for KubernetesConfig {
         Self {
             enable: false,
             listen: _default_kubernetes_listen(),
+            proxy_protocol: false,
             external_port: None,
             external_host: None,
             certificate: "".into(),
@@ -544,6 +565,10 @@ pub struct PostgresConfig {
     #[serde(default = "_default_postgres_listen")]
     pub listen: ListenEndpoint,
 
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
     #[serde(default)]
     pub external_port: Option<u16>,
 
@@ -562,6 +587,7 @@ impl Default for PostgresConfig {
         Self {
             enable: false,
             listen: _default_postgres_listen(),
+            proxy_protocol: false,
             external_port: None,
             external_host: None,
             certificate: "".into(),
@@ -588,6 +614,10 @@ pub struct VncConfig {
     #[serde(default = "_default_vnc_listen")]
     pub listen: ListenEndpoint,
 
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
     #[serde(default)]
     pub external_port: Option<u16>,
 
@@ -610,6 +640,7 @@ impl Default for VncConfig {
         Self {
             enable: false,
             listen: _default_vnc_listen(),
+            proxy_protocol: false,
             external_port: None,
             external_host: None,
             certificate: "".into(),
@@ -637,6 +668,10 @@ pub struct RdpConfig {
     #[serde(default = "_default_rdp_listen")]
     pub listen: ListenEndpoint,
 
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
     #[serde(default)]
     pub external_port: Option<u16>,
 
@@ -655,6 +690,7 @@ impl Default for RdpConfig {
         Self {
             enable: false,
             listen: _default_rdp_listen(),
+            proxy_protocol: false,
             external_port: None,
             external_host: None,
             certificate: "".into(),

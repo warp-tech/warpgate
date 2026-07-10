@@ -44,9 +44,10 @@ impl ProtocolServer for SSHProtocolServer {
     async fn bind(
         self,
         address: ListenEndpoint,
+        proxy_protocol: bool,
         _tls: Vec<TlsCertificateAndPrivateKey>,
     ) -> Result<BoxFuture<'static, Result<()>>> {
-        bind_server(self.services, address).await
+        bind_server(self.services, address, proxy_protocol).await
     }
 
     fn name(&self) -> &'static str {

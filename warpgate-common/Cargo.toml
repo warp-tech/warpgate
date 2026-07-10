@@ -28,6 +28,7 @@ ipnet.workspace = true
 password-hash.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
+ppp.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true

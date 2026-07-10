@@ -8,6 +8,7 @@ use poem::{EndpointExt, Route, Server};
 use rustls::ServerConfig;
 use tracing::info;
 use warpgate_common::ListenEndpoint;
+use warpgate_common::helpers::proxy_protocol::ProxyProtocolAcceptor;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::Services;
 use warpgate_tls::{SingleCertResolver, TlsCertificateAndPrivateKey};
@@ -25,6 +26,7 @@ use client_certs::CertificateExtractorMiddleware;
 pub async fn bind_server(
     services: Services,
     address: ListenEndpoint,
+    proxy_protocol: bool,
     tls: Vec<TlsCertificateAndPrivateKey>,
 ) -> Result<BoxFuture<'static, Result<()>>> {
     let correlator = RequestCorrelator::new(&services);
@@ -55,6 +57,7 @@ pub async fn bind_server(
     )));
 
     let tcp_acceptor = address.poem_listener()?.into_acceptor().await?;
+    let tcp_acceptor = ProxyProtocolAcceptor::new(tcp_acceptor, proxy_protocol);
     let cert_capturing_acceptor = CertificateCapturingAcceptor::new(tcp_acceptor, tls_config);
 
     Ok(async move {

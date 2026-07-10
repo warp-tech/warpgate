@@ -58,6 +58,7 @@ impl ProtocolServer for RdpProtocolServer {
     async fn bind(
         self,
         address: ListenEndpoint,
+        proxy_protocol: bool,
         tls: Vec<TlsCertificateAndPrivateKey>,
     ) -> anyhow::Result<BoxFuture<'static, anyhow::Result<()>>> {
         // The serve helper terminates TLS itself, so hand it the raw PEM.
@@ -69,7 +70,7 @@ impl ProtocolServer for RdpProtocolServer {
             .context("RDP TLS certificate is not valid UTF-8 PEM")?;
         let key_pem = String::from_utf8(certificate_and_key.private_key.bytes().to_vec())
             .context("RDP TLS private key is not valid UTF-8 PEM")?;
-        bind_server(self.services, address, cert_pem, key_pem).await
+        bind_server(self.services, address, proxy_protocol, cert_pem, key_pem).await
     }
 
     fn name(&self) -> &'static str {

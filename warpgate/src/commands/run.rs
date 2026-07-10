@@ -102,9 +102,14 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     // HTTP has no `enable` flag — it is always on.
     {
         let services = services.clone();
-        let factory: ServerFactory = Arc::new(move |address, tls| {
+        let factory: ServerFactory = Arc::new(move |address, proxy_protocol, tls| {
             let services = services.clone();
-            async move { HTTPProtocolServer::new(&services).bind(address, tls).await }.boxed()
+            async move {
+                HTTPProtocolServer::new(&services)
+                    .bind(address, proxy_protocol, tls)
+                    .await
+            }
+            .boxed()
         });
         let base = base.clone();
         let selector: ConfigSelector<WarpgateConfig> = Arc::new(move |c: &WarpgateConfig| {
@@ -122,6 +127,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             ListenerParams {
                 enabled: true,
                 endpoint: c.store.http.listen.clone(),
+                proxy_protocol: c.store.http.proxy_protocol,
                 tls,
             }
         });
@@ -130,11 +136,11 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     {
         let services = services.clone();
-        let factory: ServerFactory = Arc::new(move |address, tls| {
+        let factory: ServerFactory = Arc::new(move |address, proxy_protocol, tls| {
             let services = services.clone();
             async move {
                 let server = SSHProtocolServer::new(&services).await?;
-                server.bind(address, tls).await
+                server.bind(address, proxy_protocol, tls).await
             }
             .boxed()
         });
@@ -142,6 +148,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             Arc::new(|c: &WarpgateConfig| ListenerParams {
                 enabled: c.store.ssh.enable,
                 endpoint: c.store.ssh.listen.clone(),
+                proxy_protocol: c.store.ssh.proxy_protocol,
                 tls: Vec::new(),
             });
         supervisors.push(spawn_supervisor("SSH", false, factory, selector, &config_rx).await?);
@@ -153,14 +160,20 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         ($name:literal, $server:ident, $cfg:ident) => {{
             let services = services.clone();
             let base = base.clone();
-            let factory: ServerFactory = Arc::new(move |address, tls| {
+            let factory: ServerFactory = Arc::new(move |address, proxy_protocol, tls| {
                 let services = services.clone();
-                async move { $server::new(&services).bind(address, tls).await }.boxed()
+                async move {
+                    $server::new(&services)
+                        .bind(address, proxy_protocol, tls)
+                        .await
+                }
+                .boxed()
             });
             let selector: ConfigSelector<WarpgateConfig> =
                 Arc::new(move |c: &WarpgateConfig| ListenerParams {
                     enabled: c.store.$cfg.enable,
                     endpoint: c.store.$cfg.listen.clone(),
+                    proxy_protocol: c.store.$cfg.proxy_protocol,
                     tls: TlsPathPair::new(&base, &c.store.$cfg.certificate, &c.store.$cfg.key)
                         .into_iter()
                         .collect(),

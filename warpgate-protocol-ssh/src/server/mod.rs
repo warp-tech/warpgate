@@ -35,6 +35,7 @@ struct RusshConfigInit {
 pub async fn bind_server(
     services: Services,
     address: ListenEndpoint,
+    proxy_protocol: bool,
 ) -> Result<BoxFuture<'static, Result<()>>> {
     let russh_config_init = Arc::new({
         let config = services.config.lock().await;
@@ -54,7 +55,10 @@ pub async fn bind_server(
             tokio::task::Builder::new()
                 .name("SSH new connection setup")
                 .spawn(async move {
-                    if let Err(e) = _handle_connection(services, russh_config_init, stream).await {
+                    if let Err(e) =
+                        _handle_connection(services, russh_config_init, stream, proxy_protocol)
+                            .await
+                    {
                         error!(%e, "Connection handling failed");
                     }
                 })?;
@@ -67,7 +71,8 @@ pub async fn bind_server(
 async fn _handle_connection(
     services: Services,
     russh_config_init: Arc<RusshConfigInit>,
-    stream: TcpStream,
+    mut stream: TcpStream,
+    proxy_protocol: bool,
 ) -> Result<()> {
     stream.set_nodelay(true)?;
 
@@ -75,7 +80,9 @@ async fn _handle_connection(
         return Ok(());
     }
 
-    let remote_address = stream.peer_addr().context("getting peer address")?;
+    let remote_address =
+        warpgate_common::helpers::proxy_protocol::remote_address(&mut stream, proxy_protocol)
+            .await?;
 
     let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
