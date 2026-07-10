@@ -5381,6 +5381,10 @@
             "type": "integer",
             "format": "int64"
           },
+          "web_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
           "analytics_consent": {
             "$ref": "#/components/schemas/AnalyticsConsent"
           },
@@ -5546,6 +5550,10 @@
             "type": "boolean"
           },
           "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "web_approval_grace_period_seconds": {
             "type": "integer",
             "format": "int64"
           },

@@ -63,7 +63,8 @@ mod m00058_analytics;
 mod m00059_web_auth_max_age;
 mod m00060_recording_generation;
 mod m00061_rename_web_ssh_enabled;
-mod m00062_ephemeral_ssh_key_ttl;
+mod m00062_web_approval_grace_period;
+mod m00063_ephemeral_ssh_key_ttl;
 
 pub(crate) mod helpers;
 
@@ -134,7 +135,8 @@ impl MigratorTrait for Migrator {
             Box::new(m00059_web_auth_max_age::Migration),
             Box::new(m00060_recording_generation::Migration),
             Box::new(m00061_rename_web_ssh_enabled::Migration),
-            Box::new(m00062_ephemeral_ssh_key_ttl::Migration),
+            Box::new(m00062_web_approval_grace_period::Migration),
+            Box::new(m00063_ephemeral_ssh_key_ttl::Migration),
         ]
     }
 }

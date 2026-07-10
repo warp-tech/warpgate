@@ -31,5 +31,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 warpgate-rdp-ipc = { path = "../warpgate-rdp-ipc" }
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
+[patch.crates-io]
+ironrdp-session = { path = "../vendor/ironrdp-session" }
+
 # Own lockfile: must NOT join the Warpgate workspace (picky/sspi pre-release clash).
 [workspace]

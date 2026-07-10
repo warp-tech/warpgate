@@ -234,6 +234,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                         Some(&session_id),
                         &username,
                         crate::common::PROTOCOL_NAME,
+                        &target_name,
                         &[CredentialKind::Password],
                         Some(self.remote_address.ip()),
                         Some("password"),
@@ -342,6 +343,15 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                 }
                             } else if kinds.contains(&CredentialKind::WebUserApproval) {
                                 // Only WebUserApproval is needed, i.e. the password was either correct or not required, otherwise just fail early
+
+                                if self
+                                    .services
+                                    .try_web_approval_bypass(&state_arc)
+                                    .await
+                                    .map_err(PostgresError::other)?
+                                {
+                                    continue;
+                                }
 
                                 let identification_string =
                                     state_arc.lock().await.identification_string().to_owned();

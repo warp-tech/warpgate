@@ -27,6 +27,16 @@ pub struct AuthStateUserInfo {
     pub ephemeral_ssh_key_ttl_seconds: Option<i64>,
 }
 
+/// Cache matching key for web approval bypass
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WebApprovalMatchKey {
+    pub remote_ip: IpAddr,
+    pub protocol: String,
+    pub username: String,
+    pub target_name: String,
+    pub other_credentials: Vec<CredentialKind>,
+}
+
 impl From<&User> for AuthStateUserInfo {
     fn from(user: &User) -> Self {
         Self {
@@ -43,6 +53,7 @@ pub struct AuthState {
     session_id: Option<Uuid>,
     remote_ip: Option<IpAddr>,
     protocol: String,
+    target_name: String,
     force_rejected: bool,
     policy: Box<dyn CredentialPolicy + Sync + Send>,
     valid_credentials: Vec<AuthCredential>,
@@ -69,6 +80,7 @@ impl AuthState {
         remote_ip: Option<IpAddr>,
         user_info: AuthStateUserInfo,
         protocol: String,
+        target_name: String,
         policy: Box<dyn CredentialPolicy + Sync + Send>,
         state_change_signal: broadcast::Sender<AuthResult>,
     ) -> Self {
@@ -78,6 +90,7 @@ impl AuthState {
             remote_ip,
             user_info,
             protocol,
+            target_name,
             force_rejected: false,
             policy,
             valid_credentials: vec![],
@@ -109,6 +122,38 @@ impl AuthState {
 
     pub fn protocol(&self) -> &str {
         &self.protocol
+    }
+
+    pub fn target_name(&self) -> &str {
+        &self.target_name
+    }
+
+    /// Builds the key used to match this attempt against a remembered web
+    /// approval.
+    pub fn web_approval_match_key(&self) -> Option<WebApprovalMatchKey> {
+        let Some(remote_ip) = self.remote_ip else {
+            return None;
+        };
+
+        // `WebUserApproval` itself is excluded so the key describes the
+        // *other* credentials presented, and is identical whether computed before
+        // the approval is added (check) or after (save)
+        let mut other_credentials: Vec<CredentialKind> = self
+            .valid_credentials
+            .iter()
+            .map(AuthCredential::kind)
+            .filter(|k| *k != CredentialKind::WebUserApproval)
+            .collect();
+        other_credentials.sort_unstable();
+        other_credentials.dedup();
+
+        Some(WebApprovalMatchKey {
+            remote_ip: remote_ip,
+            protocol: self.protocol.clone(),
+            username: self.user_info.username.to_lowercase(),
+            target_name: self.target_name.clone(),
+            other_credentials,
+        })
     }
 
     pub const fn started(&self) -> &OffsetDateTime {
@@ -171,6 +216,25 @@ impl AuthState {
         );
 
         self.authenticated_event_emitted = true;
+    }
+
+    pub fn emit_web_approval_bypassed_event(&self) {
+        let Some(session_id) = self.session_id.as_ref() else {
+            return;
+        };
+
+        info!(
+            target: "audit",
+            _type = "WebApprovalBypassed1",
+            session = %session_id,
+            client_ip = %self.client_ip_for_logging(),
+            user_id = %self.user_info.id,
+            username = %self.user_info.username,
+            protocol = %self.protocol,
+            target = %self.target_name,
+            related_users = %format_related_ids(&[self.user_info.id]),
+            "Web approval bypassed within grace period",
+        );
     }
 
     pub fn emit_authentication_failed_event(
