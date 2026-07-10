@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 use tokio::task::{JoinError, JoinHandle};
 use tracing::{error, info, warn};
 use warpgate_common::{ListenEndpoint, WarpgateError};
+use warpgate_core::{ListenerState, ListenerStatus, ListenerStatusRegistry, TlsCertificateInfo};
 use warpgate_tls::{TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -72,15 +73,41 @@ pub struct ListenerSupervisor<C> {
     name: &'static str,
     factory: ServerFactory,
     selector: ConfigSelector<C>,
+    status_registry: ListenerStatusRegistry,
 }
 
 impl<C: Send + 'static> ListenerSupervisor<C> {
-    pub fn new(name: &'static str, factory: ServerFactory, selector: ConfigSelector<C>) -> Self {
+    pub fn new(
+        name: &'static str,
+        factory: ServerFactory,
+        selector: ConfigSelector<C>,
+        status_registry: ListenerStatusRegistry,
+    ) -> Self {
         Self {
             name,
             factory,
             selector,
+            status_registry,
         }
+    }
+
+    async fn report_status(
+        &self,
+        state: ListenerState,
+        endpoint: &ListenEndpoint,
+        error: Option<String>,
+        certificates: Vec<TlsCertificateInfo>,
+    ) {
+        self.status_registry.lock().await.insert(
+            self.name.to_string(),
+            ListenerStatus {
+                name: self.name.to_string(),
+                state,
+                address: endpoint.address().to_string(),
+                error,
+                certificates,
+            },
+        );
     }
 
     /// Drive the listener off a stream of config values. Runs until the stream
@@ -173,6 +200,8 @@ impl<C: Send + 'static> ListenerSupervisor<C> {
                 info!(name = self.name, "Listener disabled by config");
             }
             *applied = Some(desired.clone());
+            self.report_status(ListenerState::Disabled, &desired.endpoint, None, Vec::new())
+                .await;
             return;
         }
 
@@ -187,7 +216,7 @@ impl<C: Send + 'static> ListenerSupervisor<C> {
                 Ok(loaded) => loaded,
                 Err(error) => {
                     error!(name = self.name, %error, "New TLS certificate/key is invalid; keeping the current listener");
-                    // Only the key state changes; the current listener keeps serving.
+                    // The current listener keeps serving its previously-reported status.
                     return;
                 }
             }
@@ -198,15 +227,39 @@ impl<C: Send + 'static> ListenerSupervisor<C> {
         }
         *applied = Some(desired.clone());
 
+        let certificates: Vec<TlsCertificateInfo> = tls
+            .iter()
+            .map(|pair| TlsCertificateInfo {
+                domains: pair.certificate.sni_names().unwrap_or_default(),
+                expiry: pair.certificate.not_after(),
+            })
+            .collect();
+
         info!(name = self.name, endpoint = ?desired.endpoint, "Binding listener");
         // Phase 1: bind. A bind failure is non-fatal — leave the listener stopped
         // (`task` = None) so it retries on the next config or certificate change.
         match (self.factory)(desired.endpoint.clone(), desired.proxy_protocol, tls).await {
             // Phase 2: drive the accept loop in its own task. If it ends, the task
             // branch of `run` restarts the listener.
-            Ok(accept_loop) => *task = Some(tokio::spawn(accept_loop)),
+            Ok(accept_loop) => {
+                *task = Some(tokio::spawn(accept_loop));
+                self.report_status(
+                    ListenerState::Listening,
+                    &desired.endpoint,
+                    None,
+                    certificates,
+                )
+                .await;
+            }
             Err(error) => {
                 error!(name = self.name, %error, "Listener failed to bind; paused until the next config or certificate change");
+                self.report_status(
+                    ListenerState::BindFailed,
+                    &desired.endpoint,
+                    Some(error.to_string()),
+                    certificates,
+                )
+                .await;
             }
         }
     }
@@ -349,6 +402,10 @@ mod tests {
         }
     }
 
+    fn registry() -> ListenerStatusRegistry {
+        Default::default()
+    }
+
     /// Factory that reports each start (endpoint) on a channel and either fails
     /// immediately or runs forever, controlled by a shared flag.
     fn counting_factory(
@@ -399,7 +456,7 @@ mod tests {
         let selector: ConfigSelector<ListenerParams> = Arc::new(|p: &ListenerParams| p.clone());
 
         let (cfg_tx, cfg_rx) = watch::channel(params(2201, true));
-        let supervisor = ListenerSupervisor::new("test", factory, selector);
+        let supervisor = ListenerSupervisor::new("test", factory, selector, registry());
         let handle = tokio::spawn(supervisor.run(WatchStream::new(cfg_rx)));
 
         // Initial config → starts on port 2201.
@@ -432,7 +489,7 @@ mod tests {
         let selector: ConfigSelector<ListenerParams> = Arc::new(|p: &ListenerParams| p.clone());
 
         let (cfg_tx, cfg_rx) = watch::channel(params(2301, true));
-        let supervisor = ListenerSupervisor::new("test", factory, selector);
+        let supervisor = ListenerSupervisor::new("test", factory, selector, registry());
         let handle = tokio::spawn(supervisor.run(WatchStream::new(cfg_rx)));
 
         // First attempt starts but the factory fails → listener pauses.
@@ -476,7 +533,7 @@ mod tests {
         let selector: ConfigSelector<ListenerParams> = Arc::new(|p: &ListenerParams| p.clone());
 
         let (_cfg_tx, cfg_rx) = watch::channel(params(2401, true));
-        let supervisor = ListenerSupervisor::new("test", factory, selector);
+        let supervisor = ListenerSupervisor::new("test", factory, selector, registry());
         let handle = tokio::spawn(supervisor.run(WatchStream::new(cfg_rx)));
 
         // Initial bind, then the accept loop dies and the listener auto-restarts

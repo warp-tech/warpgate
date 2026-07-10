@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.26.1-22-gc8678d72-modified"
+    "version": "v0.26.1-34-gccfbfed3-modified"
   },
   "servers": [
     {
@@ -3925,6 +3925,59 @@
         "operationId": "get_security_status"
       }
     },
+    "/network/listeners": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ListenerStatus"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_listener_states"
+      }
+    },
+    "/network/ip-echo": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpEchoInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ip_echo"
+      }
+    },
     "/users/{user_id}/credentials/certificates": {
       "get": {
         "parameters": [
@@ -4823,6 +4876,29 @@
           }
         }
       },
+      "IpEchoInfo": {
+        "type": "object",
+        "title": "IpEchoInfo",
+        "required": [
+          "trust_x_forwarded_headers"
+        ],
+        "properties": {
+          "peer_ip": {
+            "type": "string",
+            "description": "The peer IP of the connection as the server sees it."
+          },
+          "x_forwarded_for": {
+            "type": "string"
+          },
+          "trust_x_forwarded_headers": {
+            "type": "boolean"
+          },
+          "client_ip": {
+            "type": "string",
+            "description": "The client IP after applying the X-Forwarded-For trust setting."
+          }
+        }
+      },
       "IssueCertificateCredentialRequest": {
         "type": "object",
         "title": "IssueCertificateCredentialRequest",
@@ -5108,6 +5184,45 @@
           "UserPrincipalName",
           "SamAccountName"
         ]
+      },
+      "ListenerState": {
+        "type": "string",
+        "enum": [
+          "Disabled",
+          "Listening",
+          "BindFailed"
+        ]
+      },
+      "ListenerStatus": {
+        "type": "object",
+        "title": "ListenerStatus",
+        "required": [
+          "name",
+          "state",
+          "address",
+          "certificates"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ListenerState"
+          },
+          "address": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "certificates": {
+            "type": "array",
+            "description": "The first certificate is the primary one; the rest are SNI certificates.",
+            "items": {
+              "$ref": "#/components/schemas/TlsCertificateInfo"
+            }
+          }
+        }
       },
       "LockedUserInfo": {
         "type": "object",
@@ -6732,6 +6847,26 @@
           },
           "verify": {
             "type": "boolean"
+          }
+        }
+      },
+      "TlsCertificateInfo": {
+        "type": "object",
+        "title": "TlsCertificateInfo",
+        "required": [
+          "domains"
+        ],
+        "properties": {
+          "domains": {
+            "type": "array",
+            "description": "SAN DNS/IP names and the CN of the leaf certificate.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

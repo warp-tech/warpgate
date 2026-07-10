@@ -11,6 +11,7 @@
             "!!**/dist",
             "!**/openapitools.json",
             "!**/package.json",
+            "!**/openapi-schema.json",
             "!**/*.svg"
         ],
         "ignoreUnknown": false

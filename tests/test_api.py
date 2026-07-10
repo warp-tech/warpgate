@@ -833,6 +833,18 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         call=lambda api, r: api.unlock_user_with_http_info("nonexistent-user"),
         expected_statuses={200, 404},
     ),
+    AdminApiTestCase(
+        id="get_listener_states",
+        permission="config_edit",
+        call=lambda api, r: api.get_listener_states_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_ip_echo",
+        permission="config_edit",
+        call=lambda api, r: api.get_ip_echo_with_http_info(),
+        expected_statuses={200},
+    ),
 ]
 
 

@@ -8,6 +8,7 @@ mod known_hosts_list;
 mod ldap_servers;
 mod login_protection;
 mod logs;
+mod network_status;
 mod otp_credentials;
 mod pagination;
 mod parameters;
@@ -67,7 +68,11 @@ pub fn get() -> impl OpenApi {
                 ldap_servers::ImportApi,
             ),
             parameters::Api,
-            (ssh_connection_test::Api, login_protection::Api),
+            (
+                ssh_connection_test::Api,
+                login_protection::Api,
+                network_status::Api,
+            ),
         ),
         (
             certificate_credentials::ListApi,

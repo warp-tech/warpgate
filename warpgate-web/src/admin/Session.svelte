@@ -110,12 +110,12 @@
         <div>
             <h1>session</h1>
             <div class="d-flex align-items-center mt-1">
-                <Tooltip delay="250" target="usernameBadge" animation
-                    >Authenticated user</Tooltip
-                >
-                <Tooltip delay="250" target="targetBadge" animation
-                    >Selected target</Tooltip
-                >
+                <Tooltip delay="250" target="usernameBadge" animation>
+                    Authenticated user
+                </Tooltip>
+                <Tooltip delay="250" target="targetBadge" animation>
+                    Selected target
+                </Tooltip>
 
                 <Badge
                     id="usernameBadge"
