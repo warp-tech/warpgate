@@ -47,6 +47,7 @@ use crate::PROTOCOL_NAME;
 pub async fn bind_server(
     services: Services,
     address: ListenEndpoint,
+    proxy_protocol: bool,
     certificate_and_key: TlsCertificateAndPrivateKey,
 ) -> Result<BoxFuture<'static, Result<()>>> {
     let tls_config = ServerConfig::builder_with_provider(Arc::new(
@@ -62,14 +63,23 @@ pub async fn bind_server(
     let mut listener = address.tcp_accept_stream().await?;
 
     Ok(async move {
-        while let Some(stream) = listener.next().await {
-            let Ok(remote_address) = stream.peer_addr() else {
-                continue;
-            };
+        while let Some(mut stream) = listener.next().await {
             let _ = stream.set_nodelay(true);
             if detect_port_knock(&stream).await {
                 continue;
             }
+            let remote_address = match warpgate_common::helpers::proxy_protocol::remote_address(
+                &mut stream,
+                proxy_protocol,
+            )
+            .await
+            {
+                Ok(remote_address) => remote_address,
+                Err(error) => {
+                    warn!(%error, "Failed to read PROXY protocol header");
+                    continue;
+                }
+            };
 
             let tls_config = tls_config.clone();
             let services = services.clone();

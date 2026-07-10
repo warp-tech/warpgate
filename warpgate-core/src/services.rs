@@ -9,6 +9,7 @@ use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{GlobalParams, SessionId, WarpgateConfig, WarpgateError};
+use warpgate_db_entities::Parameters;
 
 use crate::db::{connect_to_db_and_migrate, populate_db};
 use crate::login_protection::LoginProtectionService;
@@ -112,6 +113,7 @@ impl Services {
         session_id: Option<&SessionId>,
         username: &str,
         protocol: &str,
+        target_name: &str,
         supported_credential_types: &[CredentialKind],
         remote_ip: Option<IpAddr>,
         rate_limit_credential_type: Option<&str>,
@@ -126,10 +128,38 @@ impl Services {
             rate_limit_credential_type,
         )
         .await?;
-        Ok(self
-            .auth_state_store
+        Ok(self.auth_state_store.lock().await.create(
+            session_id,
+            &user,
+            protocol,
+            target_name,
+            policy,
+            remote_ip,
+        ))
+    }
+
+    async fn web_approval_grace_period(&self) -> Result<Option<Duration>, WarpgateError> {
+        Ok(Parameters::Entity::get(&*self.db.lock().await)
+            .await?
+            .web_approval_grace_period_seconds
+            .filter(|s| *s > 0)
+            .and_then(|s| u64::try_from(s).ok())
+            .map(Duration::from_secs))
+    }
+
+    /// If a matching web approval is still within the grace period, satisfies the
+    /// pending `WebUserApproval` requirement and logs an audit event
+    pub async fn try_web_approval_bypass(
+        &self,
+        state_arc: &Arc<Mutex<AuthState>>,
+    ) -> Result<bool, WarpgateError> {
+        let Some(grace) = self.web_approval_grace_period().await? else {
+            return Ok(false);
+        };
+        self.auth_state_store
             .lock()
             .await
-            .create(session_id, &user, protocol, policy, remote_ip))
+            .try_web_approval_bypass(state_arc, grace)
+            .await
     }
 }

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.26.1-32-ga7463594-modified"
+    "version": "v0.26.1-34-gccfbfed3-modified"
   },
   "servers": [
     {
@@ -5496,6 +5496,10 @@
             "type": "integer",
             "format": "int64"
           },
+          "web_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
           "analytics_consent": {
             "$ref": "#/components/schemas/AnalyticsConsent"
           },
@@ -5661,6 +5665,10 @@
             "type": "boolean"
           },
           "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "web_approval_grace_period_seconds": {
             "type": "integer",
             "format": "int64"
           },

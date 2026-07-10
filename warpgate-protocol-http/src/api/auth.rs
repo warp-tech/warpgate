@@ -571,11 +571,20 @@ impl Api {
             return Ok(AuthStateResponse::NotFound);
         };
 
-        let auth_result = {
+        let (auth_result, match_key) = {
             let mut state = state_arc.lock().await;
             state.add_valid_credential(AuthCredential::WebUserApproval);
-            state.verify()
+            (state.verify(), state.web_approval_match_key())
         };
+
+        if let Some(match_key) = match_key {
+            // Remembered so matching attempts can be bypassed within the grace period.
+            services
+                .auth_state_store
+                .lock()
+                .await
+                .record_web_approval(match_key);
+        }
 
         if let AuthResult::Accepted { .. } = auth_result {
             let mut store = services.auth_state_store.lock().await;

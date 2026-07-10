@@ -44,6 +44,7 @@ pub trait ProtocolServer {
     fn bind(
         self,
         address: ListenEndpoint,
+        proxy_protocol: bool,
         tls: Vec<TlsCertificateAndPrivateKey>,
     ) -> impl Future<Output = Result<BoxFuture<'static, Result<()>>>> + Send;
 }

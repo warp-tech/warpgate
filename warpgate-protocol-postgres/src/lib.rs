@@ -39,6 +39,7 @@ impl ProtocolServer for PostgresProtocolServer {
     async fn bind(
         self,
         address: ListenEndpoint,
+        proxy_protocol: bool,
         tls: Vec<TlsCertificateAndPrivateKey>,
     ) -> Result<BoxFuture<'static, Result<()>>> {
         let certificate_and_key = tls
@@ -62,7 +63,7 @@ impl ProtocolServer for PostgresProtocolServer {
         let services = self.services;
         Ok(async move {
             loop {
-                let Some(stream) = listener.next().await else {
+                let Some(mut stream) = listener.next().await else {
                     return Ok(());
                 };
 
@@ -70,9 +71,17 @@ impl ProtocolServer for PostgresProtocolServer {
                     continue;
                 }
 
-                let Ok(remote_address) = stream.peer_addr() else {
-                    // already disconnected
-                    continue;
+                let remote_address = match warpgate_common::helpers::proxy_protocol::remote_address(
+                    &mut stream,
+                    proxy_protocol,
+                )
+                .await
+                {
+                    Ok(remote_address) => remote_address,
+                    Err(error) => {
+                        warn!(%error, "Failed to read PROXY protocol header");
+                        continue;
+                    }
                 };
 
                 // Enable TCP keepalive to prevent idle connections from timing out

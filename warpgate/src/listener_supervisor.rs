@@ -39,6 +39,7 @@ impl TlsPathPair {
 pub struct ListenerParams {
     pub enabled: bool,
     pub endpoint: ListenEndpoint,
+    pub proxy_protocol: bool,
     /// TLS pairs the listener serves (main + SNI). Empty for non-TLS protocols.
     pub tls: Vec<TlsPathPair>,
 }
@@ -51,6 +52,7 @@ pub struct ListenerParams {
 pub type ServerFactory = Arc<
     dyn Fn(
             ListenEndpoint,
+            bool,
             Vec<TlsCertificateAndPrivateKey>,
         ) -> BoxFuture<'static, Result<BoxFuture<'static, Result<()>>>>
         + Send
@@ -236,7 +238,7 @@ impl<C: Send + 'static> ListenerSupervisor<C> {
         info!(name = self.name, endpoint = ?desired.endpoint, "Binding listener");
         // Phase 1: bind. A bind failure is non-fatal — leave the listener stopped
         // (`task` = None) so it retries on the next config or certificate change.
-        match (self.factory)(desired.endpoint.clone(), tls).await {
+        match (self.factory)(desired.endpoint.clone(), desired.proxy_protocol, tls).await {
             // Phase 2: drive the accept loop in its own task. If it ends, the task
             // branch of `run` restarts the listener.
             Ok(accept_loop) => {
@@ -395,6 +397,7 @@ mod tests {
         ListenerParams {
             enabled,
             endpoint: endpoint(port),
+            proxy_protocol: false,
             tls: vec![],
         }
     }
@@ -409,7 +412,7 @@ mod tests {
         starts: tokio::sync::mpsc::UnboundedSender<ListenEndpoint>,
         fail: Arc<AtomicBool>,
     ) -> ServerFactory {
-        Arc::new(move |endpoint: ListenEndpoint, _tls| {
+        Arc::new(move |endpoint: ListenEndpoint, _proxy_protocol, _tls| {
             let _ = starts.send(endpoint);
             let fail = fail.clone();
             async move {
@@ -511,7 +514,7 @@ mod tests {
         let factory: ServerFactory = {
             let starts = starts_tx.clone();
             let accept_calls = accept_calls.clone();
-            Arc::new(move |endpoint: ListenEndpoint, _tls| {
+            Arc::new(move |endpoint: ListenEndpoint, _proxy_protocol, _tls| {
                 let _ = starts.send(endpoint);
                 let accept_calls = accept_calls.clone();
                 async move {
@@ -585,6 +588,7 @@ mod tests {
         let desired = ListenerParams {
             enabled: true,
             endpoint: endpoint(8443),
+            proxy_protocol: false,
             tls: vec![TlsPathPair {
                 certificate: "/etc/warpgate/tls.crt".into(),
                 key: "/etc/warpgate/tls.key".into(),
