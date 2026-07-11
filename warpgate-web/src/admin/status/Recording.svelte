@@ -16,7 +16,7 @@
 
     let error: string | null = $state(null)
 
-    import { adminPermissions } from './lib/store'
+    import { adminPermissions } from '../lib/store'
 
     let recording: Recording | null = $state(null)
 

@@ -1,8 +1,8 @@
 <script lang="ts">
     import { Alert } from '@sveltestrap/sveltestrap'
-    import RelativeDate from 'admin/RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import {
         ApiAuthState,
         type AuthStateResponseInternal,

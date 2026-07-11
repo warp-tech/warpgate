@@ -822,7 +822,7 @@
                                             Manage active blocks &amp; lockouts
                                             on the
                                             <a
-                                                href="/config/login-protection"
+                                                href="/status/login-protection"
                                                 use:link
                                                 >Login protection</a
                                             >

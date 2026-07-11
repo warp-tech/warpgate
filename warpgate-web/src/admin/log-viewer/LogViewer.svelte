@@ -502,7 +502,7 @@
                                 <div class="session">
                                     {#if item.sessionId}
                                         <a
-                                            href="/sessions/{item.sessionId}"
+                                            href="/status/sessions/{item.sessionId}"
                                             use:link
                                         >
                                             {item.sessionId}

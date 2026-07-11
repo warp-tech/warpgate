@@ -78,12 +78,6 @@
         '/target-groups': wrap({
             asyncComponent: () => import('./target-groups/TargetGroups.svelte'),
         }),
-        '/login-protection': wrap({
-            asyncComponent: () => import('./LoginProtection.svelte'),
-        }),
-        '/network': wrap({
-            asyncComponent: () => import('./NetworkStatus.svelte'),
-        }),
     }
 
     let sidebarMode = $state(false)
@@ -165,22 +159,6 @@
         title="Global parameters"
         description="Change instance-wide settings"
         href="/config/parameters"
-        small={sidebarMode}
-    />
-
-    <NavListItem
-        class="mb-2"
-        title="Login protection"
-        description="View blocked IPs and locked users"
-        href="/config/login-protection"
-        small={sidebarMode}
-    />
-
-    <NavListItem
-        class="mb-2"
-        title="Network status"
-        description="Listeners, certificates and client IP detection"
-        href="/config/network"
         small={sidebarMode}
     />
 {/snippet}

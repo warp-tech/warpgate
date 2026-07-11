@@ -11,7 +11,7 @@
     import { stringifyError } from 'common/errors'
     import StatCard from 'common/StatCard.svelte'
     import { onMount } from 'svelte'
-    import RelativeDate from '../RelativeDate.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
 
     let loading = $state(true)
     let error: string | undefined = $state()

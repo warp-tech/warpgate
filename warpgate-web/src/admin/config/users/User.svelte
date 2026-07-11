@@ -41,7 +41,7 @@
     import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
     import { link, replace } from 'svelte-spa-router'
-    import RelativeDate from '../../RelativeDate.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import AdminRolePermissionsBadge from '../AdminRolePermissionsBadge.svelte'
     import AllowedIpRangesEditor from './AllowedIpRangesEditor.svelte'
     import CredentialEditor from './CredentialEditor.svelte'

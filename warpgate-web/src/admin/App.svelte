@@ -2,6 +2,7 @@
     import AuthBar from 'common/AuthBar.svelte'
     import Brand from 'common/Brand.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import Redirect from 'common/Redirect.svelte'
     import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { get } from 'svelte/store'
@@ -40,13 +41,11 @@
 
     const routes: Record<string, WrappedComponent> = {
         '/': wrap({
-            asyncComponent: () => import('./Home.svelte'),
+            component: Redirect,
+            props: { to: '/status/sessions' },
         }),
-        '/sessions/:id': wrap({
-            asyncComponent: () => import('./Session.svelte'),
-        }),
-        '/recordings/:id': wrap({
-            asyncComponent: () => import('./Recording.svelte'),
+        '/status': wrap({
+            asyncComponent: () => import('./status/Status.svelte'),
         }),
         '/log': wrap({
             asyncComponent: () => import('./Log.svelte'),
@@ -75,6 +74,8 @@
     }
     // biome-ignore lint/style/noNonNullAssertion: x
     routes['/config/*'] = routes['/config']!
+    // biome-ignore lint/style/noNonNullAssertion: x
+    routes['/status/*'] = routes['/status']!
 </script>
 
 <Loadable promise={initPromise}>
@@ -84,7 +85,7 @@
                 <Brand />
             </a>
             {#if $serverInfo?.username}
-                <a use:link use:active href="/">Sessions</a>
+                <a use:link use:active href="/status/sessions">Status</a>
                 <a use:link use:active href="/config">Config</a>
                 <a use:link use:active href="/log">Log</a>
             {/if}

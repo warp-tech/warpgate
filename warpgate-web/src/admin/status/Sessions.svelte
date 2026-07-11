@@ -23,9 +23,9 @@
     import { onDestroy } from 'svelte'
     import Fa from 'svelte-fa'
     import { link } from 'svelte-spa-router'
-    import PermissionGate from './lib/PermissionGate.svelte'
-    import { adminPermissions } from './lib/store'
-    import RelativeDate from './RelativeDate.svelte'
+    import PermissionGate from '../lib/PermissionGate.svelte'
+    import { adminPermissions } from '../lib/store'
+    import RelativeDate from 'common/RelativeDate.svelte'
 
     let [showActiveOnly, showActiveOnly$] = autosave(
         'sessions-list:show-active-only',
@@ -148,7 +148,7 @@
         {#snippet item(session)}
             <a
                 class="list-group-item list-group-item-action"
-                href="/sessions/{session.id}"
+                href="/status/sessions/{session.id}"
                 use:link
             >
                 <div class="main">

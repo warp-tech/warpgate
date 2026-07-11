@@ -5,7 +5,7 @@
     import HelpText from 'admin/lib/HelpText.svelte'
     import Loadable from 'common/Loadable.svelte'
     import Fa from 'svelte-fa'
-    import RelativeDate from '../RelativeDate.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
 
     const stateBadges: Record<ListenerState, string> = {
         [ListenerState.Listening]: 'success',

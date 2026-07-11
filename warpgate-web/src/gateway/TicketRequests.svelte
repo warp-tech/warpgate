@@ -8,7 +8,7 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
-    import RelativeDate from 'admin/RelativeDate.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import {

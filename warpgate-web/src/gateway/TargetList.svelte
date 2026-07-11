@@ -323,7 +323,7 @@
                 onclick={() => openWebSsh(sshTarget)}
             >
                 <Fa icon={faTerminal} />
-                Open Web Terminal
+                Web terminal
             </Button>
         {/if}
         <Button

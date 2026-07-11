@@ -27,8 +27,8 @@
     import { onDestroy } from 'svelte'
     import Fa from 'svelte-fa'
     import { link } from 'svelte-spa-router'
-    import LogViewer from './log-viewer/LogViewer.svelte'
-    import RelativeDate from './RelativeDate.svelte'
+    import LogViewer from '../log-viewer/LogViewer.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
 
     interface Props {
         params: { id: string }
@@ -165,7 +165,7 @@
                 {@const metadata = JSON.parse(recording.metadata)}
                 <a
                     class="list-group-item list-group-item-action"
-                    href="/recordings/{recording.id}"
+                    href="/status/recordings/{recording.id}"
                     use:link
                 >
                     <div class="main gap-1">
