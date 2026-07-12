@@ -284,6 +284,9 @@ impl Api {
         parameters.analytics_normal = body.analytics_normal.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
+        if let Some(show_session_menu) = body.show_session_menu {
+            services.set_show_session_menu(show_session_menu);
+        }
         drop(db);
 
         services

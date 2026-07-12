@@ -1,4 +1,5 @@
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,6 +33,7 @@ pub struct Services {
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
     pub listener_status: ListenerStatusRegistry,
+    show_session_menu: Arc<AtomicBool>,
 }
 
 impl Services {
@@ -42,6 +44,7 @@ impl Services {
     ) -> Result<Self> {
         let db = connect_to_db_and_migrate(&config, &params).await?;
         populate_db(&db, &mut config).await?;
+        let show_session_menu = Parameters::Entity::get(&db).await?.show_session_menu;
         let db = Arc::new(Mutex::new(db));
 
         let recordings = SessionRecordings::new(db.clone(), &config, &params)?;
@@ -101,7 +104,21 @@ impl Services {
             login_protection,
             global_params: Arc::new(params),
             listener_status: Default::default(),
+            show_session_menu: Arc::new(AtomicBool::new(show_session_menu)),
         })
+    }
+
+    /// Returns whether proxied HTML responses should include the session menu.
+    ///
+    /// This value mirrors the parameters row without requiring a database query
+    /// on every proxied HTTP request.
+    pub fn show_session_menu(&self) -> bool {
+        self.show_session_menu.load(Ordering::Relaxed)
+    }
+
+    /// Updates the cached session-menu setting after the parameters row changes.
+    pub fn set_show_session_menu(&self, show: bool) {
+        self.show_session_menu.store(show, Ordering::Relaxed);
     }
 
     /// Resolves the user/policy (without the store lock) and inserts a new
