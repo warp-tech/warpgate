@@ -1,10 +1,10 @@
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
-use sea_orm::DatabaseConnection;
+use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection};
 use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
@@ -44,8 +44,35 @@ impl Services {
     ) -> Result<Self> {
         let db = connect_to_db_and_migrate(&config, &params).await?;
         populate_db(&db, &mut config).await?;
-        let show_session_menu = Parameters::Entity::get(&db).await?.show_session_menu;
+        let show_session_menu = Arc::new(AtomicBool::new(
+            Parameters::Entity::get(&db).await?.show_session_menu,
+        ));
+        let should_periodically_sync_show_session_menu =
+            db.get_database_backend() != DatabaseBackend::Sqlite;
         let db = Arc::new(Mutex::new(db));
+
+        if should_periodically_sync_show_session_menu {
+            tokio::spawn({
+                let db = db.clone();
+                let show_session_menu = show_session_menu.clone();
+                async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                        let result = {
+                            let db = db.lock().await;
+                            Parameters::Entity::get(&db).await
+                        };
+                        match result {
+                            Ok(parameters) => show_session_menu
+                                .store(parameters.show_session_menu, Ordering::Relaxed),
+                            Err(error) => {
+                                warn!(?error, "Failed to refresh the session menu setting")
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         let recordings = SessionRecordings::new(db.clone(), &config, &params)?;
         let recordings = Arc::new(Mutex::new(recordings));
@@ -104,7 +131,7 @@ impl Services {
             login_protection,
             global_params: Arc::new(params),
             listener_status: Default::default(),
-            show_session_menu: Arc::new(AtomicBool::new(show_session_menu)),
+            show_session_menu,
         })
     }
 
