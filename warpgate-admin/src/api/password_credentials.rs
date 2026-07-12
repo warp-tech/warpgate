@@ -64,7 +64,7 @@ impl ListApi {
     ) -> Result<GetPasswordCredentialsResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let objects = PasswordCredential::Entity::find()
             .filter(PasswordCredential::Column::UserId.eq(*user_id))
@@ -90,7 +90,7 @@ impl ListApi {
     ) -> Result<CreatePasswordCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let parameters = Parameters::Entity::get(&db).await?;
         let policy = parameters.password_policy();
@@ -158,7 +158,7 @@ impl DetailApi {
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(model) = PasswordCredential::Entity::find_by_id(id.0)
             .filter(PasswordCredential::Column::UserId.eq(*user_id))

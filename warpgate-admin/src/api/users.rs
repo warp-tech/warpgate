@@ -63,7 +63,7 @@ impl ListApi {
     ) -> Result<GetUsersResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let mut users = User::Entity::find().order_by_asc(User::Column::Username);
 
@@ -94,7 +94,7 @@ impl ListApi {
             return Ok(CreateUserResponse::BadRequest(Json("name".into())));
         }
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -202,7 +202,7 @@ impl DetailApi {
     ) -> Result<GetUserResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetUserResponse::NotFound);
@@ -221,7 +221,7 @@ impl DetailApi {
     ) -> Result<UpdateUserResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateUserResponse::NotFound);
@@ -242,7 +242,6 @@ impl DetailApi {
         });
         let user = model.update(&*db).await?;
 
-        drop(db);
 
         ctx.services()
             .rate_limiter_registry
@@ -263,7 +262,7 @@ impl DetailApi {
     ) -> Result<DeleteUserResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersDelete)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserResponse::NotFound);
@@ -304,7 +303,7 @@ impl DetailApi {
     ) -> Result<UnlinkUserFromLdapResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UnlinkUserFromLdapResponse::NotFound);
@@ -339,7 +338,7 @@ impl DetailApi {
 
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(AutoLinkUserToLdapResponse::NotFound);
@@ -533,7 +532,7 @@ impl RolesApi {
     ) -> Result<GetUserRolesResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(_user) = User::Entity::find_by_id(*id).one(&*db).await? else {
             return Ok(GetUserRolesResponse::NotFound);
@@ -572,7 +571,7 @@ impl RolesApi {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<GetUserRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(assignment) = UserRoleAssignment::Entity::find()
             .filter(UserRoleAssignment::Column::UserId.eq(id.0))
@@ -609,7 +608,7 @@ impl RolesApi {
     ) -> Result<AddUserRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let expires_at = body.0.and_then(|b| b.expires_at);
 
         let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
@@ -653,7 +652,7 @@ impl RolesApi {
     ) -> Result<DeleteUserRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);
@@ -705,7 +704,7 @@ impl RolesApi {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateUserRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
             return Ok(UpdateUserRoleResponse::NotFound);
@@ -744,7 +743,7 @@ impl RolesApi {
     ) -> Result<GetUserAdminRolesResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some((_, roles)) = User::Entity::find_by_id(*id)
             .find_with_related(AdminRole::Entity)
@@ -775,7 +774,7 @@ impl RolesApi {
     ) -> Result<AddUserAdminRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(AddUserAdminRoleResponse::NotFound);
@@ -833,7 +832,7 @@ impl RolesApi {
     ) -> Result<DeleteUserAdminRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteUserAdminRoleResponse::NotFound);

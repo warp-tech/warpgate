@@ -30,7 +30,7 @@ impl RawRecordingWriter {
     pub(crate) async fn new(
         path: PathBuf,
         model: Recording::Model,
-        db: Arc<Mutex<DatabaseConnection>>,
+        db: DatabaseConnection,
         live: Option<Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>>,
         params: &GlobalParams,
     ) -> Result<Self> {
@@ -94,7 +94,7 @@ impl RawRecordingWriter {
                 writer.flush().await?;
 
                 let id = model.id;
-                let db = db.lock().await;
+                let db = &db;
                 let recording = Recording::Entity::find_by_id(id)
                     .one(&*db)
                     .await?

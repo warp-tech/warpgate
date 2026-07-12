@@ -94,7 +94,7 @@ impl Api {
         }
 
         // Same global gate as web SSH: the in-browser RDP/VNC desktop clients.
-        if !Parameters::Entity::get(&*ctx.services().db.lock().await)
+        if !Parameters::Entity::get(&ctx.services().db)
             .await
             .map_err(WarpgateError::from)?
             .web_clients_enabled
@@ -103,7 +103,7 @@ impl Api {
         }
 
         let Some(target) = Target::Entity::find_by_id(body.target_id)
-            .one(&*ctx.services().db.lock().await)
+            .one(&ctx.services().db)
             .await
             .context("querying target")?
         else {

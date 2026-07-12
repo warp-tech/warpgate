@@ -49,11 +49,11 @@ impl From<WarpgateError> for CreateTicketRequestError {
 }
 
 pub async fn create_ticket_request(
-    db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
+    db: &sea_orm::DatabaseConnection,
     config_provider: &Arc<Mutex<ConfigProviderEnum>>,
     params: CreateTicketRequestParams,
 ) -> Result<TicketRequestResult, CreateTicketRequestError> {
-    let db_conn = db.lock().await;
+    let db_conn = db;
 
     let policy = Parameters::Entity::get(&db_conn).await?;
 
@@ -76,7 +76,6 @@ pub async fn create_ticket_request(
 
     let has_access = {
         // Must drop db_conn before locking config_provider to avoid deadlock
-        drop(db_conn);
         let mut cp = config_provider.lock().await;
         cp.authorize_target(&params.username, &params.target_name)
             .await?
@@ -137,7 +136,7 @@ pub async fn create_ticket_request(
     // Uses are always admin-controlled (target-level or global policy), not user-specified
     let effective_uses = target.ticket_max_uses.or(policy.ticket_max_uses);
 
-    let db_conn = db.lock().await;
+    let db_conn = db;
 
     let existing_pending = TicketRequest::Entity::find()
         .filter(TicketRequest::Column::UserId.eq(params.user_id))
@@ -253,11 +252,11 @@ async fn insert_self_service_ticket(
 }
 
 pub async fn approve_ticket_request(
-    db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
+    db: &sea_orm::DatabaseConnection,
     request_id: Uuid,
     admin_user_id: Option<Uuid>,
 ) -> Result<Option<TicketRequest::Model>, WarpgateError> {
-    let db_conn = db.lock().await;
+    let db_conn = db;
 
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
         .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Pending))
@@ -320,11 +319,11 @@ impl From<WarpgateError> for ActivateTicketRequestError {
 }
 
 pub async fn activate_ticket_request(
-    db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
+    db: &sea_orm::DatabaseConnection,
     request_id: Uuid,
     user_id: Uuid,
 ) -> Result<(TicketRequest::Model, Secret<String>), ActivateTicketRequestError> {
-    let db_conn = db.lock().await;
+    let db_conn = db;
 
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
         .filter(TicketRequest::Column::UserId.eq(user_id))
@@ -390,12 +389,12 @@ pub async fn activate_ticket_request(
 }
 
 pub async fn deny_ticket_request(
-    db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
+    db: &sea_orm::DatabaseConnection,
     request_id: Uuid,
     admin_user_id: Option<Uuid>,
     reason: Option<String>,
 ) -> Result<Option<TicketRequest::Model>, WarpgateError> {
-    let db_conn = db.lock().await;
+    let db_conn = db;
 
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
         .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Pending))
@@ -429,10 +428,10 @@ pub async fn deny_ticket_request(
 }
 
 pub async fn list_ticket_requests(
-    db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
+    db: &sea_orm::DatabaseConnection,
     status_filter: Option<TicketRequestStatus>,
 ) -> Result<Vec<TicketRequest::Model>, WarpgateError> {
-    let db_conn = db.lock().await;
+    let db_conn = db;
     let mut query = TicketRequest::Entity::find().order_by_desc(TicketRequest::Column::Created);
 
     if let Some(status) = status_filter {

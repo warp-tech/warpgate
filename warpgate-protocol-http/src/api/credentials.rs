@@ -226,7 +226,7 @@ pub fn parameters_based_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
         let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await?;
         let services = ctx.services();
-        let parameters = Parameters::Entity::get(&*services.db.lock().await)
+        let parameters = Parameters::Entity::get(&services.db)
             .await
             .map_err(WarpgateError::from)?;
         if !parameters.allow_own_credential_management {
@@ -253,7 +253,7 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CredentialsStateResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = get_user(auth, &db).await? else {
             return Ok(CredentialsStateResponse::Unauthorized);
@@ -315,7 +315,7 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<ChangePasswordResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = get_user(auth, &db).await? else {
             return Ok(ChangePasswordResponse::Unauthorized);
@@ -380,7 +380,7 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = get_user(auth, &db).await? else {
             return Ok(CreatePublicKeyCredentialResponse::Unauthorized);
@@ -427,7 +427,7 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = get_user(auth, &db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);
@@ -470,7 +470,7 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = get_user(auth, &db).await? else {
             return Ok(CreateOtpCredentialResponse::Unauthorized);
@@ -526,7 +526,7 @@ impl Api {
         _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = get_user(auth, &db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);
@@ -568,7 +568,7 @@ impl Api {
         body: Json<IssueCertificateCredentialRequest>,
     ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = get_user(auth, &db).await? else {
             return Ok(IssueCertificateCredentialResponse::Unauthorized);
@@ -626,7 +626,7 @@ impl Api {
         id: Path<Uuid>,
     ) -> Result<DeleteCertificateCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user) = get_user(auth, &db).await? else {
             return Ok(DeleteCertificateCredentialResponse::Unauthorized);

@@ -53,7 +53,7 @@ impl ImportApi {
             return Ok(ImportLdapUsersResponse::Ok(Json(vec![])));
         }
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(ImportLdapUsersResponse::NotFound);
         };
@@ -298,7 +298,7 @@ impl ListApi {
     ) -> Result<GetLdapServersResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let mut query = LdapServer::Entity::find().order_by_asc(LdapServer::Column::Name);
 
@@ -332,7 +332,7 @@ impl ListApi {
             )));
         }
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         // Check if name already exists
         let existing = LdapServer::Entity::find()
@@ -514,7 +514,7 @@ impl DetailApi {
     ) -> Result<GetLdapServerResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetLdapServerResponse::NotFound);
@@ -537,7 +537,7 @@ impl DetailApi {
     ) -> Result<UpdateLdapServerResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateLdapServerResponse::NotFound);
@@ -603,7 +603,7 @@ impl DetailApi {
     ) -> Result<DeleteLdapServerResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteLdapServerResponse::NotFound);
@@ -644,7 +644,7 @@ impl QueryApi {
     ) -> Result<GetLdapUsersResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::UsersCreate)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetLdapUsersResponse::NotFound);

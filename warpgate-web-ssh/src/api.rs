@@ -104,7 +104,7 @@ pub async fn ws_handler(
 
 async fn handle_client_message(
     session: &WebSshSession,
-    db: &std::sync::Arc<tokio::sync::Mutex<sea_orm::DatabaseConnection>>,
+    db: &sea_orm::DatabaseConnection,
     msg: ClientMessage,
 ) -> Option<ServerMessage> {
     match msg {

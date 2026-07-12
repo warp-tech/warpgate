@@ -56,7 +56,7 @@ impl Api {
         let services = &ctx.services();
 
         let policy = {
-            let db = services.db.lock().await;
+            let db = &services.db;
             Parameters::Entity::get(&db).await?
         };
 

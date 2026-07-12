@@ -229,7 +229,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 let interval = std::cmp::min(retention, audit_retention) / 10;
                 #[allow(clippy::explicit_auto_deref)]
                 match cleanup_db(
-                    &*services.db.lock().await,
+                    &services.db,
                     &*services.recordings.lock().await,
                     &retention,
                     &audit_retention,

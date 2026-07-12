@@ -196,7 +196,7 @@ impl Api {
         }
 
         // Password login can be disabled globally (e.g. SSO-only deployments).
-        if Parameters::Entity::get(&*services.db.lock().await)
+        if Parameters::Entity::get(&services.db)
             .await
             .map_err(WarpgateError::from)?
             .password_login_mode

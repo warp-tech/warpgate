@@ -19,7 +19,7 @@ pub trait SessionHandle {
 #[derive(Clone)]
 pub struct WarpgateServerHandle {
     id: SessionId,
-    db: Arc<Mutex<DatabaseConnection>>,
+    db: DatabaseConnection,
     state: Arc<Mutex<State>>,
     session_state: Arc<Mutex<SessionState>>,
     rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
@@ -28,7 +28,7 @@ pub struct WarpgateServerHandle {
 impl WarpgateServerHandle {
     pub const fn new(
         id: SessionId,
-        db: Arc<Mutex<DatabaseConnection>>,
+        db: DatabaseConnection,
         state: Arc<Mutex<State>>,
         session_state: Arc<Mutex<SessionState>>,
         rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
@@ -59,7 +59,7 @@ impl WarpgateServerHandle {
             state.emit_change();
         }
 
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         Session::Entity::update_many()
             .set(Session::ActiveModel {
@@ -70,7 +70,6 @@ impl WarpgateServerHandle {
             .exec(&*db)
             .await?;
 
-        drop(db);
 
         self.update_rate_limiters().await?;
 
@@ -92,7 +91,7 @@ impl WarpgateServerHandle {
             ));
         };
 
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         Session::Entity::update_many()
             .set(Session::ActiveModel {
@@ -105,7 +104,6 @@ impl WarpgateServerHandle {
             .exec(&*db)
             .await?;
 
-        drop(db);
 
         if previous_target.map(|x| x.id) != Some(target.id) {
             AuditEvent::TargetSessionStarted {

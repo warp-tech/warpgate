@@ -120,7 +120,7 @@ pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bo
         RequestAuthorization::AdminToken => unreachable!(),
     };
 
-    let db = services.db.lock().await;
+    let db = &services.db;
 
     let Some(user_model) = User::Entity::find()
         .filter(User::Entity::username_eq_ci(username))

@@ -65,7 +65,7 @@ impl ListApi {
     ) -> Result<GetTargetsResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let mut targets = Target::Entity::find();
 
@@ -117,7 +117,7 @@ impl ListApi {
             return Ok(CreateTargetResponse::BadRequest(Json("name".into())));
         }
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let existing = Target::Entity::find()
             .filter(Target::Column::Name.eq(body.name.clone()))
             .one(&*db)
@@ -216,7 +216,7 @@ impl DetailApi {
     ) -> Result<GetTargetResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(GetTargetResponse::NotFound);
@@ -235,7 +235,7 @@ impl DetailApi {
     ) -> Result<UpdateTargetResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(UpdateTargetResponse::NotFound);
@@ -270,7 +270,6 @@ impl DetailApi {
         model.ticket_max_uses = Set(body.ticket_max_uses);
         let target = model.update(&*db).await?;
 
-        drop(db);
 
         services
             .rate_limiter_registry
@@ -297,7 +296,7 @@ impl DetailApi {
     ) -> Result<DeleteTargetResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsDelete)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(DeleteTargetResponse::NotFound);
@@ -347,7 +346,7 @@ impl DetailApi {
     ) -> Result<TargetKnownSshHostKeysResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
             return Ok(TargetKnownSshHostKeysResponse::NotFound);
@@ -414,7 +413,7 @@ impl RolesApi {
     ) -> Result<GetTargetRolesResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some((_, roles)) = Target::Entity::find_by_id(*id)
             .find_with_related(Role::Entity)
@@ -445,7 +444,7 @@ impl RolesApi {
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         if !TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
@@ -483,7 +482,7 @@ impl RolesApi {
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::AccessRolesAssign)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(model) = TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))

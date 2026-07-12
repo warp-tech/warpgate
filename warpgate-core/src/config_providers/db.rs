@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use data_encoding::BASE64;
 use sea_orm::sea_query::Expr;
@@ -8,7 +7,6 @@ use sea_orm::{
     EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use time::OffsetDateTime;
-use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
@@ -27,11 +25,11 @@ use warpgate_sso::SsoProviderConfig;
 use super::ConfigProvider;
 
 pub struct DatabaseConfigProvider {
-    db: Arc<Mutex<DatabaseConnection>>,
+    db: DatabaseConnection,
 }
 
 impl DatabaseConfigProvider {
-    pub fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
+    pub fn new(db: &DatabaseConnection) -> Self {
         Self { db: db.clone() }
     }
 
@@ -233,7 +231,7 @@ impl DatabaseConfigProvider {
 
 impl ConfigProvider for DatabaseConfigProvider {
     async fn list_users(&mut self) -> Result<Vec<User>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let users = entities::User::Entity::find()
             .order_by_asc(entities::User::Column::Username)
@@ -246,7 +244,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let targets = entities::Target::Entity::find()
             .order_by_asc(entities::Target::Column::Name)
@@ -259,7 +257,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn get_target_by_name(&mut self, name: &str) -> Result<Option<Target>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let target = entities::Target::Entity::find()
             .filter(entities::Target::Column::Name.eq(name))
@@ -276,7 +274,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         &mut self,
         hostname: &str,
     ) -> Result<Option<Target>, WarpgateError> {
-        let db: tokio::sync::MutexGuard<'_, DatabaseConnection> = self.db.lock().await;
+        let db = &self.db;
 
         let hostname_query = match db.get_database_backend() {
             DatabaseBackend::MySql => {
@@ -302,7 +300,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         username: &str,
         supported_credential_types: &[CredentialKind],
     ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let user_model = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
@@ -420,7 +418,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         preferred_username: Option<String>,
         sso_config: SsoProviderConfig,
     ) -> Result<Option<String>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let AuthCredential::Sso {
             provider: client_provider,
@@ -475,7 +473,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         username: &str,
         client_credential: &AuthCredential,
     ) -> Result<bool, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let user_model = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
@@ -581,7 +579,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         username: &str,
         target_name: &str,
     ) -> Result<bool, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let target_model = entities::Target::Entity::find()
             .filter(entities::Target::Column::Name.eq(target_name))
@@ -639,7 +637,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         managed_role_names: Option<Vec<String>>,
         assigned_role_names: Vec<String>,
     ) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let user = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
@@ -700,7 +698,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         managed_admin_role_names: Option<Vec<String>>,
         assigned_admin_role_names: Vec<String>,
     ) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let user = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
@@ -757,7 +755,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         &self,
         credential: Option<AuthCredential>,
     ) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let Some(AuthCredential::PublicKey {
             kind,
@@ -808,7 +806,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn validate_api_token(&mut self, token: &str) -> Result<Option<User>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         let Some(api_token) = entities::ApiToken::Entity::find()
             .filter(
                 entities::ApiToken::Column::Secret

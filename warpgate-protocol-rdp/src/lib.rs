@@ -26,7 +26,7 @@ use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tracing::{Instrument, debug, error, info_span};
+use tracing::{Instrument, debug, error, info_span, warn};
 use warpgate_common::{ListenEndpoint, ProtocolName, RdpTargetAuth, TargetRdpOptions};
 use warpgate_core::{
     DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
@@ -282,7 +282,10 @@ async fn forward_event(
             // `data` is a zero-copy `Bytes` slice of the wire frame — moved, not copied.
             data,
         },
-        HelperEvent::Error { message } => DesktopEvent::Error(message),
+        HelperEvent::Error { message } => {
+            warn!(%message, "RDP backend error");
+            DesktopEvent::Error(message)
+        }
         HelperEvent::Disconnected => DesktopEvent::State(DesktopState::Disconnected),
     };
     event_tx.send(mapped).await.map_err(|_| ())

@@ -87,7 +87,7 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
     ) -> Result<GetApiTokensResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(GetApiTokensResponse::Unauthorized);
@@ -112,7 +112,7 @@ impl Api {
         body: Json<NewApiToken>,
     ) -> Result<CreateApiTokenResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(CreateApiTokenResponse::Unauthorized);
@@ -159,7 +159,7 @@ impl Api {
         id: Path<Uuid>,
     ) -> Result<DeleteApiTokenResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let Some(user_model) = get_user(auth, &db).await? else {
             return Ok(DeleteApiTokenResponse::Unauthorized);

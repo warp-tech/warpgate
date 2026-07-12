@@ -48,7 +48,7 @@ impl Api {
     ) -> Result<GetSessionResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let session = Session::Entity::find_by_id(id.0).one(&*db).await?;
 
@@ -71,7 +71,7 @@ impl Api {
     ) -> Result<GetSessionRecordingsResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let recordings: Vec<Recording::Model> = Recording::Entity::find()
             .order_by_desc(Recording::Column::Started)
             .filter(Recording::Column::SessionId.eq(id.0))

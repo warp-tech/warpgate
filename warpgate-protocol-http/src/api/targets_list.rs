@@ -62,7 +62,7 @@ impl Api {
         // Fetch target groups for group information
         let services = ctx.services();
         let groups: Vec<TargetGroup::Model> = {
-            let db = services.db.lock().await;
+            let db = &services.db;
             TargetGroup::Entity::find().all(&*db).await
         }?;
 

@@ -1,14 +1,12 @@
 mod db;
 mod sso_user;
-use std::sync::Arc;
 
 pub use db::DatabaseConfigProvider;
 use enum_dispatch::enum_dispatch;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 pub use sso_user::resolve_and_map_sso_user;
 use time::OffsetDateTime;
-use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthCredential, AuthStateUserInfo, CredentialKind, CredentialPolicy};
@@ -85,10 +83,9 @@ pub trait ConfigProvider {
 
 //TODO: move this somewhere
 pub async fn authorize_ticket(
-    db: &Arc<Mutex<DatabaseConnection>>,
+    db: &DatabaseConnection,
     secret: &Secret<String>,
 ) -> Result<Option<(e::Ticket::Model, e::Target::Model, AuthStateUserInfo)>, WarpgateError> {
-    let db = db.lock().await;
     let ticket = {
         e::Ticket::Entity::find()
             .filter(e::Ticket::Column::Secret.eq(&secret.expose_secret()[..]))
@@ -135,19 +132,25 @@ pub async fn authorize_ticket(
 }
 
 pub async fn consume_ticket(
-    db: &Arc<Mutex<DatabaseConnection>>,
+    db: &DatabaseConnection,
     ticket_id: &Uuid,
 ) -> Result<(), WarpgateError> {
-    let db = db.lock().await;
     let ticket = e::Ticket::Entity::find_by_id(*ticket_id).one(&*db).await?;
     let Some(ticket) = ticket else {
         return Err(WarpgateError::InvalidTicket(*ticket_id));
     };
 
-    if let Some(uses_left) = ticket.uses_left {
-        let mut model: e::Ticket::ActiveModel = ticket.into();
-        model.uses_left = Set(Some(uses_left - 1));
-        model.update(&*db).await?;
+    // Decrement atomically
+    if ticket.uses_left.is_some() {
+        e::Ticket::Entity::update_many()
+            .col_expr(
+                e::Ticket::Column::UsesLeft,
+                Expr::col(e::Ticket::Column::UsesLeft).sub(1),
+            )
+            .filter(e::Ticket::Column::Id.eq(*ticket_id))
+            .filter(e::Ticket::Column::UsesLeft.gt(0))
+            .exec(db)
+            .await?;
     }
 
     Ok(())

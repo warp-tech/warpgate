@@ -166,7 +166,7 @@ async fn user_info_for_username(
     services: &Services,
     username: &str,
 ) -> poem::Result<AuthStateUserInfo> {
-    let db = services.db.lock().await;
+    let db = &services.db;
     let model = warpgate_db_entities::User::Entity::find()
         .filter(warpgate_db_entities::User::Entity::username_eq_ci(username))
         .one(&*db)
@@ -266,7 +266,7 @@ pub async fn validate_client_certificate(
     // Convert DER to PEM format for comparison
     let cert_pem = der_to_pem(cert_der);
 
-    let db = services.db.lock().await;
+    let db = &services.db;
 
     // Check if certificate is revoked (by serial number)
     let cert = deserialize_certificate(&cert_pem)?;

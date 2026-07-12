@@ -1,10 +1,8 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter};
 use serde_json::{Map, Value, json};
-use tokio::sync::Mutex;
 use tracing::{debug, warn};
 use warpgate_db_entities::Parameters::AnalyticsConsent;
 use warpgate_db_entities::Target::TargetKind;
@@ -18,7 +16,7 @@ const REPORT_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 const EVENT_NAME: &str = "instance_report";
 
-pub fn start(db: Arc<Mutex<DatabaseConnection>>) {
+pub fn start(db: DatabaseConnection) {
     tokio::spawn(async move {
         tokio::time::sleep(STARTUP_DELAY).await;
         loop {
@@ -62,14 +60,13 @@ pub fn track_url() -> String {
 }
 
 async fn build_properties(
-    db: &Arc<Mutex<DatabaseConnection>>,
+    db: &DatabaseConnection,
     normal: bool,
 ) -> Result<Map<String, Value>> {
     let mut properties = Map::new();
     properties.insert("version_series".into(), json!(major_minor_version()));
 
     if normal {
-        let db = db.lock().await;
         properties.insert(
             "approximate_targets_ssh".into(),
             json!(round_up_to_10(count_targets(&db, TargetKind::Ssh).await?)),
@@ -114,18 +111,16 @@ fn track_payload(instance_id: &str, properties: Map<String, Value>) -> Value {
     })
 }
 
-pub async fn preview(db: &Arc<Mutex<DatabaseConnection>>, normal: bool) -> Result<(String, Value)> {
+pub async fn preview(db: &DatabaseConnection, normal: bool) -> Result<(String, Value)> {
     let instance_id = {
-        let db = db.lock().await;
         Parameters::Entity::get(&db).await?.analytics_instance_id
     };
     let properties = build_properties(db, normal).await?;
     Ok((track_url(), track_payload(&instance_id, properties)))
 }
 
-async fn maybe_report_once(db: &Arc<Mutex<DatabaseConnection>>) -> Result<()> {
+async fn maybe_report_once(db: &DatabaseConnection) -> Result<()> {
     let (consent, normal, instance_id) = {
-        let db = db.lock().await;
         let params = Parameters::Entity::get(&db).await?;
         (
             params.analytics_consent,

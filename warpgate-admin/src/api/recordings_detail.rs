@@ -55,7 +55,7 @@ impl Api {
     ) -> poem::Result<GetRecordingResponse> {
         require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
         let recording = Recording::Entity::find_by_id(id.0)
             .one(&*db)
@@ -81,7 +81,7 @@ impl Api {
     ) -> poem::Result<GetKubernetesRecordingResponse> {
         require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let recordings = ctx.services().recordings.lock().await;
 
         let recording = Recording::Entity::find_by_id(id.0)
@@ -118,7 +118,7 @@ pub async fn api_get_recording_cast(
 ) -> poem::Result<String> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let db = ctx.services().db.lock().await;
+    let db = &ctx.services().db;
 
     let recording = Recording::Entity::find_by_id(id.0)
         .filter(Recording::Column::Kind.eq(RecordingKind::Terminal))
@@ -176,7 +176,7 @@ pub async fn api_get_recording_tcpdump(
 ) -> poem::Result<Bytes> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let db = ctx.services().db.lock().await;
+    let db = &ctx.services().db;
 
     let recording = Recording::Entity::find_by_id(id.0)
         .filter(Recording::Column::Kind.eq(RecordingKind::Traffic))
@@ -205,7 +205,7 @@ async fn find_desktop_recording(
     ctx: &AuthenticatedRequestContext,
     id: Uuid,
 ) -> poem::Result<Recording::Model> {
-    let db = ctx.services().db.lock().await;
+    let db = &ctx.services().db;
     Recording::Entity::find_by_id(id)
         .filter(Recording::Column::Kind.eq(RecordingKind::Desktop))
         .one(&*db)
