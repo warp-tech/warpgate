@@ -8445,6 +8445,7 @@ dependencies = [
  "poem-openapi",
  "regex",
  "reqwest 0.13.4",
+ "rustls 0.23.41",
  "sea-orm",
  "serde",
  "serde_json",

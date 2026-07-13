@@ -1,5 +1,6 @@
 pub mod api;
 mod catchall;
+mod client_cache;
 mod common;
 mod error;
 mod middleware;
@@ -9,7 +10,6 @@ mod session_handle;
 
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use common::inject_request_authorization;
@@ -43,6 +43,7 @@ use warpgate_web_desktop::api::ws_handler as desktop_web_client_ws_handler;
 use warpgate_web_ssh::WebSshClientManager;
 use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 
+use crate::client_cache::{HTTP_CLIENT_CACHE_VACUUM_INTERVAL, HttpClientCache};
 use crate::common::{SESSION_COOKIE_NAME, endpoint_auth, page_auth};
 use crate::error::error_page;
 use crate::middleware::{
@@ -93,6 +94,7 @@ impl ProtocolServer for HTTPProtocolServer {
     ) -> Result<BoxFuture<'static, Result<()>>> {
         let session_storage = make_session_storage();
         let session_store = SessionStore::new();
+        let http_client_cache = HttpClientCache::default();
 
         let cache_bust = || {
             SetHeader::new().overriding(
@@ -290,13 +292,15 @@ impl ProtocolServer for HTTPProtocolServer {
             ))
             .with(CookieHostMiddleware::new(base_cookie_domain))
             .data(UnauthenticatedRequestContext::new(self.services.clone()).await)
+            .data(http_client_cache.clone())
             .data(session_store.clone())
             .data(session_storage);
 
         tokio::spawn(async move {
             loop {
                 session_store.lock().await.vacuum(session_max_age);
-                tokio::time::sleep(Duration::from_secs(60)).await;
+                http_client_cache.vacuum().await;
+                tokio::time::sleep(HTTP_CLIENT_CACHE_VACUUM_INTERVAL).await;
             }
         });
 
