@@ -1,5 +1,4 @@
 use std::net::IpAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use sea_orm::{
@@ -7,7 +6,6 @@ use sea_orm::{
     PaginatorTrait, QueryFilter, Set, TransactionTrait,
 };
 use time::OffsetDateTime;
-use tokio::sync::Mutex;
 use tracing::{debug, info};
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
@@ -88,7 +86,7 @@ pub struct CleanupStats {
 /// for the read path; the cache is warmed on startup and updated incrementally
 /// as blocks/lockouts are created or cleared.
 pub struct LoginProtectionService {
-    db: Arc<Mutex<DatabaseConnection>>,
+    db: DatabaseConnection,
     cache: LoginProtectionCache,
 }
 
@@ -147,10 +145,10 @@ impl LoginProtectionService {
     }
 
     /// Create the service and warm the cache from DB state.
-    pub async fn new(db: Arc<Mutex<DatabaseConnection>>) -> Result<Self, WarpgateError> {
+    pub async fn new(db: DatabaseConnection) -> Result<Self, WarpgateError> {
         let cache = LoginProtectionCache::new();
         {
-            let db_conn = db.lock().await;
+            let db_conn = &db;
             if Self::read_config(&db_conn).await?.enabled {
                 cache.load_from_db(&db_conn).await?;
             }
@@ -163,7 +161,7 @@ impl LoginProtectionService {
         &self,
         ip: &IpAddr,
     ) -> Result<Option<IpBlockInfo>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         if !Self::read_config(&db).await?.enabled {
             return Ok(None);
         }
@@ -201,7 +199,7 @@ impl LoginProtectionService {
         &self,
         username: &str,
     ) -> Result<Option<UserLockInfo>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         let config = Self::read_config(&db).await?;
         if !config.enabled {
             return Ok(None);
@@ -253,7 +251,7 @@ impl LoginProtectionService {
         &self,
         attempt: FailedAttemptInfo,
     ) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         let config = Self::read_config(&db).await?;
         if !config.enabled {
             return Ok(());
@@ -315,7 +313,6 @@ impl LoginProtectionService {
         };
 
         txn.commit().await?;
-        drop(db);
 
         // Reflect the new state in the cache without a full reload.
         if let Some(info) = new_block {
@@ -453,7 +450,7 @@ impl LoginProtectionService {
         ip: &IpAddr,
         username: &str,
     ) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         if !Self::read_config(&db).await?.enabled {
             return Ok(());
         }
@@ -473,7 +470,7 @@ impl LoginProtectionService {
 
     /// Admin: unblock an IP and clear its attempt history.
     pub async fn unblock_ip(&self, ip: &IpAddr) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         IpBlock::Entity::delete_many()
             .filter(IpBlock::Column::IpAddress.eq(ip.to_string()))
             .exec(&*db)
@@ -482,7 +479,6 @@ impl LoginProtectionService {
             .filter(FailedLoginAttempt::Column::RemoteIp.eq(ip.to_string()))
             .exec(&*db)
             .await?;
-        drop(db);
 
         self.cache.unblock_ip(ip).await;
         info!(ip = %ip, "IP unblocked by admin");
@@ -491,7 +487,7 @@ impl LoginProtectionService {
 
     /// Admin: unlock a user account and clear its attempt history.
     pub async fn unlock_user(&self, username: &str) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         UserLockout::Entity::delete_many()
             .filter(UserLockout::Column::Username.eq(username))
             .exec(&*db)
@@ -500,7 +496,6 @@ impl LoginProtectionService {
             .filter(FailedLoginAttempt::Column::Username.eq(username))
             .exec(&*db)
             .await?;
-        drop(db);
 
         self.cache.unlock_user(username).await;
         info!(username = %username, "User unlocked by admin");
@@ -509,7 +504,7 @@ impl LoginProtectionService {
 
     /// Security status for the admin dashboard.
     pub async fn get_security_status(&self) -> Result<SecurityStatus, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         let now = OffsetDateTime::now_utc();
 
         let blocked_ip_count = IpBlock::Entity::find()
@@ -546,7 +541,7 @@ impl LoginProtectionService {
 
     /// List all currently blocked IPs.
     pub async fn list_blocked_ips(&self) -> Result<Vec<IpBlockInfo>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         let now = OffsetDateTime::now_utc();
         let blocks = IpBlock::Entity::find()
             .filter(IpBlock::Column::ExpiresAt.gt(now))
@@ -570,7 +565,7 @@ impl LoginProtectionService {
 
     /// List all currently locked users.
     pub async fn list_locked_users(&self) -> Result<Vec<UserLockInfo>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         let now = OffsetDateTime::now_utc();
         let lockouts = UserLockout::Entity::find()
             .filter(
@@ -595,7 +590,7 @@ impl LoginProtectionService {
     /// Background cleanup: remove expired blocks, lockouts, and old attempts.
     /// Reads the enabled flag from the DB so it honours runtime config changes.
     pub async fn cleanup_expired(&self) -> Result<CleanupStats, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         let config = Self::read_config(&db).await?;
         if !config.enabled {
             return Ok(CleanupStats {
@@ -624,7 +619,6 @@ impl LoginProtectionService {
             .exec(&*db)
             .await?;
 
-        drop(db);
         self.cache.clear_expired().await;
 
         let stats = CleanupStats {

@@ -38,7 +38,7 @@ pub async fn web_reauth_required(
         return Ok(false);
     }
 
-    let Some(max_age) = Parameters::Entity::get(&*ctx.services().db.lock().await)
+    let Some(max_age) = Parameters::Entity::get(&ctx.services().db)
         .await?
         .web_auth_max_age_seconds
     else {

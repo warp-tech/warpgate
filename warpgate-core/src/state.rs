@@ -18,14 +18,14 @@ use crate::{SessionHandle, WarpgateServerHandle};
 
 pub struct State {
     pub sessions: HashMap<SessionId, Arc<Mutex<SessionState>>>,
-    db: Arc<Mutex<DatabaseConnection>>,
+    db: DatabaseConnection,
     rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     change_sender: broadcast::Sender<()>,
 }
 
 impl State {
     pub fn new(
-        db: &Arc<Mutex<DatabaseConnection>>,
+        db: &DatabaseConnection,
         rate_limiter_registry: &Arc<Mutex<RateLimiterRegistry>>,
     ) -> Arc<Mutex<Self>> {
         let sender = broadcast::channel(2).0;
@@ -68,7 +68,7 @@ impl State {
                 ..Default::default()
             };
 
-            let db = self_.db.lock().await;
+            let db = &self_.db;
             values
                 .insert(&*db)
                 .await
@@ -115,7 +115,7 @@ impl State {
 
     async fn mark_session_complete(&self, id: Uuid) -> Result<()> {
         use sea_orm::ActiveValue::Set;
-        let db = self.db.lock().await;
+        let db = &self.db;
         let session = Session::Entity::find_by_id(id)
             .one(&*db)
             .await?

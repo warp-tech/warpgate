@@ -19,7 +19,7 @@ pub async fn command(
     let config = load_config(params, true)?;
     let services = Services::new(config.clone(), None, params.clone()).await?;
 
-    let db = services.db.lock().await;
+    let db = &services.db;
 
     let db_user = if let Some(x) = User::Entity::find()
         .filter(User::Entity::username_eq_ci(username))

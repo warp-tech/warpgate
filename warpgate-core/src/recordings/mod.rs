@@ -70,7 +70,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct RecordingWriterOpener {
     folder: PathBuf,
     model: Recording::Model,
-    db: Arc<Mutex<DatabaseConnection>>,
+    db: DatabaseConnection,
     live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
     params: GlobalParams,
 }
@@ -118,7 +118,7 @@ where
 }
 
 pub struct SessionRecordings {
-    db: Arc<Mutex<DatabaseConnection>>,
+    db: DatabaseConnection,
     path: PathBuf,
     config: RecordingsConfig,
     live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
@@ -127,7 +127,7 @@ pub struct SessionRecordings {
 
 impl SessionRecordings {
     pub fn new(
-        db: Arc<Mutex<DatabaseConnection>>,
+        db: DatabaseConnection,
         config: &WarpgateConfig,
         params: &GlobalParams,
     ) -> Result<Self> {
@@ -168,7 +168,7 @@ impl SessionRecordings {
         }
 
         let model = {
-            let db = self.db.lock().await;
+            let db = &self.db;
             let existing = Recording::Entity::find()
                 .filter(
                     Recording::Column::SessionId

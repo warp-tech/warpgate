@@ -21,7 +21,7 @@ use crate::{
 
 #[derive(Clone)]
 pub struct Services {
-    pub db: Arc<Mutex<DatabaseConnection>>,
+    pub db: DatabaseConnection,
     pub recordings: Arc<Mutex<SessionRecordings>>,
     pub config: Arc<Mutex<WarpgateConfig>>,
     pub state: Arc<Mutex<State>>,
@@ -42,8 +42,6 @@ impl Services {
     ) -> Result<Self> {
         let db = connect_to_db_and_migrate(&config, &params).await?;
         populate_db(&db, &mut config).await?;
-        let db = Arc::new(Mutex::new(db));
-
         let recordings = SessionRecordings::new(db.clone(), &config, &params)?;
         let recordings = Arc::new(Mutex::new(recordings));
 
@@ -139,7 +137,7 @@ impl Services {
     }
 
     async fn web_approval_grace_period(&self) -> Result<Option<Duration>, WarpgateError> {
-        Ok(Parameters::Entity::get(&*self.db.lock().await)
+        Ok(Parameters::Entity::get(&self.db)
             .await?
             .web_approval_grace_period_seconds
             .filter(|s| *s > 0)

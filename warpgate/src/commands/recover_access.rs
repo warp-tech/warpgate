@@ -20,7 +20,7 @@ pub async fn command(params: &GlobalParams, username: Option<&String>) -> Result
     warpgate_protocol_ssh::generate_keys(&config, params, "client")?;
 
     let theme = ColorfulTheme::default();
-    let db = services.db.lock().await;
+    let db = &services.db;
 
     let users = User::Entity::find()
         .order_by_asc(User::Column::Username)

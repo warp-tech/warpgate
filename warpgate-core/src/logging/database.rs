@@ -1,9 +1,8 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use sea_orm::query::JsonValue;
 use sea_orm::{ActiveModelTrait, DatabaseConnection};
 use time::OffsetDateTime;
-use tokio::sync::Mutex;
 use tracing::{Subscriber, error};
 use tracing_subscriber::Layer;
 use tracing_subscriber::registry::LookupSpan;
@@ -31,7 +30,7 @@ where
     })
 }
 
-pub fn install_database_logger(database: Arc<Mutex<DatabaseConnection>>) {
+pub fn install_database_logger(database: DatabaseConnection) {
     tokio::spawn(async move {
         #[allow(clippy::expect_used)]
         let mut receiver = LOG_SENDER
@@ -42,8 +41,7 @@ pub fn install_database_logger(database: Arc<Mutex<DatabaseConnection>>) {
             match receiver.recv().await {
                 Err(_) => break,
                 Ok(log_entry) => {
-                    let database = database.lock().await;
-                    if let Err(error) = log_entry.insert(&*database).await {
+                    if let Err(error) = log_entry.insert(&database).await {
                         error!(?error, "Failed to store log entry");
                     }
                 }

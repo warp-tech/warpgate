@@ -142,7 +142,7 @@ impl Api {
             .map(|x| x.to_string());
 
         let parameters = {
-            Parameters::Entity::get(&*ctx.services().db.lock().await)
+            Parameters::Entity::get(&ctx.services().db)
                 .await
                 .context("loading parameters")?
         };
@@ -172,7 +172,7 @@ impl Api {
         };
 
         let has_ldap = LdapServer::Entity::find()
-            .one(&*ctx.services().db.lock().await)
+            .one(&ctx.services().db)
             .await
             .context("loading LDAP servers")?
             .is_some();
@@ -231,7 +231,7 @@ impl Api {
         // compute admin permissions (only if authenticated)
         let admin_permissions = if let Some(ctx) = &auth_ctx {
             if let Some(username) = ctx.auth.username() {
-                let db = ctx.services().db.lock().await;
+                let db = &ctx.services().db;
                 let perms = {
                     let mut combined = AdminPermissions::default();
                     if let Some(user) = User::Entity::find()
@@ -391,7 +391,7 @@ impl Api {
             return Ok(DismissTutorialResponse::Forbidden);
         }
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let mut parameters = Parameters::Entity::get(&db)
             .await
             .context("loading parameters")?

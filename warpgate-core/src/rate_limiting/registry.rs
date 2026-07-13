@@ -1,8 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use sea_orm::{DatabaseConnection, EntityTrait};
-use tokio::sync::Mutex;
 use tracing::debug;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
@@ -13,14 +11,14 @@ use super::{RateLimiterStackHandle, WarpgateRateLimiter};
 use crate::{SessionState, State};
 
 pub struct RateLimiterRegistry {
-    db: Arc<Mutex<DatabaseConnection>>,
+    db: DatabaseConnection,
     global_rate_limiter: SharedWarpgateRateLimiter,
     user_rate_limiters: HashMap<Uuid, SharedWarpgateRateLimiter>,
     target_rate_limiters: HashMap<Uuid, SharedWarpgateRateLimiter>,
 }
 
 impl RateLimiterRegistry {
-    pub fn new(db: Arc<Mutex<DatabaseConnection>>) -> Self {
+    pub fn new(db: DatabaseConnection) -> Self {
         Self {
             db,
             global_rate_limiter: WarpgateRateLimiter::unlimited(),
@@ -50,7 +48,7 @@ impl RateLimiterRegistry {
     }
 
     async fn global_quota(&self) -> Result<Option<u32>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         let parameters = Parameters::Entity::get(&db).await?;
         Ok(parameters.rate_limit_bytes_per_second.map(|x| x as u32))
     }
@@ -69,7 +67,7 @@ impl RateLimiterRegistry {
     }
 
     async fn quota_for_user(&self, user_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         let user = User::Entity::find_by_id(*user_id).one(&*db).await?;
         Ok(user
             .and_then(|u| u.rate_limit_bytes_per_second)
@@ -90,7 +88,7 @@ impl RateLimiterRegistry {
     }
 
     async fn quota_for_target(&self, target_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         let target = Target::Entity::find_by_id(*target_id).one(&*db).await?;
         Ok(target
             .and_then(|t| t.rate_limit_bytes_per_second)

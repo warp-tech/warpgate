@@ -50,7 +50,7 @@ impl Api {
 
         require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let mut q = Session::Entity::find().order_by_desc(Session::Column::Started);
 
         if active_only.unwrap_or(false) {

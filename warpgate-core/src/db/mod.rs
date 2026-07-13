@@ -4,7 +4,7 @@ use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ConnectOptions, Database, DatabaseConnection, EntityOrSelect, EntityTrait, ModelTrait,
-    QueryFilter, QuerySelect, TransactionTrait,
+    QueryFilter, QuerySelect,
 };
 use time::OffsetDateTime;
 use tracing::error;
@@ -20,6 +20,7 @@ pub async fn connect_to_db(
     params: &GlobalParams,
 ) -> Result<DatabaseConnection> {
     let mut url = url::Url::parse(&config.store.database_url.expose_secret()[..])?;
+
     if url.scheme() == "sqlite" {
         let path = url.path();
         let mut abs_path = params.paths_relative_to().clone();
@@ -35,15 +36,15 @@ pub async fn connect_to_db(
                 .to_str()
                 .ok_or_else(|| anyhow::anyhow!("Failed to convert database path to string"))?,
         );
-
         url.set_query(Some("mode=rwc"));
 
-        let db = Database::connect(ConnectOptions::new(url.to_string())).await?;
-        db.begin().await?.commit().await?;
+        let connection = connect_to_sqlite(url.as_str()).await?;
 
         if params.should_secure_files() {
             secure_file(&abs_path)?;
         }
+
+        return Ok(connection);
     }
 
     let mut opt = ConnectOptions::new(url.to_string());
@@ -57,6 +58,37 @@ pub async fn connect_to_db(
     let connection = Database::connect(opt).await?;
 
     Ok(connection)
+}
+
+/// WAL mode required to allow multiple concurrent writes to wait for each other
+/// instead of failing
+#[cfg(feature = "sqlite")]
+async fn connect_to_sqlite(url: &str) -> Result<DatabaseConnection> {
+    use std::str::FromStr;
+
+    use sea_orm::SqlxSqliteConnector;
+    use sea_orm::sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+
+    let connect_options = SqliteConnectOptions::from_str(url)?
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .busy_timeout(Duration::from_secs(30));
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(100)
+        .min_connections(5)
+        .acquire_timeout(Duration::from_secs(8))
+        .idle_timeout(Duration::from_secs(8))
+        .max_lifetime(Duration::from_secs(8))
+        .connect_with(connect_options)
+        .await?;
+
+    Ok(SqlxSqliteConnector::from_sqlx_sqlite_pool(pool))
+}
+
+#[cfg(not(feature = "sqlite"))]
+async fn connect_to_sqlite(_url: &str) -> Result<DatabaseConnection> {
+    anyhow::bail!("SQLite support is not enabled in this build")
 }
 
 pub async fn connect_to_db_and_migrate(

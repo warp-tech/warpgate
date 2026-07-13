@@ -159,11 +159,10 @@ impl Api {
             )));
         }
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(CreateTicketRequestResponse::Unauthorized);
         };
-        drop(db);
 
         let target_name = body.target_name.trim().to_string();
         if target_name.is_empty() {
@@ -211,7 +210,7 @@ impl Api {
         if is_ticket_session(&ctx) {
             return Ok(GetTicketRequestsResponse::Unauthorized);
         }
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(GetTicketRequestsResponse::Unauthorized);
         };
@@ -264,7 +263,7 @@ impl Api {
         if is_ticket_session(&ctx) {
             return Ok(GetTicketRequestResponse::Unauthorized);
         }
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(GetTicketRequestResponse::Unauthorized);
         };
@@ -297,11 +296,10 @@ impl Api {
         if is_ticket_session(&ctx) {
             return Ok(ActivateTicketRequestResponse::Unauthorized);
         }
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(ActivateTicketRequestResponse::Unauthorized);
         };
-        drop(db);
 
         match activate_ticket_request(&ctx.services().db, id.0, user_model.id).await {
             Ok((request, secret)) => Ok(ActivateTicketRequestResponse::Ok(Json(
@@ -341,7 +339,7 @@ impl Api {
         if is_ticket_session(&ctx) {
             return Ok(GetMyTicketsResponse::Unauthorized);
         }
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(GetMyTicketsResponse::Unauthorized);
         };
@@ -390,7 +388,7 @@ impl Api {
         if is_ticket_session(&ctx) {
             return Ok(DeleteMyTicketResponse::Unauthorized);
         }
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let Some(user_model) = get_user(&ctx.auth, &db).await? else {
             return Ok(DeleteMyTicketResponse::Unauthorized);
         };

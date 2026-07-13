@@ -134,7 +134,7 @@ impl Api {
     ) -> Result<GetParametersResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
         let parameters = Parameters::Entity::get(&db).await?;
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
@@ -216,7 +216,7 @@ impl Api {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
         let services = ctx.services();
-        let db = services.db.lock().await;
+        let db = &services.db;
         let mut parameters = Parameters::Entity::get(&db).await?.into_active_model();
 
         parameters.allow_own_credential_management =
@@ -284,7 +284,6 @@ impl Api {
         parameters.analytics_normal = body.analytics_normal.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
-        drop(db);
 
         services
             .rate_limiter_registry
