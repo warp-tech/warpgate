@@ -68,15 +68,16 @@ impl HttpClientCache {
     ) -> Result<reqwest::Client> {
         let now = Instant::now();
         let configuration = ClientConfiguration::from(options);
-        let mut clients = self.clients.lock().await;
 
-        clients.retain(|_, entry| now.duration_since(entry.last_used) < self.idle_ttl);
-
-        if let Some(entry) = clients.get_mut(target_name)
-            && entry.configuration == configuration
+        // Don't hold the lock while building the client.
         {
-            entry.last_used = now;
-            return Ok(entry.client.clone());
+            let mut clients = self.clients.lock().await;
+            if let Some(entry) = clients.get_mut(target_name)
+                && entry.configuration == configuration
+            {
+                entry.last_used = now;
+                return Ok(entry.client.clone());
+            }
         }
 
         let client = build_client(&configuration)?;
@@ -84,7 +85,7 @@ impl HttpClientCache {
         self.build_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        clients.insert(
+        self.clients.lock().await.insert(
             target_name.to_string(),
             CachedClient {
                 configuration,
@@ -193,12 +194,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rebuilds_client_after_idle_ttl() {
+    async fn vacuum_evicts_idle_client_forcing_rebuild() {
         install_crypto_provider();
         let cache = HttpClientCache::new(Duration::ZERO);
         let options = make_options("https://example.com");
 
         cache.client_for("target", &options).await.unwrap();
+        cache.vacuum().await;
         cache.client_for("target", &options).await.unwrap();
 
         assert_eq!(
