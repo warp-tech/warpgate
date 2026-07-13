@@ -30,6 +30,7 @@ use warpgate_common_http::{
 use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
+use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
 use crate::session::SessionStore;
 
@@ -277,42 +278,15 @@ pub async fn proxy_normal_request(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
     body: Body,
+    target_name: &str,
     options: &TargetHTTPOptions,
+    client_cache: &HttpClientCache,
 ) -> poem::Result<Response> {
     let uri = construct_uri(req, options, false)?;
 
     tracing::debug!("URI: {:?}", uri);
 
-    let mut client = reqwest::Client::builder()
-        .gzip(true)
-        .redirect(reqwest::redirect::Policy::none())
-        .connection_verbose(true);
-
-    if options.tls.mode == TlsMode::Required {
-        client = client.https_only(true);
-    }
-
-    client = client.redirect(reqwest::redirect::Policy::custom({
-        let tls_mode = options.tls.mode;
-        let uri = uri.clone();
-        move |attempt| {
-            if tls_mode == TlsMode::Preferred
-                && uri.scheme() == Some(&Scheme::HTTP)
-                && attempt.url().scheme() == "https"
-            {
-                debug!("Following HTTP->HTTPS redirect");
-                attempt.follow()
-            } else {
-                attempt.stop()
-            }
-        }
-    }));
-
-    if !options.tls.verify {
-        client = client.danger_accept_invalid_certs(true);
-    }
-
-    let client = client.build().context("Could not build request")?;
+    let client = client_cache.client_for(target_name, options).await?;
 
     let (authorization_header, uri) = extract_basic_auth(uri)?;
 

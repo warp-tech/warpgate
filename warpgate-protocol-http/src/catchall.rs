@@ -13,6 +13,7 @@ use warpgate_common_http::{
 };
 use warpgate_core::{ConfigProvider, WarpgateServerHandle};
 
+use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
 
@@ -33,6 +34,7 @@ pub async fn catchall_endpoint(
     session: &Session,
     body: Body,
     ctx: Data<&AuthenticatedRequestContext>,
+    http_client_cache: Data<&HttpClientCache>,
     server_handle: Option<Data<&Arc<Mutex<WarpgateServerHandle>>>>,
 ) -> poem::Result<Response> {
     let target_and_options = get_target_for_request(req, &ctx).await?;
@@ -53,7 +55,7 @@ pub async fn catchall_endpoint(
             .instrument(span)
             .await?
             .into_response(),
-        None => proxy_normal_request(req, *ctx, body, &options)
+        None => proxy_normal_request(req, *ctx, body, &target.name, &options, *http_client_cache)
             .instrument(span)
             .await?
             .into_response(),
