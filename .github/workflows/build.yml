@@ -143,7 +143,7 @@ jobs:
           mv cdx.xml dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
 
       - name: Upload release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
