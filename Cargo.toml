@@ -120,6 +120,7 @@ thiserror = { version = "2", default-features = false }
 rand = { version = "0.10", default-features = false }
 rand_chacha = { version = "0.10", default-features = false }
 rand_core = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
 dialoguer = { version = "0.12", default-features = false, features = [
     "editor",
     "password",

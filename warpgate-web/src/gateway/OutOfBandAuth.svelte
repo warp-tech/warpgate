@@ -1,12 +1,21 @@
 <script lang="ts">
-    import { Alert } from '@sveltestrap/sveltestrap'
+    import {
+        Alert,
+        ButtonGroup,
+        Dropdown,
+        DropdownItem,
+        DropdownMenu,
+        DropdownToggle,
+    } from '@sveltestrap/sveltestrap'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import { formatDurationAsHumantime } from 'common/duration'
     import Loadable from 'common/Loadable.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
     import {
         ApiAuthState,
         type AuthStateResponseInternal,
         api,
+        WebApprovalScope,
     } from 'gateway/lib/api'
 
     interface Props {
@@ -17,6 +26,10 @@
 
     let authState: AuthStateResponseInternal | undefined = $state()
 
+    let cachingGrace = $derived(authState?.webApprovalCachingGraceSeconds ?? 0)
+    let cachingEnabled = $derived(cachingGrace > 0)
+    let graceLabel = $derived(formatDurationAsHumantime(cachingGrace))
+
     async function reload() {
         authState = await api.getAuthState({ id: params.stateId })
     }
@@ -25,14 +38,17 @@
         await reload()
     }
 
-    async function approve() {
-        api.approveAuth({ id: params.stateId })
+    async function approve(scope: WebApprovalScope) {
+        await api.approveAuth({
+            id: params.stateId,
+            approveAuthRequest: { scope },
+        })
         await reload()
         window.close()
     }
 
     async function reject() {
-        api.rejectAuth({ id: params.stateId })
+        await api.rejectAuth({ id: params.stateId })
         await reload()
         window.close()
     }
@@ -86,13 +102,39 @@
             <Alert color="danger"> Rejected </Alert>
         {:else}
             <div class="d-flex">
-                <AsyncButton
-                    color="primary"
-                    class="d-flex align-items-center ms-auto"
-                    click={approve}
-                >
-                    Authorize
-                </AsyncButton>
+                <div class="ms-auto"></div>
+                {#if cachingEnabled}
+                    <ButtonGroup>
+                        <AsyncButton
+                            color="primary"
+                            click={() => approve(WebApprovalScope.Target)}
+                        >
+                            Authorize & remember for {graceLabel}
+                        </AsyncButton>
+                            <Dropdown class="btn-group">
+                                <DropdownToggle color="primary" caret class="ps-2" />
+                                <DropdownMenu end>
+                                    <DropdownItem
+                                        onclick={() => approve(WebApprovalScope.AllTargets)}
+                                    >
+                                        Authorize for all targets & remember for {graceLabel}
+                                    </DropdownItem>
+                                    <DropdownItem
+                                        onclick={() => approve(WebApprovalScope.Once)}
+                                    >
+                                        Authorize this time only
+                                    </DropdownItem>
+                                </DropdownMenu>
+                            </Dropdown>
+                    </ButtonGroup>
+                {:else}
+                    <AsyncButton
+                        color="primary"
+                        click={() => approve(WebApprovalScope.Once)}
+                    >
+                        Authorize
+                    </AsyncButton>
+                {/if}
                 <AsyncButton
                     color="secondary"
                     class="d-flex align-items-center ms-2"

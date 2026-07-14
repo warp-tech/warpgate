@@ -2,6 +2,7 @@ use bytes::Bytes;
 use poem_openapi::Enum;
 use russh::keys::Algorithm;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{Secret, UserCertificateCredential};
 
@@ -59,6 +60,49 @@ impl AuthCredential {
             Self::Otp { .. } => "one-time password".to_string(),
             Self::Sso { provider, .. } => format!("SSO ({provider})"),
             Self::WebUserApproval => "in-browser auth".to_string(),
+        }
+    }
+}
+
+/// A value-bound fingerprint of an [`AuthCredential`],
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AuthCredentialFingerprint {
+    // OTP is represented by kind only to avoid a mismatch every 30s,
+    // also its key ID is not known at this time
+    Otp,
+    Password { hash: [u8; 32] },
+    PublicKey { kind: String, hash: [u8; 32] },
+    Certificate { hash: [u8; 32] },
+    Sso { provider: String, email: String },
+    WebUserApproval,
+}
+
+fn sha256(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
+
+impl From<&AuthCredential> for AuthCredentialFingerprint {
+    fn from(cred: &AuthCredential) -> Self {
+        match cred {
+            AuthCredential::Otp(_) => Self::Otp,
+            AuthCredential::Password(secret) => Self::Password {
+                hash: sha256(secret.expose_secret().as_bytes()),
+            },
+            AuthCredential::PublicKey {
+                kind,
+                public_key_bytes,
+            } => Self::PublicKey {
+                kind: kind.to_string(),
+                hash: sha256(public_key_bytes),
+            },
+            AuthCredential::Certificate { certificate_pem } => Self::Certificate {
+                hash: sha256(certificate_pem.expose_secret().as_bytes()),
+            },
+            AuthCredential::Sso { provider, email } => Self::Sso {
+                provider: provider.clone(),
+                email: email.clone(),
+            },
+            AuthCredential::WebUserApproval => Self::WebUserApproval,
         }
     }
 }
