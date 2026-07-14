@@ -329,18 +329,19 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
 
     // ---
 
+    let recordings = store.recordings.get_or_insert_with(Default::default);
     if let Commands::UnattendedSetup {
         record_sessions, ..
     } = &cli.command
     {
-        store.recordings.enable = *record_sessions;
+        recordings.enable = *record_sessions;
     } else {
-        store.recordings.enable = dialoguer::Confirm::with_theme(&theme)
+        recordings.enable = dialoguer::Confirm::with_theme(&theme)
             .default(true)
             .with_prompt("Do you want to record user sessions?")
             .interact()?;
     }
-    store.recordings.path = data_path.join("recordings").to_string_lossy().to_string();
+    recordings.path = data_path.join("recordings").to_string_lossy().to_string();
 
     // ---
 

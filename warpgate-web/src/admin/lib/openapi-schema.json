@@ -3734,6 +3734,41 @@
         "operationId": "get_analytics_preview"
       }
     },
+    "/parameters/recordings-storage/test": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingsStorageConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestRecordingsStorageResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "test_recordings_storage"
+      }
+    },
     "/ssh/check-host-key": {
       "post": {
         "requestBody": {
@@ -4418,6 +4453,10 @@
             "description": "Pretty-printed JSON request body that would be sent."
           }
         }
+      },
+      "AutoCredentials": {
+        "type": "object",
+        "title": "AutoCredentials"
       },
       "BlockedIpInfo": {
         "type": "object",
@@ -5505,6 +5544,12 @@
           },
           "analytics_normal": {
             "type": "boolean"
+          },
+          "recordings_enable": {
+            "type": "boolean"
+          },
+          "recordings_storage": {
+            "$ref": "#/components/schemas/RecordingsStorageConfig"
           }
         }
       },
@@ -5543,7 +5588,9 @@
           "web_ssh_enabled",
           "web_clients_enabled",
           "analytics_consent",
-          "analytics_normal"
+          "analytics_normal",
+          "recordings_enable",
+          "recordings_storage"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -5677,6 +5724,12 @@
           },
           "analytics_normal": {
             "type": "boolean"
+          },
+          "recordings_enable": {
+            "type": "boolean"
+          },
+          "recordings_storage": {
+            "$ref": "#/components/schemas/RecordingsStorageConfig"
           }
         }
       },
@@ -5840,6 +5893,83 @@
           "Desktop"
         ]
       },
+      "RecordingsDiskConfig": {
+        "type": "object",
+        "title": "RecordingsDiskConfig",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "RecordingsStorageConfig": {
+        "type": "object",
+        "description": "Where session recordings are stored, and everything that backend needs.\nServes as both the stored (serde) and admin-API (poem-openapi)\nrepresentation, so only valid field combinations can exist (e.g. no S3\nsettings while on disk).",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RecordingsStorageConfig_RecordingsDiskConfig"
+          },
+          {
+            "$ref": "#/components/schemas/RecordingsStorageConfig_S3StorageConfig"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Disk": "#/components/schemas/RecordingsStorageConfig_RecordingsDiskConfig",
+            "S3": "#/components/schemas/RecordingsStorageConfig_S3StorageConfig"
+          }
+        }
+      },
+      "RecordingsStorageConfig_RecordingsDiskConfig": {
+        "description": "Where session recordings are stored, and everything that backend needs.\nServes as both the stored (serde) and admin-API (poem-openapi)\nrepresentation, so only valid field combinations can exist (e.g. no S3\nsettings while on disk).",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Disk"
+                ],
+                "example": "Disk"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/RecordingsDiskConfig"
+          }
+        ]
+      },
+      "RecordingsStorageConfig_S3StorageConfig": {
+        "description": "Where session recordings are stored, and everything that backend needs.\nServes as both the stored (serde) and admin-API (poem-openapi)\nrepresentation, so only valid field combinations can exist (e.g. no S3\nsettings while on disk).",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "S3"
+                ],
+                "example": "S3"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/S3StorageConfig"
+          }
+        ]
+      },
       "Role": {
         "type": "object",
         "title": "Role",
@@ -5880,6 +6010,103 @@
           },
           "is_default": {
             "type": "boolean"
+          }
+        }
+      },
+      "S3Credentials": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/S3Credentials_AutoCredentials"
+          },
+          {
+            "$ref": "#/components/schemas/S3Credentials_StaticCredentials"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "mode",
+          "mapping": {
+            "Auto": "#/components/schemas/S3Credentials_AutoCredentials",
+            "Static": "#/components/schemas/S3Credentials_StaticCredentials"
+          }
+        }
+      },
+      "S3Credentials_AutoCredentials": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "Auto"
+                ],
+                "example": "Auto"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/AutoCredentials"
+          }
+        ]
+      },
+      "S3Credentials_StaticCredentials": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "Static"
+                ],
+                "example": "Static"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/StaticCredentials"
+          }
+        ]
+      },
+      "S3StorageConfig": {
+        "type": "object",
+        "title": "S3StorageConfig",
+        "description": "Everything needed to reach an S3 (or S3-compatible) bucket. Serves as both\nthe stored (serde) and admin-API (poem-openapi) representation.",
+        "required": [
+          "bucket",
+          "region",
+          "path_style",
+          "prefix",
+          "credentials"
+        ],
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Custom endpoint for S3-compatible services (e.g. MinIO); `None` = AWS."
+          },
+          "path_style": {
+            "type": "boolean",
+            "description": "Path-style addressing (`host/bucket/key`), required by most\nS3-compatible services."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Key prefix prepended to every object path."
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/S3Credentials"
           }
         }
       },
@@ -6100,6 +6327,22 @@
       "SshTargetPublicKeyAuth": {
         "type": "object",
         "title": "SshTargetPublicKeyAuth"
+      },
+      "StaticCredentials": {
+        "type": "object",
+        "title": "StaticCredentials",
+        "required": [
+          "access_key_id"
+        ],
+        "properties": {
+          "access_key_id": {
+            "type": "string"
+          },
+          "secret_access_key": {
+            "type": "string",
+            "description": "`None` on the admin API means \"keep the stored secret\" (it's never sent\nout); always `Some` in a stored config."
+          }
+        }
       },
       "Target": {
         "type": "object",
@@ -6700,6 +6943,23 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "TestRecordingsStorageResult": {
+        "type": "object",
+        "title": "TestRecordingsStorageResult",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the backend accepted a write/delete round-trip."
+          },
+          "error": {
+            "type": "string",
+            "description": "The failure message when `success` is false."
           }
         }
       },

@@ -14,7 +14,7 @@ use warpgate_common::{
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{
-    self as entities, CertificateCredential, Parameters, PasswordCredential, PublicKeyCredential,
+    self as entities, CertificateCredential, PasswordCredential, PublicKeyCredential,
 };
 
 use super::common::get_user;
@@ -225,10 +225,7 @@ enum DeleteCertificateCredentialResponse {
 pub fn parameters_based_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
         let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await?;
-        let services = ctx.services();
-        let parameters = Parameters::Entity::get(&services.db)
-            .await
-            .map_err(WarpgateError::from)?;
+        let parameters = ctx.parameters().await?;
         if !parameters.allow_own_credential_management {
             return Ok(poem::Response::builder()
                 .status(StatusCode::FORBIDDEN)
@@ -284,7 +281,7 @@ impl Api {
             .all(&*db)
             .await?;
 
-        let parameters = Parameters::Entity::get(&db).await?;
+        let parameters = ctx.parameters().await?;
 
         Ok(CredentialsStateResponse::Ok(Json(CredentialsState {
             password: match password_creds.len() {
@@ -321,7 +318,7 @@ impl Api {
             return Ok(ChangePasswordResponse::Unauthorized);
         };
 
-        let parameters = Parameters::Entity::get(&db).await?;
+        let parameters = ctx.parameters().await?;
         let policy = parameters.password_policy();
         let violations = validate_password(&body.password, &policy);
         if !violations.is_empty() {
@@ -575,7 +572,7 @@ impl Api {
         };
 
         // Fetch CA params
-        let params = Parameters::Entity::get(&db).await?;
+        let params = ctx.parameters().await?;
         let ca =
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
         let public_key_pem = body.public_key_pem.trim();

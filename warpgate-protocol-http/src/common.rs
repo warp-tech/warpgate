@@ -318,7 +318,11 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     ep: Arc<E>,
     req: Request,
 ) -> poem::Result<E::Output> {
-    let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await?;
+    // Reinject a per-request copy so the parameter cache is request-scoped
+    // rather than shared with the startup singleton.
+    let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req)
+        .await?
+        .for_request();
     let session = <&Session>::from_request_without_body(&req).await?;
 
     let mut session_auth = session.get_auth();
@@ -393,10 +397,10 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
 
     if let Some(auth) = auth {
         // build context and attach it instead of raw authorization
-        let ctx = ctx.to_authenticated(auth);
-        Ok(ep.data(ctx).call(req).await?)
+        let actx = ctx.to_authenticated(auth);
+        Ok(ep.data(actx).data(ctx).call(req).await?)
     } else {
-        Ok(ep.call(req).await?)
+        Ok(ep.data(ctx).call(req).await?)
     }
 }
 

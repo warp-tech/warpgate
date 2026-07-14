@@ -7,7 +7,7 @@ use warpgate_common::{Target as TargetConfig, WarpgateError};
 use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_core::ConfigProvider;
-use warpgate_db_entities::{Parameters, Target};
+use warpgate_db_entities::Target;
 
 use crate::api::AnySecurityScheme;
 use crate::common::endpoint_auth;
@@ -55,10 +55,7 @@ impl Api {
 
         let services = &ctx.services();
 
-        let policy = {
-            let db = &services.db;
-            Parameters::Entity::get(&db).await?
-        };
+        let policy = ctx.parameters().await?;
 
         if !policy.ticket_self_service_enabled {
             return Ok(GetTicketRequestTargetsResponse::Forbidden(Json(

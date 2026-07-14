@@ -30,6 +30,8 @@
     // Number of time buckets in the scrubber input-density heatmap.
     const HEATMAP_BUCKETS = 200
 
+    // For S3-backed completed recordings these 302-redirect to presigned URLs,
+    // which the browser follows transparently (Range requests included).
     const DATA_URL = `/@warpgate/admin/api/recordings/${recording.id}/desktop`
     const INDEX_URL = `${DATA_URL}/index`
 

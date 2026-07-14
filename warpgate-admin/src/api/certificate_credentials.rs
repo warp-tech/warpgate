@@ -11,7 +11,7 @@ use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
-use warpgate_db_entities::{CertificateCredential, CertificateRevocation, Parameters, User};
+use warpgate_db_entities::{CertificateCredential, CertificateRevocation, User};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -127,7 +127,7 @@ impl ListApi {
         require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
 
         let db = &ctx.services().db;
-        let params = Parameters::Entity::get(&db).await?;
+        let params = ctx.parameters().await?;
         let ca =
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
         let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {

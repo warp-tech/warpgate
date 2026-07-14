@@ -739,7 +739,7 @@ pub struct WarpgateConfigStore {
     pub sso_providers: Vec<SsoProviderConfig>,
 
     #[serde(default)]
-    pub recordings: RecordingsConfig,
+    pub recordings: Option<RecordingsConfig>,
 
     #[serde(default)]
     pub external_host: Option<String>,

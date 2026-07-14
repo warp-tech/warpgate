@@ -18,6 +18,7 @@ PyYAML = "^6.0.2"
 deepmerge = "^2"
 openapi-client = { path = "./api_sdk", develop = true }
 aiohttp = "^3.11.18"
+boto3 = "^1.35"
 cryptography = ">=46,<50"
 
 [tool.poetry.dev-dependencies]

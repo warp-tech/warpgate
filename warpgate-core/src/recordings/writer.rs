@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::ops::DerefMut;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,15 +7,13 @@ use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use serde::Serialize;
 use time::OffsetDateTime;
-use tokio::fs::File;
-use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tracing::error;
 use uuid::Uuid;
-use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{GlobalParams, try_block};
+use warpgate_common::try_block;
 use warpgate_db_entities::Recording;
 
+use super::storage::RecordingSink;
 use super::{Error, Result};
 
 #[derive(Clone)]
@@ -28,21 +25,11 @@ pub struct RawRecordingWriter {
 
 impl RawRecordingWriter {
     pub(crate) async fn new(
-        path: PathBuf,
+        mut sink: RecordingSink,
         model: Recording::Model,
         db: DatabaseConnection,
         live: Option<Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>>,
-        params: &GlobalParams,
     ) -> Result<Self> {
-        let file = File::options()
-            .append(true)
-            .create(true)
-            .open(&path)
-            .await?;
-        if params.should_secure_files() {
-            secure_file(&path)?;
-        }
-        let mut writer = BufWriter::new(file);
         let (sender, mut receiver) = mpsc::channel::<Bytes>(1024);
         let (drop_signal, mut drop_receiver) = mpsc::channel(1);
 
@@ -71,12 +58,12 @@ impl RawRecordingWriter {
                 loop {
                     if last_flush.elapsed() > Duration::from_secs(5) {
                         last_flush = Instant::now();
-                        writer.flush().await?;
+                        sink.flush().await?;
                     }
                     tokio::select! {
                         data = receiver.recv() => match data {
                             Some(bytes) => {
-                                writer.write_all(&bytes).await?;
+                                sink.write_all(&bytes).await?;
                             }
                             None => break,
                         },
@@ -85,13 +72,17 @@ impl RawRecordingWriter {
                 }
                 Ok::<(), anyhow::Error>(())
             } catch (error: anyhow::Error) {
-                error!(%error, ?path, "Failed to write recording");
+                error!(%error, "Failed to write recording");
             });
 
-            try_block!(async {
-                use sea_orm::ActiveValue::Set;
+            // Complete the S3 object before the recording is marked ended, so a
+            // reader that switches to S3 on `ended` always finds the object. On
+            // failure the local scratch is kept (the recording is at least not lost).
 
-                writer.flush().await?;
+            try_block!(async {
+                let cleanup_guard = sink.finalize().await?;
+
+                use sea_orm::ActiveValue::Set;
 
                 let id = model.id;
                 let db = &db;
@@ -102,9 +93,12 @@ impl RawRecordingWriter {
                 let mut model: Recording::ActiveModel = recording.into();
                 model.ended = Set(Some(OffsetDateTime::now_utc()));
                 model.update(&*db).await?;
+
+                drop(cleanup_guard);
+
                 Ok::<(), anyhow::Error>(())
             } catch (error: anyhow::Error) {
-                error!(%error, ?path, "Failed to write recording");
+                error!(%error, "Failed to write recording");
             });
         });
 

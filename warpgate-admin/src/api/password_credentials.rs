@@ -10,7 +10,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
-use warpgate_db_entities::{Parameters, PasswordCredential, User};
+use warpgate_db_entities::{PasswordCredential, User};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -92,7 +92,7 @@ impl ListApi {
 
         let db = &ctx.services().db;
 
-        let parameters = Parameters::Entity::get(&db).await?;
+        let parameters = ctx.parameters().await?;
         let policy = parameters.password_policy();
         let violations = validate_password(body.password.expose_secret(), &policy);
         if !violations.is_empty() {

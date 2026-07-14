@@ -5,14 +5,45 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::NotSet;
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
+use warpgate_aws::{S3Credentials, S3Storage};
 use warpgate_common::{AdminPermission, PasswordPolicy, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Parameters;
+use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
 
 pub struct Api;
+
+/// The stored S3 secret is never sent to the browser.
+fn redact_secret(mut config: RecordingsStorageConfig) -> RecordingsStorageConfig {
+    if let RecordingsStorageConfig::S3(s3) = &mut config
+        && let S3Credentials::Static(creds) = &mut s3.credentials
+    {
+        creds.secret_access_key = None;
+    }
+    config
+}
+
+/// A `None` incoming secret keeps the one already stored (the UI never sees it,
+/// so it round-trips the redacted `None` unless the admin types a new value).
+fn merge_secret(
+    mut incoming: RecordingsStorageConfig,
+    current: &RecordingsStorageConfig,
+) -> RecordingsStorageConfig {
+    if let RecordingsStorageConfig::S3(s3) = &mut incoming
+        && let S3Credentials::Static(creds) = &mut s3.credentials
+        && creds.secret_access_key.is_none()
+        && let RecordingsStorageConfig::S3(current_s3) = current
+        && let S3Credentials::Static(current_creds) = &current_s3.credentials
+    {
+        creds
+            .secret_access_key
+            .clone_from(&current_creds.secret_access_key);
+    }
+    incoming
+}
 
 #[derive(Serialize, Object)]
 struct ParameterValues {
@@ -56,6 +87,8 @@ struct ParameterValues {
     pub web_approval_grace_period_seconds: Option<i64>,
     pub analytics_consent: Parameters::AnalyticsConsent,
     pub analytics_normal: bool,
+    pub recordings_enable: bool,
+    pub recordings_storage: RecordingsStorageConfig,
 }
 
 #[derive(Serialize, Object)]
@@ -96,6 +129,8 @@ struct ParameterUpdate {
     pub web_approval_grace_period_seconds: Option<Option<i64>>,
     pub analytics_consent: Option<Parameters::AnalyticsConsent>,
     pub analytics_normal: Option<bool>,
+    pub recordings_enable: Option<bool>,
+    pub recordings_storage: Option<RecordingsStorageConfig>,
 }
 
 #[derive(Serialize, Object)]
@@ -124,6 +159,20 @@ enum UpdateParametersResponse {
     Done,
 }
 
+#[derive(Serialize, Object)]
+struct TestRecordingsStorageResult {
+    /// Whether the backend accepted a write/delete round-trip.
+    success: bool,
+    /// The failure message when `success` is false.
+    error: Option<String>,
+}
+
+#[derive(ApiResponse)]
+enum TestRecordingsStorageResponse {
+    #[oai(status = 200)]
+    Ok(Json<TestRecordingsStorageResult>),
+}
+
 #[OpenApi]
 impl Api {
     #[oai(path = "/parameters", method = "get", operation_id = "get_parameters")]
@@ -134,8 +183,8 @@ impl Api {
     ) -> Result<GetParametersResponse, WarpgateError> {
         require_admin_permission(&ctx, None).await?;
 
-        let db = &ctx.services().db;
-        let parameters = Parameters::Entity::get(&db).await?;
+        let parameters = ctx.parameters().await?.clone();
+        let recordings_storage = redact_secret(parameters.recordings_storage_config()?);
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
             allow_own_credential_management: parameters.allow_own_credential_management,
@@ -177,6 +226,8 @@ impl Api {
             web_approval_grace_period_seconds: parameters.web_approval_grace_period_seconds,
             analytics_consent: parameters.analytics_consent,
             analytics_normal: parameters.analytics_normal,
+            recordings_enable: parameters.recordings_enable,
+            recordings_storage,
         })))
     }
 
@@ -217,7 +268,15 @@ impl Api {
 
         let services = ctx.services();
         let db = &services.db;
-        let mut parameters = Parameters::Entity::get(&db).await?.into_active_model();
+        let current = ctx.parameters().await?.clone();
+        let storage = match &body.recordings_storage {
+            Some(incoming) => Some(serde_json::to_string(&merge_secret(
+                incoming.clone(),
+                &current.recordings_storage_config()?,
+            ))?),
+            None => None,
+        };
+        let mut parameters = current.into_active_model();
 
         parameters.allow_own_credential_management =
             body.allow_own_credential_management.map_or(NotSet, Set);
@@ -277,11 +336,13 @@ impl Api {
         parameters.ssh_banner = body.ssh_banner.clone().map_or(NotSet, Set);
         parameters.web_clients_enabled = body.web_clients_enabled.map_or(NotSet, Set);
         parameters.web_auth_max_age_seconds = body.web_auth_max_age_seconds.map_or(NotSet, Set);
-        parameters.web_approval_grace_period_seconds = body
-            .web_approval_grace_period_seconds
-            .map_or(NotSet, Set);
+        parameters.web_approval_grace_period_seconds =
+            body.web_approval_grace_period_seconds.map_or(NotSet, Set);
         parameters.analytics_consent = body.analytics_consent.map_or(NotSet, Set);
         parameters.analytics_normal = body.analytics_normal.map_or(NotSet, Set);
+
+        parameters.recordings_enable = body.recordings_enable.map_or(NotSet, Set);
+        parameters.recordings_storage = storage.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(&*db).await?;
 
@@ -293,5 +354,39 @@ impl Api {
             .await?;
 
         Ok(UpdateParametersResponse::Done)
+    }
+
+    #[oai(
+        path = "/parameters/recordings-storage/test",
+        method = "post",
+        operation_id = "test_recordings_storage"
+    )]
+    async fn api_test_recordings_storage(
+        &self,
+        ctx: Data<&AuthenticatedRequestContext>,
+        body: Json<RecordingsStorageConfig>,
+        _sec_scheme: AnySecurityScheme,
+    ) -> Result<TestRecordingsStorageResponse, WarpgateError> {
+        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+
+        let current = ctx.parameters().await?;
+        // The UI never receives the stored secret, so fill it back in before testing.
+        let config = merge_secret(body.0, &current.recordings_storage_config()?);
+
+        let error = match config {
+            RecordingsStorageConfig::S3(s3) => match S3Storage::new(&s3).await {
+                Ok(storage) => storage.test().await.err().map(|e| e.to_string()),
+                Err(e) => Some(e.to_string()),
+            },
+            // Disk is always reachable; nothing to test.
+            RecordingsStorageConfig::Disk(_) => None,
+        };
+
+        Ok(TestRecordingsStorageResponse::Ok(Json(
+            TestRecordingsStorageResult {
+                success: error.is_none(),
+                error,
+            },
+        )))
     }
 }
