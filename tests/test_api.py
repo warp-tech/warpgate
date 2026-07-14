@@ -679,6 +679,18 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={201},
     ),
     AdminApiTestCase(
+        id="test_recordings_storage",
+        permission="config_edit",
+        call=lambda api, r: api.test_recordings_storage_with_http_info(
+            sdk.RecordingsStorageConfig(
+                sdk.RecordingsStorageConfigRecordingsDiskConfig(
+                    kind="Disk", path="/tmp/recordings-test"
+                )
+            )
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
         id="get_analytics_preview",
         permission="config_edit",
         call=lambda api, r: api.get_analytics_preview_with_http_info(normal=True),

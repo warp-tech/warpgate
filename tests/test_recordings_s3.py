@@ -69,7 +69,7 @@ def _configure_s3(url, endpoint):
 
 def _find_completed_terminal_recording(api):
     for session in sorted(
-        api.get_sessions(), key=lambda s: s.started, reverse=True
+        api.get_sessions().items, key=lambda s: s.started, reverse=True
     ):
         for rec in api.get_session_recordings(session.id):
             if rec.kind == sdk.RecordingKind.TERMINAL and rec.ended is not None:

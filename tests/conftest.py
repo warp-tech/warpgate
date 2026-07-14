@@ -791,6 +791,10 @@ class ProcessManager:
                 data_dir,
                 "--external-host",
                 "external-host",
+                # Record all sessions so tests can assert on recordings. Enablement
+                # lives in the DB (seeded from config at setup-time migration), so it
+                # must be set here rather than patched into the config file afterwards.
+                "--record-sessions",
             ]
             if database_url:
                 setup_args += ["--database-url", database_url]
@@ -822,9 +826,6 @@ class ProcessManager:
                 "certificate": "tls.certificate.pem",
                 "key": "tls.key.pem",
             }
-            # Record all sessions so tests can assert on recordings (unattended-setup
-            # already picked a path under the data dir; just turn it on).
-            config.setdefault("recordings", {})["enable"] = True
             if config_patch:
                 always_merger.merge(config, config_patch)
             with config_path.open("w") as f:
