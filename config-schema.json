@@ -89,11 +89,15 @@
       }
     },
     "recordings": {
-      "$ref": "#/$defs/RecordingsConfig",
-      "default": {
-        "enable": false,
-        "path": "./data/recordings"
-      }
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecordingsConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "ssh": {
       "$ref": "#/$defs/SshConfig",

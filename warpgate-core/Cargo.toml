@@ -42,6 +42,7 @@ tracing-core = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 url.workspace = true
 uuid.workspace = true
+warpgate-aws = { path = "../warpgate-aws" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-db-migrations = { path = "../warpgate-db-migrations" }

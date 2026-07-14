@@ -1,16 +1,13 @@
-use anyhow::Context;
-use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use poem::error::{InternalServerError, NotFoundError};
 use poem::web::websocket::{Message, WebSocket};
-use poem::web::{Data, StaticFileRequest};
+use poem::web::{Data, Redirect, StaticFileRequest};
 use poem::{IntoResponse, handler};
 use poem_openapi::param::Path;
-use poem_openapi::payload::Json;
+use poem_openapi::payload::Json as OpenApiJson;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
-use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::error;
 use uuid::Uuid;
@@ -30,7 +27,7 @@ pub struct Api;
 #[derive(ApiResponse)]
 enum GetRecordingResponse {
     #[oai(status = 200)]
-    Ok(Json<Recording::Model>),
+    Ok(OpenApiJson<Recording::Model>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -38,8 +35,9 @@ enum GetRecordingResponse {
 #[derive(ApiResponse)]
 enum GetKubernetesRecordingResponse {
     #[oai(status = 200)]
-    Ok(Json<Vec<KubernetesRecordingItemApiObject>>),
+    Ok(OpenApiJson<Vec<KubernetesRecordingItemApiObject>>),
 }
+
 #[OpenApi]
 impl Api {
     #[oai(
@@ -63,7 +61,7 @@ impl Api {
             .map_err(InternalServerError)?;
 
         match recording {
-            Some(recording) => Ok(GetRecordingResponse::Ok(Json(recording))),
+            Some(recording) => Ok(GetRecordingResponse::Ok(OpenApiJson(recording))),
             None => Ok(GetRecordingResponse::NotFound),
         }
     }
@@ -82,7 +80,6 @@ impl Api {
         require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
         let db = &ctx.services().db;
-        let recordings = ctx.services().recordings.lock().await;
 
         let recording = Recording::Entity::find_by_id(id.0)
             .filter(Recording::Column::Kind.eq(RecordingKind::Kubernetes))
@@ -94,21 +91,43 @@ impl Api {
             return Err(NotFoundError.into());
         };
 
-        let path = recordings.file_path(&recording, RecordingFile::NDJsonData);
+        let reader = {
+            let recordings = ctx.services().recordings.lock().await;
+            recordings
+                .access(&recording, RecordingFile::NDJsonData)
+                .await
+                .map_err(InternalServerError)?
+                .open_read()
+                .await
+                .map_err(InternalServerError)?
+        };
 
-        let file = File::open(&path).await.map_err(InternalServerError)?;
-        let reader = BufReader::new(file);
-        let mut lines = reader.lines();
         let mut content = Vec::new();
-
-        while let Some(line) = lines.next_line().await.context("reading recording")? {
+        let mut lines = BufReader::new(reader).lines();
+        while let Some(line) = lines.next_line().await.map_err(InternalServerError)? {
+            if line.is_empty() {
+                continue;
+            }
             let item: KubernetesRecordingItem =
-                serde_json::from_str(&line).context("deserializing recording item")?;
+                serde_json::from_str(&line).map_err(InternalServerError)?;
             content.push(KubernetesRecordingItemApiObject::from(item));
         }
 
-        Ok(GetKubernetesRecordingResponse::Ok(Json(content)))
+        Ok(GetKubernetesRecordingResponse::Ok(OpenApiJson(content)))
     }
+}
+
+async fn find_recording(
+    ctx: &AuthenticatedRequestContext,
+    id: Uuid,
+    kind: RecordingKind,
+) -> poem::Result<Recording::Model> {
+    Recording::Entity::find_by_id(id)
+        .filter(Recording::Column::Kind.eq(kind))
+        .one(&ctx.services().db)
+        .await
+        .map_err(InternalServerError)?
+        .ok_or_else(|| NotFoundError.into())
 }
 
 #[handler]
@@ -118,35 +137,28 @@ pub async fn api_get_recording_cast(
 ) -> poem::Result<String> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let db = &ctx.services().db;
+    let recording = find_recording(&ctx, id.0, RecordingKind::Terminal).await?;
 
-    let recording = Recording::Entity::find_by_id(id.0)
-        .filter(Recording::Column::Kind.eq(RecordingKind::Terminal))
-        .one(&*db)
-        .await
-        .map_err(InternalServerError)?;
-
-    let Some(recording) = recording else {
-        return Err(NotFoundError.into());
-    };
-
-    let path = {
-        ctx.services()
-            .recordings
-            .lock()
+    let reader = {
+        let recordings = ctx.services().recordings.lock().await;
+        recordings
+            .access(&recording, RecordingFile::NDJsonData)
             .await
-            .file_path(&recording, RecordingFile::NDJsonData)
+            .map_err(InternalServerError)?
+            .open_read()
+            .await
+            .map_err(InternalServerError)?
     };
 
     let mut response = vec![];
-
     let mut last_size = (0, 0);
-    let file = File::open(&path).await.map_err(InternalServerError)?;
-    let reader = BufReader::new(file);
-    let mut lines = reader.lines();
+    let mut lines = BufReader::new(reader).lines();
     while let Some(line) = lines.next_line().await.map_err(InternalServerError)? {
+        if line.is_empty() {
+            continue;
+        }
         let entry: TerminalRecordingItem =
-            serde_json::from_str(&line[..]).map_err(InternalServerError)?;
+            serde_json::from_str(&line).map_err(InternalServerError)?;
         let asciicast: AsciiCast = entry.into();
         response.push(serde_json::to_string(&asciicast).map_err(InternalServerError)?);
         if let AsciiCast::Header { width, height, .. } = asciicast {
@@ -173,45 +185,12 @@ pub async fn api_get_recording_cast(
 pub async fn api_get_recording_tcpdump(
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
-) -> poem::Result<Bytes> {
+    static_req: StaticFileRequest,
+) -> poem::Result<poem::Response> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let db = &ctx.services().db;
-
-    let recording = Recording::Entity::find_by_id(id.0)
-        .filter(Recording::Column::Kind.eq(RecordingKind::Traffic))
-        .one(&*db)
-        .await
-        .map_err(InternalServerError)?;
-
-    let Some(recording) = recording else {
-        return Err(NotFoundError.into());
-    };
-
-    let path = {
-        ctx.services()
-            .recordings
-            .lock()
-            .await
-            .file_path(&recording, RecordingFile::TcpDumpData)
-    };
-
-    let content = std::fs::read(path).map_err(InternalServerError)?;
-
-    Ok(Bytes::from(content))
-}
-
-async fn find_desktop_recording(
-    ctx: &AuthenticatedRequestContext,
-    id: Uuid,
-) -> poem::Result<Recording::Model> {
-    let db = &ctx.services().db;
-    Recording::Entity::find_by_id(id)
-        .filter(Recording::Column::Kind.eq(RecordingKind::Desktop))
-        .one(&*db)
-        .await
-        .map_err(InternalServerError)?
-        .ok_or_else(|| NotFoundError.into())
+    let recording = find_recording(&ctx, id.0, RecordingKind::Traffic).await?;
+    serve_recording_file(&ctx, &recording, RecordingFile::TcpDumpData, static_req).await
 }
 
 #[handler]
@@ -222,19 +201,8 @@ pub async fn api_get_recording_desktop(
 ) -> poem::Result<poem::Response> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let recording = find_desktop_recording(&ctx, id.0).await?;
-    let path = {
-        ctx.services()
-            .recordings
-            .lock()
-            .await
-            .file_path(&recording, RecordingFile::NDJsonData)
-    };
-
-    Ok(static_req
-        .create_response(&path, false, false)?
-        .with_content_type("application/x-ndjson")
-        .into_response())
+    let recording = find_recording(&ctx, id.0, RecordingKind::Desktop).await?;
+    serve_recording_file(&ctx, &recording, RecordingFile::NDJsonData, static_req).await
 }
 
 #[handler]
@@ -245,18 +213,41 @@ pub async fn api_get_recording_desktop_index(
 ) -> poem::Result<poem::Response> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let recording = find_desktop_recording(&ctx, id.0).await?;
-    let index_path = ctx
+    let recording = find_recording(&ctx, id.0, RecordingKind::Desktop).await?;
+    serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req).await
+}
+
+async fn serve_recording_file(
+    ctx: &AuthenticatedRequestContext,
+    recording: &Recording::Model,
+    file: RecordingFile,
+    static_req: StaticFileRequest,
+) -> poem::Result<poem::Response> {
+    let access = ctx
         .services()
         .recordings
         .lock()
         .await
-        .file_path(&recording, RecordingFile::Index);
+        .access(&recording, file)
+        .await
+        .map_err(InternalServerError)?;
 
-    Ok(static_req
-        .create_response(&index_path, false, false)?
-        .with_content_type("application/x-ndjson")
-        .into_response())
+    if let Some(url) = access
+        .external_access_url()
+        .await
+        .map_err(InternalServerError)?
+    {
+        Ok(Redirect::temporary(url).into_response())
+    } else if let Some(path) = access.local_path() {
+        Ok(static_req
+            .create_response(&path, false, false)?
+            .with_content_type(file.mime_type())
+            .into_response())
+    } else {
+        Err(InternalServerError(std::io::Error::other(
+            "recording file access has neither an external URL nor a local path",
+        )))
+    }
 }
 
 #[handler]

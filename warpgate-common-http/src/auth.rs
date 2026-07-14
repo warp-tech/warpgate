@@ -1,10 +1,12 @@
 use std::ops::Deref;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use poem::Request;
 use poem::http::uri::{Authority, Scheme};
 use poem::session::Session;
 use serde::{Deserialize, Serialize};
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::Parameters;
@@ -38,10 +40,7 @@ pub async fn web_reauth_required(
         return Ok(false);
     }
 
-    let Some(max_age) = Parameters::Entity::get(&ctx.services().db)
-        .await?
-        .web_auth_max_age_seconds
-    else {
+    let Some(max_age) = ctx.parameters().await?.web_auth_max_age_seconds else {
         return Ok(false);
     };
 
@@ -95,6 +94,11 @@ pub enum RequestAuthorization {
 pub struct UnauthenticatedRequestContext {
     services: warpgate_core::Services,
     should_trust_x_forwarded: bool,
+    /// Request-scoped cache of the global parameters row, loaded at most once
+    /// per request on first access. The base context injected at startup is
+    /// shared across requests, so [`Self::for_request`] gives each request its
+    /// own empty cell to keep the snapshot request-scoped.
+    parameters: Arc<OnceCell<Parameters::Model>>,
 }
 
 /// Provided to API handlers as Data<>
@@ -110,11 +114,34 @@ impl UnauthenticatedRequestContext {
         Self {
             services,
             should_trust_x_forwarded,
+            parameters: Arc::new(OnceCell::new()),
+        }
+    }
+
+    /// A copy for a single request, with a fresh empty parameter cache.
+    pub fn for_request(&self) -> Self {
+        Self {
+            services: self.services.clone(),
+            should_trust_x_forwarded: self.should_trust_x_forwarded,
+            parameters: Arc::new(OnceCell::new()),
         }
     }
 
     pub const fn services(&self) -> &warpgate_core::Services {
         &self.services
+    }
+
+    /// The global parameters, cached for the duration of the request. Prefer
+    /// this over `Parameters::Entity::get` in request handlers so a request
+    /// reads the row at most once.
+    pub async fn parameters(&self) -> Result<&Parameters::Model, WarpgateError> {
+        self.parameters
+            .get_or_try_init(|| async {
+                Parameters::Entity::get(&self.services.db)
+                    .await
+                    .map_err(WarpgateError::from)
+            })
+            .await
     }
 
     pub fn to_authenticated(&self, auth: RequestAuthorization) -> AuthenticatedRequestContext {

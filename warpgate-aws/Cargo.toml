@@ -25,14 +25,23 @@ aws-sdk-eks = { version = "1", default-features = false, features = [
     "rustls",
 ] }
 aws-sdk-rds = { version = "1.130.0", default-features = false }
+aws-sdk-s3 = { version = "1", default-features = false, features = [
+    "behavior-version-latest",
+    "rustls",
+] }
 aws-sdk-sts = { version = "1", default-features = false, features = [
     "behavior-version-latest",
     "rustls",
 ] }
 aws-sigv4 = { version = "1", default-features = false }
 aws-smithy-runtime-api = { version = "1", default-features = false }
+aws-smithy-types = { version = "1", default-features = false, features = [
+    "rt-tokio",
+] }
 dashmap = { version = "6.2", default-features = false }
 data-encoding.workspace = true
+poem-openapi.workspace = true
+serde.workspace = true
 http.workspace = true
 reqwest.workspace = true
 thiserror.workspace = true

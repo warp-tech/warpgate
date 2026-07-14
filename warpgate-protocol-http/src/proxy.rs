@@ -319,7 +319,8 @@ pub async fn proxy_normal_request(
         && response
             .content_type()
             .is_some_and(|content_type| content_type.starts_with("text/html"))
-        && warpgate_db_entities::Parameters::Entity::get(&ctx.services().db)
+        && ctx
+            .parameters()
             .await
             .map(|p| p.show_session_menu)
             .unwrap_or(true);

@@ -196,12 +196,7 @@ impl Api {
         }
 
         // Password login can be disabled globally (e.g. SSO-only deployments).
-        if Parameters::Entity::get(&services.db)
-            .await
-            .map_err(WarpgateError::from)?
-            .password_login_mode
-            == Parameters::PasswordLoginMode::Disabled
-        {
+        if ctx.parameters().await?.password_login_mode == Parameters::PasswordLoginMode::Disabled {
             warn!(username = %body.username, "Password login attempt while disabled");
             return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
                 ApiAuthState::Failed,

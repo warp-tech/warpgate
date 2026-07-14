@@ -35,7 +35,9 @@ use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
+use warpgate_common_http::warpgate_csp_with_connect_src;
 use warpgate_core::{ProtocolServer, Services};
+use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 use warpgate_tls::TlsCertificateAndPrivateKey;
 use warpgate_web::Assets;
 use warpgate_web_desktop::WebDesktopClientManager;
@@ -62,6 +64,22 @@ impl HTTPProtocolServer {
         Self {
             services: services.clone(),
         }
+    }
+}
+
+/// The S3 bucket origin to allow-list in the admin document CSP, or `None` when
+/// recordings are on disk (or the config can't be read). Read live so a storage
+/// config change takes effect on the next admin page load.
+async fn recordings_s3_browser_origin(ctx: &UnauthenticatedRequestContext) -> Option<String> {
+    match ctx
+        .parameters()
+        .await
+        .ok()?
+        .recordings_storage_config()
+        .ok()?
+    {
+        RecordingsStorageConfig::S3(s3) => s3.browser_origin(),
+        RecordingsStorageConfig::Disk(_) => None,
     }
 }
 
@@ -198,7 +216,24 @@ impl ProtocolServer for HTTPProtocolServer {
                     // auth-gated, and the SPA redirects to login client-side so the login
                     // `next` can include its hash route (a server redirect can't see it).
                     "/admin",
-                    EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html").with(cache_bust()),
+                    EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html")
+                        .with(cache_bust())
+                        .around(move |ep, req| async move {
+                            // The recording player fetches S3-backed recordings directly
+                            // via presigned URLs, so the bucket origin must be allow-listed
+                            // in this document's CSP.
+                            let origin = match Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await {
+                                Ok(ctx) => recordings_s3_browser_origin(ctx.0).await,
+                                Err(_) => None,
+                            };
+                            let mut resp = ep.call(req).await?.into_response();
+                            let csp = warpgate_csp_with_connect_src(origin.as_deref());
+                            if let Ok(value) = HeaderValue::from_str(&csp) {
+                                resp.headers_mut()
+                                    .insert(http::header::CONTENT_SECURITY_POLICY, value);
+                            }
+                            Ok(resp)
+                        }),
                 )
                 .at(
                     "/api/auth/web-auth-requests/stream",

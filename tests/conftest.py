@@ -193,6 +193,26 @@ class ProcessManager:
         )
         return port
 
+    def start_minio(self, user, password):
+        port = alloc_port()
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-p",
+                f"{port}:9000",
+                "-e",
+                f"MINIO_ROOT_USER={user}",
+                "-e",
+                f"MINIO_ROOT_PASSWORD={password}",
+                "minio/minio",
+                "server",
+                "/data",
+            ]
+        )
+        return port
+
     def start_mariadb_server(self):
         port = alloc_port()
         self.start(

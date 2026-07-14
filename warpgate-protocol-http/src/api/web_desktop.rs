@@ -11,7 +11,6 @@ use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::{AuthenticatedRequestContext, web_reauth_required};
 use warpgate_core::ConfigProvider;
-use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Target::{self, TargetKind};
 use warpgate_web_desktop::WebDesktopClientManager;
 
@@ -94,11 +93,7 @@ impl Api {
         }
 
         // Same global gate as web SSH: the in-browser RDP/VNC desktop clients.
-        if !Parameters::Entity::get(&ctx.services().db)
-            .await
-            .map_err(WarpgateError::from)?
-            .web_clients_enabled
-        {
+        if !ctx.parameters().await?.web_clients_enabled {
             return Ok(CreateWebDesktopSessionResponse::Forbidden);
         }
 

@@ -29,6 +29,7 @@ tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 warpgate-ca = { path = "../warpgate-ca" }
+warpgate-aws = { path = "../warpgate-aws" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core" }

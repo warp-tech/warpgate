@@ -42,7 +42,7 @@ impl Services {
     ) -> Result<Self> {
         let db = connect_to_db_and_migrate(&config, &params).await?;
         populate_db(&db, &mut config).await?;
-        let recordings = SessionRecordings::new(db.clone(), &config, &params)?;
+        let recordings = SessionRecordings::new(db.clone(), &params);
         let recordings = Arc::new(Mutex::new(recordings));
 
         let config = Arc::new(Mutex::new(config));

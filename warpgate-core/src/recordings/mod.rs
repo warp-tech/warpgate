@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -11,14 +10,18 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::info;
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_directory;
-use warpgate_common::{GlobalParams, RecordingsConfig, SessionId, WarpgateConfig};
+use warpgate_common::{GlobalParams, SessionId};
+use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Recording::{self, RecordingKind};
 mod desktop;
 mod framebuffer;
+mod storage;
 mod terminal;
 mod traffic;
 mod writer;
 pub use desktop::*;
+pub use storage::FileAccess;
+use storage::Storage;
 pub use terminal::*;
 pub use traffic::*;
 pub use writer::{NDJsonRecordingWriter, RawRecordingWriter};
@@ -37,6 +40,14 @@ impl RecordingFile {
             RecordingFile::NDJsonData => "data.ndjson",
             RecordingFile::TcpDumpData => "data.tcpdump",
             RecordingFile::Index => "index.ndjson",
+        }
+    }
+
+    pub fn mime_type(&self) -> &'static str {
+        match self {
+            RecordingFile::NDJsonData => "application/x-ndjson",
+            RecordingFile::TcpDumpData => "application/vnd.tcpdump.pcap",
+            RecordingFile::Index => "application/x-ndjson",
         }
     }
 }
@@ -63,12 +74,15 @@ pub enum Error {
 
     #[error("Invalid recording path")]
     InvalidPath,
+
+    #[error("Storage backend: {0}")]
+    Aws(#[from] warpgate_aws::AwsError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct RecordingWriterOpener {
-    folder: PathBuf,
+    storage: Storage,
     model: Recording::Model,
     db: DatabaseConnection,
     live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
@@ -98,14 +112,11 @@ impl RecordingWriterOpener {
         // under the same id, and a live viewer would then receive the index (seek anchors,
         // no pixels) instead of the framebuffer.
         let live = matches!(file, RecordingFile::NDJsonData).then(|| self.live.clone());
-        RawRecordingWriter::new(
-            self.folder.join(file.filename()),
-            self.model.clone(),
-            self.db.clone(),
-            live,
-            &self.params,
-        )
-        .await
+        let sink = self
+            .storage
+            .open_sink(&self.model, file, &self.params)
+            .await?;
+        RawRecordingWriter::new(sink, self.model.clone(), self.db.clone(), live).await
     }
 }
 
@@ -119,33 +130,25 @@ where
 
 pub struct SessionRecordings {
     db: DatabaseConnection,
-    path: PathBuf,
-    config: RecordingsConfig,
     live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
     params: GlobalParams,
 }
 
 impl SessionRecordings {
-    pub fn new(
-        db: DatabaseConnection,
-        config: &WarpgateConfig,
-        params: &GlobalParams,
-    ) -> Result<Self> {
-        let mut path = params.paths_relative_to().clone();
-        path.push(&config.store.recordings.path);
-        if config.store.recordings.enable {
-            std::fs::create_dir_all(&path)?;
-            if params.should_secure_files() {
-                secure_directory(&path)?;
-            }
-        }
-        Ok(Self {
+    pub fn new(db: DatabaseConnection, params: &GlobalParams) -> Self {
+        Self {
             db,
-            config: config.store.recordings.clone(),
-            path,
             live: Arc::new(Mutex::new(HashMap::new())),
             params: params.clone(),
-        })
+        }
+    }
+
+    async fn storage(&self) -> Result<Storage> {
+        Storage::load(&self.db, &self.params).await
+    }
+
+    pub async fn is_enabled(&self) -> Result<bool> {
+        Ok(Parameters::Entity::get(&self.db).await?.recordings_enable)
     }
 
     /// Starting a recording with the same name again will append to it
@@ -154,14 +157,17 @@ impl SessionRecordings {
         T: Recorder,
         M: Serialize + Debug,
     {
-        if !self.config.enable {
+        let storage = self.storage().await?;
+        if !storage.enabled() {
             return Err(Error::Disabled);
         }
 
         let name = name.unwrap_or_else(|| Uuid::new_v4().to_string());
         // Gen-2 recordings are folders holding fixed-name files (`data.ndjson`, and a
         // desktop `index.json`), so the recording path is a directory we create here.
-        let folder = self.path_for(id, &name);
+        // On S3 this folder is a scratch copy, live-readable while the session runs and
+        // dropped once each file finishes uploading.
+        let folder = storage.recording_folder(id, &name);
         tokio::fs::create_dir_all(&folder).await?;
         if self.params.should_secure_files() {
             secure_directory(&folder)?;
@@ -198,7 +204,7 @@ impl SessionRecordings {
         };
 
         let opener = RecordingWriterOpener {
-            folder: folder.clone(),
+            storage,
             model,
             db: self.db.clone(),
             live: self.live.clone(),
@@ -214,37 +220,17 @@ impl SessionRecordings {
     }
 
     pub async fn remove(&self, session_id: &SessionId, name: &str) -> Result<()> {
-        let path = self.path_for(session_id, name);
-        // gen 2 is a folder, gen 1 a single file — pick by what's on disk.
-        if tokio::fs::metadata(&path).await?.is_dir() {
-            tokio::fs::remove_dir_all(&path).await?;
-        } else {
-            tokio::fs::remove_file(&path).await?;
-        }
-        if let Some(parent) = path.parent()
-            && tokio::fs::read_dir(parent)
-                .await?
-                .next_entry()
-                .await?
-                .is_none()
-        {
-            tokio::fs::remove_dir(parent).await?;
-        }
-        Ok(())
+        self.storage().await?.remove(session_id, name).await
     }
 
-    pub fn path_for<P: AsRef<Path>>(&self, session_id: &SessionId, name: P) -> PathBuf {
-        self.path.join(session_id.to_string()).join(&name)
-    }
-
-    /// On-disk path of a recording's primary data stream, generation-aware: gen 1 is a
-    /// single file, gen 2 is multiple files inside the recording folder.
-    pub fn file_path(&self, recording: &Recording::Model, file: RecordingFile) -> PathBuf {
-        let base = self.path_for(&recording.session_id, &recording.name);
-        if recording.generation >= 2 {
-            base.join(file.filename())
-        } else {
-            base
-        }
+    /// Open a recording file as a streaming reader (local file or S3 object),
+    /// without buffering the whole thing. Used by endpoints that transform the
+    /// file server-side.
+    pub async fn access(
+        &self,
+        recording: &Recording::Model,
+        file: RecordingFile,
+    ) -> Result<FileAccess> {
+        self.storage().await?.access(recording, file)
     }
 }

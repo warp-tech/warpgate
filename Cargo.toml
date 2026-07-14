@@ -77,9 +77,7 @@ sea-orm = { version = "1.0", default-features = false, features = [
     "macros",
     "with-time",
 ] }
-sea-orm-migration = { version = "1.0", default-features = false, features = [
-    "cli",
-] }
+sea-orm-migration = { version = "1.0", default-features = false }
 poem = { version = "3.1", features = [
     "cookie",
     "session",
@@ -197,4 +195,10 @@ hint-mostly-unused = true
 hint-mostly-unused = true
 
 [profile.release.package.aws-sdk-eks]
+hint-mostly-unused = true
+
+[profile.dev.package.aws-sdk-s3]
+hint-mostly-unused = true
+
+[profile.release.package.aws-sdk-s3]
 hint-mostly-unused = true

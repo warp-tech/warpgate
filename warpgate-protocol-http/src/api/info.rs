@@ -141,11 +141,7 @@ impl Api {
             .and_then(url::Url::host)
             .map(|x| x.to_string());
 
-        let parameters = {
-            Parameters::Entity::get(&ctx.services().db)
-                .await
-                .context("loading parameters")?
-        };
+        let parameters = ctx.parameters().await?;
 
         let setup_state = {
             let (users, targets) = {
@@ -392,10 +388,7 @@ impl Api {
         }
 
         let db = &ctx.services().db;
-        let mut parameters = Parameters::Entity::get(&db)
-            .await
-            .context("loading parameters")?
-            .into_active_model();
+        let mut parameters = ctx.parameters().await?.clone().into_active_model();
         parameters.tutorial_dismissed = Set(true);
         Parameters::Entity::update(parameters)
             .exec(&*db)
