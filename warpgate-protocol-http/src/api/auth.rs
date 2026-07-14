@@ -112,6 +112,22 @@ struct AuthStateResponseInternal {
     pub started: OffsetDateTime,
     pub state: ApiAuthState,
     pub identification_string: String,
+    /// When web-approval caching is enabled, the caching window in seconds;
+    /// `None` when caching is disabled.
+    pub web_approval_caching_grace_seconds: Option<i64>,
+}
+
+/// How an web approval should be remembered for bypass
+#[derive(Enum, Clone, Copy)]
+enum WebApprovalScope {
+    Once,
+    Target,
+    AllTargets,
+}
+
+#[derive(Object)]
+struct ApproveAuthRequest {
+    scope: WebApprovalScope,
 }
 
 #[derive(ApiResponse)]
@@ -564,6 +580,7 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
+        body: Json<ApproveAuthRequest>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<AuthStateResponse> {
         let services = ctx.services();
@@ -577,8 +594,12 @@ impl Api {
             (state.verify(), state.web_approval_match_key())
         };
 
-        if let Some(match_key) = match_key {
-            // Remembered so matching attempts can be bypassed within the grace period.
+        // Remembered so matching attempts can be bypassed within the grace period.
+        if let Some(match_key) = match body.scope {
+            WebApprovalScope::Once => None,
+            WebApprovalScope::Target => match_key,
+            WebApprovalScope::AllTargets => match_key.map(|k| k.for_all_targets()),
+        } {
             services
                 .auth_state_store
                 .lock()
@@ -673,6 +694,11 @@ async fn serialize_auth_state_inner(
         None => None,
     };
 
+    let web_approval_caching_grace_seconds = services
+        .web_approval_grace_period()
+        .await?
+        .and_then(|d| i64::try_from(d.as_secs()).ok());
+
     Ok(AuthStateResponseInternal {
         id: state.id().to_string(),
         protocol: state.protocol().to_string(),
@@ -680,6 +706,7 @@ async fn serialize_auth_state_inner(
         started: *state.started(),
         state: state.verify().into(),
         identification_string: state.identification_string().to_owned(),
+        web_approval_caching_grace_seconds,
     })
 }
 

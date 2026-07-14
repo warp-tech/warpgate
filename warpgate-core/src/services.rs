@@ -136,7 +136,8 @@ impl Services {
         ))
     }
 
-    async fn web_approval_grace_period(&self) -> Result<Option<Duration>, WarpgateError> {
+    /// Configured web-approval caching window, or `None` if caching is disabled.
+    pub async fn web_approval_grace_period(&self) -> Result<Option<Duration>, WarpgateError> {
         Ok(Parameters::Entity::get(&self.db)
             .await?
             .web_approval_grace_period_seconds

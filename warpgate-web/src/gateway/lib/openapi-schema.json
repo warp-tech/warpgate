@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.26.1-32-ga7463594-modified"
+    "version": "v0.27.0-beta.1-3-ga1a5c670-modified"
   },
   "servers": [
     {
@@ -198,6 +198,16 @@
             "explode": true
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveAuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "",
@@ -1552,6 +1562,18 @@
           "IpRejected"
         ]
       },
+      "ApproveAuthRequest": {
+        "type": "object",
+        "title": "ApproveAuthRequest",
+        "required": [
+          "scope"
+        ],
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/WebApprovalScope"
+          }
+        }
+      },
       "AuthStateResponseInternal": {
         "type": "object",
         "title": "AuthStateResponseInternal",
@@ -1581,6 +1603,11 @@
           },
           "identification_string": {
             "type": "string"
+          },
+          "web_approval_caching_grace_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When web-approval caching is enabled, the caching window in seconds;\n`None` when caching is disabled."
           }
         }
       },
@@ -2625,6 +2652,15 @@
             }
           }
         }
+      },
+      "WebApprovalScope": {
+        "type": "string",
+        "description": "How an web approval should be remembered for bypass",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
       },
       "WebDesktopSessionCreated": {
         "type": "object",

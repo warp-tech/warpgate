@@ -9,7 +9,10 @@ use tracing::{debug, info};
 use url::Url;
 use uuid::Uuid;
 
-use super::{AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse};
+use super::{
+    AuthCredential, AuthCredentialFingerprint, CredentialKind, CredentialPolicy,
+    CredentialPolicyResponse,
+};
 use crate::helpers::logging::format_related_ids;
 use crate::{SessionId, User};
 
@@ -26,14 +29,26 @@ pub struct AuthStateUserInfo {
     pub username: String,
 }
 
-/// Cache matching key for web approval bypass
+/// Cache matching key for web approval bypass.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebApprovalMatchKey {
     pub remote_ip: IpAddr,
     pub protocol: String,
     pub username: String,
-    pub target_name: String,
-    pub other_credentials: Vec<CredentialKind>,
+    /// `None` when the approval was granted for *all* targets;
+    /// `Some(name)` binds it to one target.
+    pub target_name: Option<String>,
+    pub other_credentials: Vec<AuthCredentialFingerprint>,
+}
+
+impl WebApprovalMatchKey {
+    /// A copy of this key that matches an approval remembered for all targets.
+    pub fn for_all_targets(&self) -> Self {
+        Self {
+            target_name: None,
+            ..self.clone()
+        }
+    }
 }
 
 impl From<&User> for AuthStateUserInfo {
@@ -136,20 +151,20 @@ impl AuthState {
         // `WebUserApproval` itself is excluded so the key describes the
         // *other* credentials presented, and is identical whether computed before
         // the approval is added (check) or after (save)
-        let mut other_credentials: Vec<CredentialKind> = self
+        let mut other_credentials: Vec<AuthCredentialFingerprint> = self
             .valid_credentials
             .iter()
-            .map(AuthCredential::kind)
-            .filter(|k| *k != CredentialKind::WebUserApproval)
+            .filter(|c| c.kind() != CredentialKind::WebUserApproval)
+            .map(Into::into)
             .collect();
         other_credentials.sort_unstable();
         other_credentials.dedup();
 
         Some(WebApprovalMatchKey {
-            remote_ip: remote_ip,
+            remote_ip,
             protocol: self.protocol.clone(),
             username: self.user_info.username.to_lowercase(),
-            target_name: self.target_name.clone(),
+            target_name: Some(self.target_name.clone()),
             other_credentials,
         })
     }
