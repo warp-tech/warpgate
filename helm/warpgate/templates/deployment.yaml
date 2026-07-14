@@ -71,13 +71,6 @@ spec:
                 chmod -R 600 /data/ssh-keys/*
               fi
 
-              if [ -d /tls-cert ]; then
-                cp /tls-cert/tls.crt /data/tls.certificate.pem
-                cp /tls-cert/tls.key /data/tls.key.pem
-                chmod 600 /data/tls.certificate.pem
-                chmod 600 /data/tls.key.pem
-              fi
-
               {{- if .Values.setup.enabled }}
               {{- if eq .Values.setup.type "podinit" }}
               if [ ! -f /data/warpgate.yaml ]; then
@@ -96,6 +89,15 @@ spec:
               fi
               {{- end }}
               {{- end }}
+
+              # After setup: unattended-setup writes a self-signed cert unconditionally,
+              # so the provided cert must be copied in afterwards to take effect.
+              if [ -d /tls-cert ]; then
+                cp /tls-cert/tls.crt /data/tls.certificate.pem
+                cp /tls-cert/tls.key /data/tls.key.pem
+                chmod 600 /data/tls.certificate.pem
+                chmod 600 /data/tls.key.pem
+              fi
 
               if [ -d /override ]; then
                 cp /override/warpgate.yaml /data/warpgate.yaml
