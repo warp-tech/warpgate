@@ -270,7 +270,10 @@ impl AuthStateStore {
             return Ok(false)
         };
 
-        if !self.recent_approval_is_fresh(&key, grace) {
+        // A remembered approval matches either this exact target or all targets.
+        if !self.recent_approval_is_fresh(&key, grace)
+            && !self.recent_approval_is_fresh(&key.for_all_targets(), grace)
+        {
             return Ok(false);
         }
 
@@ -325,6 +328,7 @@ mod tests {
     use std::str::FromStr;
 
     use ipnet::IpNet;
+    use warpgate_common::auth::AuthCredentialFingerprint;
 
     use super::*;
 
@@ -411,13 +415,13 @@ mod tests {
         assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_err());
     }
 
-    fn approval_key(target: &str) -> WebApprovalMatchKey {
+    fn approval_key(target: Option<&str>) -> WebApprovalMatchKey {
         WebApprovalMatchKey {
             remote_ip: "10.0.0.5".parse().unwrap(),
             protocol: "ssh".into(),
             username: "alice".into(),
-            target_name: target.into(),
-            other_credentials: vec![CredentialKind::Password],
+            target_name: target.map(Into::into),
+            other_credentials: vec![AuthCredentialFingerprint::Password { hash: [7u8; 32] }],
         }
     }
 
@@ -427,15 +431,35 @@ mod tests {
         let grace = Duration::from_secs(3600);
 
         // No approval recorded yet.
-        assert!(!store.recent_approval_is_fresh(&approval_key("prod"), grace));
+        assert!(!store.recent_approval_is_fresh(&approval_key(Some("prod")), grace));
 
-        store.record_web_approval(approval_key("prod"));
+        store.record_web_approval(approval_key(Some("prod")));
 
         // Exact match within grace bypasses.
-        assert!(store.recent_approval_is_fresh(&approval_key("prod"), grace));
+        assert!(store.recent_approval_is_fresh(&approval_key(Some("prod")), grace));
         // A different target is not a full match.
-        assert!(!store.recent_approval_is_fresh(&approval_key("staging"), grace));
+        assert!(!store.recent_approval_is_fresh(&approval_key(Some("staging")), grace));
+        // Different credentials are not a full match.
+        let mut wrong_cred = approval_key(Some("prod"));
+        wrong_cred.other_credentials = vec![AuthCredentialFingerprint::Password { hash: [9u8; 32] }];
+        assert!(!store.recent_approval_is_fresh(&wrong_cred, grace));
         // A zero grace never counts as fresh, so approval is required again.
-        assert!(!store.recent_approval_is_fresh(&approval_key("prod"), Duration::ZERO));
+        assert!(!store.recent_approval_is_fresh(&approval_key(Some("prod")), Duration::ZERO));
+    }
+
+    #[test]
+    fn web_approval_for_all_targets_matches_any_target() {
+        let mut store = AuthStateStore::new();
+        let grace = Duration::from_secs(3600);
+
+        store.record_web_approval(approval_key(None));
+
+        // An all-targets approval is found via `for_all_targets` for any target.
+        assert!(store.recent_approval_is_fresh(&approval_key(Some("prod")).for_all_targets(), grace));
+        assert!(
+            store.recent_approval_is_fresh(&approval_key(Some("staging")).for_all_targets(), grace)
+        );
+        // ...but not by an exact-target lookup.
+        assert!(!store.recent_approval_is_fresh(&approval_key(Some("prod")), grace));
     }
 }

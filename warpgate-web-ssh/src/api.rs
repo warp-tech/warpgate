@@ -115,7 +115,7 @@ async fn handle_client_message(
             Some(ServerMessage::ChannelOpened { channel_id })
         }
         ClientMessage::Input { channel_id, data } => {
-            session.send_input(channel_id, data);
+            session.send_input(channel_id, data).await;
             None
         }
         ClientMessage::Resize {
