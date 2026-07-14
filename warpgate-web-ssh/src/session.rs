@@ -9,7 +9,9 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info};
 use uuid::Uuid;
 use warpgate_core::WarpgateServerHandle;
-use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
+use warpgate_core::recordings::{
+    SessionRecordings, TerminalRecorder, TerminalRecordingStreamId,
+};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
     ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError, SshRecordingMetadata,
@@ -161,7 +163,13 @@ impl WebSshSession {
         channel_id
     }
 
-    pub fn send_input(&self, channel_id: Uuid, data: Bytes) {
+    pub async fn send_input(&self, channel_id: Uuid, data: Bytes) {
+        self.with_recorder(channel_id, async |r| {
+            if let Err(e) = r.write(TerminalRecordingStreamId::Input, &data).await {
+                error!(%channel_id, ?e, "Failed to record terminal input");
+            }
+        })
+        .await;
         self.command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));
     }
 
