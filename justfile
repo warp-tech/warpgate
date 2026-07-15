@@ -17,7 +17,8 @@ fix *ARGS:
     for p in {{projects}}; do cargo fix --all-features -p $p {{ARGS}}; done
 
 clippy *ARGS:
-    for p in {{projects}}; do cargo cranky --all-features -p $p {{ARGS}}; done
+    cargo cranky --workspace --all-features {{ARGS}}
+    cd warpgate-rdp-helper && cargo cranky --workspace --all-features {{ARGS}}
 
 bless *ARGS:
     for p in {{projects}}; do cargo bless --manifest-path $p/Cargo.toml {{ARGS}}; done

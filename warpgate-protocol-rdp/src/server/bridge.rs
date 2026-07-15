@@ -2,6 +2,7 @@
 //! pump its framebuffer to the serve helper, and record the session. Also owns the single
 //! serve-helper stdin writer (with drop-oldest frame shedding).
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -83,8 +84,7 @@ pub(super) async fn helper_stdin_writer(
     mut stdin: HelperWriter,
     mut rx: UnboundedReceiver<ServerHelperInput>,
 ) {
-    let mut batch: std::collections::VecDeque<ServerHelperInput> =
-        std::collections::VecDeque::new();
+    let mut batch: VecDeque<ServerHelperInput> = VecDeque::new();
     let mut body = Vec::new();
     loop {
         // Block for at least one message, then drain everything else already queued so we

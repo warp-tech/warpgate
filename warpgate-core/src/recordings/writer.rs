@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -87,12 +86,12 @@ impl RawRecordingWriter {
                 let id = model.id;
                 let db = &db;
                 let recording = Recording::Entity::find_by_id(id)
-                    .one(&*db)
+                    .one(db)
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("Recording not found"))?;
                 let mut model: Recording::ActiveModel = recording.into();
                 model.ended = Set(Some(OffsetDateTime::now_utc()));
-                model.update(&*db).await?;
+                model.update(db).await?;
 
                 drop(cleanup_guard);
 
@@ -152,9 +151,9 @@ impl NDJsonRecordingWriter {
     pub async fn write_json_line<I: Serialize>(&self, value: I) -> Result<usize> {
         let buf = &mut self.buf.write().await;
         buf.clear();
-        serde_json::to_writer(buf.deref_mut(), &value).map_err(Error::Serialization)?;
+        serde_json::to_writer(&mut **buf, &value).map_err(Error::Serialization)?;
         buf.push(b'\n');
-        self.inner.write(&buf).await?;
+        self.inner.write(buf).await?;
         Ok(buf.len())
     }
 }

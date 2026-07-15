@@ -51,6 +51,7 @@ pub struct InteractiveAuth {
 }
 
 /// Result of evaluating the viewer's up-front (password / ticket) credentials.
+#[allow(clippy::large_enum_variant)]
 pub enum DesktopAuthOutcome<O> {
     /// Fully authenticated (password-only policy, or ticket auth).
     Authorized {

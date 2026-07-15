@@ -232,13 +232,13 @@ impl Api {
                     let mut combined = AdminPermissions::default();
                     if let Some(user) = User::Entity::find()
                         .filter(User::Entity::username_eq_ci(username))
-                        .one(&*db)
+                        .one(db)
                         .await
                         .context("loading user")?
                     {
                         let roles: Vec<AdminRole::Model> = user
                             .find_related(AdminRole::Entity)
-                            .all(&*db)
+                            .all(db)
                             .await
                             .context("loading roles")?;
                         for r in roles {
@@ -391,7 +391,7 @@ impl Api {
         let mut parameters = ctx.parameters().await?.clone().into_active_model();
         parameters.tutorial_dismissed = Set(true);
         Parameters::Entity::update(parameters)
-            .exec(&*db)
+            .exec(db)
             .await
             .context("updating parameters")?;
 

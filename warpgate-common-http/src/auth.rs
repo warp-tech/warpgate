@@ -16,10 +16,10 @@ use crate::request::{trusted_host_header, trusted_proto};
 /// Used to enforce the re-authentication policy (web_auth_max_age_seconds)
 const AUTH_TIME_SESSION_KEY: &str = "auth_time";
 
-fn now_unix() -> i64 {
+fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
+        .map(|d| d.as_secs())
         .unwrap_or(0)
 }
 
@@ -44,11 +44,11 @@ pub async fn web_reauth_required(
         return Ok(false);
     };
 
-    let Some(auth_time) = session.get::<i64>(AUTH_TIME_SESSION_KEY) else {
+    let Some(auth_time) = session.get::<u64>(AUTH_TIME_SESSION_KEY) else {
         return Ok(true);
     };
 
-    Ok(now_unix() - auth_time >= max_age)
+    Ok(now_unix() - auth_time >= max_age.cast_unsigned())
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -119,6 +119,7 @@ impl UnauthenticatedRequestContext {
     }
 
     /// A copy for a single request, with a fresh empty parameter cache.
+    #[must_use]
     pub fn for_request(&self) -> Self {
         Self {
             services: self.services.clone(),

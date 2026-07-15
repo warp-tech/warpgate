@@ -73,7 +73,7 @@ impl Api {
                     limit: *limit,
                     offset: *offset,
                 },
-                &*db,
+                db,
                 Into::into,
             )
             .await?,

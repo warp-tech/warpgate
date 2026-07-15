@@ -37,11 +37,11 @@ impl Api {
 
         let db = &ctx.services().db;
 
-        let known_host = KnownHost::Entity::find_by_id(id.0).one(&*db).await?;
+        let known_host = KnownHost::Entity::find_by_id(id.0).one(db).await?;
 
         match known_host {
             Some(known_host) => {
-                known_host.delete(&*db).await?;
+                known_host.delete(db).await?;
                 Ok(DeleteSSHKnownHostResponse::Deleted)
             }
             None => Ok(DeleteSSHKnownHostResponse::NotFound),

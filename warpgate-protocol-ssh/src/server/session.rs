@@ -1449,7 +1449,7 @@ impl ServerSession {
 
         let should_record = if is_scp {
             let db = &self.services.db;
-            let should_record = Parameters::Entity::get(&db)
+            let should_record = Parameters::Entity::get(db)
                 .await
                 .map(|p| p.record_scp)
                 .unwrap_or(true);

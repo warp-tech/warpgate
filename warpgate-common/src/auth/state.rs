@@ -43,6 +43,7 @@ pub struct WebApprovalMatchKey {
 
 impl WebApprovalMatchKey {
     /// A copy of this key that matches an approval remembered for all targets.
+    #[must_use]
     pub fn for_all_targets(&self) -> Self {
         Self {
             target_name: None,
@@ -87,6 +88,7 @@ fn generate_identification_string() -> String {
 }
 
 impl AuthState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: Uuid,
         session_id: Option<SessionId>,
@@ -144,9 +146,7 @@ impl AuthState {
     /// Builds the key used to match this attempt against a remembered web
     /// approval.
     pub fn web_approval_match_key(&self) -> Option<WebApprovalMatchKey> {
-        let Some(remote_ip) = self.remote_ip else {
-            return None;
-        };
+        let remote_ip = self.remote_ip?;
 
         // `WebUserApproval` itself is excluded so the key describes the
         // *other* credentials presented, and is identical whether computed before

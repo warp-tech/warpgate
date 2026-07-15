@@ -59,7 +59,7 @@ impl ListApi {
         let db = &ctx.services().db;
         let groups = TargetGroup::Entity::find()
             .order_by_asc(TargetGroup::Column::Name)
-            .all(&*db)
+            .all(db)
             .await?;
 
         Ok(GetTargetGroupsResponse::Ok(Json(groups)))
@@ -85,7 +85,7 @@ impl ListApi {
         let db = &ctx.services().db;
         let existing = TargetGroup::Entity::find()
             .filter(TargetGroup::Column::Name.eq(body.name.clone()))
-            .one(&*db)
+            .one(db)
             .await?;
         if existing.is_some() {
             return Ok(CreateTargetGroupResponse::Conflict(Json(
@@ -100,7 +100,7 @@ impl ListApi {
             color: Set(body.color.clone()),
         };
 
-        let group = values.insert(&*db).await?;
+        let group = values.insert(db).await?;
 
         Ok(CreateTargetGroupResponse::Created(Json(group)))
     }
@@ -151,7 +151,7 @@ impl DetailApi {
         require_admin_permission(&ctx, None).await?;
 
         let db = &ctx.services().db;
-        let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
+        let group = TargetGroup::Entity::find_by_id(id.0).one(db).await?;
 
         match group {
             Some(group) => Ok(GetTargetGroupResponse::Ok(Json(group))),
@@ -178,7 +178,7 @@ impl DetailApi {
         }
 
         let db = &ctx.services().db;
-        let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
+        let group = TargetGroup::Entity::find_by_id(id.0).one(db).await?;
 
         let Some(group) = group else {
             return Ok(UpdateTargetGroupResponse::NotFound);
@@ -188,7 +188,7 @@ impl DetailApi {
         let existing = TargetGroup::Entity::find()
             .filter(TargetGroup::Column::Name.eq(body.name.clone()))
             .filter(TargetGroup::Column::Id.ne(id.0))
-            .one(&*db)
+            .one(db)
             .await?;
         if existing.is_some() {
             return Ok(UpdateTargetGroupResponse::BadRequest);
@@ -199,7 +199,7 @@ impl DetailApi {
         group.description = Set(body.description.clone().unwrap_or_default());
         group.color = Set(body.color.clone());
 
-        let group = group.update(&*db).await?;
+        let group = group.update(db).await?;
         Ok(UpdateTargetGroupResponse::Ok(Json(group)))
     }
 
@@ -219,7 +219,7 @@ impl DetailApi {
         require_admin_permission(&ctx, Some(AdminPermission::TargetsDelete)).await?;
 
         let db = &ctx.services().db;
-        let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
+        let group = TargetGroup::Entity::find_by_id(id.0).one(db).await?;
 
         let Some(group) = group else {
             return Ok(DeleteTargetGroupResponse::NotFound);
@@ -229,11 +229,11 @@ impl DetailApi {
         Target::Entity::update_many()
             .col_expr(Target::Column::GroupId, Expr::value(Option::<Uuid>::None))
             .filter(Target::Column::GroupId.eq(id.0))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         // Then delete the group
-        group.delete(&*db).await?;
+        group.delete(db).await?;
         Ok(DeleteTargetGroupResponse::Deleted)
     }
 }

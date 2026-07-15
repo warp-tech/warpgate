@@ -56,7 +56,7 @@ impl Api {
         let db = &ctx.services().db;
 
         let recording = Recording::Entity::find_by_id(id.0)
-            .one(&*db)
+            .one(db)
             .await
             .map_err(InternalServerError)?;
 
@@ -83,7 +83,7 @@ impl Api {
 
         let recording = Recording::Entity::find_by_id(id.0)
             .filter(Recording::Column::Kind.eq(RecordingKind::Kubernetes))
-            .one(&*db)
+            .one(db)
             .await
             .map_err(InternalServerError)?;
 
@@ -228,7 +228,7 @@ async fn serve_recording_file(
         .recordings
         .lock()
         .await
-        .access(&recording, file)
+        .access(recording, file)
         .await
         .map_err(InternalServerError)?;
 
@@ -240,7 +240,7 @@ async fn serve_recording_file(
         Ok(Redirect::temporary(url).into_response())
     } else if let Some(path) = access.local_path() {
         Ok(static_req
-            .create_response(&path, false, false)?
+            .create_response(path, false, false)?
             .with_content_type(file.mime_type())
             .into_response())
     } else {

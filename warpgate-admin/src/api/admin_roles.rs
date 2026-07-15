@@ -115,7 +115,7 @@ impl ListApi {
             roles = roles.filter(case_insensitive_search(search, [AdminRole::Column::Name]));
         }
 
-        let roles = roles.all(&*db).await?;
+        let roles = roles.all(db).await?;
         Ok(GetAdminRolesResponse::Ok(Json(
             roles.into_iter().map(Into::into).collect(),
         )))
@@ -159,7 +159,7 @@ impl ListApi {
             ticket_requests_manage: Set(body.ticket_requests_manage.unwrap_or_default()),
         };
 
-        let role = values.insert(&*db).await?;
+        let role = values.insert(db).await?;
         let role_config: AdminRoleConfig = role.into();
         Ok(CreateAdminRoleResponse::Created(Json(role_config)))
     }
@@ -183,7 +183,7 @@ impl DetailApi {
         require_admin_permission(&ctx, None).await?;
 
         let db = &ctx.services().db;
-        let role = AdminRole::Entity::find_by_id(id.0).one(&*db).await?;
+        let role = AdminRole::Entity::find_by_id(id.0).one(db).await?;
         Ok(match role {
             Some(r) => GetAdminRoleResponse::Ok(Json(r.into())),
             None => GetAdminRoleResponse::NotFound,
@@ -205,7 +205,7 @@ impl DetailApi {
         require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
 
         let db = &ctx.services().db;
-        let Some(role) = AdminRole::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(role) = AdminRole::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateAdminRoleResponse::NotFound);
         };
 
@@ -230,7 +230,7 @@ impl DetailApi {
         model.config_edit = Set(body.config_edit);
         model.admin_roles_manage = Set(body.admin_roles_manage);
         model.ticket_requests_manage = Set(body.ticket_requests_manage.unwrap_or_default());
-        let role = model.update(&*db).await?;
+        let role = model.update(db).await?;
         Ok(UpdateAdminRoleResponse::Ok(Json(role.into())))
     }
 
@@ -248,7 +248,7 @@ impl DetailApi {
         require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
 
         let db = &ctx.services().db;
-        let Some(role) = AdminRole::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(role) = AdminRole::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteAdminRoleResponse::NotFound);
         };
 
@@ -257,7 +257,7 @@ impl DetailApi {
             return Ok(DeleteAdminRoleResponse::Forbidden);
         }
 
-        role.delete(&*db).await?;
+        role.delete(db).await?;
         Ok(DeleteAdminRoleResponse::Deleted)
     }
 
@@ -277,7 +277,7 @@ impl DetailApi {
         let db = &ctx.services().db;
         let Some((_, users)) = AdminRole::Entity::find_by_id(id.0)
             .find_with_related(User::Entity)
-            .all(&*db)
+            .all(db)
             .await
             .map(|x| x.into_iter().next())
             .map_err(WarpgateError::from)?

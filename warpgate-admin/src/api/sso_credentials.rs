@@ -87,7 +87,7 @@ impl ListApi {
 
         let objects = SsoCredential::Entity::find()
             .filter(SsoCredential::Column::UserId.eq(*user_id))
-            .all(&*db)
+            .all(db)
             .await?;
 
         Ok(GetSsoCredentialsResponse::Ok(Json(
@@ -116,11 +116,11 @@ impl ListApi {
             user_id: Set(*user_id),
             ..SsoCredential::ActiveModel::from(UserSsoCredential::from(&*body))
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(CreateSsoCredentialResponse::NotFound);
         };
 
@@ -173,7 +173,7 @@ impl DetailApi {
             user_id: Set(*user_id),
             ..<_>::from(UserSsoCredential::from(&*body))
         }
-        .update(&*db)
+        .update(db)
         .await;
 
         match model {
@@ -201,19 +201,19 @@ impl DetailApi {
 
         let Some(role) = SsoCredential::Entity::find_by_id(id.0)
             .filter(SsoCredential::Column::UserId.eq(*user_id))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
         let credential_name = role.email.clone();
 
-        role.delete(&*db).await?;
+        role.delete(db).await?;
 
         AuditEvent::CredentialDeleted {
             credential_type: "sso".to_string(),

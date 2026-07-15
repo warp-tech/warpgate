@@ -43,7 +43,7 @@ pub enum OtpActionApplyOutcome {
 }
 
 impl OtpEntry {
-    pub fn new(protocol_label: &'static str) -> Self {
+    pub const fn new(protocol_label: &'static str) -> Self {
         Self {
             entered: String::new(),
             failures: 0,

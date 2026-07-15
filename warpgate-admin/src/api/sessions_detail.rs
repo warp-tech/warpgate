@@ -50,7 +50,7 @@ impl Api {
 
         let db = &ctx.services().db;
 
-        let session = Session::Entity::find_by_id(id.0).one(&*db).await?;
+        let session = Session::Entity::find_by_id(id.0).one(db).await?;
 
         match session {
             Some(session) => Ok(GetSessionResponse::Ok(Json(session.into()))),
@@ -75,7 +75,7 @@ impl Api {
         let recordings: Vec<Recording::Model> = Recording::Entity::find()
             .order_by_desc(Recording::Column::Started)
             .filter(Recording::Column::SessionId.eq(id.0))
-            .all(&*db)
+            .all(db)
             .await?;
         Ok(GetSessionRecordingsResponse::Ok(Json(recordings)))
     }

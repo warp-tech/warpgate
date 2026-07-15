@@ -14,7 +14,7 @@ use crate::AwsError;
 /// Minimum S3 multipart part size (5 MiB); the last part may be smaller.
 const PART_SIZE: usize = 5 * 1024 * 1024;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Union)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Union)]
 #[serde(tag = "mode")]
 #[oai(discriminator_name = "mode", one_of)]
 pub enum S3Credentials {
@@ -23,10 +23,10 @@ pub enum S3Credentials {
     Static(StaticCredentials),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Object, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object, Default)]
 pub struct AutoCredentials {}
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Object)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
 pub struct StaticCredentials {
     pub access_key_id: String,
     /// `None` on the admin API means "keep the stored secret" (it's never sent
@@ -38,8 +38,8 @@ impl S3Credentials {
     #[must_use]
     pub fn setup_config_loader(&self, loader: ConfigLoader) -> ConfigLoader {
         match self {
-            S3Credentials::Auto(_) => loader,
-            S3Credentials::Static(creds) => loader.credentials_provider(Credentials::new(
+            Self::Auto(_) => loader,
+            Self::Static(creds) => loader.credentials_provider(Credentials::new(
                 creds.access_key_id.clone(),
                 creds.secret_access_key.clone().unwrap_or_default(),
                 None,
@@ -52,7 +52,7 @@ impl S3Credentials {
 
 /// Everything needed to reach an S3 (or S3-compatible) bucket. Serves as both
 /// the stored (serde) and admin-API (poem-openapi) representation.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Object)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
 pub struct S3StorageConfig {
     pub bucket: String,
     pub region: String,

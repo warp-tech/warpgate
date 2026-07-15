@@ -176,9 +176,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         handshake: HandshakeResponse,
         password: Secret<String>,
     ) -> Result<(), MySqlError> {
-        let selector: AuthSelector = handshake.username.deref().into();
-        let remote_ip = self.remote_address.ip();
-
         async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
             this: &mut MySqlSession<S>,
         ) -> Result<(), MySqlError> {
@@ -193,6 +190,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             this.stream.flush().await?;
             Ok(())
         }
+
+        let selector: AuthSelector = handshake.username.deref().into();
+        let remote_ip = self.remote_address.ip();
 
         // Check if IP is blocked
         match self

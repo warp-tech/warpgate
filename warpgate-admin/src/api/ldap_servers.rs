@@ -54,7 +54,7 @@ impl ImportApi {
         }
 
         let db = &ctx.services().db;
-        let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(server) = LdapServer::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(ImportLdapUsersResponse::NotFound);
         };
         let ldap_config = warpgate_ldap::LdapConfig::try_from(&server)?;
@@ -66,7 +66,7 @@ impl ImportApi {
                     .filter(warpgate_db_entities::User::Entity::username_eq_ci(
                         &user.username,
                     ))
-                    .one(&*db)
+                    .one(db)
                     .await?;
                 if existing.is_none() {
                     let values = warpgate_db_entities::User::ActiveModel {
@@ -81,7 +81,7 @@ impl ImportApi {
                         ldap_server_id: Set(Some(server.id)),
                         allowed_ip_ranges: Set(serde_json::Value::Null),
                     };
-                    values.insert(&*db).await?;
+                    values.insert(db).await?;
                     imported.push(user.username.clone());
                 }
             }
@@ -306,7 +306,7 @@ impl ListApi {
             query = query.filter(case_insensitive_search(search, [LdapServer::Column::Name]));
         }
 
-        let servers = query.all(&*db).await.map_err(WarpgateError::from)?;
+        let servers = query.all(db).await.map_err(WarpgateError::from)?;
 
         Ok(GetLdapServersResponse::Ok(Json(
             servers.into_iter().map(Into::into).collect(),
@@ -337,7 +337,7 @@ impl ListApi {
         // Check if name already exists
         let existing = LdapServer::Entity::find()
             .filter(LdapServer::Column::Name.eq(&body.name))
-            .one(&*db)
+            .one(db)
             .await?;
 
         if existing.is_some() {
@@ -396,7 +396,7 @@ impl ListApi {
             uuid_attribute: Set(body.uuid_attribute.clone()),
         };
 
-        let server = values.insert(&*db).await.map_err(WarpgateError::from)?;
+        let server = values.insert(db).await.map_err(WarpgateError::from)?;
 
         Ok(CreateLdapServerResponse::Created(Json(server.into())))
     }
@@ -516,7 +516,7 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(server) = LdapServer::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(GetLdapServerResponse::NotFound);
         };
 
@@ -539,7 +539,7 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(server) = LdapServer::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateLdapServerResponse::NotFound);
         };
 
@@ -585,7 +585,7 @@ impl DetailApi {
             model.base_dns = Set(serde_json::to_value(&base_dns)?);
         }
 
-        let server = model.update(&*db).await?;
+        let server = model.update(db).await?;
 
         Ok(UpdateLdapServerResponse::Ok(Json(server.into())))
     }
@@ -605,11 +605,11 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(server) = LdapServer::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteLdapServerResponse::NotFound);
         };
 
-        server.delete(&*db).await.map_err(WarpgateError::from)?;
+        server.delete(db).await.map_err(WarpgateError::from)?;
 
         Ok(DeleteLdapServerResponse::Deleted)
     }
@@ -646,7 +646,7 @@ impl QueryApi {
 
         let db = &ctx.services().db;
 
-        let Some(server) = LdapServer::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(server) = LdapServer::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(GetLdapUsersResponse::NotFound);
         };
 

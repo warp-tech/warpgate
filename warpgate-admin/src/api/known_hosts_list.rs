@@ -64,7 +64,7 @@ impl Api {
             key_type: Set(body.key_type.clone()),
             key_base64: Set(body.key_base64.clone()),
         }
-        .insert(&*db)
+        .insert(db)
         .await?;
         Ok(AddSshKnownHostResponse::Ok(Json(model)))
     }
@@ -82,7 +82,7 @@ impl Api {
         require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
 
         let db = &ctx.services().db;
-        let hosts = KnownHost::Entity::find().all(&*db).await?;
+        let hosts = KnownHost::Entity::find().all(db).await?;
         Ok(GetSSHKnownHostsResponse::Ok(Json(hosts)))
     }
 }

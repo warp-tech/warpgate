@@ -10,7 +10,7 @@ use super::{Error, Result};
 /// A rectangle in framebuffer pixels. `width`/`height` are extents, not far corners — the
 /// distinction the old bare `(u32, u32, u32, u32)` tuples blurred (some were `x0,y0,x1,y1`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Rect {
+pub struct Rect {
     pub x: u32,
     pub y: u32,
     pub width: u32,
@@ -19,12 +19,12 @@ pub(crate) struct Rect {
 
 impl Rect {
     /// The smallest rect covering both `self` and `other` (used to coalesce dirty regions).
-    pub(crate) fn union(self, other: Rect) -> Rect {
+    pub(crate) fn union(self, other: Self) -> Self {
         let x = self.x.min(other.x);
         let y = self.y.min(other.y);
         let right = (self.x + self.width).max(other.x + other.width);
         let bottom = (self.y + self.height).max(other.y + other.height);
-        Rect {
+        Self {
             x,
             y,
             width: right - x,
@@ -35,18 +35,18 @@ impl Rect {
 
 /// RGBA (row-major, 4 bytes/pixel) framebuffer reconstructed from desktop deltas.
 #[derive(Default)]
-pub(crate) struct Framebuffer {
+pub struct Framebuffer {
     width: u32,
     height: u32,
     rgba: Vec<u8>,
 }
 
 impl Framebuffer {
-    pub(crate) fn size(&self) -> (u32, u32) {
+    pub(crate) const fn size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
     }
 
@@ -65,6 +65,7 @@ impl Framebuffer {
     }
 
     /// Blit a BGRA rectangle (RDP/VNC raw frames) at (x, y).
+    #[allow(clippy::many_single_char_names)]
     pub(crate) fn blit_bgra(&mut self, x: u32, y: u32, w: u32, h: u32, data: &[u8]) {
         self.blit::<4>(x, y, w, h, data, |px| {
             // BGRA -> RGBA; opaque.
@@ -76,6 +77,7 @@ impl Framebuffer {
     }
 
     /// Blit an RGB rectangle (decoded JPEG) at (x, y).
+    #[allow(clippy::many_single_char_names)]
     pub(crate) fn blit_rgb(&mut self, x: u32, y: u32, w: u32, h: u32, data: &[u8]) {
         self.blit::<3>(x, y, w, h, data, |px| {
             match (px.first(), px.get(1), px.get(2)) {
@@ -201,12 +203,7 @@ impl Framebuffer {
 
 /// Encode an RGBA buffer as PNG into `out` (reused; cleared first), fast compression for
 /// the recording hot path.
-pub(crate) fn encode_png_rgba(
-    width: u32,
-    height: u32,
-    rgba: &[u8],
-    out: &mut Vec<u8>,
-) -> Result<()> {
+pub fn encode_png_rgba(width: u32, height: u32, rgba: &[u8], out: &mut Vec<u8>) -> Result<()> {
     out.clear();
     let mut encoder = png::Encoder::new(&mut *out, width, height);
     encoder.set_color(png::ColorType::Rgba);
@@ -224,7 +221,7 @@ pub(crate) fn encode_png_rgba(
 
 /// Decode a JPEG (VNC tight encoding) to RGB. Best-effort: returns `None` on any error so
 /// the recording continues (that framebuffer region is simply left stale until repaint).
-pub(crate) fn decode_jpeg_rgb(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+pub fn decode_jpeg_rgb(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     use zune_jpeg::JpegDecoder;
     use zune_jpeg::zune_core::colorspace::ColorSpace;
     use zune_jpeg::zune_core::options::DecoderOptions;

@@ -58,7 +58,7 @@ impl ListApi {
             roles = roles.filter(case_insensitive_search(search, [Role::Column::Name]));
         }
 
-        let roles = roles.all(&*db).await?;
+        let roles = roles.all(db).await?;
 
         Ok(GetRolesResponse::Ok(Json(
             roles.into_iter().map(Into::into).collect(),
@@ -89,7 +89,7 @@ impl ListApi {
             is_default: Set(body.is_default.unwrap_or(false)),
         };
 
-        let role = values.insert(&*db).await.map_err(WarpgateError::from)?;
+        let role = values.insert(db).await.map_err(WarpgateError::from)?;
 
         Ok(CreateRoleResponse::Created(Json(role.into())))
     }
@@ -150,7 +150,7 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let role = Role::Entity::find_by_id(id.0).one(&*db).await?;
+        let role = Role::Entity::find_by_id(id.0).one(db).await?;
 
         Ok(match role {
             Some(role) => GetRoleResponse::Ok(Json(role.into())),
@@ -170,7 +170,7 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(role) = Role::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateRoleResponse::NotFound);
         };
 
@@ -179,7 +179,7 @@ impl DetailApi {
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
         model.is_default = Set(body.is_default.unwrap_or(current_is_default));
-        let role = model.update(&*db).await?;
+        let role = model.update(db).await?;
 
         Ok(UpdateRoleResponse::Ok(Json(role.into())))
     }
@@ -195,22 +195,22 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(role) = Role::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteRoleResponse::NotFound);
         };
 
         // Clean up referencing assignments before deleting the role
         UserRoleAssignment::Entity::delete_many()
             .filter(UserRoleAssignment::Column::RoleId.eq(id.0))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         TargetRoleAssignment::Entity::delete_many()
             .filter(TargetRoleAssignment::Column::RoleId.eq(id.0))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
-        role.delete(&*db).await?;
+        role.delete(db).await?;
         Ok(DeleteRoleResponse::Deleted)
     }
 
@@ -229,11 +229,11 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(role) = Role::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(GetRoleTargetsResponse::NotFound);
         };
 
-        let targets = role.find_related(Target::Entity).all(&*db).await?;
+        let targets = role.find_related(Target::Entity).all(db).await?;
 
         Ok(GetRoleTargetsResponse::Ok(Json(
             targets
@@ -258,11 +258,11 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(role) = Role::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(role) = Role::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(GetRoleUsersResponse::NotFound);
         };
 
-        let users = role.find_related(User::Entity).all(&*db).await?;
+        let users = role.find_related(User::Entity).all(db).await?;
 
         Ok(GetRoleUsersResponse::Ok(Json(
             users

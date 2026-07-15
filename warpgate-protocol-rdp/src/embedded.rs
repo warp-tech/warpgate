@@ -14,7 +14,7 @@ use anyhow::Context;
 use tempfile::{TempDir, TempPath};
 use warpgate_common::WarpgateError;
 
-pub(crate) struct EmbeddedHelper {
+pub struct EmbeddedHelper {
     /// gzip-compressed helper image, embedded by `build.rs`.
     blob: &'static [u8],
     /// used for the Linux `memfd` and as the temp-file prefix.
@@ -26,7 +26,7 @@ pub(crate) struct EmbeddedHelper {
 /// A ready-to-spawn helper executable. Owns the temp fd/file so that
 /// it can outlive `spawn()`.
 #[allow(unused)]
-pub(crate) enum HelperExecutable {
+pub enum HelperExecutable {
     Preexisting(PathBuf),
     #[cfg(target_os = "linux")]
     MemFd {

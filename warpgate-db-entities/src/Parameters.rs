@@ -52,7 +52,7 @@ pub enum AnalyticsConsent {
 /// Serves as both the stored (serde) and admin-API (poem-openapi)
 /// representation, so only valid field combinations can exist (e.g. no S3
 /// settings while on disk).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Union)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Union)]
 #[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum RecordingsStorageConfig {
@@ -91,7 +91,7 @@ pub fn get_config_migration_values() -> &'static ConfigMigrationValues {
         .expect("recordings migration values must be set before migrations run")
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Object)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
 pub struct RecordingsDiskConfig {
     pub path: String,
 }
@@ -185,8 +185,7 @@ impl Entity {
     pub async fn get(db: &DatabaseConnection) -> Result<Model, DbErr> {
         match Self::find().one(db).await? {
             Some(model) => Ok(model),
-            None =>
-            {
+            None => {
                 #[allow(clippy::unwrap_used, reason = "can't fail")]
                 ActiveModel {
                     id: Set(Uuid::new_v4()),
@@ -215,7 +214,7 @@ impl Entity {
                     record_scp: Set(true),
                     tutorial_dismissed: Set(false),
                     login_protection_enabled: Set(true),
-                    login_protection_retention_seconds: Set(2592000),
+                    login_protection_retention_seconds: Set(2_592_000), // 30d
                     lp_ip_max_attempts: Set(5),
                     lp_ip_time_window_seconds: Set(900),
                     lp_ip_base_block_duration_seconds: Set(1800),

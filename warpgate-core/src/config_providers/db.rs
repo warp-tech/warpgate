@@ -235,7 +235,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let users = entities::User::Entity::find()
             .order_by_asc(entities::User::Column::Username)
-            .all(&*db)
+            .all(db)
             .await?;
 
         let users: Result<Vec<User>, _> = users.into_iter().map(TryInto::try_into).collect();
@@ -248,7 +248,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let targets = entities::Target::Entity::find()
             .order_by_asc(entities::Target::Column::Name)
-            .all(&*db)
+            .all(db)
             .await?;
 
         let targets: Result<Vec<Target>, _> = targets.into_iter().map(TryInto::try_into).collect();
@@ -261,7 +261,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let target = entities::Target::Entity::find()
             .filter(entities::Target::Column::Name.eq(name))
-            .one(&*db)
+            .one(db)
             .await?;
 
         target
@@ -286,7 +286,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let target = entities::Target::Entity::find()
             .filter(hostname_query.eq(hostname))
-            .one(&*db)
+            .one(db)
             .await?;
 
         target
@@ -304,7 +304,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let user_model = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
-            .one(&*db)
+            .one(db)
             .await?;
 
         let Some(user_model) = user_model else {
@@ -312,7 +312,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(None);
         };
 
-        let user = user_model.load_details(&db).await?;
+        let user = user_model.load_details(db).await?;
 
         let mut available_credential_types = user
             .credentials
@@ -436,11 +436,11 @@ impl ConfigProvider for DatabaseConfigProvider {
                         .or(entities::SsoCredential::Column::Provider.is_null()),
                 ),
             )
-            .one(&*db)
+            .one(db)
             .await?;
 
         if let Some(cred) = cred {
-            let user = cred.find_related(entities::User::Entity).one(&*db).await?;
+            let user = cred.find_related(entities::User::Entity).one(db).await?;
 
             if let Some(user) = user {
                 return Ok(Some(user.username));
@@ -454,7 +454,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             };
             return self
                 .maybe_autocreate_sso_user(
-                    &db,
+                    db,
                     UserSsoCredential {
                         email: client_email.clone(),
                         provider: Some(client_provider.clone()),
@@ -477,7 +477,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let user_model = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
-            .one(&*db)
+            .one(db)
             .await?;
 
         let Some(user_model) = user_model else {
@@ -490,7 +490,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             && let (Some(ldap_server_id), Some(ldap_object_uuid)) =
                 (user_model.ldap_server_id, &user_model.ldap_object_uuid)
             && let Err(e) = self
-                .sync_ldap_ssh_keys(&db, user_model.id, ldap_server_id, ldap_object_uuid)
+                .sync_ldap_ssh_keys(db, user_model.id, ldap_server_id, ldap_object_uuid)
                 .await
         {
             warn!(
@@ -499,7 +499,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             );
         }
 
-        let user_details = user_model.load_details(&db).await?;
+        let user_details = user_model.load_details(db).await?;
 
         match client_credential {
             AuthCredential::PublicKey {
@@ -583,12 +583,12 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let target_model = entities::Target::Entity::find()
             .filter(entities::Target::Column::Name.eq(target_name))
-            .one(&*db)
+            .one(db)
             .await?;
 
         let user_model = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
-            .one(&*db)
+            .one(db)
             .await?;
 
         let Some(user_model) = user_model else {
@@ -603,7 +603,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let target_roles: HashSet<String> = target_model
             .find_related(entities::Role::Entity)
-            .all(&*db)
+            .all(db)
             .await?
             .into_iter()
             .map(Into::<Role>::into)
@@ -612,14 +612,14 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let user_assignments = entities::UserRoleAssignment::Entity::find_active()
             .filter(entities::UserRoleAssignment::Column::UserId.eq(user_model.id))
-            .all(&*db)
+            .all(db)
             .await?;
 
         let user_role_ids: HashSet<Uuid> = user_assignments.iter().map(|a| a.role_id).collect();
 
         let user_roles: HashSet<String> = entities::Role::Entity::find()
             .filter(entities::Role::Column::Id.is_in(user_role_ids))
-            .all(&*db)
+            .all(db)
             .await?
             .into_iter()
             .map(Into::<Role>::into)
@@ -641,14 +641,14 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let user = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
-            .one(&*db)
+            .one(db)
             .await?
             .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;
 
         let managed_role_names = match managed_role_names {
             Some(x) => x,
             None => entities::Role::Entity::find()
-                .all(&*db)
+                .all(db)
                 .await?
                 .into_iter()
                 .map(|x| x.name)
@@ -658,7 +658,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         for role_name in managed_role_names {
             let Some(role) = entities::Role::Entity::find()
                 .filter(entities::Role::Column::Name.eq(role_name.clone()))
-                .one(&*db)
+                .one(db)
                 .await?
             else {
                 warn!("SSO role mapping references non-existent role {role_name:?}, skipping");
@@ -668,14 +668,14 @@ impl ConfigProvider for DatabaseConfigProvider {
             let assignment = entities::UserRoleAssignment::Entity::find_active()
                 .filter(entities::UserRoleAssignment::Column::UserId.eq(user.id))
                 .filter(entities::UserRoleAssignment::Column::RoleId.eq(role.id))
-                .one(&*db)
+                .one(db)
                 .await?;
 
             match (assignment, assigned_role_names.contains(&role_name)) {
                 (None, true) => {
                     info!("Adding role {role_name} for user {username} (from SSO)");
                     entities::UserRoleAssignment::Entity::idempotent_grant(
-                        &db, user.id, role.id, None,
+                        db, user.id, role.id, None,
                     )
                     .await?;
                 }
@@ -683,7 +683,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     info!("Removing role {role_name} for user {username} (from SSO)");
                     let mut model: entities::UserRoleAssignment::ActiveModel = assignment.into();
                     model.revoked_at = Set(Some(OffsetDateTime::now_utc()));
-                    model.update(&*db).await?;
+                    model.update(db).await?;
                 }
                 _ => (),
             }
@@ -702,14 +702,14 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let user = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
-            .one(&*db)
+            .one(db)
             .await?
             .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;
 
         let managed_admin_role_names = match managed_admin_role_names {
             Some(x) => x,
             None => entities::AdminRole::Entity::find()
-                .all(&*db)
+                .all(db)
                 .await?
                 .into_iter()
                 .map(|x| x.name)
@@ -719,14 +719,14 @@ impl ConfigProvider for DatabaseConfigProvider {
         for role_name in managed_admin_role_names {
             let role = entities::AdminRole::Entity::find()
                 .filter(entities::AdminRole::Column::Name.eq(role_name.clone()))
-                .one(&*db)
+                .one(db)
                 .await?
                 .ok_or_else(|| WarpgateError::RoleNotFound(role_name.clone()))?;
 
             let assignment = entities::UserAdminRoleAssignment::Entity::find()
                 .filter(entities::UserAdminRoleAssignment::Column::UserId.eq(user.id))
                 .filter(entities::UserAdminRoleAssignment::Column::AdminRoleId.eq(role.id))
-                .one(&*db)
+                .one(db)
                 .await?;
 
             match (assignment, assigned_admin_role_names.contains(&role_name)) {
@@ -738,11 +738,11 @@ impl ConfigProvider for DatabaseConfigProvider {
                         ..Default::default()
                     };
 
-                    values.insert(&*db).await?;
+                    values.insert(db).await?;
                 }
                 (Some(assignment), false) => {
                     info!("Removing admin role {role_name} for user {username} (from SSO)");
-                    assignment.delete(&*db).await?;
+                    assignment.delete(db).await?;
                 }
                 _ => (),
             }
@@ -781,7 +781,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 entities::PublicKeyCredential::Column::OpensshPublicKey
                     .eq(openssh_public_key.clone()),
             )
-            .one(&*db)
+            .one(db)
             .await?;
 
         let Some(public_key_credential) = public_key_credential else {
@@ -797,7 +797,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             public_key_credential.into();
         active_model.last_used = Set(Some(OffsetDateTime::now_utc()));
 
-        active_model.update(&*db).await.map_err(|e| {
+        active_model.update(db).await.map_err(|e| {
             error!("Failed to update last_used for public key: {:?}", e);
             WarpgateError::DatabaseError(e)
         })?;
@@ -813,7 +813,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     .eq(token)
                     .and(entities::ApiToken::Column::Expiry.gt(OffsetDateTime::now_utc())),
             )
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(None);
@@ -821,7 +821,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let Some(user) = api_token
             .find_related(entities::User::Entity)
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Err(WarpgateError::InconsistentState(

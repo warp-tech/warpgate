@@ -6,6 +6,7 @@ mod framebuffer;
 mod logo;
 
 use std::convert::Infallible;
+use std::fmt::Write;
 
 use embedded_graphics::image::Image;
 use embedded_graphics::mono_font::MonoTextStyle;
@@ -46,14 +47,15 @@ pub fn render_authentication(tick: u64, prompt: &AuthPrompt) -> Result<Vec<u8>, 
             let mut text = String::new();
             match url {
                 Some(url) => {
-                    text.push_str(&format!(
+                    let _ = write!(
+                        text,
                         "Approve this session at:\n{url}\n(has been copied to your clipboard)"
-                    ));
+                    );
                 }
                 None => text.push_str("Please approve this session in Warpgate first"),
             }
             let boxes = CharBoxes {
-                text: &security_key,
+                text: security_key,
                 slots: security_key.chars().count(),
             };
             text.push_str("\n\nSecurity key:");
@@ -63,7 +65,7 @@ pub fn render_authentication(tick: u64, prompt: &AuthPrompt) -> Result<Vec<u8>, 
             tick,
             "One-time password:",
             Some(CharBoxes {
-                text: &entered,
+                text: entered,
                 slots: OTP_DIGITS,
             }),
         ),
@@ -82,7 +84,7 @@ fn render(tick: u64, text: &str, boxes: Option<CharBoxes>) -> Result<Vec<u8>, In
     let cy = i32::from(SCREEN_H) / 2 - 24;
 
     let image = logo();
-    let x0 = (i32::from(SCREEN_W) - image.size().width as i32) / 2;
+    let x0 = (i32::from(SCREEN_W) - image.size().width.cast_signed()) / 2;
     Image::new(image, Point::new(x0, 60)).draw(&mut fb)?;
 
     bouncy_ball::bouncy_ball(tick, cx, cy)
@@ -121,6 +123,7 @@ mod char_boxes {
         slots: usize,
         style: MonoTextStyle<'_, Rgb888>,
     ) {
+        #[allow(clippy::cast_possible_wrap)]
         let slots = slots as i32;
         let total_w = slots * OTP_BOX_W + (slots - 1) * OTP_BOX_GAP;
         let mut x = cx - total_w / 2;

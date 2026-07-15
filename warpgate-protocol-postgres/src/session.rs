@@ -163,9 +163,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         startup: pgwire::messages::startup::Startup,
         username: &String,
     ) -> Result<(), PostgresError> {
-        let selector: AuthSelector = username.into();
-        let remote_ip = self.remote_address.ip();
-
         async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
             this: &mut PostgresSession<S>,
         ) -> Result<(), PostgresError> {
@@ -180,6 +177,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             this.stream.flush().await?;
             Ok(())
         }
+
+        let selector: AuthSelector = username.into();
+        let remote_ip = self.remote_address.ip();
 
         // Check if IP is blocked
         match self

@@ -32,4 +32,5 @@ allow = [
   "clippy::significant_drop_in_scrutinee",
   "clippy::redundant_closure_for_method_calls",
   "clippy::manual_string_new",
+  "clippy::implicit_hasher",
 ]
