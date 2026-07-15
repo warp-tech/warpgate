@@ -30,23 +30,23 @@ pub enum FileAccess {
     S3 { s3: S3Storage, key: String },
 }
 
-pub(crate) struct RecordingSinkCleanupGuard {
+pub struct RecordingSinkCleanupGuard {
     scratch_path: Option<PathBuf>,
 }
 
 impl Drop for RecordingSinkCleanupGuard {
     fn drop(&mut self) {
-        if let Some(path) = self.scratch_path.take() {
-            if let Err(error) = std::fs::remove_file(&path) {
-                error!(%error, ?path, "Failed to remove local recording scratch");
-            }
+        if let Some(path) = self.scratch_path.take()
+            && let Err(error) = std::fs::remove_file(&path)
+        {
+            error!(%error, ?path, "Failed to remove local recording scratch");
         }
     }
 }
 
 /// The destination for a RawRecordingWriter
 /// For S3, the scratch file is cleaned up after upload
-pub(crate) enum RecordingSink {
+pub enum RecordingSink {
     Disk(File),
     S3 {
         scratch: File,
@@ -56,22 +56,21 @@ pub(crate) enum RecordingSink {
 }
 
 impl RecordingSink {
-    fn file(&mut self) -> &mut File {
+    const fn file(&mut self) -> &mut File {
         match self {
-            RecordingSink::Disk(file) => file,
-            RecordingSink::S3 { scratch, .. } => scratch,
+            Self::Disk(file) => file,
+            Self::S3 { scratch, .. } => scratch,
         }
     }
 
     pub async fn write_all(&mut self, bytes: &Bytes) -> Result<()> {
-        self.file().write_all(&bytes).await?;
+        self.file().write_all(bytes).await?;
 
-        if let Self::S3 { upload, .. } = self {
-            if let Some(upload) = upload
-                && let Err(error) = upload.push(&bytes).await
-            {
-                error!(%error, path=%upload.key(), "Failed to stream recording to S3");
-            }
+        if let Self::S3 { upload, .. } = self
+            && let Some(upload) = upload
+            && let Err(error) = upload.push(bytes).await
+        {
+            error!(%error, path=%upload.key(), "Failed to stream recording to S3");
         }
 
         Ok(())
@@ -82,7 +81,6 @@ impl RecordingSink {
         Ok(())
     }
 
-    #[must_use]
     pub async fn finalize(mut self) -> Result<RecordingSinkCleanupGuard> {
         self.flush().await?;
 
@@ -106,22 +104,22 @@ impl RecordingSink {
 impl FileAccess {
     pub async fn open_read(&self) -> Result<Box<dyn AsyncRead + Send + Unpin>> {
         match self {
-            FileAccess::S3 { s3, key } => Ok(s3.get_reader(&key).await?),
-            FileAccess::Local(path) => Ok(Box::new(tokio::fs::File::open(path).await?)),
+            Self::S3 { s3, key } => Ok(s3.get_reader(key).await?),
+            Self::Local(path) => Ok(Box::new(tokio::fs::File::open(path).await?)),
         }
     }
 
     pub async fn external_access_url(&self) -> Result<Option<String>> {
         match self {
-            FileAccess::S3 { s3, key } => Ok(Some(s3.presign_get(&key, PRESIGNED_URL_TTL).await?)),
-            FileAccess::Local(_) => Ok(None),
+            Self::S3 { s3, key } => Ok(Some(s3.presign_get(key, PRESIGNED_URL_TTL).await?)),
+            Self::Local(_) => Ok(None),
         }
     }
 
     pub fn local_path(&self) -> Option<&Path> {
         match self {
-            FileAccess::S3 { .. } => None,
-            FileAccess::Local(path) => Some(path),
+            Self::S3 { .. } => None,
+            Self::Local(path) => Some(path),
         }
     }
 }
@@ -129,7 +127,7 @@ impl FileAccess {
 /// The effective recordings storage, loaded live from the parameters table so a
 /// config change takes effect on the next recording / read. Owns the disk-vs-S3
 /// decisions so callers never inspect the backend themselves.
-pub(crate) struct Storage {
+pub struct Storage {
     enable: bool,
     /// Absolute local root — final location for disk storage, scratch for S3.
     local_root: PathBuf,
@@ -159,7 +157,7 @@ impl Storage {
         })
     }
 
-    pub(crate) fn enabled(&self) -> bool {
+    pub(crate) const fn enabled(&self) -> bool {
         self.enable
     }
 
@@ -200,12 +198,8 @@ impl Storage {
 
     /// Where a recording file should be read from: local for in-progress
     /// recordings and the disk backend, S3 for completed recordings on S3.
-    pub(crate) fn access(
-        &self,
-        recording: &Recording::Model,
-        file: RecordingFile,
-    ) -> Result<FileAccess> {
-        Ok(match &self.backend {
+    pub(crate) fn access(&self, recording: &Recording::Model, file: RecordingFile) -> FileAccess {
+        match &self.backend {
             Backend::S3(s3) if recording.ended.is_some() && recording.generation >= 2 => {
                 FileAccess::S3 {
                     s3: s3.clone(),
@@ -213,7 +207,7 @@ impl Storage {
                 }
             }
             _ => FileAccess::Local(local_path_in(&self.local_root, recording, file)),
-        })
+        }
     }
 
     /// Delete a recording's files from this storage — its S3 objects (if any)

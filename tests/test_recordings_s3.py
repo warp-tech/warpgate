@@ -1,3 +1,5 @@
+import base64
+import json
 import subprocess
 import time
 from uuid import uuid4
@@ -128,12 +130,20 @@ class Test:
             f"no recording object in bucket: {keys}"
         )
 
-        # The completed recording is served by downloading it back from S3
-        # (the local scratch is gone), so a successful cast proves the round trip.
+        # The completed recording redirects to a presigned S3 URL (the local
+        # scratch is gone); `requests` follows the redirect, so decoding the raw
+        # items back to the marker proves the presign + round trip.
         resp = requests.get(
-            f"{url}/@warpgate/admin/api/recordings/{recording.id}/cast",
+            f"{url}/@warpgate/admin/api/recordings/{recording.id}/terminal",
             headers={"X-Warpgate-Token": "token-value"},
             verify=False,
         )
-        assert resp.status_code == 200, f"cast fetch failed: {resp.status_code}"
-        assert marker in resp.text, "recorded terminal output missing the marker"
+        assert resp.status_code == 200, f"terminal fetch failed: {resp.status_code}"
+        output = b""
+        for line in resp.text.splitlines():
+            if not line:
+                continue
+            item = json.loads(line)
+            if "data" in item:
+                output += base64.b64decode(item["data"])
+        assert marker.encode() in output, "recorded terminal output missing the marker"

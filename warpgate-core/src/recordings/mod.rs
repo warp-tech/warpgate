@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use time::OffsetDateTime;
@@ -24,7 +23,12 @@ pub use storage::FileAccess;
 use storage::Storage;
 pub use terminal::*;
 pub use traffic::*;
-pub use writer::{NDJsonRecordingWriter, RawRecordingWriter};
+pub use writer::{LiveChunk, NDJsonRecordingWriter, RawRecordingWriter};
+
+/// The live-broadcast channel for a recording's primary data stream, keyed by
+/// recording id. Each item carries its end byte offset so a viewer can splice
+/// the live tail onto a history snapshot without gaps (see [`LiveChunk`]).
+type LiveMap = Arc<Mutex<HashMap<Uuid, broadcast::Sender<LiveChunk>>>>;
 
 // The possible files that a recording can open
 #[derive(Debug, Clone, Copy)]
@@ -35,19 +39,18 @@ pub enum RecordingFile {
 }
 
 impl RecordingFile {
-    fn filename(&self) -> &'static str {
+    const fn filename(self) -> &'static str {
         match self {
-            RecordingFile::NDJsonData => "data.ndjson",
-            RecordingFile::TcpDumpData => "data.tcpdump",
-            RecordingFile::Index => "index.ndjson",
+            Self::NDJsonData => "data.ndjson",
+            Self::TcpDumpData => "data.tcpdump",
+            Self::Index => "index.ndjson",
         }
     }
 
-    pub fn mime_type(&self) -> &'static str {
+    pub const fn mime_type(self) -> &'static str {
         match self {
-            RecordingFile::NDJsonData => "application/x-ndjson",
-            RecordingFile::TcpDumpData => "application/vnd.tcpdump.pcap",
-            RecordingFile::Index => "application/x-ndjson",
+            Self::NDJsonData | Self::Index => "application/x-ndjson",
+            Self::TcpDumpData => "application/vnd.tcpdump.pcap",
         }
     }
 }
@@ -85,7 +88,7 @@ pub struct RecordingWriterOpener {
     storage: Storage,
     model: Recording::Model,
     db: DatabaseConnection,
-    live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
+    live: LiveMap,
     params: GlobalParams,
 }
 
@@ -130,7 +133,7 @@ where
 
 pub struct SessionRecordings {
     db: DatabaseConnection,
-    live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
+    live: LiveMap,
     params: GlobalParams,
 }
 
@@ -182,7 +185,7 @@ impl SessionRecordings {
                         .and(Recording::Column::Name.eq(name.clone()))
                         .and(Recording::Column::Kind.eq(T::kind())),
                 )
-                .one(&*db)
+                .one(db)
                 .await?;
             if let Some(e) = existing {
                 e
@@ -199,7 +202,7 @@ impl SessionRecordings {
                     generation: Set(2),
                     ..Default::default()
                 };
-                values.insert(&*db).await.map_err(Error::Database)?
+                values.insert(db).await.map_err(Error::Database)?
             }
         };
 
@@ -211,10 +214,10 @@ impl SessionRecordings {
             params: self.params.clone(),
         };
 
-        Ok(T::new(&opener).await?)
+        T::new(&opener).await
     }
 
-    pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<Bytes>> {
+    pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<LiveChunk>> {
         let live = self.live.lock().await;
         live.get(id).map(broadcast::Sender::subscribe)
     }
@@ -231,6 +234,6 @@ impl SessionRecordings {
         recording: &Recording::Model,
         file: RecordingFile,
     ) -> Result<FileAccess> {
-        self.storage().await?.access(recording, file)
+        Ok(self.storage().await?.access(recording, file))
     }
 }
