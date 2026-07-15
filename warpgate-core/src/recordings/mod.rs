@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use time::OffsetDateTime;
@@ -48,7 +47,7 @@ pub enum RecordingFile {
 }
 
 impl RecordingFile {
-    const fn filename(&self) -> &'static str {
+    const fn filename(self) -> &'static str {
         match self {
             Self::NDJsonData => "data.ndjson",
             Self::TcpDumpData => "data.tcpdump",
@@ -56,11 +55,10 @@ impl RecordingFile {
         }
     }
 
-    pub const fn mime_type(&self) -> &'static str {
+    pub const fn mime_type(self) -> &'static str {
         match self {
-            Self::NDJsonData => "application/x-ndjson",
+            Self::NDJsonData | Self::Index => "application/x-ndjson",
             Self::TcpDumpData => "application/vnd.tcpdump.pcap",
-            Self::Index => "application/x-ndjson",
         }
     }
 }
@@ -98,7 +96,7 @@ pub struct RecordingWriterOpener {
     storage: Storage,
     model: Recording::Model,
     db: DatabaseConnection,
-    live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
+    live: LiveMap,
     params: GlobalParams,
     shutdown: CancellationToken,
     shutdown_tracker: TaskTracker,
@@ -156,7 +154,7 @@ where
 
 pub struct SessionRecordings {
     db: DatabaseConnection,
-    live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
+    live: LiveMap,
     params: GlobalParams,
     shutdown: CancellationToken,
     shutdown_tracker: TaskTracker,
@@ -265,7 +263,7 @@ impl SessionRecordings {
         T::new(&opener).await
     }
 
-    pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<Bytes>> {
+    pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<LiveChunk>> {
         let live = self.live.lock().await;
         live.get(id).map(broadcast::Sender::subscribe)
     }

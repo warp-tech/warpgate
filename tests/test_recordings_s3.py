@@ -152,10 +152,11 @@ class Test:
             f"no recording object in bucket: {keys}"
         )
 
-        # The completed recording is served by downloading it back from S3
-        # (the local scratch is gone), so a successful cast proves the round trip.
+        # The completed recording redirects to a presigned S3 URL (the local
+        # scratch is gone); `requests` follows the redirect, so decoding the raw
+        # items back to the marker proves the presign + round trip.
         resp = requests.get(
-            f"{url}/@warpgate/admin/api/recordings/{recording.id}/cast",
+            f"{url}/@warpgate/admin/api/recordings/{recording.id}/data",
             headers={"X-Warpgate-Token": "token-value"},
             verify=False,
         )

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -34,7 +36,10 @@ pub struct LiveChunk {
 #[derive(Clone)]
 pub struct RawRecordingWriter {
     sender: mpsc::Sender<Bytes>,
-    live_sender: broadcast::Sender<Bytes>,
+    live_sender: broadcast::Sender<LiveChunk>,
+    /// Running byte offset to hand out, shared across clones of this writer so
+    /// the stream is numbered consistently regardless of which clone writes.
+    offset: Arc<AtomicU64>,
     drop_signal: mpsc::Sender<()>,
 }
 
@@ -53,7 +58,7 @@ impl RawRecordingWriter {
         // Register in the live-subscription map only when this file is the live stream
         // (see `RecordingWriterOpener::open`). Sidecars pass `None` so they don't clobber
         // the data writer's entry, which shares the same recording id.
-        let live_sender = broadcast::channel(128).0;
+        let live_sender = broadcast::channel(1024).0;
         if let Some(live) = live {
             {
                 let mut live = live.lock().await;
@@ -103,9 +108,9 @@ impl RawRecordingWriter {
             // failure the local scratch is kept (the recording is at least not lost).
 
             try_block!(async {
-                let cleanup_guard = sink.finalize().await?;
-
                 use sea_orm::ActiveValue::Set;
+
+                let cleanup_guard = sink.finalize().await?;
 
                 let id = model.id;
                 let db = &db;
@@ -128,6 +133,7 @@ impl RawRecordingWriter {
         Ok(Self {
             sender,
             live_sender,
+            offset: Arc::new(AtomicU64::new(0)),
             drop_signal,
         })
     }
@@ -138,7 +144,10 @@ impl RawRecordingWriter {
             .send(data.clone())
             .await
             .map_err(|_| Error::Closed)?;
-        let _ = self.live_sender.send(data);
+        // Tag with the end byte offset (bytes written through this item) after it
+        // is durably queued, so a live viewer's offset matches the on-disk order.
+        let offset = self.offset.fetch_add(data.len() as u64, Ordering::SeqCst) + data.len() as u64;
+        let _ = self.live_sender.send(LiveChunk { offset, data });
         Ok(())
     }
 }

@@ -30,8 +30,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use ironrdp_server::tokio_rustls::rustls::ServerConfig as TlsServerConfig;
 use ironrdp_server::tokio_rustls::TlsAcceptor;
+use ironrdp_server::tokio_rustls::rustls::ServerConfig as TlsServerConfig;
 use ironrdp_server::{
     BitmapUpdate, CredentialDecision, CredentialValidationError, CredentialValidator, Credentials,
     DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent, PixelFormat, RdpServer,
@@ -39,7 +39,7 @@ use ironrdp_server::{
 };
 use tokio::io::{Stdin, Stdout};
 use tokio::net::UnixStream as TokioUnixStream;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::warn;
 use warpgate_rdp_ipc::server::{Event as ControlOut, Input as ControlIn, ServeConfig};
@@ -213,7 +213,7 @@ async fn stdin_router(
             break;
         };
         // `freeze()` is zero-copy; a `Frame`'s pixels become a slice of this buffer.
-        let Some(msg) = ControlIn::decode(frame.freeze()) else {
+        let Some(msg) = ControlIn::decode(&frame.freeze()) else {
             warn!("ignoring invalid control message");
             continue;
         };
