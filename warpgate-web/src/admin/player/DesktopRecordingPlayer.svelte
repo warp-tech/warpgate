@@ -12,6 +12,7 @@
         keysymLabel,
         scancodeLabel,
     } from 'common/desktopInput'
+    import { LiveRecordingStream } from 'common/liveRecordingStream'
     import { onDestroy, onMount } from 'svelte'
     import { latestWins } from './latestWins'
     import PlayerToolbar from './PlayerToolbar.svelte'
@@ -32,8 +33,9 @@
 
     // For S3-backed completed recordings these 302-redirect to presigned URLs,
     // which the browser follows transparently (Range requests included).
-    const DATA_URL = `/@warpgate/admin/api/recordings/${recording.id}/desktop`
-    const INDEX_URL = `${DATA_URL}/index`
+    const DATA_URL = `/@warpgate/admin/api/recordings/${recording.id}/data`
+    const INDEX_URL = `/@warpgate/admin/api/recordings/${recording.id}/index`
+    const STREAM_URL = `wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/stream`
 
     // Framebuffer message types (everything else on the stream is a viewer-input item).
     const FRAME_TYPES = new Set([
@@ -95,7 +97,7 @@
     let mode: PlayerMode = 'paused'
     let loading = true
     let sessionIsLive: boolean | null = null
-    let socket: WebSocket | null = null
+    let stream: LiveRecordingStream | null = null
     let destroyed = false
 
     // --- streaming engine: pulls the ndjson via HTTP Range and applies frames in order,
@@ -106,11 +108,38 @@
     let renderedTime = 0
     const decoder = new TextDecoder()
 
+    // Byte offset where the currently open Range snapshot ends (its Content-Length):
+    // the live edge for the next splice. The stream owns the buffer/dedup past it.
+    let currentStreamEndOffset = 0
+
     onDestroy(() => {
         destroyed = true
         abortReader()
-        socket?.close()
+        stream?.close()
     })
+
+    // Apply one live item that lies past the snapshot edge: framebuffer frames to
+    // the canvas, viewer input to the overlay. Only past-edge items reach here, so
+    // input is recorded exactly once — items already in the snapshot are rebuilt
+    // from the file by `pumpUntil` (see `doSeek`), never from the live stream.
+    function applyLiveItem(item: unknown): void | Promise<void> {
+        const it = item as Frame | InputItem
+        if (!FRAME_TYPES.has(it.type)) {
+            recordInput(it)
+            return
+        }
+        if (!ctx) {
+            return
+        }
+        const frame = it as Frame
+        return applyDesktopFrame(canvas, ctx, frame).then(() => {
+            renderedTime = frame.time
+            timestamp = frame.time
+            canvasW = canvas.width
+            canvasH = canvas.height
+            seekInputValue = duration ? (100 * timestamp) / duration : 0
+        })
+    }
 
     onMount(async () => {
         if (recording.kind !== 'Desktop') {
@@ -169,46 +198,34 @@
             new AbortController().signal,
         )
 
-        socket = new WebSocket(`wss://${location.host}${DATA_URL}-stream`)
-        socket.addEventListener('message', event =>
-            onLiveMessage(JSON.parse(event.data)),
-        )
-        socket.addEventListener('close', () =>
-            console.info('Live stream closed'),
-        )
+        stream = new LiveRecordingStream(STREAM_URL, {
+            onStart: live => {
+                sessionIsLive = live
+                if (live) {
+                    goLive()
+                }
+            },
+            onEnd: () => {
+                sessionIsLive = false
+                if (mode === 'live') {
+                    mode = 'paused'
+                }
+            },
+            // Only the duration high-water mark needs every item (it's
+            // idempotent). Input tracking must NOT go here — it would double
+            // count items the file already contributes via `pumpUntil`.
+            tap: item => {
+                const it = item as Frame | InputItem
+                if (typeof it.time === 'number') {
+                    duration = Math.max(duration, it.time)
+                }
+            },
+            onNext: applyLiveItem,
+        })
 
         loading = false
         step()
     })
-
-    function onLiveMessage(message: Record<string, unknown>) {
-        if ('start' in message) {
-            sessionIsLive = Boolean(message.live)
-            if (sessionIsLive) {
-                goLive()
-            }
-        } else if ('end' in message) {
-            sessionIsLive = false
-            if (mode === 'live') {
-                mode = 'paused'
-            }
-        } else if ('data' in message) {
-            const item = message.data as Frame | InputItem
-            if (typeof item.time === 'number') {
-                duration = Math.max(duration, item.time)
-            }
-            recordInput(item)
-            if (mode === 'live' && ctx && FRAME_TYPES.has(item.type)) {
-                void applyDesktopFrame(canvas, ctx, item as Frame).then(() => {
-                    renderedTime = item.time
-                    timestamp = item.time
-                    canvasW = canvas.width
-                    canvasH = canvas.height
-                    seekInputValue = duration ? (100 * timestamp) / duration : 0
-                })
-            }
-        }
-    }
 
     // Extract a viewer-input item into the overlay arrays. Ignores framebuffer items.
     // Clicks are button-press transitions.
@@ -278,6 +295,12 @@
             headers: { Range: `bytes=${offset}-` },
             signal,
         })
+        // The snapshot ends at the byte the Range response delivered up to; live
+        // frames past this must be spliced in from the WS, not re-read here.
+        const contentLength = Number(
+            response.headers.get('Content-Length') ?? 0,
+        )
+        currentStreamEndOffset = offset + contentLength
         reader = response.body?.getReader() ?? null
     }
 
@@ -410,6 +433,9 @@
         // Base is now the latest keyframe + deltas up to the live edge, so it's finally
         // safe to tail: applying incoming live deltas on a stale base is what froze it.
         if (goLive) {
+            // The snapshot we just pumped ends at `currentStreamEndOffset`; splice
+            // the buffered live frames past that edge onto the tail, then live-apply.
+            await stream?.splice(currentStreamEndOffset)
             mode = 'live'
         }
     }
@@ -419,6 +445,8 @@
     // don't interfere; doSeek flips us to `live` once the correct base is painted.
     function goLive() {
         mode = 'paused'
+        // Retain live frames from now; `doSeek` splices them at the rebased edge.
+        stream?.arm()
         seek(duration, true, true)
     }
 
@@ -434,11 +462,13 @@
 
     function togglePlaying() {
         // Play/pause always leaves live tailing (pausing freezes the current frame).
+        stream?.pause()
         mode = mode === 'paused' ? 'playing' : 'paused'
     }
 
     // Grabbing the scrubber pauses and leaves live (so live deltas don't fight the scrub).
     function scrub(time: number) {
+        stream?.pause()
         mode = 'paused'
         seek(time, true)
     }

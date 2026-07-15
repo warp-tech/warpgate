@@ -4,6 +4,7 @@
     import { SerializeAddon } from '@xterm/addon-serialize'
     import { Terminal } from '@xterm/xterm'
     import type { Recording } from 'admin/lib/api'
+    import { LiveRecordingStream } from 'common/liveRecordingStream'
     import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
     import { latestWins } from './latestWins'
@@ -22,7 +23,7 @@
     let playing = false
     let loading = true
     let sessionIsLive: boolean | null = null
-    let socket: WebSocket | null = null
+    let stream: LiveRecordingStream | null = null
     let isStreaming = false
     let ptyMode = false
 
@@ -75,25 +76,21 @@
         theme[COLOR_NAMES[i]!] = colors[i]!
     }
 
-    interface AsciiCastHeader {
-        time: number
-        version: number
-        width: number
-        height: number
-    }
-    type AsciiCastData = [number, 'o', string]
-    type AsciiCastItem = AsciiCastData | AsciiCastHeader
+    // The raw stored item: `data` is base64 of the exact terminal bytes (lossless
+    // at rest). The lossy decode for display happens in `addTerminalItem`.
+    type TerminalItem =
+        | { time: number; stream?: 'Input' | 'Output' | 'Error'; data: string }
+        | { time: number; cols: number; rows: number }
 
-    function isAsciiCastHeader(data: AsciiCastItem): data is AsciiCastHeader {
-        return 'version' in data
-    }
-
-    function isAsciiCastData(data: AsciiCastItem): data is AsciiCastData {
-        if (Array.isArray(data)) {
-            return data[1] === 'o' || data[1] === 'e'
-        } else {
-            return false
+    function decodeBase64Lossy(b64: string): string {
+        const bin = atob(b64)
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) {
+            bytes[i] = bin.charCodeAt(i)
         }
+        // fatal:false replaces invalid sequences with U+FFFD — same as the
+        // server's former from_utf8_lossy.
+        return new TextDecoder('utf-8', { fatal: false }).decode(bytes)
     }
 
     interface SizeEvent {
@@ -113,14 +110,14 @@
     const term = new Terminal()
     const serializeAddon = new SerializeAddon()
 
-    onDestroy(() => socket?.close())
+    onDestroy(() => stream?.close())
 
     onMount(async () => {
         if (recording.kind !== 'Terminal') {
             throw new Error('Invalid recording type')
         }
 
-        url = `/@warpgate/admin/api/recordings/${recording.id}/cast`
+        url = `/@warpgate/admin/api/recordings/${recording.id}/data`
 
         term.loadAddon(serializeAddon)
         term.open(containerElement)
@@ -132,41 +129,55 @@
         resizeObserver = new ResizeObserver(fitSize)
         resizeObserver.observe(containerElement)
 
-        const data = await fetch(url).then(r => r.text())
-        for (const line of data.split('\n')) {
-            addData(JSON.parse(line))
+        // Subscribe and buffer BEFORE reading history so nothing written during
+        // the fetch is lost; the stream then drops live items the snapshot
+        // already covers (by byte offset) and tails the rest.
+        let painted = false
+        let started = false
+
+        function applyLiveDecision() {
+            if (!painted || !started) {
+                return
+            }
+            if (sessionIsLive) {
+                playing = true
+            } else {
+                seek(0)
+            }
         }
+
+        stream = new LiveRecordingStream(
+            `wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/stream`,
+            {
+                onStart: live => {
+                    started = true
+                    sessionIsLive = live
+                    applyLiveDecision()
+                },
+                onEnd: () => {
+                    sessionIsLive = false
+                },
+                onNext: item => addTerminalItem(item as TerminalItem),
+            },
+        )
+        stream.arm()
+
+        // Read the raw file as bytes so the snapshot boundary is exact (the
+        // decompressed byte length), independent of any transfer encoding.
+        const buf = await fetch(url).then(r => r.arrayBuffer())
+        for (const line of new TextDecoder().decode(buf).split('\n')) {
+            if (!line) {
+                continue
+            }
+            addTerminalItem(JSON.parse(line) as TerminalItem)
+        }
+        await stream.splice(buf.byteLength)
 
         // Await the first paint directly (nothing else is seeking yet) so `loading` clears
         // only once the terminal reflects the recording.
         await _seekInternal(duration)
-
-        socket = new WebSocket(
-            `wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/stream`,
-        )
-        socket.addEventListener('message', event => {
-            let message = JSON.parse(event.data)
-            if ('data' in message) {
-                let item: AsciiCastItem = message.data
-                addData(item)
-            }
-            if ('start' in message) {
-                sessionIsLive = message.live
-                if (!sessionIsLive) {
-                    seek(0)
-                } else {
-                    playing = true
-                }
-            }
-            if ('end' in message) {
-                sessionIsLive = false
-            } else {
-                console.log('Message from server ', message)
-            }
-        })
-        socket.addEventListener('close', () =>
-            console.info('Live stream closed'),
-        )
+        painted = true
+        applyLiveDecision()
 
         loading = false
     })
@@ -178,34 +189,31 @@
         await new Promise<void>(r => term.write(data, r))
     }
 
-    function addData(data: AsciiCastItem) {
-        if (isAsciiCastHeader(data)) {
-            if (data.width) {
+    // Fold one stored item into the player's event model. Viewer input isn't
+    // rendered, matching the previous server-side behaviour.
+    function addTerminalItem(item: TerminalItem) {
+        if ('cols' in item) {
+            if (item.cols) {
                 ptyMode = true
             }
-            events.push({
-                time: data.time,
-                cols: data.width,
-                rows: data.height,
-            })
+            events.push({ time: item.time, cols: item.cols, rows: item.rows })
             if (isStreaming) {
-                resize(data.width, data.height)
-                timestamp = data.time
+                resize(item.cols, item.rows)
+                timestamp = item.time
             }
-            duration = Math.max(duration, data.time)
+            duration = Math.max(duration, item.time)
+            return
         }
-        if (isAsciiCastData(data)) {
-            let dataEvent = {
-                time: data[0],
-                data: data[2],
-            }
-            events.push(dataEvent)
-            if (isStreaming) {
-                writeToTerminal(dataEvent.data)
-                timestamp = dataEvent.time
-            }
-            duration = Math.max(duration, dataEvent.time)
+        if (item.stream === 'Input') {
+            return
         }
+        const data = decodeBase64Lossy(item.data)
+        events.push({ time: item.time, data })
+        if (isStreaming) {
+            writeToTerminal(data)
+            timestamp = item.time
+        }
+        duration = Math.max(duration, item.time)
     }
 
     let metricsCanvas: HTMLCanvasElement

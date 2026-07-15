@@ -7,13 +7,14 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json as OpenApiJson;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use serde_json::json;
+use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::broadcast;
 use tracing::error;
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common::AdminPermission;
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::recordings::{AsciiCast, RecordingFile, TerminalRecordingItem};
+use warpgate_core::recordings::{LiveChunk, RecordingFile};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_protocol_kubernetes::recording::{
     KubernetesRecordingItem, KubernetesRecordingItemApiObject,
@@ -120,65 +121,16 @@ impl Api {
 async fn find_recording(
     ctx: &AuthenticatedRequestContext,
     id: Uuid,
-    kind: RecordingKind,
+    kind: Option<RecordingKind>,
 ) -> poem::Result<Recording::Model> {
-    Recording::Entity::find_by_id(id)
-        .filter(Recording::Column::Kind.eq(kind))
-        .one(&ctx.services().db)
+    let mut q = Recording::Entity::find_by_id(id);
+    if let Some(kind) = kind {
+        q = q.filter(Recording::Column::Kind.eq(kind));
+    }
+    q.one(&ctx.services().db)
         .await
         .map_err(InternalServerError)?
         .ok_or_else(|| NotFoundError.into())
-}
-
-#[handler]
-pub async fn api_get_recording_cast(
-    ctx: Data<&AuthenticatedRequestContext>,
-    id: poem::web::Path<Uuid>,
-) -> poem::Result<String> {
-    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
-
-    let recording = find_recording(&ctx, id.0, RecordingKind::Terminal).await?;
-
-    let reader = {
-        let recordings = ctx.services().recordings.lock().await;
-        recordings
-            .access(&recording, RecordingFile::NDJsonData)
-            .await
-            .map_err(InternalServerError)?
-            .open_read()
-            .await
-            .map_err(InternalServerError)?
-    };
-
-    let mut response = vec![];
-    let mut last_size = (0, 0);
-    let mut lines = BufReader::new(reader).lines();
-    while let Some(line) = lines.next_line().await.map_err(InternalServerError)? {
-        if line.is_empty() {
-            continue;
-        }
-        let entry: TerminalRecordingItem =
-            serde_json::from_str(&line).map_err(InternalServerError)?;
-        let asciicast: AsciiCast = entry.into();
-        response.push(serde_json::to_string(&asciicast).map_err(InternalServerError)?);
-        if let AsciiCast::Header { width, height, .. } = asciicast {
-            last_size = (width, height);
-        }
-    }
-
-    response.insert(
-        0,
-        serde_json::to_string(&AsciiCast::Header {
-            time: 0.0,
-            version: 2,
-            width: last_size.0,
-            height: last_size.1,
-            title: recording.name,
-        })
-        .map_err(InternalServerError)?,
-    );
-
-    Ok(response.join("\n"))
 }
 
 #[handler]
@@ -189,31 +141,31 @@ pub async fn api_get_recording_tcpdump(
 ) -> poem::Result<poem::Response> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let recording = find_recording(&ctx, id.0, RecordingKind::Traffic).await?;
+    let recording = find_recording(&ctx, id.0, Some(RecordingKind::Traffic)).await?;
     serve_recording_file(&ctx, &recording, RecordingFile::TcpDumpData, static_req).await
 }
 
 #[handler]
-pub async fn api_get_recording_desktop(
+pub async fn api_get_recording_data(
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
     static_req: StaticFileRequest,
 ) -> poem::Result<poem::Response> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let recording = find_recording(&ctx, id.0, RecordingKind::Desktop).await?;
+    let recording = find_recording(&ctx, id.0, None).await?;
     serve_recording_file(&ctx, &recording, RecordingFile::NDJsonData, static_req).await
 }
 
 #[handler]
-pub async fn api_get_recording_desktop_index(
+pub async fn api_get_recording_index(
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
     static_req: StaticFileRequest,
 ) -> poem::Result<poem::Response> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let recording = find_recording(&ctx, id.0, RecordingKind::Desktop).await?;
+    let recording = find_recording(&ctx, id.0, None).await?;
     serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req).await
 }
 
@@ -250,94 +202,81 @@ async fn serve_recording_file(
     }
 }
 
+/// Messages pushed to a recording live-view WebSocket, serialised with a `type`
+/// discriminator the player switches on.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum LiveStreamMessage {
+    /// Sent first: whether the session is currently being recorded on this node.
+    Start { live: bool },
+    /// One raw recording item plus its end byte offset in `data.ndjson`.
+    Data {
+        data: serde_json::Value,
+        offset: u64,
+    },
+    /// The recording ended.
+    End,
+}
+
+/// Relay a recording's live broadcast to a WebSocket: a `Start` frame, then one
+/// `Data` frame per item, then `End`. Terminal and desktop share this — both just
+/// forward the raw item + offset; the player renders it per its own format.
+fn live_stream_response(
+    ws: WebSocket,
+    receiver: Option<broadcast::Receiver<LiveChunk>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| async move {
+        let (mut sink, _) = socket.split();
+
+        sink.send(Message::Text(serde_json::to_string(
+            &LiveStreamMessage::Start {
+                live: receiver.is_some(),
+            },
+        )?))
+        .await?;
+
+        if let Some(mut receiver) = receiver {
+            tokio::spawn(async move {
+                if let Err(error) = async {
+                    while let Ok(LiveChunk { offset, data }) = receiver.recv().await {
+                        let item: serde_json::Value = serde_json::from_slice(&data)?;
+                        sink.send(Message::Text(serde_json::to_string(
+                            &LiveStreamMessage::Data { data: item, offset },
+                        )?))
+                        .await?;
+                    }
+                    sink.send(Message::Text(serde_json::to_string(
+                        &LiveStreamMessage::End,
+                    )?))
+                    .await?;
+                    Ok::<(), anyhow::Error>(())
+                }
+                .await
+                {
+                    error!(%error, "Livestream error:");
+                }
+            });
+        }
+
+        Ok::<(), anyhow::Error>(())
+    })
+}
+
 #[handler]
-pub async fn api_get_recording_desktop_stream(
+pub async fn api_get_recording_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
 ) -> poem::Result<impl IntoResponse> {
     require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
 
-    let recordings = ctx.services().recordings.lock().await;
-    let receiver = recordings.subscribe_live(&id).await;
+    let receiver = ctx
+        .services()
+        .recordings
+        .lock()
+        .await
+        .subscribe_live(&id)
+        .await;
 
-    Ok(ws.on_upgrade(|socket| async move {
-        let (mut sink, _) = socket.split();
-
-        sink.send(Message::Text(serde_json::to_string(&json!({
-            "start": true,
-            "live": receiver.is_some(),
-        }))?))
-        .await?;
-
-        if let Some(mut receiver) = receiver {
-            tokio::spawn(async move {
-                if let Err(error) = async {
-                    while let Ok(data) = receiver.recv().await {
-                        // Each broadcast line is a serialised DesktopRecordingItem.
-                        let item: serde_json::Value = serde_json::from_slice(&data)?;
-                        let msg = serde_json::to_string(&json!({ "data": item }))?;
-                        sink.send(Message::Text(msg)).await?;
-                    }
-                    sink.send(Message::Text(serde_json::to_string(&json!({
-                        "end": true,
-                    }))?))
-                    .await?;
-                    Ok::<(), anyhow::Error>(())
-                }
-                .await
-                {
-                    error!(%error, "Livestream error:");
-                }
-            });
-        }
-
-        Ok::<(), anyhow::Error>(())
-    }))
-}
-
-#[handler]
-pub async fn api_get_recording_terminal_stream(
-    ws: WebSocket,
-    ctx: Data<&AuthenticatedRequestContext>,
-    id: poem::web::Path<Uuid>,
-) -> Result<impl IntoResponse, WarpgateError> {
-    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
-
-    let recordings = ctx.services().recordings.lock().await;
-    let receiver = recordings.subscribe_live(&id).await;
-
-    Ok(ws.on_upgrade(|socket| async move {
-        let (mut sink, _) = socket.split();
-
-        sink.send(Message::Text(serde_json::to_string(&json!({
-            "start": true,
-            "live": receiver.is_some(),
-        }))?))
-        .await?;
-
-        if let Some(mut receiver) = receiver {
-            tokio::spawn(async move {
-                if let Err(error) = async {
-                    while let Ok(data) = receiver.recv().await {
-                        let content: TerminalRecordingItem = serde_json::from_slice(&data)?;
-                        let cast: AsciiCast = content.into();
-                        let msg = serde_json::to_string(&json!({ "data": cast }))?;
-                        sink.send(Message::Text(msg)).await?;
-                    }
-                    sink.send(Message::Text(serde_json::to_string(&json!({
-                        "end": true,
-                    }))?))
-                    .await?;
-                    Ok::<(), anyhow::Error>(())
-                }
-                .await
-                {
-                    error!(%error, "Livestream error:");
-                }
-            });
-        }
-
-        Ok::<(), anyhow::Error>(())
-    }))
+    Ok(live_stream_response(ws, receiver))
 }
