@@ -65,6 +65,7 @@ mod m00060_recording_generation;
 mod m00061_rename_web_ssh_enabled;
 mod m00062_web_approval_grace_period;
 mod m00063_recordings_storage;
+mod m00064_cluster;
 
 pub(crate) mod helpers;
 
@@ -137,6 +138,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00061_rename_web_ssh_enabled::Migration),
             Box::new(m00062_web_approval_grace_period::Migration),
             Box::new(m00063_recordings_storage::Migration),
+            Box::new(m00064_cluster::Migration),
         ]
     }
 }

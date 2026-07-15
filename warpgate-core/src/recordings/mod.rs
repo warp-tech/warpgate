@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Duration;
 
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
-use tracing::info;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
+use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_directory;
 use warpgate_common::{GlobalParams, SessionId};
@@ -23,7 +26,12 @@ pub use storage::FileAccess;
 use storage::Storage;
 pub use terminal::*;
 pub use traffic::*;
+use writer::WriterShutdown;
 pub use writer::{LiveChunk, NDJsonRecordingWriter, RawRecordingWriter};
+
+/// How long `SessionRecordings::shutdown` waits
+/// (just under kubernetes default)
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(25);
 
 /// The live-broadcast channel for a recording's primary data stream, keyed by
 /// recording id. Each item carries its end byte offset so a viewer can splice
@@ -90,6 +98,8 @@ pub struct RecordingWriterOpener {
     db: DatabaseConnection,
     live: LiveMap,
     params: GlobalParams,
+    shutdown: CancellationToken,
+    shutdown_tracker: TaskTracker,
 }
 
 impl RecordingWriterOpener {
@@ -119,7 +129,18 @@ impl RecordingWriterOpener {
             .storage
             .open_sink(&self.model, file, &self.params)
             .await?;
-        RawRecordingWriter::new(sink, self.model.clone(), self.db.clone(), live).await
+
+        RawRecordingWriter::new(
+            sink,
+            self.model.clone(),
+            self.db.clone(),
+            live,
+            WriterShutdown {
+                token: self.shutdown.clone(),
+                tracker: self.shutdown_tracker.clone(),
+            },
+        )
+        .await
     }
 }
 
@@ -135,6 +156,8 @@ pub struct SessionRecordings {
     db: DatabaseConnection,
     live: LiveMap,
     params: GlobalParams,
+    shutdown: CancellationToken,
+    shutdown_tracker: TaskTracker,
 }
 
 impl SessionRecordings {
@@ -143,6 +166,27 @@ impl SessionRecordings {
             db,
             live: Arc::new(Mutex::new(HashMap::new())),
             params: params.clone(),
+            shutdown: CancellationToken::new(),
+            shutdown_tracker: TaskTracker::new(),
+        }
+    }
+
+    /// Signal every in-flight writer to finalize, then wait (bounded)
+    pub async fn shutdown(&self) {
+        self.shutdown.cancel();
+        if self.shutdown_tracker.len() > 0 {
+            info!(
+                count = self.shutdown_tracker.len(),
+                "Waiting for session recording uploads to finish..."
+            );
+        }
+        self.shutdown_tracker.close();
+
+        if tokio::time::timeout(SHUTDOWN_TIMEOUT, self.shutdown_tracker.wait())
+            .await
+            .is_err()
+        {
+            warn!("Timed out waiting for recording uploads to finish");
         }
     }
 
@@ -212,6 +256,8 @@ impl SessionRecordings {
             db: self.db.clone(),
             live: self.live.clone(),
             params: self.params.clone(),
+            shutdown: self.shutdown.clone(),
+            shutdown_tracker: self.shutdown_tracker.clone(),
         };
 
         T::new(&opener).await

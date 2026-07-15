@@ -36,6 +36,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 totp-rs = { version = "5.0", features = ["otpauth"], default-features = false }
 tracing.workspace = true
 tracing-core = { version = "0.1", default-features = false }

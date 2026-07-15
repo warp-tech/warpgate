@@ -7,12 +7,19 @@ use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing::error;
 use warpgate_common::try_block;
 use warpgate_db_entities::Recording;
 
 use super::storage::RecordingSink;
 use super::{Error, LiveMap, Result};
+
+pub(crate) struct WriterShutdown {
+    pub token: CancellationToken,
+    pub tracker: TaskTracker,
+}
 
 /// One item of a recording's primary data stream, broadcast to live viewers.
 /// `offset` is the total bytes written through this item (its end position in
@@ -30,8 +37,11 @@ pub struct LiveChunk {
 pub struct RawRecordingWriter {
     sender: mpsc::Sender<Bytes>,
     live_sender: broadcast::Sender<LiveChunk>,
-    /// Running byte offset to hand out, shared across clones of this writer so
-    /// the stream is numbered consistently regardless of which clone writes.
+    /// Running byte offset to hand out. Live viewers rely on this matching the
+    /// on-disk byte order, which holds because every write to a recording is
+    /// serialized by `NDJsonRecordingWriter`'s `buf` lock: that writer is not
+    /// `Clone`, so tasks share the one instance (through an `Arc`) and its single
+    /// lock, and the counter can't diverge from disk order.
     offset: Arc<AtomicU64>,
     drop_signal: mpsc::Sender<()>,
 }
@@ -42,9 +52,11 @@ impl RawRecordingWriter {
         model: Recording::Model,
         db: DatabaseConnection,
         live: Option<LiveMap>,
+        shutdown: WriterShutdown,
     ) -> Result<Self> {
         let (sender, mut receiver) = mpsc::channel::<Bytes>(1024);
         let (drop_signal, mut drop_receiver) = mpsc::channel(1);
+        let WriterShutdown { token, tracker } = shutdown;
 
         // Register in the live-subscription map only when this file is the live stream
         // (see `RecordingWriterOpener::open`). Sidecars pass `None` so they don't clobber
@@ -65,7 +77,7 @@ impl RawRecordingWriter {
             });
         }
 
-        tokio::spawn(async move {
+        tracker.spawn(async move {
             try_block!(async {
                 let mut last_flush = Instant::now();
                 loop {
@@ -80,8 +92,14 @@ impl RawRecordingWriter {
                             }
                             None => break,
                         },
+                        () = token.cancelled() => break,
                         () = tokio::time::sleep(Duration::from_millis(5000)) => ()
                     }
+                }
+
+                // Drain receiver in case writer was shut down
+                while let Ok(bytes) = receiver.try_recv() {
+                    sink.write_all(&bytes).await?;
                 }
                 Ok::<(), anyhow::Error>(())
             } catch (error: anyhow::Error) {
@@ -147,15 +165,6 @@ impl Drop for RawRecordingWriter {
 pub struct NDJsonRecordingWriter {
     pub(crate) inner: RawRecordingWriter,
     buf: RwLock<Vec<u8>>,
-}
-
-impl Clone for NDJsonRecordingWriter {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            buf: RwLock::new(Vec::new()),
-        }
-    }
 }
 
 impl NDJsonRecordingWriter {

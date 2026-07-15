@@ -9,6 +9,7 @@ pub mod IpBlock;
 pub mod KnownHost;
 pub mod LdapServer;
 pub mod LogEntry;
+pub mod Node;
 pub mod OtpCredential;
 pub mod Parameters;
 pub mod PasswordCredential;

@@ -238,12 +238,22 @@ fn live_stream_response(
         if let Some(mut receiver) = receiver {
             tokio::spawn(async move {
                 if let Err(error) = async {
-                    while let Ok(LiveChunk { offset, data }) = receiver.recv().await {
-                        let item: serde_json::Value = serde_json::from_slice(&data)?;
-                        sink.send(Message::Text(serde_json::to_string(
-                            &LiveStreamMessage::Data { data: item, offset },
-                        )?))
-                        .await?;
+                    loop {
+                        match receiver.recv().await {
+                            Ok(LiveChunk { offset, data }) => {
+                                let item: serde_json::Value = serde_json::from_slice(&data)?;
+                                sink.send(Message::Text(serde_json::to_string(
+                                    &LiveStreamMessage::Data { data: item, offset },
+                                )?))
+                                .await?;
+                            }
+                            // A slow viewer fell behind the broadcast ring: skip the
+                            // dropped items and keep tailing. This leaves a gap the
+                            // client can only heal by reloading the snapshot, but it is
+                            // not the recording ending, so don't send `End`.
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        }
                     }
                     sink.send(Message::Text(serde_json::to_string(
                         &LiveStreamMessage::End,
