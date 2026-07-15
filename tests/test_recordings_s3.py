@@ -1,4 +1,8 @@
-import subprocess
+import base64
+import json
+import os
+import select
+import signal
 import time
 from uuid import uuid4
 
@@ -7,7 +11,7 @@ import pytest
 import requests
 
 from .api_client import admin_client, sdk
-from .conftest import ProcessManager, WarpgateProcess
+from .conftest import ProcessManager
 from .test_ssh_proto import common_args, setup_user_and_target
 from .util import wait_port
 
@@ -77,6 +81,26 @@ def _find_completed_terminal_recording(api):
     return None
 
 
+def _find_in_progress_terminal_session(api):
+    for session in sorted(
+        api.get_sessions().items, key=lambda s: s.started, reverse=True
+    ):
+        for rec in api.get_session_recordings(session.id):
+            if rec.kind == sdk.RecordingKind.TERMINAL and rec.ended is None:
+                return session.id
+    return None
+
+
+def _read_until(stream, needle: bytes, deadline: float) -> bytes:
+    """Read from `stream` (a pipe) until `needle` appears or `deadline` passes."""
+    buf = b""
+    while time.monotonic() < deadline and needle not in buf:
+        ready, _, _ = select.select([stream], [], [], 1)
+        if ready:
+            buf += os.read(stream.fileno(), 4096)
+    return buf
+
+
 class Test:
     def test_s3_recording_roundtrip(
         self,
@@ -135,5 +159,89 @@ class Test:
             headers={"X-Warpgate-Token": "token-value"},
             verify=False,
         )
-        assert resp.status_code == 200, f"cast fetch failed: {resp.status_code}"
-        assert marker in resp.text, "recorded terminal output missing the marker"
+        assert resp.status_code == 200, f"terminal fetch failed: {resp.status_code}"
+        output = b""
+        for line in resp.text.splitlines():
+            if not line:
+                continue
+            item = json.loads(line)
+            if "data" in item:
+                output += base64.b64decode(item["data"])
+        assert marker.encode() in output, "recorded terminal output missing the marker"
+
+    def test_s3_recording_drain_on_sigterm(
+        self,
+        processes: ProcessManager,
+        timeout,
+        wg_c_ed25519_pubkey,
+        minio,
+    ):
+        endpoint, s3 = minio
+
+        wg = processes.start_wg(config_patch={"recordings": {"enable": True}})
+        wait_port(wg.http_port, recv=False)
+        url = f"https://localhost:{wg.http_port}"
+
+        _configure_s3(url, endpoint)
+
+        user, ssh_target = setup_user_and_target(processes, wg, wg_c_ed25519_pubkey)
+
+        # A session that emits the marker and then stays open, so the recording is
+        # still in progress (multipart upload open, not finalized) at SIGTERM time.
+        marker = f"drain-{uuid4().hex}"
+        ssh_client = processes.start_ssh_client(
+            f"{user.username}:{ssh_target.name}@localhost",
+            "-p",
+            str(wg.ssh_port),
+            "-tt",
+            *common_args,
+            # One arg: ssh sends it verbatim and the remote login shell runs it,
+            # so the `;` is parsed there (splitting the args would mangle it).
+            f"echo {marker}; sleep 30",
+            password="123",
+        )
+
+        # The marker round-tripping back through the gateway proves the session is
+        # up and the output has reached the recorder's queue.
+        output = _read_until(
+            ssh_client.stdout, marker.encode(), time.monotonic() + timeout
+        )
+        assert marker.encode() in output, "marker never appeared in session output"
+
+        # Capture the in-progress recording's session id while the gateway is up.
+        session_id = None
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and session_id is None:
+            with admin_client(url) as api:
+                session_id = _find_in_progress_terminal_session(api)
+            if session_id is None:
+                time.sleep(0.5)
+        assert session_id is not None, "no in-progress terminal recording found"
+
+        # SIGTERM mid-recording: the gateway must drain and finalize the upload
+        # before exiting rather than abandoning the multipart upload.
+        wg.process.send_signal(signal.SIGTERM)
+        returncode = wg.process.wait(timeout=45)
+        assert returncode == 0, f"gateway did not exit cleanly on SIGTERM: {returncode}"
+
+        # A multipart upload only becomes a listable/gettable object once completed,
+        # so a readable object holding the marker proves the drain finalized it.
+        listing = s3.list_objects_v2(Bucket=BUCKET, Prefix=f"{session_id}/")
+        data_keys = [
+            o["Key"]
+            for o in listing.get("Contents", [])
+            if o["Key"].endswith("data.ndjson")
+        ]
+        assert data_keys, (
+            f"recording upload was not finalized on SIGTERM: {listing.get('Contents')}"
+        )
+
+        body = s3.get_object(Bucket=BUCKET, Key=data_keys[0])["Body"].read()
+        recorded = b""
+        for line in body.splitlines():
+            if not line:
+                continue
+            item = json.loads(line)
+            if "data" in item:
+                recorded += base64.b64decode(item["data"])
+        assert marker.encode() in recorded, "drained recording is missing the marker"

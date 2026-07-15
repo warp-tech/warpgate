@@ -19,6 +19,8 @@ use crate::{SessionHandle, WarpgateServerHandle};
 pub struct State {
     pub sessions: HashMap<SessionId, Arc<Mutex<SessionState>>>,
     db: DatabaseConnection,
+    // Node IDs are random
+    node_id: Uuid,
     rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     change_sender: broadcast::Sender<()>,
 }
@@ -27,11 +29,13 @@ impl State {
     pub fn new(
         db: &DatabaseConnection,
         rate_limiter_registry: &Arc<Mutex<RateLimiterRegistry>>,
+        node_id: Uuid,
     ) -> Arc<Mutex<Self>> {
         let sender = broadcast::channel(2).0;
         Arc::new(Mutex::new(Self {
             sessions: HashMap::new(),
             db: db.clone(),
+            node_id,
             rate_limiter_registry: rate_limiter_registry.clone(),
             change_sender: sender,
         }))
@@ -65,6 +69,7 @@ impl State {
                     .remote_address
                     .map_or_else(String::new, |x| x.to_string())),
                 protocol: Set(protocol.to_string()),
+                node_id: Set(Some(self_.node_id)),
                 ..Default::default()
             };
 

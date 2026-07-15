@@ -1,19 +1,35 @@
-use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use serde::Serialize;
 use time::OffsetDateTime;
-use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
+use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing::error;
-use uuid::Uuid;
 use warpgate_common::try_block;
 use warpgate_db_entities::Recording;
 
 use super::storage::RecordingSink;
-use super::{Error, Result};
+use super::{Error, LiveMap, Result};
+
+pub(crate) struct WriterShutdown {
+    pub token: CancellationToken,
+    pub tracker: TaskTracker,
+}
+
+/// One item of a recording's primary data stream, broadcast to live viewers.
+/// `offset` is the total bytes written through this item (its end position in
+/// `data.ndjson`), so a viewer that loaded a snapshot covering the first `N`
+/// bytes keeps only chunks with `offset > N` — splicing the live tail onto the
+/// snapshot with neither a gap nor a duplicate. Both players use this: the
+/// snapshot boundary is the `Content-Length` of the raw file they fetched.
+#[derive(Clone, Debug)]
+pub struct LiveChunk {
+    pub offset: u64,
+    pub data: Bytes,
+}
 
 #[derive(Clone)]
 pub struct RawRecordingWriter {
@@ -27,10 +43,12 @@ impl RawRecordingWriter {
         mut sink: RecordingSink,
         model: Recording::Model,
         db: DatabaseConnection,
-        live: Option<Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>>,
+        live: Option<LiveMap>,
+        shutdown: WriterShutdown,
     ) -> Result<Self> {
         let (sender, mut receiver) = mpsc::channel::<Bytes>(1024);
         let (drop_signal, mut drop_receiver) = mpsc::channel(1);
+        let WriterShutdown { token, tracker } = shutdown;
 
         // Register in the live-subscription map only when this file is the live stream
         // (see `RecordingWriterOpener::open`). Sidecars pass `None` so they don't clobber
@@ -51,7 +69,7 @@ impl RawRecordingWriter {
             });
         }
 
-        tokio::spawn(async move {
+        tracker.spawn(async move {
             try_block!(async {
                 let mut last_flush = Instant::now();
                 loop {
@@ -66,8 +84,14 @@ impl RawRecordingWriter {
                             }
                             None => break,
                         },
+                        () = token.cancelled() => break,
                         () = tokio::time::sleep(Duration::from_millis(5000)) => ()
                     }
+                }
+
+                // Drain receiver in case writer was shut down
+                while let Ok(bytes) = receiver.try_recv() {
+                    sink.write_all(&bytes).await?;
                 }
                 Ok::<(), anyhow::Error>(())
             } catch (error: anyhow::Error) {

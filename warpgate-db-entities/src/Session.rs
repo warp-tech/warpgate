@@ -14,6 +14,8 @@ pub struct Model {
     pub ended: Option<OffsetDateTime>,
     pub ticket_id: Option<Uuid>,
     pub protocol: String,
+    /// The node this session exists/ed on
+    pub node_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

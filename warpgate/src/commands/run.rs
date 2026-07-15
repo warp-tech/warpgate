@@ -271,6 +271,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     tokio::spawn(watch_config_and_reload(services.clone(), config_rx.clone()));
 
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
+    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
 
     loop {
         tokio::select! {
@@ -278,6 +279,9 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 std::process::exit(1);
             }
             _ = sigint.recv() => {
+                break
+            }
+            _ = sigterm.recv() => {
                 break
             }
             result = supervisors.next() => {
@@ -290,6 +294,12 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 }
             }
         }
+    }
+
+    // Finalize recordings
+    services.recordings.lock().await.shutdown().await;
+    if let Err(error) = services.cluster.shutdown().await {
+        warn!(%error, "Failed to deregister cluster node");
     }
 
     info!("Exiting");

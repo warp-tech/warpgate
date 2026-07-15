@@ -11,6 +11,7 @@ use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{GlobalParams, SessionId, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Parameters;
 
+use crate::cluster::Cluster;
 use crate::db::{connect_to_db_and_migrate, populate_db};
 use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
@@ -24,6 +25,7 @@ pub struct Services {
     pub db: DatabaseConnection,
     pub recordings: Arc<Mutex<SessionRecordings>>,
     pub config: Arc<Mutex<WarpgateConfig>>,
+    pub cluster: Arc<Cluster>,
     pub state: Arc<Mutex<State>>,
     pub config_provider: Arc<Mutex<ConfigProviderEnum>>,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
@@ -44,6 +46,9 @@ impl Services {
         populate_db(&db, &mut config).await?;
         let recordings = SessionRecordings::new(db.clone(), &params);
         let recordings = Arc::new(Mutex::new(recordings));
+
+        let cluster = Arc::new(Cluster::new(db.clone(), config.store.http.listen.port())?);
+        cluster.start().await?;
 
         let config = Arc::new(Mutex::new(config));
 
@@ -91,7 +96,8 @@ impl Services {
             db: db.clone(),
             recordings,
             config: config.clone(),
-            state: State::new(&db, &rate_limiter_registry),
+            state: State::new(&db, &rate_limiter_registry, cluster.node_id),
+            cluster,
             rate_limiter_registry,
             config_provider,
             auth_state_store,
