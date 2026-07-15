@@ -6,9 +6,10 @@
     let ready = false
     let menuVisible = false
     let dragging = false
+    const DRAG_THRESHOLD = 5
     let savedPosition = { x: 0.1, y: 0.8 }
     let position = { x: 0.1, y: 0.8 }
-    let dragStartCoords = { x: 0, y: 0 }
+    let dragStartCoords: { x: number; y: number } | undefined
     let externalHost: string | undefined
 
     if (localStorage.warpgateMenuLocation) {
@@ -23,13 +24,17 @@
     })
 
     function drag(e: MouseEvent) {
-        if (!dragging) {
+        if (!dragStartCoords || !e.buttons) {
             return
         }
         const { x, y } = dragStartCoords
         const { clientX, clientY } = e
         const dx = clientX - x
         const dy = clientY - y
+        if (!dragging && Math.hypot(dx, dy) < DRAG_THRESHOLD) {
+            return
+        }
+        dragging = true
         position = {
             x: Math.max(
                 0,
@@ -44,11 +49,12 @@
 
     function startDragging(e: MouseEvent) {
         dragStartCoords = { x: e.clientX, y: e.clientY }
-        dragging = true
+        dragging = false
     }
 
     function stopDragging() {
         dragging = false
+        dragStartCoords = undefined
         savedPosition = position
         localStorage.warpgateMenuLocation = JSON.stringify(position)
     }
@@ -88,16 +94,10 @@
         on:mouseup|stopPropagation|preventDefault={() => {
             if (!dragging) {
                 menuVisible = !menuVisible
-            } else {
-                stopDragging()
             }
+            stopDragging()
         }}
-        on:mousedown|preventDefault
-        on:mousemove|preventDefault={e => {
-            if (e.buttons && !dragging) {
-                startDragging(e)
-            }
-        }}
+        on:mousedown|preventDefault={startDragging}
     >
 
     {#if menuVisible}
