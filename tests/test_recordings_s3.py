@@ -134,7 +134,7 @@ class Test:
         # scratch is gone); `requests` follows the redirect, so decoding the raw
         # items back to the marker proves the presign + round trip.
         resp = requests.get(
-            f"{url}/@warpgate/admin/api/recordings/{recording.id}/terminal",
+            f"{url}/@warpgate/admin/api/recordings/{recording.id}/data",
             headers={"X-Warpgate-Token": "token-value"},
             verify=False,
         )
