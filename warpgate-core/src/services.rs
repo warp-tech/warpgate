@@ -98,7 +98,7 @@ impl Services {
             admin_token: Arc::new(Mutex::new(admin_token)),
             login_protection,
             global_params: Arc::new(params),
-            listener_status: Default::default(),
+            listener_status: Arc::default(),
         })
     }
 
@@ -106,6 +106,7 @@ impl Services {
     /// [`AuthState`] under a brief store lock. This is the only sanctioned way
     /// to create an auth state, so the "no DB I/O while holding the store lock"
     /// invariant is enforced structurally rather than by convention.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_auth_state(
         &self,
         session_id: Option<&SessionId>,

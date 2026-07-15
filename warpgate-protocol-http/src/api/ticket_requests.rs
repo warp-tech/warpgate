@@ -160,7 +160,7 @@ impl Api {
         }
 
         let db = &ctx.services().db;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let Some(user_model) = get_user(&ctx.auth, db).await? else {
             return Ok(CreateTicketRequestResponse::Unauthorized);
         };
 
@@ -211,21 +211,21 @@ impl Api {
             return Ok(GetTicketRequestsResponse::Unauthorized);
         }
         let db = &ctx.services().db;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let Some(user_model) = get_user(&ctx.auth, db).await? else {
             return Ok(GetTicketRequestsResponse::Unauthorized);
         };
 
         let requests = TicketRequest::Entity::find()
             .filter(TicketRequest::Column::UserId.eq(user_model.id))
             .order_by_desc(TicketRequest::Column::Created)
-            .all(&*db)
+            .all(db)
             .await?;
 
         let mut views = Vec::with_capacity(requests.len());
         for req in requests {
             let target_name = req
                 .find_related(Target::Entity)
-                .one(&*db)
+                .one(db)
                 .await?
                 .map(|t| t.name)
                 .unwrap_or_default();
@@ -264,13 +264,13 @@ impl Api {
             return Ok(GetTicketRequestResponse::Unauthorized);
         }
         let db = &ctx.services().db;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let Some(user_model) = get_user(&ctx.auth, db).await? else {
             return Ok(GetTicketRequestResponse::Unauthorized);
         };
 
         let Some(request) = TicketRequest::Entity::find_by_id(id.0)
             .filter(TicketRequest::Column::UserId.eq(user_model.id))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(GetTicketRequestResponse::NotFound);
@@ -297,7 +297,7 @@ impl Api {
             return Ok(ActivateTicketRequestResponse::Unauthorized);
         }
         let db = &ctx.services().db;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let Some(user_model) = get_user(&ctx.auth, db).await? else {
             return Ok(ActivateTicketRequestResponse::Unauthorized);
         };
 
@@ -340,7 +340,7 @@ impl Api {
             return Ok(GetMyTicketsResponse::Unauthorized);
         }
         let db = &ctx.services().db;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let Some(user_model) = get_user(&ctx.auth, db).await? else {
             return Ok(GetMyTicketsResponse::Unauthorized);
         };
 
@@ -349,14 +349,14 @@ impl Api {
             .filter(Ticket::Column::UserId.eq(user_model.id))
             .filter(Ticket::Column::SelfService.eq(true))
             .order_by_desc(Ticket::Column::Created)
-            .all(&*db)
+            .all(db)
             .await?;
 
         let mut result = Vec::with_capacity(tickets.len());
         for ticket in tickets {
             let target_name = ticket
                 .find_related(Target::Entity)
-                .one(&*db)
+                .one(db)
                 .await?
                 .map(|t| t.name)
                 .unwrap_or_default();
@@ -389,7 +389,7 @@ impl Api {
             return Ok(DeleteMyTicketResponse::Unauthorized);
         }
         let db = &ctx.services().db;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let Some(user_model) = get_user(&ctx.auth, db).await? else {
             return Ok(DeleteMyTicketResponse::Unauthorized);
         };
 
@@ -397,7 +397,7 @@ impl Api {
         let Some(ticket) = Ticket::Entity::find_by_id(id.0)
             .filter(Ticket::Column::UserId.eq(user_model.id))
             .filter(Ticket::Column::SelfService.eq(true))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteMyTicketResponse::NotFound);
@@ -405,9 +405,9 @@ impl Api {
 
         TicketRequest::Entity::delete_many()
             .filter(TicketRequest::Column::TicketId.eq(Some(ticket.id)))
-            .exec(&*db)
+            .exec(db)
             .await?;
-        ticket.delete(&*db).await?;
+        ticket.delete(db).await?;
         Ok(DeleteMyTicketResponse::Deleted)
     }
 }

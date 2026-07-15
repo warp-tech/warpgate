@@ -102,7 +102,7 @@ async fn _handle_connection(
 
     let banner = {
         let db = &services.db;
-        let text = Parameters::Entity::get(&db).await?.ssh_banner;
+        let text = Parameters::Entity::get(db).await?.ssh_banner;
         if text.trim().is_empty() {
             None
         } else {
@@ -204,7 +204,7 @@ where
 pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> {
     let parameters = {
         let db = &services.db;
-        Parameters::Entity::get(&db).await?
+        Parameters::Entity::get(db).await?
     };
 
     let mut methods_vec: Vec<MethodKind> = Vec::new();

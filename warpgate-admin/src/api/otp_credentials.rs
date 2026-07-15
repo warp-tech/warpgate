@@ -71,7 +71,7 @@ impl ListApi {
 
         let objects = OtpCredential::Entity::find()
             .filter(OtpCredential::Column::UserId.eq(*user_id))
-            .all(&*db)
+            .all(db)
             .await?;
 
         Ok(GetOtpCredentialsResponse::Ok(Json(
@@ -100,11 +100,11 @@ impl ListApi {
             user_id: Set(*user_id),
             ..OtpCredential::ActiveModel::from(UserTotpCredential::from(&*body))
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(CreateOtpCredentialResponse::NotFound);
         };
 
@@ -152,15 +152,15 @@ impl DetailApi {
 
         let Some(role) = OtpCredential::Entity::find_by_id(id.0)
             .filter(OtpCredential::Column::UserId.eq(*user_id))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        role.delete(&*db).await?;
+        role.delete(db).await?;
 
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 

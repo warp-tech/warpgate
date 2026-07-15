@@ -69,6 +69,7 @@ pub struct SecurityStatus {
 
 /// Statistics from a cleanup run.
 #[derive(Clone, Debug)]
+#[allow(clippy::struct_field_names)]
 pub struct CleanupStats {
     pub expired_blocks_removed: u64,
     pub expired_lockouts_removed: u64,
@@ -92,7 +93,7 @@ pub struct LoginProtectionService {
 
 impl LoginProtectionService {
     /// Build a [`LoginProtectionConfig`] from a `Parameters` DB row.
-    fn config_from_params(params: &Parameters::Model) -> LoginProtectionConfig {
+    const fn config_from_params(params: &Parameters::Model) -> LoginProtectionConfig {
         LoginProtectionConfig {
             enabled: params.login_protection_enabled,
             retention_seconds: params.login_protection_retention_seconds as u32,
@@ -149,8 +150,8 @@ impl LoginProtectionService {
         let cache = LoginProtectionCache::new();
         {
             let db_conn = &db;
-            if Self::read_config(&db_conn).await?.enabled {
-                cache.load_from_db(&db_conn).await?;
+            if Self::read_config(db_conn).await?.enabled {
+                cache.load_from_db(db_conn).await?;
             }
         }
         Ok(Self { db, cache })
@@ -162,7 +163,7 @@ impl LoginProtectionService {
         ip: &IpAddr,
     ) -> Result<Option<IpBlockInfo>, WarpgateError> {
         let db = &self.db;
-        if !Self::read_config(&db).await?.enabled {
+        if !Self::read_config(db).await?.enabled {
             return Ok(None);
         }
 
@@ -175,7 +176,7 @@ impl LoginProtectionService {
         let block = IpBlock::Entity::find()
             .filter(IpBlock::Column::IpAddress.eq(ip.to_string()))
             .filter(IpBlock::Column::ExpiresAt.gt(now))
-            .one(&*db)
+            .one(db)
             .await?;
 
         let Some(block) = block else {
@@ -200,42 +201,41 @@ impl LoginProtectionService {
         username: &str,
     ) -> Result<Option<UserLockInfo>, WarpgateError> {
         let db = &self.db;
-        let config = Self::read_config(&db).await?;
+        let config = Self::read_config(db).await?;
         if !config.enabled {
             return Ok(None);
         }
 
-        let info = match self.cache.is_user_locked(username).await {
-            Some(info) => Some(info),
-            None => {
-                let now = OffsetDateTime::now_utc();
-                let lockout = UserLockout::Entity::find()
-                    .filter(UserLockout::Column::Username.eq(username))
-                    .one(&*db)
-                    .await?
-                    .filter(|l| l.expires_at.is_none_or(|e| e > now));
-                match lockout {
-                    Some(lockout) => {
-                        let info = UserLockInfo {
-                            username: lockout.username,
-                            locked_at: lockout.locked_at,
-                            expires_at: lockout.expires_at,
-                            reason: lockout.reason,
-                        };
-                        self.cache
-                            .lock_user(username.to_string(), info.clone())
-                            .await;
-                        Some(info)
-                    }
-                    None => None,
+        let info = if let Some(info) = self.cache.is_user_locked(username).await {
+            Some(info)
+        } else {
+            let now = OffsetDateTime::now_utc();
+            let lockout = UserLockout::Entity::find()
+                .filter(UserLockout::Column::Username.eq(username))
+                .one(db)
+                .await?
+                .filter(|l| l.expires_at.is_none_or(|e| e > now));
+            match lockout {
+                Some(lockout) => {
+                    let info = UserLockInfo {
+                        username: lockout.username,
+                        locked_at: lockout.locked_at,
+                        expires_at: lockout.expires_at,
+                        reason: lockout.reason,
+                    };
+                    self.cache
+                        .lock_user(username.to_string(), info.clone())
+                        .await;
+                    Some(info)
                 }
+                None => None,
             }
         };
 
         // When exemption is enabled, never report an admin as locked.
         if info.is_some()
             && config.user_lockout.exempt_admins
-            && Self::user_admin_status(&*db, username).await? == Some(true)
+            && Self::user_admin_status(db, username).await? == Some(true)
         {
             return Ok(None);
         }
@@ -252,7 +252,7 @@ impl LoginProtectionService {
         attempt: FailedAttemptInfo,
     ) -> Result<(), WarpgateError> {
         let db = &self.db;
-        let config = Self::read_config(&db).await?;
+        let config = Self::read_config(db).await?;
         if !config.enabled {
             return Ok(());
         }
@@ -272,20 +272,20 @@ impl LoginProtectionService {
         .await?;
 
         let ip_window_start =
-            now - time::Duration::seconds(config.ip_rate_limit.time_window_seconds as i64);
+            now - time::Duration::seconds(i64::from(config.ip_rate_limit.time_window_seconds));
         let ip_count = FailedLoginAttempt::Entity::find()
             .filter(FailedLoginAttempt::Column::RemoteIp.eq(attempt.remote_ip.to_string()))
             .filter(FailedLoginAttempt::Column::Timestamp.gte(ip_window_start))
             .count(&txn)
             .await?;
-        let new_block = if ip_count >= config.ip_rate_limit.max_attempts as u64 {
+        let new_block = if ip_count >= u64::from(config.ip_rate_limit.max_attempts) {
             Some(Self::create_or_update_ip_block(&txn, &attempt.remote_ip, now, &config).await?)
         } else {
             None
         };
 
         let user_window_start =
-            now - time::Duration::seconds(config.user_lockout.time_window_seconds as i64);
+            now - time::Duration::seconds(i64::from(config.user_lockout.time_window_seconds));
         let user_count = FailedLoginAttempt::Entity::find()
             .filter(FailedLoginAttempt::Column::Username.eq(&attempt.username))
             .filter(FailedLoginAttempt::Column::Timestamp.gte(user_window_start))
@@ -293,7 +293,7 @@ impl LoginProtectionService {
             .await?;
         // Lock real accounts over the threshold; skip non-existent usernames and
         // (unless exemption is disabled) admins.
-        let new_lock = if user_count >= config.user_lockout.max_attempts as u64 {
+        let new_lock = if user_count >= u64::from(config.user_lockout.max_attempts) {
             match Self::user_admin_status(&txn, &attempt.username).await? {
                 None => None,
                 Some(true) if config.user_lockout.exempt_admins => None,
@@ -347,7 +347,8 @@ impl LoginProtectionService {
             .await?;
 
         // Escalate the block count unless the IP has been quiet long enough.
-        let cooldown = time::Duration::seconds(config.ip_rate_limit.cooldown_reset_seconds as i64);
+        let cooldown =
+            time::Duration::seconds(i64::from(config.ip_rate_limit.cooldown_reset_seconds));
         let block_count = match &existing {
             Some(e) if now - e.last_attempt_at <= cooldown => e.block_count + 1,
             _ => 1,
@@ -410,7 +411,7 @@ impl LoginProtectionService {
         }
 
         let expires_at = config.user_lockout.auto_unlock.then(|| {
-            now + time::Duration::seconds(config.user_lockout.lockout_duration_seconds as i64)
+            now + time::Duration::seconds(i64::from(config.user_lockout.lockout_duration_seconds))
         });
         let reason = format!(
             "Exceeded {} failed login attempts",
@@ -451,7 +452,7 @@ impl LoginProtectionService {
         username: &str,
     ) -> Result<(), WarpgateError> {
         let db = &self.db;
-        if !Self::read_config(&db).await?.enabled {
+        if !Self::read_config(db).await?.enabled {
             return Ok(());
         }
 
@@ -461,7 +462,7 @@ impl LoginProtectionService {
                     .eq(ip.to_string())
                     .or(FailedLoginAttempt::Column::Username.eq(username)),
             )
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         debug!(ip = %ip, username = %username, "Cleared failed attempts after successful login");
@@ -473,11 +474,11 @@ impl LoginProtectionService {
         let db = &self.db;
         IpBlock::Entity::delete_many()
             .filter(IpBlock::Column::IpAddress.eq(ip.to_string()))
-            .exec(&*db)
+            .exec(db)
             .await?;
         FailedLoginAttempt::Entity::delete_many()
             .filter(FailedLoginAttempt::Column::RemoteIp.eq(ip.to_string()))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         self.cache.unblock_ip(ip).await;
@@ -490,11 +491,11 @@ impl LoginProtectionService {
         let db = &self.db;
         UserLockout::Entity::delete_many()
             .filter(UserLockout::Column::Username.eq(username))
-            .exec(&*db)
+            .exec(db)
             .await?;
         FailedLoginAttempt::Entity::delete_many()
             .filter(FailedLoginAttempt::Column::Username.eq(username))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         self.cache.unlock_user(username).await;
@@ -509,7 +510,7 @@ impl LoginProtectionService {
 
         let blocked_ip_count = IpBlock::Entity::find()
             .filter(IpBlock::Column::ExpiresAt.gt(now))
-            .count(&*db)
+            .count(db)
             .await?;
 
         let locked_user_count = UserLockout::Entity::find()
@@ -518,17 +519,17 @@ impl LoginProtectionService {
                     .is_null()
                     .or(UserLockout::Column::ExpiresAt.gt(now)),
             )
-            .count(&*db)
+            .count(db)
             .await?;
 
         let failed_attempts_last_hour = FailedLoginAttempt::Entity::find()
             .filter(FailedLoginAttempt::Column::Timestamp.gte(now - time::Duration::hours(1)))
-            .count(&*db)
+            .count(db)
             .await?;
 
         let failed_attempts_last_24h = FailedLoginAttempt::Entity::find()
             .filter(FailedLoginAttempt::Column::Timestamp.gte(now - time::Duration::hours(24)))
-            .count(&*db)
+            .count(db)
             .await?;
 
         Ok(SecurityStatus {
@@ -545,7 +546,7 @@ impl LoginProtectionService {
         let now = OffsetDateTime::now_utc();
         let blocks = IpBlock::Entity::find()
             .filter(IpBlock::Column::ExpiresAt.gt(now))
-            .all(&*db)
+            .all(db)
             .await?;
 
         Ok(blocks
@@ -573,7 +574,7 @@ impl LoginProtectionService {
                     .is_null()
                     .or(UserLockout::Column::ExpiresAt.gt(now)),
             )
-            .all(&*db)
+            .all(db)
             .await?;
 
         Ok(lockouts
@@ -591,7 +592,7 @@ impl LoginProtectionService {
     /// Reads the enabled flag from the DB so it honours runtime config changes.
     pub async fn cleanup_expired(&self) -> Result<CleanupStats, WarpgateError> {
         let db = &self.db;
-        let config = Self::read_config(&db).await?;
+        let config = Self::read_config(db).await?;
         if !config.enabled {
             return Ok(CleanupStats {
                 expired_blocks_removed: 0,
@@ -604,19 +605,19 @@ impl LoginProtectionService {
 
         let expired_blocks = IpBlock::Entity::delete_many()
             .filter(IpBlock::Column::ExpiresAt.lt(now))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         let expired_lockouts = UserLockout::Entity::delete_many()
             .filter(UserLockout::Column::ExpiresAt.is_not_null())
             .filter(UserLockout::Column::ExpiresAt.lt(now))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
-        let retention_cutoff = now - time::Duration::seconds(config.retention_seconds as i64);
+        let retention_cutoff = now - time::Duration::seconds(i64::from(config.retention_seconds));
         let old_attempts = FailedLoginAttempt::Entity::delete_many()
             .filter(FailedLoginAttempt::Column::Timestamp.lt(retention_cutoff))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         self.cache.clear_expired().await;
@@ -646,11 +647,12 @@ impl LoginProtectionService {
 /// Block duration with exponential backoff:
 /// `base * multiplier^(block_count - 1)`, capped at the configured maximum.
 fn calculate_block_duration(block_count: u32, config: &IpRateLimitConfig) -> Duration {
-    let base_secs = config.base_block_duration_seconds as u64;
-    let max_secs = config.max_block_duration_seconds as u64;
+    let base_secs = u64::from(config.base_block_duration_seconds);
+    let max_secs = u64::from(config.max_block_duration_seconds);
     let factor = config
         .block_duration_multiplier
-        .powi(block_count.saturating_sub(1) as i32);
+        .powi(block_count.saturating_sub(1).cast_signed());
+    #[allow(clippy::cast_precision_loss)]
     let duration_secs = (base_secs as f32 * factor) as u64;
     Duration::from_secs(duration_secs.min(max_secs))
 }

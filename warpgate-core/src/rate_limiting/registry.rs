@@ -49,7 +49,7 @@ impl RateLimiterRegistry {
 
     async fn global_quota(&self) -> Result<Option<u32>, WarpgateError> {
         let db = &self.db;
-        let parameters = Parameters::Entity::get(&db).await?;
+        let parameters = Parameters::Entity::get(db).await?;
         Ok(parameters.rate_limit_bytes_per_second.map(|x| x as u32))
     }
 
@@ -68,7 +68,7 @@ impl RateLimiterRegistry {
 
     async fn quota_for_user(&self, user_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
         let db = &self.db;
-        let user = User::Entity::find_by_id(*user_id).one(&*db).await?;
+        let user = User::Entity::find_by_id(*user_id).one(db).await?;
         Ok(user
             .and_then(|u| u.rate_limit_bytes_per_second)
             .map(|r| r as u32))
@@ -89,7 +89,7 @@ impl RateLimiterRegistry {
 
     async fn quota_for_target(&self, target_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
         let db = &self.db;
-        let target = Target::Entity::find_by_id(*target_id).one(&*db).await?;
+        let target = Target::Entity::find_by_id(*target_id).one(db).await?;
         Ok(target
             .and_then(|t| t.rate_limit_bytes_per_second)
             .map(|r| r as u32))

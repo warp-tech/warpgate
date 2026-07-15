@@ -124,7 +124,7 @@ pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bo
 
     let Some(user_model) = User::Entity::find()
         .filter(User::Entity::username_eq_ci(username))
-        .one(&*db)
+        .one(db)
         .await
         .map_err(InternalServerError)?
     else {
@@ -133,7 +133,7 @@ pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bo
 
     let count: u64 = UserAdminRoleAssignment::Entity::find()
         .filter(UserAdminRoleAssignment::Column::UserId.eq(user_model.id))
-        .count(&*db)
+        .count(db)
         .await
         .map_err(InternalServerError)?;
 

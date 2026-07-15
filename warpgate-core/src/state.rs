@@ -70,7 +70,7 @@ impl State {
 
             let db = &self_.db;
             values
-                .insert(&*db)
+                .insert(db)
                 .await
                 .context("Error inserting session")
                 .map_err(WarpgateError::from)?;
@@ -117,12 +117,12 @@ impl State {
         use sea_orm::ActiveValue::Set;
         let db = &self.db;
         let session = Session::Entity::find_by_id(id)
-            .one(&*db)
+            .one(db)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
         let mut model: Session::ActiveModel = session.into();
         model.ended = Set(Some(OffsetDateTime::now_utc()));
-        model.update(&*db).await?;
+        model.update(db).await?;
         Ok(())
     }
 }

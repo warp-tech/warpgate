@@ -67,7 +67,7 @@ impl WarpgateServerHandle {
                 ..Default::default()
             })
             .filter(Session::Column::Id.eq(self.id))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
 
@@ -101,7 +101,7 @@ impl WarpgateServerHandle {
                 ..Default::default()
             })
             .filter(Session::Column::Id.eq(self.id))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
 

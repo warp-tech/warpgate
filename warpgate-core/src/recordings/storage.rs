@@ -30,6 +30,7 @@ pub enum FileAccess {
     S3 { s3: S3Storage, key: String },
 }
 
+#[must_use]
 pub struct RecordingSinkCleanupGuard {
     scratch_path: Option<PathBuf>,
 }

@@ -169,7 +169,7 @@ async fn user_info_for_username(
     let db = &services.db;
     let model = warpgate_db_entities::User::Entity::find()
         .filter(warpgate_db_entities::User::Entity::username_eq_ci(username))
-        .one(&*db)
+        .one(db)
         .await
         .context("looking up user in database")?
         .ok_or_else(|| {
@@ -273,7 +273,7 @@ pub async fn validate_client_certificate(
     let serial_b64 = serialize_certificate_serial(&cert);
     if CertificateRevocation::Entity::find()
         .filter(CertificateRevocation::Column::SerialNumberBase64.eq(&serial_b64))
-        .one(&*db)
+        .one(db)
         .await?
         .is_some()
     {
@@ -284,7 +284,7 @@ pub async fn validate_client_certificate(
     // Find all certificate credentials and match against the provided certificate
     let cert_credentials = CertificateCredential::Entity::find()
         .find_with_related(warpgate_db_entities::User::Entity)
-        .all(&*db)
+        .all(db)
         .await?;
 
     for (cert_credential, users) in cert_credentials {
@@ -303,7 +303,7 @@ pub async fn validate_client_certificate(
                 // Update last_used timestamp
                 let mut active_model: CertificateCredential::ActiveModel = cert_credential.into();
                 active_model.last_used = Set(Some(OffsetDateTime::now_utc()));
-                if let Err(e) = active_model.update(&*db).await {
+                if let Err(e) = active_model.update(db).await {
                     warn!("Failed to update certificate last_used timestamp: {}", e);
                 }
 

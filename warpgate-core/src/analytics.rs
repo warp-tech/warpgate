@@ -36,7 +36,7 @@ fn major_minor_version() -> String {
     format!("{major}.{minor}")
 }
 
-fn round_up_to_10(n: u64) -> u64 {
+const fn round_up_to_10(n: u64) -> u64 {
     n.div_ceil(10) * 10
 }
 
@@ -69,31 +69,31 @@ async fn build_properties(
     if normal {
         properties.insert(
             "approximate_targets_ssh".into(),
-            json!(round_up_to_10(count_targets(&db, TargetKind::Ssh).await?)),
+            json!(round_up_to_10(count_targets(db, TargetKind::Ssh).await?)),
         );
         properties.insert(
             "approximate_targets_http".into(),
-            json!(round_up_to_10(count_targets(&db, TargetKind::Http).await?)),
+            json!(round_up_to_10(count_targets(db, TargetKind::Http).await?)),
         );
         properties.insert(
             "approximate_targets_mysql".into(),
-            json!(round_up_to_10(count_targets(&db, TargetKind::MySql).await?)),
+            json!(round_up_to_10(count_targets(db, TargetKind::MySql).await?)),
         );
         properties.insert(
             "approximate_targets_postgres".into(),
             json!(round_up_to_10(
-                count_targets(&db, TargetKind::Postgres).await?
+                count_targets(db, TargetKind::Postgres).await?
             )),
         );
         properties.insert(
             "approximate_targets_kubernetes".into(),
             json!(round_up_to_10(
-                count_targets(&db, TargetKind::Kubernetes).await?
+                count_targets(db, TargetKind::Kubernetes).await?
             )),
         );
         properties.insert(
             "approximate_users".into(),
-            json!(round_up_to_10(User::Entity::find().count(&*db).await?)),
+            json!(round_up_to_10(User::Entity::find().count(db).await?)),
         );
     }
 
@@ -113,7 +113,7 @@ fn track_payload(instance_id: &str, properties: Map<String, Value>) -> Value {
 
 pub async fn preview(db: &DatabaseConnection, normal: bool) -> Result<(String, Value)> {
     let instance_id = {
-        Parameters::Entity::get(&db).await?.analytics_instance_id
+        Parameters::Entity::get(db).await?.analytics_instance_id
     };
     let properties = build_properties(db, normal).await?;
     Ok((track_url(), track_payload(&instance_id, properties)))
@@ -121,7 +121,7 @@ pub async fn preview(db: &DatabaseConnection, normal: bool) -> Result<(String, V
 
 async fn maybe_report_once(db: &DatabaseConnection) -> Result<()> {
     let (consent, normal, instance_id) = {
-        let params = Parameters::Entity::get(&db).await?;
+        let params = Parameters::Entity::get(db).await?;
         (
             params.analytics_consent,
             params.analytics_normal,

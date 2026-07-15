@@ -41,14 +41,14 @@ impl Api {
 
         let db = &ctx.services().db;
 
-        let Some(ticket) = Ticket::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(ticket) = Ticket::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteTicketResponse::NotFound);
         };
 
-        let user = User::Entity::find_by_id(ticket.user_id).one(&*db).await?;
+        let user = User::Entity::find_by_id(ticket.user_id).one(db).await?;
 
         let target = Target::Entity::find_by_id(ticket.target_id)
-            .one(&*db)
+            .one(db)
             .await?;
 
         if let (Some(user), Some(target)) = (user, target) {
@@ -62,7 +62,7 @@ impl Api {
             .emit();
         }
 
-        ticket.delete(&*db).await?;
+        ticket.delete(db).await?;
         Ok(DeleteTicketResponse::Deleted)
     }
 }

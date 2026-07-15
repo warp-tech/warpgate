@@ -35,7 +35,7 @@ where
         tokio::select! {
             out = &mut wait => return Ok(out),
             event = events_rx.recv(), if !state.reader_done => {
-                state.note_event(event);
+                state.note_event(event.as_ref());
             }
             // Only render when asked to
             () = sleep(SPINNER_INTERVAL), if state.pending_request => {
@@ -94,11 +94,10 @@ where
             bail!("authentication policy requires a factor that cannot be collected over VNC");
         };
 
-        if let AuthPrompt::WebApproval { url, .. } = &prompt {
-            if let Some(url) = url {
-                write_server_cut_text(viewer_wr, &url).await.ok();
+        if let AuthPrompt::WebApproval { url, .. } = &prompt
+            && let Some(url) = url {
+                write_server_cut_text(viewer_wr, url).await.ok();
             }
-        }
 
         loop {
             tokio::select! {
@@ -107,7 +106,7 @@ where
                     continue 'next_prompt // web approval accepted
                 }
                 event = events_rx.recv(), if !render.reader_done => {
-                    if let Some(keysym) = render.note_event(event)
+                    if let Some(keysym) = render.note_event(event.as_ref())
                         && let AuthPrompt::Otp { entered } = &mut prompt
                     {
                         if let Some(action) = keysym_otp_action(keysym)

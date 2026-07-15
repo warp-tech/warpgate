@@ -116,11 +116,11 @@ impl Api {
         require_admin_permission(&ctx, None).await?;
 
         let db = &ctx.services().db;
-        let tickets = Ticket::Entity::find().all(&*db).await?;
+        let tickets = Ticket::Entity::find().all(db).await?;
         let tickets = futures::future::join_all(
             tickets
                 .into_iter()
-                .map(|ticket| TicketModel::from_entity(ticket, &db)),
+                .map(|ticket| TicketModel::from_entity(ticket, db)),
         )
         .await
         .into_iter()
@@ -147,11 +147,11 @@ impl Api {
         let db = &ctx.services().db;
 
         let Some(user) = (if let Some(user_id) = body.user_id {
-            User::Entity::find_by_id(user_id).one(&*db).await?
+            User::Entity::find_by_id(user_id).one(db).await?
         } else if let Some(username) = &body.username {
             User::Entity::find()
                 .filter(User::Entity::username_eq_ci(username))
-                .one(&*db)
+                .one(db)
                 .await?
         } else {
             return Ok(CreateTicketResponse::BadRequest(Json(
@@ -162,11 +162,11 @@ impl Api {
         };
 
         let Some(target) = (if let Some(target_id) = body.target_id {
-            Target::Entity::find_by_id(target_id).one(&*db).await?
+            Target::Entity::find_by_id(target_id).one(db).await?
         } else if let Some(target_name) = &body.target_name {
             Target::Entity::find()
                 .filter(Target::Column::Name.eq(target_name.clone()))
-                .one(&*db)
+                .one(db)
                 .await?
         } else {
             return Ok(CreateTicketResponse::BadRequest(Json(
@@ -189,7 +189,7 @@ impl Api {
             self_service: Set(false),
         };
 
-        let ticket = values.insert(&*db).await.context("Error saving ticket")?;
+        let ticket = values.insert(db).await.context("Error saving ticket")?;
 
         AuditEvent::TicketCreated {
             ticket_id: ticket.id,
@@ -202,7 +202,7 @@ impl Api {
 
         Ok(CreateTicketResponse::Created(Json(TicketAndSecret {
             secret: secret.expose_secret().clone(),
-            ticket: TicketModel::from_entity(ticket, &db).await?,
+            ticket: TicketModel::from_entity(ticket, db).await?,
         })))
     }
 }

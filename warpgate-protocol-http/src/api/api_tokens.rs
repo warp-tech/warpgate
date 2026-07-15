@@ -89,11 +89,11 @@ impl Api {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(user_model) = get_user(auth, db).await? else {
             return Ok(GetApiTokensResponse::Unauthorized);
         };
 
-        let api_tokens = user_model.find_related(ApiToken::Entity).all(&*db).await?;
+        let api_tokens = user_model.find_related(ApiToken::Entity).all(db).await?;
 
         Ok(GetApiTokensResponse::Ok(Json(
             api_tokens.into_iter().map(Into::into).collect(),
@@ -114,7 +114,7 @@ impl Api {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(user_model) = get_user(auth, db).await? else {
             return Ok(CreateApiTokenResponse::Unauthorized);
         };
 
@@ -137,7 +137,7 @@ impl Api {
             label: Set(body.label.clone()),
             secret: Set(secret.expose_secret().clone()),
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
@@ -161,20 +161,20 @@ impl Api {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(user_model) = get_user(auth, db).await? else {
             return Ok(DeleteApiTokenResponse::Unauthorized);
         };
 
         let Some(model) = user_model
             .find_related(ApiToken::Entity)
             .filter(ApiToken::Column::Id.eq(id.0))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteApiTokenResponse::NotFound);
         };
 
-        model.delete(&*db).await?;
+        model.delete(db).await?;
         Ok(DeleteApiTokenResponse::Deleted)
     }
 }

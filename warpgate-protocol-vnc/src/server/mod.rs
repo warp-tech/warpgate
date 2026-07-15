@@ -333,7 +333,7 @@ async fn negotiate_and_authorize(
         &mut viewer_wr,
         &mut events_rx,
         &mut render,
-        wait_for_backend_size(&mut backend.event_rx, &recorder),
+        wait_for_backend_size(&mut backend.event_rx, recorder.as_ref()),
     )
     .await??;
 
@@ -397,18 +397,18 @@ impl RenderState {
 
     /// Update state from a viewer message
     /// Returns keysym of a keypress (the only interesting action)
-    fn note_event(&mut self, event: Option<ClientEvent>) -> Option<u32> {
+    const fn note_event(&mut self, event: Option<&ClientEvent>) -> Option<u32> {
         match event {
-            Some(ClientEvent::PixelFormat(pf)) => self.pixel_format = pf,
+            Some(ClientEvent::PixelFormat(pf)) => self.pixel_format = *pf,
             Some(ClientEvent::Encodings {
                 desktop_size,
                 tight,
             }) => {
-                self.supports_desktop_size = desktop_size;
-                self.viewer_supports_tight = tight;
+                self.supports_desktop_size = *desktop_size;
+                self.viewer_supports_tight = *tight;
             }
             Some(ClientEvent::WantsFrame) => self.pending_request = true,
-            Some(ClientEvent::Key { down: true, keysym }) => return Some(keysym),
+            Some(ClientEvent::Key { down: true, keysym }) => return Some(*keysym),
             // A key release, pointer motion or clipboard update is irrelevant to the
             // hold screen; the recording session loop handles input once it takes over.
             Some(

@@ -171,7 +171,7 @@ impl NDJsonRecordingWriter {
         buf.clear();
         serde_json::to_writer(&mut **buf, &value).map_err(Error::Serialization)?;
         buf.push(b'\n');
-        self.inner.write(&buf).await?;
+        self.inner.write(buf).await?;
         Ok(buf.len())
     }
 }

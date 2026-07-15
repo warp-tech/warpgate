@@ -232,7 +232,7 @@ async fn run(
                 };
                 let frame = frame.context("reading helper output")?;
                 // `freeze()` is zero-copy; the image payload becomes a slice of this buffer.
-                if let Some(event) = HelperEvent::decode(frame.freeze()) {
+                if let Some(event) = HelperEvent::decode(&frame.freeze()) {
                     // Race the (possibly blocking) send against abort so a slow consumer
                     // can't starve abort handling while the helper floods stdout.
                     tokio::select! {

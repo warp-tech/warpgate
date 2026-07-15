@@ -95,7 +95,7 @@ impl ListApi {
             targets = targets.filter(Target::Column::GroupId.eq(group_id));
         }
 
-        let targets = targets.all(&*db).await.map_err(WarpgateError::from)?;
+        let targets = targets.all(db).await.map_err(WarpgateError::from)?;
 
         let targets: Result<Vec<TargetConfig>, _> =
             targets.into_iter().map(TryInto::try_into).collect();
@@ -120,7 +120,7 @@ impl ListApi {
         let db = &ctx.services().db;
         let existing = Target::Entity::find()
             .filter(Target::Column::Name.eq(body.name.clone()))
-            .one(&*db)
+            .one(db)
             .await?;
         if existing.is_some() {
             return Ok(CreateTargetResponse::Conflict(Json(
@@ -154,7 +154,7 @@ impl ListApi {
             ticket_max_uses: Set(body.ticket_max_uses),
         };
 
-        let target = values.insert(&*db).await.map_err(WarpgateError::from)?;
+        let target = values.insert(db).await.map_err(WarpgateError::from)?;
 
         Ok(CreateTargetResponse::Created(Json(
             target.try_into().map_err(WarpgateError::from)?,
@@ -218,7 +218,7 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(target) = Target::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(GetTargetResponse::NotFound);
         };
 
@@ -237,7 +237,7 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(target) = Target::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateTargetResponse::NotFound);
         };
 
@@ -268,7 +268,7 @@ impl DetailApi {
         model.ticket_requests_disabled = Set(body.ticket_requests_disabled.unwrap_or(false));
         model.ticket_require_approval = Set(body.ticket_require_approval.unwrap_or(false));
         model.ticket_max_uses = Set(body.ticket_max_uses);
-        let target = model.update(&*db).await?;
+        let target = model.update(db).await?;
 
 
         services
@@ -298,23 +298,23 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(target) = Target::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteTargetResponse::NotFound);
         };
 
         TargetRoleAssignment::Entity::delete_many()
             .filter(TargetRoleAssignment::Column::TargetId.eq(target.id))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         Ticket::Entity::delete_many()
             .filter(Ticket::Column::TargetId.eq(target.id))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         TicketRequest::Entity::delete_many()
             .filter(TicketRequest::Column::TargetId.eq(target.id))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         if target.kind == TargetKind::Ssh {
@@ -324,12 +324,12 @@ impl DetailApi {
                 KnownHost::Entity::delete_many()
                     .filter(KnownHost::Column::Host.eq(&ssh_options.host))
                     .filter(KnownHost::Column::Port.eq(i32::from(ssh_options.port)))
-                    .exec(&*db)
+                    .exec(db)
                     .await?;
             }
         }
 
-        target.delete(&*db).await?;
+        target.delete(db).await?;
         Ok(DeleteTargetResponse::Deleted)
     }
 
@@ -348,7 +348,7 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(target) = Target::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(target) = Target::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(TargetKnownSshHostKeysResponse::NotFound);
         };
 
@@ -365,7 +365,7 @@ impl DetailApi {
                     .eq(&options.host)
                     .and(KnownHost::Column::Port.eq(options.port)),
             )
-            .all(&*db)
+            .all(db)
             .await?;
 
         Ok(TargetKnownSshHostKeysResponse::Found(Json(known_hosts)))
@@ -417,7 +417,7 @@ impl RolesApi {
 
         let Some((_, roles)) = Target::Entity::find_by_id(*id)
             .find_with_related(Role::Entity)
-            .all(&*db)
+            .all(db)
             .await
             .map(|x| x.into_iter().next())
             .map_err(WarpgateError::from)?
@@ -449,7 +449,7 @@ impl RolesApi {
         if !TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
             .filter(TargetRoleAssignment::Column::RoleId.eq(role_id.0))
-            .all(&*db)
+            .all(db)
             .await
             .map_err(WarpgateError::from)?
             .is_empty()
@@ -463,7 +463,7 @@ impl RolesApi {
             ..Default::default()
         };
 
-        values.insert(&*db).await.map_err(WarpgateError::from)?;
+        values.insert(db).await.map_err(WarpgateError::from)?;
 
         Ok(AddTargetRoleResponse::Created)
     }
@@ -487,14 +487,14 @@ impl RolesApi {
         let Some(model) = TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id.0))
             .filter(TargetRoleAssignment::Column::RoleId.eq(role_id.0))
-            .one(&*db)
+            .one(db)
             .await
             .map_err(WarpgateError::from)?
         else {
             return Ok(DeleteTargetRoleResponse::NotFound);
         };
 
-        model.delete(&*db).await.map_err(WarpgateError::from)?;
+        model.delete(db).await.map_err(WarpgateError::from)?;
 
         Ok(DeleteTargetRoleResponse::Deleted)
     }

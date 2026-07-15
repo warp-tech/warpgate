@@ -68,7 +68,6 @@ impl<A: Acceptor> Acceptor for ProxyProtocolAcceptor<A> {
                 Ok(None) => return Ok((io, local_addr, remote_addr, scheme)),
                 Err(error) => {
                     warn!(%error, "Failed to read PROXY protocol header");
-                    continue;
                 }
             }
         }
@@ -99,12 +98,20 @@ async fn read_header_inner<R: AsyncRead + Unpin>(
         bytes.push(byte[0]);
 
         if bytes.len() == V2_MINIMUM_HEADER_LENGTH && bytes.starts_with(ppp::v2::PROTOCOL_PREFIX) {
-            let payload_length = u16::from_be_bytes([bytes[14], bytes[15]]) as usize;
+            // The v2 payload length is the last two bytes of the fixed 16-byte header.
+            let length_bytes: [u8; 2] = bytes
+                .get(V2_MINIMUM_HEADER_LENGTH - 2..)
+                .and_then(|s| s.try_into().ok())
+                .context("PROXY protocol v2 header missing length field")?;
+            let payload_length = u16::from_be_bytes(length_bytes) as usize;
             let header_length = V2_MINIMUM_HEADER_LENGTH + payload_length;
             let remaining_length = header_length - bytes.len();
             bytes.resize(header_length, 0);
+            let payload = bytes
+                .get_mut(V2_MINIMUM_HEADER_LENGTH..)
+                .context("PROXY protocol v2 payload buffer too short")?;
             stream
-                .read_exact(&mut bytes[V2_MINIMUM_HEADER_LENGTH..])
+                .read_exact(payload)
                 .await
                 .context("reading PROXY protocol v2 payload")?;
             debug_assert_eq!(remaining_length, payload_length);
@@ -127,12 +134,13 @@ async fn read_header_inner<R: AsyncRead + Unpin>(
 fn source_address(header: HeaderResult<'_>) -> anyhow::Result<Option<SocketAddr>> {
     match header {
         HeaderResult::V1(Ok(header)) => source_address_v1(header.addresses),
-        HeaderResult::V2(Ok(header)) => source_address_v2(header),
+        HeaderResult::V2(Ok(header)) => source_address_v2(&header),
         HeaderResult::V1(Err(error)) => Err(error).context("invalid PROXY protocol v1 header"),
         HeaderResult::V2(Err(error)) => Err(error).context("invalid PROXY protocol v2 header"),
     }
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn source_address_v1(addresses: ppp::v1::Addresses) -> anyhow::Result<Option<SocketAddr>> {
     match addresses {
         ppp::v1::Addresses::Unknown => Ok(None),
@@ -147,7 +155,7 @@ fn source_address_v1(addresses: ppp::v1::Addresses) -> anyhow::Result<Option<Soc
     }
 }
 
-fn source_address_v2(header: ppp::v2::Header<'_>) -> anyhow::Result<Option<SocketAddr>> {
+fn source_address_v2(header: &ppp::v2::Header<'_>) -> anyhow::Result<Option<SocketAddr>> {
     if header.command == ppp::v2::Command::Local {
         return Ok(None);
     }

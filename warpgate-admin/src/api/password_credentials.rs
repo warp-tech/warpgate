@@ -68,7 +68,7 @@ impl ListApi {
 
         let objects = PasswordCredential::Entity::find()
             .filter(PasswordCredential::Column::UserId.eq(*user_id))
-            .all(&*db)
+            .all(db)
             .await?;
 
         Ok(GetPasswordCredentialsResponse::Ok(Json(
@@ -108,11 +108,11 @@ impl ListApi {
                 &body.password,
             ))
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(CreatePasswordCredentialResponse::NotFound);
         };
 
@@ -162,15 +162,15 @@ impl DetailApi {
 
         let Some(model) = PasswordCredential::Entity::find_by_id(id.0)
             .filter(PasswordCredential::Column::UserId.eq(*user_id))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        model.delete(&*db).await?;
+        model.delete(db).await?;
 
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 

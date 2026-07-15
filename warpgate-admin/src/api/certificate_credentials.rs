@@ -104,7 +104,7 @@ impl ListApi {
 
         let objects = CertificateCredential::Entity::find()
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
-            .all(&*db)
+            .all(db)
             .await?;
 
         Ok(GetCertificateCredentialsResponse::Ok(Json(
@@ -130,7 +130,7 @@ impl ListApi {
         let params = ctx.parameters().await?;
         let ca =
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(IssueCertificateCredentialResponse::NotFound);
         };
 
@@ -148,7 +148,7 @@ impl ListApi {
             label: Set(body.label.clone()),
             certificate_pem: Set(client_cert_pem.clone()),
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
@@ -202,7 +202,7 @@ impl DetailApi {
         let db = &ctx.services().db;
         let Some(cred) = CertificateCredential::Entity::find_by_id(id.0)
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(UpdateCertificateCredentialResponse::NotFound);
@@ -211,7 +211,7 @@ impl DetailApi {
         let mut am = cred.into_active_model();
 
         am.label = Set(body.label.clone());
-        let model = am.update(&*db).await?;
+        let model = am.update(db).await?;
 
         Ok(UpdateCertificateCredentialResponse::Updated(Json(
             model.into(),
@@ -236,7 +236,7 @@ impl DetailApi {
 
         let Some(model) = CertificateCredential::Entity::find_by_id(id.0)
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(RevokeCertificateCredentialResponse::NotFound);
@@ -249,13 +249,13 @@ impl DetailApi {
             date_added: Set(OffsetDateTime::now_utc()),
             serial_number_base64: Set(serialize_certificate_serial(&cert)),
         }
-        .insert(&*db)
+        .insert(db)
         .await?;
 
         let credential_name = model.label.clone();
-        model.delete(&*db).await?;
+        model.delete(db).await?;
 
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(RevokeCertificateCredentialResponse::NotFound);
         };
 

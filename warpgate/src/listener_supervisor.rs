@@ -354,7 +354,7 @@ async fn wait_task(task: &mut Option<JoinHandle<Result<()>>>) -> Result<Result<(
 /// returning the loaded material in the same order as `pairs`. On failure the
 /// returned [`TlsState`] classifies whether the material could not be loaded or
 /// loaded but did not match.
-pub(crate) async fn validate_tls(
+pub async fn validate_tls(
     pairs: &[TlsPathPair],
 ) -> Result<Vec<TlsCertificateAndPrivateKey>, WarpgateError> {
     let mut loaded = Vec::with_capacity(pairs.len());

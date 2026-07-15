@@ -23,7 +23,7 @@ pub async fn command(
 
     let db_user = if let Some(x) = User::Entity::find()
         .filter(User::Entity::username_eq_ci(username))
-        .all(&*db)
+        .all(db)
         .await?
         .first()
     {
@@ -39,38 +39,38 @@ pub async fn command(
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
         };
-        values.insert(&*db).await.map_err(WarpgateError::from)?
+        values.insert(db).await.map_err(WarpgateError::from)?
     };
 
-    Role::Entity::grant_default_roles(&db, db_user.id).await?;
+    Role::Entity::grant_default_roles(db, db_user.id).await?;
 
     PasswordCredential::ActiveModel {
         user_id: Set(db_user.id),
         id: Set(Uuid::new_v4()),
         ..UserPasswordCredential::from_password(password).into()
     }
-    .insert(&*db)
+    .insert(db)
     .await?;
 
     if let Some(role_name) = role {
         // try regular role first
         if let Some(db_role) = Role::Entity::find()
             .filter(Role::Column::Name.eq(role_name.clone()))
-            .one(&*db)
+            .one(db)
             .await?
         {
-            UserRoleAssignment::Entity::idempotent_grant(&db, db_user.id, db_role.id, None).await?;
+            UserRoleAssignment::Entity::idempotent_grant(db, db_user.id, db_role.id, None).await?;
         }
 
         // admin role
         if let Some(db_admin) = AdminRole::Entity::find()
             .filter(AdminRole::Column::Name.eq(role_name.clone()))
-            .one(&*db)
+            .one(db)
             .await?
             && UserAdminRoleAssignment::Entity::find()
                 .filter(UserAdminRoleAssignment::Column::UserId.eq(db_user.id))
                 .filter(UserAdminRoleAssignment::Column::AdminRoleId.eq(db_admin.id))
-                .all(&*db)
+                .all(db)
                 .await?
                 .is_empty()
         {
@@ -79,7 +79,7 @@ pub async fn command(
                 admin_role_id: Set(db_admin.id),
                 ..Default::default()
             };
-            values.insert(&*db).await.map_err(WarpgateError::from)?;
+            values.insert(db).await.map_err(WarpgateError::from)?;
         }
     }
 

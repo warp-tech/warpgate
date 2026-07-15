@@ -20,7 +20,7 @@ use super::{ProxySession, RenderState};
 
 /// Record an event, logging (but not failing on) recorder write errors. No-op when
 /// recording is disabled (`None`).
-async fn record_event(recorder: &Option<DesktopRecorder>, event: &DesktopEvent) {
+async fn record_event(recorder: Option<&DesktopRecorder>, event: &DesktopEvent) {
     if let Some(recorder) = recorder
         && let Err(error) = recorder.write_event(event).await
     {
@@ -30,7 +30,7 @@ async fn record_event(recorder: &Option<DesktopRecorder>, event: &DesktopEvent) 
 
 /// Record a viewer input, logging (but not failing on) recorder write errors. No-op when
 /// recording is disabled (`None`).
-async fn record_input(recorder: &Option<DesktopRecorder>, input: &DesktopInput) {
+async fn record_input(recorder: Option<&DesktopRecorder>, input: &DesktopInput) {
     if let Some(recorder) = recorder
         && let Err(error) = recorder.write_input(input).await
     {
@@ -43,7 +43,7 @@ async fn record_input(recorder: &Option<DesktopRecorder>, input: &DesktopInput) 
 /// before any `RawImage`, so nothing visible is consumed here.
 pub(super) async fn wait_for_backend_size(
     event_rx: &mut mpsc::Receiver<DesktopEvent>,
-    recorder: &Option<DesktopRecorder>,
+    recorder: Option<&DesktopRecorder>,
 ) -> Result<(u16, u16)> {
     while let Some(event) = event_rx.recv().await {
         record_event(recorder, &event).await;
@@ -154,21 +154,21 @@ pub(super) async fn run_proxy_session(session: ProxySession) -> Result<()> {
                     }
                     Some(ClientEvent::Key { down, keysym }) => {
                         let input = DesktopInput::Key { keysym, down };
-                        record_input(&recorder, &input).await;
+                        record_input(recorder.as_ref(), &input).await;
                         if input_tx.send(input).await.is_err() {
                             break Ok(());
                         }
                     }
                     Some(ClientEvent::Pointer { x, y, buttons }) => {
                         let input = DesktopInput::Pointer { x, y, buttons };
-                        record_input(&recorder, &input).await;
+                        record_input(recorder.as_ref(), &input).await;
                         if input_tx.send(input).await.is_err() {
                             break Ok(());
                         }
                     }
                     Some(ClientEvent::Clipboard(text)) => {
                         let input = DesktopInput::Clipboard(text);
-                        record_input(&recorder, &input).await;
+                        record_input(recorder.as_ref(), &input).await;
                         let _ = input_tx.send(input).await;
                     }
                     None => break Ok(()), // viewer disconnected
@@ -180,7 +180,7 @@ pub(super) async fn run_proxy_session(session: ProxySession) -> Result<()> {
             event = event_rx.recv(), if queue.len() < QUEUE_CAP => {
                 match event {
                     Some(event) => {
-                        record_event(&recorder, &event).await;
+                        record_event(recorder.as_ref(), &event).await;
                         match event {
                             DesktopEvent::RawImage { .. }
                             | DesktopEvent::JpegImage { .. }

@@ -96,7 +96,7 @@ impl Api {
             ));
         }
 
-        let logs = q.all(&*db).await?;
+        let logs = q.all(db).await?;
         Ok(GetLogsResponse::Ok(Json(logs)))
     }
 }

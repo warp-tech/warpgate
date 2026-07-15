@@ -89,7 +89,7 @@ pub async fn authorize_ticket(
     let ticket = {
         e::Ticket::Entity::find()
             .filter(e::Ticket::Column::Secret.eq(&secret.expose_secret()[..]))
-            .one(&*db)
+            .one(db)
             .await?
     };
     if let Some(ticket) = ticket {
@@ -106,14 +106,14 @@ pub async fn authorize_ticket(
         }
 
         let Some(ticket_user) = e::User::Entity::find_by_id(ticket.user_id)
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Err(WarpgateError::UserNotFound(ticket.user_id.to_string()));
         };
 
         let Some(ticket_target) = e::Target::Entity::find_by_id(ticket.target_id)
-            .one(&*db)
+            .one(db)
             .await?
         else {
             warn!("Ticket target not found: {}", &ticket.target_id);
@@ -135,7 +135,7 @@ pub async fn consume_ticket(
     db: &DatabaseConnection,
     ticket_id: &Uuid,
 ) -> Result<(), WarpgateError> {
-    let ticket = e::Ticket::Entity::find_by_id(*ticket_id).one(&*db).await?;
+    let ticket = e::Ticket::Entity::find_by_id(*ticket_id).one(db).await?;
     let Some(ticket) = ticket else {
         return Err(WarpgateError::InvalidTicket(*ticket_id));
     };

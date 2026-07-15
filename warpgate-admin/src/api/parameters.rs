@@ -344,7 +344,7 @@ impl Api {
         parameters.recordings_enable = body.recordings_enable.map_or(NotSet, Set);
         parameters.recordings_storage = storage.map_or(NotSet, Set);
 
-        Parameters::Entity::update(parameters).exec(&*db).await?;
+        Parameters::Entity::update(parameters).exec(db).await?;
 
         services
             .rate_limiter_registry

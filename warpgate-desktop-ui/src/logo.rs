@@ -25,9 +25,7 @@ fn decode_logo() -> (Vec<u8>, u32) {
     #[allow(clippy::expect_used)]
     let mut buf = vec![0u8; reader.output_buffer_size().expect("out of memory")];
     let info = reader.next_frame(&mut buf).expect("logo unreadable");
-    if info.bit_depth != png::BitDepth::Eight {
-        panic!("logo has unexpected bit depth: {:?}", info.bit_depth);
-    }
+    assert!(info.bit_depth == png::BitDepth::Eight, "logo has unexpected bit depth: {:?}", info.bit_depth);
     buf.truncate(info.buffer_size());
 
     let rgb = match info.color_type {
@@ -37,7 +35,7 @@ fn decode_logo() -> (Vec<u8>, u32) {
             .chunks_exact(4)
             .flat_map(|px| px.iter().copied().take(3))
             .collect(),
-        t => panic!("logo has unexpected color type: {:?}", t),
+        t => panic!("logo has unexpected color type: {t:?}"),
     };
 
     (rgb, info.width)

@@ -75,7 +75,7 @@ pub async fn ws_handler(
 
             tokio::select! {
                 // Woken by a new frame; the loop re-drains at the top.
-                _ = notified.as_mut() => {}
+                () = notified.as_mut() => {}
 
                 maybe_msg = stream.next() => {
                     match maybe_msg {

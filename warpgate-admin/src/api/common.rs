@@ -31,7 +31,7 @@ pub async fn has_admin_permission(
 
     let Some(user_model) = User::Entity::find()
         .filter(User::Entity::username_eq_ci(username))
-        .one(&*db)
+        .one(db)
         .await?
     else {
         return Ok(false);
@@ -77,7 +77,7 @@ pub async fn has_admin_permission(
         });
     }
 
-    let count = query.count(&*db).await?;
+    let count = query.count(db).await?;
     Ok(count > 0)
 }
 

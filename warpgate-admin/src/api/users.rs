@@ -71,7 +71,7 @@ impl ListApi {
             users = users.filter(case_insensitive_search(search, [User::Column::Username]));
         }
 
-        let users = users.all(&*db).await.map_err(WarpgateError::from)?;
+        let users = users.all(db).await.map_err(WarpgateError::from)?;
 
         let users: Vec<UserConfig> = users
             .into_iter()
@@ -110,8 +110,8 @@ impl ListApi {
             allowed_ip_ranges: Set(serde_json::Value::Null),
         };
 
-        let user = values.insert(&*db).await.map_err(WarpgateError::from)?;
-        let default_roles = Role::Entity::grant_default_roles(&db, user.id).await?;
+        let user = values.insert(db).await.map_err(WarpgateError::from)?;
+        let default_roles = Role::Entity::grant_default_roles(db, user.id).await?;
 
         AuditEvent::UserCreated {
             user_id: user.id,
@@ -204,7 +204,7 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(GetUserResponse::NotFound);
         };
 
@@ -223,7 +223,7 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateUserResponse::NotFound);
         };
 
@@ -240,7 +240,7 @@ impl DetailApi {
                 .map_err(WarpgateError::from)?,
             None => serde_json::Value::Null,
         });
-        let user = model.update(&*db).await?;
+        let user = model.update(db).await?;
 
 
         ctx.services()
@@ -264,18 +264,18 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteUserResponse::NotFound);
         };
 
         UserRoleAssignment::Entity::delete_many()
             .filter(UserRoleAssignment::Column::UserId.eq(user.id))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         UserAdminRoleAssignment::Entity::delete_many()
             .filter(UserAdminRoleAssignment::Column::UserId.eq(user.id))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         AuditEvent::UserDeleted {
@@ -285,7 +285,7 @@ impl DetailApi {
         }
         .emit();
 
-        user.delete(&*db).await?;
+        user.delete(db).await?;
 
         Ok(DeleteUserResponse::Deleted)
     }
@@ -305,7 +305,7 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UnlinkUserFromLdapResponse::NotFound);
         };
 
@@ -318,7 +318,7 @@ impl DetailApi {
         let mut model: User::ActiveModel = user.into();
         model.ldap_server_id = Set(None);
         model.ldap_object_uuid = Set(None);
-        let user = model.update(&*db).await?;
+        let user = model.update(db).await?;
 
         Ok(UnlinkUserFromLdapResponse::Ok(Json(user.try_into()?)))
     }
@@ -340,7 +340,7 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        let Some(user) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(AutoLinkUserToLdapResponse::NotFound);
         };
 
@@ -352,7 +352,7 @@ impl DetailApi {
 
         let ldap_servers: Vec<LdapServer::Model> = LdapServer::Entity::find()
             .filter(LdapServer::Column::Enabled.eq(true))
-            .all(&*db)
+            .all(db)
             .await?;
 
         if ldap_servers.is_empty() {
@@ -390,7 +390,7 @@ impl DetailApi {
         let mut model: User::ActiveModel = user.into();
         model.ldap_server_id = Set(ldap_server_id);
         model.ldap_object_uuid = Set(ldap_object_uuid);
-        let user = model.update(&*db).await?;
+        let user = model.update(db).await?;
 
         Ok(AutoLinkUserToLdapResponse::Ok(Json(user.try_into()?)))
     }
@@ -534,19 +534,19 @@ impl RolesApi {
 
         let db = &ctx.services().db;
 
-        let Some(_user) = User::Entity::find_by_id(*id).one(&*db).await? else {
+        let Some(_user) = User::Entity::find_by_id(*id).one(db).await? else {
             return Ok(GetUserRolesResponse::NotFound);
         };
 
         let assignments = UserRoleAssignment::Entity::find()
             .filter(UserRoleAssignment::Column::UserId.eq(*id))
-            .all(&*db)
+            .all(db)
             .await?;
 
         let mut results = Vec::new();
         for assignment in assignments {
             let Some(role) = Role::Entity::find_by_id(assignment.role_id)
-                .one(&*db)
+                .one(db)
                 .await?
             else {
                 continue;
@@ -576,13 +576,13 @@ impl RolesApi {
         let Some(assignment) = UserRoleAssignment::Entity::find()
             .filter(UserRoleAssignment::Column::UserId.eq(id.0))
             .filter(UserRoleAssignment::Column::RoleId.eq(role_id.0))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(GetUserRoleResponse::NotFound);
         };
 
-        let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
+        let Some(role) = Role::Entity::find_by_id(role_id.0).one(db).await? else {
             return Ok(GetUserRoleResponse::NotFound);
         };
 
@@ -611,16 +611,16 @@ impl RolesApi {
         let db = &ctx.services().db;
         let expires_at = body.0.and_then(|b| b.expires_at);
 
-        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(AddUserRoleResponse::NotFound);
         };
 
-        let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
+        let Some(role) = Role::Entity::find_by_id(role_id.0).one(db).await? else {
             return Ok(AddUserRoleResponse::AlreadyExists);
         };
 
         let assignment =
-            UserRoleAssignment::Entity::idempotent_grant(&db, id.0, role_id.0, expires_at).await?;
+            UserRoleAssignment::Entity::idempotent_grant(db, id.0, role_id.0, expires_at).await?;
 
         AuditEvent::AccessRoleGranted {
             grantee_id: grantee.id,
@@ -654,18 +654,18 @@ impl RolesApi {
 
         let db = &ctx.services().db;
 
-        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);
         };
 
-        let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
+        let Some(role) = Role::Entity::find_by_id(role_id.0).one(db).await? else {
             return Ok(DeleteUserRoleResponse::NotFound);
         };
 
         let Some(model) = UserRoleAssignment::Entity::find()
             .filter(UserRoleAssignment::Column::UserId.eq(id.0))
             .filter(UserRoleAssignment::Column::RoleId.eq(role_id.0))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteUserRoleResponse::NotFound);
@@ -675,7 +675,7 @@ impl RolesApi {
         let now = OffsetDateTime::now_utc();
         let mut model: UserRoleAssignment::ActiveModel = model.into();
         model.revoked_at = Set(Some(now));
-        model.update(&*db).await?;
+        model.update(db).await?;
 
         AuditEvent::AccessRoleRevoked {
             grantee_id: grantee.id,
@@ -706,14 +706,14 @@ impl RolesApi {
         require_admin_permission(&ctx, None).await?;
         let db = &ctx.services().db;
 
-        let Some(role) = Role::Entity::find_by_id(role_id.0).one(&*db).await? else {
+        let Some(role) = Role::Entity::find_by_id(role_id.0).one(db).await? else {
             return Ok(UpdateUserRoleResponse::NotFound);
         };
 
         let Some(assignment) = UserRoleAssignment::Entity::find()
             .filter(UserRoleAssignment::Column::UserId.eq(id.0))
             .filter(UserRoleAssignment::Column::RoleId.eq(role_id.0))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(UpdateUserRoleResponse::NotFound);
@@ -723,7 +723,7 @@ impl RolesApi {
         model.expires_at = Set(body.expires_at);
         // If renewing an expired role, clear revoked_at
         model.revoked_at = Set(None);
-        let updated = model.update(&*db).await?;
+        let updated = model.update(db).await?;
 
         Ok(UpdateUserRoleResponse::Ok(Json(build_assignment_response(
             &updated, &role,
@@ -747,7 +747,7 @@ impl RolesApi {
 
         let Some((_, roles)) = User::Entity::find_by_id(*id)
             .find_with_related(AdminRole::Entity)
-            .all(&*db)
+            .all(db)
             .await
             .map(|x| x.into_iter().next())
             .map_err(WarpgateError::from)?
@@ -776,11 +776,11 @@ impl RolesApi {
 
         let db = &ctx.services().db;
 
-        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(AddUserAdminRoleResponse::NotFound);
         };
 
-        let Some(role) = AdminRole::Entity::find_by_id(role_id.0).one(&*db).await? else {
+        let Some(role) = AdminRole::Entity::find_by_id(role_id.0).one(db).await? else {
             return Ok(AddUserAdminRoleResponse::NotFound);
         };
 
@@ -789,7 +789,7 @@ impl RolesApi {
             .filter(
                 warpgate_db_entities::UserAdminRoleAssignment::Column::AdminRoleId.eq(role_id.0),
             )
-            .all(&*db)
+            .all(db)
             .await
             .map_err(WarpgateError::from)?
             .is_empty()
@@ -803,7 +803,7 @@ impl RolesApi {
             ..Default::default()
         };
 
-        values.insert(&*db).await.map_err(WarpgateError::from)?;
+        values.insert(db).await.map_err(WarpgateError::from)?;
 
         AuditEvent::AdminRoleGranted {
             grantee_id: grantee.id,
@@ -834,11 +834,11 @@ impl RolesApi {
 
         let db = &ctx.services().db;
 
-        let Some(grantee) = User::Entity::find_by_id(id.0).one(&*db).await? else {
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteUserAdminRoleResponse::NotFound);
         };
 
-        let Some(role) = AdminRole::Entity::find_by_id(role_id.0).one(&*db).await? else {
+        let Some(role) = AdminRole::Entity::find_by_id(role_id.0).one(db).await? else {
             return Ok(DeleteUserAdminRoleResponse::NotFound);
         };
 
@@ -847,14 +847,14 @@ impl RolesApi {
             .filter(
                 warpgate_db_entities::UserAdminRoleAssignment::Column::AdminRoleId.eq(role_id.0),
             )
-            .one(&*db)
+            .one(db)
             .await
             .map_err(WarpgateError::from)?
         else {
             return Ok(DeleteUserAdminRoleResponse::NotFound);
         };
 
-        model.delete(&*db).await.map_err(WarpgateError::from)?;
+        model.delete(db).await.map_err(WarpgateError::from)?;
 
         AuditEvent::AdminRoleRevoked {
             grantee_id: grantee.id,

@@ -63,7 +63,7 @@ impl Api {
         let services = ctx.services();
         let groups: Vec<TargetGroup::Model> = {
             let db = &services.db;
-            TargetGroup::Entity::find().all(&*db).await
+            TargetGroup::Entity::find().all(db).await
         }?;
 
         let group_map: HashMap<uuid::Uuid, &TargetGroup::Model> =

@@ -33,7 +33,7 @@ impl KnownHosts {
             .filter(KnownHost::Column::Host.eq(host))
             .filter(KnownHost::Column::Port.eq(port))
             .filter(KnownHost::Column::KeyType.eq(key.algorithm().as_str()))
-            .all(&*db)
+            .all(db)
             .await?;
 
         let key_base64 = key.public_key_base64();
@@ -66,7 +66,7 @@ impl KnownHosts {
         };
 
         let db = &self.db;
-        values.insert(&*db).await?;
+        values.insert(db).await?;
 
         Ok(())
     }

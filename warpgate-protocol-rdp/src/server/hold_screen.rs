@@ -141,7 +141,7 @@ struct HoldPainter {
 }
 
 impl HoldPainter {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self { tick: 0 }
     }
 
@@ -181,8 +181,7 @@ impl HoldPainter {
 fn scancode_otp_action(code: u8) -> Option<OtpAction> {
     Some(match code {
         0x02..=0x0a => OtpAction::Digit(char::from(b'1' + (code - 0x02))), // top row 1..9
-        0x0b => OtpAction::Digit('0'),
-        0x52 => OtpAction::Digit('0'), // keypad 0
+        0x0b | 0x52 => OtpAction::Digit('0'),                              // keypad 0
         0x4f => OtpAction::Digit('1'),
         0x50 => OtpAction::Digit('2'),
         0x51 => OtpAction::Digit('3'),

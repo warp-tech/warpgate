@@ -17,14 +17,13 @@ pub async fn command(params: &GlobalParams, steps: i32) -> Result<()> {
         recordings_path: recordings.path,
     });
 
+    let steps_abs = steps.unsigned_abs();
     if steps < 0 {
-        let steps = steps.unsigned_abs();
-        info!("Reverting {steps} migration(s)");
-        migrate_down(&connection, steps).await?;
+        info!("Reverting {steps_abs} migration(s)");
+        migrate_down(&connection, steps_abs).await?;
     } else {
-        let steps = steps.unsigned_abs();
-        info!("Applying {steps} migration(s)");
-        migrate_up(&connection, steps).await?;
+        info!("Applying {steps_abs} migration(s)");
+        migrate_up(&connection, steps_abs).await?;
     }
 
     Ok(())

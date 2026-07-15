@@ -537,7 +537,7 @@ async fn proxy_ws_inner(
                     result = &mut client_to_server => {
                         (false, Some(result))
                     }
-                    _ = async {
+                    () = async {
                         match close_rx.as_mut() {
                             Some(close_rx) => {
                                 let _ = close_rx.recv().await;

@@ -55,7 +55,7 @@ pub async fn create_ticket_request(
 ) -> Result<TicketRequestResult, CreateTicketRequestError> {
     let db_conn = db;
 
-    let policy = Parameters::Entity::get(&db_conn).await?;
+    let policy = Parameters::Entity::get(db_conn).await?;
 
     if !policy.ticket_self_service_enabled {
         return Err(CreateTicketRequestError::InvalidInput(
@@ -65,7 +65,7 @@ pub async fn create_ticket_request(
 
     let target = Target::Entity::find()
         .filter(Target::Column::Name.eq(&params.target_name))
-        .one(&*db_conn)
+        .one(db_conn)
         .await?;
 
     let Some(target) = target else {
@@ -142,7 +142,7 @@ pub async fn create_ticket_request(
         .filter(TicketRequest::Column::UserId.eq(params.user_id))
         .filter(TicketRequest::Column::TargetId.eq(target.id))
         .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Pending))
-        .count(&*db_conn)
+        .count(db_conn)
         .await?;
 
     if existing_pending > 0 {
@@ -209,7 +209,7 @@ pub async fn create_ticket_request(
             resolved_at: Set(None),
             deny_reason: Set(None),
         };
-        let request_model = request.insert(&*db_conn).await?;
+        let request_model = request.insert(db_conn).await?;
 
         info!(
             "Created pending ticket request {} for user {} to target {}",
@@ -260,14 +260,14 @@ pub async fn approve_ticket_request(
 
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
         .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Pending))
-        .one(&*db_conn)
+        .one(db_conn)
         .await?
     else {
         return Ok(None);
     };
 
     let user_exists = warpgate_db_entities::User::Entity::find_by_id(request.user_id)
-        .count(&*db_conn)
+        .count(db_conn)
         .await?
         > 0;
 
@@ -276,7 +276,7 @@ pub async fn approve_ticket_request(
     }
 
     let target_exists = Target::Entity::find_by_id(request.target_id)
-        .count(&*db_conn)
+        .count(db_conn)
         .await?
         > 0;
 
@@ -288,7 +288,7 @@ pub async fn approve_ticket_request(
     active.status = Set(TicketRequestStatus::Approved);
     active.resolved_by_user_id = Set(admin_user_id);
     active.resolved_at = Set(Some(OffsetDateTime::now_utc()));
-    let updated = active.update(&*db_conn).await?;
+    let updated = active.update(db_conn).await?;
 
     info!(
         "Admin {:?} approved ticket request {}",
@@ -328,7 +328,7 @@ pub async fn activate_ticket_request(
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
         .filter(TicketRequest::Column::UserId.eq(user_id))
         .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Approved))
-        .one(&*db_conn)
+        .one(db_conn)
         .await?
     else {
         return Err(ActivateTicketRequestError::NotFound);
@@ -341,14 +341,14 @@ pub async fn activate_ticket_request(
     }
 
     let target = Target::Entity::find_by_id(request.target_id)
-        .one(&*db_conn)
+        .one(db_conn)
         .await?;
 
     let Some(target) = target else {
         return Err(ActivateTicketRequestError::TargetGone);
     };
 
-    let policy = Parameters::Entity::get(&db_conn).await?;
+    let policy = Parameters::Entity::get(db_conn).await?;
     // Re-cap duration against current policy at activation time, in case
     // max duration was lowered between approval and activation
     let max_duration = target
@@ -398,7 +398,7 @@ pub async fn deny_ticket_request(
 
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
         .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Pending))
-        .one(&*db_conn)
+        .one(db_conn)
         .await?
     else {
         return Ok(None);
@@ -417,7 +417,7 @@ pub async fn deny_ticket_request(
     active.resolved_by_user_id = Set(admin_user_id);
     active.resolved_at = Set(Some(OffsetDateTime::now_utc()));
     active.deny_reason = Set(reason);
-    let updated = active.update(&*db_conn).await?;
+    let updated = active.update(db_conn).await?;
 
     info!(
         "Admin {:?} denied ticket request {}",
@@ -438,5 +438,5 @@ pub async fn list_ticket_requests(
         query = query.filter(TicketRequest::Column::Status.eq(status));
     }
 
-    Ok(query.all(&*db_conn).await?)
+    Ok(query.all(db_conn).await?)
 }

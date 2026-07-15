@@ -126,7 +126,7 @@ impl ListApi {
 
         let objects = PublicKeyCredential::Entity::find()
             .filter(PublicKeyCredential::Column::UserId.eq(*user_id))
-            .all(&*db)
+            .all(db)
             .await?;
 
         Ok(GetPublicKeyCredentialsResponse::Ok(Json(
@@ -151,11 +151,11 @@ impl ListApi {
         let db = &ctx.services().db;
 
         // Ensure user exists and is not LDAP-linked
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(CreatePublicKeyCredentialResponse::NotFound);
         };
 
-        if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
+        if let Err(msg) = verify_user_not_ldap_linked(db, *user_id).await {
             return Ok(CreatePublicKeyCredentialResponse::Forbidden(Json(msg)));
         }
 
@@ -167,7 +167,7 @@ impl ListApi {
             label: Set(body.label.clone()),
             ..PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential::try_from(&*body)?)
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
@@ -220,11 +220,11 @@ impl DetailApi {
         let db = &ctx.services().db;
 
         // Ensure user exists and is not LDAP-linked
-        let Some(_) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(_) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(UpdatePublicKeyCredentialResponse::NotFound);
         };
 
-        if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
+        if let Err(msg) = verify_user_not_ldap_linked(db, *user_id).await {
             return Ok(UpdatePublicKeyCredentialResponse::Forbidden(Json(msg)));
         }
 
@@ -235,7 +235,7 @@ impl DetailApi {
             label: Set(body.label.clone()),
             ..<_>::from(UserPublicKeyCredential::try_from(&*body)?)
         }
-        .update(&*db)
+        .update(db)
         .await;
 
         match model {
@@ -263,22 +263,22 @@ impl DetailApi {
 
         let db = &ctx.services().db;
 
-        if let Err(msg) = verify_user_not_ldap_linked(&db, *user_id).await {
+        if let Err(msg) = verify_user_not_ldap_linked(db, *user_id).await {
             return Ok(DeleteCredentialResponse::Forbidden(Json(msg)));
         }
 
         let Some(model) = PublicKeyCredential::Entity::find_by_id(id.0)
             .filter(PublicKeyCredential::Column::UserId.eq(*user_id))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
         let credential_name = model.label.clone();
-        model.delete(&*db).await?;
+        model.delete(db).await?;
 
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 

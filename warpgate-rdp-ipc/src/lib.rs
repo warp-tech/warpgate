@@ -48,7 +48,7 @@ impl ImageHeader {
     pub const LEN: usize = 1 + 4 * 2;
 
     /// Append the kind byte and rectangle to `out`.
-    pub fn write_into(&self, out: &mut Vec<u8>) {
+    pub fn write_into(self, out: &mut Vec<u8>) {
         out.push(KIND_IMAGE);
         out.extend_from_slice(&self.x.to_le_bytes());
         out.extend_from_slice(&self.y.to_le_bytes());
@@ -218,7 +218,7 @@ pub mod client {
     impl Event {
         pub fn encode_into(&self, out: &mut Vec<u8>) {
             match self {
-                Event::RawImage {
+                Self::RawImage {
                     x,
                     y,
                     width,
@@ -229,16 +229,16 @@ pub mod client {
             }
         }
         /// Takes the owned frame so the image payload is a zero-copy slice of it, not a copy.
-        pub fn decode(frame: bytes::Bytes) -> Option<Self> {
-            match super::decode_frame(&frame) {
-                super::WireFrame::Image(h, _) => Some(Event::RawImage {
+        pub fn decode(frame: &bytes::Bytes) -> Option<Self> {
+            match super::decode_frame(frame) {
+                super::WireFrame::Image(h, _) => Some(Self::RawImage {
                     x: h.x,
                     y: h.y,
                     width: h.width,
                     height: h.height,
                     data: frame.slice(super::ImageHeader::LEN..),
                 }),
-                super::WireFrame::Control(_) => super::decode_json(&frame),
+                super::WireFrame::Control(_) => super::decode_json(frame),
             }
         }
     }
@@ -288,7 +288,7 @@ pub mod server {
     impl Input {
         pub fn encode_into(&self, out: &mut Vec<u8>) {
             match self {
-                Input::Frame {
+                Self::Frame {
                     x,
                     y,
                     width,
@@ -299,16 +299,16 @@ pub mod server {
             }
         }
         /// Takes the owned frame so the image payload is a zero-copy slice of it, not a copy.
-        pub fn decode(frame: bytes::Bytes) -> Option<Self> {
-            match super::decode_frame(&frame) {
-                super::WireFrame::Image(h, _) => Some(Input::Frame {
+        pub fn decode(frame: &bytes::Bytes) -> Option<Self> {
+            match super::decode_frame(frame) {
+                super::WireFrame::Image(h, _) => Some(Self::Frame {
                     x: h.x,
                     y: h.y,
                     width: h.width,
                     height: h.height,
                     data: frame.slice(super::ImageHeader::LEN..),
                 }),
-                super::WireFrame::Control(_) => super::decode_json(&frame),
+                super::WireFrame::Control(_) => super::decode_json(frame),
             }
         }
     }
@@ -360,10 +360,10 @@ pub mod server {
     }
 }
 
-fn default_width() -> u16 {
+const fn default_width() -> u16 {
     1280
 }
-fn default_height() -> u16 {
+const fn default_height() -> u16 {
     800
 }
 
@@ -390,7 +390,7 @@ mod tests {
             width,
             height,
             data,
-        }) = server::Input::decode(bytes::Bytes::from(buf))
+        }) = server::Input::decode(&bytes::Bytes::from(buf))
         else {
             panic!("wrong variant");
         };
@@ -408,7 +408,7 @@ mod tests {
         .encode_into(&mut buf);
         assert_eq!(frame_kind(&buf), KIND_JSON);
         assert!(matches!(
-            server::Input::decode(bytes::Bytes::from(buf)),
+            server::Input::decode(&bytes::Bytes::from(buf)),
             Some(server::Input::Resize {
                 width: 640,
                 height: 480
