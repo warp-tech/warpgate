@@ -192,8 +192,8 @@ fn take_dirty_region(st: &mut RecorderState, out: &mut Vec<u8>) -> Option<Rect> 
 }
 
 pub struct DesktopRecorder {
-    data_writer: NDJsonRecordingWriter,
-    index_writer: NDJsonRecordingWriter,
+    data_writer: Arc<NDJsonRecordingWriter>,
+    index_writer: Arc<NDJsonRecordingWriter>,
     started_at: Instant,
     state: Arc<Mutex<RecorderState>>,
 }
@@ -532,8 +532,8 @@ impl Recorder for DesktopRecorder {
 
     async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
         Ok(Self {
-            data_writer: opener.open_ndjson_data().await?,
-            index_writer: opener.open_index().await?,
+            data_writer: Arc::new(opener.open_ndjson_data().await?),
+            index_writer: Arc::new(opener.open_index().await?),
             started_at: Instant::now(),
             state: Arc::new(Mutex::new(RecorderState::default())),
         })

@@ -275,9 +275,6 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     loop {
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                std::process::exit(1);
-            }
             _ = sigint.recv() => {
                 break
             }
@@ -296,10 +293,17 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         }
     }
 
-    // Finalize recordings
-    services.recordings.lock().await.shutdown().await;
-    if let Err(error) = services.cluster.shutdown().await {
-        warn!(%error, "Failed to deregister cluster node");
+    let cleanup = async {
+        services.recordings.lock().await.shutdown().await;
+        if let Err(error) = services.cluster.shutdown().await {
+            warn!(%error, "Failed to deregister cluster node");
+        }
+    };
+
+    tokio::select! {
+        () = cleanup => {}
+        _ = sigint.recv() => std::process::exit(1),
+        _ = sigterm.recv() => std::process::exit(1),
     }
 
     info!("Exiting");

@@ -23,6 +23,11 @@ jobs:
       - name: Build RDP helper
         run: just build-rdp-helper
 
+      # warpgate-web embeds ./dist via RustEmbed, which needs the folder to exist
+      # at compile time. The lint job doesn't ship assets, so an empty dir is enough.
+      - name: Stub web assets for RustEmbed
+        run: mkdir -p warpgate-web/dist
+
       - name: Clippy
         run: |
           just clippy

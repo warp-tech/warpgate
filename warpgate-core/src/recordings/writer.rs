@@ -37,8 +37,11 @@ pub struct LiveChunk {
 pub struct RawRecordingWriter {
     sender: mpsc::Sender<Bytes>,
     live_sender: broadcast::Sender<LiveChunk>,
-    /// Running byte offset to hand out, shared across clones of this writer so
-    /// the stream is numbered consistently regardless of which clone writes.
+    /// Running byte offset to hand out. Live viewers rely on this matching the
+    /// on-disk byte order, which holds because every write to a recording is
+    /// serialized by `NDJsonRecordingWriter`'s `buf` lock: that writer is not
+    /// `Clone`, so tasks share the one instance (through an `Arc`) and its single
+    /// lock, and the counter can't diverge from disk order.
     offset: Arc<AtomicU64>,
     drop_signal: mpsc::Sender<()>,
 }
@@ -162,15 +165,6 @@ impl Drop for RawRecordingWriter {
 pub struct NDJsonRecordingWriter {
     pub(crate) inner: RawRecordingWriter,
     buf: RwLock<Vec<u8>>,
-}
-
-impl Clone for NDJsonRecordingWriter {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            buf: RwLock::new(Vec::new()),
-        }
-    }
 }
 
 impl NDJsonRecordingWriter {

@@ -177,7 +177,7 @@ impl SessionRecordings {
         if self.shutdown_tracker.len() > 0 {
             info!(
                 count = self.shutdown_tracker.len(),
-                "Waiting for to finish uploading session recordings"
+                "Waiting for session recording uploads to finish..."
             );
         }
         self.shutdown_tracker.close();
@@ -186,7 +186,7 @@ impl SessionRecordings {
             .await
             .is_err()
         {
-            warn!("Timed out waiting for recording uploads to finalize");
+            warn!("Timed out waiting for recording uploads to finish");
         }
     }
 
