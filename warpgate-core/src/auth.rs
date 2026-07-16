@@ -6,7 +6,7 @@ use crate::ConfigProvider;
 pub async fn validate_and_add_credential<C: ConfigProvider>(
     state: &mut AuthState,
     credential: &AuthCredential,
-    cp: &mut C,
+    cp: &C,
 ) -> Result<bool, WarpgateError> {
     let credential_valid = cp
         .validate_credential(&state.user_info().username, credential)

@@ -258,8 +258,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                             let target_auth_result = {
                                 self.services
                                     .config_provider
-                                    .lock()
-                                    .await
                                     .authorize_target(&user_info.username, &target_name)
                                     .await
                                     .map_err(PostgresError::other)?
@@ -323,7 +321,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                 if !validate_and_add_credential(
                                     &mut state,
                                     &credential,
-                                    &mut *self.services.config_provider.lock().await,
+                                    self.services.config_provider.as_ref(),
                                 )
                                 .await?
                                 {
@@ -461,8 +459,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         let target = {
             self.services
                 .config_provider
-                .lock()
-                .await
                 .get_target_by_name(&target_name)
                 .await?
                 .and_then(|t| match t.options {

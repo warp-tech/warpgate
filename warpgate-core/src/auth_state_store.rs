@@ -157,7 +157,7 @@ impl AuthStateStore {
     /// and pass the result to [`AuthStateStore::create`], so that concurrent
     /// logins don't serialise on the store lock while doing database I/O.
     pub(crate) async fn resolve_user_and_policy(
-        config_provider: &Arc<Mutex<ConfigProviderEnum>>,
+        config_provider: &Arc<ConfigProviderEnum>,
         login_protection: &LoginProtectionService,
         username: &str,
         protocol: &str,
@@ -166,8 +166,6 @@ impl AuthStateStore {
         rate_limit_credential_type: Option<&str>,
     ) -> Result<(User, Box<dyn CredentialPolicy + Sync + Send>), WarpgateError> {
         let Some(user) = config_provider
-            .lock()
-            .await
             .list_users()
             .await?
             .iter()
@@ -188,8 +186,6 @@ impl AuthStateStore {
         check_ip_allowed(user.allowed_ip_ranges.as_ref(), remote_ip, username)?;
 
         let policy = config_provider
-            .lock()
-            .await
             .get_credential_policy(username, supported_credential_types)
             .await?;
         let Some(policy) = policy else {

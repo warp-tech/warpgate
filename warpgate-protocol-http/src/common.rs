@@ -378,8 +378,6 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                 } else if let Some(user) = ctx
                     .services()
                     .config_provider
-                    .lock()
-                    .await
                     .validate_api_token(token_from_header)
                     .await?
                 {

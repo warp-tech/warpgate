@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use data_encoding::BASE64;
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, Func, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
     EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
@@ -16,7 +16,7 @@ use warpgate_common::auth::{
 use warpgate_common::helpers::hash::verify_password_hash;
 use warpgate_common::helpers::otp::verify_totp;
 use warpgate_common::{
-    Role, Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
+    Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
     UserRequireCredentialsPolicy, UserSsoCredential, UserTotpCredential, WarpgateError,
 };
 use warpgate_db_entities as entities;
@@ -26,6 +26,62 @@ use super::ConfigProvider;
 
 pub struct DatabaseConfigProvider {
     db: DatabaseConnection,
+}
+
+/// Joins active (non-revoked, non-expired) user role assignments to target
+/// role assignments; callers add the authorization predicates and selection.
+fn active_role_assignment_query() -> sea_orm::sea_query::SelectStatement {
+    let now = OffsetDateTime::now_utc();
+    Query::select()
+        .from(entities::UserRoleAssignment::Entity)
+        .inner_join(
+            entities::TargetRoleAssignment::Entity,
+            Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::RoleId,
+            ))
+            .equals((
+                entities::TargetRoleAssignment::Entity,
+                entities::TargetRoleAssignment::Column::RoleId,
+            )),
+        )
+        .and_where(
+            Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::RevokedAt,
+            ))
+            .is_null(),
+        )
+        .and_where(
+            Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::ExpiresAt,
+            ))
+            .is_null()
+            .or(Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::ExpiresAt,
+            ))
+            .gt(now)),
+        )
+        .to_owned()
+}
+
+/// SQL `EXISTS`-style check for a query built with [`Query::select`].
+trait SelectExists {
+    /// Whether the query matches at least one row; selects a constant instead
+    /// of any column data.
+    async fn exists(&mut self, db: &DatabaseConnection) -> Result<bool, WarpgateError>;
+}
+
+impl SelectExists for sea_orm::sea_query::SelectStatement {
+    async fn exists(&mut self, db: &DatabaseConnection) -> Result<bool, WarpgateError> {
+        self.expr(Expr::val(1)).limit(1);
+        Ok(db
+            .query_one(db.get_database_backend().build(&*self))
+            .await?
+            .is_some())
+    }
 }
 
 impl DatabaseConfigProvider {
@@ -230,7 +286,7 @@ impl DatabaseConfigProvider {
 }
 
 impl ConfigProvider for DatabaseConfigProvider {
-    async fn list_users(&mut self) -> Result<Vec<User>, WarpgateError> {
+    async fn list_users(&self) -> Result<Vec<User>, WarpgateError> {
         let db = &self.db;
 
         let users = entities::User::Entity::find()
@@ -243,7 +299,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         users
     }
 
-    async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError> {
+    async fn list_targets(&self) -> Result<Vec<Target>, WarpgateError> {
         let db = &self.db;
 
         let targets = entities::Target::Entity::find()
@@ -256,7 +312,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         Ok(targets?)
     }
 
-    async fn get_target_by_name(&mut self, name: &str) -> Result<Option<Target>, WarpgateError> {
+    async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, WarpgateError> {
         let db = &self.db;
 
         let target = entities::Target::Entity::find()
@@ -271,7 +327,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn get_target_by_hostname(
-        &mut self,
+        &self,
         hostname: &str,
     ) -> Result<Option<Target>, WarpgateError> {
         let db = &self.db;
@@ -296,7 +352,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn get_credential_policy(
-        &mut self,
+        &self,
         username: &str,
         supported_credential_types: &[CredentialKind],
     ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError> {
@@ -413,7 +469,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn username_for_sso_credential(
-        &mut self,
+        &self,
         client_credential: &AuthCredential,
         preferred_username: Option<String>,
         sso_config: SsoProviderConfig,
@@ -469,7 +525,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn validate_credential(
-        &mut self,
+        &self,
         username: &str,
         client_credential: &AuthCredential,
     ) -> Result<bool, WarpgateError> {
@@ -575,64 +631,115 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn authorize_target(
-        &mut self,
+        &self,
         username: &str,
         target_name: &str,
     ) -> Result<bool, WarpgateError> {
-        let db = &self.db;
-
-        let target_model = entities::Target::Entity::find()
-            .filter(entities::Target::Column::Name.eq(target_name))
-            .one(db)
+        let authorized = active_role_assignment_query()
+            .inner_join(
+                entities::User::Entity,
+                Expr::col((
+                    entities::UserRoleAssignment::Entity,
+                    entities::UserRoleAssignment::Column::UserId,
+                ))
+                .equals((entities::User::Entity, entities::User::Column::Id)),
+            )
+            .inner_join(
+                entities::Target::Entity,
+                Expr::col((
+                    entities::TargetRoleAssignment::Entity,
+                    entities::TargetRoleAssignment::Column::TargetId,
+                ))
+                .equals((entities::Target::Entity, entities::Target::Column::Id)),
+            )
+            .and_where(
+                Expr::expr(Func::lower(Expr::col((
+                    entities::User::Entity,
+                    entities::User::Column::Username,
+                ))))
+                .eq(username.to_lowercase()),
+            )
+            .and_where(
+                Expr::col((entities::Target::Entity, entities::Target::Column::Name))
+                    .eq(target_name),
+            )
+            .exists(&self.db)
             .await?;
 
-        let user_model = entities::User::Entity::find()
-            .filter(entities::User::Entity::username_eq_ci(username))
-            .one(db)
-            .await?;
+        if !authorized {
+            // Cold path: distinguish a missing user/target from missing role
+            // grants for diagnosability.
+            if entities::User::Entity::find()
+                .filter(entities::User::Entity::username_eq_ci(username))
+                .one(&self.db)
+                .await?
+                .is_none()
+            {
+                error!("Selected user not found: {username}");
+            } else if entities::Target::Entity::find()
+                .filter(entities::Target::Column::Name.eq(target_name))
+                .one(&self.db)
+                .await?
+                .is_none()
+            {
+                warn!("Selected target not found: {target_name}");
+            }
+        }
 
-        let Some(user_model) = user_model else {
-            error!("Selected user not found: {}", username);
-            return Ok(false);
-        };
+        Ok(authorized)
+    }
 
-        let Some(target_model) = target_model else {
-            warn!("Selected target not found: {}", target_name);
-            return Ok(false);
-        };
+    async fn authorize_target_by_id(
+        &self,
+        user_id: Uuid,
+        target_id: Uuid,
+    ) -> Result<bool, WarpgateError> {
+        active_role_assignment_query()
+            .and_where(
+                Expr::col((
+                    entities::UserRoleAssignment::Entity,
+                    entities::UserRoleAssignment::Column::UserId,
+                ))
+                .eq(user_id),
+            )
+            .and_where(
+                Expr::col((
+                    entities::TargetRoleAssignment::Entity,
+                    entities::TargetRoleAssignment::Column::TargetId,
+                ))
+                .eq(target_id),
+            )
+            .exists(&self.db)
+            .await
+    }
 
-        let target_roles: HashSet<String> = target_model
-            .find_related(entities::Role::Entity)
-            .all(db)
+    async fn authorized_target_ids(&self, user_id: Uuid) -> Result<HashSet<Uuid>, WarpgateError> {
+        let query = active_role_assignment_query()
+            .column((
+                entities::TargetRoleAssignment::Entity,
+                entities::TargetRoleAssignment::Column::TargetId,
+            ))
+            .distinct()
+            .and_where(
+                Expr::col((
+                    entities::UserRoleAssignment::Entity,
+                    entities::UserRoleAssignment::Column::UserId,
+                ))
+                .eq(user_id),
+            )
+            .to_owned();
+
+        self.db
+            .query_all(self.db.get_database_backend().build(&query))
             .await?
-            .into_iter()
-            .map(Into::<Role>::into)
-            .map(|x| x.name)
-            .collect();
-
-        let user_assignments = entities::UserRoleAssignment::Entity::find_active()
-            .filter(entities::UserRoleAssignment::Column::UserId.eq(user_model.id))
-            .all(db)
-            .await?;
-
-        let user_role_ids: HashSet<Uuid> = user_assignments.iter().map(|a| a.role_id).collect();
-
-        let user_roles: HashSet<String> = entities::Role::Entity::find()
-            .filter(entities::Role::Column::Id.is_in(user_role_ids))
-            .all(db)
-            .await?
-            .into_iter()
-            .map(Into::<Role>::into)
-            .map(|x| x.name)
-            .collect();
-
-        let intersect = user_roles.intersection(&target_roles).count() > 0;
-
-        Ok(intersect)
+            .iter()
+            .map(|row| row.try_get_by_index(0))
+            .collect::<Result<HashSet<Uuid>, _>>()
+            .map_err(Into::into)
     }
 
     async fn apply_sso_role_mappings(
-        &mut self,
+        &self,
         username: &str,
         managed_role_names: Option<Vec<String>>,
         assigned_role_names: Vec<String>,
@@ -693,7 +800,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn apply_sso_admin_role_mappings(
-        &mut self,
+        &self,
         username: &str,
         managed_admin_role_names: Option<Vec<String>>,
         assigned_admin_role_names: Vec<String>,
@@ -805,7 +912,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         Ok(())
     }
 
-    async fn validate_api_token(&mut self, token: &str) -> Result<Option<User>, WarpgateError> {
+    async fn validate_api_token(&self, token: &str) -> Result<Option<User>, WarpgateError> {
         let db = &self.db;
         let Some(api_token) = entities::ApiToken::Entity::find()
             .filter(

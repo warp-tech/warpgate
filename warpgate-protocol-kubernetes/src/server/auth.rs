@@ -22,14 +22,15 @@ pub async fn authenticate_and_get_target(
         && let Ok(auth_str) = auth_header.to_str()
         && let Some(token) = auth_str.strip_prefix("Bearer ")
     {
-        let mut config_provider = services.config_provider.lock().await;
-        if let Ok(Some(user)) = config_provider.validate_api_token(token).await {
-            let target =
-                lookup_authorized_k8s_target(&mut *config_provider, target_name, &user.username)
-                    .await?;
+        if let Ok(Some(user)) = services.config_provider.validate_api_token(token).await {
+            let target = lookup_authorized_k8s_target(
+                services.config_provider.as_ref(),
+                target_name,
+                user.id,
+            )
+            .await?;
             return Ok(((&user).into(), target));
         }
-        drop(config_provider);
 
         // API token did not match — try OIDC ID token validation against any SSO
         // provider that has opted into Kubernetes OIDC.
@@ -68,9 +69,8 @@ pub async fn authenticate_and_get_target(
                 }
             };
 
-            let mut config_provider = services.config_provider.lock().await;
             let Some(username) = warpgate_core::resolve_and_map_sso_user(
-                &mut *config_provider,
+                services.config_provider.as_ref(),
                 provider_config,
                 &response,
             )
@@ -85,11 +85,15 @@ pub async fn authenticate_and_get_target(
                 continue;
             };
 
-            let target =
-                lookup_authorized_k8s_target(&mut *config_provider, target_name, &username).await?;
-            drop(config_provider);
+            let user_info = user_info_for_username(services, &username).await?;
+            let target = lookup_authorized_k8s_target(
+                services.config_provider.as_ref(),
+                target_name,
+                user_info.id,
+            )
+            .await?;
 
-            return Ok((user_info_for_username(services, &username).await?, target));
+            return Ok((user_info, target));
         }
     }
 
@@ -101,11 +105,10 @@ pub async fn authenticate_and_get_target(
         match validate_client_certificate(&client_cert.der_bytes, services).await {
             Ok(Some(user_info)) => {
                 // Look up the specific target by name from the URL
-                let mut config_provider = services.config_provider.lock().await;
                 let target = lookup_authorized_k8s_target(
-                    &mut *config_provider,
+                    services.config_provider.as_ref(),
                     target_name,
-                    &user_info.username,
+                    user_info.id,
                 )
                 .await?;
                 return Ok((user_info, target));
@@ -131,9 +134,9 @@ pub async fn authenticate_and_get_target(
 /// Look up a Kubernetes target by name and ensure `username` is authorized for
 /// it. Shared by the API-token, OIDC and client-certificate auth paths.
 async fn lookup_authorized_k8s_target<C: ConfigProvider + Send + ?Sized>(
-    config_provider: &mut C,
+    config_provider: &C,
     target_name: &str,
-    username: &str,
+    user_id: uuid::Uuid,
 ) -> poem::Result<Target> {
     let target = config_provider
         .get_target_by_name(target_name)
@@ -148,7 +151,7 @@ async fn lookup_authorized_k8s_target<C: ConfigProvider + Send + ?Sized>(
         })?;
 
     if !config_provider
-        .authorize_target(username, &target.name)
+        .authorize_target_by_id(user_id, target.id)
         .await
         .unwrap_or(false)
     {

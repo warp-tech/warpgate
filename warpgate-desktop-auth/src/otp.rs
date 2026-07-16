@@ -91,7 +91,7 @@ impl OtpEntry {
         let valid = validate_and_add_credential(
             &mut *state.lock().await,
             &credential,
-            &mut *services.config_provider.lock().await,
+            services.config_provider.as_ref(),
         )
         .await
         .unwrap_or(false);

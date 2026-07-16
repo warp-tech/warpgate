@@ -70,23 +70,21 @@ async fn get_target_for_request(
     let params: QueryParams = req.params()?;
 
     let selected_target_name;
-    let need_role_auth;
+    let authorized_user_id;
 
     let request_host = ctx.trusted_hostname(req);
 
-    let host_based_target_name = if let Some(host) = request_host {
+    let host_based_target = if let Some(host) = request_host {
         let found = ctx
             .services()
             .config_provider
-            .lock()
-            .await
             .get_target_by_hostname(host.as_str())
-            .await?
-            .map(|t| t.name);
+            .await?;
         if found.is_some() {
             debug!(
                 "Domain rebinding detected: host={} -> target={:?}",
-                host, found
+                host,
+                found.as_ref().map(|target| &target.name)
             );
         }
         found
@@ -94,64 +92,57 @@ async fn get_target_for_request(
         None
     };
 
-    let username = match &ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::Ticket {
-            target_name,
-            username,
-            ..
-        }) => {
+    match &ctx.auth {
+        RequestAuthorization::Session(SessionAuthorization::Ticket { target_name, .. }) => {
             selected_target_name = Some(target_name.clone());
-            need_role_auth = false;
-            username
+            authorized_user_id = None;
         }
-        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => {
-            need_role_auth = true;
+        RequestAuthorization::Session(SessionAuthorization::User { user_id, .. }) => {
+            authorized_user_id = Some(*user_id);
 
             selected_target_name = if let Some(warpgate_target) = params.warpgate_target {
                 Some(warpgate_target)
-            } else if let Some(ref rebound_target) = host_based_target_name {
-                Some(rebound_target.clone())
+            } else if let Some(ref rebound_target) = host_based_target {
+                Some(rebound_target.name.clone())
             } else {
                 session.get_target_name()
             };
-            username
         }
         RequestAuthorization::UserToken { .. } | RequestAuthorization::AdminToken => {
             return Ok(None);
         }
     };
 
-    let domain_rebinding_configured = host_based_target_name.is_some();
-    let final_target_name = selected_target_name.or(host_based_target_name);
+    let domain_rebinding_configured = host_based_target.is_some();
+    let final_target_name = selected_target_name
+        .or_else(|| host_based_target.as_ref().map(|target| target.name.clone()));
 
     if let Some(target_name) = final_target_name {
-        let target = {
-            ctx.services()
-                .config_provider
-                .lock()
-                .await
-                .get_target_by_name(target_name.as_str())
-                .await?
-                .and_then(|t| match t.options {
-                    TargetOptions::Http(ref options) => Some((t.clone(), options.clone())),
-                    _ => None,
-                })
-        };
+        let target =
+            if let Some(target) = host_based_target.filter(|target| target.name == target_name) {
+                Some(target)
+            } else {
+                ctx.services()
+                    .config_provider
+                    .get_target_by_name(target_name.as_str())
+                    .await?
+            };
 
-        if let Some(target) = target {
-            if need_role_auth
+        if let Some(target) = target
+            && let TargetOptions::Http(ref options) = target.options
+        {
+            if let Some(user_id) = authorized_user_id
                 && !ctx
                     .services()
                     .config_provider
-                    .lock()
-                    .await
-                    .authorize_target(username, &target.0.name)
+                    .authorize_target_by_id(user_id, target.id)
                     .await?
             {
                 return Ok(None);
             }
 
-            return Ok(Some(target));
+            let options = options.clone();
+            return Ok(Some((target, options)));
         }
     }
 

@@ -58,8 +58,9 @@ impl WebSshClientManager {
         }
 
         let target: Target = {
-            let mut cp = services.config_provider.lock().await;
-            cp.get_target_by_name(target_name)
+            services
+                .config_provider
+                .get_target_by_name(target_name)
                 .await?
                 .ok_or_else(|| anyhow!("SSH target {target_name:?} not found"))?
         };

@@ -208,7 +208,7 @@ impl RequestAuthorization {
         }
     }
 
-    /// Returns a user ID if present in the authorization context.
+    /// Returns a user ID if present in the authorization context or nil UUID
     pub const fn user_id(&self) -> Uuid {
         match self {
             Self::Session(auth) => auth.user_id(),
