@@ -54,90 +54,70 @@ impl WarpgateServerHandle {
         use sea_orm::ActiveValue::Set;
 
         {
-            let state = self.session_state.lock().await;
-            // Kubernetes reuses one session handle for many requests. Avoid emitting a
-            // change and writing the same username to the session row for every request.
+            // Kubernetes reuses one session handle for many concurrent requests, so
+            // most calls are no-ops, and the lock must span the no-op check and the
+            // commit to keep the DB and in-memory state consistent.
+            let mut state = self.session_state.lock().await;
             if state.user_info.as_ref() == Some(&user_info) {
                 return Ok(());
             }
+
+            Session::Entity::update_many()
+                .set(Session::ActiveModel {
+                    username: Set(Some(user_info.username.clone())),
+                    ..Default::default()
+                })
+                .filter(Session::Column::Id.eq(self.id))
+                .exec(&self.db)
+                .await?;
+
+            state.user_info = Some(user_info);
+            state.emit_change();
         }
 
-        let db = &self.db;
-
-        Session::Entity::update_many()
-            .set(Session::ActiveModel {
-                username: Set(Some(user_info.username.clone())),
-                ..Default::default()
-            })
-            .filter(Session::Column::Id.eq(self.id))
-            .exec(db)
-            .await?;
-
-        let previous_user_info = {
-            let mut state = self.session_state.lock().await;
-            state.user_info.replace(user_info)
-        };
-
-        if let Err(error) = self.update_rate_limiters().await {
-            self.session_state.lock().await.user_info = previous_user_info;
-            return Err(error);
-        }
-        self.session_state.lock().await.emit_change();
-
-        Ok(())
+        self.update_rate_limiters().await
     }
 
     pub async fn set_target(&self, target: &Target) -> Result<(), WarpgateError> {
         use sea_orm::ActiveValue::Set;
 
-        let user_info = {
-            let state = self.session_state.lock().await;
-            // Do not emit a change if the target is the same as the previous one.
+        {
+            let mut state = self.session_state.lock().await;
             if state.target.as_ref() == Some(target) {
                 return Ok(());
             }
 
-            state.user_info.clone().ok_or_else(|| {
+            let user_info = state.user_info.clone().ok_or_else(|| {
                 WarpgateError::InconsistentState("set_target called before set_user_info".into())
-            })?
-        };
+            })?;
 
-        let db = &self.db;
+            Session::Entity::update_many()
+                .set(Session::ActiveModel {
+                    target_snapshot: Set(Some(
+                        serde_json::to_string(&target).map_err(WarpgateError::other)?,
+                    )),
+                    ..Default::default()
+                })
+                .filter(Session::Column::Id.eq(self.id))
+                .exec(&self.db)
+                .await?;
 
-        Session::Entity::update_many()
-            .set(Session::ActiveModel {
-                target_snapshot: Set(Some(
-                    serde_json::to_string(&target).map_err(WarpgateError::other)?,
-                )),
-                ..Default::default()
-            })
-            .filter(Session::Column::Id.eq(self.id))
-            .exec(db)
-            .await?;
+            let previous_target = state.target.replace(target.clone());
+            state.emit_change();
 
-        let previous_target = {
-            let mut state = self.session_state.lock().await;
-            state.target.replace(target.clone())
-        };
-
-        if let Err(error) = self.update_rate_limiters().await {
-            self.session_state.lock().await.target = previous_target;
-            return Err(error);
-        }
-        self.session_state.lock().await.emit_change();
-
-        if previous_target.as_ref().map(|x| x.id) != Some(target.id) {
-            AuditEvent::TargetSessionStarted {
-                session_id: self.id,
-                target_id: target.id,
-                target_name: target.name.clone(),
-                user_id: user_info.id,
-                username: user_info.username.clone(),
+            if previous_target.map(|x| x.id) != Some(target.id) {
+                AuditEvent::TargetSessionStarted {
+                    session_id: self.id,
+                    target_id: target.id,
+                    target_name: target.name.clone(),
+                    user_id: user_info.id,
+                    username: user_info.username,
+                }
+                .emit();
             }
-            .emit();
         }
 
-        Ok(())
+        self.update_rate_limiters().await
     }
 
     pub async fn wrap_stream<S>(
