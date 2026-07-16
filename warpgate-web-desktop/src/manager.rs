@@ -54,10 +54,8 @@ impl WebDesktopClientManager {
         let target: Target = {
             services
                 .config_provider
-                .list_targets()
+                .get_target_by_name(target_name)
                 .await?
-                .into_iter()
-                .find(|t| t.name == target_name)
                 .ok_or_else(|| anyhow!("Desktop target {target_name:?} not found"))?
         };
 
