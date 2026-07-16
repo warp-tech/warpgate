@@ -43,7 +43,7 @@
     "bootstrap": "^5.3.8",
     "copy-text-to-clipboard": "^3.2.2",
     "date-fns": "^4.4.0",
-    "format-duration": "^3.0.2",
+    "format-duration": "^4.0.0",
     "otpauth": "^9.5.1",
     "qrcode": "^1.5.4",
     "rxjs": "^7.8.2",
