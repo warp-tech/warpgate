@@ -63,10 +63,7 @@ impl Api {
             )));
         }
 
-        let mut targets: Vec<TargetConfig> = {
-            let mut config_provider = services.config_provider.lock().await;
-            config_provider.list_targets().await?
-        };
+        let mut targets: Vec<TargetConfig> = services.config_provider.list_targets().await?;
 
         targets.retain(|t| !t.ticket_requests_disabled);
 
@@ -75,14 +72,16 @@ impl Api {
             targets = stream::iter(targets)
                 .filter(|t| {
                     let auth = auth_clone.clone();
-                    let name = t.name.clone();
+                    let target_id = t.id;
                     async move {
-                        let mut config_provider = services.config_provider.lock().await;
-                        let Some(username) = auth.username() else {
+                        let Some(_username) = auth.username() else {
                             return false;
                         };
                         matches!(
-                            config_provider.authorize_target(username, &name).await,
+                            services
+                                .config_provider
+                                .authorize_target_by_id(auth.user_id(), target_id)
+                                .await,
                             Ok(true)
                         )
                     }

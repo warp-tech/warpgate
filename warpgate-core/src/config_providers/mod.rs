@@ -22,32 +22,32 @@ pub enum ConfigProviderEnum {
 #[enum_dispatch(ConfigProviderEnum)]
 #[allow(async_fn_in_trait)]
 pub trait ConfigProvider {
-    async fn list_users(&mut self) -> Result<Vec<User>, WarpgateError>;
+    async fn list_users(&self) -> Result<Vec<User>, WarpgateError>;
 
-    async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError>;
+    async fn list_targets(&self) -> Result<Vec<Target>, WarpgateError>;
 
-    async fn get_target_by_name(&mut self, name: &str) -> Result<Option<Target>, WarpgateError>;
+    async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, WarpgateError>;
 
     async fn get_target_by_hostname(
-        &mut self,
+        &self,
         hostname: &str,
     ) -> Result<Option<Target>, WarpgateError>;
 
     async fn validate_credential(
-        &mut self,
+        &self,
         username: &str,
         client_credential: &AuthCredential,
     ) -> Result<bool, WarpgateError>;
 
     async fn username_for_sso_credential(
-        &mut self,
+        &self,
         client_credential: &AuthCredential,
         preferred_username: Option<String>,
         sso_config: SsoProviderConfig,
     ) -> Result<Option<String>, WarpgateError>;
 
     async fn apply_sso_role_mappings(
-        &mut self,
+        &self,
         username: &str,
         managed_role_names: Option<Vec<String>>,
         active_role_names: Vec<String>,
@@ -55,22 +55,28 @@ pub trait ConfigProvider {
 
     /// Similar to `apply_sso_role_mappings` but operates on *admin* roles.
     async fn apply_sso_admin_role_mappings(
-        &mut self,
+        &self,
         username: &str,
         managed_admin_role_names: Option<Vec<String>>,
         active_admin_role_names: Vec<String>,
     ) -> Result<(), WarpgateError>;
 
     async fn get_credential_policy(
-        &mut self,
+        &self,
         username: &str,
         supported_credential_types: &[CredentialKind],
     ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError>;
 
     async fn authorize_target(
-        &mut self,
+        &self,
         username: &str,
         target: &str,
+    ) -> Result<bool, WarpgateError>;
+
+    async fn authorize_target_by_id(
+        &self,
+        user_id: Uuid,
+        target_id: Uuid,
     ) -> Result<bool, WarpgateError>;
 
     async fn update_public_key_last_used(
@@ -78,7 +84,7 @@ pub trait ConfigProvider {
         credential: Option<AuthCredential>,
     ) -> Result<(), WarpgateError>;
 
-    async fn validate_api_token(&mut self, token: &str) -> Result<Option<User>, WarpgateError>;
+    async fn validate_api_token(&self, token: &str) -> Result<Option<User>, WarpgateError>;
 }
 
 //TODO: move this somewhere

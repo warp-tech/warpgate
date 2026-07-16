@@ -27,7 +27,7 @@ pub struct Services {
     pub config: Arc<Mutex<WarpgateConfig>>,
     pub cluster: Arc<Cluster>,
     pub state: Arc<Mutex<State>>,
-    pub config_provider: Arc<Mutex<ConfigProviderEnum>>,
+    pub config_provider: Arc<ConfigProviderEnum>,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Mutex<Option<String>>>,
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
@@ -52,7 +52,7 @@ impl Services {
 
         let config = Arc::new(Mutex::new(config));
 
-        let config_provider = Arc::new(Mutex::new(DatabaseConfigProvider::new(&db).into()));
+        let config_provider = Arc::new(DatabaseConfigProvider::new(&db).into());
 
         let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
 

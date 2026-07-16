@@ -133,7 +133,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                 let credential_valid = validate_and_add_credential(
                     &mut state,
                     &credential,
-                    &mut *services.config_provider.lock().await,
+                    services.config_provider.as_ref(),
                 )
                 .await?;
                 if !credential_valid {
@@ -224,8 +224,6 @@ pub async fn finalize_user_auth<P: DesktopProtocol>(
 ) -> Result<(Target, P::Options)> {
     let authorized = services
         .config_provider
-        .lock()
-        .await
         .authorize_target(username, target_name)
         .await?;
     if !authorized {
@@ -240,8 +238,6 @@ async fn find_target<P: DesktopProtocol>(
 ) -> Result<(Target, P::Options)> {
     let Some(target) = services
         .config_provider
-        .lock()
-        .await
         .get_target_by_name(target_name)
         .await?
     else {

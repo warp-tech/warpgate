@@ -52,8 +52,9 @@ impl WebDesktopClientManager {
         }
 
         let target: Target = {
-            let mut cp = services.config_provider.lock().await;
-            cp.list_targets()
+            services
+                .config_provider
+                .list_targets()
                 .await?
                 .into_iter()
                 .find(|t| t.name == target_name)

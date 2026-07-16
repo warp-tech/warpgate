@@ -69,10 +69,7 @@ impl Api {
         let group_map: HashMap<uuid::Uuid, &TargetGroup::Model> =
             groups.iter().map(|g| (g.id, g)).collect();
 
-        let mut targets: Vec<TargetConfig> = {
-            let mut config_provider = services.config_provider.lock().await;
-            config_provider.list_targets().await?
-        };
+        let mut targets: Vec<TargetConfig> = services.config_provider.list_targets().await?;
 
         if let Some(ref search) = *search {
             let search = search.to_lowercase();
@@ -89,6 +86,7 @@ impl Api {
                 let services = services.clone();
                 let auth = auth_clone.clone();
                 let name = t.name.clone();
+                let target_id = t.id;
                 async move {
                     if let RequestAuthorization::Session(SessionAuthorization::Ticket {
                         target_name,
@@ -97,12 +95,14 @@ impl Api {
                     {
                         target_name == name
                     } else {
-                        let mut config_provider = services.config_provider.lock().await;
-                        let Some(username) = auth.username() else {
+                        let Some(_username) = auth.username() else {
                             return false;
                         };
                         matches!(
-                            config_provider.authorize_target(username, &name).await,
+                            services
+                                .config_provider
+                                .authorize_target_by_id(auth.user_id(), target_id)
+                                .await,
                             Ok(true)
                         )
                     }

@@ -7,7 +7,6 @@ use sea_orm::{
     QueryOrder, TransactionTrait,
 };
 use time::{Duration, OffsetDateTime};
-use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
@@ -50,7 +49,7 @@ impl From<WarpgateError> for CreateTicketRequestError {
 
 pub async fn create_ticket_request(
     db: &sea_orm::DatabaseConnection,
-    config_provider: &Arc<Mutex<ConfigProviderEnum>>,
+    config_provider: &Arc<ConfigProviderEnum>,
     params: CreateTicketRequestParams,
 ) -> Result<TicketRequestResult, CreateTicketRequestError> {
     let db_conn = db;
@@ -74,12 +73,9 @@ pub async fn create_ticket_request(
         ));
     };
 
-    let has_access = {
-        // Must drop db_conn before locking config_provider to avoid deadlock
-        let mut cp = config_provider.lock().await;
-        cp.authorize_target(&params.username, &params.target_name)
-            .await?
-    };
+    let has_access = config_provider
+        .authorize_target_by_id(params.user_id, target.id)
+        .await?;
 
     // Return generic "not found" to avoid revealing target existence to unauthorized users
     if !policy.ticket_request_show_all_targets && !has_access {

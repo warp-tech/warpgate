@@ -89,7 +89,7 @@ pub async fn resolve_ssh_chain(
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
     let mut jumps = vec![];
     let mut current_jump_id = Some(target_id);
-    let targets = services.config_provider.lock().await.list_targets().await?;
+    let targets = services.config_provider.list_targets().await?;
     while let Some(id) = current_jump_id {
         let Some(t) = targets.iter().find(|t| t.id == id) else {
             break;
