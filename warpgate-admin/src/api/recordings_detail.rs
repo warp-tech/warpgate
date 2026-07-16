@@ -4,39 +4,31 @@ use poem::web::websocket::{Message, WebSocket};
 use poem::web::{Data, Redirect, StaticFileRequest};
 use poem::{IntoResponse, handler};
 use poem_openapi::param::Path;
-use poem_openapi::payload::Json as OpenApiJson;
+use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::broadcast;
 use tracing::error;
 use uuid::Uuid;
-use warpgate_common::AdminPermission;
+use warpgate_common::WarpgateError;
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::recordings::{LiveChunk, RecordingFile};
 use warpgate_db_entities::Recording::{self, RecordingKind};
-use warpgate_protocol_kubernetes::recording::{
-    KubernetesRecordingItem, KubernetesRecordingItemApiObject,
-};
+use warpgate_db_entities::{Node, Session};
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::cluster_proxy::{Owner, proxy_or_serve, proxy_or_serve_websocket};
+use crate::api::common::require_recording_access;
 
 pub struct Api;
 
 #[derive(ApiResponse)]
 enum GetRecordingResponse {
     #[oai(status = 200)]
-    Ok(OpenApiJson<Recording::Model>),
+    Ok(Json<Recording::Model>),
     #[oai(status = 404)]
     NotFound,
-}
-
-#[derive(ApiResponse)]
-enum GetKubernetesRecordingResponse {
-    #[oai(status = 200)]
-    Ok(OpenApiJson<Vec<KubernetesRecordingItemApiObject>>),
 }
 
 #[OpenApi]
@@ -52,7 +44,7 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetRecordingResponse> {
-        require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+        require_recording_access(&ctx).await?;
 
         let db = &ctx.services().db;
 
@@ -62,59 +54,9 @@ impl Api {
             .map_err(InternalServerError)?;
 
         match recording {
-            Some(recording) => Ok(GetRecordingResponse::Ok(OpenApiJson(recording))),
+            Some(recording) => Ok(GetRecordingResponse::Ok(Json(recording))),
             None => Ok(GetRecordingResponse::NotFound),
         }
-    }
-
-    #[oai(
-        path = "/recordings/:id/kubernetes",
-        method = "get",
-        operation_id = "get_kubernetes_recording"
-    )]
-    async fn api_get_recording_kubernetes(
-        &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
-    ) -> poem::Result<GetKubernetesRecordingResponse> {
-        require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
-
-        let db = &ctx.services().db;
-
-        let recording = Recording::Entity::find_by_id(id.0)
-            .filter(Recording::Column::Kind.eq(RecordingKind::Kubernetes))
-            .one(db)
-            .await
-            .map_err(InternalServerError)?;
-
-        let Some(recording) = recording else {
-            return Err(NotFoundError.into());
-        };
-
-        let reader = {
-            let recordings = ctx.services().recordings.lock().await;
-            recordings
-                .access(&recording, RecordingFile::NDJsonData)
-                .await
-                .map_err(InternalServerError)?
-                .open_read()
-                .await
-                .map_err(InternalServerError)?
-        };
-
-        let mut content = Vec::new();
-        let mut lines = BufReader::new(reader).lines();
-        while let Some(line) = lines.next_line().await.map_err(InternalServerError)? {
-            if line.is_empty() {
-                continue;
-            }
-            let item: KubernetesRecordingItem =
-                serde_json::from_str(&line).map_err(InternalServerError)?;
-            content.push(KubernetesRecordingItemApiObject::from(item));
-        }
-
-        Ok(GetKubernetesRecordingResponse::Ok(OpenApiJson(content)))
     }
 }
 
@@ -138,11 +80,16 @@ pub async fn api_get_recording_tcpdump(
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
     static_req: StaticFileRequest,
+    req: &poem::Request,
 ) -> poem::Result<poem::Response> {
-    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+    require_recording_access(&ctx).await?;
 
     let recording = find_recording(&ctx, id.0, Some(RecordingKind::Traffic)).await?;
-    serve_recording_file(&ctx, &recording, RecordingFile::TcpDumpData, static_req).await
+    let owner = recording_owner(&ctx, &recording).await?;
+    proxy_or_serve(&ctx, req, owner, || {
+        serve_recording_file(&ctx, &recording, RecordingFile::TcpDumpData, static_req)
+    })
+    .await
 }
 
 #[handler]
@@ -150,11 +97,16 @@ pub async fn api_get_recording_data(
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
     static_req: StaticFileRequest,
+    req: &poem::Request,
 ) -> poem::Result<poem::Response> {
-    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+    require_recording_access(&ctx).await?;
 
     let recording = find_recording(&ctx, id.0, None).await?;
-    serve_recording_file(&ctx, &recording, RecordingFile::NDJsonData, static_req).await
+    let owner = recording_owner(&ctx, &recording).await?;
+    proxy_or_serve(&ctx, req, owner, || {
+        serve_recording_file(&ctx, &recording, RecordingFile::NDJsonData, static_req)
+    })
+    .await
 }
 
 #[handler]
@@ -162,11 +114,16 @@ pub async fn api_get_recording_index(
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
     static_req: StaticFileRequest,
+    req: &poem::Request,
 ) -> poem::Result<poem::Response> {
-    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+    require_recording_access(&ctx).await?;
 
     let recording = find_recording(&ctx, id.0, None).await?;
-    serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req).await
+    let owner = recording_owner(&ctx, &recording).await?;
+    proxy_or_serve(&ctx, req, owner, || {
+        serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req)
+    })
+    .await
 }
 
 async fn serve_recording_file(
@@ -277,16 +234,50 @@ pub async fn api_get_recording_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,
     id: poem::web::Path<Uuid>,
-) -> poem::Result<impl IntoResponse> {
-    require_admin_permission(&ctx, Some(AdminPermission::RecordingsView)).await?;
+    req: &poem::Request,
+) -> poem::Result<poem::Response> {
+    require_recording_access(&ctx).await?;
 
-    let receiver = ctx
-        .services()
-        .recordings
-        .lock()
-        .await
-        .subscribe_live(&id)
-        .await;
+    let recording = find_recording(&ctx, id.0, None).await?;
+    let owner = recording_owner(&ctx, &recording).await?;
 
-    Ok(live_stream_response(ws, receiver))
+    proxy_or_serve_websocket(&ctx, req, ws, owner, async move |ws| {
+        let receiver = ctx
+            .services()
+            .recordings
+            .lock()
+            .await
+            .subscribe_live(&id)
+            .await;
+
+        Ok(live_stream_response(ws, receiver).into_response())
+    })
+    .await
+}
+
+pub async fn recording_owner(
+    ctx: &AuthenticatedRequestContext,
+    recording: &Recording::Model,
+) -> Result<Owner, WarpgateError> {
+    // Completed recordings live in S3 / on disk and are served by any node.
+    if recording.ended.is_some() {
+        return Ok(Owner::Local);
+    }
+    let services = ctx.services();
+    let db = &services.db;
+    let owner_id = Session::Entity::find_by_id(recording.session_id)
+        .one(db)
+        .await?
+        .and_then(|s| s.node_id);
+    let Some(owner_id) = owner_id else {
+        return Ok(Owner::Local);
+    };
+    if owner_id == services.cluster.node_id {
+        return Ok(Owner::Local);
+    }
+    let Some(node) = Node::Entity::find_by_id(owner_id).one(db).await? else {
+        return Err(WarpgateError::NodeGone(owner_id));
+    };
+
+    Ok(Owner::remote(node))
 }

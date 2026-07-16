@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.0-beta.1-3-ga1a5c670-modified"
+    "version": "v0.27.0-beta.1-23-gc4756129-modified"
   },
   "servers": [
     {
@@ -261,47 +261,6 @@
           }
         ],
         "operationId": "get_recording"
-      }
-    },
-    "/recordings/{id}/kubernetes": {
-      "get": {
-        "parameters": [
-          {
-            "name": "id",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "required": true,
-            "deprecated": false,
-            "explode": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/KubernetesRecordingItem"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "TokenSecurityScheme": []
-          },
-          {
-            "CookieSecurityScheme": []
-          }
-        ],
-        "operationId": "get_kubernetes_recording"
       }
     },
     "/roles": {
@@ -4968,35 +4927,6 @@
           "certificate_pem": {
             "type": "string"
           }
-        }
-      },
-      "KubernetesRecordingItem": {
-        "type": "object",
-        "title": "KubernetesRecordingItem",
-        "required": [
-          "timestamp",
-          "request_method",
-          "request_path",
-          "request_body",
-          "response_body"
-        ],
-        "properties": {
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "request_method": {
-            "type": "string"
-          },
-          "request_path": {
-            "type": "string"
-          },
-          "request_body": {},
-          "response_status": {
-            "type": "integer",
-            "format": "uint16"
-          },
-          "response_body": {}
         }
       },
       "KubernetesTargetAuth": {

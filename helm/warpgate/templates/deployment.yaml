@@ -34,6 +34,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      serviceAccountName: {{ include "warpgate.serviceAccountName" . }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -138,6 +139,12 @@ spec:
           {{- end }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: WARPGATE_CLUSTER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "warpgate.fullname" . }}-cluster-token
+                  key: clusterToken
           command:
             - warpgate
             - -c

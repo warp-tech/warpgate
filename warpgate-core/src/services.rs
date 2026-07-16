@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, CredentialKind};
-use warpgate_common::{GlobalParams, SessionId, WarpgateConfig, WarpgateError};
+use warpgate_common::{GlobalParams, Secret, SessionId, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Parameters;
 
 use crate::cluster::Cluster;
@@ -29,7 +29,8 @@ pub struct Services {
     pub state: Arc<Mutex<State>>,
     pub config_provider: Arc<Mutex<ConfigProviderEnum>>,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
-    pub admin_token: Arc<Mutex<Option<String>>>,
+    pub admin_token: Arc<Option<Secret<String>>>,
+    pub cluster_token: Arc<Option<Secret<String>>>,
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
@@ -101,7 +102,13 @@ impl Services {
             rate_limiter_registry,
             config_provider,
             auth_state_store,
-            admin_token: Arc::new(Mutex::new(admin_token)),
+            admin_token: Arc::new(admin_token.map(Secret::new)),
+            cluster_token: Arc::new(
+                std::env::var("WARPGATE_CLUSTER_TOKEN")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .map(Secret::new),
+            ),
             login_protection,
             global_params: Arc::new(params),
             listener_status: Arc::default(),

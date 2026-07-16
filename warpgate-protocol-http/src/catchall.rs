@@ -116,7 +116,9 @@ async fn get_target_for_request(
             };
             username
         }
-        RequestAuthorization::UserToken { .. } | RequestAuthorization::AdminToken => {
+        RequestAuthorization::UserToken { .. }
+        | RequestAuthorization::AdminToken
+        | RequestAuthorization::ClusterToken => {
             return Ok(None);
         }
     };

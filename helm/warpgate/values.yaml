@@ -20,6 +20,17 @@ podLabels: {}
 nameOverride: ""
 fullnameOverride: ""
 
+# ServiceAccount the pods run under. Annotate it to grant cloud IAM roles to
+# the pod, e.g. for the S3 recording storage "Auto" credentials mode via
+# EKS IRSA (eks.amazonaws.com/role-arn) or GKE Workload Identity.
+serviceAccount:
+  create: true
+  # Name override; with create: false, an existing ServiceAccount to use
+  # (empty = the namespace default one)
+  name: ""
+  annotations: {}
+    # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/warpgate-recordings
+
 # Pod-level security context (applies to all containers)
 podSecurityContext: {}
   # fsGroup: 2000

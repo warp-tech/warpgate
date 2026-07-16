@@ -88,6 +88,8 @@ pub enum RequestAuthorization {
     Session(SessionAuthorization),
     UserToken { user_id: Uuid, username: String },
     AdminToken,
+    /// Auth between cluster peers
+    ClusterToken,
 }
 
 #[derive(Clone)]
@@ -204,7 +206,7 @@ impl RequestAuthorization {
         match self {
             Self::Session(auth) => Some(auth.username()),
             Self::UserToken { username, .. } => Some(username),
-            Self::AdminToken => None,
+            Self::AdminToken | Self::ClusterToken => None,
         }
     }
 
@@ -213,7 +215,7 @@ impl RequestAuthorization {
         match self {
             Self::Session(auth) => auth.user_id(),
             Self::UserToken { user_id, .. } => *user_id,
-            Self::AdminToken => Uuid::nil(),
+            Self::AdminToken | Self::ClusterToken => Uuid::nil(),
         }
     }
 }
