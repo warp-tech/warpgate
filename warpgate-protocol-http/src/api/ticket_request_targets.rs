@@ -1,4 +1,3 @@
-use futures::{StreamExt, stream};
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -68,26 +67,16 @@ impl Api {
         targets.retain(|t| !t.ticket_requests_disabled);
 
         if !policy.ticket_request_show_all_targets {
-            let auth_clone = ctx.auth.clone();
-            targets = stream::iter(targets)
-                .filter(|t| {
-                    let auth = auth_clone.clone();
-                    let target_id = t.id;
-                    async move {
-                        let Some(_username) = auth.username() else {
-                            return false;
-                        };
-                        matches!(
-                            services
-                                .config_provider
-                                .authorize_target_by_id(auth.user_id(), target_id)
-                                .await,
-                            Ok(true)
-                        )
-                    }
-                })
-                .collect::<Vec<_>>()
-                .await;
+            let authorized_ids = match &ctx.auth {
+                warpgate_common_http::RequestAuthorization::AdminToken => Default::default(),
+                auth => {
+                    services
+                        .config_provider
+                        .authorized_target_ids(auth.user_id())
+                        .await?
+                }
+            };
+            targets.retain(|t| authorized_ids.contains(&t.id));
         }
 
         let result: Vec<TicketRequestTarget> = targets

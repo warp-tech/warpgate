@@ -141,7 +141,8 @@ async fn get_target_for_request(
                 return Ok(None);
             }
 
-            return Ok(Some((target.clone(), options.clone())));
+            let options = options.clone();
+            return Ok(Some((target, options)));
         }
     }
 

@@ -28,6 +28,62 @@ pub struct DatabaseConfigProvider {
     db: DatabaseConnection,
 }
 
+/// Joins active (non-revoked, non-expired) user role assignments to target
+/// role assignments; callers add the authorization predicates and selection.
+fn active_role_assignment_query() -> sea_orm::sea_query::SelectStatement {
+    let now = OffsetDateTime::now_utc();
+    Query::select()
+        .from(entities::UserRoleAssignment::Entity)
+        .inner_join(
+            entities::TargetRoleAssignment::Entity,
+            Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::RoleId,
+            ))
+            .equals((
+                entities::TargetRoleAssignment::Entity,
+                entities::TargetRoleAssignment::Column::RoleId,
+            )),
+        )
+        .and_where(
+            Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::RevokedAt,
+            ))
+            .is_null(),
+        )
+        .and_where(
+            Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::ExpiresAt,
+            ))
+            .is_null()
+            .or(Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::ExpiresAt,
+            ))
+            .gt(now)),
+        )
+        .to_owned()
+}
+
+/// SQL `EXISTS`-style check for a query built with [`Query::select`].
+trait SelectExists {
+    /// Whether the query matches at least one row; selects a constant instead
+    /// of any column data.
+    async fn exists(&mut self, db: &DatabaseConnection) -> Result<bool, WarpgateError>;
+}
+
+impl SelectExists for sea_orm::sea_query::SelectStatement {
+    async fn exists(&mut self, db: &DatabaseConnection) -> Result<bool, WarpgateError> {
+        self.expr(Expr::val(1)).limit(1);
+        Ok(db
+            .query_one(db.get_database_backend().build(&*self))
+            .await?
+            .is_some())
+    }
+}
+
 impl DatabaseConfigProvider {
     pub fn new(db: &DatabaseConnection) -> Self {
         Self { db: db.clone() }
@@ -579,21 +635,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         username: &str,
         target_name: &str,
     ) -> Result<bool, WarpgateError> {
-        let now = OffsetDateTime::now_utc();
-        let query = Query::select()
-            .expr(Expr::val(1))
-            .from(entities::UserRoleAssignment::Entity)
-            .inner_join(
-                entities::TargetRoleAssignment::Entity,
-                Expr::col((
-                    entities::UserRoleAssignment::Entity,
-                    entities::UserRoleAssignment::Column::RoleId,
-                ))
-                .equals((
-                    entities::TargetRoleAssignment::Entity,
-                    entities::TargetRoleAssignment::Column::RoleId,
-                )),
-            )
+        let authorized = active_role_assignment_query()
             .inner_join(
                 entities::User::Entity,
                 Expr::col((
@@ -621,33 +663,30 @@ impl ConfigProvider for DatabaseConfigProvider {
                 Expr::col((entities::Target::Entity, entities::Target::Column::Name))
                     .eq(target_name),
             )
-            .and_where(
-                Expr::col((
-                    entities::UserRoleAssignment::Entity,
-                    entities::UserRoleAssignment::Column::RevokedAt,
-                ))
-                .is_null(),
-            )
-            .and_where(
-                Expr::col((
-                    entities::UserRoleAssignment::Entity,
-                    entities::UserRoleAssignment::Column::ExpiresAt,
-                ))
-                .is_null()
-                .or(Expr::col((
-                    entities::UserRoleAssignment::Entity,
-                    entities::UserRoleAssignment::Column::ExpiresAt,
-                ))
-                .gt(now)),
-            )
-            .limit(1)
-            .to_owned();
+            .exists(&self.db)
+            .await?;
 
-        Ok(self
-            .db
-            .query_one(self.db.get_database_backend().build(&query))
-            .await?
-            .is_some())
+        if !authorized {
+            // Cold path: distinguish a missing user/target from missing role
+            // grants for diagnosability.
+            if entities::User::Entity::find()
+                .filter(entities::User::Entity::username_eq_ci(username))
+                .one(&self.db)
+                .await?
+                .is_none()
+            {
+                error!("Selected user not found: {username}");
+            } else if entities::Target::Entity::find()
+                .filter(entities::Target::Column::Name.eq(target_name))
+                .one(&self.db)
+                .await?
+                .is_none()
+            {
+                warn!("Selected target not found: {target_name}");
+            }
+        }
+
+        Ok(authorized)
     }
 
     async fn authorize_target_by_id(
@@ -655,21 +694,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         user_id: Uuid,
         target_id: Uuid,
     ) -> Result<bool, WarpgateError> {
-        let now = OffsetDateTime::now_utc();
-        let query = Query::select()
-            .expr(Expr::val(1))
-            .from(entities::UserRoleAssignment::Entity)
-            .inner_join(
-                entities::TargetRoleAssignment::Entity,
-                Expr::col((
-                    entities::UserRoleAssignment::Entity,
-                    entities::UserRoleAssignment::Column::RoleId,
-                ))
-                .equals((
-                    entities::TargetRoleAssignment::Entity,
-                    entities::TargetRoleAssignment::Column::RoleId,
-                )),
-            )
+        active_role_assignment_query()
             .and_where(
                 Expr::col((
                     entities::UserRoleAssignment::Entity,
@@ -684,33 +709,33 @@ impl ConfigProvider for DatabaseConfigProvider {
                 ))
                 .eq(target_id),
             )
+            .exists(&self.db)
+            .await
+    }
+
+    async fn authorized_target_ids(&self, user_id: Uuid) -> Result<HashSet<Uuid>, WarpgateError> {
+        let query = active_role_assignment_query()
+            .column((
+                entities::TargetRoleAssignment::Entity,
+                entities::TargetRoleAssignment::Column::TargetId,
+            ))
+            .distinct()
             .and_where(
                 Expr::col((
                     entities::UserRoleAssignment::Entity,
-                    entities::UserRoleAssignment::Column::RevokedAt,
+                    entities::UserRoleAssignment::Column::UserId,
                 ))
-                .is_null(),
+                .eq(user_id),
             )
-            .and_where(
-                Expr::col((
-                    entities::UserRoleAssignment::Entity,
-                    entities::UserRoleAssignment::Column::ExpiresAt,
-                ))
-                .is_null()
-                .or(Expr::col((
-                    entities::UserRoleAssignment::Entity,
-                    entities::UserRoleAssignment::Column::ExpiresAt,
-                ))
-                .gt(now)),
-            )
-            .limit(1)
             .to_owned();
 
-        Ok(self
-            .db
-            .query_one(self.db.get_database_backend().build(&query))
+        self.db
+            .query_all(self.db.get_database_backend().build(&query))
             .await?
-            .is_some())
+            .iter()
+            .map(|row| row.try_get_by_index(0))
+            .collect::<Result<HashSet<Uuid>, _>>()
+            .map_err(Into::into)
     }
 
     async fn apply_sso_role_mappings(

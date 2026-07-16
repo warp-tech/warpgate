@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use futures::{StreamExt, stream};
 use poem::web::Data;
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
@@ -80,36 +79,21 @@ impl Api {
             });
         }
 
-        let auth_clone = ctx.auth.clone();
-        let targets: Vec<_> = stream::iter(targets)
-            .filter(|t| {
-                let services = services.clone();
-                let auth = auth_clone.clone();
-                let name = t.name.clone();
-                let target_id = t.id;
-                async move {
-                    if let RequestAuthorization::Session(SessionAuthorization::Ticket {
-                        target_name,
-                        ..
-                    }) = auth
-                    {
-                        target_name == name
-                    } else {
-                        let Some(_username) = auth.username() else {
-                            return false;
-                        };
-                        matches!(
-                            services
-                                .config_provider
-                                .authorize_target_by_id(auth.user_id(), target_id)
-                                .await,
-                            Ok(true)
-                        )
-                    }
-                }
-            })
-            .collect::<Vec<_>>()
-            .await;
+        match &ctx.auth {
+            RequestAuthorization::Session(SessionAuthorization::Ticket { target_name, .. }) => {
+                targets.retain(|t| t.name == *target_name);
+            }
+            RequestAuthorization::AdminToken => {
+                targets.clear();
+            }
+            auth => {
+                let authorized_ids = services
+                    .config_provider
+                    .authorized_target_ids(auth.user_id())
+                    .await?;
+                targets.retain(|t| authorized_ids.contains(&t.id));
+            }
+        }
 
         let result: Vec<TargetSnapshot> = targets
             .into_iter()

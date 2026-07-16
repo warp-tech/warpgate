@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 mod db;
 mod sso_user;
 
@@ -28,10 +30,8 @@ pub trait ConfigProvider {
 
     async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, WarpgateError>;
 
-    async fn get_target_by_hostname(
-        &self,
-        hostname: &str,
-    ) -> Result<Option<Target>, WarpgateError>;
+    async fn get_target_by_hostname(&self, hostname: &str)
+    -> Result<Option<Target>, WarpgateError>;
 
     async fn validate_credential(
         &self,
@@ -67,17 +67,16 @@ pub trait ConfigProvider {
         supported_credential_types: &[CredentialKind],
     ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError>;
 
-    async fn authorize_target(
-        &self,
-        username: &str,
-        target: &str,
-    ) -> Result<bool, WarpgateError>;
+    async fn authorize_target(&self, username: &str, target: &str) -> Result<bool, WarpgateError>;
 
     async fn authorize_target_by_id(
         &self,
         user_id: Uuid,
         target_id: Uuid,
     ) -> Result<bool, WarpgateError>;
+
+    /// IDs of all targets the user is authorized for, in a single query.
+    async fn authorized_target_ids(&self, user_id: Uuid) -> Result<HashSet<Uuid>, WarpgateError>;
 
     async fn update_public_key_last_used(
         &self,
@@ -111,10 +110,7 @@ pub async fn authorize_ticket(
             return Ok(None);
         }
 
-        let Some(ticket_user) = e::User::Entity::find_by_id(ticket.user_id)
-            .one(db)
-            .await?
-        else {
+        let Some(ticket_user) = e::User::Entity::find_by_id(ticket.user_id).one(db).await? else {
             return Err(WarpgateError::UserNotFound(ticket.user_id.to_string()));
         };
 
