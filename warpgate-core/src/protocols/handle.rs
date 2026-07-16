@@ -54,41 +54,52 @@ impl WarpgateServerHandle {
         use sea_orm::ActiveValue::Set;
 
         {
-            let mut state = self.session_state.lock().await;
-            state.user_info = Some(user_info.clone());
-            state.emit_change();
+            let state = self.session_state.lock().await;
+            // Kubernetes reuses one session handle for many requests. Avoid emitting a
+            // change and writing the same username to the session row for every request.
+            if state.user_info.as_ref() == Some(&user_info) {
+                return Ok(());
+            }
         }
 
         let db = &self.db;
 
         Session::Entity::update_many()
             .set(Session::ActiveModel {
-                username: Set(Some(user_info.username)),
+                username: Set(Some(user_info.username.clone())),
                 ..Default::default()
             })
             .filter(Session::Column::Id.eq(self.id))
             .exec(db)
             .await?;
 
+        let previous_user_info = {
+            let mut state = self.session_state.lock().await;
+            state.user_info.replace(user_info)
+        };
 
-        self.update_rate_limiters().await?;
+        if let Err(error) = self.update_rate_limiters().await {
+            self.session_state.lock().await.user_info = previous_user_info;
+            return Err(error);
+        }
+        self.session_state.lock().await.emit_change();
 
         Ok(())
     }
 
     pub async fn set_target(&self, target: &Target) -> Result<(), WarpgateError> {
         use sea_orm::ActiveValue::Set;
-        let previous_target = {
-            let mut state = self.session_state.lock().await;
-            let previous_target = state.target.replace(target.clone());
-            state.emit_change();
-            previous_target
-        };
 
-        let Some(user_info) = self.session_state.lock().await.user_info.clone() else {
-            return Err(WarpgateError::InconsistentState(
-                "set_target called before set_user_info".into(),
-            ));
+        let user_info = {
+            let state = self.session_state.lock().await;
+            // Do not emit a change if the target is the same as the previous one.
+            if state.target.as_ref() == Some(target) {
+                return Ok(());
+            }
+
+            state.user_info.clone().ok_or_else(|| {
+                WarpgateError::InconsistentState("set_target called before set_user_info".into())
+            })?
         };
 
         let db = &self.db;
@@ -104,8 +115,18 @@ impl WarpgateServerHandle {
             .exec(db)
             .await?;
 
+        let previous_target = {
+            let mut state = self.session_state.lock().await;
+            state.target.replace(target.clone())
+        };
 
-        if previous_target.map(|x| x.id) != Some(target.id) {
+        if let Err(error) = self.update_rate_limiters().await {
+            self.session_state.lock().await.target = previous_target;
+            return Err(error);
+        }
+        self.session_state.lock().await.emit_change();
+
+        if previous_target.as_ref().map(|x| x.id) != Some(target.id) {
             AuditEvent::TargetSessionStarted {
                 session_id: self.id,
                 target_id: target.id,
@@ -115,8 +136,6 @@ impl WarpgateServerHandle {
             }
             .emit();
         }
-
-        self.update_rate_limiters().await?;
 
         Ok(())
     }
