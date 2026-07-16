@@ -169,6 +169,9 @@ reqwest-websocket = { version = "0.6.0", default-features = false }
 time = { version = "0.3", default-features = false }
 url = { version = "2.4", default-features = false }
 
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 lto = true
 panic = "abort"

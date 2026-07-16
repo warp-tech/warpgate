@@ -647,8 +647,6 @@ impl ServerSession {
         let ssh_targets = {
             self.services
                 .config_provider
-                .lock()
-                .await
                 .list_targets()
                 .await?
                 .into_iter()
@@ -665,8 +663,6 @@ impl ServerSession {
             let is_authorized = self
                 .services
                 .config_provider
-                .lock()
-                .await
                 .authorize_target(username, &target.name)
                 .await?;
 
@@ -1751,8 +1747,6 @@ impl ServerSession {
                 if let Err(err) = self
                     .services
                     .config_provider
-                    .lock()
-                    .await
                     .update_public_key_last_used(key.clone())
                     .await
                 {
@@ -1968,11 +1962,7 @@ impl ServerSession {
                 let cp = self.services.config_provider.clone();
 
                 if let Some(credential) = credential {
-                    return Ok(cp
-                        .lock()
-                        .await
-                        .validate_credential(username, &credential)
-                        .await?);
+                    return Ok(cp.validate_credential(username, &credential).await?);
                 }
 
                 Ok(false)
@@ -2062,7 +2052,7 @@ impl ServerSession {
                     let credential_valid = validate_and_add_credential(
                         &mut state,
                         &credential,
-                        &mut *self.services.config_provider.lock().await,
+                        self.services.config_provider.as_ref(),
                     )
                     .await?;
 
@@ -2102,8 +2092,6 @@ impl ServerSession {
                             let target_auth_result = {
                                 self.services
                                     .config_provider
-                                    .lock()
-                                    .await
                                     .authorize_target(&user_info.username, target_name)
                                     .await?
                             };
@@ -2157,8 +2145,6 @@ impl ServerSession {
         let target = {
             self.services
                 .config_provider
-                .lock()
-                .await
                 .get_target_by_name(target_name)
                 .await?
                 .and_then(|t| match t.options {

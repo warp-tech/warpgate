@@ -270,7 +270,7 @@ impl Api {
         let credential_valid = validate_and_add_credential(
             &mut state,
             &AuthCredential::Password(Secret::new(body.password.clone())),
-            &mut *ctx.services().config_provider.lock().await,
+            ctx.services().config_provider.as_ref(),
         )
         .await?;
 
@@ -372,7 +372,7 @@ impl Api {
         let credential_valid = validate_and_add_credential(
             &mut state,
             &AuthCredential::Otp(body.otp.clone().into()),
-            &mut *services.config_provider.lock().await,
+            services.config_provider.as_ref(),
         )
         .await?;
 

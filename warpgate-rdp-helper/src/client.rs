@@ -245,6 +245,7 @@ fn emit_region(image: &DecodedImage, region: &ironrdp::pdu::geometry::InclusiveR
             height: h as u16,
         }
         .write_into(frame);
+        #[allow(clippy::indexing_slicing)] // bounds guaranteed by the clamp + length check above
         for row in 0..h {
             let src_start = ((top + row) * img_w + left) * 4;
             let src_row = &src[src_start..src_start + w * 4];

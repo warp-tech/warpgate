@@ -108,6 +108,7 @@ async fn run() -> Result<()> {
     // The inherited fd is our end of the socketpair — the raw RDP byte stream the IronRDP
     // server speaks over (Warpgate relays it to the viewer). Safety: Warpgate dup2'd this
     // fd into place before exec and passed us its number; nothing else owns it.
+    #[allow(unsafe_code)]
     let std_stream = unsafe { std::os::unix::net::UnixStream::from_raw_fd(raw_fd) };
     std_stream
         .set_nonblocking(true)

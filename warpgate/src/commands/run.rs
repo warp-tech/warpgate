@@ -316,7 +316,7 @@ pub async fn watch_config_and_reload(
 ) -> Result<()> {
     while config_rx.changed().await.is_ok() {
         let state = services.state.lock().await;
-        let mut cp = services.config_provider.lock().await;
+        let cp = &services.config_provider;
         // TODO no longer happens since everything is in the DB
         for (id, session) in &state.sessions {
             let mut session = session.lock().await;

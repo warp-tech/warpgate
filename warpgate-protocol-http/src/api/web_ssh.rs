@@ -107,9 +107,7 @@ impl Api {
         let services = ctx.services();
         let authorized: bool = services
             .config_provider
-            .lock()
-            .await
-            .authorize_target(username, &target.name)
+            .authorize_target_by_id(user_id, target.id)
             .await?;
 
         if !authorized {

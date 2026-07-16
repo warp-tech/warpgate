@@ -49,7 +49,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a
+      - uses: rlespinasse/github-slug-action@ef93b2ea4b6405d06fd8684fc3ff795d262ecae8
 
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
@@ -58,7 +58,7 @@ jobs:
         with:
           key: "build"
 
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
 

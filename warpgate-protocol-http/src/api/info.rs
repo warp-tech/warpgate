@@ -145,7 +145,7 @@ impl Api {
 
         let setup_state = {
             let (users, targets) = {
-                let mut p = ctx.services().config_provider.lock().await;
+                let p = &ctx.services().config_provider;
                 let users = p.list_users().await?;
                 let targets = p.list_targets().await?;
                 (users, targets)

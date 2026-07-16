@@ -291,8 +291,6 @@ impl Api {
 
         let username = services
             .config_provider
-            .lock()
-            .await
             .username_for_sso_credential(
                 &cred,
                 response.preferred_username.clone(),
@@ -339,7 +337,7 @@ impl Api {
         if !validate_and_add_credential(
             &mut state,
             &cred,
-            &mut *ctx.services().config_provider.lock().await,
+            ctx.services().config_provider.as_ref(),
         )
         .await?
         {
@@ -367,7 +365,7 @@ impl Api {
         }
 
         warpgate_core::resolve_and_map_sso_user(
-            &mut *services.config_provider.lock().await,
+            services.config_provider.as_ref(),
             provider_config,
             &response,
         )

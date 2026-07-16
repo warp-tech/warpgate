@@ -27,7 +27,7 @@ impl Default for KubernetesTargetCertificateAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct TargetSSHOptions {
     pub host: String,
     #[serde(default = "_default_ssh_port")]
@@ -71,7 +71,7 @@ impl Default for SSHTargetAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct TargetHTTPOptions {
     #[serde(default = "_default_empty_string")]
     pub url: String,
@@ -86,7 +86,7 @@ pub struct TargetHTTPOptions {
     pub external_host: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct Tls {
     #[serde(default)]
     pub mode: TlsMode,
@@ -139,7 +139,7 @@ impl DatabaseTargetAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct TargetMySqlOptions {
     #[serde(default = "_default_empty_string")]
     pub host: String,
@@ -200,7 +200,7 @@ pub enum PostgresProtocolVersion {
     V3_2,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct TargetPostgresOptions {
     #[serde(default = "_default_empty_string")]
     pub host: String,
@@ -256,7 +256,7 @@ impl TargetPostgresOptions {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct TargetVncOptions {
     #[serde(default = "_default_empty_string")]
     pub host: String,
@@ -292,7 +292,7 @@ impl Default for VncTargetAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct TargetRdpOptions {
     #[serde(default = "_default_empty_string")]
     pub host: String,
@@ -336,7 +336,7 @@ impl Default for RdpTargetAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct TargetKubernetesOptions {
     #[serde(default = "_default_empty_string")]
     pub cluster_url: String,
@@ -374,7 +374,7 @@ impl Default for KubernetesTargetAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct Target {
     #[serde(default)]
     pub id: Uuid,
@@ -392,7 +392,7 @@ pub struct Target {
     pub ticket_max_uses: Option<i16>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Union)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum TargetOptions {
     #[serde(rename = "ssh")]
