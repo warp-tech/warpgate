@@ -1,5 +1,4 @@
 use core::str;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -326,19 +325,14 @@ async fn cluster_token_matches(
         return Ok(false);
     };
     let provided = header.to_str().map_err(poem::error::BadRequest)?;
+    // Constant-time comparison to prevent timing attacks.
     Ok(ctx
         .services()
         .cluster_token
-        .deref()
-        .as_ref()
-        .is_some_and(|token| {
-            // Constant-time comparison to prevent timing attacks.
-            token
-                .expose_secret()
-                .as_bytes()
-                .ct_eq(provided.as_bytes())
-                .into()
-        }))
+        .expose_secret()
+        .as_bytes()
+        .ct_eq(provided.as_bytes())
+        .into())
 }
 
 pub async fn inject_request_authorization<E: Endpoint + 'static>(
@@ -380,46 +374,41 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         }
     }
 
-    let auth = match session_auth {
-        Some(auth) => Some(RequestAuthorization::Session(auth)),
-        None => match req.headers().get(&X_WARPGATE_TOKEN) {
-            Some(token_from_header) => {
-                let token_from_header = token_from_header
-                    .to_str()
-                    .map_err(poem::error::BadRequest)?;
-                if ctx
-                    .services()
-                    .admin_token
-                    .lock()
-                    .await
-                    .as_deref()
-                    .is_some_and(|admin_token| {
-                        // Use constant time comparison to prevent timing attacks
-                        admin_token
-                            .as_bytes()
-                            .ct_eq(token_from_header.as_bytes())
-                            .into()
-                    })
-                {
-                    Some(RequestAuthorization::AdminToken)
-                } else if cluster_token_matches(&ctx, &req).await? {
-                    Some(RequestAuthorization::ClusterToken)
-                } else if let Some(user) = ctx
-                    .services()
-                    .config_provider
-                    .validate_api_token(token_from_header)
-                    .await?
-                {
-                    Some(RequestAuthorization::UserToken {
-                        user_id: user.id,
-                        username: user.username,
-                    })
-                } else {
-                    None
-                }
-            }
-            None => None,
-        },
+    let auth = if let Some(auth) = session_auth {
+        Some(RequestAuthorization::Session(auth))
+    } else if cluster_token_matches(&ctx, &req).await? {
+        Some(RequestAuthorization::ClusterToken)
+    } else if let Some(token_from_header) = req.headers().get(&X_WARPGATE_TOKEN) {
+        let token_from_header = token_from_header
+            .to_str()
+            .map_err(poem::error::BadRequest)?;
+        if (*ctx.services().admin_token)
+            .as_ref()
+            .is_some_and(|admin_token| {
+                // Use constant time comparison to prevent timing attacks
+                admin_token
+                    .expose_secret()
+                    .as_bytes()
+                    .ct_eq(token_from_header.as_bytes())
+                    .into()
+            })
+        {
+            Some(RequestAuthorization::AdminToken)
+        } else if let Some(user) = ctx
+            .services()
+            .config_provider
+            .validate_api_token(token_from_header)
+            .await?
+        {
+            Some(RequestAuthorization::UserToken {
+                user_id: user.id,
+                username: user.username,
+            })
+        } else {
+            None
+        }
+    } else {
+        None
     };
 
     if let Some(auth) = auth {

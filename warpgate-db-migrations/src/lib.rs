@@ -67,6 +67,8 @@ mod m00062_web_approval_grace_period;
 mod m00063_recordings_storage;
 mod m00064_cluster;
 mod m00065_authorization_indexes;
+mod m00066_cluster_token;
+mod m00067_node_tls_pin;
 
 pub(crate) mod helpers;
 
@@ -141,6 +143,8 @@ impl MigratorTrait for Migrator {
             Box::new(m00063_recordings_storage::Migration),
             Box::new(m00064_cluster::Migration),
             Box::new(m00065_authorization_indexes::Migration),
+            Box::new(m00066_cluster_token::Migration),
+            Box::new(m00067_node_tls_pin::Migration),
         ]
     }
 }

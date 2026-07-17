@@ -20,6 +20,7 @@ regex.workspace = true
 reqwest.workspace = true
 russh.workspace = true
 rust-embed = { version = "8.3", default-features = false }
+rustls.workspace = true
 rustls-pki-types.workspace = true
 sea-orm.workspace = true
 serde.workspace = true

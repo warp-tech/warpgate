@@ -1,9 +1,11 @@
 import base64
 import json
+import sqlite3
 import time
 from uuid import uuid4
 
 import requests
+import yaml
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager
@@ -11,7 +13,16 @@ from .test_recordings_s3 import _read_until
 from .test_ssh_proto import common_args, setup_user_and_target
 from .util import wait_port
 
-CLUSTER_TOKEN = "cluster-secret"
+
+def _cluster_token(config_path):
+    """The auto-generated cluster token, read from the node's database."""
+    config = yaml.safe_load(config_path.open())
+    db_url = config["database_url"]
+    assert db_url.startswith("sqlite:")
+    with sqlite3.connect(db_url.removeprefix("sqlite:")) as db:
+        row = db.execute("SELECT cluster_token FROM parameters").fetchone()
+    assert row and row[0], "cluster token was not generated"
+    return row[0]
 
 
 def _find_in_progress_terminal_recording_id(api):
@@ -31,15 +42,12 @@ class Test:
         timeout,
         wg_c_ed25519_pubkey,
     ):
-        cluster_env = {"WARPGATE_CLUSTER_TOKEN": CLUSTER_TOKEN}
-
-        # Two nodes on one database. Node A owns the session and alone holds the
+        # Two nodes on one database (which also carries the auto-generated
+        # cluster token). Node A owns the session and alone holds the
         # in-progress recording file; node B must proxy live reads to A.
-        node_a = processes.start_wg(
-            config_patch={"recordings": {"enable": True}}, env=cluster_env
-        )
+        node_a = processes.start_wg(config_patch={"recordings": {"enable": True}})
         wait_port(node_a.http_port, recv=False)
-        node_b = processes.start_wg(share_with=node_a, env=cluster_env)
+        node_b = processes.start_wg(share_with=node_a)
         wait_port(node_b.http_port, recv=False)
 
         url_b = f"https://localhost:{node_b.http_port}"
@@ -95,7 +103,7 @@ class Test:
         # admin endpoints, while the admin token still does.
         scoped = requests.get(
             f"{url_b}/@warpgate/admin/api/sessions",
-            headers={"X-Warpgate-Cluster-Token": CLUSTER_TOKEN},
+            headers={"X-Warpgate-Cluster-Token": _cluster_token(node_a.config_path)},
             verify=False,
             timeout=timeout,
         )

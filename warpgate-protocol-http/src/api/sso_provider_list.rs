@@ -334,12 +334,8 @@ impl Api {
 
         let mut state = state_arc.lock().await;
 
-        if !validate_and_add_credential(
-            &mut state,
-            &cred,
-            ctx.services().config_provider.as_ref(),
-        )
-        .await?
+        if !validate_and_add_credential(&mut state, &cred, ctx.services().config_provider.as_ref())
+            .await?
         {
             return Ok(Err(format!(
                 "Failed to validate SSO credential for {username}"

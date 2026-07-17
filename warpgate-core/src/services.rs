@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use sea_orm::DatabaseConnection;
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
@@ -30,11 +31,36 @@ pub struct Services {
     pub config_provider: Arc<ConfigProviderEnum>,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Option<Secret<String>>>,
-    pub cluster_token: Arc<Option<Secret<String>>>,
+    pub cluster_token: Arc<Secret<String>>,
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
     pub listener_status: ListenerStatusRegistry,
+}
+
+/// Upsert the token without conflicts from multiple nodes
+/// starting at the same time
+async fn resolve_cluster_token(db: &DatabaseConnection) -> Result<Secret<String>> {
+    // Ensures the row exists before the conditional update.
+    let params = Parameters::Entity::get(db).await?;
+    if let Some(token) = params.cluster_token {
+        return Ok(Secret::new(token));
+    }
+
+    Parameters::Entity::update_many()
+        .col_expr(
+            Parameters::Column::ClusterToken,
+            Expr::value(Secret::<String>::random().expose_secret().clone()),
+        )
+        .filter(Parameters::Column::ClusterToken.is_null())
+        .exec(db)
+        .await?;
+
+    Parameters::Entity::get(db)
+        .await?
+        .cluster_token
+        .map(Secret::new)
+        .ok_or_else(|| anyhow::anyhow!("cluster token missing after generation"))
 }
 
 impl Services {
@@ -48,7 +74,7 @@ impl Services {
         let recordings = SessionRecordings::new(db.clone(), &params);
         let recordings = Arc::new(Mutex::new(recordings));
 
-        let cluster = Arc::new(Cluster::new(db.clone(), config.store.http.listen.port())?);
+        let cluster = Arc::new(Cluster::new(db.clone(), config.store.http.listen.port()).await?);
         cluster.start().await?;
 
         let config = Arc::new(Mutex::new(config));
@@ -103,12 +129,7 @@ impl Services {
             config_provider,
             auth_state_store,
             admin_token: Arc::new(admin_token.map(Secret::new)),
-            cluster_token: Arc::new(
-                std::env::var("WARPGATE_CLUSTER_TOKEN")
-                    .ok()
-                    .filter(|s| !s.is_empty())
-                    .map(Secret::new),
-            ),
+            cluster_token: Arc::new(resolve_cluster_token(&db).await?),
             login_protection,
             global_params: Arc::new(params),
             listener_status: Arc::default(),

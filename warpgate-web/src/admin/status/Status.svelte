@@ -10,9 +10,6 @@
         '/sessions/:id': wrap({
             asyncComponent: () => import('./Session.svelte'),
         }),
-        '/recordings/:id': wrap({
-            asyncComponent: () => import('./Recording.svelte'),
-        }),
         '/login-protection': wrap({
             asyncComponent: () => import('./LoginProtection.svelte'),
         }),

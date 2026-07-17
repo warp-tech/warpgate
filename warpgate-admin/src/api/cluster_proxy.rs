@@ -11,6 +11,7 @@
 //!
 //! Cross-node proxy requests are authenticated with the cluster token (see `require_recording_access`).
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -19,16 +20,20 @@ use poem::http::HeaderName;
 use poem::http::header::{CONNECTION, CONTENT_LENGTH, COOKIE, HOST, TRANSFER_ENCODING, UPGRADE};
 use poem::web::websocket::WebSocket;
 use poem::{Body, IntoResponse, Request, Response};
-use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
+use tokio_tungstenite::{Connector, client_async_tls_with_config, tungstenite};
+use warpgate_ca::CLUSTER_TLS_SNI_NAME;
 use warpgate_common::Secret;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
 use warpgate_common_http::{AuthenticatedRequestContext, X_WARPGATE_CLUSTER_TOKEN};
-use warpgate_db_entities::Node;
-use warpgate_tls::configure_tls_connector;
+use warpgate_db_entities::{Node, Parameters};
+use warpgate_tls::configure_cluster_tls_connector;
 
 pub struct RemoteNode {
     pub address: String,
+    /// SPKI pin from the node's registry row; peer TLS verification fails
+    /// closed when a node has not published one.
+    pub tls_spki_sha256: Option<String>,
 }
 
 /// Which node owns an in-progress recording
@@ -45,14 +50,9 @@ impl Owner {
     pub fn remote(node: Node::Model) -> Self {
         Self::Remote(RemoteNode {
             address: node.address,
+            tls_spki_sha256: node.tls_spki_sha256,
         })
     }
-}
-
-fn cluster_token(ctx: &AuthenticatedRequestContext) -> poem::Result<Secret<String>> {
-    (*ctx.services().cluster_token)
-        .clone()
-        .ok_or_else(|| anyhow!("This request has to be proxied to another node, but the cluster token is not set on this node. Refer to clustering documentation.").into())
 }
 
 /// Serve a request with `serve_local`, or if data is owned
@@ -68,7 +68,9 @@ where
     Fut: Future<Output = poem::Result<Response>>,
 {
     match owner {
-        Owner::Remote(remote) => forward_http(req, remote, &cluster_token(ctx)?).await,
+        Owner::Remote(remote) => {
+            forward_http(ctx, req, remote, &ctx.services().cluster_token).await
+        }
         Owner::Local => serve_local().await,
     }
 }
@@ -85,17 +87,53 @@ where
     Fut: Future<Output = poem::Result<Response>>,
 {
     match owner {
-        Owner::Remote(remote) => forward_websocket(req, ws, remote, &cluster_token(ctx)?).await,
+        Owner::Remote(remote) => {
+            forward_websocket(ctx, req, ws, remote, &ctx.services().cluster_token).await
+        }
         Owner::Local => serve_local(ws).await,
     }
 }
 
+async fn peer_connection(
+    ctx: &AuthenticatedRequestContext,
+    owner: &RemoteNode,
+) -> poem::Result<(rustls::ClientConfig, SocketAddr)> {
+    let Some(pin) = owner.tls_spki_sha256.clone() else {
+        return Err(anyhow!(
+            "The TLS cert pin for a peer node"
+        )
+        .into());
+    };
+    let params = Parameters::Entity::get(&ctx.services().db)
+        .await
+        .map_err(poem::error::InternalServerError)?;
+    let tls = configure_cluster_tls_connector(params.ca_certificate_pem.as_bytes(), pin)
+        .map_err(poem::error::InternalServerError)?;
+    let addr = tokio::net::lookup_host(&owner.address)
+        .await
+        .map_err(poem::error::BadGateway)?
+        .next()
+        .ok_or_else(|| {
+            poem::error::BadGateway(std::io::Error::other(format!(
+                "cannot resolve peer address {}",
+                owner.address
+            )))
+        })?;
+    Ok((tls, addr))
+}
+
 async fn forward_http(
+    ctx: &AuthenticatedRequestContext,
     req: &Request,
     owner: RemoteNode,
     token: &Secret<String>,
 ) -> poem::Result<Response> {
-    let url = format!("https://{}{}", owner.address, path_and_query(req));
+    let (tls, addr) = peer_connection(ctx, &owner).await?;
+    let url = format!(
+        "https://{CLUSTER_TLS_SNI_NAME}:{}{}",
+        addr.port(),
+        path_and_query(req)
+    );
 
     let mut headers = poem::http::HeaderMap::new();
     for (name, value) in req.headers() {
@@ -104,9 +142,11 @@ async fn forward_http(
         }
     }
 
-    // Expect a self-signed peer cert at the node IP
+    // Per-request client: the TLS config pins one specific peer, so a shared
+    // pooled client cannot be reused across nodes.
     let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
+        .use_preconfigured_tls(tls)
+        .resolve(CLUSTER_TLS_SNI_NAME, addr)
         .build()
         .map_err(poem::error::InternalServerError)?;
 
@@ -130,12 +170,15 @@ async fn forward_http(
 }
 
 async fn forward_websocket(
+    ctx: &AuthenticatedRequestContext,
     req: &Request,
     ws: WebSocket,
     owner: RemoteNode,
     token: &Secret<String>,
 ) -> poem::Result<Response> {
-    let url = format!("wss://{}{}", owner.address, path_and_query(req));
+    let (tls, addr) = peer_connection(ctx, &owner).await?;
+    let host = format!("{CLUSTER_TLS_SNI_NAME}:{}", addr.port());
+    let url = format!("wss://{host}{}", path_and_query(req));
 
     let request = poem::http::Request::builder()
         .uri(&url)
@@ -146,18 +189,22 @@ async fn forward_websocket(
             poem::http::header::SEC_WEBSOCKET_KEY,
             tungstenite::handshake::client::generate_key(),
         )
-        .header(HOST, owner.address.clone())
+        .header(HOST, host)
         .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret())
         .body(())
         .map_err(poem::error::InternalServerError)?;
 
-    let tls = configure_tls_connector(true, false, None)
+    let stream = tokio::net::TcpStream::connect(addr)
         .await
-        .map_err(poem::error::InternalServerError)?;
-    let (peer, _) =
-        connect_async_tls_with_config(request, None, true, Some(Connector::Rustls(Arc::new(tls))))
-            .await
-            .map_err(poem::error::BadGateway)?;
+        .map_err(poem::error::BadGateway)?;
+    let (peer, _) = client_async_tls_with_config(
+        request,
+        stream,
+        None,
+        Some(Connector::Rustls(Arc::new(tls))),
+    )
+    .await
+    .map_err(poem::error::BadGateway)?;
 
     Ok(ws
         .on_upgrade(move |socket| async move {

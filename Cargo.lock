@@ -8169,6 +8169,7 @@ dependencies = [
  "reqwest 0.13.4",
  "russh",
  "rust-embed",
+ "rustls 0.23.41",
  "rustls-pki-types",
  "sea-orm",
  "serde",
@@ -8351,6 +8352,7 @@ dependencies = [
  "url",
  "uuid",
  "warpgate-aws",
+ "warpgate-ca",
  "warpgate-common",
  "warpgate-db-entities",
  "warpgate-db-migrations",
@@ -8727,6 +8729,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tracing",
+ "warpgate-ca",
  "webpki",
  "x509-parser",
 ]

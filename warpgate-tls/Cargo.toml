@@ -10,6 +10,7 @@ bytes.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
 rustls.workspace = true
+warpgate-ca = { path = "../warpgate-ca" }
 rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pki-types.workspace = true
 sea-orm.workspace = true

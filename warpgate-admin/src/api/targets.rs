@@ -270,7 +270,6 @@ impl DetailApi {
         model.ticket_max_uses = Set(body.ticket_max_uses);
         let target = model.update(db).await?;
 
-
         services
             .rate_limiter_registry
             .lock()

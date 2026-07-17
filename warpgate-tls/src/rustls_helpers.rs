@@ -165,3 +165,185 @@ impl ServerCertVerifier for NoHostnameTlsVerifier {
         self.verifier.supported_verify_schemes()
     }
 }
+
+/// TLS verifier used for cluster peer to peer connections
+/// Verifies that a cert is issued by the own warpgate-ca
+/// and SPKI matches the pinned value
+#[derive(Debug)]
+pub struct ClusterPeerVerifier {
+    verifier: Arc<WebPkiServerVerifier>,
+    expected_spki_sha256_hex: String,
+}
+
+impl ClusterPeerVerifier {
+    pub fn new(
+        ca_certificate_pem: &[u8],
+        expected_spki_sha256_hex: String,
+    ) -> Result<Self, RustlsSetupError> {
+        let mut cert_store = rustls::RootCertStore::empty();
+        for cert in CertificateDer::pem_reader_iter(&mut Cursor::new(ca_certificate_pem)) {
+            cert_store.add(cert?)?;
+        }
+        Ok(Self {
+            verifier: WebPkiServerVerifier::builder(Arc::new(cert_store)).build()?,
+            expected_spki_sha256_hex,
+        })
+    }
+}
+
+/// A TLS client config trusting only the cluster peer with
+/// specific pinned certificate
+pub fn configure_cluster_tls_connector(
+    ca_certificate_pem: &[u8],
+    expected_spki_sha256_hex: String,
+) -> Result<ClientConfig, RustlsSetupError> {
+    Ok(
+        ClientConfig::builder_with_provider(
+            Arc::new(rustls::crypto::aws_lc_rs::default_provider()),
+        )
+        .with_safe_default_protocol_versions()?
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(ClusterPeerVerifier::new(
+            ca_certificate_pem,
+            expected_spki_sha256_hex,
+        )?))
+        .with_no_client_auth(),
+    )
+}
+
+impl ServerCertVerifier for ClusterPeerVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
+        ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, TlsError> {
+        // Verify the certificate against CA
+        let verified = self.verifier.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        )?;
+
+        // Verify the SPKI against pin
+        let spki = warpgate_ca::certificate_der_spki_sha256_hex(end_entity.as_ref())
+            .map_err(|e| TlsError::General(e.to_string()))?;
+        if spki != self.expected_spki_sha256_hex {
+            return Err(TlsError::General(
+                "peer certificate key does not match the node's registered pin".into(),
+            ));
+        }
+        Ok(verified)
+    }
+
+    // Delegate the rest
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        self.verifier.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        self.verifier.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.verifier.supported_verify_schemes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rustls::pki_types::PrivateKeyDer;
+    use rustls::{ClientConnection, ServerConnection};
+
+    use super::*;
+
+    fn handshake(
+        client: &mut ClientConnection,
+        server: &mut ServerConnection,
+    ) -> Result<(), TlsError> {
+        while client.is_handshaking() || server.is_handshaking() {
+            let mut buf = Vec::new();
+            while client.wants_write() {
+                client.write_tls(&mut buf).unwrap();
+            }
+            let mut slice = &buf[..];
+            while !slice.is_empty() {
+                server.read_tls(&mut slice).unwrap();
+            }
+            server.process_new_packets()?;
+
+            let mut buf = Vec::new();
+            while server.wants_write() {
+                server.write_tls(&mut buf).unwrap();
+            }
+            let mut slice = &buf[..];
+            while !slice.is_empty() {
+                client.read_tls(&mut slice).unwrap();
+            }
+            client.process_new_packets()?;
+        }
+        Ok(())
+    }
+
+    fn connections(expected_pin: String) -> (warpgate_ca::ClusterTlsIdentity, ClientConnection) {
+        let (ca_cert, ca_key) = warpgate_ca::issue_ca_root_certificate().unwrap();
+        let identity = warpgate_ca::ClusterTlsIdentity::issue(&ca_cert, &ca_key).unwrap();
+
+        let pin = if expected_pin.is_empty() {
+            identity.spki_sha256_hex.clone()
+        } else {
+            expected_pin
+        };
+        let client_config = configure_cluster_tls_connector(ca_cert.as_bytes(), pin).unwrap();
+        let client = ClientConnection::new(
+            Arc::new(client_config),
+            ServerName::try_from(warpgate_ca::CLUSTER_TLS_SNI_NAME).unwrap(),
+        )
+        .unwrap();
+        (identity, client)
+    }
+
+    fn server(identity: &warpgate_ca::ClusterTlsIdentity) -> ServerConnection {
+        let certs = CertificateDer::pem_slice_iter(identity.certificate_pem.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let key = PrivateKeyDer::from_pem_slice(identity.private_key_pem.as_bytes()).unwrap();
+        let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .unwrap();
+        ServerConnection::new(Arc::new(config)).unwrap()
+    }
+
+    #[test]
+    fn cluster_handshake_succeeds() {
+        let (identity, mut client) = connections(String::new());
+        let mut srv = server(&identity);
+        handshake(&mut client, &mut srv).unwrap();
+    }
+
+    #[test]
+    fn cluster_handshake_rejects_wrong_pin() {
+        let (identity, mut client) = connections("00".repeat(32));
+        let mut srv = server(&identity);
+        assert!(handshake(&mut client, &mut srv).is_err());
+    }
+}

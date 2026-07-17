@@ -47,9 +47,7 @@ impl Api {
 
         let user = User::Entity::find_by_id(ticket.user_id).one(db).await?;
 
-        let target = Target::Entity::find_by_id(ticket.target_id)
-            .one(db)
-            .await?;
+        let target = Target::Entity::find_by_id(ticket.target_id).one(db).await?;
 
         if let (Some(user), Some(target)) = (user, target) {
             AuditEvent::TicketDeleted {

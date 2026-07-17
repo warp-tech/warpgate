@@ -38,7 +38,7 @@ use warpgate_common_http::logging::{
 use warpgate_common_http::warpgate_csp_with_connect_src;
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
-use warpgate_tls::TlsCertificateAndPrivateKey;
+use warpgate_tls::{TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey};
 use warpgate_web::Assets;
 use warpgate_web_desktop::WebDesktopClientManager;
 use warpgate_web_desktop::api::ws_handler as desktop_web_client_ws_handler;
@@ -108,8 +108,21 @@ impl ProtocolServer for HTTPProtocolServer {
         self,
         address: ListenEndpoint,
         proxy_protocol: bool,
-        tls: Vec<TlsCertificateAndPrivateKey>,
+        mut tls: Vec<TlsCertificateAndPrivateKey>,
     ) -> Result<BoxFuture<'static, Result<()>>> {
+        // Present the cluster identity certificate along other SNI certs
+        if !tls.is_empty() { // catch the weird case of no cert at all
+            let identity = &self.services.cluster.tls_identity;
+            tls.push(TlsCertificateAndPrivateKey {
+                certificate: TlsCertificateBundle::from_bytes(
+                    identity.certificate_pem.clone().into_bytes(),
+                )?,
+                private_key: TlsPrivateKey::from_bytes(
+                    identity.private_key_pem.clone().into_bytes(),
+                )?,
+            });
+        }
+
         let session_storage = make_session_storage();
         let session_store = SessionStore::new();
         let http_client_cache = HttpClientCache::default();

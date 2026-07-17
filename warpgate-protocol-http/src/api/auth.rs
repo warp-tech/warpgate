@@ -199,16 +199,17 @@ impl Api {
 
         // Check if IP is blocked
         if let Some(ip) = client_ip
-            && let Some(block_info) = services.login_protection.check_ip_blocked(&ip).await? {
-                warn!(
-                    ip = %ip,
-                    expires_at = %block_info.expires_at,
-                    "Login attempt from blocked IP"
-                );
-                return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
-                    ApiAuthState::IpBlocked,
-                ))));
-            }
+            && let Some(block_info) = services.login_protection.check_ip_blocked(&ip).await?
+        {
+            warn!(
+                ip = %ip,
+                expires_at = %block_info.expires_at,
+                "Login attempt from blocked IP"
+            );
+            return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                ApiAuthState::IpBlocked,
+            ))));
+        }
 
         // Password login can be disabled globally (e.g. SSO-only deployments).
         if ctx.parameters().await?.password_login_mode == Parameters::PasswordLoginMode::Disabled {
@@ -335,16 +336,17 @@ impl Api {
 
         // Check if IP is blocked
         if let Some(ip) = client_ip
-            && let Some(block_info) = services.login_protection.check_ip_blocked(&ip).await? {
-                warn!(
-                    ip = %ip,
-                    expires_at = %block_info.expires_at,
-                    "OTP login attempt from blocked IP"
-                );
-                return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
-                    ApiAuthState::IpBlocked,
-                ))));
-            }
+            && let Some(block_info) = services.login_protection.check_ip_blocked(&ip).await?
+        {
+            warn!(
+                ip = %ip,
+                expires_at = %block_info.expires_at,
+                "OTP login attempt from blocked IP"
+            );
+            return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
+                ApiAuthState::IpBlocked,
+            ))));
+        }
 
         let Some(state_arc) = get_auth_state_for_request(req, &ctx).await? else {
             return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
@@ -400,18 +402,17 @@ impl Api {
             }
             x => {
                 // Only an invalid OTP counts as a failed attempt.
-                if !credential_valid
-                    && let Some(ip) = client_ip {
-                        let _ = services
-                            .login_protection
-                            .record_failed_attempt(FailedAttemptInfo {
-                                username: state.user_info().username.clone(),
-                                remote_ip: ip,
-                                protocol: "http".to_string(),
-                                credential_type: "otp".to_string(),
-                            })
-                            .await;
-                    }
+                if !credential_valid && let Some(ip) = client_ip {
+                    let _ = services
+                        .login_protection
+                        .record_failed_attempt(FailedAttemptInfo {
+                            username: state.user_info().username.clone(),
+                            remote_ip: ip,
+                            protocol: "http".to_string(),
+                            credential_type: "otp".to_string(),
+                        })
+                        .await;
+                }
                 Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                     state: x.into(),
                     credential_rejected: !credential_valid,
