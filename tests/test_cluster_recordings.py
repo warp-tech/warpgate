@@ -19,7 +19,9 @@ def _cluster_token(config_path):
     config = yaml.safe_load(config_path.open())
     db_url = config["database_url"]
     assert db_url.startswith("sqlite:")
-    with sqlite3.connect(db_url.removeprefix("sqlite:")) as db:
+    # A sqlite URL names a directory (relative to the config dir) that holds db.sqlite3
+    db_file = config_path.parent / db_url.removeprefix("sqlite:") / "db.sqlite3"
+    with sqlite3.connect(db_file) as db:
         row = db.execute("SELECT cluster_token FROM parameters").fetchone()
     assert row and row[0], "cluster token was not generated"
     return row[0]
