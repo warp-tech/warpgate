@@ -109,7 +109,7 @@
 </script>
 
 <div class="container-max-md">
-    <Loadable promise={init()}>
+    <Loadable promise={init()} bind:value={target}>
         {#snippet children(target)}
             <Modal
                 isOpen={connectionsInstructionsModalOpen}

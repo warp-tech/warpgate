@@ -143,7 +143,7 @@
 </script>
 
 <div class="container-max-md">
-    <Loadable promise={initPromise}>
+    <Loadable promise={initPromise} bind:value={role}>
         {#snippet children(role)}
             <div class="page-summary-bar">
                 <div>

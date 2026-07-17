@@ -6,23 +6,34 @@
 
     let {
         promise,
+        value = $bindable(),
         children,
     }: {
         promise: Promise<T>
-        children: Snippet<[T]>
+        /**
+         * Bind this to the variable holding the loaded value to keep the
+         * children snippet in sync when the page later reassigns it —
+         * otherwise the snippet only sees the value the promise resolved to.
+         */
+        value?: T
+        children?: Snippet<[T]>
     } = $props()
 
     let loaded = $state(false)
-    const EMPTY = Symbol()
-    let data = $state<T | typeof EMPTY>(EMPTY)
+    let resolved = $state(false)
     let error: string | undefined = $state()
+
+    // "resolved" guards against rendering before the value is set, since on
+    // rejection `loaded` becomes true before the async stringifyError lands.
+    const currentValue = $derived(value as T)
 
     $effect(() => {
         loaded = false
-        data = EMPTY
+        resolved = false
         promise
             .then(d => {
-                data = d
+                value = d
+                resolved = true
             })
             .catch(err => {
                 stringifyError(err).then(e => {
@@ -37,14 +48,10 @@
 
 {#if !loaded}
     <DelayedSpinner />
-{:else}
-    {#if !error}
-        {#if data !== EMPTY}
-            {@render children?.(data)}
-        {/if}
-    {:else}
-        <Alert color="danger">
-            {error}
-        </Alert>
-    {/if}
+{:else if error}
+    <Alert color="danger">
+        {error}
+    </Alert>
+{:else if resolved}
+    {@render children?.(currentValue)}
 {/if}
