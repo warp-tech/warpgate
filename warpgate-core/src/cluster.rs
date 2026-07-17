@@ -8,8 +8,9 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use tracing::{info, warn};
 use uuid::Uuid;
+use warpgate_ca::ClusterTlsIdentity;
 use warpgate_common::WarpgateError;
-use warpgate_db_entities::{Node, Session};
+use warpgate_db_entities::{Node, Parameters, Session};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const REAP_INTERVAL: Duration = Duration::from_secs(15);
@@ -18,16 +19,23 @@ const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Cluster identity, registers our ephemeral identity in the node list
 pub struct Cluster {
     pub node_id: Uuid,
+    /// Peer auth certificate issued for this process
+    pub tls_identity: ClusterTlsIdentity,
     db: DatabaseConnection,
-    /// Peer addres (host:port)
+    /// Peer address (host:port)
     address: String,
     hostname: String,
 }
 
 impl Cluster {
-    pub fn new(db: DatabaseConnection, http_port: u16) -> std::io::Result<Self> {
+    pub async fn new(db: DatabaseConnection, http_port: u16) -> Result<Self, WarpgateError> {
+        let params = Parameters::Entity::get(&db).await?;
         Ok(Self {
             node_id: Uuid::new_v4(),
+            tls_identity: ClusterTlsIdentity::issue(
+                &params.ca_certificate_pem,
+                &params.ca_private_key_pem,
+            )?,
             db,
             address: advertised_peer_address(http_port)?,
             hostname: std::net::hostname()?.to_string_lossy().to_string(),
@@ -74,6 +82,7 @@ impl Cluster {
             address: Set(self.address.clone()),
             hostname: Set(self.hostname.clone()),
             last_seen: Set(OffsetDateTime::now_utc()),
+            tls_spki_sha256: Set(Some(self.tls_identity.spki_sha256_hex.clone())),
         };
         // Upsert: SeaORM emits `ON CONFLICT DO UPDATE` (Postgres/SQLite) or
         // `ON DUPLICATE KEY UPDATE` (MySQL). `exec_without_returning` avoids the
@@ -86,6 +95,7 @@ impl Cluster {
                         Node::Column::Address,
                         Node::Column::Hostname,
                         Node::Column::LastSeen,
+                        Node::Column::TlsSpkiSha256,
                     ])
                     .to_owned(),
             )

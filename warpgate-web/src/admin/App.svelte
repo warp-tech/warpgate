@@ -44,6 +44,9 @@
             component: Redirect,
             props: { to: '/status/sessions' },
         }),
+        '/status/recordings/:id': wrap({
+            asyncComponent: () => import('./status/Recording.svelte'),
+        }),
         '/status': wrap({
             asyncComponent: () => import('./status/Status.svelte'),
         }),

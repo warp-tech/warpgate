@@ -242,7 +242,6 @@ impl DetailApi {
         });
         let user = model.update(db).await?;
 
-
         ctx.services()
             .rate_limiter_registry
             .lock()
@@ -545,10 +544,7 @@ impl RolesApi {
 
         let mut results = Vec::new();
         for assignment in assignments {
-            let Some(role) = Role::Entity::find_by_id(assignment.role_id)
-                .one(db)
-                .await?
-            else {
+            let Some(role) = Role::Entity::find_by_id(assignment.role_id).one(db).await? else {
                 continue;
             };
             results.push(build_assignment_response(&assignment, &role));

@@ -7,6 +7,8 @@ pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthori
 use poem::http::HeaderName;
 
 pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
+pub static X_WARPGATE_CLUSTER_TOKEN: HeaderName =
+    HeaderName::from_static("x-warpgate-cluster-token");
 
 // style-src unsafe-inline for Svelte
 // img-src data: for TOTP codes

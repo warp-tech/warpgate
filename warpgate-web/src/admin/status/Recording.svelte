@@ -5,7 +5,6 @@
     import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
-    import Loadable from 'common/Loadable.svelte'
     import KubernetesRecording from './KubernetesRecording.svelte'
 
     interface Props {
@@ -59,9 +58,5 @@
     <DesktopRecordingPlayer {recording} />
 {/if}
 {#if recording?.kind === RecordingKind.Kubernetes}
-    <Loadable promise={api.getKubernetesRecording({ id: recording.id })}>
-        {#snippet children(items)}
-            <KubernetesRecording {items} />
-        {/snippet}
-    </Loadable>
+    <KubernetesRecording {recording} />
 {/if}

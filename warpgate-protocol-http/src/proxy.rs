@@ -94,10 +94,13 @@ fn strip_warpgate_internal_query_params(pq: &PathAndQuery) -> Result<PathAndQuer
     };
     let query = form_urlencoded::parse(query.as_bytes())
         .filter(|(key, _)| key != "warpgate-target" && key != "warpgate-ticket")
-        .fold(form_urlencoded::Serializer::new(String::new()), |mut s, (k, v)| {
-            s.append_pair(&k, &v);
-            s
-        })
+        .fold(
+            form_urlencoded::Serializer::new(String::new()),
+            |mut s, (k, v)| {
+                s.append_pair(&k, &v);
+                s
+            },
+        )
         .finish();
     let path = pq.path();
     let rebuilt = if query.is_empty() {

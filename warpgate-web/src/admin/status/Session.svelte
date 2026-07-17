@@ -146,6 +146,9 @@
                     {:else}
                         {formatDistanceToNow(new Date(session.started))}
                     {/if}
+                    {#if session.nodeHostname}
+                        · on {session.nodeHostname}
+                    {/if}
                 </span>
             </div>
         </div>

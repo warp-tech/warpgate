@@ -1,13 +1,73 @@
 <script lang="ts">
     import { Badge } from '@sveltestrap/sveltestrap'
+    import type { Recording } from 'admin/lib/api'
+    import { onMount } from 'svelte'
     import { firstBy } from 'thenby'
-    import type { KubernetesRecordingItem } from '../lib/api'
 
     interface Props {
-        items: KubernetesRecordingItem[]
+        recording: Recording
     }
 
-    let { items }: Props = $props()
+    let { recording }: Props = $props()
+
+    // Parsed from the raw NDJSON recording (served like every other recording).
+    // The stored bodies are JSON payloads: the request base64-encoded, the
+    // response a raw byte array; both are decoded here for display.
+    interface KubernetesItem {
+        timestamp: Date
+        requestMethod: string
+        requestPath: string
+        responseStatus?: number
+        requestBody: { kind?: string } | null
+        responseBody: {
+            kind?: string
+            columnDefinitions?: { name: string }[]
+            items?: {
+                metadata: {
+                    name: string
+                    namespace: string
+                }
+            }[]
+            rows?: { cells: unknown[] }[]
+        } | null
+    }
+
+    let items: KubernetesItem[] = $state([])
+
+    function decodeJson<T>(bytes: Uint8Array): T | null {
+        try {
+            return JSON.parse(new TextDecoder().decode(bytes))
+        } catch {
+            return null
+        }
+    }
+
+    onMount(async () => {
+        const url = `/@warpgate/admin/api/recordings/${recording.id}/data`
+        const text = await fetch(url).then(r => r.text())
+        const parsed: KubernetesItem[] = []
+        for (const line of text.split('\n')) {
+            if (!line.trim()) {
+                continue
+            }
+            const raw = JSON.parse(line)
+            const requestBytes = Uint8Array.from(atob(raw.request_body), c =>
+                c.charCodeAt(0),
+            )
+            const responseBytes = raw.response_body
+                ? Uint8Array.from(raw.response_body)
+                : new Uint8Array()
+            parsed.push({
+                timestamp: new Date(raw.timestamp),
+                requestMethod: raw.request_method,
+                requestPath: raw.request_path,
+                responseStatus: raw.response_status ?? undefined,
+                requestBody: decodeJson(requestBytes),
+                responseBody: decodeJson(responseBytes),
+            })
+        }
+        items = parsed
+    })
 
     const sortedItems = $derived(
         items

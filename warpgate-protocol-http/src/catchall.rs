@@ -108,7 +108,9 @@ async fn get_target_for_request(
                 session.get_target_name()
             };
         }
-        RequestAuthorization::UserToken { .. } | RequestAuthorization::AdminToken => {
+        RequestAuthorization::UserToken { .. }
+        | RequestAuthorization::AdminToken
+        | RequestAuthorization::ClusterToken => {
             return Ok(None);
         }
     };

@@ -8,14 +8,14 @@ publish = false
 [dependencies]
 aws-lc-rs = { version = "1", default-features = false }
 bytes.workspace = true
-const-oid = { version = "0.9", default-features = false }
+const-oid = { version = "0.9", default-features = false, features = ["db"] }
 data-encoding.workspace = true
-der = { version = "0.7", default-features = false }
+der = { version = "0.7", default-features = false, features = ["pem", "alloc"] }
 
-hex.workspace = true
+hex = { workspace = true, features = ["alloc"] }
 pem = { version = "3.0", default-features = false }
 rcgen.workspace = true
-spki = { version = "0.7", default-features = false }
+spki = { version = "0.7", default-features = false, features = ["pem"] }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

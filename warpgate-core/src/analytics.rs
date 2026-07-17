@@ -59,10 +59,7 @@ pub fn track_url() -> String {
     format!("{}/track", endpoint().trim_end_matches('/'))
 }
 
-async fn build_properties(
-    db: &DatabaseConnection,
-    normal: bool,
-) -> Result<Map<String, Value>> {
+async fn build_properties(db: &DatabaseConnection, normal: bool) -> Result<Map<String, Value>> {
     let mut properties = Map::new();
     properties.insert("version_series".into(), json!(major_minor_version()));
 
@@ -112,9 +109,7 @@ fn track_payload(instance_id: &str, properties: Map<String, Value>) -> Value {
 }
 
 pub async fn preview(db: &DatabaseConnection, normal: bool) -> Result<(String, Value)> {
-    let instance_id = {
-        Parameters::Entity::get(db).await?.analytics_instance_id
-    };
+    let instance_id = { Parameters::Entity::get(db).await?.analytics_instance_id };
     let properties = build_properties(db, normal).await?;
     Ok((track_url(), track_payload(&instance_id, properties)))
 }

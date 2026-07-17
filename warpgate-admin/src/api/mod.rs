@@ -2,6 +2,7 @@ use poem_openapi::OpenApi;
 
 mod admin_roles;
 mod certificate_credentials;
+mod cluster_proxy;
 mod common;
 mod known_hosts_detail;
 mod known_hosts_list;

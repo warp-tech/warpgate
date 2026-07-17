@@ -14,6 +14,10 @@ pub struct SessionSnapshot {
     pub ended: Option<OffsetDateTime>,
     pub ticket_id: Option<Uuid>,
     pub protocol: String,
+    pub node_id: Option<Uuid>,
+    /// Hostname of the owning node; only filled in by the session detail
+    /// endpoint, and only while the node is registered.
+    pub node_hostname: Option<String>,
 }
 
 impl From<Session::Model> for SessionSnapshot {
@@ -28,6 +32,8 @@ impl From<Session::Model> for SessionSnapshot {
             ended: model.ended,
             ticket_id: model.ticket_id,
             protocol: model.protocol,
+            node_id: model.node_id,
+            node_hostname: None,
         }
     }
 }

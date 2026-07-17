@@ -263,7 +263,7 @@ impl AuthStateStore {
         grace: Duration,
     ) -> Result<bool, WarpgateError> {
         let Some(key) = state_arc.lock().await.web_approval_match_key() else {
-            return Ok(false)
+            return Ok(false);
         };
 
         // A remembered approval matches either this exact target or all targets.
@@ -437,7 +437,8 @@ mod tests {
         assert!(!store.recent_approval_is_fresh(&approval_key(Some("staging")), grace));
         // Different credentials are not a full match.
         let mut wrong_cred = approval_key(Some("prod"));
-        wrong_cred.other_credentials = vec![AuthCredentialFingerprint::Password { hash: [9u8; 32] }];
+        wrong_cred.other_credentials =
+            vec![AuthCredentialFingerprint::Password { hash: [9u8; 32] }];
         assert!(!store.recent_approval_is_fresh(&wrong_cred, grace));
         // A zero grace never counts as fresh, so approval is required again.
         assert!(!store.recent_approval_is_fresh(&approval_key(Some("prod")), Duration::ZERO));
@@ -451,7 +452,9 @@ mod tests {
         store.record_web_approval(approval_key(None));
 
         // An all-targets approval is found via `for_all_targets` for any target.
-        assert!(store.recent_approval_is_fresh(&approval_key(Some("prod")).for_all_targets(), grace));
+        assert!(
+            store.recent_approval_is_fresh(&approval_key(Some("prod")).for_all_targets(), grace)
+        );
         assert!(
             store.recent_approval_is_fresh(&approval_key(Some("staging")).for_all_targets(), grace)
         );

@@ -99,14 +99,6 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200, 404},
     ),
     AdminApiTestCase(
-        id="get_kubernetes_recording",
-        permission="recordings_view",
-        call=lambda api, r: api.get_kubernetes_recording_with_http_info(
-            r["recording_id"]
-        ),
-        expected_statuses={200, 404},
-    ),
-    AdminApiTestCase(
         id="get_roles",
         permission=None,
         call=lambda api, r: api.get_roles_with_http_info(),
