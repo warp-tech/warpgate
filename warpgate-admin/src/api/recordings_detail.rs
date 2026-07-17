@@ -12,7 +12,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::broadcast;
 use tracing::error;
 use uuid::Uuid;
@@ -215,28 +215,30 @@ async fn replay_scratch_span_awaiting<S: futures::Sink<Message> + Unpin>(
     target: u64,
     timeout: Duration,
 ) -> anyhow::Result<bool> {
-    let deadline = Instant::now() + timeout;
+    let mut deadline = Instant::now() + timeout;
 
     while *sent < target {
-        let mut buf = Vec::new();
+        let read_from = *sent;
         let mut file = tokio::fs::File::open(path).await?;
         file.seek(SeekFrom::Start(*sent)).await?;
-        // read all we can
-        file.take(target - *sent).read_to_end(&mut buf).await?;
-
-        // split keeping newlines
-        for chunk in buf.split_inclusive(|b| *b == b'\n') {
+        // Line-at-a-time buffered read: the missed span can be arbitrarily
+        // large, so memory use must be bounded by one item, not the span
+        let mut reader = BufReader::new(file.take(target - *sent));
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            reader.read_until(b'\n', &mut line).await?;
             // the last line will have no newline at the end if it's incomplete
-            let Some(line) = chunk.strip_suffix(b"\n") else {
+            let Some(item) = line.strip_suffix(b"\n") else {
                 // at this point we need to wait and try again
                 break;
             };
-            let end = *sent + chunk.len() as u64;
-            if !line.is_empty()
+            let end = *sent + line.len() as u64;
+            if !item.is_empty()
                 && !send_message(
                     sink,
                     &LiveStreamMessage::Data {
-                        data: serde_json::from_slice(line)?,
+                        data: serde_json::from_slice(item)?,
                         offset: end,
                     },
                 )
@@ -248,7 +250,11 @@ async fn replay_scratch_span_awaiting<S: futures::Sink<Message> + Unpin>(
         }
 
         if *sent < target {
-            if Instant::now() > deadline {
+            // The timeout only limits waiting on the file to grow, not the
+            // (client-paced) sending above
+            if *sent > read_from {
+                deadline = Instant::now() + timeout;
+            } else if Instant::now() > deadline {
                 tracing::warn!("Recording file lags its live stream; leaving a gap for the viewer");
                 break;
             }
