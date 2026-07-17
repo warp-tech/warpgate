@@ -271,6 +271,10 @@ mod tests {
 
     use super::*;
 
+    fn install_crypto_provider() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    }
+
     fn handshake(
         client: &mut ClientConnection,
         server: &mut ServerConnection,
@@ -335,6 +339,7 @@ mod tests {
 
     #[test]
     fn cluster_handshake_succeeds() {
+        install_crypto_provider();
         let (identity, mut client) = connections(String::new());
         let mut srv = server(&identity);
         handshake(&mut client, &mut srv).unwrap();
@@ -342,6 +347,7 @@ mod tests {
 
     #[test]
     fn cluster_handshake_rejects_wrong_pin() {
+        install_crypto_provider();
         let (identity, mut client) = connections("00".repeat(32));
         let mut srv = server(&identity);
         assert!(handshake(&mut client, &mut srv).is_err());

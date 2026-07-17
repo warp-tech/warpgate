@@ -1,13 +1,18 @@
+use std::io::SeekFrom;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use poem::error::{InternalServerError, NotFoundError};
-use poem::web::websocket::{Message, WebSocket};
+use poem::web::websocket::{Message, WebSocket, WebSocketStream};
 use poem::web::{Data, Redirect, StaticFileRequest};
 use poem::{IntoResponse, handler};
-use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::broadcast;
 use tracing::error;
 use uuid::Uuid;
@@ -41,7 +46,7 @@ impl Api {
     async fn api_get_recording(
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
-        id: Path<Uuid>,
+        id: poem_openapi::param::Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetRecordingResponse> {
         require_recording_access(&ctx).await?;
@@ -175,51 +180,156 @@ enum LiveStreamMessage {
     End,
 }
 
-/// Relay a recording's live broadcast to a WebSocket: a `Start` frame, then one
-/// `Data` frame per item, then `End`. Terminal and desktop share this — both just
-/// forward the raw item + offset; the player renders it per its own format.
+/// Send one message, false = client disconnected (not an error)
+async fn send_message<S: futures::Sink<Message> + Unpin>(
+    sink: &mut S,
+    message: &LiveStreamMessage,
+) -> anyhow::Result<bool> {
+    Ok(sink
+        .send(Message::Text(serde_json::to_string(message)?))
+        .await
+        .is_ok())
+}
+
+/// next item retained in the received, ignoring Lagged errors
+/// None if the receiver is closed (recording ended)
+async fn next_retained(receiver: &mut broadcast::Receiver<LiveChunk>) -> Option<LiveChunk> {
+    loop {
+        match receiver.recv().await {
+            Ok(chunk) => return Some(chunk),
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => return None,
+        }
+    }
+}
+
+const LAG_REPLAY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Replay a part of the scratch recording between two points
+/// If the last portion has not been written yet, try to wait for a while
+/// for it to get written
+async fn replay_scratch_span_awaiting<S: futures::Sink<Message> + Unpin>(
+    sink: &mut S,
+    path: &Path,
+    sent: &mut u64,
+    target: u64,
+    timeout: Duration,
+) -> anyhow::Result<bool> {
+    let deadline = Instant::now() + timeout;
+
+    while *sent < target {
+        let mut buf = Vec::new();
+        let mut file = tokio::fs::File::open(path).await?;
+        file.seek(SeekFrom::Start(*sent)).await?;
+        // read all we can
+        file.take(target - *sent).read_to_end(&mut buf).await?;
+
+        // split keeping newlines
+        for chunk in buf.split_inclusive(|b| *b == b'\n') {
+            // the last line will have no newline at the end if it's incomplete
+            let Some(line) = chunk.strip_suffix(b"\n") else {
+                // at this point we need to wait and try again
+                break;
+            };
+            let end = *sent + chunk.len() as u64;
+            if !line.is_empty()
+                && !send_message(
+                    sink,
+                    &LiveStreamMessage::Data {
+                        data: serde_json::from_slice(line)?,
+                        offset: end,
+                    },
+                )
+                .await?
+            {
+                return Ok(false);
+            }
+            *sent = end;
+        }
+
+        if *sent < target {
+            if Instant::now() > deadline {
+                tracing::warn!("Recording file lags its live stream; leaving a gap for the viewer");
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    Ok(true)
+}
+
+/// Relay a recording live broadcast into a socket
+async fn serve_live_stream(
+    mut sink: SplitSink<WebSocketStream, Message>,
+    mut source: SplitStream<WebSocketStream>,
+    mut receiver: broadcast::Receiver<LiveChunk>,
+    path: &Path,
+) -> anyhow::Result<()> {
+    // Everything already in the scratch has been fetched by the
+    // client separately - start at the end of the scratch
+    let mut sent = tokio::fs::metadata(&path).await?.len();
+    loop {
+        let chunk = tokio::select! {
+            item = receiver.recv() => match item {
+                Ok(chunk) => Some(chunk),
+                // Client is lagging - replay everything it has missed
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let chunk = next_retained(&mut receiver).await;
+                    let end = match &chunk {
+                        Some(chunk) => chunk.offset - chunk.data.len() as u64,
+                        // Recording ended - just replay to the end
+                        None => tokio::fs::metadata(&path).await?.len(),
+                    };
+                    if !replay_scratch_span_awaiting(&mut sink, &path, &mut sent, end, LAG_REPLAY_TIMEOUT).await? {
+                        return Ok(());
+                    }
+                    chunk
+                }
+                Err(broadcast::error::RecvError::Closed) => None,
+            },
+            // Pump the recv stream to detect disconnection
+            frame = source.next() => match frame {
+                None | Some(Err(_)) => return Ok::<(), anyhow::Error>(()),
+                Some(Ok(_)) => continue,
+            },
+        };
+        let message = match chunk {
+            Some(LiveChunk { offset, data }) => {
+                // Already replayed from the file after a lag
+                if offset <= sent {
+                    continue;
+                }
+                sent = offset;
+                LiveStreamMessage::Data {
+                    data: serde_json::from_slice(&data)?,
+                    offset,
+                }
+            }
+            None => LiveStreamMessage::End,
+        };
+        if !send_message(&mut sink, &message).await? || matches!(message, LiveStreamMessage::End) {
+            return Ok(());
+        }
+    }
+}
+
 fn live_stream_response(
     ws: WebSocket,
-    receiver: Option<broadcast::Receiver<LiveChunk>>,
+    live: Option<(broadcast::Receiver<LiveChunk>, std::path::PathBuf)>,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| async move {
-        let (mut sink, _) = socket.split();
+        let (mut sink, source) = socket.split();
 
         sink.send(Message::Text(serde_json::to_string(
             &LiveStreamMessage::Start {
-                live: receiver.is_some(),
+                live: live.is_some(),
             },
         )?))
         .await?;
 
-        if let Some(mut receiver) = receiver {
+        if let Some((receiver, path)) = live {
             tokio::spawn(async move {
-                if let Err(error) = async {
-                    loop {
-                        match receiver.recv().await {
-                            Ok(LiveChunk { offset, data }) => {
-                                let item: serde_json::Value = serde_json::from_slice(&data)?;
-                                sink.send(Message::Text(serde_json::to_string(
-                                    &LiveStreamMessage::Data { data: item, offset },
-                                )?))
-                                .await?;
-                            }
-                            // A slow viewer fell behind the broadcast ring: skip the
-                            // dropped items and keep tailing. This leaves a gap the
-                            // client can only heal by reloading the snapshot, but it is
-                            // not the recording ending, so don't send `End`.
-                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                            Err(broadcast::error::RecvError::Closed) => break,
-                        }
-                    }
-                    sink.send(Message::Text(serde_json::to_string(
-                        &LiveStreamMessage::End,
-                    )?))
-                    .await?;
-                    Ok::<(), anyhow::Error>(())
-                }
-                .await
-                {
+                if let Err(error) = serve_live_stream(sink, source, receiver, &path).await {
                     error!(%error, "Livestream error:");
                 }
             });
@@ -242,15 +352,27 @@ pub async fn api_get_recording_stream(
     let owner = recording_owner(&ctx, &recording).await?;
 
     proxy_or_serve_websocket(&ctx, req, ws, owner, async move |ws| {
-        let receiver = ctx
-            .services()
-            .recordings
-            .lock()
-            .await
-            .subscribe_live(&id)
-            .await;
+        let recordings = ctx.services().recordings.lock().await;
+        let live = match recordings.subscribe_live(&id).await {
+            Some(receiver) => {
+                // An in-progress recording is always a local file on the owner
+                // node (S3 uploads stream from a local scratch), and only the
+                // owner has a live subscription.
+                let access = recordings
+                    .access(&recording, RecordingFile::NDJsonData)
+                    .await
+                    .map_err(InternalServerError)?;
+                let path = access.local_path().ok_or_else(|| {
+                    InternalServerError(std::io::Error::other(
+                        "in-progress recording has no local file",
+                    ))
+                })?;
+                Some((receiver, path.to_owned()))
+            }
+            None => None,
+        };
 
-        Ok(live_stream_response(ws, receiver).into_response())
+        Ok(live_stream_response(ws, live).into_response())
     })
     .await
 }
@@ -280,4 +402,48 @@ pub async fn recording_owner(
     };
 
     Ok(Owner::remote(node))
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::StreamExt;
+
+    use super::*;
+
+    /// `replay_scratch_span_awaiting` replays exactly the complete lines in `sent..target`,
+    /// with each offset being the line's end position in the file.
+    #[tokio::test]
+    async fn file_span_replay() {
+        let path = std::env::temp_dir().join(format!("warpgate-test-{}", Uuid::new_v4()));
+        //                offsets:  8 ---------- 16 ---------- 24 --- partial tail
+        tokio::fs::write(&path, b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n{\"d\"")
+            .await
+            .unwrap();
+
+        let (mut sink, stream) = futures::channel::mpsc::unbounded::<Message>();
+        let mut sent = 8;
+        assert!(
+            replay_scratch_span_awaiting(&mut sink, &path, &mut sent, 24, LAG_REPLAY_TIMEOUT)
+                .await
+                .unwrap()
+        );
+        drop(sink);
+        tokio::fs::remove_file(&path).await.unwrap();
+
+        assert_eq!(sent, 24);
+        let messages: Vec<String> = stream
+            .map(|m| match m {
+                Message::Text(text) => text,
+                other => panic!("unexpected message {other:?}"),
+            })
+            .collect()
+            .await;
+        assert_eq!(
+            messages,
+            vec![
+                r#"{"type":"data","data":{"b":2},"offset":16}"#,
+                r#"{"type":"data","data":{"c":3},"offset":24}"#,
+            ]
+        );
+    }
 }
