@@ -17,7 +17,7 @@ pub async fn has_admin_permission(
     if matches!(auth, RequestAuthorization::AdminToken) {
         return Ok(true);
     }
-    // Cluster tokens are scoped to the recording endpoints, never general admin.
+    // Cluster tokens are scoped to cross-node proxied endpoints, never general admin.
     if matches!(auth, RequestAuthorization::ClusterToken) {
         return Ok(false);
     }
@@ -99,15 +99,17 @@ pub async fn require_admin_permission(
     }
 }
 
-/// Gate for the recording access endpoints, which might have to be forwarded
-/// between nodes - so they accept a cluster token as auth
-pub async fn require_recording_access(
+/// Gate for endpoints that might have to be forwarded between nodes - so they
+/// accept a cluster token as auth (the origin node has already authorized the
+/// admin before forwarding)
+pub async fn require_cluster_or_admin_permission(
     ctx: &warpgate_common_http::AuthenticatedRequestContext,
+    permission: AdminPermission,
 ) -> Result<(), WarpgateError> {
     if matches!(ctx.auth, RequestAuthorization::ClusterToken) {
         return Ok(());
     }
-    require_admin_permission(ctx, Some(AdminPermission::RecordingsView)).await
+    require_admin_permission(ctx, Some(permission)).await
 }
 
 pub fn case_insensitive_search<C, I>(search: &str, columns: I) -> impl IntoCondition

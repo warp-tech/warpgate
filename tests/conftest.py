@@ -857,7 +857,7 @@ class ProcessManager:
         # A deterministic, reachable self-address so cross-node proxying can find us.
         p = run(
             args,
-            env={"WARPGATE_NODE_ADDRESS": f"127.0.0.1:{http_port}", **(env or {})},
+            env={"WARPGATE_PEER_ADDRESS": f"127.0.0.1:{http_port}", **(env or {})},
         )
         return WarpgateProcess(
             process=p,

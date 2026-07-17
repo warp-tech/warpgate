@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.0-beta.1-23-gc4756129-modified"
+    "version": "v0.27.0-beta.1-38-g1ea235bb-modified"
   },
   "servers": [
     {
@@ -6235,6 +6235,14 @@
           },
           "protocol": {
             "type": "string"
+          },
+          "node_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "node_hostname": {
+            "type": "string",
+            "description": "Hostname of the owning node; only filled in by the session detail\nendpoint, and only while the node is registered."
           }
         }
       },

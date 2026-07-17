@@ -21,6 +21,14 @@ pub(crate) struct WriterShutdown {
     pub tracker: TaskTracker,
 }
 
+/// Capacity of both the disk-write queue and the live broadcast ring. They must
+/// stay equal: the live-stream lag heal relies on any item dropped from the
+/// broadcast ring already having left the disk queue (so it is on disk, or at
+/// most one item is mid-write). That holds only because a producer blocks on the
+/// full disk queue before it can broadcast, so the ring cannot outrun the queue
+/// by more than its own capacity. Raising the ring above the queue breaks it.
+const RECORDING_QUEUE_CAPACITY: usize = 1024;
+
 /// One item of a recording's primary data stream, broadcast to live viewers.
 /// `offset` is the total bytes written through this item (its end position in
 /// `data.ndjson`), so a viewer that loaded a snapshot covering the first `N`
@@ -54,14 +62,14 @@ impl RawRecordingWriter {
         live: Option<LiveMap>,
         shutdown: WriterShutdown,
     ) -> Result<Self> {
-        let (sender, mut receiver) = mpsc::channel::<Bytes>(1024);
+        let (sender, mut receiver) = mpsc::channel::<Bytes>(RECORDING_QUEUE_CAPACITY);
         let (drop_signal, mut drop_receiver) = mpsc::channel(1);
         let WriterShutdown { token, tracker } = shutdown;
 
         // Register in the live-subscription map only when this file is the live stream
         // (see `RecordingWriterOpener::open`). Sidecars pass `None` so they don't clobber
         // the data writer's entry, which shares the same recording id.
-        let live_sender = broadcast::channel(1024).0;
+        let live_sender = broadcast::channel(RECORDING_QUEUE_CAPACITY).0;
         if let Some(live) = live {
             {
                 let mut live = live.lock().await;

@@ -16,15 +16,15 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::broadcast;
 use tracing::error;
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
+use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::recordings::{LiveChunk, RecordingFile};
 use warpgate_db_entities::Recording::{self, RecordingKind};
-use warpgate_db_entities::{Node, Session};
+use warpgate_db_entities::Session;
 
 use super::AnySecurityScheme;
-use crate::api::cluster_proxy::{Owner, proxy_or_serve, proxy_or_serve_websocket};
-use crate::api::common::require_recording_access;
+use crate::api::cluster_proxy::{Owner, proxy_or_serve, proxy_or_serve_websocket, session_owner};
+use crate::api::common::require_cluster_or_admin_permission;
 
 pub struct Api;
 
@@ -49,7 +49,7 @@ impl Api {
         id: poem_openapi::param::Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetRecordingResponse> {
-        require_recording_access(&ctx).await?;
+        require_cluster_or_admin_permission(&ctx, AdminPermission::RecordingsView).await?;
 
         let db = &ctx.services().db;
 
@@ -87,7 +87,7 @@ pub async fn api_get_recording_tcpdump(
     static_req: StaticFileRequest,
     req: &poem::Request,
 ) -> poem::Result<poem::Response> {
-    require_recording_access(&ctx).await?;
+    require_cluster_or_admin_permission(&ctx, AdminPermission::RecordingsView).await?;
 
     let recording = find_recording(&ctx, id.0, Some(RecordingKind::Traffic)).await?;
     let owner = recording_owner(&ctx, &recording).await?;
@@ -104,7 +104,7 @@ pub async fn api_get_recording_data(
     static_req: StaticFileRequest,
     req: &poem::Request,
 ) -> poem::Result<poem::Response> {
-    require_recording_access(&ctx).await?;
+    require_cluster_or_admin_permission(&ctx, AdminPermission::RecordingsView).await?;
 
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
@@ -121,7 +121,7 @@ pub async fn api_get_recording_index(
     static_req: StaticFileRequest,
     req: &poem::Request,
 ) -> poem::Result<poem::Response> {
-    require_recording_access(&ctx).await?;
+    require_cluster_or_admin_permission(&ctx, AdminPermission::RecordingsView).await?;
 
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
@@ -205,6 +205,11 @@ async fn next_retained(receiver: &mut broadcast::Receiver<LiveChunk>) -> Option<
 
 const LAG_REPLAY_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Ceiling on a single lag replay. Beyond this, a viewer is treated as unable to
+/// keep up and is fast-forwarded to live with a gap rather than served an
+/// ever-growing backlog of stale history.
+const MAX_LAG_REPLAY_SPAN: u64 = 16 * 1024 * 1024;
+
 /// Replay a part of the scratch recording between two points
 /// If the last portion has not been written yet, try to wait for a while
 /// for it to get written
@@ -286,7 +291,17 @@ async fn serve_live_stream(
                         // Recording ended - just replay to the end
                         None => tokio::fs::metadata(&path).await?.len(),
                     };
-                    if !replay_scratch_span_awaiting(&mut sink, &path, &mut sent, end, LAG_REPLAY_TIMEOUT).await? {
+                    // A viewer too slow to keep up would grow this span without
+                    // bound and only ever watch stale history. Past a cap, drop the
+                    // completeness guarantee: skip to the retained item's line
+                    // boundary and resume live, leaving one gap.
+                    if end.saturating_sub(sent) > MAX_LAG_REPLAY_SPAN {
+                        tracing::warn!(
+                            "Live viewer too far behind; skipping {} bytes to resume live",
+                            end - sent
+                        );
+                        sent = end;
+                    } else if !replay_scratch_span_awaiting(&mut sink, &path, &mut sent, end, LAG_REPLAY_TIMEOUT).await? {
                         return Ok(());
                     }
                     chunk
@@ -352,7 +367,7 @@ pub async fn api_get_recording_stream(
     id: poem::web::Path<Uuid>,
     req: &poem::Request,
 ) -> poem::Result<poem::Response> {
-    require_recording_access(&ctx).await?;
+    require_cluster_or_admin_permission(&ctx, AdminPermission::RecordingsView).await?;
 
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
@@ -391,23 +406,13 @@ pub async fn recording_owner(
     if recording.ended.is_some() {
         return Ok(Owner::Local);
     }
-    let services = ctx.services();
-    let db = &services.db;
-    let owner_id = Session::Entity::find_by_id(recording.session_id)
-        .one(db)
+    let Some(session) = Session::Entity::find_by_id(recording.session_id)
+        .one(&ctx.services().db)
         .await?
-        .and_then(|s| s.node_id);
-    let Some(owner_id) = owner_id else {
+    else {
         return Ok(Owner::Local);
     };
-    if owner_id == services.cluster.node_id {
-        return Ok(Owner::Local);
-    }
-    let Some(node) = Node::Entity::find_by_id(owner_id).one(db).await? else {
-        return Err(WarpgateError::NodeGone(owner_id));
-    };
-
-    Ok(Owner::remote(node))
+    session_owner(ctx, &session).await
 }
 
 #[cfg(test)]

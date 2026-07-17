@@ -1,3 +1,4 @@
+use poem::http::StatusCode;
 use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -7,10 +8,11 @@ use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::SessionSnapshot;
-use warpgate_db_entities::{Recording, Session};
+use warpgate_db_entities::{Node, Recording, Session};
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::cluster_proxy::{Owner, forward_http, session_owner};
+use crate::api::common::{require_admin_permission, require_cluster_or_admin_permission};
 
 pub struct Api;
 
@@ -50,12 +52,18 @@ impl Api {
 
         let db = &ctx.services().db;
 
-        let session = Session::Entity::find_by_id(id.0).one(db).await?;
+        let Some(session) = Session::Entity::find_by_id(id.0).one(db).await? else {
+            return Ok(GetSessionResponse::NotFound);
+        };
 
-        match session {
-            Some(session) => Ok(GetSessionResponse::Ok(Json(session.into()))),
-            None => Ok(GetSessionResponse::NotFound),
+        let mut snapshot: SessionSnapshot = session.into();
+        if let Some(node_id) = snapshot.node_id {
+            snapshot.node_hostname = Node::Entity::find_by_id(node_id)
+                .one(db)
+                .await?
+                .map(|node| node.hostname);
         }
+        Ok(GetSessionResponse::Ok(Json(snapshot)))
     }
 
     #[oai(
@@ -89,18 +97,50 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
+        req: &poem::Request,
         _sec_scheme: AnySecurityScheme,
-    ) -> Result<CloseSessionResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::SessionsTerminate)).await?;
+    ) -> poem::Result<CloseSessionResponse> {
+        require_cluster_or_admin_permission(&ctx, AdminPermission::SessionsTerminate).await?;
 
-        let state = ctx.services().state.lock().await;
+        {
+            let state = ctx.services().state.lock().await;
+            if let Some(s) = state.sessions.get(&id) {
+                s.lock().await.handle.close();
+                return Ok(CloseSessionResponse::Ok);
+            }
+        }
 
-        if let Some(s) = state.sessions.get(&id) {
-            let mut session = s.lock().await;
-            session.handle.close();
-            Ok(CloseSessionResponse::Ok)
-        } else {
-            Ok(CloseSessionResponse::NotFound)
+        // No live handle here — the session may be owned by another node.
+        let session = Session::Entity::find_by_id(id.0)
+            .one(&ctx.services().db)
+            .await
+            .map_err(WarpgateError::from)?;
+        let Some(session) = session else {
+            return Ok(CloseSessionResponse::NotFound);
+        };
+        if session.ended.is_some() {
+            return Ok(CloseSessionResponse::NotFound);
+        }
+        let owner = match session_owner(&ctx, &session).await {
+            // The owner node is gone; nothing left to close.
+            Err(WarpgateError::NodeGone(_)) => return Ok(CloseSessionResponse::NotFound),
+            owner => owner?,
+        };
+        match owner {
+            // Owned here but no live handle — already terminated.
+            Owner::Local => Ok(CloseSessionResponse::NotFound),
+            Owner::Remote(remote) => {
+                let response =
+                    forward_http(&ctx, req, remote, &ctx.services().cluster_token).await?;
+                match response.status() {
+                    StatusCode::CREATED => Ok(CloseSessionResponse::Ok),
+                    StatusCode::NOT_FOUND => Ok(CloseSessionResponse::NotFound),
+                    status => Err(poem::Error::from_string(
+                        format!("Unexpected response from the owner node: {status}"),
+                        StatusCode::BAD_GATEWAY,
+                    )),
+                }
+            }
         }
     }
 }
