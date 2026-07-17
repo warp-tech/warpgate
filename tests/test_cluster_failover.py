@@ -1,15 +1,14 @@
-import sqlite3
 import time
 from uuid import uuid4
 
 import psutil
 import requests
-import yaml
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
 from .test_recordings_s3 import _read_until
 from .test_ssh_proto import common_args, setup_user_and_target
+from .util import open_wg_sqlite_db as _db
 from .util import wait_port
 
 
@@ -21,15 +20,6 @@ def _find_in_progress_terminal_recording_id(api):
             if rec.kind == sdk.RecordingKind.TERMINAL and rec.ended is None:
                 return rec.id
     return None
-
-
-def _db(config_path):
-    """A read connection to the node's shared sqlite database."""
-    config = yaml.safe_load(config_path.open())
-    db_url = config["database_url"]
-    assert db_url.startswith("sqlite:")
-    # busy timeout: the surviving node writes to the same file concurrently
-    return sqlite3.connect(db_url.removeprefix("sqlite:"), timeout=5)
 
 
 def _live_session_node(config_path):
