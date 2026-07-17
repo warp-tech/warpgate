@@ -243,6 +243,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "Hexalyse",
+      "name": "Hexalyse",
+      "avatar_url": "https://avatars.githubusercontent.com/u/4415295?v=4",
+      "profile": "https://github.com/Hexalyse",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
