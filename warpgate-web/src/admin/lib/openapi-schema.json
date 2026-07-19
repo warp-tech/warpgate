@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.0-beta.1-38-gf1d067c2-modified"
+    "version": "v0.27.0-beta.1-39-gf1909cc1-modified"
   },
   "servers": [
     {
@@ -4017,7 +4017,7 @@
           {
             "name": "scope",
             "schema": {
-              "$ref": "#/components/schemas/SessionApprovalScope"
+              "$ref": "#/components/schemas/ApprovalScope"
             },
             "in": "query",
             "required": true,
@@ -4525,6 +4525,15 @@
             "description": "Pretty-printed JSON request body that would be sent."
           }
         }
+      },
+      "ApprovalScope": {
+        "type": "string",
+        "description": "How an approval should be remembered for later bypass.\n\nDerives the OpenAPI enum directly so both the administrator and the\nself-approval endpoints can take it as-is; a per-API copy would be three\nidentical enums and two conversions that only exist to satisfy the derive.",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
       },
       "AutoCredentials": {
         "type": "object",
@@ -6364,7 +6373,8 @@
             "format": "date-time"
           },
           "identification_string": {
-            "type": "string"
+            "type": "string",
+            "description": "Shown alongside the request so the administrator can confirm they are\napproving the session the user is actually looking at."
           },
           "caching_grace_seconds": {
             "type": "integer",
@@ -6372,15 +6382,6 @@
             "description": "When administrator-approval caching is enabled, the caching window in\nseconds; `None` when caching is disabled."
           }
         }
-      },
-      "SessionApprovalScope": {
-        "type": "string",
-        "description": "How an administrator approval should be remembered for bypass.",
-        "enum": [
-          "Once",
-          "Target",
-          "AllTargets"
-        ]
       },
       "SessionSnapshot": {
         "type": "object",
