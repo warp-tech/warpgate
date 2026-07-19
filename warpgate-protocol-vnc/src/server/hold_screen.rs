@@ -69,9 +69,13 @@ where
         .context("auth state expired")?;
 
     let mut otp = OtpEntry::new("vnc");
-    let mut approval = services.auth_state_store.lock().await.subscribe(state_id);
 
     'next_prompt: loop {
+        // Re-subscribed each round: `complete()` drops the sender (even for
+        // non-terminal resolutions), and a closed receiver would otherwise make
+        // the select below spin.
+        let mut approval = services.auth_state_store.lock().await.subscribe(state_id);
+
         // Bind to a local so the state guard drops before `complete()` re-locks the same
         // AuthState mutex — holding a match-scrutinee guard across it deadlocks (same reason
         // RDP's `run_hold_screen` does this).
@@ -99,11 +103,32 @@ where
                 write_server_cut_text(viewer_wr, url).await.ok();
             }
 
+        // An administrator approval is bounded by the configured window, like
+        // every other protocol's hold — without it the viewer would sit on this
+        // screen forever, and past the auth-state lifetime it would be waiting
+        // on a request that no admin can resolve any more.
+        let approval_deadline = match prompt {
+            AuthPrompt::AdminApproval { .. } => {
+                Some(tokio::time::Instant::now() + services.admin_approval_timeout().await?)
+            }
+            _ => None,
+        };
+
         loop {
             tokio::select! {
-                // Browser approval landed (or the signal lagged/closed); the loop re-verifies.
-                _ = approval.recv(), if matches!(prompt, ui::AuthPrompt::WebApproval { ..}) => {
-                    continue 'next_prompt // web approval accepted
+                // An out-of-band approval landed (self or administrator), or the signal
+                // lagged/closed; the loop re-verifies.
+                _ = approval.recv(), if matches!(prompt, ui::AuthPrompt::WebApproval { .. } | ui::AuthPrompt::AdminApproval { .. }) => {
+                    continue 'next_prompt // approval resolved
+                }
+                () = async {
+                    match approval_deadline {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    services.expire_session_approval(&state).await?;
+                    bail!("administrator approval timed out");
                 }
                 event = events_rx.recv(), if !render.reader_done => {
                     if let Some(keysym) = render.note_event(event.as_ref())

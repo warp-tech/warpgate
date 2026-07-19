@@ -875,6 +875,11 @@ class ProcessManager:
         preargs = []
         if password:
             preargs = ["sshpass", "-p", password]
+        # The tests answer keyboard-interactive prompts (OTP, "press Enter to
+        # approve") by writing to the client's stdin. Without a controlling TTY
+        # (stdin is a pipe here) OpenSSH would instead pop up a GUI ssh-askpass
+        # to read them; force it back to stdin.
+        env = {**os.environ, "SSH_ASKPASS_REQUIRE": "never", **kwargs.pop("env", {})}
         p = self.start(
             [
                 *preargs,
@@ -890,6 +895,7 @@ class ProcessManager:
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
+            env=env,
             **kwargs,
         )
         return p

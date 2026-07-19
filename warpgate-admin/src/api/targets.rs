@@ -30,6 +30,7 @@ struct TargetDataRequest {
     ticket_requests_disabled: Option<bool>,
     ticket_require_approval: Option<bool>,
     ticket_max_uses: Option<i16>,
+    require_approval: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -152,6 +153,7 @@ impl ListApi {
             ticket_requests_disabled: Set(body.ticket_requests_disabled.unwrap_or(false)),
             ticket_require_approval: Set(body.ticket_require_approval.unwrap_or(false)),
             ticket_max_uses: Set(body.ticket_max_uses),
+            require_approval: Set(body.require_approval.unwrap_or(false)),
         };
 
         let target = values.insert(db).await.map_err(WarpgateError::from)?;
@@ -268,6 +270,7 @@ impl DetailApi {
         model.ticket_requests_disabled = Set(body.ticket_requests_disabled.unwrap_or(false));
         model.ticket_require_approval = Set(body.ticket_require_approval.unwrap_or(false));
         model.ticket_max_uses = Set(body.ticket_max_uses);
+        model.require_approval = Set(body.require_approval.unwrap_or(false));
         let target = model.update(db).await?;
 
         services

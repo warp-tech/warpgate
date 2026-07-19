@@ -115,6 +115,13 @@ impl State {
             error!(%error, %id, "Could not update session in the DB");
         }
 
+        // The connection is gone, so any approval it was waiting on can never
+        // be acted on — drop the request rather than leave it in the approval
+        // queues, where approving it would still stamp a grace-period bypass.
+        if let Err(error) = crate::approvals::delete_requests_for_session(&self.db, id).await {
+            error!(%error, %id, "Could not remove the session's approval requests");
+        }
+
         let _ = self.change_sender.send(());
     }
 

@@ -85,6 +85,8 @@ struct ParameterValues {
     pub web_clients_enabled: bool,
     pub web_auth_max_age_seconds: Option<i64>,
     pub web_approval_grace_period_seconds: Option<i64>,
+    pub admin_approval_timeout_seconds: Option<i64>,
+    pub admin_approval_grace_period_seconds: Option<i64>,
     pub analytics_consent: Parameters::AnalyticsConsent,
     pub analytics_normal: bool,
     pub recordings_enable: bool,
@@ -127,6 +129,8 @@ struct ParameterUpdate {
     pub web_clients_enabled: Option<bool>,
     pub web_auth_max_age_seconds: Option<Option<i64>>,
     pub web_approval_grace_period_seconds: Option<Option<i64>>,
+    pub admin_approval_timeout_seconds: Option<Option<i64>>,
+    pub admin_approval_grace_period_seconds: Option<Option<i64>>,
     pub analytics_consent: Option<Parameters::AnalyticsConsent>,
     pub analytics_normal: Option<bool>,
     pub recordings_enable: Option<bool>,
@@ -224,6 +228,8 @@ impl Api {
             web_clients_enabled: parameters.web_clients_enabled,
             web_auth_max_age_seconds: parameters.web_auth_max_age_seconds,
             web_approval_grace_period_seconds: parameters.web_approval_grace_period_seconds,
+            admin_approval_timeout_seconds: parameters.admin_approval_timeout_seconds,
+            admin_approval_grace_period_seconds: parameters.admin_approval_grace_period_seconds,
             analytics_consent: parameters.analytics_consent,
             analytics_normal: parameters.analytics_normal,
             recordings_enable: parameters.recordings_enable,
@@ -338,6 +344,10 @@ impl Api {
         parameters.web_auth_max_age_seconds = body.web_auth_max_age_seconds.map_or(NotSet, Set);
         parameters.web_approval_grace_period_seconds =
             body.web_approval_grace_period_seconds.map_or(NotSet, Set);
+        parameters.admin_approval_timeout_seconds =
+            body.admin_approval_timeout_seconds.map_or(NotSet, Set);
+        parameters.admin_approval_grace_period_seconds =
+            body.admin_approval_grace_period_seconds.map_or(NotSet, Set);
         parameters.analytics_consent = body.analytics_consent.map_or(NotSet, Set);
         parameters.analytics_normal = body.analytics_normal.map_or(NotSet, Set);
 

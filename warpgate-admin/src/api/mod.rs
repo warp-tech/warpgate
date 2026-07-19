@@ -2,7 +2,6 @@ use poem_openapi::OpenApi;
 
 mod admin_roles;
 mod certificate_credentials;
-mod cluster_proxy;
 mod common;
 mod known_hosts_detail;
 mod known_hosts_list;
@@ -17,6 +16,7 @@ mod password_credentials;
 mod public_key_credentials;
 pub mod recordings_detail;
 mod roles;
+pub mod session_approvals;
 mod sessions_detail;
 pub mod sessions_list;
 mod ssh_connection_test;
@@ -74,6 +74,7 @@ pub fn get() -> impl OpenApi {
                 login_protection::Api,
                 network_status::Api,
             ),
+            session_approvals::Api,
         ),
         (
             certificate_credentials::ListApi,

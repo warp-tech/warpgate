@@ -3,6 +3,7 @@
     import Brand from 'common/Brand.svelte'
     import Loadable from 'common/Loadable.svelte'
     import Redirect from 'common/Redirect.svelte'
+    import RequestsButton from 'common/RequestsButton.svelte'
     import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { get } from 'svelte/store'
@@ -93,7 +94,8 @@
                 <a use:link use:active href="/log">Log</a>
             {/if}
             <span class="ms-3"></span>
-            <div class="ms-auto">
+            <div class="ms-auto d-flex align-items-center">
+                <RequestsButton collapsed class="me-4" />
                 <AuthBar />
             </div>
         </header>

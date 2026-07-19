@@ -14,7 +14,6 @@ use warpgate_common::auth::{
 };
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
-use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
     ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
@@ -254,19 +253,37 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                     )
                     .await?
                     .1;
-                let mut state = state_arc.lock().await;
-
-                let user_auth_result = {
-                    let credential = AuthCredential::Password(password);
-
-                    validate_and_add_credential(
-                        &mut state,
-                        &credential,
-                        self.services.config_provider.as_ref(),
-                    )
+                let credential = AuthCredential::Password(password);
+                self.services
+                    .validate_and_add_credential(&state_arc, &credential)
                     .await?;
 
+                let mut state = state_arc.lock().await;
+                let user_auth_result = state.verify();
+
+                // Hold the session for administrator (JIT) approval if required.
+                // MySQL has no in-band channel to display a "waiting" message
+                // during the handshake, so the connection simply blocks until an
+                // administrator approves or rejects it (or the request times out).
+                let user_auth_result = if matches!(
+                    &user_auth_result,
+                    AuthResult::Need(kinds) if kinds.contains(&CredentialKind::AdminApproval)
+                ) {
+                    drop(state);
+                    let approved = self
+                        .services
+                        .hold_for_admin_approval(&state_arc, || async {
+                            Ok::<_, MySqlError>(())
+                        })
+                        .await?;
+                    if !approved {
+                        warn!("Session was not approved by an administrator");
+                        return fail(&mut self).await;
+                    }
+                    state = state_arc.lock().await;
                     state.verify()
+                } else {
+                    user_auth_result
                 };
 
                 match user_auth_result {
@@ -333,6 +350,25 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 {
                     Some((ticket, target, user_info)) => {
                         info!("Authorized for {} with a ticket", target.name);
+
+                        // Held before the ticket is consumed, so a denied
+                        // session doesn't burn a single-use ticket.
+                        if !self
+                            .services
+                            .hold_preauthenticated_for_admin_approval(
+                                &self.id,
+                                &user_info,
+                                crate::common::PROTOCOL_NAME,
+                                &target.name,
+                                Some(self.remote_address.ip()),
+                                || async { Ok::<_, MySqlError>(()) },
+                            )
+                            .await?
+                        {
+                            warn!("Session was not approved by an administrator");
+                            return fail(&mut self).await;
+                        }
+
                         consume_ticket(&self.services.db, &ticket.id)
                             .await
                             .map_err(MySqlError::other)?;

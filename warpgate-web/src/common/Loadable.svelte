@@ -20,6 +20,7 @@
     } = $props()
 
     let loaded = $state(false)
+    let resolvedOnce = $state(false)
     let resolved = $state(false)
     let error: string | undefined = $state()
 
@@ -28,12 +29,16 @@
     const currentValue = $derived(value as T)
 
     $effect(() => {
-        loaded = false
-        resolved = false
+        if (!resolvedOnce) {
+            // only hide content when loading for the first time
+            loaded = false
+            resolved = false
+        }
         promise
             .then(d => {
                 value = d
                 resolved = true
+                resolvedOnce = true
             })
             .catch(err => {
                 stringifyError(err).then(e => {

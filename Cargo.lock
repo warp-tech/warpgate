@@ -8299,16 +8299,24 @@ dependencies = [
 name = "warpgate-common-http"
 version = "0.27.0-beta.1"
 dependencies = [
+ "anyhow",
+ "futures",
  "poem",
  "poem-openapi",
+ "reqwest 0.13.4",
+ "rustls 0.23.41",
+ "sea-orm",
  "serde",
  "tokio",
+ "tokio-tungstenite 0.29.0",
  "tracing",
  "url",
  "uuid",
+ "warpgate-ca",
  "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-tls",
 ]
 
 [[package]]

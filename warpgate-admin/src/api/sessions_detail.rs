@@ -11,7 +11,9 @@ use warpgate_core::SessionSnapshot;
 use warpgate_db_entities::{Node, Recording, Session};
 
 use super::AnySecurityScheme;
-use crate::api::cluster_proxy::{Owner, forward_http, session_owner};
+use warpgate_common_http::cluster_proxy::{
+    FromProxiedStatus, local_or_forward, session_owner, unexpected_proxied_status,
+};
 use crate::api::common::{require_admin_permission, require_cluster_or_admin_permission};
 
 pub struct Api;
@@ -37,6 +39,16 @@ enum CloseSessionResponse {
     Ok,
     #[oai(status = 404)]
     NotFound,
+}
+
+impl FromProxiedStatus for CloseSessionResponse {
+    fn from_proxied_status(status: StatusCode) -> poem::Result<Self> {
+        match status {
+            StatusCode::CREATED => Ok(Self::Ok),
+            StatusCode::NOT_FOUND => Ok(Self::NotFound),
+            status => Err(unexpected_proxied_status(status)),
+        }
+    }
 }
 
 #[OpenApi]
@@ -126,21 +138,10 @@ impl Api {
             Err(WarpgateError::NodeGone(_)) => return Ok(CloseSessionResponse::NotFound),
             owner => owner?,
         };
-        match owner {
-            // Owned here but no live handle — already terminated.
-            Owner::Local => Ok(CloseSessionResponse::NotFound),
-            Owner::Remote(remote) => {
-                let response =
-                    forward_http(&ctx, req, remote, &ctx.services().cluster_token).await?;
-                match response.status() {
-                    StatusCode::CREATED => Ok(CloseSessionResponse::Ok),
-                    StatusCode::NOT_FOUND => Ok(CloseSessionResponse::NotFound),
-                    status => Err(poem::Error::from_string(
-                        format!("Unexpected response from the owner node: {status}"),
-                        StatusCode::BAD_GATEWAY,
-                    )),
-                }
-            }
-        }
+        // Owned here but no live handle (checked above) means already terminated.
+        local_or_forward(&ctx, req, owner, || async {
+            Ok(CloseSessionResponse::NotFound)
+        })
+        .await
     }
 }

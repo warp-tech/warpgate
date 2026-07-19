@@ -6,7 +6,9 @@ use sha2::{Digest, Sha256};
 
 use crate::{Secret, UserCertificateCredential};
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Enum)]
+#[derive(
+    Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Enum,
+)]
 pub enum CredentialKind {
     #[serde(rename = "password")]
     Password,
@@ -20,6 +22,37 @@ pub enum CredentialKind {
     Sso,
     #[serde(rename = "web")]
     WebUserApproval,
+    #[serde(rename = "admin_approval")]
+    AdminApproval,
+}
+
+/// The two out-of-band approval factors — the subset of [`CredentialKind`]
+/// usable where only an approval makes sense (match keys, bypass caching,
+/// resolving a held session), so the other kinds are ruled out by the type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ApprovalKind {
+    /// Self approval from the user's own browser session.
+    User,
+    /// JIT approval by an administrator.
+    Admin,
+}
+
+impl From<ApprovalKind> for CredentialKind {
+    fn from(kind: ApprovalKind) -> Self {
+        match kind {
+            ApprovalKind::User => Self::WebUserApproval,
+            ApprovalKind::Admin => Self::AdminApproval,
+        }
+    }
+}
+
+impl From<ApprovalKind> for AuthCredential {
+    fn from(kind: ApprovalKind) -> Self {
+        match kind {
+            ApprovalKind::User => Self::WebUserApproval,
+            ApprovalKind::Admin => Self::AdminApproval,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +71,7 @@ pub enum AuthCredential {
         email: String,
     },
     WebUserApproval,
+    AdminApproval,
 }
 
 impl AuthCredential {
@@ -49,6 +83,7 @@ impl AuthCredential {
             Self::Otp { .. } => CredentialKind::Totp,
             Self::Sso { .. } => CredentialKind::Sso,
             Self::WebUserApproval => CredentialKind::WebUserApproval,
+            Self::AdminApproval => CredentialKind::AdminApproval,
         }
     }
 
@@ -60,6 +95,7 @@ impl AuthCredential {
             Self::Otp { .. } => "one-time password".to_string(),
             Self::Sso { provider, .. } => format!("SSO ({provider})"),
             Self::WebUserApproval => "in-browser auth".to_string(),
+            Self::AdminApproval => "administrator approval".to_string(),
         }
     }
 }
@@ -75,6 +111,7 @@ pub enum AuthCredentialFingerprint {
     Certificate { hash: [u8; 32] },
     Sso { provider: String, email: String },
     WebUserApproval,
+    AdminApproval,
 }
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -103,6 +140,7 @@ impl From<&AuthCredential> for AuthCredentialFingerprint {
                 email: email.clone(),
             },
             AuthCredential::WebUserApproval => Self::WebUserApproval,
+            AuthCredential::AdminApproval => Self::AdminApproval,
         }
     }
 }

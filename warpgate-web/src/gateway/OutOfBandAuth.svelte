@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { faEllipsisVertical } from '@fortawesome/free-solid-svg-icons'
     import {
         Alert,
         ButtonGroup,
@@ -17,6 +18,7 @@
         api,
         WebApprovalScope,
     } from 'gateway/lib/api'
+    import Fa from 'svelte-fa'
 
     interface Props {
         params: { stateId: string }
@@ -41,7 +43,7 @@
     async function approve(scope: WebApprovalScope) {
         await api.approveAuth({
             id: params.stateId,
-            approveAuthRequest: { scope },
+            scope,
         })
         await reload()
         window.close()
@@ -111,21 +113,24 @@
                         >
                             Authorize & remember for {graceLabel}
                         </AsyncButton>
-                            <Dropdown class="btn-group">
-                                <DropdownToggle color="primary" caret class="ps-2" />
-                                <DropdownMenu end>
-                                    <DropdownItem
-                                        onclick={() => approve(WebApprovalScope.AllTargets)}
-                                    >
-                                        Authorize for all targets & remember for {graceLabel}
-                                    </DropdownItem>
-                                    <DropdownItem
-                                        onclick={() => approve(WebApprovalScope.Once)}
-                                    >
-                                        Authorize this time only
-                                    </DropdownItem>
-                                </DropdownMenu>
-                            </Dropdown>
+                        <Dropdown class="btn-group">
+                            <DropdownToggle color="primary" class="px-3">
+                                <Fa icon={faEllipsisVertical} />
+                            </DropdownToggle>
+                            <DropdownMenu end>
+                                <DropdownItem
+                                    onclick={() => approve(WebApprovalScope.AllTargets)}
+                                >
+                                    Authorize for all targets & remember for
+                                    {graceLabel}
+                                </DropdownItem>
+                                <DropdownItem
+                                    onclick={() => approve(WebApprovalScope.Once)}
+                                >
+                                    Authorize this time only
+                                </DropdownItem>
+                            </DropdownMenu>
+                        </Dropdown>
                     </ButtonGroup>
                 {:else}
                     <AsyncButton

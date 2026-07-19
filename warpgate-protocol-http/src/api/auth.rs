@@ -7,24 +7,26 @@ use poem::session::Session;
 use poem::web::Data;
 use poem::web::websocket::{Message, WebSocket};
 use poem::{IntoResponse, Request, handler};
-use poem_openapi::param::Path;
+use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
 use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_admin::api::AnySecurityScheme;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
+use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, WarpgateError};
+use warpgate_common_http::approvals::{acting_approver, resolve_approval};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
-use warpgate_core::Services;
-use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::approvals::{ApprovalDecision, ApprovalScope};
 use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_db_entities::Parameters;
+use warpgate_core::{AuthState, Services};
+use warpgate_db_entities::{Parameters, SessionApprovalRequest};
 
 use super::common::{emit_unknown_authentication_failed_event, logout};
 use crate::common::{
@@ -53,6 +55,7 @@ enum ApiAuthState {
     OtpNeeded,
     SsoNeeded,
     WebUserApprovalNeeded,
+    AdminApprovalNeeded,
     PublicKeyNeeded,
     Success,
     IpBlocked,
@@ -125,9 +128,22 @@ enum WebApprovalScope {
     AllTargets,
 }
 
-#[derive(Object)]
-struct ApproveAuthRequest {
-    scope: WebApprovalScope,
+impl From<WebApprovalScope> for ApprovalScope {
+    fn from(scope: WebApprovalScope) -> Self {
+        match scope {
+            WebApprovalScope::Once => Self::Once,
+            WebApprovalScope::Target => Self::Target,
+            WebApprovalScope::AllTargets => Self::AllTargets,
+        }
+    }
+}
+
+#[derive(ApiResponse)]
+enum ApprovalActionResponse {
+    #[oai(status = 200)]
+    Ok,
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -152,6 +168,7 @@ const PREFERRED_NEED_CRED_ORDER: &[CredentialKind] = &[
     CredentialKind::Totp,
     CredentialKind::Sso,
     CredentialKind::WebUserApproval,
+    CredentialKind::AdminApproval,
 ];
 
 impl From<AuthResult> for ApiAuthState {
@@ -168,6 +185,7 @@ impl From<AuthResult> for ApiAuthState {
                     Some(CredentialKind::Totp) => Self::OtpNeeded,
                     Some(CredentialKind::Sso) => Self::SsoNeeded,
                     Some(CredentialKind::WebUserApproval) => Self::WebUserApprovalNeeded,
+                    Some(CredentialKind::AdminApproval) => Self::AdminApprovalNeeded,
                     Some(CredentialKind::PublicKey) => Self::PublicKeyNeeded,
                     Some(CredentialKind::Certificate) => {
                         // Certificate authentication is not supported for HTTP protocol
@@ -266,15 +284,15 @@ impl Api {
                 }
                 x => x,
             }?;
+        let credential_valid = ctx
+            .services()
+            .validate_and_add_credential(
+                &state_arc,
+                &AuthCredential::Password(Secret::new(body.password.clone())),
+            )
+            .await?;
+
         let mut state = state_arc.lock().await;
-
-        let credential_valid = validate_and_add_credential(
-            &mut state,
-            &AuthCredential::Password(Secret::new(body.password.clone())),
-            ctx.services().config_provider.as_ref(),
-        )
-        .await?;
-
         match state.verify() {
             AuthResult::Accepted { user_info } => {
                 let username = user_info.username.clone();
@@ -354,16 +372,12 @@ impl Api {
             ))));
         };
 
-        let mut state = state_arc.lock().await;
+        let username = state_arc.lock().await.user_info().username.clone();
 
         // Check if user is locked
-        if let Some(_lock_info) = services
-            .login_protection
-            .check_user_locked(&state.user_info().username)
-            .await?
-        {
+        if let Some(_lock_info) = services.login_protection.check_user_locked(&username).await? {
             warn!(
-                username = %state.user_info().username,
+                username = %username,
                 "OTP login attempt for locked user"
             );
             return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
@@ -371,13 +385,11 @@ impl Api {
             ))));
         }
 
-        let credential_valid = validate_and_add_credential(
-            &mut state,
-            &AuthCredential::Otp(body.otp.clone().into()),
-            services.config_provider.as_ref(),
-        )
-        .await?;
+        let credential_valid = services
+            .validate_and_add_credential(&state_arc, &AuthCredential::Otp(body.otp.clone().into()))
+            .await?;
 
+        let mut state = state_arc.lock().await;
         match state.verify() {
             AuthResult::Accepted { user_info } => {
                 let username = user_info.username.clone();
@@ -479,7 +491,7 @@ impl Api {
         let Some(state_arc) = state_arc else {
             return Ok(AuthStateResponse::NotFound);
         };
-        state_arc.lock().await.reject();
+        services.reject_auth_state(&state_arc).await?;
         services
             .auth_state_store
             .lock()
@@ -512,29 +524,23 @@ impl Api {
             return Ok(AuthStateListResponse::NotFound);
         };
 
-        // Snapshot the state handles while briefly holding the store lock, then
-        // release it before inspecting/serialising each state. Inspecting a
-        // state locks its inner mutex (and `serialize_auth_state_inner` locks
-        // the session state store), so doing that work under the auth state
-        // store lock would serialise every login against this endpoint.
-        let state_arcs = {
-            let store = services.auth_state_store.lock().await;
-            store.snapshot_states()
-        };
+        // The user's in-browser approval requests may be owned by any node, so
+        // they are read from the shared request table rather than this node's
+        // in-memory store.
+        let requests = SessionApprovalRequest::Entity::find()
+            .filter(
+                SessionApprovalRequest::Column::Kind
+                    .eq(SessionApprovalRequest::ApprovalRequestKind::User),
+            )
+            .order_by_asc(SessionApprovalRequest::Column::Started)
+            .all(&services.db)
+            .await
+            .map_err(WarpgateError::from)?;
 
         let mut results = vec![];
-
-        for state_arc in state_arcs {
-            let is_pending_web_approval = {
-                let state = state_arc.lock().await;
-                username_eq_ci(&state.user_info().username, username)
-                    && matches!(
-                        state.verify(),
-                        AuthResult::Need(need) if need.contains(&CredentialKind::WebUserApproval)
-                    )
-            };
-            if is_pending_web_approval {
-                results.push(serialize_auth_state_inner(state_arc, services).await?);
+        for request in requests {
+            if username_eq_ci(&request.username, username) {
+                results.push(request_to_auth_state(services, request).await?);
             }
         }
 
@@ -553,14 +559,23 @@ impl Api {
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
         let services = ctx.services();
-        let state_arc = get_foreign_auth_state(&id, &ctx).await;
-        let Some(state_arc) = state_arc else {
-            return Ok(AuthStateResponse::NotFound);
-        };
-        serialize_auth_state_inner(state_arc, services)
-            .await
-            .map(Json)
-            .map(AuthStateResponse::Ok)
+        if let Some(state_arc) = get_foreign_auth_state(&id, &ctx).await {
+            return serialize_auth_state_inner(state_arc, services)
+                .await
+                .map(Json)
+                .map(AuthStateResponse::Ok);
+        }
+
+        // The request may be awaiting approval on another node; its row in the
+        // shared database carries everything the approval page needs, so it
+        // can be shown without contacting the owner.
+        match request_for_user(&ctx, &id).await? {
+            Some(request) => request_to_auth_state(services, request)
+                .await
+                .map(Json)
+                .map(AuthStateResponse::Ok),
+            None => Ok(AuthStateResponse::NotFound),
+        }
     }
 
     #[oai(
@@ -573,41 +588,25 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
-        body: Json<ApproveAuthRequest>,
+        scope: Query<WebApprovalScope>,
         _sec_scheme: AnySecurityScheme,
-    ) -> poem::Result<AuthStateResponse> {
-        let services = ctx.services();
-        let Some(state_arc) = get_foreign_auth_state(&id, &ctx).await else {
-            return Ok(AuthStateResponse::NotFound);
-        };
-
-        let (auth_result, match_key) = {
-            let mut state = state_arc.lock().await;
-            state.add_valid_credential(AuthCredential::WebUserApproval);
-            (state.verify(), state.web_approval_match_key())
-        };
-
-        // Remembered so matching attempts can be bypassed within the grace period.
-        if let Some(match_key) = match body.scope {
-            WebApprovalScope::Once => None,
-            WebApprovalScope::Target => match_key,
-            WebApprovalScope::AllTargets => match_key.map(|k| k.for_all_targets()),
-        } {
-            services
-                .auth_state_store
-                .lock()
-                .await
-                .record_web_approval(match_key);
+    ) -> poem::Result<ApprovalActionResponse> {
+        if approval_request_owner(&ctx, &id).await?.is_none() {
+            return Ok(ApprovalActionResponse::NotFound);
         }
-
-        if let AuthResult::Accepted { .. } = auth_result {
-            let mut store = services.auth_state_store.lock().await;
-            store.complete(&id).await;
-        }
-        serialize_auth_state_inner(state_arc, services)
-            .await
-            .map(Json)
-            .map(AuthStateResponse::Ok)
+        let resolved = resolve_approval(
+            &ctx,
+            id.0,
+            ApprovalKind::User,
+            ApprovalDecision::Approved(scope.0.into()),
+            &acting_approver(&ctx),
+        )
+        .await?;
+        Ok(if resolved {
+            ApprovalActionResponse::Ok
+        } else {
+            ApprovalActionResponse::NotFound
+        })
     }
 
     #[oai(
@@ -621,22 +620,23 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
-    ) -> poem::Result<AuthStateResponse> {
-        let services = ctx.services();
-        let Some(state_arc) = get_foreign_auth_state(&id, &ctx).await else {
-            return Ok(AuthStateResponse::NotFound);
-        };
-        {
-            let mut state = state_arc.lock().await;
-            let credential = AuthCredential::WebUserApproval;
-            state.emit_authentication_failed_event(Some(&credential), "rejected by user");
-            state.reject();
+    ) -> poem::Result<ApprovalActionResponse> {
+        if approval_request_owner(&ctx, &id).await?.is_none() {
+            return Ok(ApprovalActionResponse::NotFound);
         }
-        services.auth_state_store.lock().await.complete(&id).await;
-        serialize_auth_state_inner(state_arc, services)
-            .await
-            .map(Json)
-            .map(AuthStateResponse::Ok)
+        let resolved = resolve_approval(
+            &ctx,
+            id.0,
+            ApprovalKind::User,
+            ApprovalDecision::Rejected,
+            &acting_approver(&ctx),
+        )
+        .await?;
+        Ok(if resolved {
+            ApprovalActionResponse::Ok
+        } else {
+            ApprovalActionResponse::NotFound
+        })
     }
 }
 
@@ -664,6 +664,64 @@ async fn get_foreign_auth_state(
     }
 
     Some(state_arc)
+}
+
+/// The username of the browser-authenticated user, when they own the approval
+/// request `id` — either via the locally-held auth state or via the request
+/// row (which the owning node wrote from its auth state).
+async fn approval_request_owner(
+    ctx: &AuthenticatedRequestContext,
+    id: &Uuid,
+) -> Result<Option<String>, WarpgateError> {
+    let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
+    else {
+        return Ok(None);
+    };
+    if get_foreign_auth_state(id, ctx).await.is_some()
+        || request_for_user(ctx, id).await?.is_some()
+    {
+        return Ok(Some(username.clone()));
+    }
+    Ok(None)
+}
+
+/// The approval request row for `id`, if it exists and belongs to the
+/// browser-authenticated user.
+async fn request_for_user(
+    ctx: &AuthenticatedRequestContext,
+    id: &Uuid,
+) -> Result<Option<SessionApprovalRequest::Model>, WarpgateError> {
+    let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
+    else {
+        return Ok(None);
+    };
+    let request = SessionApprovalRequest::Entity::find_by_id(*id)
+        .one(&ctx.services().db)
+        .await?;
+    Ok(request.filter(|r| username_eq_ci(&r.username, username)))
+}
+
+/// Renders an approval request row into the approval-page response.
+async fn request_to_auth_state(
+    services: &Services,
+    request: SessionApprovalRequest::Model,
+) -> poem::Result<AuthStateResponseInternal> {
+    let web_approval_caching_grace_seconds = services
+        .web_approval_grace_period()
+        .await?
+        .and_then(|d| i64::try_from(d.as_secs()).ok());
+    Ok(AuthStateResponseInternal {
+        id: request.id.to_string(),
+        protocol: request.protocol,
+        address: request.remote_address,
+        started: request.started,
+        state: match request.kind {
+            SessionApprovalRequest::ApprovalRequestKind::Admin => ApiAuthState::AdminApprovalNeeded,
+            SessionApprovalRequest::ApprovalRequestKind::User => ApiAuthState::WebUserApprovalNeeded,
+        },
+        identification_string: request.identification_string,
+        web_approval_caching_grace_seconds,
+    })
 }
 
 async fn serialize_auth_state_inner(

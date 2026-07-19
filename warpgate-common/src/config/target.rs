@@ -390,6 +390,10 @@ pub struct Target {
     pub ticket_requests_disabled: bool,
     pub ticket_require_approval: bool,
     pub ticket_max_uses: Option<i16>,
+    /// Hold every incoming session to this target until an administrator
+    /// approves it in real time (JIT approval).
+    #[serde(default)]
+    pub require_approval: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]

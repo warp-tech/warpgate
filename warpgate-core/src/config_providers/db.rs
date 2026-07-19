@@ -376,6 +376,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map(UserAuthCredential::kind)
             .collect::<HashSet<_>>();
         available_credential_types.insert(CredentialKind::WebUserApproval);
+        available_credential_types.insert(CredentialKind::AdminApproval);
 
         let supported_credential_types = supported_credential_types
             .iter()
@@ -385,14 +386,21 @@ impl ConfigProvider for DatabaseConfigProvider {
             .copied()
             .collect::<HashSet<_>>();
 
-        // "Any single credential" policy should not include WebUserApproval
-        // if other authentication methods are available because it could lead to user confusion
+        // The "any single credential" default must never let an approval factor
+        // stand alone: an approval only ever confirms an otherwise-authenticated
+        // session, so both approval kinds are dropped from the default set when
+        // any real credential is also available.
         let default_policy = Box::new(AnySingleCredentialPolicy {
             supported_credential_types: if supported_credential_types.len() > 1 {
                 supported_credential_types
                     .iter()
                     .copied()
-                    .filter(|x| x != &CredentialKind::WebUserApproval)
+                    .filter(|x| {
+                        !matches!(
+                            x,
+                            CredentialKind::WebUserApproval | CredentialKind::AdminApproval
+                        )
+                    })
                     .collect()
             } else {
                 supported_credential_types.clone()

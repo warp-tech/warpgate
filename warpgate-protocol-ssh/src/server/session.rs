@@ -19,7 +19,7 @@ use tracing::*;
 use url::Url;
 use uuid::Uuid;
 use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
+    ApprovalKind, AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
 use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
 use warpgate_common::helpers::username::username_eq_ci;
@@ -27,7 +27,7 @@ use warpgate_common::{
     Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::AuthState;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
@@ -115,6 +115,9 @@ pub struct ServerSession {
     service_output: ServiceOutput,
     channel_writer: ChannelWriter,
     auth_state: Option<Arc<Mutex<AuthState>>>,
+    /// Set once authenticated. The target menu picks a target *after* this
+    /// point, so it needs the identity to hold that choice for approval.
+    authenticated_user: Option<AuthStateUserInfo>,
     keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
@@ -192,6 +195,7 @@ impl ServerSession {
             service_output: ServiceOutput::new(),
             channel_writer: ChannelWriter::new(),
             auth_state: None,
+            authenticated_user: None,
             keyboard_interactive_state: None,
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
@@ -294,6 +298,7 @@ impl ServerSession {
         {
             kinds.push(CredentialKind::Totp);
             kinds.push(CredentialKind::WebUserApproval);
+            kinds.push(CredentialKind::AdminApproval);
         }
         kinds
     }
@@ -551,15 +556,55 @@ impl ServerSession {
                 self.disconnect_server().await;
             }
             MenuEvent::Selected(target) => {
-                self.target = TargetSelection::Found(target.clone());
-                let _ = self.server_handle.lock().await.set_target(&target).await;
                 // clear screen ; cursor to 1;1
                 self.emit_pty_output(b"\x1b[2J\x1b[H")?;
+
+                // The target wasn't known during authentication, so the
+                // approval requirement couldn't be part of the credential
+                // policy — enforce it on the choice instead.
+                if !self.hold_menu_selection_for_approval(&target).await? {
+                    self.emit_service_message(
+                        "Session was not approved by an administrator",
+                    )?;
+                    self.request_disconnect();
+                    self.disconnect_server().await;
+                    return Ok(());
+                }
+
+                self.target = TargetSelection::Found(target.clone());
+                let _ = self.server_handle.lock().await.set_target(&target).await;
                 self.maybe_connect_remote().await?;
             }
         }
 
         Ok(())
+    }
+
+    /// Holds a menu-selected target for administrator approval when it requires
+    /// one, telling the user what's happening on their terminal. `true` when the
+    /// session may proceed.
+    async fn hold_menu_selection_for_approval(&mut self, target: &Target) -> Result<bool> {
+        let Some(user_info) = self.authenticated_user.clone() else {
+            return Ok(true);
+        };
+
+        let services = self.services.clone();
+        let session_id = self.id;
+        let remote_ip = self.remote_address.ip();
+        Ok(services
+            .hold_preauthenticated_for_admin_approval(
+                &session_id,
+                &user_info,
+                crate::PROTOCOL_NAME,
+                &target.name,
+                Some(remote_ip),
+                || async {
+                    self.emit_service_message(
+                        "Waiting for an administrator to approve this session...",
+                    )
+                },
+            )
+            .await?)
     }
 
     fn handle_event<'a>(
@@ -1860,6 +1905,10 @@ impl ServerSession {
                 }
 
                 if kinds.contains(&CredentialKind::WebUserApproval) {
+                    self.services
+                        .request_approval(auth_state, ApprovalKind::User)
+                        .await?;
+
                     let identification_string =
                         auth_state.lock().await.identification_string().to_owned();
 
@@ -1886,7 +1935,10 @@ impl ServerSession {
                     if let Some(retries) = pending_web_auth_retries {
                         if retries >= MAX_RETRIES {
                             drop(auth_state);
-                            self.auth_state = None;
+                            let state_arc = self.auth_state.take();
+                            if let Some(state_arc) = state_arc {
+                                self.services.reject_auth_state(&state_arc).await?;
+                            }
                             return Ok(russh::server::Auth::reject());
                         }
 
@@ -1897,6 +1949,40 @@ impl ServerSession {
                     } else {
                         next_pending.web_approval_retry_count = Some(0);
                     }
+                }
+
+                if kinds.contains(&CredentialKind::AdminApproval) {
+                    let (started, id_string) = {
+                        let s = auth_state.lock().await;
+                        (*s.started(), s.identification_string().to_owned())
+                    };
+
+                    let timeout = self.services.admin_approval_timeout().await?;
+                    let elapsed = time::OffsetDateTime::now_utc() - started;
+                    if u64::try_from(elapsed.whole_seconds()).unwrap_or(0) >= timeout.as_secs() {
+                        auth_state
+                            .lock()
+                            .await
+                            .emit_session_approval_timed_out_event();
+                        let state_arc = self.auth_state.take();
+                        if let Some(state_arc) = state_arc {
+                            self.services.reject_auth_state(&state_arc).await?;
+                        }
+                        return Ok(russh::server::Auth::reject());
+                    }
+
+                    self.services
+                        .request_approval(auth_state, ApprovalKind::Admin)
+                        .await?;
+
+                    auth_name = "Administrator approval".into();
+                    auth_instructions.push_str(&format!(
+                        "-----------------------------------------------------------------------\n\
+                         This session must be approved by an administrator (request {id_string}).\n\
+                         Please wait, then press Enter to check.\n\
+                         -----------------------------------------------------------------------\n"
+                    ));
+                    auth_prompts.push(("Press Enter to check: ".into(), true));
                 }
 
                 if auth_prompts.is_empty() {
@@ -1929,9 +2015,10 @@ impl ServerSession {
         for cred_kind in kinds {
             let method_kind = match cred_kind {
                 CredentialKind::Password => MethodKind::Password,
-                CredentialKind::Totp | CredentialKind::WebUserApproval | CredentialKind::Sso => {
-                    MethodKind::KeyboardInteractive
-                }
+                CredentialKind::Totp
+                | CredentialKind::WebUserApproval
+                | CredentialKind::AdminApproval
+                | CredentialKind::Sso => MethodKind::KeyboardInteractive,
                 CredentialKind::PublicKey => MethodKind::PublicKey,
                 CredentialKind::Certificate => {
                     // Certificate authentication is not supported for SSH protocol
@@ -2046,15 +2133,11 @@ impl ServerSession {
                             .and_then(Self::rate_limited_credential_type),
                     )
                     .await?;
-                let mut state = state_arc.lock().await;
-
                 if let Some(credential) = credential {
-                    let credential_valid = validate_and_add_credential(
-                        &mut state,
-                        &credential,
-                        self.services.config_provider.as_ref(),
-                    )
-                    .await?;
+                    let credential_valid = self
+                        .services
+                        .validate_and_add_credential(&state_arc, &credential)
+                        .await?;
 
                     if !credential_valid
                         && let Some(credential_type) =
@@ -2065,10 +2148,19 @@ impl ServerSession {
                     }
                 }
 
+                let mut state = state_arc.lock().await;
+
                 if matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval))
                 {
                     drop(state);
                     self.services.try_web_approval_bypass(&state_arc).await?;
+                    state = state_arc.lock().await;
+                }
+
+                if matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::AdminApproval))
+                {
+                    drop(state);
+                    self.services.try_admin_approval_bypass(&state_arc).await?;
                     state = state_arc.lock().await;
                 }
 
@@ -2113,6 +2205,25 @@ impl ServerSession {
                 match authorize_ticket(&self.services.db, secret).await? {
                     Some((ticket, target, user_info)) => {
                         info!("Authorized for {} with a ticket", target.name);
+
+                        // Held before the ticket is consumed, so a denied
+                        // session doesn't burn a single-use ticket.
+                        if !self
+                            .services
+                            .hold_preauthenticated_for_admin_approval(
+                                &self.id,
+                                &user_info,
+                                crate::PROTOCOL_NAME,
+                                &target.name,
+                                Some(self.remote_address.ip()),
+                                || async { Ok::<_, WarpgateError>(()) },
+                            )
+                            .await?
+                        {
+                            warn!("Session was not approved by an administrator");
+                            return Ok(AuthResult::Rejected);
+                        }
+
                         consume_ticket(&self.services.db, &ticket.id).await?;
                         self._auth_accept(user_info.clone(), &target.name).await?;
 
@@ -2130,6 +2241,7 @@ impl ServerSession {
         target_name: &str,
     ) -> Result<(), WarpgateError> {
         self.username = Some(user_info.username.clone());
+        self.authenticated_user = Some(user_info.clone());
         let _ = self
             .server_handle
             .lock()

@@ -39,11 +39,6 @@ pub(super) async fn run_hold_screen(
         .await
         .get(&interactive.state_id)
         .context("auth state expired")?;
-    let mut approval = services
-        .auth_state_store
-        .lock()
-        .await
-        .subscribe(interactive.state_id);
 
     // Size the viewer to the UI canvas; the target's real size follows once it connects.
     let _ = helper_in_tx.send(ServerHelperInput::Resize {
@@ -57,6 +52,16 @@ pub(super) async fn run_hold_screen(
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
+        // Re-subscribed each round: `complete()` drops the sender (even for
+        // non-terminal resolutions, e.g. web approval granted while an
+        // administrator approval is still pending), and a closed receiver
+        // would otherwise make the select below spin.
+        let mut approval = services
+            .auth_state_store
+            .lock()
+            .await
+            .subscribe(interactive.state_id);
+
         // Bind to a local so the `state` guard drops here — `complete()` below re-locks
         // the same AuthState mutex, and holding a match-scrutinee guard across it deadlocks.
         let verification = state.lock().await.verify();
@@ -88,12 +93,37 @@ pub(super) async fn run_hold_screen(
             return Ok(None);
         };
 
-        let awaiting_web = matches!(prompt, ui::AuthPrompt::WebApproval { .. });
+        let awaiting_approval = matches!(
+            prompt,
+            ui::AuthPrompt::WebApproval { .. } | ui::AuthPrompt::AdminApproval { .. }
+        );
+
+        // An administrator approval is bounded by the configured window, like
+        // every other protocol's hold — without it the viewer would sit on this
+        // screen forever, and past the auth-state lifetime it would be waiting
+        // on a request that no admin can resolve any more.
+        let approval_deadline = match prompt {
+            ui::AuthPrompt::AdminApproval { .. } => Some(
+                tokio::time::Instant::now() + services.admin_approval_timeout().await?,
+            ),
+            _ => None,
+        };
 
         loop {
             tokio::select! {
-                // Browser approval landed (or the signal lagged/closed); re-verify on the next loop.
-                _ = approval.recv(), if awaiting_web => break,
+                // An out-of-band approval landed (self or administrator), or the signal
+                // lagged/closed; re-verify on the next loop.
+                _ = approval.recv(), if awaiting_approval => break,
+                () = async {
+                    match approval_deadline {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    warn!("Administrator approval timed out");
+                    services.expire_session_approval(&state).await?;
+                    return Ok(None);
+                }
                 frame = frames.next() => {
                     let Some(frame) = frame else {
                         return Ok(None);
@@ -107,7 +137,7 @@ pub(super) async fn run_hold_screen(
                         Some(ServerHelperEvent::Key { keysym, down }) if down => key_otp_action(keysym),
                         _ => None,
                     };
-                    if !awaiting_web
+                    if !awaiting_approval
                         && let Some(action) = action
                         && let AuthPrompt::Otp { entered } = &mut prompt
                         {

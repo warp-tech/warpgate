@@ -5,8 +5,10 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::ticket_requests::{approve_ticket_request, deny_ticket_request};
-use warpgate_db_entities::TicketRequest;
+use warpgate_core::ticket_requests::{
+    TicketRequestDetails, approve_ticket_request, deny_ticket_request,
+    resolve_ticket_request_names,
+};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
@@ -18,6 +20,18 @@ const fn admin_user_id(ctx: &AuthenticatedRequestContext) -> Option<Uuid> {
 
 pub struct Api;
 
+/// Projects a single resolved request, so the response carries the same shape
+/// as the list endpoint.
+async fn resolve_one(
+    db: &sea_orm::DatabaseConnection,
+    request: warpgate_db_entities::TicketRequest::Model,
+) -> Result<TicketRequestDetails, WarpgateError> {
+    resolve_ticket_request_names(db, vec![request])
+        .await?
+        .pop()
+        .ok_or_else(|| WarpgateError::from(anyhow::anyhow!("request vanished while resolving")))
+}
+
 #[derive(Object)]
 struct DenyTicketRequestBody {
     reason: Option<String>,
@@ -26,7 +40,7 @@ struct DenyTicketRequestBody {
 #[derive(ApiResponse)]
 enum ApproveTicketRequestResponse {
     #[oai(status = 200)]
-    Ok(Json<TicketRequest::Model>),
+    Ok(Json<TicketRequestDetails>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -34,7 +48,7 @@ enum ApproveTicketRequestResponse {
 #[derive(ApiResponse)]
 enum DenyTicketRequestResponse {
     #[oai(status = 200)]
-    Ok(Json<TicketRequest::Model>),
+    Ok(Json<TicketRequestDetails>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -55,8 +69,11 @@ impl Api {
         require_admin_permission(&ctx, Some(AdminPermission::TicketRequestsManage)).await?;
 
         let uid = admin_user_id(&ctx);
-        match approve_ticket_request(&ctx.services().db, id.0, uid).await? {
-            Some(request) => Ok(ApproveTicketRequestResponse::Ok(Json(request))),
+        let db = &ctx.services().db;
+        match approve_ticket_request(db, id.0, uid).await? {
+            Some(request) => Ok(ApproveTicketRequestResponse::Ok(Json(
+                resolve_one(db, request).await?,
+            ))),
             None => Ok(ApproveTicketRequestResponse::NotFound),
         }
     }
@@ -76,8 +93,11 @@ impl Api {
         require_admin_permission(&ctx, Some(AdminPermission::TicketRequestsManage)).await?;
 
         let uid = admin_user_id(&ctx);
-        match deny_ticket_request(&ctx.services().db, id.0, uid, body.reason.clone()).await? {
-            Some(request) => Ok(DenyTicketRequestResponse::Ok(Json(request))),
+        let db = &ctx.services().db;
+        match deny_ticket_request(db, id.0, uid, body.reason.clone()).await? {
+            Some(request) => Ok(DenyTicketRequestResponse::Ok(Json(
+                resolve_one(db, request).await?,
+            ))),
             None => Ok(DenyTicketRequestResponse::NotFound),
         }
     }

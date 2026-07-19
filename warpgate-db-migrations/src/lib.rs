@@ -69,6 +69,7 @@ mod m00064_cluster;
 mod m00065_authorization_indexes;
 mod m00066_cluster_token;
 mod m00067_node_tls_pin;
+mod m00068_jit_session_approval;
 
 pub(crate) mod helpers;
 
@@ -145,6 +146,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00065_authorization_indexes::Migration),
             Box::new(m00066_cluster_token::Migration),
             Box::new(m00067_node_tls_pin::Migration),
+            Box::new(m00068_jit_session_approval::Migration),
         ]
     }
 }

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
+use warpgate_common::auth::{AuthStateUserInfo, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{ProtocolName, SessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
@@ -22,7 +22,7 @@ use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
     X_WARPGATE_CLUSTER_TOKEN,
 };
-use warpgate_core::ConfigProvider;
+use warpgate_core::{AuthState, ConfigProvider};
 use warpgate_db_entities::{User, UserAdminRoleAssignment};
 use warpgate_sso::WarpgateIdToken;
 
@@ -231,9 +231,11 @@ pub async fn get_or_create_auth_state_for_request(
 
     {
         let session_id = session_id_for_request(req, ctx).await?;
-        let mut state = state.lock().await;
-        if state.session_id() != Some(&session_id) {
-            state.set_session_id(session_id);
+        let needs_bind = state.lock().await.session_id() != Some(&session_id);
+        if needs_bind {
+            ctx.services()
+                .set_auth_state_session_id(&state, session_id)
+                .await;
         }
     }
 

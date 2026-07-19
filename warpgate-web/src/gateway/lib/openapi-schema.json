@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.27.0-beta.1-3-ga1a5c670-modified"
+    "version": "v0.27.0-beta.1-36-gd12d4527-modified"
   },
   "servers": [
     {
@@ -196,28 +196,21 @@
             "required": true,
             "deprecated": false,
             "explode": true
+          },
+          {
+            "name": "scope",
+            "schema": {
+              "$ref": "#/components/schemas/WebApprovalScope"
+            },
+            "in": "query",
+            "required": true,
+            "deprecated": false,
+            "explode": true
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json; charset=utf-8": {
-              "schema": {
-                "$ref": "#/components/schemas/ApproveAuthRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -251,14 +244,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -1555,24 +1541,13 @@
           "OtpNeeded",
           "SsoNeeded",
           "WebUserApprovalNeeded",
+          "AdminApprovalNeeded",
           "PublicKeyNeeded",
           "Success",
           "IpBlocked",
           "UserLocked",
           "IpRejected"
         ]
-      },
-      "ApproveAuthRequest": {
-        "type": "object",
-        "title": "ApproveAuthRequest",
-        "required": [
-          "scope"
-        ],
-        "properties": {
-          "scope": {
-            "$ref": "#/components/schemas/WebApprovalScope"
-          }
-        }
       },
       "AuthStateResponseInternal": {
         "type": "object",
@@ -1704,7 +1679,8 @@
           "Certificate",
           "Totp",
           "Sso",
-          "WebUserApproval"
+          "WebUserApproval",
+          "AdminApproval"
         ]
       },
       "CredentialsState": {

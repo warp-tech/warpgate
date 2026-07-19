@@ -149,6 +149,12 @@ pub struct Model {
     pub instance_created_at: OffsetDateTime,
     pub web_auth_max_age_seconds: Option<i64>,
     pub web_approval_grace_period_seconds: Option<i64>,
+    /// How long a session held for administrator (JIT) approval waits before it
+    /// is auto-rejected. `None`/`<=0` falls back to the auth-state timeout.
+    pub admin_approval_timeout_seconds: Option<i64>,
+    /// Window during which a matching administrator approval is remembered and
+    /// bypasses a fresh prompt. `None`/`<=0` disables caching.
+    pub admin_approval_grace_period_seconds: Option<i64>,
     pub recordings_enable: bool,
     /// Serialized [`RecordingsStorageConfig`].
     #[sea_orm(column_type = "Text")]
@@ -238,6 +244,8 @@ impl Entity {
                     instance_created_at: Set(OffsetDateTime::now_utc()),
                     web_auth_max_age_seconds: Set(None),
                     web_approval_grace_period_seconds: Set(None),
+                    admin_approval_timeout_seconds: Set(None),
+                    admin_approval_grace_period_seconds: Set(None),
                     recordings_enable: Set(false),
                     recordings_storage: Set(serde_json::to_string(
                         &RecordingsStorageConfig::default(),

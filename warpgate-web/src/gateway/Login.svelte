@@ -56,10 +56,8 @@
         try {
             authState = (await api.getDefaultAuthState()).state
         } catch (err) {
-            if (err instanceof ResponseError) {
-                if (err.response.status === 404) {
-                    authState = ApiAuthState.NotStarted
-                }
+            if (err instanceof ResponseError && err.response.status === 404) {
+                authState = ApiAuthState.NotStarted
             } else {
                 throw err
             }
@@ -255,19 +253,19 @@
         <div class="mt-3"></div>
 
         {#if reauthRequired}
-            <Alert color="warning"
-                >The security policy requires you to sign in again before
-                accessing this function.</Alert
-            >
+            <Alert color="warning">
+                The security policy requires you to sign in again before
+                accessing this function.
+            </Alert>
         {/if}
         {#if credentialRejected || authState === ApiAuthState.Failed}
             <Alert color="danger">Incorrect credentials</Alert>
         {/if}
         {#if authState === ApiAuthState.IpRejected}
-            <Alert color="danger"
-                >Login denied: your IP address is not in the allowed range for
-                this user</Alert
-            >
+            <Alert color="danger">
+                Login denied: your IP address is not in the allowed range for
+                this user
+            </Alert>
         {/if}
         {#if serverErrorMessage}
             <Alert color="danger">{serverErrorMessage}</Alert>

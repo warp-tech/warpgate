@@ -23,7 +23,7 @@ use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_db_entities::Session;
 
 use super::AnySecurityScheme;
-use crate::api::cluster_proxy::{Owner, proxy_or_serve, proxy_or_serve_websocket, session_owner};
+use warpgate_common_http::cluster_proxy::{Owner, proxy_or_serve, proxy_or_serve_websocket, session_owner};
 use crate::api::common::require_cluster_or_admin_permission;
 
 pub struct Api;

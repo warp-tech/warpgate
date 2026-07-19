@@ -42,4 +42,12 @@ pub fn admin_api_app() -> impl IntoEndpoint {
             "/sessions/changes",
             crate::api::sessions_list::api_get_sessions_changes_stream,
         )
+        .at(
+            "/session-approvals/changes",
+            crate::api::session_approvals::api_get_session_approvals_stream,
+        )
+        .at(
+            "/session-approvals/:id/resolve",
+            crate::api::session_approvals::api_resolve_session_approval,
+        )
 }

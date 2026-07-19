@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::{StreamExt, TryStreamExt};
+use poem::http::StatusCode;
 use poem::http::HeaderName;
 use poem::http::header::{CONNECTION, CONTENT_LENGTH, COOKIE, HOST, TRANSFER_ENCODING, UPGRADE};
 use poem::web::websocket::WebSocket;
@@ -26,8 +27,9 @@ use sea_orm::EntityTrait;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
 use warpgate_common::{Secret, WarpgateError};
-use warpgate_common_http::{AuthenticatedRequestContext, X_WARPGATE_CLUSTER_TOKEN};
 use warpgate_db_entities::{Node, Parameters, Session};
+
+use crate::{AuthenticatedRequestContext, X_WARPGATE_CLUSTER_TOKEN};
 use warpgate_tls::configure_cluster_tls_connector;
 
 pub struct RemoteNode {
@@ -117,6 +119,58 @@ where
     }
 }
 
+/// Error for a peer status a [`FromProxiedStatus`] impl doesn't recognise.
+pub fn unexpected_proxied_status(status: StatusCode) -> poem::Error {
+    poem::Error::from_string(
+        format!("Unexpected response from the owner node: {status}"),
+        StatusCode::BAD_GATEWAY,
+    )
+}
+
+/// Reconstructs a typed OpenAPI response from the HTTP status a peer node
+/// returned. Implemented once per `ApiResponse` enum that is reachable
+/// cross-node, next to the enum, so its status↔variant mapping lives in one
+/// place. [`local_or_forward`] uses it to bridge the raw proxied response back
+/// into the handler's typed world.
+pub trait FromProxiedStatus: Sized {
+    fn from_proxied_status(status: StatusCode) -> poem::Result<Self>;
+}
+
+/// Forward `req` to a specific owner node and translate the peer's status into
+/// the caller's typed response. For handlers that resolve the owner themselves
+/// (e.g. via an identity check) rather than through an [`Owner`].
+pub async fn forward_and_translate<R: FromProxiedStatus>(
+    ctx: &AuthenticatedRequestContext,
+    req: &Request,
+    remote: RemoteNode,
+) -> poem::Result<R> {
+    let response = forward_http(ctx, req, remote, &ctx.services().cluster_token).await?;
+    R::from_proxied_status(response.status())
+}
+
+/// The typed-response analogue of [`proxy_or_serve`]: serve the response locally
+/// when this node owns the resource, otherwise forward the request to the owner
+/// and translate its status back into the handler's `ApiResponse` type.
+///
+/// OpenAPI handlers can't use `proxy_or_serve` directly — that yields a raw
+/// `Response`, but an `#[oai]` method must return its typed response enum.
+pub async fn local_or_forward<R, L, Fut>(
+    ctx: &AuthenticatedRequestContext,
+    req: &Request,
+    owner: Owner,
+    serve_local: L,
+) -> poem::Result<R>
+where
+    R: FromProxiedStatus,
+    L: FnOnce() -> Fut,
+    Fut: Future<Output = poem::Result<R>>,
+{
+    match owner {
+        Owner::Local => serve_local().await,
+        Owner::Remote(remote) => forward_and_translate(ctx, req, remote).await,
+    }
+}
+
 /// Peer TLS config plus every address `owner.address` resolves to, so callers
 /// can try each rather than only the first record.
 async fn peer_connection(
@@ -171,7 +225,52 @@ async fn connect_any(addrs: &[SocketAddr]) -> poem::Result<tokio::net::TcpStream
     .into())
 }
 
-pub(crate) async fn forward_http(
+/// Per-request client: the TLS config pins one specific peer, so a shared
+/// pooled client cannot be reused across nodes. reqwest tries the resolved
+/// addresses in order.
+fn peer_reqwest_client(
+    tls: rustls::ClientConfig,
+    addrs: &[SocketAddr],
+) -> poem::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .use_preconfigured_tls(tls)
+        .resolve_to_addrs(CLUSTER_TLS_SNI_NAME, addrs)
+        .build()
+        .map_err(poem::error::InternalServerError)
+        .map_err(Into::into)
+}
+
+/// POSTs a JSON body to a purpose-built internal endpoint on a peer node,
+/// authenticated by the cluster token alone, and returns the response status.
+/// Unlike [`forward_http`], nothing of the incoming request is forwarded —
+/// the body carries the entire meaning.
+pub async fn post_json_to_peer<B: serde::Serialize + ?Sized>(
+    ctx: &AuthenticatedRequestContext,
+    node: Node::Model,
+    path: &str,
+    body: &B,
+) -> poem::Result<poem::http::StatusCode> {
+    let remote = RemoteNode {
+        address: node.address,
+        tls_spki_sha256: node.tls_spki_sha256,
+    };
+    let (tls, addrs) = peer_connection(ctx, &remote).await?;
+    let url = format!("https://{CLUSTER_TLS_SNI_NAME}:{}{path}", peer_port(&addrs)?);
+    let client = peer_reqwest_client(tls, &addrs)?;
+    let response = client
+        .post(&url)
+        .json(body)
+        .header(
+            X_WARPGATE_CLUSTER_TOKEN.clone(),
+            ctx.services().cluster_token.expose_secret(),
+        )
+        .send()
+        .await
+        .map_err(poem::error::BadGateway)?;
+    Ok(response.status())
+}
+
+pub async fn forward_http(
     ctx: &AuthenticatedRequestContext,
     req: &Request,
     owner: RemoteNode,
@@ -191,19 +290,17 @@ pub(crate) async fn forward_http(
         }
     }
 
-    // Per-request client: the TLS config pins one specific peer, so a shared
-    // pooled client cannot be reused across nodes. reqwest tries the resolved
-    // addresses in order.
-    let client = reqwest::Client::builder()
-        .use_preconfigured_tls(tls)
-        .resolve_to_addrs(CLUSTER_TLS_SNI_NAME, &addrs)
-        .build()
-        .map_err(poem::error::InternalServerError)?;
+    let client = peer_reqwest_client(tls, &addrs)?;
 
     let response = client
         .request(req.method().clone(), &url)
         .headers(headers)
         .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret())
+        // Typed (OpenAPI) peer endpoints require a token/cookie security scheme
+        // to be *present* before the handler runs; the cluster token — checked
+        // ahead of it in the auth order — is the actual authorization, so this
+        // header only unlocks the schema check.
+        .header(crate::X_WARPGATE_TOKEN.clone(), token.expose_secret())
         .send()
         .await
         .map_err(poem::error::BadGateway)?;

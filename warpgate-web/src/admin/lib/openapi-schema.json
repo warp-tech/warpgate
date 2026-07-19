@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.0-beta.1-38-g1ea235bb-modified"
+    "version": "v0.27.0-beta.1-36-gd12d4527-modified"
   },
   "servers": [
     {
@@ -3972,6 +3972,112 @@
         "operationId": "get_ip_echo"
       }
     },
+    "/session-approvals": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionApprovalItem"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_session_approvals"
+      }
+    },
+    "/session-approvals/{id}/approve": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "scope",
+            "schema": {
+              "$ref": "#/components/schemas/SessionApprovalScope"
+            },
+            "in": "query",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "approve_session"
+      }
+    },
+    "/session-approvals/{id}/reject": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "reject_session"
+      }
+    },
     "/users/{user_id}/credentials/certificates": {
       "get": {
         "parameters": [
@@ -4622,7 +4728,8 @@
           "Certificate",
           "Totp",
           "Sso",
-          "WebUserApproval"
+          "WebUserApproval",
+          "AdminApproval"
         ]
       },
       "DatabaseTargetAuth": {
@@ -5469,6 +5576,14 @@
             "type": "integer",
             "format": "int64"
           },
+          "admin_approval_timeout_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "admin_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
           "analytics_consent": {
             "$ref": "#/components/schemas/AnalyticsConsent"
           },
@@ -5646,6 +5761,14 @@
             "format": "int64"
           },
           "web_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "admin_approval_timeout_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "admin_approval_grace_period_seconds": {
             "type": "integer",
             "format": "int64"
           },
@@ -6202,6 +6325,57 @@
           }
         }
       },
+      "SessionApprovalItem": {
+        "type": "object",
+        "title": "SessionApprovalItem",
+        "description": "A session held pending administrator (JIT) approval.",
+        "required": [
+          "id",
+          "protocol",
+          "username",
+          "target",
+          "started",
+          "identification_string"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "identification_string": {
+            "type": "string"
+          },
+          "caching_grace_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When administrator-approval caching is enabled, the caching window in\nseconds; `None` when caching is disabled."
+          }
+        }
+      },
+      "SessionApprovalScope": {
+        "type": "string",
+        "description": "How an administrator approval should be remembered for bypass.",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
+      },
       "SessionSnapshot": {
         "type": "object",
         "title": "SessionSnapshot",
@@ -6292,7 +6466,8 @@
           "allow_roles",
           "options",
           "ticket_requests_disabled",
-          "ticket_require_approval"
+          "ticket_require_approval",
+          "require_approval"
         ],
         "properties": {
           "id": {
@@ -6335,6 +6510,10 @@
           "ticket_max_uses": {
             "type": "integer",
             "format": "int16"
+          },
+          "require_approval": {
+            "type": "boolean",
+            "description": "Hold every incoming session to this target until an administrator\napproves it in real time (JIT approval)."
           }
         }
       },
@@ -6383,6 +6562,9 @@
           "ticket_max_uses": {
             "type": "integer",
             "format": "int16"
+          },
+          "require_approval": {
+            "type": "boolean"
           }
         }
       },
@@ -6972,6 +7154,7 @@
       "TicketRequest": {
         "type": "object",
         "title": "TicketRequest",
+        "description": "A ticket request with the requesting user's and target's names resolved, so\nclients can render one without looking up every referenced id.",
         "required": [
           "id",
           "user_id",
@@ -6989,9 +7172,17 @@
             "type": "string",
             "format": "uuid"
           },
+          "username": {
+            "type": "string",
+            "description": "Empty if the user has since been deleted."
+          },
           "target_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "target_name": {
+            "type": "string",
+            "description": "Empty if the target has since been deleted."
           },
           "requested_duration_seconds": {
             "type": "integer",
@@ -7006,6 +7197,10 @@
           "resolved_by_user_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "resolved_by_username": {
+            "type": "string",
+            "description": "Name of the administrator who resolved it; `None` while pending, or if\nthat user has since been deleted."
           },
           "ticket_id": {
             "type": "string",

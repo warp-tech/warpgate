@@ -4,8 +4,9 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::ticket_requests::list_ticket_requests;
-use warpgate_db_entities::TicketRequest;
+use warpgate_core::ticket_requests::{
+    TicketRequestDetails, list_ticket_requests, resolve_ticket_request_names,
+};
 use warpgate_db_entities::TicketRequest::TicketRequestStatus;
 
 use super::AnySecurityScheme;
@@ -16,7 +17,7 @@ pub struct Api;
 #[derive(ApiResponse)]
 enum GetTicketRequestsResponse {
     #[oai(status = 200)]
-    Ok(Json<Vec<TicketRequest::Model>>),
+    Ok(Json<Vec<TicketRequestDetails>>),
 }
 
 #[OpenApi]
@@ -34,7 +35,10 @@ impl Api {
     ) -> Result<GetTicketRequestsResponse, WarpgateError> {
         require_admin_permission(&ctx, Some(AdminPermission::TicketRequestsManage)).await?;
 
-        let requests = list_ticket_requests(&ctx.services().db, status.0).await?;
-        Ok(GetTicketRequestsResponse::Ok(Json(requests)))
+        let db = &ctx.services().db;
+        let requests = list_ticket_requests(db, status.0).await?;
+        Ok(GetTicketRequestsResponse::Ok(Json(
+            resolve_ticket_request_names(db, requests).await?,
+        )))
     }
 }

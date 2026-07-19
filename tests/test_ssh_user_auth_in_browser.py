@@ -109,7 +109,7 @@ class Test:
         auth_state = await (await session.get(f'{url}/@warpgate/api/auth/state/{auth_id}', ssl=False)).json()
         assert auth_state['protocol'] == 'SSH'
         assert auth_state['state'] == 'WebUserApprovalNeeded'
-        r = await session.post(f'{url}/@warpgate/api/auth/state/{auth_id}/approve', json={"scope": "Once"}, ssl=False)
+        r = await session.post(f'{url}/@warpgate/api/auth/state/{auth_id}/approve', params={"scope": "Once"}, ssl=False)
         assert r.status == 200
 
         ssh_client.stdin.write(b"\r\n")

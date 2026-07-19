@@ -539,6 +539,33 @@
                     </Section>
                 {/if}
 
+                <Section id="access-control" title="Access control">
+                    <label
+                        for="requireApproval"
+                        class="d-flex align-items-center mb-2"
+                    >
+                        <Input
+                            id="requireApproval"
+                            class="mb-0 me-2"
+                            type="switch"
+                            on:change={() => {
+                                target.requireApproval = !target.requireApproval
+                                update()
+                            }}
+                            checked={target.requireApproval}
+                        />
+                        <div>
+                            Require administrator approval for each connection
+                        </div>
+                    </label>
+                    <small class="form-text text-muted">
+                        Sessions are held after authentication — including
+                        ticket connections — until an administrator approves
+                        them. Applies when the target is known at connection
+                        time (not the interactive SSH menu or HTTP).
+                    </small>
+                </Section>
+
                 {#if $serverInfo?.ticketSelfServiceEnabled}
                     <Section
                         id="self-service-tickets"
