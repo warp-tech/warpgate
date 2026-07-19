@@ -344,12 +344,6 @@
         playing = !playing
     }
 
-    function keyPressHandler(event: KeyboardEvent) {
-        if (event.key === ' ') {
-            togglePlaying()
-        }
-    }
-
     step()
 
     function toggleFullscreen() {
@@ -381,7 +375,6 @@
         class="container"
         class:invisible={loading}
         on:click={togglePlaying}
-        on:keypress={keyPressHandler}
         role="img"
         bind:this={containerElement}
     ></div>
