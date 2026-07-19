@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { faCompress, faExpand } from '@fortawesome/free-solid-svg-icons'
     import { Button } from '@sveltestrap/sveltestrap'
     import {
         applyDesktopFrame,
@@ -8,6 +9,7 @@
     } from 'common/desktopCanvas'
     import InfoBox from 'common/InfoBox.svelte'
     import { onDestroy, onMount } from 'svelte'
+    import Fa from 'svelte-fa'
     import { loadTheme } from 'theme'
     import { api, ResponseError, type WebDesktopSessionInfo } from './lib/api'
     import {
@@ -37,6 +39,10 @@
     let canvas: HTMLCanvasElement | undefined = $state()
     // Gates the fade-in; set on the first painted batch.
     let painted = $state(false)
+    // The whole client goes fullscreen, not just the canvas, so the toolbar (and the
+    // disconnect button) stays reachable.
+    let rootElement: HTMLDivElement | undefined = $state()
+    let isFullscreen = $state(false)
     let ctx: CanvasRenderingContext2D | null = null
     let connectionError: string | null = $state(null)
     let sessionNotFound = $state(false)
@@ -151,6 +157,14 @@
             pendingPointer = null
         }
         rafHandle = requestAnimationFrame(tick)
+    }
+
+    function toggleFullscreen() {
+        if (document.fullscreenElement) {
+            void document.exitFullscreen()
+        } else {
+            void rootElement?.requestFullscreen()
+        }
     }
 
     // RFB button mask: bit0=left, bit1=middle, bit2=right
@@ -305,8 +319,13 @@
 </script>
 
 <svelte:window onkeydown={e => onKey(e, true)} onkeyup={e => onKey(e, false)} />
+<!-- Tracked via the event rather than a local toggle, so leaving fullscreen with Esc
+     (which fires no click) still updates the button. -->
+<svelte:document
+    onfullscreenchange={() => (isFullscreen = !!document.fullscreenElement)}
+/>
 
-<div class="desktop-web-client d-flex flex-column">
+<div class="desktop-web-client d-flex flex-column" bind:this={rootElement}>
     <div class="toolbar d-flex align-items-center gap-2 p-2">
         <span class="me-auto text-muted small"
             >{sessionInfo?.targetName ?? ''}</span
@@ -319,6 +338,14 @@
                 {/if}
             </span>
         {/if}
+        <button
+            type="button"
+            class="btn btn-link"
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            onclick={toggleFullscreen}
+        >
+            <Fa icon={isFullscreen ? faCompress : faExpand} fw />
+        </button>
         <Button color="danger" size="sm" onclick={disconnect}
             >Disconnect</Button
         >
