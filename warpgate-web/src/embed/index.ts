@@ -1,3 +1,4 @@
+import { mount } from 'svelte'
 import { api } from 'gateway/lib/api'
 import EmbeddedUI from './EmbeddedUI.svelte'
 
@@ -47,7 +48,7 @@ document.body.appendChild(container)
 
 setTimeout(
     () =>
-        new EmbeddedUI({
+        mount(EmbeddedUI, {
             target: container,
         }),
 )
