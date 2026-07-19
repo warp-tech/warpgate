@@ -85,9 +85,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     credentials,
                 },
                 std::future::pending(),
-                |security_key| {
-                  let security_key = security_key.to_owned();
-                  async move {
+                || async move {
                     if !*auth_ok_sent {
                         stream.push(pgwire::messages::startup::Authentication::Ok)?;
                         *auth_ok_sent = true;
@@ -98,14 +96,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                         (b'C', "WG002".into()),
                         (
                             b'M',
-                            format!(
-                                "Warpgate: waiting for an administrator to approve this session (key {security_key})..."
-                            ),
+                            "Warpgate: waiting for an administrator to approve this session..."
+                                .into(),
                         ),
                     ]))?;
                     stream.flush().await?;
                     Ok::<_, PostgresError>(())
-                  }
                 },
             )
             .await

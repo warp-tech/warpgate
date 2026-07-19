@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.0-beta.1-39-gf1909cc1-modified"
+    "version": "v0.27.0-beta.1-41-g6711f7bb-modified"
   },
   "servers": [
     {
@@ -6349,8 +6349,7 @@
           "protocol",
           "username",
           "target",
-          "started",
-          "identification_string"
+          "started"
         ],
         "properties": {
           "id": {
@@ -6371,10 +6370,6 @@
           "started": {
             "type": "string",
             "format": "date-time"
-          },
-          "identification_string": {
-            "type": "string",
-            "description": "Shown alongside the request so the administrator can confirm they are\napproving the session the user is actually looking at."
           },
           "caching_grace_seconds": {
             "type": "integer",

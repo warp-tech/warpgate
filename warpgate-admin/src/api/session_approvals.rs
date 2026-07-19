@@ -58,9 +58,6 @@ struct SessionApprovalItem {
     username: String,
     target: String,
     started: OffsetDateTime,
-    /// Shown alongside the request so the administrator can confirm they are
-    /// approving the session the user is actually looking at.
-    identification_string: String,
     /// When administrator-approval caching is enabled, the caching window in
     /// seconds; `None` when caching is disabled.
     caching_grace_seconds: Option<i64>,
@@ -167,7 +164,6 @@ impl Api {
                     username: r.username,
                     target: r.target,
                     started: r.started,
-                    identification_string: r.identification_string,
                     caching_grace_seconds,
                 })
                 .collect(),

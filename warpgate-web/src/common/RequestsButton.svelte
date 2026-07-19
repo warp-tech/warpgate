@@ -46,11 +46,9 @@
     // they have been granted. Returning the cleanup ties it to this effect run,
     // so a permission change tears the old watch down instead of leaking it.
     $effect(() => {
-        if (!canSeeAny) {
-            sessionCount = 0
-            ticketCount = 0
-            return
-        }
+        sessionCount = 0
+        ticketCount = 0
+        // No-ops when no permission is held, so no guard is needed here.
         return watchPendingRequests(
             { canSeeSessions, canManageTickets },
             () => {

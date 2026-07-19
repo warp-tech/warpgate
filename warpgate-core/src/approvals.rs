@@ -36,7 +36,7 @@ use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{SessionId, WarpgateError};
 use warpgate_db_entities::{Parameters, SessionApprovalRequest};
 
-use crate::auth_state::{ApprovalMatchKey, AuthState, generate_identification_string};
+use crate::auth_state::{ApprovalMatchKey, AuthState};
 use crate::auth_state_store::TIMEOUT;
 use crate::services::Services;
 
@@ -91,9 +91,6 @@ struct ApprovalSubject {
     /// approval. `None` where they aren't a stable fingerprint (ticket auth),
     /// which disables remembering rather than keying on less.
     credentials: Option<Vec<AuthCredentialFingerprint>>,
-    /// Short code shown to both parties so the administrator can confirm they
-    /// are approving the session the user is actually looking at.
-    identification_string: String,
 }
 
 impl ApprovalSubject {
@@ -107,7 +104,6 @@ impl ApprovalSubject {
             target_name: state.target_name().to_string(),
             remote_ip: state.remote_ip(),
             credentials: Some(state.credential_fingerprints()),
-            identification_string: state.identification_string().to_owned(),
         })
     }
 
@@ -275,9 +271,8 @@ impl Services {
     /// short-circuits before anything is announced, the request is advertised
     /// before the wait begins (so it can never be resolved by an administrator
     /// who cannot see it), and only then does `notify_waiting` tell the client
-    /// what is happening — it receives the session's identification string, the
-    /// code the administrator sees alongside the request. Protocols with no
-    /// in-band channel for that message (MySQL) pass a no-op.
+    /// what is happening. Protocols with no in-band channel for that message
+    /// (MySQL) pass a no-op.
     ///
     /// `cancel` ends the wait early when the client goes away. It is a
     /// promptness measure, not a correctness one — session teardown deletes the
@@ -291,7 +286,7 @@ impl Services {
     ) -> Result<bool, E>
     where
         E: From<WarpgateError>,
-        F: FnOnce(&str) -> Fut,
+        F: FnOnce() -> Fut,
         Fut: Future<Output = Result<(), E>>,
     {
         if !self.target_requires_approval(request.target_name).await? {
@@ -307,7 +302,6 @@ impl Services {
             target_name: request.target_name.to_string(),
             remote_ip: request.remote_ip,
             credentials: request.credentials,
-            identification_string: generate_identification_string(),
         };
 
         if self.admin_approval_is_remembered(&subject).await? {
@@ -332,7 +326,7 @@ impl Services {
         subject.emit_requested_event();
         let _ = self.admin_approval_request_tx.send(*session_id);
 
-        notify_waiting(&subject.identification_string).await?;
+        notify_waiting().await?;
 
         let timeout = self.admin_approval_timeout().await?;
         let decision = tokio::select! {
@@ -410,7 +404,7 @@ impl Services {
                         credentials,
                     },
                     std::future::pending(),
-                    |_| async { Ok::<_, WarpgateError>(()) },
+                    || async { Ok::<_, WarpgateError>(()) },
                 )
                 .await
                 .unwrap_or_else(|error| {
@@ -469,7 +463,7 @@ impl Services {
                 username: Set(subject.user_info.username.clone()),
                 target: Set(subject.target_name.clone()),
                 remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
-                identification_string: Set(subject.identification_string.clone()),
+                identification_string: Set(None),
                 started: Set(OffsetDateTime::now_utc()),
             },
         )
@@ -536,7 +530,7 @@ impl Services {
                     username: Set(state.user_info().username.clone()),
                     target: Set(state.target_name().to_string()),
                     remote_address: Set(state.remote_ip().map(|ip| ip.to_string())),
-                    identification_string: Set(state.identification_string().to_owned()),
+                    identification_string: Set(Some(state.identification_string().to_owned())),
                     started: Set(*state.started()),
                 },
             )

@@ -338,7 +338,7 @@ async fn negotiate_and_authorize(
                     credentials,
                 },
                 std::future::pending(),
-                |_| async { Ok::<_, WarpgateError>(()) },
+                || async { Ok::<_, WarpgateError>(()) },
             ),
         )
         .await??;

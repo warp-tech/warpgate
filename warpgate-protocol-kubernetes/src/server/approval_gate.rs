@@ -41,7 +41,6 @@ pub async fn check_admin_approval(
         // decided, and retrying is the right thing for the client to do.
         AdminApprovalStatus::Pending => Some(status_response(
             StatusCode::SERVICE_UNAVAILABLE,
-            "ServiceUnavailable",
             &format!(
                 "Warpgate: session for target \"{}\" is waiting for administrator approval; \
                  retry shortly",
@@ -50,7 +49,6 @@ pub async fn check_admin_approval(
         )),
         AdminApprovalStatus::Denied => Some(status_response(
             StatusCode::FORBIDDEN,
-            "Forbidden",
             &format!(
                 "Warpgate: an administrator did not approve this session for target \"{}\"",
                 target.name
@@ -60,7 +58,11 @@ pub async fn check_admin_approval(
 }
 
 /// A `v1.Status` failure, the shape every Kubernetes client already parses.
-fn status_response(code: StatusCode, reason: &str, message: &str) -> Response {
+///
+/// Kubernetes spells `reason` in CamelCase, which is the HTTP status name with
+/// its spaces removed.
+fn status_response(code: StatusCode, message: &str) -> Response {
+    let reason = code.canonical_reason().unwrap_or_default().replace(' ', "");
     let body = serde_json::json!({
         "kind": "Status",
         "apiVersion": "v1",

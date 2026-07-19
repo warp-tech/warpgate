@@ -5,7 +5,7 @@ import {
     TicketRequestStatus,
 } from 'admin/lib/api'
 
-export const APPROVAL_POLL_INTERVAL_MS = 30000
+const POLL_INTERVAL_MS = 30000
 
 /** Each kind of request has its own permission, so an admin only ever sees what
  * they are allowed to act on. */
@@ -53,7 +53,7 @@ export function watchPendingRequests(
     }
 
     onChange()
-    const interval = setInterval(onChange, APPROVAL_POLL_INTERVAL_MS)
+    const interval = setInterval(onChange, POLL_INTERVAL_MS)
 
     let socket: WebSocket | undefined
     if (permissions.canSeeSessions) {

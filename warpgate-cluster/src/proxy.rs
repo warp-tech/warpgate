@@ -14,7 +14,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use futures::{StreamExt, TryStreamExt};
 use poem::http::header::{CONNECTION, CONTENT_LENGTH, COOKIE, HOST, TRANSFER_ENCODING, UPGRADE};
 use poem::http::{HeaderName, StatusCode};
@@ -23,9 +22,9 @@ use poem::{Body, IntoResponse, Request, Response};
 use sea_orm::EntityTrait;
 use tokio_tungstenite::{Connector, client_async_tls_with_config, tungstenite};
 use warpgate_ca::CLUSTER_TLS_SNI_NAME;
+use warpgate_common::WarpgateError;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
-use warpgate_common::{Secret, WarpgateError};
 use warpgate_common_http::{
     AuthenticatedRequestContext, X_WARPGATE_CLUSTER_ACTOR, X_WARPGATE_CLUSTER_TOKEN,
     X_WARPGATE_TOKEN, encode_cluster_actor,
@@ -47,10 +46,6 @@ pub enum Owner {
 }
 
 impl Owner {
-    pub fn local() -> Self {
-        Self::Local
-    }
-
     pub fn remote(node: Node::Model) -> Self {
         Self::Remote(RemoteNode {
             address: node.address,
@@ -91,9 +86,7 @@ where
     Fut: Future<Output = poem::Result<Response>>,
 {
     match owner {
-        Owner::Remote(remote) => {
-            forward_http(ctx, req, remote, &ctx.services().cluster_token).await
-        }
+        Owner::Remote(remote) => forward_http(ctx, req, remote).await,
         Owner::Local => serve_local().await,
     }
 }
@@ -110,9 +103,7 @@ where
     Fut: Future<Output = poem::Result<Response>>,
 {
     match owner {
-        Owner::Remote(remote) => {
-            forward_websocket(ctx, req, ws, remote, &ctx.services().cluster_token).await
-        }
+        Owner::Remote(remote) => forward_websocket(ctx, req, ws, remote).await,
         Owner::Local => serve_local(ws).await,
     }
 }
@@ -134,18 +125,6 @@ pub trait FromProxiedStatus: Sized {
     fn from_proxied_status(status: StatusCode) -> poem::Result<Self>;
 }
 
-/// Forward `req` to a specific owner node and translate the peer's status into
-/// the caller's typed response. For handlers that resolve the owner themselves
-/// (e.g. via an identity check) rather than through an [`Owner`].
-pub async fn forward_and_translate<R: FromProxiedStatus>(
-    ctx: &AuthenticatedRequestContext,
-    req: &Request,
-    remote: RemoteNode,
-) -> poem::Result<R> {
-    let response = forward_http(ctx, req, remote, &ctx.services().cluster_token).await?;
-    R::from_proxied_status(response.status())
-}
-
 /// The typed-response analogue of [`proxy_or_serve`]: serve the response locally
 /// when this node owns the resource, otherwise forward the request to the owner
 /// and translate its status back into the handler's `ApiResponse` type.
@@ -164,9 +143,29 @@ where
     Fut: Future<Output = poem::Result<R>>,
 {
     match owner {
+        Owner::Remote(remote) => {
+            let response = forward_http(ctx, req, remote).await?;
+            R::from_proxied_status(response.status())
+        }
         Owner::Local => serve_local().await,
-        Owner::Remote(remote) => forward_and_translate(ctx, req, remote).await,
     }
+}
+
+/// The headers that authenticate and attribute a cluster hop.
+///
+/// Every forward sends these, whatever the protocol: the token says which node
+/// is asking, and the actor says who it is asking *for* — a peer rejects a
+/// cluster-token request that doesn't say. Built in one place so the two
+/// forwards can't drift apart on it.
+fn cluster_auth_headers(
+    ctx: &AuthenticatedRequestContext,
+) -> poem::Result<[(HeaderName, String); 2]> {
+    let token = ctx.services().cluster_token.expose_secret().to_owned();
+    let actor = encode_cluster_actor(ctx.auth.actor()).map_err(poem::error::InternalServerError)?;
+    Ok([
+        (X_WARPGATE_CLUSTER_TOKEN.clone(), token),
+        (X_WARPGATE_CLUSTER_ACTOR.clone(), actor),
+    ])
 }
 
 /// Peer TLS config plus every address `owner.address` resolves to, so callers
@@ -238,7 +237,6 @@ async fn forward_http(
     ctx: &AuthenticatedRequestContext,
     req: &Request,
     owner: RemoteNode,
-    token: &Secret<String>,
 ) -> poem::Result<Response> {
     let (tls, addrs) = peer_connection(ctx, &owner).await?;
     let url = format!(
@@ -256,22 +254,20 @@ async fn forward_http(
 
     let client = peer_reqwest_client(tls, &addrs)?;
 
-    let response = client
-        .request(req.method().clone(), &url)
-        .headers(headers)
-        .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret())
-        // Who the peer is acting for. The token authenticates this node, not
-        // the person behind the request, and the peer rejects a forward that
-        // doesn't say.
-        .header(
-            X_WARPGATE_CLUSTER_ACTOR.clone(),
-            encode_cluster_actor(ctx.auth.actor()).map_err(poem::error::InternalServerError)?,
-        )
+    let mut request = client.request(req.method().clone(), &url).headers(headers);
+    for (name, value) in cluster_auth_headers(ctx)? {
+        request = request.header(name, value);
+    }
+
+    let response = request
         // Typed (OpenAPI) peer endpoints require a token/cookie security scheme
         // to be *present* before the handler runs; the cluster token — checked
         // ahead of it in the auth order — is the actual authorization, so this
         // header only unlocks the schema check.
-        .header(X_WARPGATE_TOKEN.clone(), token.expose_secret())
+        .header(
+            X_WARPGATE_TOKEN.clone(),
+            ctx.services().cluster_token.expose_secret(),
+        )
         .send()
         .await
         .map_err(poem::error::BadGateway)?;
@@ -292,13 +288,12 @@ async fn forward_websocket(
     req: &Request,
     ws: WebSocket,
     owner: RemoteNode,
-    token: &Secret<String>,
 ) -> poem::Result<Response> {
     let (tls, addrs) = peer_connection(ctx, &owner).await?;
     let host = format!("{CLUSTER_TLS_SNI_NAME}:{}", peer_port(&addrs)?);
     let url = format!("wss://{host}{}", path_and_query(req));
 
-    let request = poem::http::Request::builder()
+    let mut builder = poem::http::Request::builder()
         .uri(&url)
         .header(CONNECTION, "Upgrade")
         .header(UPGRADE, "websocket")
@@ -307,10 +302,11 @@ async fn forward_websocket(
             poem::http::header::SEC_WEBSOCKET_KEY,
             tungstenite::handshake::client::generate_key(),
         )
-        .header(HOST, host)
-        .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret())
-        .body(())
-        .map_err(poem::error::InternalServerError)?;
+        .header(HOST, host);
+    for (name, value) in cluster_auth_headers(ctx)? {
+        builder = builder.header(name, value);
+    }
+    let request = builder.body(()).map_err(poem::error::InternalServerError)?;
 
     let stream = connect_any(&addrs).await?;
     let (peer, _) = client_async_tls_with_config(

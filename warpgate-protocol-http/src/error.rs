@@ -2,11 +2,13 @@ use http::StatusCode;
 use poem::IntoResponse;
 use tracing::error;
 
-pub fn error_page(e: &poem::Error) -> impl IntoResponse {
-    error!("{:?}", e);
-    let e = html_escape::encode_text(&e.to_string()).into_owned();
-    poem::web::Html(format!(
+/// The branded standalone page Warpgate serves in place of a proxied response.
+/// `head` is dropped into the document head (a `<meta refresh>`, say); `body` is
+/// already-escaped markup for inside `<main>`.
+pub fn branded_page(head: &str, body: &str) -> String {
+    format!(
         r#"<!DOCTYPE html>
+        {head}
         <style>
             body {{
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
@@ -23,9 +25,18 @@ pub fn error_page(e: &poem::Error) -> impl IntoResponse {
         </style>
         <main>
             <img src="/@warpgate/assets/brand.svg" />
-            <h1>Request failed</h1>
-            <p>{e}</p>
+            {body}
         </main>
         "#
-    )).with_status(StatusCode::BAD_GATEWAY)
+    )
+}
+
+pub fn error_page(e: &poem::Error) -> impl IntoResponse {
+    error!("{:?}", e);
+    let e = html_escape::encode_text(&e.to_string()).into_owned();
+    poem::web::Html(branded_page(
+        "",
+        &format!("<h1>Request failed</h1><p>{e}</p>"),
+    ))
+    .with_status(StatusCode::BAD_GATEWAY)
 }

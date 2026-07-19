@@ -75,9 +75,7 @@ pub enum Event {
     /// The approval gate is actually holding this session (as opposed to
     /// passing it straight through), so the user can be told why they're
     /// waiting. Only the session can write to the terminal.
-    AdminApprovalPending {
-        security_key: String,
-    },
+    AdminApprovalPending,
     AdminApprovalResolved {
         approved: bool,
     },
@@ -698,14 +696,9 @@ impl ServerSession {
                         credentials,
                     },
                     cancel.cancelled_owned(),
-                    |security_key| {
-                        let security_key = security_key.to_owned();
-                        async move {
-                            let _ = notify_sender
-                                .send_once(Event::AdminApprovalPending { security_key })
-                                .await;
-                            Ok::<_, WarpgateError>(())
-                        }
+                    || async move {
+                        let _ = notify_sender.send_once(Event::AdminApprovalPending).await;
+                        Ok::<_, WarpgateError>(())
                     },
                 )
                 .await
@@ -764,10 +757,10 @@ impl ServerSession {
                         error!(?err, "Menu loop action handler error");
                     }
                 }
-                Event::AdminApprovalPending { security_key } => {
-                    self.emit_service_message(&format!(
-                        "Waiting for an administrator to approve this session (key {security_key})..."
-                    ))?;
+                Event::AdminApprovalPending => {
+                    self.emit_service_message(
+                        "Waiting for an administrator to approve this session...",
+                    )?;
                 }
                 Event::AdminApprovalResolved { approved } => {
                     if !approved {

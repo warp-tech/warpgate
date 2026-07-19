@@ -48,7 +48,11 @@ pub struct Model {
     pub username: String,
     pub target: String,
     pub remote_address: Option<String>,
-    pub identification_string: String,
+    /// The short code the user is shown, for confirming they are approving
+    /// their own login. Only [`ApprovalRequestKind::User`] has one — an
+    /// administrator approval is a gate on a connection, with no second party
+    /// reading a code off a screen.
+    pub identification_string: Option<String>,
     pub started: OffsetDateTime,
 }
 

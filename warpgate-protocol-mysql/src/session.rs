@@ -72,7 +72,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                     credentials,
                 },
                 std::future::pending(),
-                |_| async { Ok::<_, MySqlError>(()) },
+                || async { Ok::<_, MySqlError>(()) },
             )
             .await
     }

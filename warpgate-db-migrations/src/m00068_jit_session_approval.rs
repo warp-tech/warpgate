@@ -23,7 +23,7 @@ pub mod session_approval_request {
         pub username: String,
         pub target: String,
         pub remote_address: Option<String>,
-        pub identification_string: String,
+        pub identification_string: Option<String>,
         pub started: OffsetDateTime,
     }
 

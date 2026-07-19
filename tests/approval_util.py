@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager
+from .test_ticket_requests import _default_params as default_params  # noqa: F401
 from .util import wait_port
 
 # Every admin-role permission, all off. Tests switch on only what they are
@@ -37,23 +38,6 @@ NO_ADMIN_PERMISSIONS = dict(
     admin_roles_manage=False,
     ticket_requests_manage=False,
 )
-
-
-def default_params(**overrides):
-    """A ParameterUpdate carrying the defaults these tests assume."""
-    defaults = dict(
-        allow_own_credential_management=True,
-        minimize_password_login=False,
-        rate_limit_bytes_per_second=None,
-        ssh_client_auth_keyboard_interactive=True,
-        ssh_client_auth_password=True,
-        ssh_client_auth_publickey=True,
-        ticket_self_service_enabled=False,
-        ticket_auto_approve_existing_access=True,
-        ticket_require_description=False,
-    )
-    defaults.update(overrides)
-    return sdk.ParameterUpdate(**defaults)
 
 
 def create_password_user(api, password="123"):

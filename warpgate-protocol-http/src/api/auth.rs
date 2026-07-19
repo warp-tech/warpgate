@@ -735,7 +735,9 @@ async fn request_to_auth_state(
         address: request.remote_address,
         started: request.started,
         state: ApiAuthState::WebUserApprovalNeeded,
-        identification_string: request.identification_string,
+        // Only user-approval rows reach here (the lookup filters on the kind),
+        // and those always carry the code the user reads back.
+        identification_string: request.identification_string.unwrap_or_default(),
         web_approval_caching_grace_seconds,
     })
 }

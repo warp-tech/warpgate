@@ -299,7 +299,7 @@ async fn hold_until_connected(
                     credentials,
                 },
                 std::future::pending(),
-                |_| async { Ok::<_, WarpgateError>(()) },
+                || async { Ok::<_, WarpgateError>(()) },
             )
             .await?;
         if !approved {

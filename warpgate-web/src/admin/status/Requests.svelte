@@ -197,7 +197,7 @@
                                 </span>
                                 <strong>{entry.session.target}</strong>
                             </div>
-                            <div class="meta text-muted">
+                            <div class="small text-muted">
                                 {#if entry.session.address}
                                     {entry.session.address}
                                     ·
@@ -286,7 +286,7 @@
                                     {entry.ticket.targetName ?? '(deleted)'}
                                 </strong>
                             </div>
-                            <div class="meta text-muted">
+                            <div class="small text-muted">
                                 {#if entry.ticket.requestedDurationSeconds}
                                     valid for
                                     {formatDurationAsHumantime(
@@ -365,9 +365,3 @@
         </Button>
     </ModalFooter>
 </Modal>
-
-<style lang="scss">
-    .meta {
-        font-size: .75rem;
-    }
-</style>

@@ -217,8 +217,9 @@ impl Services {
             remote_ip,
         );
 
-        // A policy whose only outstanding factor is the self-approval never
-        // reaches `add_auth_credential`, so it would otherwise go unadvertised.
+        // A policy needing nothing but the self-approval (an SSH user with no
+        // password or key) never reaches `add_auth_credential`, so it would
+        // otherwise go unadvertised.
         let result = state_arc.lock().await.verify();
         self.advertise_if_awaiting_approval(&state_arc, &result)
             .await?;
@@ -240,13 +241,18 @@ impl Services {
         Ok(result)
     }
 
-    /// Advertises a pending self-approval the moment a state starts needing
-    /// one.
+    /// Advertises a pending self-approval once the login is actually waiting on
+    /// one — that is, when the approval is the *only* factor still outstanding.
     ///
     /// Every credential any protocol adds funnels through here, so the request
-    /// row exists however the login was driven. Advertising per-protocol
-    /// instead would silently leave whichever protocol forgot with an approval
-    /// the resolve endpoints can never find.
+    /// row exists however the login was driven. Advertising per-protocol instead
+    /// would silently leave whichever protocol forgot with an approval the
+    /// resolve endpoints can never find.
+    ///
+    /// Requiring it to be the sole remaining need is what keeps the row honest:
+    /// it means "a human must act now". Advertising while a password is still
+    /// outstanding would publish a request nobody can yet fulfil, and make the
+    /// approval page describe a login that hasn't got that far.
     async fn advertise_if_awaiting_approval(
         &self,
         state_arc: &Arc<Mutex<AuthState>>,
@@ -254,7 +260,8 @@ impl Services {
     ) -> Result<(), WarpgateError> {
         if matches!(
             result,
-            AuthResult::Need(kinds) if kinds.contains(&CredentialKind::WebUserApproval)
+            AuthResult::Need(kinds)
+                if kinds.len() == 1 && kinds.contains(&CredentialKind::WebUserApproval)
         ) {
             self.request_approval(state_arc).await?;
         }
