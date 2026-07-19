@@ -48,7 +48,7 @@
     "qrcode": "^1.5.4",
     "rxjs": "^7.8.2",
     "sass": "1.78",
-    "svelte": "^5.56.4",
+    "svelte": "^5.56.5",
     "svelte-check": "^4.7.2",
     "svelte-fa": "^4.0.4",
     "svelte-intersection-observer": "^1.2.0",
