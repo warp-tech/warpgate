@@ -35,6 +35,8 @@
     const { sessionId } = params
 
     let canvas: HTMLCanvasElement | undefined = $state()
+    // Gates the fade-in; set on the first painted batch.
+    let painted = $state(false)
     let ctx: CanvasRenderingContext2D | null = null
     let connectionError: string | null = $state(null)
     let sessionNotFound = $state(false)
@@ -140,6 +142,9 @@
             for (const frame of batch) {
                 void applyDesktopFrame(canvas, ctx, frame)
             }
+            // Reveal only once there's something to show, so the canvas fades in with the
+            // first real content instead of flashing an empty surface.
+            painted = true
         }
         if (pendingPointer) {
             send({ type: 'pointer_event', ...pendingPointer })
@@ -336,6 +341,7 @@
     >
         <canvas
             bind:this={canvas}
+            class:painted
             tabindex="0"
             onmousemove={onPointerMove}
             onmousedown={onPointerButton}
@@ -373,5 +379,14 @@
         max-width: 100%;
         max-height: 100%;
         outline: none;
+
+        // Hidden until the first frame is painted, so the desktop eases in instead of
+        // snapping from a blank surface.
+        opacity: 0;
+        transition: opacity 0.5s ease-in-out;
+
+        &.painted {
+            opacity: 1;
+        }
     }
 </style>
