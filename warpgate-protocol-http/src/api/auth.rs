@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use futures::{SinkExt, StreamExt};
+use poem::http::StatusCode;
 use poem::session::Session;
 use poem::web::Data;
 use poem::web::websocket::{Message, WebSocket};
@@ -16,7 +17,8 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_admin::api::AnySecurityScheme;
-use warpgate_cluster::approvals::{acting_approver, resolve_approval};
+use warpgate_cluster::approvals::{acting_approver, find_pending_approval, resolve_locally};
+use warpgate_cluster::proxy::{FromProxiedStatus, local_or_forward, unexpected_proxied_status};
 use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, WarpgateError};
@@ -117,24 +119,6 @@ struct AuthStateResponseInternal {
     /// When web-approval caching is enabled, the caching window in seconds;
     /// `None` when caching is disabled.
     pub web_approval_caching_grace_seconds: Option<i64>,
-}
-
-/// How an web approval should be remembered for bypass
-#[derive(Enum, Clone, Copy)]
-enum WebApprovalScope {
-    Once,
-    Target,
-    AllTargets,
-}
-
-impl From<WebApprovalScope> for ApprovalScope {
-    fn from(scope: WebApprovalScope) -> Self {
-        match scope {
-            WebApprovalScope::Once => Self::Once,
-            WebApprovalScope::Target => Self::Target,
-            WebApprovalScope::AllTargets => Self::AllTargets,
-        }
-    }
 }
 
 #[derive(ApiResponse)]
@@ -589,25 +573,11 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
-        scope: Query<WebApprovalScope>,
+        scope: Query<ApprovalScope>,
+        req: &poem::Request,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<ApprovalActionResponse> {
-        let Some(session_id) = owned_approval_session(&ctx, &id).await? else {
-            return Ok(ApprovalActionResponse::NotFound);
-        };
-        let resolved = resolve_approval(
-            &ctx,
-            session_id,
-            ApprovalKind::User,
-            ApprovalDecision::Approved(scope.0.into()),
-            &acting_approver(&ctx),
-        )
-        .await?;
-        Ok(if resolved {
-            ApprovalActionResponse::Ok
-        } else {
-            ApprovalActionResponse::NotFound
-        })
+        resolve_own_approval(&ctx, req, &id, ApprovalDecision::Approved(scope.0)).await
     }
 
     #[oai(
@@ -620,25 +590,54 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
+        req: &poem::Request,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<ApprovalActionResponse> {
-        let Some(session_id) = owned_approval_session(&ctx, &id).await? else {
-            return Ok(ApprovalActionResponse::NotFound);
-        };
-        let resolved = resolve_approval(
-            &ctx,
-            session_id,
-            ApprovalKind::User,
-            ApprovalDecision::Rejected,
-            &acting_approver(&ctx),
-        )
-        .await?;
-        Ok(if resolved {
-            ApprovalActionResponse::Ok
-        } else {
-            ApprovalActionResponse::NotFound
-        })
+        resolve_own_approval(&ctx, req, &id, ApprovalDecision::Rejected).await
     }
+}
+
+impl FromProxiedStatus for ApprovalActionResponse {
+    fn from_proxied_status(status: StatusCode) -> poem::Result<Self> {
+        match status {
+            StatusCode::OK => Ok(Self::Ok),
+            StatusCode::NOT_FOUND => Ok(Self::NotFound),
+            status => Err(unexpected_proxied_status(status)),
+        }
+    }
+}
+
+/// Resolves the user's own pending approval, wherever the held session is
+/// running.
+///
+/// Only the node holding it can apply the decision to its auth state, so a
+/// request that lands elsewhere is forwarded there and re-enters this handler
+/// under a cluster token. Ownership is re-checked on both nodes: the forwarded
+/// identity is what `owned_approval_session` reads, so the peer confirms the
+/// request really belongs to the user who asked rather than trusting the hop.
+async fn resolve_own_approval(
+    ctx: &AuthenticatedRequestContext,
+    req: &poem::Request,
+    auth_state_id: &Uuid,
+    decision: ApprovalDecision,
+) -> poem::Result<ApprovalActionResponse> {
+    let Some(session_id) = owned_approval_session(ctx, auth_state_id).await? else {
+        return Ok(ApprovalActionResponse::NotFound);
+    };
+    let actor = acting_approver(ctx);
+    let Some(pending) = find_pending_approval(ctx, session_id, ApprovalKind::User).await? else {
+        return Ok(ApprovalActionResponse::NotFound);
+    };
+    local_or_forward(ctx, req, pending.owner, || async {
+        Ok(
+            if resolve_locally(ctx, session_id, ApprovalKind::User, decision, &actor).await? {
+                ApprovalActionResponse::Ok
+            } else {
+                ApprovalActionResponse::NotFound
+            },
+        )
+    })
+    .await
 }
 
 /// Used to obtain an AuthState that is not for this request
@@ -647,7 +646,10 @@ async fn get_foreign_auth_state(
     id: &Uuid,
     ctx: &AuthenticatedRequestContext,
 ) -> Option<Arc<Mutex<AuthState>>> {
-    let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
+    // `actor`, not `auth`: on a cluster-forwarded request this is the browser
+    // user from the originating node, and ownership is what we're checking.
+    let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) =
+        ctx.auth.actor()
     else {
         return None;
     };
@@ -676,7 +678,7 @@ async fn owned_approval_session(
     id: &Uuid,
 ) -> Result<Option<Uuid>, WarpgateError> {
     if !matches!(
-        &ctx.auth,
+        ctx.auth.actor(),
         RequestAuthorization::Session(SessionAuthorization::User { .. })
     ) {
         return Ok(None);
@@ -697,7 +699,8 @@ async fn request_for_user(
     ctx: &AuthenticatedRequestContext,
     id: &Uuid,
 ) -> Result<Option<SessionApprovalRequest::Model>, WarpgateError> {
-    let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
+    let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) =
+        ctx.auth.actor()
     else {
         return Ok(None);
     };

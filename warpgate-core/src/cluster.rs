@@ -82,7 +82,7 @@ impl Cluster {
             address: Set(self.address.clone()),
             hostname: Set(self.hostname.clone()),
             last_seen: Set(OffsetDateTime::now_utc()),
-            tls_spki_sha256: Set(Some(self.tls_identity.spki_sha256_hex.clone())),
+            tls_spki_sha256: Set(self.tls_identity.spki_sha256_hex.clone()),
         };
         // Upsert: SeaORM emits `ON CONFLICT DO UPDATE` (Postgres/SQLite) or
         // `ON DUPLICATE KEY UPDATE` (MySQL). `exec_without_returning` avoids the

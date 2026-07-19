@@ -1205,3 +1205,103 @@ class TestKubernetesIntegration:
         assert resp.status_code == 401, (
             f"expected 401 for untrusted audience, got {resp.status_code}: {resp.text[:300]}"
         )
+
+
+class TestKubernetesAdminApproval:
+    @pytest.mark.asyncio
+    async def test_gated_target_refuses_until_approved(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        """A target marked `require_approval` must hold Kubernetes traffic too.
+
+        kubectl can't sit on a gate, so the request is refused with a
+        Kubernetes `Status` object it can render, and only succeeds once an
+        administrator resolves the held session.
+        """
+        from .approval_util import wait_for_pending_approval
+
+        k3s = processes.start_k3s()
+        url = f"https://localhost:{shared_wg.http_port}"
+
+        with admin_client(url) as api:
+            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
+            user = api.create_user(
+                sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}")
+            )
+            api.create_password_credential(
+                user.id, sdk.NewPasswordCredential(password="123")
+            )
+            api.add_user_role(user.id, role.id)
+
+            target_name = f"k8s-approval-{uuid.uuid4()}"
+            target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=target_name,
+                    require_approval=True,
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetKubernetesOptions(
+                            kind="Kubernetes",
+                            cluster_url=f"https://127.0.0.1:{k3s.port}",
+                            tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
+                            auth=sdk.KubernetesTargetAuth(
+                                sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
+                                    kind="Token", token=k3s.token
+                                )
+                            ),
+                        )
+                    ),
+                )
+            )
+            api.add_target_role(target.id, role.id)
+
+        async with aiohttp.ClientSession() as session:
+            headers = {"Host": f"localhost:{shared_wg.http_port}"}
+            resp = await session.post(
+                f"{url}/@warpgate/api/auth/login",
+                json={"username": user.username, "password": "123"},
+                headers=headers,
+                ssl=False,
+            )
+            resp.raise_for_status()
+            resp = await session.post(
+                f"{url}/@warpgate/api/profile/api-tokens",
+                json={
+                    "label": "approval-token",
+                    "expiry": (
+                        datetime.now(timezone.utc) + timedelta(days=1)
+                    ).isoformat(),
+                },
+                ssl=False,
+            )
+            resp.raise_for_status()
+            user_token = (await resp.json())["secret"]
+
+        server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+        cmd = [
+            "kubectl",
+            "get",
+            "pods",
+            "--server",
+            server,
+            "--insecure-skip-tls-verify",
+            "--token",
+            user_token,
+            "-n",
+            "default",
+        ]
+
+        # Held: kubectl fails, and the reason reaches the user rather than an
+        # opaque transport error.
+        p = run_kubectl(cmd)
+        assert p.returncode != 0, "a gated target must not be reachable while held"
+        assert b"approval" in p.stderr.lower(), (
+            f"kubectl should surface why: {p.stderr!r}"
+        )
+
+        with admin_client(url) as api:
+            approval = wait_for_pending_approval(api, target_name, user.username)
+            assert approval.protocol == "Kubernetes"
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
+
+        p = run_kubectl(cmd)
+        assert p.returncode == 0, f"approved session should reach k8s: {p.stderr!r}"

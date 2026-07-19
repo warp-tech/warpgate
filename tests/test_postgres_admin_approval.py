@@ -1,114 +1,22 @@
+import asyncio
 import os
-import subprocess
 import time
-from uuid import uuid4
+import subprocess
 
 import aiohttp
 import pytest
 import requests
 
 from .api_client import admin_client, sdk
+from .approval_util import (
+    create_user_and_postgres_target,
+    default_params,
+    grant_admin_role,
+    psql_held,
+    wait_for_pending_approval,
+)
 from .conftest import ProcessManager, WarpgateProcess
-from .test_ticket_requests import _default_params
 from .util import wait_port
-
-
-def _create_user_and_target(url, db_port):
-    """A password user and a Postgres target gated by JIT admin approval."""
-    with admin_client(url) as api:
-        role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
-        user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
-        api.create_password_credential(
-            user.id, sdk.NewPasswordCredential(password="123")
-        )
-        api.add_user_role(user.id, role.id)
-        target = api.create_target(
-            sdk.TargetDataRequest(
-                name=f"postgres-{uuid4()}",
-                # The JIT gate: every connection is held until an admin approves.
-                require_approval=True,
-                options=sdk.TargetOptions(
-                    sdk.TargetOptionsTargetPostgresOptions(
-                        kind="Postgres",
-                        host="localhost",
-                        port=db_port,
-                        username="user",
-                        auth=sdk.DatabaseTargetAuth(
-                            sdk.DatabaseTargetAuthDatabaseTargetPasswordAuth(
-                                kind="Password",
-                                password="123",
-                            )
-                        ),
-                        tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
-                    )
-                ),
-            )
-        )
-        api.add_target_role(target.id, role.id)
-    return user, target
-
-
-def _grant_admin_role(url, user_id, **perms):
-    """Give a user an admin role carrying only the named permissions. The
-    requests indicator counts each kind behind its own permission."""
-    payload = dict(
-        name=f"requests-admin-{uuid4()}",
-        description="scoped for the requests inbox",
-        targets_create=False,
-        targets_edit=False,
-        targets_delete=False,
-        users_create=False,
-        users_edit=False,
-        users_delete=False,
-        access_roles_create=False,
-        access_roles_edit=False,
-        access_roles_delete=False,
-        access_roles_assign=False,
-        sessions_view=False,
-        sessions_terminate=False,
-        recordings_view=False,
-        tickets_create=False,
-        tickets_delete=False,
-        config_edit=False,
-        admin_roles_manage=False,
-        ticket_requests_manage=False,
-    )
-    payload.update(perms)
-    with admin_client(url) as api:
-        role = api.create_admin_role(sdk.AdminRoleDataRequest(**payload))
-        api.add_user_admin_role(user_id, role.id)
-
-
-def _wait_for_pending_approval(api, target_name, username, deadline=15):
-    """Poll the admin API until the held session shows up. The owning node
-    creates the request record when it starts waiting for the approval, and
-    any node can list it from the shared database."""
-    for _ in range(deadline * 4):
-        for approval in api.get_session_approvals():
-            if approval.target == target_name and approval.username == username:
-                return approval
-        time.sleep(0.25)
-    raise AssertionError("session did not appear in the pending-approval list")
-
-
-def _psql_held(processes: ProcessManager, gateway_postgres_port, user, target):
-    """Start psql; it blocks after password auth until the session is approved."""
-    wait_port(gateway_postgres_port, recv=False)
-    return processes.start(
-        [
-            "psql",
-            "--user",
-            f"{user.username}#{target.name}",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(gateway_postgres_port),
-            "db",
-        ],
-        env={"PGPASSWORD": "123", **os.environ},
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-    )
 
 
 class Test:
@@ -120,15 +28,15 @@ class Test:
     ):
         db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
-        user, target = _create_user_and_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, db_port)
         wait_port(db_port, recv=False)
 
-        client = _psql_held(processes, shared_wg.postgres_port, user, target)
+        client = psql_held(processes, shared_wg.postgres_port, user, target)
 
         with admin_client(url) as api:
-            approval = _wait_for_pending_approval(api, target.name, user.username)
+            approval = wait_for_pending_approval(api, target.name, user.username)
             assert approval.protocol == "PostgreSQL"
-            api.approve_session(approval.id, sdk.SessionApprovalScope.ONCE)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
 
         # Once approved the session proceeds and the query runs.
         assert b"tbl" in client.communicate(b"\\dt\n", timeout=timeout)[0]
@@ -157,13 +65,13 @@ class Test:
     ):
         db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
-        user, target = _create_user_and_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, db_port)
         wait_port(db_port, recv=False)
 
-        client = _psql_held(processes, shared_wg.postgres_port, user, target)
+        client = psql_held(processes, shared_wg.postgres_port, user, target)
 
         with admin_client(url) as api:
-            approval = _wait_for_pending_approval(api, target.name, user.username)
+            approval = wait_for_pending_approval(api, target.name, user.username)
             api.reject_session(approval.id)
 
         # A rejected session is denied: psql exits non-zero without connecting.
@@ -181,7 +89,7 @@ class Test:
         # approval: the session is held twice, sequentially.
         db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
-        user, target = _create_user_and_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, db_port)
         with admin_client(url) as api:
             api.update_user(
                 user.id,
@@ -211,7 +119,7 @@ class Test:
             ssl=False,
         )
 
-        client = _psql_held(processes, shared_wg.postgres_port, user, target)
+        client = psql_held(processes, shared_wg.postgres_port, user, target)
 
         msg = await ws.receive(15)
         auth_id = msg.data
@@ -225,8 +133,8 @@ class Test:
         # The web approval is granted, but the session is now held again, for
         # an administrator.
         with admin_client(url) as api:
-            approval = _wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.SessionApprovalScope.ONCE)
+            approval = wait_for_pending_approval(api, target.name, user.username)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
 
         assert b"tbl" in client.communicate(b"\\dt\n", timeout=timeout)[0]
         assert client.returncode == 0
@@ -245,8 +153,8 @@ class Test:
         # into the gateway must be able to read it cross-app.
         db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
-        user, target = _create_user_and_target(url, db_port)
-        _grant_admin_role(url, user.id, sessions_view=True)
+        user, target = create_user_and_postgres_target(url, db_port)
+        grant_admin_role(url, user.id, approve_sessions=True)
         wait_port(db_port, recv=False)
 
         session = aiohttp.ClientSession()
@@ -262,31 +170,33 @@ class Test:
         info = await (
             await session.get(f"{url}/@warpgate/api/info", ssl=False)
         ).json()
-        assert info["admin_permissions"]["sessions_view"] is True
+        assert info["admin_permissions"]["approve_sessions"] is True
 
-        client = _psql_held(processes, shared_wg.postgres_port, user, target)
+        client = psql_held(processes, shared_wg.postgres_port, user, target)
 
-        pending = []
+        # Filtered to this test's target: `shared_wg` is shared, so a sibling
+        # test's held session would otherwise make a bare count flaky.
+        ours = []
         for _ in range(60):
             response = await session.get(
                 f"{url}/@warpgate/admin/api/session-approvals", ssl=False
             )
             assert response.status == 200, "session cookie must reach the admin API"
-            pending = await response.json()
-            if pending:
+            ours = [r for r in await response.json() if r["target"] == target.name]
+            if ours:
                 break
-            time.sleep(0.25)
-        assert len(pending) == 1, "indicator would show no outstanding requests"
+            await asyncio.sleep(0.25)
+        assert len(ours) == 1, "indicator would show no outstanding requests"
 
         with admin_client(url) as api:
-            api.approve_session(pending[0]["id"], sdk.SessionApprovalScope.ONCE)
+            api.approve_session(ours[0]["id"], sdk.ApprovalScope.ONCE)
 
         # Resolved requests drop out of the count.
         client.communicate(b"\\dt\n", timeout=timeout)
         response = await session.get(
             f"{url}/@warpgate/admin/api/session-approvals", ssl=False
         )
-        assert await response.json() == []
+        assert [r for r in await response.json() if r["target"] == target.name] == []
         await session.close()
 
     def test_inbox_counts_sessions_and_tickets(
@@ -302,13 +212,13 @@ class Test:
         url = f"https://localhost:{wg.http_port}"
 
         db_port = processes.start_postgres_server()
-        user, target = _create_user_and_target(url, db_port)
-        _grant_admin_role(
-            url, user.id, sessions_view=True, ticket_requests_manage=True
+        user, target = create_user_and_postgres_target(url, db_port)
+        grant_admin_role(
+            url, user.id, approve_sessions=True, ticket_requests_manage=True
         )
         with admin_client(url) as api:
             api.update_parameters(
-                _default_params(
+                default_params(
                     ticket_self_service_enabled=True,
                     ticket_auto_approve_existing_access=False,
                 )
@@ -330,7 +240,7 @@ class Test:
         assert created.status_code == 201
 
         # ...and one held session.
-        client = _psql_held(processes, wg.postgres_port, user, target)
+        client = psql_held(processes, wg.postgres_port, user, target)
 
         def counts():
             held = session.get(f"{url}/@warpgate/admin/api/session-approvals")
@@ -345,7 +255,7 @@ class Test:
             sessions_n, tickets_n = counts()
             if sessions_n and tickets_n:
                 break
-            time.sleep(0.25)
+            time.sleep(0.25)  # sync test, own node
         assert (sessions_n, tickets_n) == (1, 1), "indicator should total 2"
 
         # Names are projected into the request, so the inbox renders one
@@ -359,8 +269,8 @@ class Test:
 
         # Resolving one kind leaves the other counted.
         with admin_client(url) as api:
-            approval = _wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.SessionApprovalScope.ONCE)
+            approval = wait_for_pending_approval(api, target.name, user.username)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
         client.communicate(b"\\dt\n", timeout=timeout)
         assert counts() == (0, 1)
 
@@ -375,7 +285,7 @@ class Test:
         # bypassable by anyone holding a ticket.
         db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
-        user, target = _create_user_and_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, db_port)
         wait_port(db_port, recv=False)
 
         with admin_client(url) as api:
@@ -405,8 +315,8 @@ class Test:
 
         # The ticket connection is held, and appears in the approval queue.
         with admin_client(url) as api:
-            approval = _wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.SessionApprovalScope.ONCE)
+            approval = wait_for_pending_approval(api, target.name, user.username)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
 
         assert b"tbl" in client.communicate(b"\\dt\n", timeout=timeout)[0]
         assert client.returncode == 0
@@ -425,18 +335,18 @@ class Test:
         wait_port(node_b.http_port, recv=False)
 
         db_port = processes.start_postgres_server()
-        user, target = _create_user_and_target(
+        user, target = create_user_and_postgres_target(
             f"https://localhost:{node_a.http_port}", db_port
         )
         wait_port(db_port, recv=False)
 
         # Held on node A.
-        client = _psql_held(processes, node_a.postgres_port, user, target)
+        client = psql_held(processes, node_a.postgres_port, user, target)
 
         # Approved from node B.
         with admin_client(f"https://localhost:{node_b.http_port}") as api:
-            approval = _wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.SessionApprovalScope.ONCE)
+            approval = wait_for_pending_approval(api, target.name, user.username)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
 
         assert b"tbl" in client.communicate(b"\\dt\n", timeout=timeout)[0]
         assert client.returncode == 0

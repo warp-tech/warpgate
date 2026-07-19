@@ -2,53 +2,43 @@ use futures::{SinkExt, StreamExt};
 use poem::http::StatusCode;
 use poem::web::Data;
 use poem::web::websocket::{Message, WebSocket};
-use poem::{IntoResponse, Response, handler};
+use poem::{IntoResponse, handler};
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
-use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
+use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use uuid::Uuid;
-use warpgate_cluster::approvals::{ResolveApprovalRpc, acting_approver, resolve_approval};
+use warpgate_cluster::approvals::{acting_approver, find_pending_approval, resolve_locally};
+use warpgate_cluster::proxy::{FromProxiedStatus, local_or_forward, unexpected_proxied_status};
 use warpgate_common::auth::ApprovalKind;
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_common_http::{AuthenticatedRequestContext, RequestAuthorization};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::approvals::{ApprovalDecision, ApprovalScope};
 use warpgate_db_entities::SessionApprovalRequest;
 
 use super::AnySecurityScheme;
-use crate::api::common::{has_admin_permission, require_admin_permission};
+use crate::api::common::{
+    has_admin_permission, require_admin_permission, require_cluster_or_admin_permission,
+};
 
 pub struct Api;
 
 /// Approving your own held session defeats the four-eyes property the gate
 /// exists for, so it is refused — unless the approver could edit targets, since
-/// that lets them clear `require_approval` and walk through anyway. Rejecting
-/// your own session stays allowed: denying yourself access grants nothing.
+/// that lets them clear `require_approval` and walk through anyway.
 async fn require_not_self_approval(
     ctx: &AuthenticatedRequestContext,
-    session_id: Uuid,
+    held_username: &str,
 ) -> Result<(), WarpgateError> {
-    let Some(approver) = ctx.auth.username() else {
+    let Some(approver) = ctx.auth.actor().username() else {
         // Not a user (admin API token) — there is no "own session" to speak of.
         return Ok(());
     };
 
-    let key = (
-        session_id,
-        SessionApprovalRequest::ApprovalRequestKind::Admin,
-    );
-    let Some(row) = SessionApprovalRequest::Entity::find_by_id(key)
-        .one(&ctx.services().db)
-        .await?
-    else {
-        // No request to resolve; `resolve_approval` reports the 404.
-        return Ok(());
-    };
-
-    if !username_eq_ci(&row.username, approver)
+    if !username_eq_ci(held_username, approver)
         || has_admin_permission(ctx, Some(AdminPermission::TargetsEdit)).await?
     {
         return Ok(());
@@ -68,28 +58,12 @@ struct SessionApprovalItem {
     username: String,
     target: String,
     started: OffsetDateTime,
+    /// Shown alongside the request so the administrator can confirm they are
+    /// approving the session the user is actually looking at.
     identification_string: String,
     /// When administrator-approval caching is enabled, the caching window in
     /// seconds; `None` when caching is disabled.
     caching_grace_seconds: Option<i64>,
-}
-
-/// How an administrator approval should be remembered for bypass.
-#[derive(Enum, Clone, Copy)]
-enum SessionApprovalScope {
-    Once,
-    Target,
-    AllTargets,
-}
-
-impl From<SessionApprovalScope> for ApprovalScope {
-    fn from(scope: SessionApprovalScope) -> Self {
-        match scope {
-            SessionApprovalScope::Once => Self::Once,
-            SessionApprovalScope::Target => Self::Target,
-            SessionApprovalScope::AllTargets => Self::AllTargets,
-        }
-    }
 }
 
 #[derive(ApiResponse)]
@@ -106,6 +80,51 @@ enum ActionResponse {
     NotFound,
 }
 
+impl FromProxiedStatus for ActionResponse {
+    fn from_proxied_status(status: StatusCode) -> poem::Result<Self> {
+        match status {
+            StatusCode::OK => Ok(Self::Ok),
+            StatusCode::NOT_FOUND => Ok(Self::NotFound),
+            status => Err(unexpected_proxied_status(status)),
+        }
+    }
+}
+
+/// Resolves a pending approval from whichever node the admin is talking to.
+///
+/// Only the node running the held session can deliver a decision, so a request
+/// that lands elsewhere is forwarded there and re-enters this same handler
+/// under a cluster token — which is why the permission gate accepts one.
+async fn resolve(
+    ctx: &AuthenticatedRequestContext,
+    req: &poem::Request,
+    session_id: Uuid,
+    decision: ApprovalDecision,
+) -> poem::Result<ActionResponse> {
+    let actor = acting_approver(ctx);
+    let Some(pending) = find_pending_approval(ctx, session_id, ApprovalKind::Admin).await? else {
+        return Ok(ActionResponse::NotFound);
+    };
+
+    // Checked here rather than at the endpoint so it can't be reached around,
+    // and so it reuses the row the lookup above already read. Only approvals:
+    // rejecting your own session grants nothing.
+    if matches!(decision, ApprovalDecision::Approved(_)) {
+        require_not_self_approval(ctx, &pending.username).await?;
+    }
+
+    local_or_forward(ctx, req, pending.owner, || async {
+        Ok(
+            if resolve_locally(ctx, session_id, ApprovalKind::Admin, decision, &actor).await? {
+                ActionResponse::Ok
+            } else {
+                ActionResponse::NotFound
+            },
+        )
+    })
+    .await
+}
+
 #[OpenApi]
 impl Api {
     #[oai(
@@ -118,7 +137,7 @@ impl Api {
         ctx: Data<&AuthenticatedRequestContext>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<ListResponse> {
-        require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
+        require_admin_permission(&ctx, Some(AdminPermission::ApproveSessions)).await?;
         let services = ctx.services();
 
         // Any node can serve the list: requests are first-class rows in the
@@ -164,24 +183,12 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
-        scope: Query<SessionApprovalScope>,
+        scope: Query<ApprovalScope>,
+        req: &poem::Request,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<ActionResponse> {
-        require_admin_permission(&ctx, Some(AdminPermission::ApproveSessions)).await?;
-        require_not_self_approval(&ctx, id.0).await?;
-        let resolved = resolve_approval(
-            &ctx,
-            id.0,
-            ApprovalKind::Admin,
-            ApprovalDecision::Approved(scope.0.into()),
-            &acting_approver(&ctx),
-        )
-        .await?;
-        Ok(if resolved {
-            ActionResponse::Ok
-        } else {
-            ActionResponse::NotFound
-        })
+        require_cluster_or_admin_permission(&ctx, AdminPermission::ApproveSessions).await?;
+        resolve(&ctx, req, id.0, ApprovalDecision::Approved(scope.0)).await
     }
 
     #[oai(
@@ -193,62 +200,12 @@ impl Api {
         &self,
         ctx: Data<&AuthenticatedRequestContext>,
         id: Path<Uuid>,
+        req: &poem::Request,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<ActionResponse> {
-        require_admin_permission(&ctx, Some(AdminPermission::ApproveSessions)).await?;
-        let resolved = resolve_approval(
-            &ctx,
-            id.0,
-            ApprovalKind::Admin,
-            ApprovalDecision::Rejected,
-            &acting_approver(&ctx),
-        )
-        .await?;
-        Ok(if resolved {
-            ActionResponse::Ok
-        } else {
-            ActionResponse::NotFound
-        })
+        require_cluster_or_admin_permission(&ctx, AdminPermission::ApproveSessions).await?;
+        resolve(&ctx, req, id.0, ApprovalDecision::Rejected).await
     }
-}
-
-/// The owner side of a cross-node resolution: delivers the decision carried in
-/// the body to the session waiting on this node. Cluster-token authenticated
-/// only — admins go through the public approve/reject endpoints on any node
-/// instead.
-#[handler]
-pub async fn api_resolve_session_approval(
-    ctx: Data<&AuthenticatedRequestContext>,
-    session_id: poem::web::Path<Uuid>,
-    body: poem::web::Json<ResolveApprovalRpc>,
-) -> poem::Result<Response> {
-    if !matches!(ctx.auth, RequestAuthorization::ClusterToken) {
-        return Err(poem::Error::from_status(StatusCode::UNAUTHORIZED));
-    }
-    let services = ctx.services();
-    let applied = match body.kind {
-        ApprovalKind::Admin => {
-            services
-                .deliver_admin_approval(session_id.0, body.decision, &body.actor)
-                .await
-        }
-        ApprovalKind::User => match body.auth_state_id {
-            Some(auth_state_id) => {
-                services
-                    .apply_user_approval(session_id.0, auth_state_id, body.decision, &body.actor)
-                    .await
-            }
-            None => Ok(false),
-        },
-    }
-    .map_err(poem::error::InternalServerError)?;
-    Ok(Response::builder()
-        .status(if applied {
-            StatusCode::OK
-        } else {
-            StatusCode::NOT_FOUND
-        })
-        .finish())
 }
 
 #[handler]
@@ -256,7 +213,7 @@ pub async fn api_get_session_approvals_stream(
     ctx: Data<&AuthenticatedRequestContext>,
     ws: WebSocket,
 ) -> Result<impl IntoResponse, WarpgateError> {
-    require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
+    require_admin_permission(&ctx, Some(AdminPermission::ApproveSessions)).await?;
 
     let mut rx = ctx
         .services()

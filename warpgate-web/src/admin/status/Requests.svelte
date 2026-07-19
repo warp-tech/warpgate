@@ -18,9 +18,9 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
     import {
+        ApprovalScope,
         api,
         type SessionApprovalItem,
-        SessionApprovalScope,
         type TicketRequest,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
@@ -55,7 +55,7 @@
     let denyReason = $state('')
     let denyError: string | undefined = $state()
 
-    let canSeeSessions = $derived($adminPermissions.sessionsView)
+    let canSeeSessions = $derived($adminPermissions.approveSessions)
     let canManageTickets = $derived($adminPermissions.ticketRequestsManage)
 
     // Oldest first: the longest-waiting request is the one to action next.
@@ -126,7 +126,7 @@
 
     async function approveSession(
         item: SessionApprovalItem,
-        scope: SessionApprovalScope,
+        scope: ApprovalScope,
     ) {
         await resolveSession(() => api.approveSession({ id: item.id, scope }))
     }
@@ -202,7 +202,6 @@
                                     {entry.session.address}
                                     ·
                                 {/if}
-                                key {entry.session.identificationString} ·
                                 <RelativeDate date={entry.session.started} />
                             </div>
                         </div>
@@ -215,7 +214,7 @@
                                         click={() =>
                                         approveSession(
                                             entry.session,
-                                            SessionApprovalScope.Target,
+                                            ApprovalScope.Target,
                                         )}
                                     >
                                         Approve for
@@ -235,7 +234,7 @@
                                             <DropdownItem
                                                 onclick={() => approveSession(
                                                     entry.session,
-                                                    SessionApprovalScope.AllTargets,
+                                                    ApprovalScope.AllTargets,
                                                 )}
                                             >
                                                 Approve for all targets for
@@ -246,7 +245,7 @@
                                             <DropdownItem
                                                 onclick={() => approveSession(
                                                     entry.session,
-                                                    SessionApprovalScope.Once,
+                                                    ApprovalScope.Once,
                                                 )}
                                             >
                                                 Approve this time only
@@ -259,7 +258,7 @@
                                         click={() =>
                                         approveSession(
                                             entry.session,
-                                            SessionApprovalScope.Once,
+                                            ApprovalScope.Once,
                                         )}
                                     >
                                         Approve

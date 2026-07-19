@@ -32,8 +32,6 @@ use tokio::sync::mpsc::{Sender, UnboundedSender, unbounded_channel};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{Instrument, debug, error, info, info_span, warn};
-use uuid::Uuid;
-use warpgate_common::auth::{AuthCredentialFingerprint, AuthStateUserInfo};
 use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetRdpOptions, WarpgateError};
 use warpgate_core::approvals::AdminApprovalRequest;
@@ -55,7 +53,7 @@ mod transport;
 use bridge::{connect_backend, helper_stdin_writer};
 use hold_screen::run_hold_screen;
 use warpgate_desktop_auth::{
-    DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
+    AuthorizedSession, DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
 };
 
 /// The fd number at which the serve helper receives its end of the RDP transport
@@ -268,19 +266,22 @@ async fn handle_connection(
 /// one), and dialing the target.
 ///
 /// `Ok(None)` means an administrator denied the session.
-#[allow(clippy::too_many_arguments)]
 async fn hold_until_connected(
     services: &Services,
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     helper_in_tx: &UnboundedSender<ServerHelperInput>,
     frames: &mut HelperReader,
-    user_info: AuthStateUserInfo,
-    target: Target,
-    options: TargetRdpOptions,
-    pending_ticket: Option<Uuid>,
-    credentials: Option<Vec<AuthCredentialFingerprint>>,
+    session: AuthorizedSession<TargetRdpOptions>,
     remote_address: Option<SocketAddr>,
 ) -> Result<Option<BackendBridge>> {
+    let AuthorizedSession {
+        user_info,
+        target,
+        options,
+        pending_ticket,
+        credentials,
+    } = session;
+
     let (session_id, remote_ip) = {
         let handle = server_handle.lock().await;
         (handle.id(), remote_address.map(|a| a.ip()))
@@ -358,13 +359,7 @@ async fn control_loop(
                 )
                 .await
                 {
-                    Ok(DesktopAuthOutcome::Authorized {
-                        user_info,
-                        target,
-                        options,
-                        pending_ticket,
-                        credentials,
-                    }) => {
+                    Ok(DesktopAuthOutcome::Authorized(session)) => {
                         // Accept the NLA first so the RDP session starts and the
                         // holding screen has somewhere to paint — the viewer
                         // would otherwise sit in its credential dialog with no
@@ -380,11 +375,7 @@ async fn control_loop(
                             &server_handle,
                             &helper_in_tx,
                             &mut frames,
-                            user_info,
-                            target,
-                            options,
-                            pending_ticket,
-                            credentials,
+                            session,
                             Some(remote_address),
                         )
                         .await
@@ -428,11 +419,13 @@ async fn control_loop(
                                             &server_handle,
                                             &helper_in_tx,
                                             &mut frames,
-                                            user_info,
-                                            target,
-                                            options,
-                                            None,
-                                            Some(credentials),
+                                            AuthorizedSession {
+                                                user_info,
+                                                target,
+                                                options,
+                                                pending_ticket: None,
+                                                credentials: Some(credentials),
+                                            },
                                             Some(remote_address),
                                         )
                                         .await

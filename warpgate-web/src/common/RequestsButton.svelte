@@ -20,7 +20,7 @@
     // Each kind of request has its own permission, so an admin only ever counts
     // what they are allowed to act on.
     let canSeeSessions = $derived(
-        $serverInfo?.adminPermissions?.sessionsView ?? false,
+        $serverInfo?.adminPermissions?.approveSessions ?? false,
     )
     let canManageTickets = $derived(
         $serverInfo?.adminPermissions?.ticketRequestsManage ?? false,

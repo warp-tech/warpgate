@@ -289,8 +289,17 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                     .validate_and_add_credential(&state_arc, &credential)
                     .await?;
 
-                let state = state_arc.lock().await;
-                let user_auth_result = state.verify();
+                // Bind to locals so the guard drops here: the arms below take
+                // the store lock and then this same state lock, and the
+                // approval gate can hold for minutes.
+                let (user_auth_result, state_id, credentials) = {
+                    let state = state_arc.lock().await;
+                    (
+                        state.verify(),
+                        *state.id(),
+                        Some(state.credential_fingerprints()),
+                    )
+                };
 
                 match user_auth_result {
                     AuthResult::Accepted { user_info } => {
@@ -298,7 +307,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                             .auth_state_store
                             .lock()
                             .await
-                            .complete(state.id())
+                            .complete(&state_id)
                             .await;
                         let target_auth_result = {
                             self.services
@@ -332,7 +341,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                             .clear_failed_attempts(&remote_ip, &user_info.username)
                             .await;
 
-                        let credentials = Some(state_arc.lock().await.credential_fingerprints());
                         if !self
                             .hold_for_admin_approval(&user_info, &target_name, credentials)
                             .await?

@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
-from .test_postgres_admin_approval import _wait_for_pending_approval
+from .approval_util import wait_for_pending_approval
 from .util import wait_port
 
 
@@ -24,7 +24,7 @@ class Test:
         client = _connect_held(processes, shared_wg, user, target)
 
         with admin_client(url) as api:
-            _wait_for_pending_approval(api, target.name, user.username)
+            wait_for_pending_approval(api, target.name, user.username)
 
         client.kill()
         client.wait(timeout=10)
@@ -46,14 +46,14 @@ class Test:
         )
 
         with admin_client(url) as api:
-            approval = _wait_for_pending_approval(api, target.name, user.username)
+            approval = wait_for_pending_approval(api, target.name, user.username)
 
             # A connection that slipped past the gate would have run the command
             # and exited by now.
             time.sleep(2)
             assert client.poll() is None, "session connected before approval"
 
-            api.approve_session(approval.id, sdk.SessionApprovalScope.ONCE)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
 
         assert b"gate-marker" in client.communicate(timeout=timeout)[0]
 
@@ -70,7 +70,7 @@ class Test:
         client = _connect_held(processes, shared_wg, user, target)
 
         with admin_client(url) as api:
-            approval = _wait_for_pending_approval(api, target.name, user.username)
+            approval = wait_for_pending_approval(api, target.name, user.username)
             api.close_session(approval.id)
 
         _assert_request_disappears(url, user, target)

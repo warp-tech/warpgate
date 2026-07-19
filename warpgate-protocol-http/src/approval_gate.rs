@@ -6,17 +6,15 @@
 //! administrator decides; a client that asked for something other than a
 //! document gets the same meaning as a status code it can branch on.
 
-use std::sync::Arc;
-
 use http::StatusCode;
 use poem::web::Html;
 use poem::{IntoResponse, Request, Response};
-use tokio::sync::Mutex;
 use warpgate_common::Target;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::WarpgateServerHandle;
 use warpgate_core::approvals::{AdminApprovalRequest, AdminApprovalStatus};
+
+use crate::session_handle::warpgate_server_handle_for_request;
 
 /// How often the interstitial re-checks. Short enough to feel immediate, long
 /// enough not to hammer the gateway while a session waits.
@@ -28,15 +26,14 @@ pub async fn check_admin_approval(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
     target: &Target,
-    server_handle: Option<&Arc<Mutex<WarpgateServerHandle>>>,
 ) -> poem::Result<Option<Response>> {
     let services = ctx.services();
 
     // A decision needs a session to attribute the request row to and a user to
     // name in it. Without either there is nothing to approve, so a gated target
     // is simply unreachable on this path rather than silently open.
-    let (Some(server_handle), Some(username)) = (server_handle, ctx.auth.username().cloned())
-    else {
+    let handle = warpgate_server_handle_for_request(req).await.ok();
+    let (Some(handle), Some(username)) = (handle, ctx.auth.username().cloned()) else {
         return Ok(if services.target_requires_approval(&target.name).await? {
             Some(denied_response(req, target))
         } else {
@@ -44,7 +41,7 @@ pub async fn check_admin_approval(
         });
     };
 
-    let session_id = server_handle.lock().await.id();
+    let session_id = handle.lock().await.id();
     let user_info = AuthStateUserInfo {
         id: ctx.auth.user_id(),
         username,

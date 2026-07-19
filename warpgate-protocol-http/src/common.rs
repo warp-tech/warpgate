@@ -20,7 +20,7 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-    X_WARPGATE_CLUSTER_TOKEN,
+    X_WARPGATE_CLUSTER_ACTOR, X_WARPGATE_CLUSTER_TOKEN, decode_cluster_actor,
 };
 use warpgate_core::{AuthState, ConfigProvider};
 use warpgate_db_entities::{User, UserAdminRoleAssignment};
@@ -118,7 +118,7 @@ pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bo
         RequestAuthorization::Session(SessionAuthorization::User { username, .. })
         | RequestAuthorization::UserToken { username, .. } => username,
         RequestAuthorization::Session(SessionAuthorization::Ticket { .. })
-        | RequestAuthorization::ClusterToken => return Ok(false),
+        | RequestAuthorization::ClusterToken { .. } => return Ok(false),
         RequestAuthorization::AdminToken => unreachable!(),
     };
 
@@ -379,7 +379,23 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     let auth = if let Some(auth) = session_auth {
         Some(RequestAuthorization::Session(auth))
     } else if cluster_token_matches(&ctx, &req).await? {
-        Some(RequestAuthorization::ClusterToken)
+        // The peer is authenticated, but a forwarded request must also say who
+        // it is acting for. Rejecting an unattributable one keeps the cluster
+        // token from becoming an anonymous way to act on any node.
+        let origin = req
+            .headers()
+            .get(&X_WARPGATE_CLUSTER_ACTOR)
+            .and_then(|value| value.to_str().ok())
+            .and_then(decode_cluster_actor)
+            .ok_or_else(|| {
+                poem::Error::from_string(
+                    "Cluster-authenticated request is missing a valid actor",
+                    StatusCode::UNAUTHORIZED,
+                )
+            })?;
+        Some(RequestAuthorization::ClusterToken {
+            origin: Box::new(origin),
+        })
     } else if let Some(token_from_header) = req.headers().get(&X_WARPGATE_TOKEN) {
         let token_from_header = token_from_header
             .to_str()

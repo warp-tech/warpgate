@@ -8322,8 +8322,10 @@ dependencies = [
 name = "warpgate-common-http"
 version = "0.27.0-beta.1"
 dependencies = [
+ "data-encoding",
  "poem",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "url",

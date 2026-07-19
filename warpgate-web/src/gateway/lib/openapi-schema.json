@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.27.0-beta.1-38-gf1d067c2-modified"
+    "version": "v0.27.0-beta.1-39-gf1909cc1-modified"
   },
   "servers": [
     {
@@ -200,7 +200,7 @@
           {
             "name": "scope",
             "schema": {
-              "$ref": "#/components/schemas/WebApprovalScope"
+              "$ref": "#/components/schemas/ApprovalScope"
             },
             "in": "query",
             "required": true,
@@ -1552,6 +1552,15 @@
           "IpRejected"
         ]
       },
+      "ApprovalScope": {
+        "type": "string",
+        "description": "How an approval should be remembered for later bypass.\n\nDerives the OpenAPI enum directly so both the administrator and the\nself-approval endpoints can take it as-is; a per-API copy would be three\nidentical enums and two conversions that only exist to satisfy the derive.",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
+      },
       "AuthStateResponseInternal": {
         "type": "object",
         "title": "AuthStateResponseInternal",
@@ -2630,15 +2639,6 @@
             }
           }
         }
-      },
-      "WebApprovalScope": {
-        "type": "string",
-        "description": "How an web approval should be remembered for bypass",
-        "enum": [
-          "Once",
-          "Target",
-          "AllTargets"
-        ]
       },
       "WebDesktopSessionCreated": {
         "type": "object",

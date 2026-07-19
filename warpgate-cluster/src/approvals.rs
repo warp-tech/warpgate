@@ -1,14 +1,14 @@
-//! Any-node resolution of session approval requests.
+//! Owner-side resolution of session approval requests.
 //!
-//! The request row names the owning node; when that's us, the decision is
-//! delivered locally — to the waiting connection for an administrator approval,
-//! to the in-memory auth state for a user's own approval. Otherwise it is
-//! carried to the owner by a purpose-built internal cluster RPC (cluster-token
-//! authenticated, JSON body — nothing of the caller's request is forwarded).
+//! The request row names the node running the held session, and only that node
+//! can deliver a decision — the waiting connection and the auth state are both
+//! in its memory. Reaching it is the ordinary cross-node problem, so it uses the
+//! ordinary mechanism: the admin's own approve/reject request is forwarded to
+//! the owner by [`crate::proxy::local_or_forward`], and the owner runs the same
+//! handler under a cluster token, attributing the decision to the actor carried
+//! alongside it.
 
-use poem::http::StatusCode;
 use sea_orm::EntityTrait;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common::auth::ApprovalKind;
@@ -16,41 +16,20 @@ use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::approvals::{ApprovalActor, ApprovalDecision};
 use warpgate_db_entities::{Node, SessionApprovalRequest};
 
-use crate::proxy::{post_json_to_peer, unexpected_proxied_status};
+use crate::proxy::Owner;
 
-/// Route of the owner-side resolution RPC, relative to the admin API mount.
-/// `warpgate-admin` mounts its handler here; [`resolve_approval`] calls the
-/// same path on a peer. Both sides read it from here so the two can't drift.
-pub const RESOLVE_APPROVAL_ROUTE: &str = "/session-approvals/:id/resolve";
-
-/// Where the admin API is mounted on every node, needed to address the route
-/// above on a peer.
-const ADMIN_API_MOUNT: &str = "/@warpgate/admin/api";
-
-/// Absolute path of the resolution RPC for `session_id` on a peer node.
-fn resolve_approval_path(session_id: Uuid) -> String {
-    format!("{ADMIN_API_MOUNT}/session-approvals/{session_id}/resolve")
-}
-
-/// Body of the internal owner-side resolution RPC.
-#[derive(Serialize, Deserialize)]
-pub struct ResolveApprovalRpc {
-    pub kind: ApprovalKind,
-    /// The auth state to resolve, for [`ApprovalKind::User`]. Carried from the
-    /// row so the owner doesn't have to re-read it.
-    pub auth_state_id: Option<Uuid>,
-    pub decision: ApprovalDecision,
-    pub actor: ApprovalActor,
-}
-
-/// The resolver's identity, for audit attribution on the owning node.
+/// The identity to record against a decision.
+///
+/// For a forwarded request this is the admin on the originating node, carried
+/// in the cluster actor header — the cluster token says which node is asking,
+/// never who.
 pub fn acting_approver(ctx: &AuthenticatedRequestContext) -> ApprovalActor {
-    let user_id = ctx.auth.user_id();
+    let actor = ctx.auth.actor();
+    let user_id = actor.user_id();
     ApprovalActor {
         // Token-authenticated callers have no user behind them; name the
         // mechanism rather than logging an empty actor.
-        username: ctx
-            .auth
+        username: actor
             .username()
             .cloned()
             .unwrap_or_else(|| "<api token>".to_string()),
@@ -59,81 +38,99 @@ pub fn acting_approver(ctx: &AuthenticatedRequestContext) -> ApprovalActor {
     }
 }
 
-/// Resolves the pending `kind` approval of `session_id` from any node. Returns
-/// `Ok(false)` when there is no matching pending request (unknown session, no
-/// request of that kind, already resolved, or the owning node is gone).
+/// A pending approval request: where it has to be handled, and who it is about.
+pub struct PendingApproval {
+    pub owner: Owner,
+    /// The user whose session is being held — the one an approver must not be.
+    pub username: String,
+}
+
+/// Looks up the pending `kind` approval of `session_id`.
+///
+/// `None` when there is no such request — unknown session, no request of that
+/// kind, or already resolved. A row whose owning node has left the cluster is
+/// deleted here: the waiting connection went with it, so nothing can ever
+/// resolve it.
+pub async fn find_pending_approval(
+    ctx: &AuthenticatedRequestContext,
+    session_id: Uuid,
+    kind: ApprovalKind,
+) -> Result<Option<PendingApproval>, WarpgateError> {
+    let services = ctx.services();
+    let key = (
+        session_id,
+        SessionApprovalRequest::ApprovalRequestKind::from(kind),
+    );
+
+    let Some(row) = SessionApprovalRequest::Entity::find_by_id(key)
+        .one(&services.db)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    if row.node_id == services.cluster.node_id {
+        return Ok(Some(PendingApproval {
+            owner: Owner::Local,
+            username: row.username,
+        }));
+    }
+
+    let Some(node) = Node::Entity::find_by_id(row.node_id)
+        .one(&services.db)
+        .await?
+    else {
+        SessionApprovalRequest::Entity::delete_by_id(key)
+            .exec(&services.db)
+            .await?;
+        return Ok(None);
+    };
+
+    Ok(Some(PendingApproval {
+        owner: Owner::remote(node),
+        username: row.username,
+    }))
+}
+
+/// Applies a decision to a request this node owns. `Ok(false)` when nothing is
+/// waiting for it any more.
 ///
 /// Rows are keyed by `(session_id, kind)`, so a stale click for one kind can
 /// never resolve the other — a user's own approval cannot satisfy an
 /// administrator requirement.
-pub async fn resolve_approval(
+pub async fn resolve_locally(
     ctx: &AuthenticatedRequestContext,
     session_id: Uuid,
     kind: ApprovalKind,
     decision: ApprovalDecision,
     actor: &ApprovalActor,
-) -> poem::Result<bool> {
+) -> Result<bool, WarpgateError> {
     let services = ctx.services();
-
     let key = (
         session_id,
         SessionApprovalRequest::ApprovalRequestKind::from(kind),
     );
     let Some(row) = SessionApprovalRequest::Entity::find_by_id(key)
         .one(&services.db)
-        .await
-        .map_err(WarpgateError::from)?
+        .await?
     else {
         return Ok(false);
     };
 
-    if row.node_id == services.cluster.node_id {
-        return Ok(match kind {
-            ApprovalKind::Admin => {
-                services
-                    .deliver_admin_approval(session_id, decision, actor)
-                    .await?
-            }
-            ApprovalKind::User => {
-                let Some(auth_state_id) = row.auth_state_id else {
-                    return Ok(false);
-                };
+    match kind {
+        ApprovalKind::Admin => {
+            services
+                .deliver_admin_approval(session_id, decision, actor)
+                .await
+        }
+        ApprovalKind::User => match row.auth_state_id {
+            Some(auth_state_id) => {
                 services
                     .apply_user_approval(session_id, auth_state_id, decision, actor)
-                    .await?
+                    .await
             }
-        });
-    }
-
-    let Some(node) = Node::Entity::find_by_id(row.node_id)
-        .one(&services.db)
-        .await
-        .map_err(WarpgateError::from)?
-    else {
-        // The owning node is gone, and with it the waiting connection — the
-        // row is a ghost; it cannot be resurrected.
-        SessionApprovalRequest::Entity::delete_by_id(key)
-            .exec(&services.db)
-            .await
-            .map_err(WarpgateError::from)?;
-        return Ok(false);
-    };
-
-    let status = post_json_to_peer(
-        ctx,
-        node,
-        &resolve_approval_path(session_id),
-        &ResolveApprovalRpc {
-            kind,
-            auth_state_id: row.auth_state_id,
-            decision,
-            actor: actor.clone(),
+            // A user-approval row with no auth state can never be satisfied.
+            None => Ok(false),
         },
-    )
-    .await?;
-    match status {
-        StatusCode::OK => Ok(true),
-        StatusCode::NOT_FOUND => Ok(false),
-        status => Err(unexpected_proxied_status(status)),
     }
 }

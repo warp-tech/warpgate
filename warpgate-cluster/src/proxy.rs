@@ -27,7 +27,8 @@ use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_common_http::{
-    AuthenticatedRequestContext, X_WARPGATE_CLUSTER_TOKEN, X_WARPGATE_TOKEN,
+    AuthenticatedRequestContext, X_WARPGATE_CLUSTER_ACTOR, X_WARPGATE_CLUSTER_TOKEN,
+    X_WARPGATE_TOKEN, encode_cluster_actor,
 };
 use warpgate_db_entities::{Node, Parameters, Session};
 use warpgate_tls::configure_cluster_tls_connector;
@@ -36,7 +37,7 @@ pub struct RemoteNode {
     pub address: String,
     /// SPKI pin from the node's registry row; peer TLS verification fails
     /// closed when a node has not published one.
-    pub tls_spki_sha256: Option<String>,
+    pub tls_spki_sha256: String,
 }
 
 /// Which node owns a node-local resource (an in-progress recording, a live session)
@@ -174,12 +175,7 @@ async fn peer_connection(
     ctx: &AuthenticatedRequestContext,
     owner: &RemoteNode,
 ) -> poem::Result<(rustls::ClientConfig, Vec<SocketAddr>)> {
-    let Some(pin) = owner.tls_spki_sha256.clone() else {
-        return Err(anyhow!(
-            "The peer node has not published a cluster TLS key pin (is it running an older version?)"
-        )
-        .into());
-    };
+    let pin = owner.tls_spki_sha256.clone();
     let params = Parameters::Entity::get(&ctx.services().db)
         .await
         .map_err(poem::error::InternalServerError)?;
@@ -238,39 +234,7 @@ fn peer_reqwest_client(
 }
 
 /// POSTs a JSON body to a purpose-built internal endpoint on a peer node,
-/// authenticated by the cluster token alone, and returns the response status.
-/// Unlike [`forward_http`], nothing of the incoming request is forwarded —
-/// the body carries the entire meaning.
-pub async fn post_json_to_peer<B: serde::Serialize + ?Sized>(
-    ctx: &AuthenticatedRequestContext,
-    node: Node::Model,
-    path: &str,
-    body: &B,
-) -> poem::Result<poem::http::StatusCode> {
-    let remote = RemoteNode {
-        address: node.address,
-        tls_spki_sha256: node.tls_spki_sha256,
-    };
-    let (tls, addrs) = peer_connection(ctx, &remote).await?;
-    let url = format!(
-        "https://{CLUSTER_TLS_SNI_NAME}:{}{path}",
-        peer_port(&addrs)?
-    );
-    let client = peer_reqwest_client(tls, &addrs)?;
-    let response = client
-        .post(&url)
-        .json(body)
-        .header(
-            X_WARPGATE_CLUSTER_TOKEN.clone(),
-            ctx.services().cluster_token.expose_secret(),
-        )
-        .send()
-        .await
-        .map_err(poem::error::BadGateway)?;
-    Ok(response.status())
-}
-
-pub async fn forward_http(
+async fn forward_http(
     ctx: &AuthenticatedRequestContext,
     req: &Request,
     owner: RemoteNode,
@@ -296,6 +260,13 @@ pub async fn forward_http(
         .request(req.method().clone(), &url)
         .headers(headers)
         .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret())
+        // Who the peer is acting for. The token authenticates this node, not
+        // the person behind the request, and the peer rejects a forward that
+        // doesn't say.
+        .header(
+            X_WARPGATE_CLUSTER_ACTOR.clone(),
+            encode_cluster_actor(ctx.auth.actor()).map_err(poem::error::InternalServerError)?,
+        )
         // Typed (OpenAPI) peer endpoints require a token/cookie security scheme
         // to be *present* before the handler runs; the cluster token — checked
         // ahead of it in the auth order — is the actual authorization, so this

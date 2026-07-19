@@ -9,6 +9,25 @@ use poem::http::HeaderName;
 pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
 pub static X_WARPGATE_CLUSTER_TOKEN: HeaderName =
     HeaderName::from_static("x-warpgate-cluster-token");
+/// Carries the forwarding node's own [`RequestAuthorization`] alongside
+/// [`X_WARPGATE_CLUSTER_TOKEN`]. Required on every cluster-forwarded request.
+pub static X_WARPGATE_CLUSTER_ACTOR: HeaderName =
+    HeaderName::from_static("x-warpgate-cluster-actor");
+
+/// Encodes an authorization for [`X_WARPGATE_CLUSTER_ACTOR`].
+///
+/// Base64 because a header value must be visible ASCII and a username need not
+/// be — it is an encoding, not a protection; the cluster token is what makes
+/// the claim trustworthy.
+pub fn encode_cluster_actor(auth: &RequestAuthorization) -> Result<String, serde_json::Error> {
+    Ok(data_encoding::BASE64.encode(serde_json::to_string(auth)?.as_bytes()))
+}
+
+/// Inverse of [`encode_cluster_actor`]; `None` for anything unreadable.
+pub fn decode_cluster_actor(value: &str) -> Option<RequestAuthorization> {
+    let bytes = data_encoding::BASE64.decode(value.as_bytes()).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
 
 // style-src unsafe-inline for Svelte
 // img-src data: for TOTP codes

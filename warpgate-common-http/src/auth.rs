@@ -91,8 +91,22 @@ pub enum RequestAuthorization {
         username: String,
     },
     AdminToken,
-    /// Auth between cluster peers
-    ClusterToken,
+    /// Auth between cluster peers.
+    ///
+    /// Carries the authorization the request had on the node that forwarded it,
+    /// so the owning node can attribute what it does on that node's behalf —
+    /// the cluster token authenticates the *peer*, not the person behind it.
+    /// Required on every forwarded request: a cluster-authenticated call with
+    /// no origin is an action nobody can be held to, so it is rejected rather
+    /// than logged as anonymous.
+    ///
+    /// This never confers permissions. `has_admin_permission` still refuses a
+    /// cluster token outright; the origin node authorizes the admin before
+    /// forwarding, and `require_cluster_or_admin_permission` is what accepts
+    /// the result.
+    ClusterToken {
+        origin: Box<RequestAuthorization>,
+    },
 }
 
 #[derive(Clone)]
@@ -209,7 +223,7 @@ impl RequestAuthorization {
         match self {
             Self::Session(auth) => Some(auth.username()),
             Self::UserToken { username, .. } => Some(username),
-            Self::AdminToken | Self::ClusterToken => None,
+            Self::AdminToken | Self::ClusterToken { .. } => None,
         }
     }
 
@@ -218,7 +232,23 @@ impl RequestAuthorization {
         match self {
             Self::Session(auth) => auth.user_id(),
             Self::UserToken { user_id, .. } => *user_id,
-            Self::AdminToken | Self::ClusterToken => Uuid::nil(),
+            Self::AdminToken | Self::ClusterToken { .. } => Uuid::nil(),
+        }
+    }
+
+    /// The authorization to *attribute* this request to: for a cluster-forwarded
+    /// request the one it had on the originating node, otherwise this one.
+    ///
+    /// Deliberately separate from [`Self::username`] and [`Self::user_id`],
+    /// which keep reporting nothing for a cluster token. A forwarded identity
+    /// says who asked for an action, never what they may do, so it is only
+    /// reachable where a caller explicitly wants to name an actor.
+    pub fn actor(&self) -> &Self {
+        match self {
+            // Flattened: a chain of forwards still attributes to whoever
+            // originally asked.
+            Self::ClusterToken { origin } => origin.actor(),
+            other => other,
         }
     }
 }
@@ -226,4 +256,53 @@ impl RequestAuthorization {
 /// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
 pub fn is_localhost_host(host: &str) -> bool {
     host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn user(name: &str) -> RequestAuthorization {
+        RequestAuthorization::Session(SessionAuthorization::User {
+            user_id: Uuid::from_u128(1),
+            username: name.to_owned(),
+        })
+    }
+
+    #[test]
+    fn cluster_actor_survives_a_round_trip() {
+        let encoded = crate::encode_cluster_actor(&user("alice")).unwrap();
+        let decoded = crate::decode_cluster_actor(&encoded).unwrap();
+        assert_eq!(decoded.username().map(String::as_str), Some("alice"));
+    }
+
+    #[test]
+    fn garbage_actor_headers_are_rejected() {
+        // The auth path turns `None` into a 401, so anything unreadable must
+        // not decode into some default identity.
+        assert!(crate::decode_cluster_actor("not base64!").is_none());
+        assert!(crate::decode_cluster_actor("YWJj").is_none());
+    }
+
+    #[test]
+    fn a_cluster_token_reports_no_identity_of_its_own() {
+        let auth = RequestAuthorization::ClusterToken {
+            origin: Box::new(user("alice")),
+        };
+        // Permission checks must never see the forwarded user...
+        assert_eq!(auth.username(), None);
+        assert!(auth.user_id().is_nil());
+        // ...but attribution must.
+        assert_eq!(auth.actor().username().map(String::as_str), Some("alice"));
+    }
+
+    #[test]
+    fn actor_flattens_nested_forwards() {
+        let auth = RequestAuthorization::ClusterToken {
+            origin: Box::new(RequestAuthorization::ClusterToken {
+                origin: Box::new(user("alice")),
+            }),
+        };
+        assert_eq!(auth.actor().username().map(String::as_str), Some("alice"));
+    }
 }

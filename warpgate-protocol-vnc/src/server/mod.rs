@@ -27,7 +27,7 @@ use warpgate_core::approvals::AdminApprovalRequest;
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle, consume_ticket};
 use warpgate_desktop_auth::{
-    DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
+    AuthorizedSession, DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
 };
 use warpgate_desktop_ui as ui;
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
@@ -261,14 +261,8 @@ async fn negotiate_and_authorize(
 
     let mut render = RenderState::new();
 
-    let (user_info, target, vnc_options, pending_ticket, credentials) = match authenticated {
-        DesktopAuthOutcome::Authorized {
-            user_info,
-            target,
-            options,
-            pending_ticket,
-            credentials,
-        } => (user_info, target, options, pending_ticket, credentials),
+    let authorized = match authenticated {
+        DesktopAuthOutcome::Authorized(session) => session,
         DesktopAuthOutcome::NeedsInteractive(interactive) => {
             collect_additional_credentials(
                 &mut viewer_wr,
@@ -304,11 +298,25 @@ async fn negotiate_and_authorize(
                 .login_protection
                 .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
                 .await;
-            (user_info, target, options, None, Some(credentials))
+            AuthorizedSession {
+                user_info,
+                target,
+                options,
+                pending_ticket: None,
+                credentials: Some(credentials),
+            }
         }
         // Already handled before the security handshake above.
         DesktopAuthOutcome::Failed => return Ok(None),
     };
+
+    let AuthorizedSession {
+        user_info,
+        target,
+        options: vnc_options,
+        pending_ticket,
+        credentials,
+    } = authorized;
 
     // Gate the connection on administrator approval under the hold screen, so
     // the viewer sees a spinner rather than a frozen frame. The ticket that

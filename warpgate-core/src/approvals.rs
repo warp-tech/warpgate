@@ -41,7 +41,13 @@ use crate::auth_state_store::TIMEOUT;
 use crate::services::Services;
 
 /// How an approval should be remembered for later bypass.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// Derives the OpenAPI enum directly so both the administrator and the
+/// self-approval endpoints can take it as-is; a per-API copy would be three
+/// identical enums and two conversions that only exist to satisfy the derive.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, poem_openapi::Enum,
+)]
 pub enum ApprovalScope {
     Once,
     Target,

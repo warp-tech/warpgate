@@ -14,9 +14,9 @@
     import RelativeDate from 'common/RelativeDate.svelte'
     import {
         ApiAuthState,
+        ApprovalScope,
         type AuthStateResponseInternal,
         api,
-        WebApprovalScope,
     } from 'gateway/lib/api'
     import Fa from 'svelte-fa'
 
@@ -40,7 +40,7 @@
         await reload()
     }
 
-    async function approve(scope: WebApprovalScope) {
+    async function approve(scope: ApprovalScope) {
         await api.approveAuth({
             id: params.stateId,
             scope,
@@ -109,7 +109,7 @@
                     <ButtonGroup>
                         <AsyncButton
                             color="primary"
-                            click={() => approve(WebApprovalScope.Target)}
+                            click={() => approve(ApprovalScope.Target)}
                         >
                             Authorize & remember for {graceLabel}
                         </AsyncButton>
@@ -119,13 +119,13 @@
                             </DropdownToggle>
                             <DropdownMenu end>
                                 <DropdownItem
-                                    onclick={() => approve(WebApprovalScope.AllTargets)}
+                                    onclick={() => approve(ApprovalScope.AllTargets)}
                                 >
                                     Authorize for all targets & remember for
                                     {graceLabel}
                                 </DropdownItem>
                                 <DropdownItem
-                                    onclick={() => approve(WebApprovalScope.Once)}
+                                    onclick={() => approve(ApprovalScope.Once)}
                                 >
                                     Authorize this time only
                                 </DropdownItem>
@@ -135,7 +135,7 @@
                 {:else}
                     <AsyncButton
                         color="primary"
-                        click={() => approve(WebApprovalScope.Once)}
+                        click={() => approve(ApprovalScope.Once)}
                     >
                         Authorize
                     </AsyncButton>

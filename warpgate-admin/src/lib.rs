@@ -3,7 +3,6 @@ use poem::http::header::CONTENT_SECURITY_POLICY;
 use poem::middleware::SetHeader;
 use poem::{EndpointExt, IntoEndpoint, Route};
 use poem_openapi::OpenApiService;
-use warpgate_cluster::approvals::RESOLVE_APPROVAL_ROUTE;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::WARPGATE_PLAYGROUND_CSP;
 
@@ -46,9 +45,5 @@ pub fn admin_api_app() -> impl IntoEndpoint {
         .at(
             "/session-approvals/changes",
             crate::api::session_approvals::api_get_session_approvals_stream,
-        )
-        .at(
-            RESOLVE_APPROVAL_ROUTE,
-            crate::api::session_approvals::api_resolve_session_approval,
         )
 }

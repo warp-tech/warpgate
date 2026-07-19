@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
-from .test_postgres_admin_approval import _wait_for_pending_approval
+from .approval_util import wait_for_pending_approval
 from .util import wait_port
 
 
@@ -80,7 +80,7 @@ class Test:
             client.stdin.flush()
             with admin_client(url) as api:
                 try:
-                    approval = _wait_for_pending_approval(
+                    approval = wait_for_pending_approval(
                         api, target.name, user.username, deadline=3
                     )
                     break
@@ -89,7 +89,7 @@ class Test:
         assert approval, "menu selection was not held for approval"
 
         with admin_client(url) as api:
-            api.approve_session(approval.id, sdk.SessionApprovalScope.ONCE)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
 
         # Approved: the session connects to the target and runs a command.
         output = client.communicate(b"echo approved-ok\nexit\n", timeout=timeout)[0]

@@ -14,21 +14,20 @@ pub async fn has_admin_permission(
 ) -> Result<bool, WarpgateError> {
     // Admin tokens have all permissions
     let auth = &ctx.auth;
-    if matches!(auth, RequestAuthorization::AdminToken) {
-        return Ok(true);
-    }
-    // Cluster tokens are scoped to cross-node proxied endpoints, never general admin.
-    if matches!(auth, RequestAuthorization::ClusterToken) {
-        return Ok(false);
-    }
 
     let username = match auth {
+        RequestAuthorization::AdminToken => {
+            return Ok(true);
+        }
+        // Cluster tokens are scoped to cross-node proxied endpoints, never general admin.
+        RequestAuthorization::ClusterToken { .. } => {
+            return Ok(false);
+        }
         RequestAuthorization::Session(
             SessionAuthorization::User { username, .. }
             | SessionAuthorization::Ticket { username, .. },
         )
         | RequestAuthorization::UserToken { username, .. } => username,
-        RequestAuthorization::AdminToken | RequestAuthorization::ClusterToken => unreachable!(),
     };
 
     let db = &ctx.services().db;
@@ -107,7 +106,7 @@ pub async fn require_cluster_or_admin_permission(
     ctx: &warpgate_common_http::AuthenticatedRequestContext,
     permission: AdminPermission,
 ) -> Result<(), WarpgateError> {
-    if matches!(ctx.auth, RequestAuthorization::ClusterToken) {
+    if matches!(ctx.auth, RequestAuthorization::ClusterToken { .. }) {
         return Ok(());
     }
     require_admin_permission(ctx, Some(permission)).await

@@ -1,22 +1,20 @@
-use std::sync::Arc;
-
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
 use poem::web::{Data, FromRequest, Redirect};
 use poem::{Body, IntoResponse, Request, Response, handler};
 use serde::Deserialize;
-use tokio::sync::Mutex;
 use tracing::{Instrument, debug, info_span};
 use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
-use warpgate_core::{ConfigProvider, WarpgateServerHandle};
+use warpgate_core::ConfigProvider;
 
 use crate::approval_gate::check_admin_approval;
 use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
+use crate::session_handle::warpgate_server_handle_for_request;
 
 #[derive(Deserialize)]
 struct QueryParams {
@@ -36,7 +34,6 @@ pub async fn catchall_endpoint(
     body: Body,
     ctx: Data<&AuthenticatedRequestContext>,
     http_client_cache: Data<&HttpClientCache>,
-    server_handle: Option<Data<&Arc<Mutex<WarpgateServerHandle>>>>,
 ) -> poem::Result<Response> {
     let target_and_options = get_target_for_request(req, &ctx).await?;
     let Some((target, options)) = target_and_options else {
@@ -45,16 +42,17 @@ pub async fn catchall_endpoint(
 
     session.set_target_name(target.name.clone());
 
-    let server_handle = server_handle.map(|h| h.0.clone());
-    if let Some(server_handle) = &server_handle {
+    // The handle is looked up from the session store rather than taken as
+    // request data: nothing inserts it as data, so a `Data` parameter is
+    // always absent and the target would never be recorded on the session.
+    if let Ok(server_handle) = warpgate_server_handle_for_request(req).await {
         server_handle.lock().await.set_target(&target).await?;
     }
 
     // Gated before the protocol branch so the WebSocket upgrade is held too —
     // an upgrade has nowhere to render an interstitial, and letting it through
     // would leave the gate applying only to plain requests.
-    if let Some(response) = check_admin_approval(req, &ctx, &target, server_handle.as_ref()).await?
-    {
+    if let Some(response) = check_admin_approval(req, &ctx, &target).await? {
         return Ok(response);
     }
 
@@ -120,7 +118,7 @@ async fn get_target_for_request(
         }
         RequestAuthorization::UserToken { .. }
         | RequestAuthorization::AdminToken
-        | RequestAuthorization::ClusterToken => {
+        | RequestAuthorization::ClusterToken { .. } => {
             return Ok(None);
         }
     };
