@@ -23,6 +23,7 @@ use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetVncOptions, WarpgateError};
+use warpgate_core::approvals::AdminApprovalRequest;
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle, consume_ticket};
 use warpgate_desktop_auth::{
@@ -260,13 +261,14 @@ async fn negotiate_and_authorize(
 
     let mut render = RenderState::new();
 
-    let (user_info, target, vnc_options, pending_ticket) = match authenticated {
+    let (user_info, target, vnc_options, pending_ticket, credentials) = match authenticated {
         DesktopAuthOutcome::Authorized {
             user_info,
             target,
             options,
             pending_ticket,
-        } => (user_info, target, options, pending_ticket),
+            credentials,
+        } => (user_info, target, options, pending_ticket, credentials),
         DesktopAuthOutcome::NeedsInteractive(interactive) => {
             collect_additional_credentials(
                 &mut viewer_wr,
@@ -279,16 +281,16 @@ async fn negotiate_and_authorize(
             )
             .await?;
 
-            let user_info = services
-                .auth_state_store
-                .lock()
-                .await
-                .get(&interactive.state_id)
-                .context("auth state expired during approval")?
-                .lock()
-                .await
-                .user_info()
-                .clone();
+            let (user_info, credentials) = {
+                let state_arc = services
+                    .auth_state_store
+                    .lock()
+                    .await
+                    .get(&interactive.state_id)
+                    .context("auth state expired during approval")?;
+                let state = state_arc.lock().await;
+                (state.user_info().clone(), state.credential_fingerprints())
+            };
             let (target, options) = finalize_user_auth::<VncProto>(
                 services,
                 &interactive.username,
@@ -302,7 +304,7 @@ async fn negotiate_and_authorize(
                 .login_protection
                 .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
                 .await;
-            (user_info, target, options, None)
+            (user_info, target, options, None, Some(credentials))
         }
         // Already handled before the security handshake above.
         DesktopAuthOutcome::Failed => return Ok(None),
@@ -319,11 +321,14 @@ async fn negotiate_and_authorize(
             &mut events_rx,
             &mut render,
             services.require_admin_approval(
-                &session_id,
-                &user_info,
-                VncProto::NAME,
-                &target.name,
-                Some(remote_address.ip()),
+                AdminApprovalRequest {
+                    session_id: &session_id,
+                    user_info: &user_info,
+                    protocol: VncProto::NAME,
+                    target_name: &target.name,
+                    remote_ip: Some(remote_address.ip()),
+                    credentials,
+                },
                 std::future::pending(),
                 |_| async { Ok::<_, WarpgateError>(()) },
             ),

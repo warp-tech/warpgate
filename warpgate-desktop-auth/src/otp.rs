@@ -13,8 +13,8 @@ use tracing::warn;
 use warpgate_common::Secret;
 use warpgate_common::auth::AuthCredential;
 use warpgate_common::helpers::otp::OTP_DIGITS;
-use warpgate_core::{AuthState, Services};
 use warpgate_core::login_protection::FailedAttemptInfo;
+use warpgate_core::{AuthState, Services};
 
 /// Max wrong one-time passwords before the holding screen gives up.
 pub const MAX_OTP_ATTEMPTS: usize = 3;

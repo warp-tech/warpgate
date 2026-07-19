@@ -43,6 +43,8 @@ struct AdminRoleDataRequest {
     admin_roles_manage: bool,
 
     ticket_requests_manage: Option<bool>,
+
+    approve_sessions: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -157,6 +159,7 @@ impl ListApi {
             config_edit: Set(body.config_edit),
             admin_roles_manage: Set(body.admin_roles_manage),
             ticket_requests_manage: Set(body.ticket_requests_manage.unwrap_or_default()),
+            approve_sessions: Set(body.approve_sessions.unwrap_or_default()),
         };
 
         let role = values.insert(db).await?;
@@ -230,6 +233,7 @@ impl DetailApi {
         model.config_edit = Set(body.config_edit);
         model.admin_roles_manage = Set(body.admin_roles_manage);
         model.ticket_requests_manage = Set(body.ticket_requests_manage.unwrap_or_default());
+        model.approve_sessions = Set(body.approve_sessions.unwrap_or_default());
         let role = model.update(db).await?;
         Ok(UpdateAdminRoleResponse::Ok(Json(role.into())))
     }

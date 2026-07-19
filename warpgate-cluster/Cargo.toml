@@ -1,0 +1,24 @@
+[package]
+name = "warpgate-cluster"
+version = "0.27.0-beta.1"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+poem.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+sea-orm.workspace = true
+tokio.workspace = true
+serde.workspace = true
+tokio-tungstenite.workspace = true
+uuid.workspace = true
+warpgate-ca = { path = "../warpgate-ca" }
+warpgate-common = { path = "../warpgate-common" }
+warpgate-common-http = { path = "../warpgate-common-http" }
+warpgate-core = { path = "../warpgate-core" }
+warpgate-db-entities = { path = "../warpgate-db-entities" }
+warpgate-tls = { path = "../warpgate-tls" }

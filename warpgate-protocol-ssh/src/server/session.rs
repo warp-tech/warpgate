@@ -28,6 +28,7 @@ use warpgate_common::{
     Secret, SessionId, SshHostKeyVerificationMode, Target, TargetOptions, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::approvals::AdminApprovalRequest;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{
     self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
@@ -298,23 +299,47 @@ impl ServerSession {
         let inactivity_timeout = services.config.lock().await.store.ssh.inactivity_timeout;
 
         Ok(async move {
-            loop {
-                let next_event_fut = this.get_next_event();
-                match tokio::time::timeout(inactivity_timeout, next_event_fut).await {
-                    Ok(Some(event)) => this.handle_event(event).await?,
-                    Ok(None) => break,
-                    Err(_) => {
-                        info!("Closing the session due to inactivity");
-                        let _ = this.emit_service_message("Closing the session due to inactivity");
-                        this.request_disconnect();
-                        this.disconnect_server().await;
-                        break;
+            let result = async {
+                loop {
+                    let next_event_fut = this.get_next_event();
+                    match tokio::time::timeout(inactivity_timeout, next_event_fut).await {
+                        Ok(Some(event)) => this.handle_event(event).await?,
+                        Ok(None) => break,
+                        Err(_) => {
+                            info!("Closing the session due to inactivity");
+                            let _ =
+                                this.emit_service_message("Closing the session due to inactivity");
+                            this.request_disconnect();
+                            this.disconnect_server().await;
+                            break;
+                        }
                     }
                 }
+                debug!("No more events");
+                Ok::<_, anyhow::Error>(())
             }
-            debug!("No more events");
-            Ok::<_, anyhow::Error>(())
+            .await;
+
+            this.consume_pending_ticket().await;
+            result
         })
+    }
+
+    /// Spends the ticket that authorised this session, if connecting never got
+    /// far enough to spend it itself.
+    ///
+    /// A ticket is spent by *authenticating* with it, not by reaching a target:
+    /// a session that opens no channel (`ssh -N`) never calls `connect_remote`,
+    /// and leaving the ticket unspent would make a single-use one reusable
+    /// without limit. The one case that must not spend it — an administrator
+    /// denying the session — clears `pending_ticket` instead.
+    async fn consume_pending_ticket(&mut self) {
+        let Some(ticket_id) = self.pending_ticket.take() else {
+            return;
+        };
+        if let Err(error) = consume_ticket(&self.services.db, &ticket_id).await {
+            error!(%error, "Failed to consume the ticket");
+        }
     }
 
     async fn get_next_event(&mut self) -> Option<Event> {
@@ -537,9 +562,6 @@ impl ServerSession {
         if let Some(target) = target
             && self.rc_state == RCState::NotInitialized
         {
-            // Claim the slot before returning: the approval hold runs off to the
-            // side, and leaving the state at `NotInitialized` across it lets a
-            // second caller re-enter and open a duplicate connection.
             if self.admin_approval_granted {
                 self.connect_remote(&target).await?;
             } else {
@@ -556,11 +578,9 @@ impl ServerSession {
     }
 
     async fn connect_remote(&mut self, target: &Target) -> Result<()> {
-        // The one place a session is known to be past every gate and actually
-        // going to the target — so the one place a ticket is spent.
-        if let Some(ticket_id) = self.pending_ticket.take() {
-            consume_ticket(&self.services.db, &ticket_id).await?;
-        }
+        // Past every gate and actually going to the target, so the ticket is
+        // spent here rather than waiting for teardown to do it.
+        self.consume_pending_ticket().await;
 
         let ssh_chain =
             resolve_ssh_chain(&self.services, target.id, self.username.as_ref()).await?;
@@ -639,25 +659,44 @@ impl ServerSession {
     /// waiting. A session that passes straight through says nothing and
     /// resolves within the tick.
     fn spawn_admin_approval_gate(&mut self, target: Target) {
-        let Some(user_info) = self.authenticated_user.clone() else {
-            return;
-        };
-
         let services = self.services.clone();
         let session_id = self.id;
         let remote_ip = self.remote_address.ip();
         let cancel = self.disconnect_token.clone();
         let event_sender = self.event_sender.clone();
         let notify_sender = self.event_sender.clone();
+        let auth_state = self.auth_state.clone();
+
+        // `maybe_connect_remote` has already claimed the connection slot, so
+        // every path out of here must report back — a silent return would leave
+        // the session parked with no output and no way forward.
+        let Some(user_info) = self.authenticated_user.clone() else {
+            error!("Reached the approval gate with no authenticated user");
+            tokio::spawn(async move {
+                let _ = event_sender
+                    .send_once(Event::AdminApprovalResolved { approved: false })
+                    .await;
+            });
+            return;
+        };
 
         tokio::spawn(async move {
+            // Ticket-authorised sessions carry no auth state; without one there
+            // are no credentials to key a remembered approval on.
+            let credentials = match auth_state {
+                Some(state) => Some(state.lock().await.credential_fingerprints()),
+                None => None,
+            };
             let approved = services
                 .require_admin_approval(
-                    &session_id,
-                    &user_info,
-                    crate::PROTOCOL_NAME,
-                    &target.name,
-                    Some(remote_ip),
+                    AdminApprovalRequest {
+                        session_id: &session_id,
+                        user_info: &user_info,
+                        protocol: crate::PROTOCOL_NAME,
+                        target_name: &target.name,
+                        remote_ip: Some(remote_ip),
+                        credentials,
+                    },
                     cancel.cancelled_owned(),
                     |security_key| {
                         let security_key = security_key.to_owned();
@@ -732,6 +771,9 @@ impl ServerSession {
                 }
                 Event::AdminApprovalResolved { approved } => {
                     if !approved {
+                        // A denied session never reached the target, so its
+                        // ticket stays unspent.
+                        self.pending_ticket = None;
                         self.emit_service_message("Session was not approved by an administrator")?;
                         self.request_disconnect();
                         self.disconnect_server().await;
@@ -1995,8 +2037,6 @@ impl ServerSession {
                 }
 
                 if kinds.contains(&CredentialKind::WebUserApproval) {
-                    self.services.request_approval(auth_state).await?;
-
                     let identification_string =
                         auth_state.lock().await.identification_string().to_owned();
 

@@ -35,6 +35,7 @@ warpgate-web-desktop = { path = "../warpgate-web-desktop", default-features = fa
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-ca = { path = "../warpgate-ca", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-cluster = { path = "../warpgate-cluster" }
 warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }

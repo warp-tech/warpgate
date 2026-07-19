@@ -1,5 +1,6 @@
-use crate::{PixelFormat, Rect, VncEncoding, VncError};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+use crate::{PixelFormat, Rect, VncEncoding, VncError};
 
 #[derive(Debug)]
 pub(super) enum ClientMsg {

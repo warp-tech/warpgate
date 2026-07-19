@@ -24,6 +24,7 @@ mod ssh_keys;
 mod sso_credentials;
 mod target_groups;
 mod targets;
+mod ticket_request_details;
 mod ticket_requests_detail;
 mod ticket_requests_list;
 mod tickets_detail;

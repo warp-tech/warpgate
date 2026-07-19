@@ -15,6 +15,7 @@
         type Target,
         type TargetGroup,
     } from 'admin/lib/api'
+    import HelpText from 'admin/lib/HelpText.svelte'
     import Section from 'admin/lib/Section.svelte'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import { adminPermissions } from 'admin/lib/store'
@@ -558,12 +559,12 @@
                             Require administrator approval for each connection
                         </div>
                     </label>
-                    <small class="form-text text-muted">
+                    <HelpText>
                         Sessions are held after authentication — including
                         ticket connections — until an administrator approves
-                        them. Applies when the target is known at connection
-                        time (not the interactive SSH menu or HTTP).
-                    </small>
+                        them. HTTP and Kubernetes requests are refused with a
+                        retryable response until then.
+                    </HelpText>
                 </Section>
 
                 {#if $serverInfo?.ticketSelfServiceEnabled}

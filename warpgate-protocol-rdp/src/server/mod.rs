@@ -33,9 +33,10 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use uuid::Uuid;
-use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_common::auth::{AuthCredentialFingerprint, AuthStateUserInfo};
 use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetRdpOptions, WarpgateError};
+use warpgate_core::approvals::AdminApprovalRequest;
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{
     DesktopInput, Services, SessionStateInit, State, WarpgateServerHandle, consume_ticket,
@@ -277,6 +278,7 @@ async fn hold_until_connected(
     target: Target,
     options: TargetRdpOptions,
     pending_ticket: Option<Uuid>,
+    credentials: Option<Vec<AuthCredentialFingerprint>>,
     remote_address: Option<SocketAddr>,
 ) -> Result<Option<BackendBridge>> {
     let (session_id, remote_ip) = {
@@ -287,11 +289,14 @@ async fn hold_until_connected(
     let connect = async {
         let approved = services
             .require_admin_approval(
-                &session_id,
-                &user_info,
-                RdpProto::NAME,
-                &target.name,
-                remote_ip,
+                AdminApprovalRequest {
+                    session_id: &session_id,
+                    user_info: &user_info,
+                    protocol: RdpProto::NAME,
+                    target_name: &target.name,
+                    remote_ip,
+                    credentials,
+                },
                 std::future::pending(),
                 |_| async { Ok::<_, WarpgateError>(()) },
             )
@@ -358,6 +363,7 @@ async fn control_loop(
                         target,
                         options,
                         pending_ticket,
+                        credentials,
                     }) => {
                         // Accept the NLA first so the RDP session starts and the
                         // holding screen has somewhere to paint — the viewer
@@ -378,6 +384,7 @@ async fn control_loop(
                             target,
                             options,
                             pending_ticket,
+                            credentials,
                             Some(remote_address),
                         )
                         .await
@@ -407,7 +414,7 @@ async fn control_loop(
                         match run_hold_screen(&services, &interactive, &mut frames, &helper_in_tx)
                             .await
                         {
-                            Ok(Some(user_info)) => {
+                            Ok(Some((user_info, credentials))) => {
                                 match finalize_user_auth::<RdpProto>(
                                     &services,
                                     &interactive.username,
@@ -425,6 +432,7 @@ async fn control_loop(
                                             target,
                                             options,
                                             None,
+                                            Some(credentials),
                                             Some(remote_address),
                                         )
                                         .await

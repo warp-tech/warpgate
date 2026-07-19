@@ -26,10 +26,11 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, oneshot};
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 use warpgate_common::auth::{
-    ApprovalKind, AuthCredential, AuthResult, AuthStateUserInfo, CredentialKind,
+    ApprovalKind, AuthCredential, AuthCredentialFingerprint, AuthResult, AuthStateUserInfo,
+    CredentialKind,
 };
 use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{SessionId, WarpgateError};
@@ -72,11 +73,18 @@ pub struct ApprovalActor {
 /// same code.
 #[derive(Debug, Clone)]
 struct ApprovalSubject {
+    /// Which approval this subject describes. Part of every key it produces, so
+    /// a grant of one kind can never satisfy a request of the other.
+    kind: ApprovalKind,
     session_id: SessionId,
     user_info: AuthStateUserInfo,
     protocol: String,
     target_name: String,
     remote_ip: Option<IpAddr>,
+    /// Credentials this session authenticated with, keying the remembered
+    /// approval. `None` where they aren't a stable fingerprint (ticket auth),
+    /// which disables remembering rather than keying on less.
+    credentials: Option<Vec<AuthCredentialFingerprint>>,
     /// Short code shown to both parties so the administrator can confirm they
     /// are approving the session the user is actually looking at.
     identification_string: String,
@@ -86,11 +94,13 @@ impl ApprovalSubject {
     /// `None` for a state with no session — nothing to attribute the events to.
     fn from_auth_state(state: &AuthState) -> Option<Self> {
         Some(Self {
+            kind: ApprovalKind::User,
             session_id: *state.session_id()?,
             user_info: state.user_info().clone(),
             protocol: state.protocol().to_string(),
             target_name: state.target_name().to_string(),
             remote_ip: state.remote_ip(),
+            credentials: Some(state.credential_fingerprints()),
             identification_string: state.identification_string().to_owned(),
         })
     }
@@ -102,15 +112,20 @@ impl ApprovalSubject {
 
     /// The key this session's approval is remembered under. `None` without a
     /// remote IP — an approval that can't be pinned to an origin isn't safe to
-    /// replay.
+    /// replay — or without known credentials, so a remembered approval is never
+    /// replayed for a session that authenticated some other way.
     fn match_key(&self) -> Option<ApprovalMatchKey> {
+        let mut other_credentials = self.credentials.clone()?;
+        other_credentials.sort_unstable();
+        other_credentials.dedup();
+
         Some(ApprovalMatchKey {
-            approval_kind: ApprovalKind::Admin,
+            approval_kind: self.kind,
             remote_ip: self.remote_ip?,
             protocol: self.protocol.clone(),
             username: self.user_info.username.to_lowercase(),
             target_name: Some(self.target_name.clone()),
-            other_credentials: vec![],
+            other_credentials,
         })
     }
 
@@ -209,6 +224,38 @@ impl Drop for PendingApproval {
     }
 }
 
+/// Where a session's administrator gate has got to.
+///
+/// Request/response protocols answer each request on its own rather than
+/// holding a connection open, so they need to *observe* the gate instead of
+/// awaiting it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminApprovalStatus {
+    Approved,
+    Pending,
+    Denied,
+}
+
+/// Per-session gate outcomes for the non-blocking path, shared with [`State`]
+/// so a session's entry is dropped when the session ends.
+///
+/// [`State`]: crate::State
+pub type AdminApprovalStatuses = Arc<Mutex<HashMap<SessionId, AdminApprovalStatus>>>;
+
+/// The session an administrator gate is being asked about.
+pub struct AdminApprovalRequest<'a> {
+    pub session_id: &'a SessionId,
+    pub user_info: &'a AuthStateUserInfo,
+    pub protocol: &'a str,
+    pub target_name: &'a str,
+    pub remote_ip: Option<IpAddr>,
+    /// Fingerprints of the credentials that authenticated this session, keying
+    /// the remembered-approval bypass. `None` disables remembering for this
+    /// session — pass it wherever the authenticating credential has no stable
+    /// fingerprint, such as ticket auth.
+    pub credentials: Option<Vec<AuthCredentialFingerprint>>,
+}
+
 impl Services {
     /// Holds an authenticated connection until an administrator approves it,
     /// when the target requires approval. Returns whether it may proceed.
@@ -230,14 +277,9 @@ impl Services {
     /// promptness measure, not a correctness one — session teardown deletes the
     /// row regardless — so protocols that can't cheaply observe a disconnect
     /// may pass `std::future::pending()`.
-    #[allow(clippy::too_many_arguments)]
     pub async fn require_admin_approval<E, F, Fut>(
         &self,
-        session_id: &SessionId,
-        user_info: &AuthStateUserInfo,
-        protocol: &str,
-        target_name: &str,
-        remote_ip: Option<IpAddr>,
+        request: AdminApprovalRequest<'_>,
         cancel: impl Future<Output = ()> + Send,
         notify_waiting: F,
     ) -> Result<bool, E>
@@ -246,16 +288,19 @@ impl Services {
         F: FnOnce(&str) -> Fut,
         Fut: Future<Output = Result<(), E>>,
     {
-        if !self.target_requires_approval(target_name).await? {
+        if !self.target_requires_approval(request.target_name).await? {
             return Ok(true);
         }
 
+        let session_id = request.session_id;
         let subject = ApprovalSubject {
+            kind: ApprovalKind::Admin,
             session_id: *session_id,
-            user_info: user_info.clone(),
-            protocol: protocol.to_string(),
-            target_name: target_name.to_string(),
-            remote_ip,
+            user_info: request.user_info.clone(),
+            protocol: request.protocol.to_string(),
+            target_name: request.target_name.to_string(),
+            remote_ip: request.remote_ip,
+            credentials: request.credentials,
             identification_string: generate_identification_string(),
         };
 
@@ -307,6 +352,77 @@ impl Services {
             }
             ApprovalDecision::Rejected => Ok(false),
         }
+    }
+
+    /// Non-blocking form of [`Self::require_admin_approval`], for protocols
+    /// that answer each request separately and so cannot park on the gate.
+    ///
+    /// The first call for a session starts the ordinary blocking wait on a
+    /// background task; every call reports where that wait has got to. Routing
+    /// it through the same wait means the grace bypass, timeout, audit trail,
+    /// request-row lifecycle and cross-node delivery all behave identically to
+    /// the connection-holding protocols — the only thing that differs is who
+    /// does the waiting.
+    ///
+    /// The session's entry is dropped when the session ends, so a status is
+    /// only ever reused for the connection it was decided for.
+    pub async fn poll_admin_approval(
+        &self,
+        request: AdminApprovalRequest<'_>,
+    ) -> Result<AdminApprovalStatus, WarpgateError> {
+        if !self.target_requires_approval(request.target_name).await? {
+            return Ok(AdminApprovalStatus::Approved);
+        }
+
+        let session_id = *request.session_id;
+        // Claim the slot under the same lock the lookup uses, so concurrent
+        // requests for one session start exactly one wait between them.
+        {
+            let mut statuses = self.admin_approval_statuses.lock().await;
+            if let Some(status) = statuses.get(&session_id) {
+                return Ok(*status);
+            }
+            statuses.insert(session_id, AdminApprovalStatus::Pending);
+        }
+
+        let services = self.clone();
+        let user_info = request.user_info.clone();
+        let protocol = request.protocol.to_string();
+        let target_name = request.target_name.to_string();
+        let remote_ip = request.remote_ip;
+        let credentials = request.credentials;
+
+        tokio::spawn(async move {
+            let approved = services
+                .require_admin_approval(
+                    AdminApprovalRequest {
+                        session_id: &session_id,
+                        user_info: &user_info,
+                        protocol: &protocol,
+                        target_name: &target_name,
+                        remote_ip,
+                        credentials,
+                    },
+                    std::future::pending(),
+                    |_| async { Ok::<_, WarpgateError>(()) },
+                )
+                .await
+                .unwrap_or_else(|error| {
+                    error!(%error, "Failed to hold the session for administrator approval");
+                    false
+                });
+
+            services.admin_approval_statuses.lock().await.insert(
+                session_id,
+                if approved {
+                    AdminApprovalStatus::Approved
+                } else {
+                    AdminApprovalStatus::Denied
+                },
+            );
+        });
+
+        Ok(AdminApprovalStatus::Pending)
     }
 
     /// Delivers a decision to a session waiting on this node. `Ok(false)` when
@@ -579,15 +695,20 @@ pub(crate) async fn delete_requests_for_session(
     Ok(())
 }
 
+/// How long approval requests — and the auth states behind them — must stay
+/// alive: the administrator-approval window, never shorter than the auth-state
+/// [`TIMEOUT`].
+///
+/// A request legitimately outlives the auth state that may have preceded it, so
+/// expiring either at the shorter interval would strand sessions still waiting.
+pub(crate) async fn request_lifetime(db: &DatabaseConnection) -> Result<Duration, WarpgateError> {
+    Ok(admin_approval_timeout(db).await?.max(*TIMEOUT))
+}
+
 /// Ages out request rows whose waiter is gone without having deleted them
 /// (owning node crashed, or a `Drop` cleanup that never got to run).
-///
-/// Keyed to the administrator-approval window rather than the auth-state
-/// [`TIMEOUT`]: a request legitimately outlives the auth state that may have
-/// preceded it, and reaping at the shorter interval would delete live requests
-/// out from under sessions still waiting on them.
 pub(crate) async fn reap_stale(db: &DatabaseConnection) -> Result<(), WarpgateError> {
-    let lifetime = admin_approval_timeout(db).await?.max(*TIMEOUT);
+    let lifetime = request_lifetime(db).await?;
     #[allow(clippy::cast_possible_wrap)]
     let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(lifetime.as_secs() as i64);
     SessionApprovalRequest::Entity::delete_many()

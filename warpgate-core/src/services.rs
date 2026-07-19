@@ -13,7 +13,7 @@ use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, Credential
 use warpgate_common::{GlobalParams, Secret, SessionId, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::{Parameters, Target};
 
-use crate::approvals::{ApprovalActor, ApprovalDecision};
+use crate::approvals::{AdminApprovalStatuses, ApprovalActor, ApprovalDecision};
 use crate::auth_state::AuthState;
 use crate::cluster::Cluster;
 use crate::db::{connect_to_db_and_migrate, populate_db};
@@ -49,6 +49,9 @@ pub struct Services {
     /// state for a decision to mutate.
     pub(crate) pending_admin_approvals:
         Arc<Mutex<HashMap<SessionId, oneshot::Sender<(ApprovalDecision, ApprovalActor)>>>>,
+    /// Gate outcomes for sessions that observe the gate rather than parking on
+    /// it. Shared with [`State`], which drops a session's entry on teardown.
+    pub(crate) admin_approval_statuses: AdminApprovalStatuses,
 }
 
 /// Upsert the token without conflicts from multiple nodes
@@ -97,6 +100,7 @@ impl Services {
         let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
 
         let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new()));
+        let admin_approval_statuses = AdminApprovalStatuses::default();
         let (web_auth_request_tx, admin_approval_request_tx) =
             auth_state_store.lock().await.request_signal_senders();
 
@@ -105,13 +109,21 @@ impl Services {
             let db = db.clone();
             async move {
                 loop {
-                    auth_state_store
-                        .lock()
+                    // A session held for administrator approval must stay
+                    // resolvable for the whole configured window, so states are
+                    // kept at least that long rather than for the auth-state
+                    // TIMEOUT. Falling back to TIMEOUT on a lookup failure only
+                    // shortens retention, never extends it.
+                    let lifetime = crate::approvals::request_lifetime(&db)
                         .await
-                        .vacuum(*crate::auth_state_store::TIMEOUT);
+                        .unwrap_or_else(|error| {
+                            warn!("Failed to read the approval window: {error}");
+                            *crate::auth_state_store::TIMEOUT
+                        });
+                    auth_state_store.lock().await.vacuum(lifetime);
                     // Approval requests are normally deleted by their resolver
                     // or their waiter; rows whose owning node died are aged out
-                    // here, on their own (longer, configurable) window.
+                    // here.
                     if let Err(error) = crate::approvals::reap_stale(&db).await {
                         warn!("Failed to reap stale session approval requests: {error}");
                     }
@@ -148,7 +160,12 @@ impl Services {
             db: db.clone(),
             recordings,
             config: config.clone(),
-            state: State::new(&db, &rate_limiter_registry, cluster.node_id),
+            state: State::new(
+                &db,
+                &rate_limiter_registry,
+                cluster.node_id,
+                admin_approval_statuses.clone(),
+            ),
             cluster,
             rate_limiter_registry,
             config_provider,
@@ -161,6 +178,7 @@ impl Services {
             web_auth_request_tx,
             admin_approval_request_tx,
             pending_admin_approvals: Arc::default(),
+            admin_approval_statuses,
         })
     }
 
@@ -190,14 +208,22 @@ impl Services {
         )
         .await?;
 
-        Ok(self.auth_state_store.lock().await.create(
+        let (id, state_arc) = self.auth_state_store.lock().await.create(
             session_id,
             (&user).into(),
             protocol,
             target_name,
             policy,
             remote_ip,
-        ))
+        );
+
+        // A policy whose only outstanding factor is the self-approval never
+        // reaches `add_auth_credential`, so it would otherwise go unadvertised.
+        let result = state_arc.lock().await.verify();
+        self.advertise_if_awaiting_approval(&state_arc, &result)
+            .await?;
+
+        Ok((id, state_arc))
     }
 
     /// Adds a validated credential to the auth state. Part of the sole
@@ -208,7 +234,31 @@ impl Services {
         state_arc: &Arc<Mutex<AuthState>>,
         credential: AuthCredential,
     ) -> Result<AuthResult, WarpgateError> {
-        Ok(state_arc.lock().await.add_valid_credential(credential))
+        let result = state_arc.lock().await.add_valid_credential(credential);
+        self.advertise_if_awaiting_approval(state_arc, &result)
+            .await?;
+        Ok(result)
+    }
+
+    /// Advertises a pending self-approval the moment a state starts needing
+    /// one.
+    ///
+    /// Every credential any protocol adds funnels through here, so the request
+    /// row exists however the login was driven. Advertising per-protocol
+    /// instead would silently leave whichever protocol forgot with an approval
+    /// the resolve endpoints can never find.
+    async fn advertise_if_awaiting_approval(
+        &self,
+        state_arc: &Arc<Mutex<AuthState>>,
+        result: &AuthResult,
+    ) -> Result<(), WarpgateError> {
+        if matches!(
+            result,
+            AuthResult::Need(kinds) if kinds.contains(&CredentialKind::WebUserApproval)
+        ) {
+            self.request_approval(state_arc).await?;
+        }
+        Ok(())
     }
 
     /// Rejects the auth state and purges any pending approval request for it.

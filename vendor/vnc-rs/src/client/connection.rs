@@ -1,18 +1,13 @@
-use futures::TryStreamExt;
-use tokio_stream::wrappers::ReceiverStream;
+use std::future::Future;
+use std::sync::Arc;
+use std::vec;
 
-use std::{future::Future, sync::Arc, vec};
-use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    sync::{
-        mpsc::{
-            channel,
-            error::{TryRecvError, TrySendError},
-            Receiver, Sender,
-        },
-        oneshot, Mutex,
-    },
-};
+use futures::TryStreamExt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::{oneshot, Mutex};
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::compat::*;
 use tracing::*;
 
@@ -129,9 +124,7 @@ impl VncInner {
             };
 
             let pf = pixel_format.as_ref().unwrap();
-            if let Err(e) =
-                decode_loop(&mut conn_ch_rx, pf, &output_func, decoding_stop_rx).await
-            {
+            if let Err(e) = decode_loop(&mut conn_ch_rx, pf, &output_func, decoding_stop_rx).await {
                 if let VncError::IoError(e) = e {
                     if let std::io::ErrorKind::UnexpectedEof = e.kind() {
                         // this should be a normal case when the network connection disconnects

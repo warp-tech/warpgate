@@ -86,7 +86,10 @@ impl SessionAuthorization {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum RequestAuthorization {
     Session(SessionAuthorization),
-    UserToken { user_id: Uuid, username: String },
+    UserToken {
+        user_id: Uuid,
+        username: String,
+    },
     AdminToken,
     /// Auth between cluster peers
     ClusterToken,

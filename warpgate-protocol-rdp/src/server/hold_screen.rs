@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 use tracing::warn;
-use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
+use warpgate_common::auth::{AuthCredentialFingerprint, AuthResult, AuthStateUserInfo};
 use warpgate_core::Services;
 use warpgate_desktop_auth::{
     InteractiveAuth, OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt,
@@ -61,7 +61,7 @@ pub(super) async fn run_hold_screen(
     interactive: &InteractiveAuth,
     frames: &mut HelperReader,
     helper_in_tx: &UnboundedSender<ServerHelperInput>,
-) -> Result<Option<AuthStateUserInfo>> {
+) -> Result<Option<(AuthStateUserInfo, Vec<AuthCredentialFingerprint>)>> {
     let state = services
         .auth_state_store
         .lock()
@@ -93,7 +93,10 @@ pub(super) async fn run_hold_screen(
 
         // Bind to a local so the `state` guard drops here — `complete()` below re-locks
         // the same AuthState mutex, and holding a match-scrutinee guard across it deadlocks.
-        let verification = state.lock().await.verify();
+        let (verification, credentials) = {
+            let state = state.lock().await;
+            (state.verify(), state.credential_fingerprints())
+        };
         let need = match verification {
             AuthResult::Accepted { user_info } => {
                 let _ = services
@@ -109,7 +112,7 @@ pub(super) async fn run_hold_screen(
                 // Swap the OTP prompt for a "Connecting" screen before the caller blocks on
                 // the backend connect, so the viewer gets feedback instead of a frozen frame.
                 let _ = painter.paint(helper_in_tx, ui::render_connecting);
-                return Ok(Some(user_info));
+                return Ok(Some((user_info, credentials)));
             }
             AuthResult::Rejected => return Ok(None),
             AuthResult::Need(need) => need,

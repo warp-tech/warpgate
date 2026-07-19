@@ -10,10 +10,12 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span, trace, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
+    AuthCredential, AuthCredentialFingerprint, AuthResult, AuthSelector, AuthStateUserInfo,
+    CredentialKind,
 };
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_core::approvals::AdminApprovalRequest;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
     ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
@@ -46,6 +48,35 @@ pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
+    /// Holds the connection on the administrator-approval gate. Returns whether
+    /// the session may proceed.
+    ///
+    /// MySQL has no in-band channel to display a "waiting" message during the
+    /// handshake, so the connection simply blocks until an administrator
+    /// resolves it or the request times out. Held before the OK packet, so a
+    /// denial is a clean auth failure rather than a dropped connection.
+    async fn hold_for_admin_approval(
+        &mut self,
+        user_info: &AuthStateUserInfo,
+        target_name: &str,
+        credentials: Option<Vec<AuthCredentialFingerprint>>,
+    ) -> Result<bool, MySqlError> {
+        self.services
+            .require_admin_approval(
+                AdminApprovalRequest {
+                    session_id: &self.id,
+                    user_info,
+                    protocol: crate::common::PROTOCOL_NAME,
+                    target_name,
+                    remote_ip: Some(self.remote_address.ip()),
+                    credentials,
+                },
+                std::future::pending(),
+                |_| async { Ok::<_, MySqlError>(()) },
+            )
+            .await
+    }
+
     pub async fn new(
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         services: Services,
@@ -301,23 +332,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                             .clear_failed_attempts(&remote_ip, &user_info.username)
                             .await;
 
-                        // MySQL has no in-band channel to display a "waiting"
-                        // message during the handshake, so the connection simply
-                        // blocks until an administrator resolves it or the
-                        // request times out. Held before the OK packet, so a
-                        // denial is a clean auth failure rather than a dropped
-                        // connection.
+                        let credentials = Some(state_arc.lock().await.credential_fingerprints());
                         if !self
-                            .services
-                            .require_admin_approval(
-                                &self.id,
-                                &user_info,
-                                crate::common::PROTOCOL_NAME,
-                                &target_name,
-                                Some(remote_ip),
-                                std::future::pending(),
-                                |_| async { Ok::<_, MySqlError>(()) },
-                            )
+                            .hold_for_admin_approval(&user_info, &target_name, credentials)
                             .await?
                         {
                             warn!("Session was not approved by an administrator");
@@ -351,18 +368,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                         info!("Authorized for {} with a ticket", target.name);
 
                         // Held before the ticket is consumed, so a denied
-                        // session doesn't burn a single-use ticket.
+                        // session doesn't burn a single-use ticket. A ticket is
+                        // not a stable credential fingerprint, so this session
+                        // never contributes a remembered approval.
                         if !self
-                            .services
-                            .require_admin_approval(
-                                &self.id,
-                                &user_info,
-                                crate::common::PROTOCOL_NAME,
-                                &target.name,
-                                Some(self.remote_address.ip()),
-                                std::future::pending(),
-                                |_| async { Ok::<_, MySqlError>(()) },
-                            )
+                            .hold_for_admin_approval(&user_info, &target.name, None)
                             .await?
                         {
                             warn!("Session was not approved by an administrator");

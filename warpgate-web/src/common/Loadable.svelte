@@ -28,25 +28,42 @@
     // rejection `loaded` becomes true before the async stringifyError lands.
     const currentValue = $derived(value as T)
 
+    // Bumped per effect run so a slow earlier promise can't overwrite the
+    // result of a later one, or resurrect an error the retry has cleared.
+    let generation = 0
+
     $effect(() => {
         if (!resolvedOnce) {
             // only hide content when loading for the first time
             loaded = false
             resolved = false
         }
+        // A retry starts clean: leaving the previous error set would replace the
+        // content with a permanent alert after a single failed refresh.
+        error = undefined
+
+        generation += 1
+        const current = generation
         promise
             .then(d => {
+                if (current !== generation) {
+                    return
+                }
                 value = d
                 resolved = true
                 resolvedOnce = true
             })
             .catch(err => {
                 stringifyError(err).then(e => {
-                    error = e
+                    if (current === generation) {
+                        error = e
+                    }
                 })
             })
             .finally(() => {
-                loaded = true
+                if (current === generation) {
+                    loaded = true
+                }
             })
     })
 </script>

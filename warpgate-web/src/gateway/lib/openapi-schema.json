@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.27.0-beta.1-37-g790e55d3-modified"
+    "version": "v0.27.0-beta.1-38-gf1d067c2-modified"
   },
   "servers": [
     {
@@ -1473,7 +1473,8 @@
           "tickets_delete",
           "config_edit",
           "admin_roles_manage",
-          "ticket_requests_manage"
+          "ticket_requests_manage",
+          "approve_sessions"
         ],
         "properties": {
           "targets_create": {
@@ -1528,6 +1529,9 @@
             "type": "boolean"
           },
           "ticket_requests_manage": {
+            "type": "boolean"
+          },
+          "approve_sessions": {
             "type": "boolean"
           }
         }

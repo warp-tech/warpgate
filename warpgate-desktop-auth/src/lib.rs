@@ -18,15 +18,14 @@ use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
+    AuthCredential, AuthCredentialFingerprint, AuthResult, AuthSelector, AuthStateUserInfo,
+    CredentialKind,
 };
 use warpgate_common::{Secret, Target};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
-use warpgate_core::{
-    AuthState, ConfigProvider, Services, WarpgateServerHandle, authorize_ticket,
-};
+use warpgate_core::{AuthState, ConfigProvider, Services, WarpgateServerHandle, authorize_ticket};
 use warpgate_desktop_ui::AuthPrompt;
 
 /// The per-protocol specifics the shared auth flow needs.
@@ -49,20 +48,31 @@ pub struct InteractiveAuth {
     pub remote_ip: IpAddr,
 }
 
+/// An authenticated session and everything the caller still has to do with it:
+/// gate it, spend its ticket, and dial the target.
+///
+/// These travel together from authentication all the way to the backend
+/// connection, so they are one value rather than five parallel arguments.
+pub struct AuthorizedSession<O> {
+    pub user_info: AuthStateUserInfo,
+    pub target: Target,
+    pub options: O,
+    /// A ticket that authorised this session and has *not* been consumed yet.
+    /// The caller consumes it only once the session is past the
+    /// administrator-approval gate, so a denied session doesn't burn a
+    /// single-use ticket.
+    pub pending_ticket: Option<Uuid>,
+    /// Fingerprints of the credentials that authenticated this session, for
+    /// keying a remembered administrator approval. `None` for ticket auth,
+    /// which has no stable fingerprint.
+    pub credentials: Option<Vec<AuthCredentialFingerprint>>,
+}
+
 /// Result of evaluating the viewer's up-front (password / ticket) credentials.
 #[allow(clippy::large_enum_variant)]
 pub enum DesktopAuthOutcome<O> {
     /// Fully authenticated (password-only policy, or ticket auth).
-    Authorized {
-        user_info: AuthStateUserInfo,
-        target: Target,
-        options: O,
-        /// A ticket that authorised this session and has *not* been consumed
-        /// yet. The caller consumes it only once the session is past the
-        /// administrator-approval gate, so a denied session doesn't burn a
-        /// single-use ticket.
-        pending_ticket: Option<Uuid>,
-    },
+    Authorized(AuthorizedSession<O>),
     /// Password accepted, but the policy needs an interactive second factor — collected on
     /// the per-protocol holding screen.
     NeedsInteractive(InteractiveAuth),
@@ -164,6 +174,7 @@ pub async fn authenticate<P: DesktopProtocol>(
             let verification = state_arc.lock().await.verify();
             match verification {
                 AuthResult::Accepted { user_info } => {
+                    let credentials = state_arc.lock().await.credential_fingerprints();
                     let _ = services
                         .login_protection
                         .clear_failed_attempts(&remote_ip, &user_info.username)
@@ -177,21 +188,19 @@ pub async fn authenticate<P: DesktopProtocol>(
                     let (target, options) =
                         finalize_user_auth::<P>(services, &user_info.username, &target_name)
                             .await?;
-                    Ok(DesktopAuthOutcome::Authorized {
+                    Ok(DesktopAuthOutcome::Authorized(AuthorizedSession {
                         user_info,
                         target,
                         options,
                         pending_ticket: None,
-                    })
+                        credentials: Some(credentials),
+                    }))
                 }
                 // Go interactive only when *every* still-needed factor is one the holding
                 // screen can collect; otherwise the session could never complete.
                 AuthResult::Need(kinds)
                     if kinds.iter().all(|k| {
-                        matches!(
-                            k,
-                            CredentialKind::Totp | CredentialKind::WebUserApproval
-                        )
+                        matches!(k, CredentialKind::Totp | CredentialKind::WebUserApproval)
                     }) =>
                 {
                     Ok(DesktopAuthOutcome::NeedsInteractive(InteractiveAuth {
@@ -207,12 +216,13 @@ pub async fn authenticate<P: DesktopProtocol>(
         AuthSelector::Ticket { secret } => match authorize_ticket(&services.db, &secret).await? {
             Some((ticket, target_model, user_info)) => {
                 let (target, options) = find_target::<P>(services, &target_model.name).await?;
-                Ok(DesktopAuthOutcome::Authorized {
+                Ok(DesktopAuthOutcome::Authorized(AuthorizedSession {
                     user_info,
                     target,
                     options,
                     pending_ticket: Some(ticket.id),
-                })
+                    credentials: None,
+                }))
             }
             None => Ok(DesktopAuthOutcome::Failed),
         },
@@ -304,9 +314,6 @@ pub async fn auth_prompt(
             entered: entered_otp.to_owned(),
         })
     } else if needed.contains(&CredentialKind::WebUserApproval) {
-        if let Err(error) = services.request_approval(state).await {
-            warn!(%error, "Failed to record the approval request");
-        }
         Some(AuthPrompt::WebApproval {
             url: web_approval_url(services, state).await,
             security_key: state.lock().await.identification_string().to_owned(),

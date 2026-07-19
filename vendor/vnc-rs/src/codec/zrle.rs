@@ -1,9 +1,11 @@
-use crate::{PixelFormat, Rect, VncError, VncEvent};
 use std::future::Future;
+
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::error;
 
-use super::{uninit_vec, zlib::ZlibReader};
+use super::uninit_vec;
+use super::zlib::ZlibReader;
+use crate::{PixelFormat, Rect, VncError, VncEvent};
 
 fn read_run_length(reader: &mut ZlibReader) -> Result<usize, VncError> {
     let mut run_length_part;

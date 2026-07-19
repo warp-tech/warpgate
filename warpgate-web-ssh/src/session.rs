@@ -9,9 +9,7 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info};
 use uuid::Uuid;
 use warpgate_core::WarpgateServerHandle;
-use warpgate_core::recordings::{
-    SessionRecordings, TerminalRecorder, TerminalRecordingStreamId,
-};
+use warpgate_core::recordings::{SessionRecordings, TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
     ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError, SshRecordingMetadata,

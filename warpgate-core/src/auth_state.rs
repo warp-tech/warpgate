@@ -127,21 +127,25 @@ impl AuthState {
         self.remote_ip
     }
 
+    /// Fingerprints of the credentials accepted so far, excluding the approval
+    /// itself so the result describes the *other* credentials presented and is
+    /// identical whether taken before the approval is added (check) or after
+    /// (save).
+    pub fn credential_fingerprints(&self) -> Vec<AuthCredentialFingerprint> {
+        self.valid_credentials
+            .iter()
+            .filter(|c| !matches!(c.kind(), CredentialKind::WebUserApproval))
+            .map(Into::into)
+            .collect()
+    }
+
     /// Builds the key used to match this attempt against a remembered
     /// self-approval. Administrator approvals key off the connection instead
     /// (see `ApprovalSubject::match_key`), so they never come through here.
     pub fn approval_match_key(&self) -> Option<ApprovalMatchKey> {
         let remote_ip = self.remote_ip?;
 
-        // The approval itself is excluded so the key describes the *other*
-        // credentials presented, and is identical whether computed before the
-        // approval is added (check) or after (save).
-        let mut other_credentials: Vec<AuthCredentialFingerprint> = self
-            .valid_credentials
-            .iter()
-            .filter(|c| !matches!(c.kind(), CredentialKind::WebUserApproval))
-            .map(Into::into)
-            .collect();
+        let mut other_credentials = self.credential_fingerprints();
         other_credentials.sort_unstable();
         other_credentials.dedup();
 

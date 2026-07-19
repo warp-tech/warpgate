@@ -8182,6 +8182,7 @@ dependencies = [
  "uuid",
  "warpgate-aws",
  "warpgate-ca",
+ "warpgate-cluster",
  "warpgate-common",
  "warpgate-common-http",
  "warpgate-core",
@@ -8238,6 +8239,28 @@ dependencies = [
  "uuid",
  "x509-cert",
  "x509-parser",
+]
+
+[[package]]
+name = "warpgate-cluster"
+version = "0.27.0-beta.1"
+dependencies = [
+ "anyhow",
+ "futures",
+ "poem",
+ "reqwest 0.13.4",
+ "rustls 0.23.41",
+ "sea-orm",
+ "serde",
+ "tokio",
+ "tokio-tungstenite 0.29.0",
+ "uuid",
+ "warpgate-ca",
+ "warpgate-common",
+ "warpgate-common-http",
+ "warpgate-core",
+ "warpgate-db-entities",
+ "warpgate-tls",
 ]
 
 [[package]]
@@ -8299,24 +8322,15 @@ dependencies = [
 name = "warpgate-common-http"
 version = "0.27.0-beta.1"
 dependencies = [
- "anyhow",
- "futures",
  "poem",
- "poem-openapi",
- "reqwest 0.13.4",
- "rustls 0.23.41",
- "sea-orm",
  "serde",
  "tokio",
- "tokio-tungstenite 0.29.0",
  "tracing",
  "url",
  "uuid",
- "warpgate-ca",
  "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
- "warpgate-tls",
 ]
 
 [[package]]
@@ -8494,6 +8508,7 @@ dependencies = [
  "warpgate-admin",
  "warpgate-aws",
  "warpgate-ca",
+ "warpgate-cluster",
  "warpgate-common",
  "warpgate-common-http",
  "warpgate-core",

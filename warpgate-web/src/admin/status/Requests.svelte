@@ -22,15 +22,17 @@
         type SessionApprovalItem,
         SessionApprovalScope,
         type TicketRequest,
-        TicketRequestStatus,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import {
+        loadPendingRequests,
+        watchPendingRequests,
+    } from 'common/approvalRequests'
+    import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { formatDurationAsHumantime } from 'common/duration'
     import { stringifyError } from 'common/errors'
-    import Loadable from 'common/Loadable.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
-    import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
 
     /// One inbox entry, whichever kind of request produced it. `at` is the
@@ -47,6 +49,8 @@
     let sessions: SessionApprovalItem[] = $state([])
     let tickets: TicketRequest[] = $state([])
     let error: string | undefined = $state()
+    /// Gates the first render only; the watch drives every refresh after it.
+    let loaded = $state(false)
     let denyModalRequest: TicketRequest | undefined = $state()
     let denyReason = $state('')
     let denyError: string | undefined = $state()
@@ -79,49 +83,56 @@
     )
 
     async function reload() {
-        const [loadedSessions, loadedTickets] = await Promise.all([
-            canSeeSessions ? api.getSessionApprovals() : Promise.resolve([]),
-            canManageTickets
-                ? api.getTicketRequests({ status: TicketRequestStatus.Pending })
-                : Promise.resolve([]),
-        ])
-        sessions = loadedSessions
-        tickets = loadedTickets
+        const loaded = await loadPendingRequests({
+            canSeeSessions,
+            canManageTickets,
+        })
+        sessions = loaded.sessions
+        tickets = loaded.tickets
     }
 
-    $effect(() => {
-        if (!canSeeSessions) {
-            return
+    /// Swallows the error so a failed background refresh leaves the last known
+    /// list on screen instead of blanking the inbox; actions surface their own.
+    async function refresh() {
+        try {
+            await reload()
+            error = undefined
+        } catch (err) {
+            error = await stringifyError(err)
         }
-        const ws = new WebSocket(
-            `wss://${location.host}/@warpgate/admin/api/session-approvals/changes`,
-        )
-        ws.addEventListener('message', reload)
-        onDestroy(() => ws.close())
-    })
+        loaded = true
+    }
 
-    $effect(() => {
-        if (!canManageTickets) {
-            return
+    // Returned from the effect, not registered with onDestroy: re-running the
+    // effect must tear down the previous watch, which onDestroy (scoped to the
+    // component) would defer until unmount, leaking a socket per run.
+    $effect(() =>
+        watchPendingRequests({ canSeeSessions, canManageTickets }, () => {
+            void refresh()
+        }),
+    )
+
+    /// A 404 means someone else already resolved it, or the held session gave
+    /// up waiting — the entry is simply gone, so reload either way.
+    async function resolveSession(action: () => Promise<void>) {
+        error = undefined
+        try {
+            await action()
+        } catch (err) {
+            error = await stringifyError(err)
         }
-
-        // Ticket requests are not pushed, so poll for those (which also catches
-        // requests resolved by another admin).
-        const interval = setInterval(reload, 30000)
-        onDestroy(() => clearInterval(interval))
-    })
+        await refresh()
+    }
 
     async function approveSession(
         item: SessionApprovalItem,
         scope: SessionApprovalScope,
     ) {
-        await api.approveSession({ id: item.id, scope })
-        await reload()
+        await resolveSession(() => api.approveSession({ id: item.id, scope }))
     }
 
     async function rejectSession(item: SessionApprovalItem) {
-        await api.rejectSession({ id: item.id })
-        await reload()
+        await resolveSession(() => api.rejectSession({ id: item.id }))
     }
 
     async function approveTicket(request: TicketRequest) {
@@ -166,7 +177,9 @@
         <Alert color="danger">{error}</Alert>
     {/if}
 
-    <Loadable promise={reload()}>
+    {#if !loaded}
+        <DelayedSpinner />
+    {:else}
         {#if !entries.length}
             <div class="text-muted">Nothing is awaiting your action.</div>
         {/if}
@@ -311,7 +324,7 @@
                 </div>
             {/each}
         </div>
-    </Loadable>
+    {/if}
 {/if}
 
 <Modal

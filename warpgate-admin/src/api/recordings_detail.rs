@@ -16,11 +16,9 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::broadcast;
 use tracing::error;
 use uuid::Uuid;
+use warpgate_cluster::proxy::{Owner, proxy_or_serve, proxy_or_serve_websocket, session_owner};
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_common_http::cluster_proxy::{
-    Owner, proxy_or_serve, proxy_or_serve_websocket, session_owner,
-};
 use warpgate_core::recordings::{LiveChunk, RecordingFile};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_db_entities::Session;

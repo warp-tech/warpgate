@@ -5,12 +5,11 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::ticket_requests::{
-    TicketRequestDetails, approve_ticket_request, deny_ticket_request, resolve_ticket_request_names,
-};
+use warpgate_core::ticket_requests::{approve_ticket_request, deny_ticket_request};
 
 use super::AnySecurityScheme;
 use crate::api::common::require_admin_permission;
+use crate::api::ticket_request_details::{TicketRequestDetails, resolve_ticket_request_names};
 
 const fn admin_user_id(ctx: &AuthenticatedRequestContext) -> Option<Uuid> {
     let id = ctx.auth.user_id();

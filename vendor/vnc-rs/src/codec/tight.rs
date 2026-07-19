@@ -1,10 +1,12 @@
-use crate::{PixelFormat, Rect, VncError, VncEvent};
 use std::future::Future;
 use std::io::Read;
+
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::error;
 
-use super::{uninit_vec, zlib::ZlibReader};
+use super::uninit_vec;
+use super::zlib::ZlibReader;
+use crate::{PixelFormat, Rect, VncError, VncEvent};
 
 const MAX_PALETTE: usize = 256;
 

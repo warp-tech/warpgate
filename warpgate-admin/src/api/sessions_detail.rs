@@ -5,11 +5,11 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_common_http::cluster_proxy::{
+use warpgate_cluster::proxy::{
     FromProxiedStatus, local_or_forward, session_owner, unexpected_proxied_status,
 };
+use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::SessionSnapshot;
 use warpgate_db_entities::{Node, Recording, Session};
 

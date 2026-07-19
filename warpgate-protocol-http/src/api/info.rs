@@ -78,6 +78,7 @@ pub struct AdminPermissions {
     config_edit: bool,
     admin_roles_manage: bool,
     ticket_requests_manage: bool,
+    approve_sessions: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -260,6 +261,7 @@ impl Api {
                             combined.config_edit |= r.config_edit;
                             combined.admin_roles_manage |= r.admin_roles_manage;
                             combined.ticket_requests_manage |= r.ticket_requests_manage;
+                            combined.approve_sessions |= r.approve_sessions;
                         }
                     }
                     combined

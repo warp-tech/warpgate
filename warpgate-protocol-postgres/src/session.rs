@@ -16,10 +16,12 @@ use tokio::time;
 use tracing::{debug, error, info, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
+    AuthCredential, AuthCredentialFingerprint, AuthResult, AuthSelector, AuthStateUserInfo,
+    CredentialKind,
 };
 use warpgate_common::{PostgresProtocolVersion, Secret, TargetOptions, TargetPostgresOptions};
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::approvals::AdminApprovalRequest;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
     ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
@@ -52,6 +54,63 @@ pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
+    /// Holds the connection on the administrator-approval gate, announcing the
+    /// wait in-band. Returns whether the session may proceed.
+    ///
+    /// The "waiting" notice needs an authenticated connection to travel on, so
+    /// the `Authentication::Ok` goes out first when the session is actually
+    /// held. `auth_ok_sent` tracks whether that has happened — the caller reads
+    /// it afterwards to avoid sending a second one — and stays false for a
+    /// session that passes straight through, which announces nothing.
+    async fn hold_for_admin_approval(
+        &mut self,
+        user_info: &AuthStateUserInfo,
+        target_name: &str,
+        credentials: Option<Vec<AuthCredentialFingerprint>>,
+        auth_ok_sent: &mut bool,
+    ) -> Result<bool, PostgresError> {
+        let services = self.services.clone();
+        let session_id = self.id;
+        let remote_ip = self.remote_address.ip();
+        let stream = &mut self.stream;
+
+        services
+            .require_admin_approval(
+                AdminApprovalRequest {
+                    session_id: &session_id,
+                    user_info,
+                    protocol: crate::common::PROTOCOL_NAME,
+                    target_name,
+                    remote_ip: Some(remote_ip),
+                    credentials,
+                },
+                std::future::pending(),
+                |security_key| {
+                  let security_key = security_key.to_owned();
+                  async move {
+                    if !*auth_ok_sent {
+                        stream.push(pgwire::messages::startup::Authentication::Ok)?;
+                        *auth_ok_sent = true;
+                    }
+                    stream.push(pgwire::messages::response::NoticeResponse::new(vec![
+                        (b'S', "NOTICE".into()),
+                        (b'V', "NOTICE".into()),
+                        (b'C', "WG002".into()),
+                        (
+                            b'M',
+                            format!(
+                                "Warpgate: waiting for an administrator to approve this session (key {security_key})..."
+                            ),
+                        ),
+                    ]))?;
+                    stream.flush().await?;
+                    Ok::<_, PostgresError>(())
+                  }
+                },
+            )
+            .await
+    }
+
     pub async fn new(
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         services: Services,
@@ -284,54 +343,19 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                 .clear_failed_attempts(&remote_ip, &user_info.username)
                                 .await;
 
-                            // The "waiting" notice needs an authenticated
-                            // connection to travel on, so the OK goes out first
-                            // when the session is held. A denial after it is
-                            // still a clean ErrorResponse.
+                            let credentials =
+                                Some(state_arc.lock().await.credential_fingerprints());
+                            if !self
+                                .hold_for_admin_approval(
+                                    &user_info,
+                                    &target_name,
+                                    credentials,
+                                    &mut auth_ok_sent,
+                                )
+                                .await?
                             {
-                                let services = self.services.clone();
-                                let stream = &mut self.stream;
-                                let approved = services
-                                    .require_admin_approval(
-                                        &self.id,
-                                        &user_info,
-                                        crate::common::PROTOCOL_NAME,
-                                        &target_name,
-                                        Some(remote_ip),
-                                        std::future::pending(),
-                                        |security_key| {
-                                          let security_key = security_key.to_owned();
-                                          let auth_ok_sent = &mut auth_ok_sent;
-                                          async move {
-                                            if !*auth_ok_sent {
-                                                stream.push(
-                                                    pgwire::messages::startup::Authentication::Ok,
-                                                )?;
-                                                *auth_ok_sent = true;
-                                            }
-                                            stream.push(
-                                                pgwire::messages::response::NoticeResponse::new(vec![
-                                                    (b'S', "NOTICE".into()),
-                                                    (b'V', "NOTICE".into()),
-                                                    (b'C', "WG002".into()),
-                                                    (
-                                                        b'M',
-                                                        format!(
-                                                            "Warpgate: waiting for an administrator to approve this session (key {security_key})..."
-                                                        ),
-                                                    ),
-                                                ]),
-                                            )?;
-                                            stream.flush().await?;
-                                            Ok::<_, PostgresError>(())
-                                          }
-                                        },
-                                    )
-                                    .await?;
-                                if !approved {
-                                    warn!("Session was not approved by an administrator");
-                                    return fail(&mut self).await;
-                                }
+                                warn!("Session was not approved by an administrator");
+                                return fail(&mut self).await;
                             }
 
                             if !auth_ok_sent {
@@ -406,10 +430,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                     .lock()
                                     .await
                                     .subscribe(auth_state_id);
-                                self.services
-                                    .request_approval(&state_arc)
-                                    .await
-                                    .map_err(PostgresError::other)?;
 
                                 let ext_url_result = construct_external_url(
                                     None,
@@ -493,46 +513,19 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                         info!("Authorized for {} with a ticket", target.name);
 
                         // Held before the ticket is consumed, so a denied
-                        // session doesn't burn a single-use ticket.
+                        // session doesn't burn a single-use ticket. A ticket is
+                        // not a stable credential fingerprint, so this session
+                        // never contributes a remembered approval.
                         let mut auth_ok_sent = false;
-                        let services = self.services.clone();
-                        let stream = &mut self.stream;
-                        let approved = services
-                            .require_admin_approval(
-                                &self.id,
+                        if !self
+                            .hold_for_admin_approval(
                                 &user_info,
-                                crate::common::PROTOCOL_NAME,
                                 &target.name,
-                                Some(self.remote_address.ip()),
-                                std::future::pending(),
-                                |security_key| {
-                                  let security_key = security_key.to_owned();
-                                  let auth_ok_sent = &mut auth_ok_sent;
-                                  async move {
-                                    stream.push(
-                                        pgwire::messages::startup::Authentication::Ok,
-                                    )?;
-                                    *auth_ok_sent = true;
-                                    stream.push(
-                                        pgwire::messages::response::NoticeResponse::new(vec![
-                                            (b'S', "NOTICE".into()),
-                                            (b'V', "NOTICE".into()),
-                                            (b'C', "WG002".into()),
-                                            (
-                                                b'M',
-                                                format!(
-                                                    "Warpgate: waiting for an administrator to approve this session (key {security_key})..."
-                                                ),
-                                            ),
-                                        ]),
-                                    )?;
-                                    stream.flush().await?;
-                                    Ok::<_, PostgresError>(())
-                                  }
-                                },
+                                None,
+                                &mut auth_ok_sent,
                             )
-                            .await?;
-                        if !approved {
+                            .await?
+                        {
                             warn!("Session was not approved by an administrator");
                             return fail(&mut self).await;
                         }

@@ -1,10 +1,12 @@
 <script lang="ts">
     import { faHand } from '@fortawesome/free-regular-svg-icons'
     import { Button } from '@sveltestrap/sveltestrap'
-    import { api, TicketRequestStatus } from 'admin/lib/api'
     import { serverInfo } from 'gateway/lib/store'
-    import { onDestroy } from 'svelte'
     import Fa from 'svelte-fa'
+    import {
+        loadPendingRequests,
+        watchPendingRequests,
+    } from './approvalRequests'
     import { classnames } from './helpers'
 
     const { collapsed = false, class: className = '' } = $props()
@@ -26,65 +28,36 @@
     let canSeeAny = $derived(canSeeSessions || canManageTickets)
     let count = $derived(sessionCount + ticketCount)
 
-    let socket: WebSocket | undefined
-    let interval: ReturnType<typeof setInterval> | undefined
-
     async function reload() {
         try {
-            const [sessions, tickets] = await Promise.all([
-                canSeeSessions
-                    ? api.getSessionApprovals().then(r => r.length)
-                    : 0,
-                canManageTickets
-                    ? api
-                          .getTicketRequests({
-                              status: TicketRequestStatus.Pending,
-                          })
-                          .then(r => r.length)
-                    : 0,
-            ])
-            sessionCount = sessions
-            ticketCount = tickets
+            const { sessions, tickets } = await loadPendingRequests({
+                canSeeSessions,
+                canManageTickets,
+            })
+            sessionCount = sessions.length
+            ticketCount = tickets.length
         } catch {
             // A transient failure leaves the last known counts in place rather
             // than flashing the indicator away.
         }
     }
 
-    function stopWatching() {
-        socket?.close()
-        socket = undefined
-        if (interval) {
-            clearInterval(interval)
-        }
-        interval = undefined
-    }
-
     // The permissions arrive with the server info, so the watch starts once
-    // they have been granted.
+    // they have been granted. Returning the cleanup ties it to this effect run,
+    // so a permission change tears the old watch down instead of leaking it.
     $effect(() => {
         if (!canSeeAny) {
-            stopWatching()
             sessionCount = 0
             ticketCount = 0
             return
         }
-        if (interval) {
-            return
-        }
-        void reload()
-        // Held sessions are pushed; ticket requests are not, so the poll below
-        // covers those (and requests resolved by another admin).
-        if (canSeeSessions) {
-            socket = new WebSocket(
-                `wss://${location.host}/@warpgate/admin/api/session-approvals/changes`,
-            )
-            socket.addEventListener('message', reload)
-        }
-        interval = setInterval(reload, 30000)
+        return watchPendingRequests(
+            { canSeeSessions, canManageTickets },
+            () => {
+                void reload()
+            },
+        )
     })
-
-    onDestroy(stopWatching)
 </script>
 
 {#if canSeeAny && count > 0}

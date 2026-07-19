@@ -12,11 +12,25 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common::auth::ApprovalKind;
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::approvals::{ApprovalActor, ApprovalDecision};
 use warpgate_db_entities::{Node, SessionApprovalRequest};
 
-use crate::AuthenticatedRequestContext;
-use crate::cluster_proxy::post_json_to_peer;
+use crate::proxy::{post_json_to_peer, unexpected_proxied_status};
+
+/// Route of the owner-side resolution RPC, relative to the admin API mount.
+/// `warpgate-admin` mounts its handler here; [`resolve_approval`] calls the
+/// same path on a peer. Both sides read it from here so the two can't drift.
+pub const RESOLVE_APPROVAL_ROUTE: &str = "/session-approvals/:id/resolve";
+
+/// Where the admin API is mounted on every node, needed to address the route
+/// above on a peer.
+const ADMIN_API_MOUNT: &str = "/@warpgate/admin/api";
+
+/// Absolute path of the resolution RPC for `session_id` on a peer node.
+fn resolve_approval_path(session_id: Uuid) -> String {
+    format!("{ADMIN_API_MOUNT}/session-approvals/{session_id}/resolve")
+}
 
 /// Body of the internal owner-side resolution RPC.
 #[derive(Serialize, Deserialize)]
@@ -108,7 +122,7 @@ pub async fn resolve_approval(
     let status = post_json_to_peer(
         ctx,
         node,
-        &format!("/@warpgate/admin/api/session-approvals/{session_id}/resolve"),
+        &resolve_approval_path(session_id),
         &ResolveApprovalRpc {
             kind,
             auth_state_id: row.auth_state_id,
@@ -120,9 +134,6 @@ pub async fn resolve_approval(
     match status {
         StatusCode::OK => Ok(true),
         StatusCode::NOT_FOUND => Ok(false),
-        status => Err(poem::Error::from_string(
-            format!("Unexpected response from the owner node: {status}"),
-            StatusCode::BAD_GATEWAY,
-        )),
+        status => Err(unexpected_proxied_status(status)),
     }
 }

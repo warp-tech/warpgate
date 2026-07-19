@@ -65,6 +65,7 @@ pub async fn has_admin_permission(
 
             AdminPermission::SessionsView => AdminRole::Column::SessionsView.eq(true),
             AdminPermission::SessionsTerminate => AdminRole::Column::SessionsTerminate.eq(true),
+            AdminPermission::ApproveSessions => AdminRole::Column::ApproveSessions.eq(true),
 
             AdminPermission::RecordingsView => AdminRole::Column::RecordingsView.eq(true),
 

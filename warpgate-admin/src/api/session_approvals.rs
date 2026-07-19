@@ -10,17 +10,54 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use uuid::Uuid;
+use warpgate_cluster::approvals::{ResolveApprovalRpc, acting_approver, resolve_approval};
 use warpgate_common::auth::ApprovalKind;
+use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_common_http::approvals::{ResolveApprovalRpc, acting_approver, resolve_approval};
 use warpgate_common_http::{AuthenticatedRequestContext, RequestAuthorization};
 use warpgate_core::approvals::{ApprovalDecision, ApprovalScope};
 use warpgate_db_entities::SessionApprovalRequest;
 
 use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use crate::api::common::{has_admin_permission, require_admin_permission};
 
 pub struct Api;
+
+/// Approving your own held session defeats the four-eyes property the gate
+/// exists for, so it is refused — unless the approver could edit targets, since
+/// that lets them clear `require_approval` and walk through anyway. Rejecting
+/// your own session stays allowed: denying yourself access grants nothing.
+async fn require_not_self_approval(
+    ctx: &AuthenticatedRequestContext,
+    session_id: Uuid,
+) -> Result<(), WarpgateError> {
+    let Some(approver) = ctx.auth.username() else {
+        // Not a user (admin API token) — there is no "own session" to speak of.
+        return Ok(());
+    };
+
+    let key = (
+        session_id,
+        SessionApprovalRequest::ApprovalRequestKind::Admin,
+    );
+    let Some(row) = SessionApprovalRequest::Entity::find_by_id(key)
+        .one(&ctx.services().db)
+        .await?
+    else {
+        // No request to resolve; `resolve_approval` reports the 404.
+        return Ok(());
+    };
+
+    if !username_eq_ci(&row.username, approver)
+        || has_admin_permission(ctx, Some(AdminPermission::TargetsEdit)).await?
+    {
+        return Ok(());
+    }
+
+    Err(WarpgateError::NoAdminPermission(
+        AdminPermission::TargetsEdit,
+    ))
+}
 
 /// A session held pending administrator (JIT) approval.
 #[derive(Object)]
@@ -130,7 +167,8 @@ impl Api {
         scope: Query<SessionApprovalScope>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<ActionResponse> {
-        require_admin_permission(&ctx, Some(AdminPermission::SessionsTerminate)).await?;
+        require_admin_permission(&ctx, Some(AdminPermission::ApproveSessions)).await?;
+        require_not_self_approval(&ctx, id.0).await?;
         let resolved = resolve_approval(
             &ctx,
             id.0,
@@ -157,7 +195,7 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<ActionResponse> {
-        require_admin_permission(&ctx, Some(AdminPermission::SessionsTerminate)).await?;
+        require_admin_permission(&ctx, Some(AdminPermission::ApproveSessions)).await?;
         let resolved = resolve_approval(
             &ctx,
             id.0,

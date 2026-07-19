@@ -34,6 +34,7 @@ uuid.workspace = true
 warpgate-ca = { path = "../warpgate-ca" }
 warpgate-aws = { path = "../warpgate-aws" }
 warpgate-common = { path = "../warpgate-common" }
+warpgate-cluster = { path = "../warpgate-cluster" }
 warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }

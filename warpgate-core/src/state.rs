@@ -12,6 +12,7 @@ use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{ProtocolName, SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
+use crate::approvals::AdminApprovalStatuses;
 use crate::logging::AuditEvent;
 use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
 use crate::{SessionHandle, WarpgateServerHandle};
@@ -23,6 +24,7 @@ pub struct State {
     node_id: Uuid,
     rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     change_sender: broadcast::Sender<()>,
+    admin_approval_statuses: AdminApprovalStatuses,
 }
 
 impl State {
@@ -30,6 +32,7 @@ impl State {
         db: &DatabaseConnection,
         rate_limiter_registry: &Arc<Mutex<RateLimiterRegistry>>,
         node_id: Uuid,
+        admin_approval_statuses: AdminApprovalStatuses,
     ) -> Arc<Mutex<Self>> {
         let sender = broadcast::channel(2).0;
         Arc::new(Mutex::new(Self {
@@ -38,6 +41,7 @@ impl State {
             node_id,
             rate_limiter_registry: rate_limiter_registry.clone(),
             change_sender: sender,
+            admin_approval_statuses,
         }))
     }
 
@@ -121,6 +125,9 @@ impl State {
         if let Err(error) = crate::approvals::delete_requests_for_session(&self.db, id).await {
             error!(%error, %id, "Could not remove the session's approval requests");
         }
+        // Likewise for a gate outcome observed rather than awaited: it describes
+        // this connection only, and must not be inherited by a later session.
+        self.admin_approval_statuses.lock().await.remove(&id);
 
         let _ = self.change_sender.send(());
     }
