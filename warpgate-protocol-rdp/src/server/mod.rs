@@ -27,14 +27,19 @@ use futures::{FutureExt, SinkExt};
 use tokio::io::{AsyncBufReadExt, BufReader, copy_bidirectional};
 use tokio::net::TcpStream;
 use tokio::process::{ChildStdin, ChildStdout, Command};
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Sender, UnboundedSender, unbounded_channel};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{Instrument, debug, error, info, info_span, warn};
+use uuid::Uuid;
+use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::net::detect_port_knock;
-use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetRdpOptions};
+use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetRdpOptions, WarpgateError};
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{DesktopInput, Services, SessionStateInit, State, WarpgateServerHandle};
+use warpgate_core::{
+    DesktopInput, Services, SessionStateInit, State, WarpgateServerHandle, consume_ticket,
+};
 use warpgate_rdp_ipc::server::{
     Event as ServerHelperEvent, Input as ServerHelperInput, ServeConfig,
 };
@@ -256,6 +261,65 @@ async fn handle_connection(
 
 /// Read the serve helper's control channel: authenticate the viewer, connect to the
 /// target on success, and forward viewer input to the target client.
+/// Everything between "NLA accepted" and "backend connected", with the holding screen
+/// painted throughout: the administrator-approval gate, consuming the ticket that
+/// authorised the session (only once approved, so a denial doesn't burn a single-use
+/// one), and dialing the target.
+///
+/// `Ok(None)` means an administrator denied the session.
+#[allow(clippy::too_many_arguments)]
+async fn hold_until_connected(
+    services: &Services,
+    server_handle: &Arc<Mutex<WarpgateServerHandle>>,
+    helper_in_tx: &UnboundedSender<ServerHelperInput>,
+    frames: &mut HelperReader,
+    user_info: AuthStateUserInfo,
+    target: Target,
+    options: TargetRdpOptions,
+    pending_ticket: Option<Uuid>,
+    remote_address: Option<SocketAddr>,
+) -> Result<Option<BackendBridge>> {
+    let (session_id, remote_ip) = {
+        let handle = server_handle.lock().await;
+        (handle.id(), remote_address.map(|a| a.ip()))
+    };
+
+    let connect = async {
+        let approved = services
+            .require_admin_approval(
+                &session_id,
+                &user_info,
+                RdpProto::NAME,
+                &target.name,
+                remote_ip,
+                std::future::pending(),
+                |_| async { Ok::<_, WarpgateError>(()) },
+            )
+            .await?;
+        if !approved {
+            warn!("Session was not approved by an administrator");
+            return Ok(None);
+        }
+
+        if let Some(ticket_id) = pending_ticket {
+            consume_ticket(&services.db, &ticket_id).await?;
+        }
+
+        connect_backend(
+            services,
+            server_handle,
+            helper_in_tx,
+            user_info.clone(),
+            target.clone(),
+            options.clone(),
+        )
+        .await
+        .map(Some)
+    };
+
+    hold_screen::render_while(frames, helper_in_tx, connect).await?
+}
+
 async fn control_loop(
     services: Services,
     server_handle: Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
@@ -293,23 +357,41 @@ async fn control_loop(
                         user_info,
                         target,
                         options,
+                        pending_ticket,
                     }) => {
-                        backend = Some(
-                            connect_backend(
-                                &services,
-                                &server_handle,
-                                &helper_in_tx,
-                                user_info,
-                                target,
-                                options,
-                            )
-                            .await?,
-                        );
+                        // Accept the NLA first so the RDP session starts and the
+                        // holding screen has somewhere to paint — the viewer
+                        // would otherwise sit in its credential dialog with no
+                        // feedback while we gate and dial.
                         if helper_in_tx
                             .send(ServerHelperInput::AuthResponse { accept: true })
                             .is_err()
                         {
                             break;
+                        }
+                        match hold_until_connected(
+                            &services,
+                            &server_handle,
+                            &helper_in_tx,
+                            &mut frames,
+                            user_info,
+                            target,
+                            options,
+                            pending_ticket,
+                            Some(remote_address),
+                        )
+                        .await
+                        {
+                            Ok(Some(b)) => backend = Some(b),
+                            Ok(None) => {
+                                let _ = helper_in_tx.send(ServerHelperInput::Shutdown);
+                                break;
+                            }
+                            Err(error) => {
+                                warn!(%error, "Failed to connect to the target");
+                                let _ = helper_in_tx.send(ServerHelperInput::Shutdown);
+                                break;
+                            }
                         }
                     }
                     Ok(DesktopAuthOutcome::NeedsInteractive(interactive)) => {
@@ -334,17 +416,32 @@ async fn control_loop(
                                 .await
                                 {
                                     Ok((target, options)) => {
-                                        backend = Some(
-                                            connect_backend(
-                                                &services,
-                                                &server_handle,
-                                                &helper_in_tx,
-                                                user_info,
-                                                target,
-                                                options,
-                                            )
-                                            .await?,
-                                        );
+                                        match hold_until_connected(
+                                            &services,
+                                            &server_handle,
+                                            &helper_in_tx,
+                                            &mut frames,
+                                            user_info,
+                                            target,
+                                            options,
+                                            None,
+                                            Some(remote_address),
+                                        )
+                                        .await
+                                        {
+                                            Ok(Some(b)) => backend = Some(b),
+                                            Ok(None) => {
+                                                let _ =
+                                                    helper_in_tx.send(ServerHelperInput::Shutdown);
+                                                break;
+                                            }
+                                            Err(error) => {
+                                                warn!(%error, "Failed to connect to the target");
+                                                let _ =
+                                                    helper_in_tx.send(ServerHelperInput::Shutdown);
+                                                break;
+                                            }
+                                        }
                                     }
                                     Err(error) => {
                                         warn!(%error, "Authorization failed after second factor");

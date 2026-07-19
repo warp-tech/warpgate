@@ -111,7 +111,8 @@ impl ProtocolServer for HTTPProtocolServer {
         mut tls: Vec<TlsCertificateAndPrivateKey>,
     ) -> Result<BoxFuture<'static, Result<()>>> {
         // Present the cluster identity certificate along other SNI certs
-        if !tls.is_empty() { // catch the weird case of no cert at all
+        if !tls.is_empty() {
+            // catch the weird case of no cert at all
             let identity = &self.services.cluster.tls_identity;
             tls.push(TlsCertificateAndPrivateKey {
                 certificate: TlsCertificateBundle::from_bytes(

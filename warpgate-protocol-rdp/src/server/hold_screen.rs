@@ -22,6 +22,35 @@ use super::HelperReader;
 /// How often the holding screen repaints (spinner animation cadence).
 const HOLD_RENDER_INTERVAL: Duration = Duration::from_millis(100);
 
+/// Paint the "connecting" holding screen to the viewer while `wait` runs, draining viewer
+/// input so the session stays responsive. Mirrors the VNC hold screen's `render_while`.
+///
+/// Used for anything the viewer has to sit through after NLA is accepted — dialing the
+/// backend, and waiting for an administrator to approve the session.
+pub(super) async fn render_while<F>(
+    frames: &mut HelperReader,
+    helper_in_tx: &UnboundedSender<ServerHelperInput>,
+    wait: F,
+) -> Result<F::Output>
+where
+    F: Future,
+{
+    let mut painter = HoldPainter::new();
+    let mut ticker = tokio::time::interval(HOLD_RENDER_INTERVAL);
+    tokio::pin!(wait);
+    loop {
+        tokio::select! {
+            out = &mut wait => return Ok(out),
+            // Input is irrelevant here, but it must keep being drained or the
+            // helper channel backs up.
+            _ = frames.next() => {}
+            _ = ticker.tick() => {
+                painter.paint(helper_in_tx, ui::render_connecting)?;
+            }
+        }
+    }
+}
+
 /// Render a holding screen to the viewer and collect the interactive second factor — a
 /// TOTP typed on the viewer's keyboard, or an out-of-band web approval — until the auth
 /// state is fully accepted. Returns the authenticated user on success, `None` on failure
@@ -93,37 +122,13 @@ pub(super) async fn run_hold_screen(
             return Ok(None);
         };
 
-        let awaiting_approval = matches!(
-            prompt,
-            ui::AuthPrompt::WebApproval { .. } | ui::AuthPrompt::AdminApproval { .. }
-        );
-
-        // An administrator approval is bounded by the configured window, like
-        // every other protocol's hold — without it the viewer would sit on this
-        // screen forever, and past the auth-state lifetime it would be waiting
-        // on a request that no admin can resolve any more.
-        let approval_deadline = match prompt {
-            ui::AuthPrompt::AdminApproval { .. } => Some(
-                tokio::time::Instant::now() + services.admin_approval_timeout().await?,
-            ),
-            _ => None,
-        };
+        let awaiting_approval = matches!(prompt, ui::AuthPrompt::WebApproval { .. });
 
         loop {
             tokio::select! {
-                // An out-of-band approval landed (self or administrator), or the signal
-                // lagged/closed; re-verify on the next loop.
+                // The user's own approval landed, or the signal lagged/closed;
+                // re-verify on the next loop.
                 _ = approval.recv(), if awaiting_approval => break,
-                () = async {
-                    match approval_deadline {
-                        Some(deadline) => tokio::time::sleep_until(deadline).await,
-                        None => std::future::pending().await,
-                    }
-                } => {
-                    warn!("Administrator approval timed out");
-                    services.expire_session_approval(&state).await?;
-                    return Ok(None);
-                }
                 frame = frames.next() => {
                     let Some(frame) = frame else {
                         return Ok(None);

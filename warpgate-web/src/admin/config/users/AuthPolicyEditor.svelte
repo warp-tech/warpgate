@@ -38,7 +38,6 @@
         Totp: 'OTP',
         Sso: 'SSO',
         WebUserApproval: 'In-browser auth',
-        AdminApproval: 'Administrator approval',
     }
 
     const requirePassword = $derived(

@@ -36,9 +36,6 @@ pub enum AuthPrompt {
         url: Option<String>,
         security_key: String,
     },
-    AdminApproval {
-        security_key: String,
-    },
     Otp {
         entered: String,
     },
@@ -46,17 +43,6 @@ pub enum AuthPrompt {
 
 pub fn render_authentication(tick: u64, prompt: &AuthPrompt) -> Result<Vec<u8>, Infallible> {
     match prompt {
-        AuthPrompt::AdminApproval { security_key } => {
-            let boxes = CharBoxes {
-                text: security_key,
-                slots: security_key.chars().count(),
-            };
-            render(
-                tick,
-                "Waiting for an administrator to approve this session...\n\nSecurity key:",
-                Some(boxes),
-            )
-        }
         AuthPrompt::WebApproval { url, security_key } => {
             let mut text = String::new();
             match url {

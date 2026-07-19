@@ -16,7 +16,7 @@ use tokio::time;
 use tracing::{debug, error, info, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
-    ApprovalKind, AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
+    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
 use warpgate_common::{PostgresProtocolVersion, Secret, TargetOptions, TargetPostgresOptions};
 use warpgate_common_http::ext::construct_external_url;
@@ -277,16 +277,67 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                 return fail(&mut self).await;
                             }
 
-                            if !auth_ok_sent {
-                                self.stream
-                                    .push(pgwire::messages::startup::Authentication::Ok)?;
-                            }
                             // Clear failed attempts on successful auth
                             let _ = self
                                 .services
                                 .login_protection
                                 .clear_failed_attempts(&remote_ip, &user_info.username)
                                 .await;
+
+                            // The "waiting" notice needs an authenticated
+                            // connection to travel on, so the OK goes out first
+                            // when the session is held. A denial after it is
+                            // still a clean ErrorResponse.
+                            {
+                                let services = self.services.clone();
+                                let stream = &mut self.stream;
+                                let approved = services
+                                    .require_admin_approval(
+                                        &self.id,
+                                        &user_info,
+                                        crate::common::PROTOCOL_NAME,
+                                        &target_name,
+                                        Some(remote_ip),
+                                        std::future::pending(),
+                                        |security_key| {
+                                          let security_key = security_key.to_owned();
+                                          let auth_ok_sent = &mut auth_ok_sent;
+                                          async move {
+                                            if !*auth_ok_sent {
+                                                stream.push(
+                                                    pgwire::messages::startup::Authentication::Ok,
+                                                )?;
+                                                *auth_ok_sent = true;
+                                            }
+                                            stream.push(
+                                                pgwire::messages::response::NoticeResponse::new(vec![
+                                                    (b'S', "NOTICE".into()),
+                                                    (b'V', "NOTICE".into()),
+                                                    (b'C', "WG002".into()),
+                                                    (
+                                                        b'M',
+                                                        format!(
+                                                            "Warpgate: waiting for an administrator to approve this session (key {security_key})..."
+                                                        ),
+                                                    ),
+                                                ]),
+                                            )?;
+                                            stream.flush().await?;
+                                            Ok::<_, PostgresError>(())
+                                          }
+                                        },
+                                    )
+                                    .await?;
+                                if !approved {
+                                    warn!("Session was not approved by an administrator");
+                                    return fail(&mut self).await;
+                                }
+                            }
+
+                            if !auth_ok_sent {
+                                self.stream
+                                    .push(pgwire::messages::startup::Authentication::Ok)?;
+                            }
                             return self.run_authorized(startup, user_info, target_name).await;
                         }
                         AuthResult::Need(kinds) => {
@@ -356,7 +407,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                     .await
                                     .subscribe(auth_state_id);
                                 self.services
-                                    .request_approval(&state_arc, ApprovalKind::User)
+                                    .request_approval(&state_arc)
                                     .await
                                     .map_err(PostgresError::other)?;
 
@@ -412,38 +463,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                     // dispatches to the right branch.
                                     Ok(_) => continue,
                                 }
-                            } else if kinds.contains(&CredentialKind::AdminApproval) {
-                                let services = self.services.clone();
-                                let stream = &mut self.stream;
-                                let approved = services
-                                    .hold_for_admin_approval(&state_arc, || async {
-                                        if !auth_ok_sent {
-                                            stream.push(
-                                                pgwire::messages::startup::Authentication::Ok,
-                                            )?;
-                                            auth_ok_sent = true;
-                                        }
-                                        stream.push(
-                                            pgwire::messages::response::NoticeResponse::new(vec![
-                                                (b'S', "NOTICE".into()),
-                                                (b'V', "NOTICE".into()),
-                                                (b'C', "WG002".into()),
-                                                (
-                                                    b'M',
-                                                    "Warpgate: waiting for an administrator to approve this session..."
-                                                        .into(),
-                                                ),
-                                            ]),
-                                        )?;
-                                        stream.flush().await?;
-                                        Ok::<_, PostgresError>(())
-                                    })
-                                    .await?;
-
-                                if !approved {
-                                    warn!("Session was not approved by an administrator");
-                                    return fail(&mut self).await;
-                                }
                             } else {
                                 return fail(&mut self).await;
                             }
@@ -479,17 +498,21 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                         let services = self.services.clone();
                         let stream = &mut self.stream;
                         let approved = services
-                            .hold_preauthenticated_for_admin_approval(
+                            .require_admin_approval(
                                 &self.id,
                                 &user_info,
                                 crate::common::PROTOCOL_NAME,
                                 &target.name,
                                 Some(self.remote_address.ip()),
-                                || async {
+                                std::future::pending(),
+                                |security_key| {
+                                  let security_key = security_key.to_owned();
+                                  let auth_ok_sent = &mut auth_ok_sent;
+                                  async move {
                                     stream.push(
                                         pgwire::messages::startup::Authentication::Ok,
                                     )?;
-                                    auth_ok_sent = true;
+                                    *auth_ok_sent = true;
                                     stream.push(
                                         pgwire::messages::response::NoticeResponse::new(vec![
                                             (b'S', "NOTICE".into()),
@@ -497,13 +520,15 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                             (b'C', "WG002".into()),
                                             (
                                                 b'M',
-                                                "Warpgate: waiting for an administrator to approve this session..."
-                                                    .into(),
+                                                format!(
+                                                    "Warpgate: waiting for an administrator to approve this session (key {security_key})..."
+                                                ),
                                             ),
                                         ]),
                                     )?;
                                     stream.flush().await?;
                                     Ok::<_, PostgresError>(())
+                                  }
                                 },
                             )
                             .await?;

@@ -10,7 +10,7 @@ use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{SessionId, User, WarpgateError};
 
-use crate::auth_state::{AuthState, WebApprovalMatchKey};
+use crate::auth_state::{ApprovalMatchKey, AuthState};
 use crate::login_protection::{FailedAttemptInfo, LoginProtectionService};
 use crate::{ConfigProvider, ConfigProviderEnum};
 
@@ -107,7 +107,7 @@ pub struct AuthStateStore {
     completion_signals: HashMap<Uuid, AuthCompletionSignal>,
     web_auth_request_signal: broadcast::Sender<Uuid>,
     admin_approval_request_signal: broadcast::Sender<Uuid>,
-    recent_approvals: HashMap<WebApprovalMatchKey, Instant>,
+    recent_approvals: HashMap<ApprovalMatchKey, Instant>,
 }
 
 impl Default for AuthStateStore {
@@ -129,16 +129,6 @@ impl AuthStateStore {
 
     pub fn contains_key(&self, id: &Uuid) -> bool {
         self.store.contains_key(id)
-    }
-
-    /// Returns cloned `Arc` handles to every stored [`AuthState`].
-    ///
-    /// This only clones the handles and never locks the inner states, so the
-    /// store lock is held for the shortest possible time. Callers can then
-    /// inspect each state (which requires locking it) *after* releasing the
-    /// store lock, avoiding lock convoys on the store under concurrent logins.
-    pub fn snapshot_states(&self) -> Vec<Arc<Mutex<AuthState>>> {
-        self.store.values().map(|auth| auth.0.clone()).collect()
     }
 
     pub fn get(&self, id: &Uuid) -> Option<Arc<Mutex<AuthState>>> {
@@ -242,11 +232,11 @@ impl AuthStateStore {
     }
 
     /// Records a web approval for later bypass checks
-    pub fn record_web_approval(&mut self, key: WebApprovalMatchKey) {
+    pub fn record_approval(&mut self, key: ApprovalMatchKey) {
         self.recent_approvals.insert(key, Instant::now());
     }
 
-    pub fn recent_approval_is_fresh(&self, key: &WebApprovalMatchKey, grace: Duration) -> bool {
+    fn recent_approval_is_fresh(&self, key: &ApprovalMatchKey, grace: Duration) -> bool {
         self.recent_approvals
             .get(key)
             .is_some_and(|at| at.elapsed() < grace)
@@ -254,14 +244,16 @@ impl AuthStateStore {
 
     /// True when a remembered approval matching `key` — for its exact target or
     /// for all targets — is still within `grace`.
-    pub fn matching_approval_is_fresh(&self, key: &WebApprovalMatchKey, grace: Duration) -> bool {
+    pub fn matching_approval_is_fresh(&self, key: &ApprovalMatchKey, grace: Duration) -> bool {
         self.recent_approval_is_fresh(key, grace)
             || self.recent_approval_is_fresh(&key.for_all_targets(), grace)
     }
 
     /// Senders for the approval-request signals, held by `Services` so
     /// transition reactions can fire them without taking the store lock.
-    pub(crate) fn request_signal_senders(&self) -> (broadcast::Sender<Uuid>, broadcast::Sender<Uuid>) {
+    pub(crate) fn request_signal_senders(
+        &self,
+    ) -> (broadcast::Sender<Uuid>, broadcast::Sender<Uuid>) {
         (
             self.web_auth_request_signal.clone(),
             self.admin_approval_request_signal.clone(),
@@ -319,10 +311,8 @@ mod tests {
         assert!(check_ip_allowed(None, Some(ip), "user").is_ok());
     }
 
-    /// A completion signal must survive as long as the caller's configured
-    /// approval window — an administrator approval window longer than the
-    /// default auth-state timeout used to expire the signal underneath a
-    /// still-waiting client.
+    /// Signals expire on the lifetime the caller passes, not on [`TIMEOUT`] —
+    /// a signal must never be reaped while its auth state is still retained.
     #[test]
     fn completion_signal_expiry_follows_the_configured_lifetime() {
         let signal = AuthCompletionSignal {
@@ -413,8 +403,8 @@ mod tests {
         assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_err());
     }
 
-    fn approval_key(target: Option<&str>) -> WebApprovalMatchKey {
-        WebApprovalMatchKey {
+    fn approval_key(target: Option<&str>) -> ApprovalMatchKey {
+        ApprovalMatchKey {
             approval_kind: ApprovalKind::User,
             remote_ip: "10.0.0.5".parse().unwrap(),
             protocol: "ssh".into(),
@@ -432,7 +422,7 @@ mod tests {
         // No approval recorded yet.
         assert!(!store.recent_approval_is_fresh(&approval_key(Some("prod")), grace));
 
-        store.record_web_approval(approval_key(Some("prod")));
+        store.record_approval(approval_key(Some("prod")));
 
         // Exact match within grace bypasses.
         assert!(store.recent_approval_is_fresh(&approval_key(Some("prod")), grace));
@@ -454,13 +444,13 @@ mod tests {
 
         // A remembered self (web) approval must not satisfy an admin-approval
         // requirement with an otherwise identical key.
-        store.record_web_approval(approval_key(Some("prod")));
+        store.record_approval(approval_key(Some("prod")));
 
         let mut admin_key = approval_key(Some("prod"));
         admin_key.approval_kind = ApprovalKind::Admin;
         assert!(!store.recent_approval_is_fresh(&admin_key, grace));
 
-        store.record_web_approval(admin_key.clone());
+        store.record_approval(admin_key.clone());
         assert!(store.recent_approval_is_fresh(&admin_key, grace));
     }
 
@@ -469,7 +459,7 @@ mod tests {
         let mut store = AuthStateStore::new();
         let grace = Duration::from_secs(3600);
 
-        store.record_web_approval(approval_key(None));
+        store.record_approval(approval_key(None));
 
         // An all-targets approval is found via `for_all_targets` for any target.
         assert!(

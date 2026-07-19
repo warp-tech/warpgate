@@ -1,8 +1,9 @@
 //! Any-node resolution of session approval requests.
 //!
 //! The request row names the owning node; when that's us, the decision is
-//! applied directly to the in-memory auth state, otherwise it is carried to
-//! the owner by a purpose-built internal cluster RPC (cluster-token
+//! delivered locally — to the waiting connection for an administrator approval,
+//! to the in-memory auth state for a user's own approval. Otherwise it is
+//! carried to the owner by a purpose-built internal cluster RPC (cluster-token
 //! authenticated, JSON body — nothing of the caller's request is forwarded).
 
 use poem::http::StatusCode;
@@ -21,6 +22,9 @@ use crate::cluster_proxy::post_json_to_peer;
 #[derive(Serialize, Deserialize)]
 pub struct ResolveApprovalRpc {
     pub kind: ApprovalKind,
+    /// The auth state to resolve, for [`ApprovalKind::User`]. Carried from the
+    /// row so the owner doesn't have to re-read it.
+    pub auth_state_id: Option<Uuid>,
     pub decision: ApprovalDecision,
     pub actor: ApprovalActor,
 }
@@ -41,35 +45,50 @@ pub fn acting_approver(ctx: &AuthenticatedRequestContext) -> ApprovalActor {
     }
 }
 
-/// Resolves the approval request `id` of the given `kind` from any node.
-/// Returns `Ok(false)` when there is no matching pending request (unknown id,
-/// kind mismatch, already resolved, or the owning node is gone).
+/// Resolves the pending `kind` approval of `session_id` from any node. Returns
+/// `Ok(false)` when there is no matching pending request (unknown session, no
+/// request of that kind, already resolved, or the owning node is gone).
+///
+/// Rows are keyed by `(session_id, kind)`, so a stale click for one kind can
+/// never resolve the other — a user's own approval cannot satisfy an
+/// administrator requirement.
 pub async fn resolve_approval(
     ctx: &AuthenticatedRequestContext,
-    id: Uuid,
+    session_id: Uuid,
     kind: ApprovalKind,
     decision: ApprovalDecision,
     actor: &ApprovalActor,
 ) -> poem::Result<bool> {
     let services = ctx.services();
 
-    let Some(row) = SessionApprovalRequest::Entity::find_by_id(id)
+    let key = (
+        session_id,
+        SessionApprovalRequest::ApprovalRequestKind::from(kind),
+    );
+    let Some(row) = SessionApprovalRequest::Entity::find_by_id(key)
         .one(&services.db)
         .await
         .map_err(WarpgateError::from)?
     else {
         return Ok(false);
     };
-    // A stale click for one factor must never resolve a request for another
-    // (e.g. a user's web approval satisfying an admin requirement).
-    if row.kind != SessionApprovalRequest::ApprovalRequestKind::from(kind) {
-        return Ok(false);
-    }
 
     if row.node_id == services.cluster.node_id {
-        return Ok(services
-            .apply_approval_resolution(id, kind, decision, actor)
-            .await?);
+        return Ok(match kind {
+            ApprovalKind::Admin => {
+                services
+                    .deliver_admin_approval(session_id, decision, actor)
+                    .await?
+            }
+            ApprovalKind::User => {
+                let Some(auth_state_id) = row.auth_state_id else {
+                    return Ok(false);
+                };
+                services
+                    .apply_user_approval(session_id, auth_state_id, decision, actor)
+                    .await?
+            }
+        });
     }
 
     let Some(node) = Node::Entity::find_by_id(row.node_id)
@@ -77,9 +96,9 @@ pub async fn resolve_approval(
         .await
         .map_err(WarpgateError::from)?
     else {
-        // The owning node is gone, and with it the auth state — the row is a
-        // ghost; the waiting connection cannot be resurrected.
-        SessionApprovalRequest::Entity::delete_by_id(id)
+        // The owning node is gone, and with it the waiting connection — the
+        // row is a ghost; it cannot be resurrected.
+        SessionApprovalRequest::Entity::delete_by_id(key)
             .exec(&services.db)
             .await
             .map_err(WarpgateError::from)?;
@@ -89,9 +108,10 @@ pub async fn resolve_approval(
     let status = post_json_to_peer(
         ctx,
         node,
-        &format!("/@warpgate/admin/api/session-approvals/{id}/resolve"),
+        &format!("/@warpgate/admin/api/session-approvals/{session_id}/resolve"),
         &ResolveApprovalRpc {
             kind,
+            auth_state_id: row.auth_state_id,
             decision,
             actor: actor.clone(),
         },

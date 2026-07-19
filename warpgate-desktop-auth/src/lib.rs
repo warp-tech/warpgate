@@ -18,14 +18,14 @@ use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{
-    ApprovalKind, AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
+    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
 };
-use warpgate_common::{Secret, Target, WarpgateError};
+use warpgate_common::{Secret, Target};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    AuthState, ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
+    AuthState, ConfigProvider, Services, WarpgateServerHandle, authorize_ticket,
 };
 use warpgate_desktop_ui::AuthPrompt;
 
@@ -57,6 +57,11 @@ pub enum DesktopAuthOutcome<O> {
         user_info: AuthStateUserInfo,
         target: Target,
         options: O,
+        /// A ticket that authorised this session and has *not* been consumed
+        /// yet. The caller consumes it only once the session is past the
+        /// administrator-approval gate, so a denied session doesn't burn a
+        /// single-use ticket.
+        pending_ticket: Option<Uuid>,
     },
     /// Password accepted, but the policy needs an interactive second factor — collected on
     /// the per-protocol holding screen.
@@ -119,7 +124,6 @@ pub async fn authenticate<P: DesktopProtocol>(
                         CredentialKind::Password,
                         CredentialKind::Totp,
                         CredentialKind::WebUserApproval,
-                        CredentialKind::AdminApproval,
                     ],
                     Some(remote_address.ip()),
                     Some("password"),
@@ -146,20 +150,14 @@ pub async fn authenticate<P: DesktopProtocol>(
                 }
             }
 
-            // Bypass an approval step when a matching approval (self or
-            // administrator) is still within its grace period.
-            let (needs_web_approval, needs_admin_approval) = {
-                let verification = state_arc.lock().await.verify();
-                (
-                    matches!(&verification, AuthResult::Need(kinds) if kinds.contains(&CredentialKind::WebUserApproval)),
-                    matches!(&verification, AuthResult::Need(kinds) if kinds.contains(&CredentialKind::AdminApproval)),
-                )
-            };
+            // Bypass the self-approval step when a matching approval is still
+            // within its grace period.
+            let needs_web_approval = matches!(
+                state_arc.lock().await.verify(),
+                AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval)
+            );
             if needs_web_approval {
                 services.try_web_approval_bypass(&state_arc).await?;
-            }
-            if needs_admin_approval {
-                services.try_admin_approval_bypass(&state_arc).await?;
             }
 
             // Bind to a local so the guard drops before `complete()` re-locks it.
@@ -183,6 +181,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                         user_info,
                         target,
                         options,
+                        pending_ticket: None,
                     })
                 }
                 // Go interactive only when *every* still-needed factor is one the holding
@@ -191,9 +190,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                     if kinds.iter().all(|k| {
                         matches!(
                             k,
-                            CredentialKind::Totp
-                                | CredentialKind::WebUserApproval
-                                | CredentialKind::AdminApproval
+                            CredentialKind::Totp | CredentialKind::WebUserApproval
                         )
                     }) =>
                 {
@@ -209,31 +206,12 @@ pub async fn authenticate<P: DesktopProtocol>(
         }
         AuthSelector::Ticket { secret } => match authorize_ticket(&services.db, &secret).await? {
             Some((ticket, target_model, user_info)) => {
-                // Held before the ticket is consumed, so a denied session
-                // doesn't burn a single-use ticket. The viewer has no holding
-                // screen yet at this point, so the connection simply blocks.
-                let session_id = server_handle.lock().await.id();
-                if !services
-                    .hold_preauthenticated_for_admin_approval(
-                        &session_id,
-                        &user_info,
-                        P::NAME,
-                        &target_model.name,
-                        Some(remote_address.ip()),
-                        || async { Ok::<_, WarpgateError>(()) },
-                    )
-                    .await?
-                {
-                    warn!(protocol = P::LABEL, "Session was not approved by an administrator");
-                    return Ok(DesktopAuthOutcome::Failed);
-                }
-
-                consume_ticket(&services.db, &ticket.id).await?;
                 let (target, options) = find_target::<P>(services, &target_model.name).await?;
                 Ok(DesktopAuthOutcome::Authorized {
                     user_info,
                     target,
                     options,
+                    pending_ticket: Some(ticket.id),
                 })
             }
             None => Ok(DesktopAuthOutcome::Failed),
@@ -326,18 +304,11 @@ pub async fn auth_prompt(
             entered: entered_otp.to_owned(),
         })
     } else if needed.contains(&CredentialKind::WebUserApproval) {
-        if let Err(error) = services.request_approval(state, ApprovalKind::User).await {
+        if let Err(error) = services.request_approval(state).await {
             warn!(%error, "Failed to record the approval request");
         }
         Some(AuthPrompt::WebApproval {
             url: web_approval_url(services, state).await,
-            security_key: state.lock().await.identification_string().to_owned(),
-        })
-    } else if needed.contains(&CredentialKind::AdminApproval) {
-        if let Err(error) = services.request_approval(state, ApprovalKind::Admin).await {
-            warn!(%error, "Failed to record the approval request");
-        }
-        Some(AuthPrompt::AdminApproval {
             security_key: state.lock().await.identification_string().to_owned(),
         })
     } else {

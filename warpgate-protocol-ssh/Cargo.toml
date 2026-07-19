@@ -26,6 +26,7 @@ termwiz = { version = "0.23", default-features = false }
 thiserror.workspace = true
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 tui-input = { version = "0.14", default-features = false, features = [
     "ratatui-crossterm",

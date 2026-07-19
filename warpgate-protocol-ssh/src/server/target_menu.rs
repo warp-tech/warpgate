@@ -538,6 +538,7 @@ async fn run_target_menu_loop(
                     break;
                 }
             }
+            Event::AdminApprovalPending { .. } | Event::AdminApprovalResolved { .. } => {}
             Event::ConsoleInput(data) => {
                 let action = match menu.handle_input(&data) {
                     None => None,

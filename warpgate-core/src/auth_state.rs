@@ -16,7 +16,7 @@ use warpgate_common::helpers::logging::format_related_ids;
 /// Cache matching key for approval bypass (both self web approval and
 /// administrator approval).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WebApprovalMatchKey {
+pub struct ApprovalMatchKey {
     /// The approval factor this remembered grant satisfies. A remembered
     /// self-approval must never satisfy an administrator-approval requirement,
     /// or vice versa, so the kind is part of the key.
@@ -30,7 +30,7 @@ pub struct WebApprovalMatchKey {
     pub other_credentials: Vec<AuthCredentialFingerprint>,
 }
 
-impl WebApprovalMatchKey {
+impl ApprovalMatchKey {
     /// A copy of this key that matches an approval remembered for all targets.
     #[must_use]
     pub fn for_all_targets(&self) -> Self {
@@ -60,7 +60,7 @@ pub struct AuthState {
     authenticated_event_emitted: bool,
 }
 
-fn generate_identification_string() -> String {
+pub(crate) fn generate_identification_string() -> String {
     let mut s = String::new();
     let mut rng = rand::rng();
     for _ in 0..4 {
@@ -127,46 +127,32 @@ impl AuthState {
         self.remote_ip
     }
 
-    /// Builds the key used to match this attempt against a remembered approval
-    /// of the given `approval_kind`.
-    pub fn approval_match_key(&self, approval_kind: ApprovalKind) -> Option<WebApprovalMatchKey> {
+    /// Builds the key used to match this attempt against a remembered
+    /// self-approval. Administrator approvals key off the connection instead
+    /// (see `ApprovalSubject::match_key`), so they never come through here.
+    pub fn approval_match_key(&self) -> Option<ApprovalMatchKey> {
         let remote_ip = self.remote_ip?;
 
-        // Both approval factors are excluded so the key describes the *other*
+        // The approval itself is excluded so the key describes the *other*
         // credentials presented, and is identical whether computed before the
         // approval is added (check) or after (save).
         let mut other_credentials: Vec<AuthCredentialFingerprint> = self
             .valid_credentials
             .iter()
-            .filter(|c| {
-                !matches!(
-                    c.kind(),
-                    CredentialKind::WebUserApproval | CredentialKind::AdminApproval
-                )
-            })
+            .filter(|c| !matches!(c.kind(), CredentialKind::WebUserApproval))
             .map(Into::into)
             .collect();
         other_credentials.sort_unstable();
         other_credentials.dedup();
 
-        Some(WebApprovalMatchKey {
-            approval_kind,
+        Some(ApprovalMatchKey {
+            approval_kind: ApprovalKind::User,
             remote_ip,
             protocol: self.protocol.clone(),
             username: self.user_info.username.to_lowercase(),
             target_name: Some(self.target_name.clone()),
             other_credentials,
         })
-    }
-
-    /// Match key for a remembered self (in-browser) approval.
-    pub fn web_approval_match_key(&self) -> Option<WebApprovalMatchKey> {
-        self.approval_match_key(ApprovalKind::User)
-    }
-
-    /// Match key for a remembered administrator approval.
-    pub fn admin_approval_match_key(&self) -> Option<WebApprovalMatchKey> {
-        self.approval_match_key(ApprovalKind::Admin)
     }
 
     pub const fn started(&self) -> &OffsetDateTime {
@@ -248,99 +234,6 @@ impl AuthState {
             target = %self.target_name,
             related_users = %format_related_ids(&[self.user_info.id]),
             "Web approval bypassed within grace period",
-        );
-    }
-
-    pub fn emit_admin_approval_bypassed_event(&self) {
-        let Some(session_id) = self.session_id.as_ref() else {
-            return;
-        };
-
-        info!(
-            target: "audit",
-            _type = "AdminApprovalBypassed1",
-            session = %session_id,
-            client_ip = %self.client_ip_for_logging(),
-            user_id = %self.user_info.id,
-            username = %self.user_info.username,
-            protocol = %self.protocol,
-            target = %self.target_name,
-            related_users = %format_related_ids(&[self.user_info.id]),
-            "Administrator approval bypassed within grace period",
-        );
-    }
-
-    pub fn emit_session_approval_requested_event(&self) {
-        let Some(session_id) = self.session_id.as_ref() else {
-            return;
-        };
-
-        info!(
-            target: "audit",
-            _type = "SessionApprovalRequested1",
-            session = %session_id,
-            client_ip = %self.client_ip_for_logging(),
-            user_id = %self.user_info.id,
-            username = %self.user_info.username,
-            protocol = %self.protocol,
-            target = %self.target_name,
-            related_users = %format_related_ids(&[self.user_info.id]),
-            "Session is awaiting administrator approval",
-        );
-    }
-
-    /// `resolved_by_user_id` is `None` when the resolver isn't a user (the admin
-    /// API token). It is recorded in `related_users` so the decision also shows
-    /// up in the resolver's own audit trail, matching how every other
-    /// actor-driven event is attributed.
-    pub fn emit_session_approval_resolved_event(
-        &self,
-        resolved_by: &str,
-        resolved_by_user_id: Option<Uuid>,
-        approved: bool,
-    ) {
-        let Some(session_id) = self.session_id.as_ref() else {
-            return;
-        };
-
-        // A user approving their own session is both parties — don't list twice.
-        let mut related = vec![self.user_info.id];
-        if let Some(actor) = resolved_by_user_id.filter(|id| *id != self.user_info.id) {
-            related.push(actor);
-        }
-
-        info!(
-            target: "audit",
-            _type = "SessionApprovalResolved1",
-            session = %session_id,
-            client_ip = %self.client_ip_for_logging(),
-            user_id = %self.user_info.id,
-            username = %self.user_info.username,
-            protocol = %self.protocol,
-            target = %self.target_name,
-            resolved_by = %resolved_by,
-            approved = approved,
-            related_users = %format_related_ids(&related),
-            "Session approval resolved",
-        );
-    }
-
-    pub fn emit_session_approval_timed_out_event(&self) {
-        let Some(session_id) = self.session_id.as_ref() else {
-            return;
-        };
-
-        info!(
-            target: "audit",
-            _type = "SessionApprovalTimedOut1",
-            session = %session_id,
-            client_ip = %self.client_ip_for_logging(),
-            user_id = %self.user_info.id,
-            username = %self.user_info.username,
-            protocol = %self.protocol,
-            target = %self.target_name,
-            related_users = %format_related_ids(&[self.user_info.id]),
-            "Session approval request timed out",
         );
     }
 

@@ -1,6 +1,7 @@
 #![feature(gethostname)]
 
 pub mod analytics;
+pub mod approvals;
 mod auth_state;
 mod auth_state_store;
 pub mod cluster;
@@ -14,7 +15,6 @@ pub mod login_protection;
 mod protocols;
 pub mod rate_limiting;
 pub mod recordings;
-pub mod approvals;
 mod services;
 mod state;
 pub mod ticket_requests;

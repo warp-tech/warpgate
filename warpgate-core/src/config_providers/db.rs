@@ -376,7 +376,6 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map(UserAuthCredential::kind)
             .collect::<HashSet<_>>();
         available_credential_types.insert(CredentialKind::WebUserApproval);
-        available_credential_types.insert(CredentialKind::AdminApproval);
 
         let supported_credential_types = supported_credential_types
             .iter()
@@ -395,12 +394,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 supported_credential_types
                     .iter()
                     .copied()
-                    .filter(|x| {
-                        !matches!(
-                            x,
-                            CredentialKind::WebUserApproval | CredentialKind::AdminApproval
-                        )
-                    })
+                    .filter(|x| !matches!(x, CredentialKind::WebUserApproval))
                     .collect()
             } else {
                 supported_credential_types.clone()

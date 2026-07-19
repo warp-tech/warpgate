@@ -6,8 +6,7 @@ use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::ticket_requests::{
-    TicketRequestDetails, approve_ticket_request, deny_ticket_request,
-    resolve_ticket_request_names,
+    TicketRequestDetails, approve_ticket_request, deny_ticket_request, resolve_ticket_request_names,
 };
 
 use super::AnySecurityScheme;

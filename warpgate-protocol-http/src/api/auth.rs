@@ -55,7 +55,6 @@ enum ApiAuthState {
     OtpNeeded,
     SsoNeeded,
     WebUserApprovalNeeded,
-    AdminApprovalNeeded,
     PublicKeyNeeded,
     Success,
     IpBlocked,
@@ -168,7 +167,6 @@ const PREFERRED_NEED_CRED_ORDER: &[CredentialKind] = &[
     CredentialKind::Totp,
     CredentialKind::Sso,
     CredentialKind::WebUserApproval,
-    CredentialKind::AdminApproval,
 ];
 
 impl From<AuthResult> for ApiAuthState {
@@ -185,7 +183,6 @@ impl From<AuthResult> for ApiAuthState {
                     Some(CredentialKind::Totp) => Self::OtpNeeded,
                     Some(CredentialKind::Sso) => Self::SsoNeeded,
                     Some(CredentialKind::WebUserApproval) => Self::WebUserApprovalNeeded,
-                    Some(CredentialKind::AdminApproval) => Self::AdminApprovalNeeded,
                     Some(CredentialKind::PublicKey) => Self::PublicKeyNeeded,
                     Some(CredentialKind::Certificate) => {
                         // Certificate authentication is not supported for HTTP protocol
@@ -375,7 +372,11 @@ impl Api {
         let username = state_arc.lock().await.user_info().username.clone();
 
         // Check if user is locked
-        if let Some(_lock_info) = services.login_protection.check_user_locked(&username).await? {
+        if let Some(_lock_info) = services
+            .login_protection
+            .check_user_locked(&username)
+            .await?
+        {
             warn!(
                 username = %username,
                 "OTP login attempt for locked user"
@@ -591,12 +592,12 @@ impl Api {
         scope: Query<WebApprovalScope>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<ApprovalActionResponse> {
-        if approval_request_owner(&ctx, &id).await?.is_none() {
+        let Some(session_id) = owned_approval_session(&ctx, &id).await? else {
             return Ok(ApprovalActionResponse::NotFound);
-        }
+        };
         let resolved = resolve_approval(
             &ctx,
-            id.0,
+            session_id,
             ApprovalKind::User,
             ApprovalDecision::Approved(scope.0.into()),
             &acting_approver(&ctx),
@@ -621,12 +622,12 @@ impl Api {
         id: Path<Uuid>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<ApprovalActionResponse> {
-        if approval_request_owner(&ctx, &id).await?.is_none() {
+        let Some(session_id) = owned_approval_session(&ctx, &id).await? else {
             return Ok(ApprovalActionResponse::NotFound);
-        }
+        };
         let resolved = resolve_approval(
             &ctx,
-            id.0,
+            session_id,
             ApprovalKind::User,
             ApprovalDecision::Rejected,
             &acting_approver(&ctx),
@@ -666,27 +667,32 @@ async fn get_foreign_auth_state(
     Some(state_arc)
 }
 
-/// The username of the browser-authenticated user, when they own the approval
-/// request `id` — either via the locally-held auth state or via the request
-/// row (which the owning node wrote from its auth state).
-async fn approval_request_owner(
+/// The session behind auth state `id`, when the browser-authenticated user owns
+/// it — either via the locally-held auth state or via the request row (which the
+/// owning node wrote from its auth state). Approvals are addressed by session,
+/// so this is what turns the id the browser holds into one.
+async fn owned_approval_session(
     ctx: &AuthenticatedRequestContext,
     id: &Uuid,
-) -> Result<Option<String>, WarpgateError> {
-    let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
-    else {
+) -> Result<Option<Uuid>, WarpgateError> {
+    if !matches!(
+        &ctx.auth,
+        RequestAuthorization::Session(SessionAuthorization::User { .. })
+    ) {
+        return Ok(None);
+    }
+    if let Some(request) = request_for_user(ctx, id).await? {
+        return Ok(Some(request.session_id));
+    }
+    let Some(state_arc) = get_foreign_auth_state(id, ctx).await else {
         return Ok(None);
     };
-    if get_foreign_auth_state(id, ctx).await.is_some()
-        || request_for_user(ctx, id).await?.is_some()
-    {
-        return Ok(Some(username.clone()));
-    }
-    Ok(None)
+    let session_id = state_arc.lock().await.session_id().copied();
+    Ok(session_id)
 }
 
-/// The approval request row for `id`, if it exists and belongs to the
-/// browser-authenticated user.
+/// The user-approval request row for auth state `id`, if it exists and belongs
+/// to the browser-authenticated user.
 async fn request_for_user(
     ctx: &AuthenticatedRequestContext,
     id: &Uuid,
@@ -695,7 +701,12 @@ async fn request_for_user(
     else {
         return Ok(None);
     };
-    let request = SessionApprovalRequest::Entity::find_by_id(*id)
+    let request = SessionApprovalRequest::Entity::find()
+        .filter(SessionApprovalRequest::Column::AuthStateId.eq(*id))
+        .filter(
+            SessionApprovalRequest::Column::Kind
+                .eq(SessionApprovalRequest::ApprovalRequestKind::User),
+        )
         .one(&ctx.services().db)
         .await?;
     Ok(request.filter(|r| username_eq_ci(&r.username, username)))
@@ -711,14 +722,16 @@ async fn request_to_auth_state(
         .await?
         .and_then(|d| i64::try_from(d.as_secs()).ok());
     Ok(AuthStateResponseInternal {
-        id: request.id.to_string(),
+        // The browser addresses the request by auth state throughout, so keep
+        // handing back the same id it followed here.
+        id: request
+            .auth_state_id
+            .unwrap_or(request.session_id)
+            .to_string(),
         protocol: request.protocol,
         address: request.remote_address,
         started: request.started,
-        state: match request.kind {
-            SessionApprovalRequest::ApprovalRequestKind::Admin => ApiAuthState::AdminApprovalNeeded,
-            SessionApprovalRequest::ApprovalRequestKind::User => ApiAuthState::WebUserApprovalNeeded,
-        },
+        state: ApiAuthState::WebUserApprovalNeeded,
         identification_string: request.identification_string,
         web_approval_caching_grace_seconds,
     })

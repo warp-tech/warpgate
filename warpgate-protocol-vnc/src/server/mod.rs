@@ -22,9 +22,9 @@ use tokio_rustls::TlsAcceptor;
 use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::detect_port_knock;
-use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetVncOptions};
+use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetVncOptions, WarpgateError};
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
+use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle, consume_ticket};
 use warpgate_desktop_auth::{
     DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
 };
@@ -260,12 +260,13 @@ async fn negotiate_and_authorize(
 
     let mut render = RenderState::new();
 
-    let (user_info, target, vnc_options) = match authenticated {
+    let (user_info, target, vnc_options, pending_ticket) = match authenticated {
         DesktopAuthOutcome::Authorized {
             user_info,
             target,
             options,
-        } => (user_info, target, options),
+            pending_ticket,
+        } => (user_info, target, options, pending_ticket),
         DesktopAuthOutcome::NeedsInteractive(interactive) => {
             collect_additional_credentials(
                 &mut viewer_wr,
@@ -301,11 +302,41 @@ async fn negotiate_and_authorize(
                 .login_protection
                 .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
                 .await;
-            (user_info, target, options)
+            (user_info, target, options, None)
         }
         // Already handled before the security handshake above.
         DesktopAuthOutcome::Failed => return Ok(None),
     };
+
+    // Gate the connection on administrator approval under the hold screen, so
+    // the viewer sees a spinner rather than a frozen frame. The ticket that
+    // authorised the session is consumed only once approved, so a denial
+    // doesn't burn a single-use one.
+    {
+        let session_id = server_handle.lock().await.id();
+        let approved = render_while(
+            &mut viewer_wr,
+            &mut events_rx,
+            &mut render,
+            services.require_admin_approval(
+                &session_id,
+                &user_info,
+                VncProto::NAME,
+                &target.name,
+                Some(remote_address.ip()),
+                std::future::pending(),
+                |_| async { Ok::<_, WarpgateError>(()) },
+            ),
+        )
+        .await??;
+        if !approved {
+            warn!("Session was not approved by an administrator");
+            return Ok(None);
+        }
+        if let Some(ticket_id) = pending_ticket {
+            consume_ticket(&services.db, &ticket_id).await?;
+        }
+    }
 
     {
         let handle = server_handle.lock().await;

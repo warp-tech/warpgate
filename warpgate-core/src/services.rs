@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -5,15 +6,14 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, oneshot};
 use tracing::warn;
 use uuid::Uuid;
-use warpgate_common::auth::{
-    ApprovalKind, AuthCredential, AuthResult, CredentialKind, RequireApprovalPolicy,
-};
+use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, CredentialKind};
 use warpgate_common::{GlobalParams, Secret, SessionId, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::{Parameters, Target};
 
+use crate::approvals::{ApprovalActor, ApprovalDecision};
 use crate::auth_state::AuthState;
 use crate::cluster::Cluster;
 use crate::db::{connect_to_db_and_migrate, populate_db};
@@ -40,9 +40,15 @@ pub struct Services {
     pub global_params: Arc<GlobalParams>,
     pub listener_status: ListenerStatusRegistry,
     /// Approval-request signal senders, held here (cloned from the store) so
-    /// `request_approval` can fire them without taking the store lock.
+    /// request sites can fire them without taking the store lock.
     pub(crate) web_auth_request_tx: broadcast::Sender<Uuid>,
     pub(crate) admin_approval_request_tx: broadcast::Sender<Uuid>,
+    /// Sessions on this node blocked in `require_admin_approval`, keyed by
+    /// session id. Administrator approval is a gate on the connection rather
+    /// than a credential, so the waiter is a plain channel — there is no auth
+    /// state for a decision to mutate.
+    pub(crate) pending_admin_approvals:
+        Arc<Mutex<HashMap<SessionId, oneshot::Sender<(ApprovalDecision, ApprovalActor)>>>>,
 }
 
 /// Upsert the token without conflicts from multiple nodes
@@ -99,23 +105,14 @@ impl Services {
             let db = db.clone();
             async move {
                 loop {
-                    // Re-read every tick: the administrator-approval window is
-                    // configurable at runtime and a session held for approval
-                    // must outlive it, so it sets the floor for every lifetime
-                    // below.
-                    let lifetime = match crate::approvals::auth_state_lifetime(&db).await {
-                        Ok(lifetime) => lifetime,
-                        Err(error) => {
-                            warn!("Failed to read the auth state lifetime: {error}");
-                            *crate::auth_state_store::TIMEOUT
-                        }
-                    };
-
-                    auth_state_store.lock().await.vacuum(lifetime);
+                    auth_state_store
+                        .lock()
+                        .await
+                        .vacuum(*crate::auth_state_store::TIMEOUT);
                     // Approval requests are normally deleted by their resolver
-                    // or their waiter; rows whose owning node died (or whose
-                    // state was vacuumed) are aged out here.
-                    if let Err(error) = crate::approvals::reap_stale(&db, lifetime).await {
+                    // or their waiter; rows whose owning node died are aged out
+                    // here, on their own (longer, configurable) window.
+                    if let Err(error) = crate::approvals::reap_stale(&db).await {
                         warn!("Failed to reap stale session approval requests: {error}");
                     }
                     tokio::time::sleep(Duration::from_secs(60)).await;
@@ -163,6 +160,7 @@ impl Services {
             listener_status: Arc::default(),
             web_auth_request_tx,
             admin_approval_request_tx,
+            pending_admin_approvals: Arc::default(),
         })
     }
 
@@ -181,7 +179,7 @@ impl Services {
         remote_ip: Option<IpAddr>,
         rate_limit_credential_type: Option<&str>,
     ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
-        let (user, mut policy) = AuthStateStore::resolve_user_and_policy(
+        let (user, policy) = AuthStateStore::resolve_user_and_policy(
             &self.config_provider,
             &self.login_protection,
             username,
@@ -191,16 +189,6 @@ impl Services {
             rate_limit_credential_type,
         )
         .await?;
-
-        // JIT approval is per-target, so it can only be enforced at auth time
-        // when the target is already known. Protocols that resolve the target
-        // after authentication (HTTP by hostname, the interactive SSH target
-        // menu) pass an empty name here and are not gated.
-        // ponytail: auth-time gate only; enforce at target-selection time if
-        // menu-based SSH/HTTP need JIT approval too.
-        if !target_name.is_empty() && self.target_requires_approval(target_name).await? {
-            policy = Box::new(RequireApprovalPolicy { inner: policy });
-        }
 
         Ok(self.auth_state_store.lock().await.create(
             session_id,
@@ -228,11 +216,13 @@ impl Services {
         &self,
         state_arc: &Arc<Mutex<AuthState>>,
     ) -> Result<AuthResult, WarpgateError> {
-        let (id, result) = {
+        let (session_id, result) = {
             let mut state = state_arc.lock().await;
-            (*state.id(), state.reject())
+            (state.session_id().copied(), state.reject())
         };
-        crate::approvals::delete_request(&self.db, id).await?;
+        if let Some(session_id) = session_id {
+            crate::approvals::delete_request(&self.db, session_id, ApprovalKind::User).await?;
+        }
         Ok(result)
     }
 
@@ -273,10 +263,8 @@ impl Services {
         Ok(credential_valid)
     }
 
-    pub(crate) async fn target_requires_approval(
-        &self,
-        target_name: &str,
-    ) -> Result<bool, WarpgateError> {
+    /// Whether connections to this target must be approved by an administrator.
+    pub async fn target_requires_approval(&self, target_name: &str) -> Result<bool, WarpgateError> {
         Ok(Target::Entity::find()
             .filter(Target::Column::Name.eq(target_name))
             .one(&self.db)
@@ -300,28 +288,14 @@ impl Services {
             .map(Duration::from_secs))
     }
 
-    /// If a matching administrator approval is still within the grace period,
-    /// satisfies the pending `AdminApproval` requirement and logs an audit event.
-    pub async fn try_admin_approval_bypass(
-        &self,
-        state_arc: &Arc<Mutex<AuthState>>,
-    ) -> Result<bool, WarpgateError> {
-        let Some(grace) = self.admin_approval_grace_period().await? else {
-            return Ok(false);
-        };
-        self.try_approval_bypass(state_arc, grace, ApprovalKind::Admin)
-            .await
-    }
-
-    /// If there is a matching remembered approval of `approval_kind` within
-    /// `grace`, accept it as a valid credential.
+    /// If there is a matching remembered self-approval within `grace`, accept
+    /// it as a valid credential.
     async fn try_approval_bypass(
         &self,
         state_arc: &Arc<Mutex<AuthState>>,
         grace: Duration,
-        approval_kind: ApprovalKind,
     ) -> Result<bool, WarpgateError> {
-        let Some(key) = state_arc.lock().await.approval_match_key(approval_kind) else {
+        let Some(key) = state_arc.lock().await.approval_match_key() else {
             return Ok(false);
         };
 
@@ -337,23 +311,21 @@ impl Services {
         let mut state = state_arc.lock().await;
 
         // A concurrent change may have satisfied or cancelled the requirement.
-        let needed_kind = CredentialKind::from(approval_kind);
+        let needed_kind = CredentialKind::WebUserApproval;
         if !matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&needed_kind)) {
             return Ok(false);
         }
 
-        let _ = state.add_valid_credential(approval_kind.into());
-        match approval_kind {
-            ApprovalKind::Admin => state.emit_admin_approval_bypassed_event(),
-            ApprovalKind::User => state.emit_web_approval_bypassed_event(),
-        }
-        let id = *state.id();
+        let _ = state.add_valid_credential(AuthCredential::WebUserApproval);
+        state.emit_web_approval_bypassed_event();
+        let session_id = state.session_id().copied();
         drop(state);
 
         // The factor is satisfied without anyone resolving the request, so the
-        // row would otherwise linger — advertising an approval that is already
-        // granted, and blocking the next factor's request under this same id.
-        crate::approvals::delete_request(&self.db, id).await?;
+        // row would otherwise linger, advertising an approval already granted.
+        if let Some(session_id) = session_id {
+            crate::approvals::delete_request(&self.db, session_id, ApprovalKind::User).await?;
+        }
         Ok(true)
     }
 
@@ -376,7 +348,6 @@ impl Services {
         let Some(grace) = self.web_approval_grace_period().await? else {
             return Ok(false);
         };
-        self.try_approval_bypass(state_arc, grace, ApprovalKind::User)
-            .await
+        self.try_approval_bypass(state_arc, grace).await
     }
 }

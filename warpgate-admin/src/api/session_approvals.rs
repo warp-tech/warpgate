@@ -105,7 +105,7 @@ impl Api {
             requests
                 .into_iter()
                 .map(|r| SessionApprovalItem {
-                    id: r.id.to_string(),
+                    id: r.session_id.to_string(),
                     protocol: r.protocol,
                     address: r.remote_address,
                     username: r.username,
@@ -174,23 +174,36 @@ impl Api {
     }
 }
 
-/// The owner side of a cross-node resolution: applies the decision carried in
-/// the body to the locally-owned auth state. Cluster-token authenticated only —
-/// admins go through the public approve/reject endpoints on any node instead.
+/// The owner side of a cross-node resolution: delivers the decision carried in
+/// the body to the session waiting on this node. Cluster-token authenticated
+/// only — admins go through the public approve/reject endpoints on any node
+/// instead.
 #[handler]
 pub async fn api_resolve_session_approval(
     ctx: Data<&AuthenticatedRequestContext>,
-    id: poem::web::Path<Uuid>,
+    session_id: poem::web::Path<Uuid>,
     body: poem::web::Json<ResolveApprovalRpc>,
 ) -> poem::Result<Response> {
     if !matches!(ctx.auth, RequestAuthorization::ClusterToken) {
         return Err(poem::Error::from_status(StatusCode::UNAUTHORIZED));
     }
-    let applied = ctx
-        .services()
-        .apply_approval_resolution(id.0, body.kind, body.decision, &body.actor)
-        .await
-        .map_err(poem::error::InternalServerError)?;
+    let services = ctx.services();
+    let applied = match body.kind {
+        ApprovalKind::Admin => {
+            services
+                .deliver_admin_approval(session_id.0, body.decision, &body.actor)
+                .await
+        }
+        ApprovalKind::User => match body.auth_state_id {
+            Some(auth_state_id) => {
+                services
+                    .apply_user_approval(session_id.0, auth_state_id, body.decision, &body.actor)
+                    .await
+            }
+            None => Ok(false),
+        },
+    }
+    .map_err(poem::error::InternalServerError)?;
     Ok(Response::builder()
         .status(if applied {
             StatusCode::OK

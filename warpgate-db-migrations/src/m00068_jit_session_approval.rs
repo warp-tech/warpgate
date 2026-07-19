@@ -12,12 +12,12 @@ pub mod session_approval_request {
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
     #[sea_orm(table_name = "session_approval_requests")]
     pub struct Model {
-        /// The auth-state id on the owning node.
         #[sea_orm(primary_key, auto_increment = false)]
-        pub id: Uuid,
+        pub session_id: Uuid,
+        #[sea_orm(primary_key, auto_increment = false)]
         #[sea_orm(column_type = "String(StringLen::N(16))")]
         pub kind: String,
-        pub session_id: Uuid,
+        pub auth_state_id: Option<Uuid>,
         pub node_id: Uuid,
         pub protocol: String,
         pub username: String,
@@ -58,8 +58,7 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(parameters::Entity)
                     .add_column(
-                        ColumnDef::new(Alias::new("admin_approval_timeout_seconds"))
-                            .big_integer(),
+                        ColumnDef::new(Alias::new("admin_approval_timeout_seconds")).big_integer(),
                     )
                     .to_owned(),
             )
