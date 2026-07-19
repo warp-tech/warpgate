@@ -113,6 +113,9 @@
                 return { type: 'jpeg_image', rect, data }
             case 3:
                 return { type: 'cursor', rect, data }
+            case 4:
+                // Full-canvas base image sent on attach; never shed from the queue.
+                return { type: 'png_image', rect, data, keyframe: true }
             default:
                 return null
         }

@@ -1,11 +1,22 @@
-//! Server-side framebuffer reconstruction for desktop recordings.
+//! Server-side framebuffer reconstruction from a desktop delta stream.
 //!
-//! Mirrors the browser's `applyDesktopFrame` (warpgate-web `common/desktopCanvas.ts`) so
-//! the recorder can composite the incremental delta stream into a full RGBA buffer and
-//! periodically snapshot it as a PNG keyframe. All rectangle ops are bounds-checked and
-//! clip silently rather than panicking (Cranky denies indexing/unwrap/panic here).
+//! Mirrors the browser's `applyDesktopFrame` (warpgate-web `common/desktopCanvas.ts`) so the
+//! server can composite incremental deltas into a full RGBA buffer and snapshot it as PNG.
+//! Two callers need that, for unrelated reasons: recordings use snapshots as seek anchors,
+//! and live web sessions send one to a newly attached viewer so it has a base image to
+//! paint deltas onto. All rectangle ops are bounds-checked and clip silently rather than
+//! panicking (Cranky denies indexing/unwrap/panic here).
+//!
+//! Each caller owns its **own** instance. The recorder's copy must only ever see events it
+//! actually wrote — its keyframes are indexed by byte offset, so compositing an event that
+//! was dropped from the recording stream would desync seeking.
 
-use super::{Error, Result};
+use super::DesktopEvent;
+
+/// PNG encoding failed. Carries the codec's message; callers map it into their own error.
+#[derive(Debug, thiserror::Error)]
+#[error("PNG encoding failed: {0}")]
+pub struct PngEncodeError(String);
 
 /// A rectangle in framebuffer pixels. `width`/`height` are extents, not far corners — the
 /// distinction the old bare `(u32, u32, u32, u32)` tuples blurred (some were `x0,y0,x1,y1`).
@@ -159,6 +170,66 @@ impl Framebuffer {
         })
     }
 
+    /// Composite one event, ignoring those that carry no framebuffer pixels.
+    ///
+    /// The cursor is deliberately not composited: the server renders the pointer into the
+    /// framebuffer itself, so drawing it again would leave a trail behind the real one.
+    pub fn apply(&mut self, event: &DesktopEvent) {
+        match event {
+            DesktopEvent::Resize { width, height } => {
+                self.resize(u32::from(*width), u32::from(*height));
+            }
+            DesktopEvent::RawImage { rect, data } => {
+                self.blit_bgra(
+                    u32::from(rect.x),
+                    u32::from(rect.y),
+                    u32::from(rect.width),
+                    u32::from(rect.height),
+                    data,
+                );
+            }
+            DesktopEvent::JpegImage { rect, data } => {
+                // Best-effort: on a decode failure that region stays stale until repainted.
+                if let Some((_, _, rgb)) = decode_jpeg_rgb(data) {
+                    self.blit_rgb(
+                        u32::from(rect.x),
+                        u32::from(rect.y),
+                        u32::from(rect.width),
+                        u32::from(rect.height),
+                        &rgb,
+                    );
+                }
+            }
+            DesktopEvent::CopyRect { dst, src_x, src_y } => {
+                self.copy_rect(
+                    u32::from(dst.x),
+                    u32::from(dst.y),
+                    u32::from(dst.width),
+                    u32::from(dst.height),
+                    u32::from(*src_x),
+                    u32::from(*src_y),
+                );
+            }
+            DesktopEvent::Cursor { .. }
+            | DesktopEvent::State(_)
+            | DesktopEvent::Clipboard(_)
+            | DesktopEvent::Bell
+            | DesktopEvent::Error(_) => {}
+        }
+    }
+
+    /// PNG-encode the whole surface, for handing a newly attached viewer a base image.
+    /// `None` before the first resize, when there are no pixels yet.
+    pub fn snapshot_png(&self) -> Option<(u16, u16, Vec<u8>)> {
+        if self.is_empty() {
+            return None;
+        }
+        let (width, height) = (self.width, self.height);
+        let mut out = Vec::new();
+        encode_png_rgba(width, height, &self.rgba, &mut out).ok()?;
+        Some((width.try_into().ok()?, height.try_into().ok()?, out))
+    }
+
     /// Copy a `w`x`h` region from `(src_x, src_y)` to `(dst_x, dst_y)` (overlap-safe via a
     /// scratch copy). Used for RDP/VNC CopyRect (scrolling).
     pub(crate) fn copy_rect(
@@ -203,19 +274,21 @@ impl Framebuffer {
 
 /// Encode an RGBA buffer as PNG into `out` (reused; cleared first), fast compression for
 /// the recording hot path.
-pub fn encode_png_rgba(width: u32, height: u32, rgba: &[u8], out: &mut Vec<u8>) -> Result<()> {
+pub fn encode_png_rgba(
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    out: &mut Vec<u8>,
+) -> Result<(), PngEncodeError> {
     out.clear();
     let mut encoder = png::Encoder::new(&mut *out, width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     encoder.set_compression(png::Compression::Fast);
-    let mut writer = encoder
-        .write_header()
-        .map_err(|e| Error::Codec(e.to_string()))?;
-    writer
-        .write_image_data(rgba)
-        .map_err(|e| Error::Codec(e.to_string()))?;
-    writer.finish().map_err(|e| Error::Codec(e.to_string()))?;
+    let err = |e: png::EncodingError| PngEncodeError(e.to_string());
+    let mut writer = encoder.write_header().map_err(err)?;
+    writer.write_image_data(rgba).map_err(err)?;
+    writer.finish().map_err(err)?;
     Ok(())
 }
 
@@ -235,6 +308,7 @@ pub fn decode_jpeg_rgb(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::DesktopRect;
     use super::*;
 
     fn decode_png(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
@@ -264,6 +338,51 @@ mod tests {
         assert_eq!(&rgba[4..8], &[0, 255, 0, 255]); // green
         assert_eq!(&rgba[8..12], &[0, 0, 255, 255]); // blue
         assert_eq!(&rgba[12..16], &[255, 255, 255, 255]); // white
+    }
+
+    /// The attach path end to end: deltas composite, and the snapshot handed to a newly
+    /// attached viewer carries them. If this breaks, that viewer sees a black screen.
+    #[test]
+    fn snapshot_carries_composited_deltas() {
+        let mut fb = Framebuffer::default();
+        assert!(
+            fb.snapshot_png().is_none(),
+            "no snapshot before the backend reports a size"
+        );
+
+        fb.apply(&DesktopEvent::Resize {
+            width: 2,
+            height: 1,
+        });
+        fb.apply(&DesktopEvent::RawImage {
+            rect: DesktopRect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+            // BGRA: red, green.
+            data: bytes::Bytes::from_static(&[0, 0, 255, 255, 0, 255, 0, 255]),
+        });
+
+        let (w, h, png) = fb.snapshot_png().expect("snapshot after a delta");
+        assert_eq!((w, h), (2, 1));
+        let (_, _, rgba) = decode_png(&png);
+        assert_eq!(&rgba[0..4], &[255, 0, 0, 255]);
+        assert_eq!(&rgba[4..8], &[0, 255, 0, 255]);
+    }
+
+    /// Events with no pixels must not disturb the surface.
+    #[test]
+    fn non_visual_events_leave_the_surface_alone() {
+        let mut fb = Framebuffer::default();
+        fb.apply(&DesktopEvent::Resize {
+            width: 1,
+            height: 1,
+        });
+        fb.apply(&DesktopEvent::Bell);
+        fb.apply(&DesktopEvent::Error("boom".into()));
+        assert_eq!(fb.size(), (1, 1));
     }
 
     #[test]

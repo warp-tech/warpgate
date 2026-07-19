@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 use tracing::warn;
 use uuid::Uuid;
-use warpgate_core::DesktopInput;
 use warpgate_core::recordings::DesktopRecorder;
+use warpgate_core::{DesktopEvent, DesktopInput, Framebuffer};
 use warpgate_web_clients_common::{ManagedSession, Sheddable, WebSession};
 
-use crate::protocol::ServerMessage;
+use crate::protocol::{ServerMessage, WsRect};
 
 /// Initial output-buffer allocation. Not a hard cap: incremental frames are bounded by
 /// [`MAX_BUFFERED_INCREMENTAL`] and structural messages are rare, so the buffer stays small.
@@ -30,6 +31,9 @@ pub struct WebDesktopSession {
     input_tx: Sender<DesktopInput>,
     // shared with the manager's event loop; records viewer input for audit
     recorder: Option<Arc<DesktopRecorder>>,
+    /// Composited surface, kept so a viewer attaching mid-session gets a base image.
+    /// Separate from the recorder's: that one must only see events it actually wrote.
+    framebuffer: Mutex<Framebuffer>,
 }
 
 impl WebDesktopSession {
@@ -56,7 +60,32 @@ impl WebDesktopSession {
             ),
             input_tx,
             recorder,
+            framebuffer: Mutex::new(Framebuffer::default()),
         }
+    }
+
+    /// Composite an event into the session's surface. Driven from the manager's event loop
+    /// on the *pre-JPEG* stream, so this stays a plain blit with no decode round-trip.
+    pub async fn composite(&self, event: &DesktopEvent) {
+        self.framebuffer.lock().await.apply(event);
+    }
+
+    /// A full-canvas snapshot for a viewer that just attached. `None` before the first
+    /// resize, when the backend hasn't reported a size yet.
+    ///
+    /// Encodes under the lock: it runs once per attach, and copying the surface out to
+    /// offload it would cost more than the encode saves.
+    pub async fn keyframe(&self) -> Option<ServerMessage> {
+        let (width, height, data) = self.framebuffer.lock().await.snapshot_png()?;
+        Some(ServerMessage::Keyframe {
+            rect: WsRect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
+            data: data.into(),
+        })
     }
 
     pub async fn send_input(&self, input: DesktopInput) {

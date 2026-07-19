@@ -16,7 +16,6 @@ use warpgate_common::{GlobalParams, SessionId};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Recording::{self, RecordingKind};
 mod desktop;
-mod framebuffer;
 mod storage;
 mod terminal;
 mod traffic;
@@ -76,6 +75,9 @@ pub enum Error {
 
     #[error("Image codec: {0}")]
     Codec(String),
+
+    #[error(transparent)]
+    PngEncode(#[from] crate::protocols::PngEncodeError),
 
     #[error("Writer is closed")]
     Closed,
