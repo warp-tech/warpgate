@@ -19,6 +19,7 @@ members = [
     "warpgate-protocol-mysql",
     "warpgate-protocol-postgres",
     "warpgate-protocol-rdp",
+    "warpgate-rdp-helper",
     "warpgate-rdp-ipc",
     "warpgate-protocol-ssh",
     "warpgate-protocol-vnc",
@@ -29,17 +30,26 @@ members = [
     "warpgate-web-desktop",
     "warpgate-web-ssh",
 ]
-# warpgate-rdp-helper is intentionally excluded: IronRDP's NLA/CredSSP stack (sspi/picky)
-# exact-pins RustCrypto pre-release crates that conflict with russh's exact pins, so RDP
-# support is built as a standalone helper binary with its own lockfile and integrated over
-# a subprocess IPC channel. The helper carries both the target-facing client (`connect`)
-# and viewer-facing server (`serve`) as subcommands.
-# vendor/vnc-rs and vendor/ironrdp-session are vendored third-party forks (path deps /
-# patches for warpgate-protocol-vnc and warpgate-rdp-helper); they are excluded from the
-# workspace so Cranky's deny lints don't apply to their upstream code. See PATCHES.md.
-exclude = ["warpgate-rdp-helper", "vendor/vnc-rs", "vendor/ironrdp-session"]
+# Vendored third-party forks (path deps / patches). They are excluded from the workspace
+# so Cranky's deny lints don't apply to their upstream code. Each carries a PATCHES.md
+# describing the fork and a warpgate.patch reproducing it.
+exclude = [
+    "vendor/vnc-rs",
+    "vendor/ironrdp-session",
+    "vendor/picky",
+    "vendor/sspi",
+]
 default-members = ["warpgate"]
 resolver = "2"
+
+# IronRDP's NLA/CredSSP stack pins RustCrypto crates to release candidates that russh
+# resolves via caret requirements, which Cargo cannot satisfy at once. picky and sspi are
+# forked to drop those pins so both stacks share one crypto generation. See PATCHES.md in
+# each vendored crate.
+[patch.crates-io]
+ironrdp-session = { path = "vendor/ironrdp-session" }
+picky = { path = "vendor/picky" }
+sspi = { path = "vendor/sspi" }
 
 [workspace.dependencies]
 anyhow = { version = "1.0", default-features = false, features = ["std"] }

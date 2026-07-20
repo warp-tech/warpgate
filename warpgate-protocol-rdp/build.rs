@@ -2,9 +2,11 @@
 //! single executable.
 //!
 //! One helper is embedded: `warpgate-rdp-helper`, which carries both the target-facing
-//! client (`connect`) and the viewer-facing server (`serve`) as subcommands. It is built
-//! separately — it has its own lockfile to avoid `picky`/`sspi` pre-release conflicts
-//! between IronRDP and `russh` — so here we only locate the prebuilt artifact, compress
+//! client (`connect`) and the viewer-facing server (`serve`) as subcommands.
+//!
+//! This crate has no cargo dependency on the helper — it only embeds the finished
+//! executable — so Cargo cannot order the two builds. The helper must therefore be built
+//! first (`just build-rdp-helper`); here we only locate the prebuilt artifact, compress
 //! it, and stash it in `OUT_DIR` for `include_bytes!`. Embedding is mandatory: if the
 //! artifact is missing the build fails (there is no runtime `$PATH` fallback).
 
@@ -15,7 +17,6 @@ use std::path::PathBuf;
 fn main() -> Result<(), Box<dyn Error>> {
     embed(&Helper {
         bin_env: "WARPGATE_RDP_HELPER_BIN",
-        crate_dir: "warpgate-rdp-helper",
         bin_stem: "warpgate-rdp-helper",
         blob_file: "rdp-helper.gz",
         blob_env: "RDP_HELPER_BLOB",
@@ -28,9 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 struct Helper {
     /// Env var holding an explicit path to the prebuilt binary (CI / cross builds).
     bin_env: &'static str,
-    /// Sibling crate directory (relative to this crate's parent).
-    crate_dir: &'static str,
-    /// Binary file stem (without the platform extension).
+    /// Binary file stem (without the platform extension), also the package name.
     bin_stem: &'static str,
     /// Output file name under `OUT_DIR`.
     blob_file: &'static str,
@@ -45,12 +44,11 @@ fn embed(helper: &Helper) -> Result<(), Box<dyn Error>> {
 
     let path = locate_helper(helper).ok_or_else(|| {
         format!(
-            "{stem} binary not found. Build it first (`just {recipe}`, or `cd {dir} && cargo \
-             build --release`) or point {env} at it. The helper is embedded into the main \
-             binary and is required.",
+            "{stem} binary not found. Build it first (`just {recipe}`, or `cargo build \
+             --release -p {stem}`) or point {env} at it. The helper is embedded into the \
+             main binary and is required.",
             stem = helper.bin_stem,
             recipe = helper.just_recipe,
-            dir = helper.crate_dir,
             env = helper.bin_env,
         )
     })?;
@@ -85,9 +83,6 @@ fn locate_helper(helper: &Helper) -> Option<PathBuf> {
         return path.is_file().then_some(path);
     }
 
-    let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR")?);
-    let helper_root = manifest_dir.parent()?.join(helper.crate_dir);
-
     let target = std::env::var_os("TARGET");
     let mut bin_name = String::from(helper.bin_stem);
     if target
@@ -98,18 +93,14 @@ fn locate_helper(helper: &Helper) -> Option<PathBuf> {
         bin_name.push_str(".exe");
     }
 
-    // Prefer a target-specific build dir (cross-compilation), then the default.
-    let mut candidates = Vec::new();
-    if let Some(target) = target {
-        candidates.push(
-            helper_root
-                .join("target")
-                .join(target)
-                .join("release")
-                .join(&bin_name),
-        );
-    }
-    candidates.push(helper_root.join("target").join("release").join(&bin_name));
+    // `OUT_DIR` is `<target>/[<triple>/]<profile>/build/<pkg>-<hash>/out`, so its third
+    // ancestor is the profile directory. The helper is always built in release (it is a
+    // ~12 MB artifact and gets compressed into this crate regardless of our own profile),
+    // and under the same `[<triple>/]` prefix, so it is the profile dir's `release`
+    // sibling — which also resolves correctly when cross-compiling.
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR")?);
+    let profile_dir = out_dir.ancestors().nth(3)?;
+    let path = profile_dir.parent()?.join("release").join(&bin_name);
 
-    candidates.into_iter().find(|p| p.is_file())
+    path.is_file().then_some(path)
 }

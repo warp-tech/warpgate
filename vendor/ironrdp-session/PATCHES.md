@@ -1,1 +1,13 @@
-https://github.com/Devolutions/IronRDP/pull/1436
+Fork of `ironrdp-session` 0.11.0.
+
+RDP servers may pad `TS_BITMAP_DATA` beyond the destination rectangle — the width up to a
+multiple of 4 pixels (xrdp) and/or each row up to a multiple of 4 bytes. The `apply_*`
+functions re-chunk the source at the rectangle width, so the padding offsets every
+subsequent row and shears the image. `warpgate.patch` crops each decoded bitmap to the
+rectangle before it reaches them.
+
+Upstream [PR #1436][1] carries the same fix but is unmerged ([#1452][2] was closed as its
+duplicate), so drop this fork once a release contains either.
+
+[1]: https://github.com/Devolutions/IronRDP/pull/1436
+[2]: https://github.com/Devolutions/IronRDP/pull/1452
