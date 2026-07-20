@@ -1,0 +1,86 @@
+@@ -135,7 +135,7 @@
+ optional = true
+ 
+ [dependencies.aes-gcm]
+-version = "=0.11.0-rc.4"
++version = "0.11"
+ optional = true
+ 
+ [dependencies.aes-kw]
+@@ -186,9 +186,6 @@
+ version = "0.10"
+ optional = true
+ 
+-[dependencies.curve25519-dalek]
+-version = "=5.0.0-rc.1"
+-
+ [dependencies.des]
+ version = "0.9"
+ optional = true
+@@ -196,11 +193,8 @@
+ [dependencies.digest]
+ version = "0.11"
+ 
+-[dependencies.ecdsa]
+-version = "=0.17.0-rc.22"
+-
+ [dependencies.ed25519-dalek]
+-version = "=3.0.0-rc.1"
++version = "3"
+ features = [
+     "hazmat",
+     "rand_core",
+@@ -230,15 +224,15 @@
+ package = "md-5"
+ 
+ [dependencies.p256]
+-version = "=0.14.0-rc.14"
++version = "0.14"
+ features = ["ecdh"]
+ 
+ [dependencies.p384]
+-version = "=0.14.0-rc.14"
++version = "0.14"
+ features = ["ecdh"]
+ 
+ [dependencies.p521]
+-version = "=0.14.0-rc.14"
++version = "0.14"
+ features = ["ecdh"]
+ 
+ [dependencies.pbkdf2]
+@@ -262,9 +256,6 @@
+ [dependencies.pkcs1]
+ version = "=0.8.0-rc.4"
+ 
+-[dependencies.primeorder]
+-version = "=0.14.0-rc.14"
+-
+ [dependencies.rand]
+ version = "0.10"
+ 
+@@ -285,15 +276,6 @@
+ version = "=0.10.0-rc.18"
+ features = ["std"]
+ 
+-[dependencies.rustcrypto-ff]
+-version = "=0.14.0-rc.1"
+-
+-[dependencies.rustcrypto-ff_derive]
+-version = "=0.14.0-rc.0"
+-
+-[dependencies.rustcrypto-group]
+-version = "=0.14.0-rc.1"
+-
+ [dependencies.serde]
+ version = "1"
+ features = ["derive"]
+@@ -322,7 +304,7 @@
+ optional = true
+ 
+ [dependencies.x25519-dalek]
+-version = "=3.0.0-rc.1"
++version = "3"
+ features = ["static_secrets"]
+ 
+ [dependencies.zeroize]

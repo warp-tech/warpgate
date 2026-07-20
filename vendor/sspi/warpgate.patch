@@ -1,0 +1,40 @@
+@@ -267,39 +267,9 @@
+ [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.async-dnssd]
+ version = "0.5"
+ 
+-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.curve25519-dalek]
+-version = "=5.0.0-rc.1"
+-
+-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.ed25519-dalek]
+-version = "=3.0.0-rc.1"
+-
+ [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.futures]
+ version = "0.3"
+ 
+-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.p256]
+-version = "=0.14.0-rc.14"
+-
+-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.p384]
+-version = "=0.14.0-rc.14"
+-
+-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.p521]
+-version = "=0.14.0-rc.14"
+-
+-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.pkcs1]
+-version = "=0.8.0-rc.4"
+-
+-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.primeorder]
+-version = "=0.14.0-rc.14"
+-
+-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.rustcrypto-ff]
+-version = "=0.14.0-rc.1"
+-
+-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.rustcrypto-ff_derive]
+-version = "=0.14.0-rc.0"
+-
+-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.rustcrypto-group]
+-version = "=0.14.0-rc.1"
+-
+ [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.tokio]
+ version = "1.52"
+ features = [

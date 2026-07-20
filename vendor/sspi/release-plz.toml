@@ -1,0 +1,8 @@
+[workspace]
+dependencies_update = true
+git_release_enable = false
+semver_check = true
+pr_branch_prefix = "release-plz/"
+pr_name = "chore(release): prepare for publishing"
+changelog_config = "cliff.toml"
+release_commits = "^(feat|docs|fix|build|perf)"
