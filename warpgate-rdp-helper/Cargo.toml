@@ -13,9 +13,9 @@ bytes = "1"
 futures = "0.3"
 # Client (`connect`) and server (`serve`) share one IronRDP generation so a single
 # lockfile can resolve them (they pin the same picky/sspi pre-releases).
-ironrdp = { version = "0.15", features = ["connector", "session", "graphics", "input"] }
-ironrdp-blocking = "0.9"
-ironrdp-server = "0.12"
+ironrdp = { version = "0.17", features = ["connector", "session", "graphics", "input"] }
+ironrdp-blocking = "0.10"
+ironrdp-server = "0.13"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-native-certs = "0.8"
 rustls-pemfile = "2"
