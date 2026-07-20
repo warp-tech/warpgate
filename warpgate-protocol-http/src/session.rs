@@ -6,7 +6,7 @@ use poem::session::{MemoryStorage, Session, SessionStorage};
 use poem::web::{Data, RemoteAddr};
 use poem::{FromRequest, Request};
 use serde_json::Value;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::Mutex;
 use tracing::info;
 use warpgate_common::SessionId;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
@@ -58,7 +58,6 @@ impl SessionStorage for SharedSessionStorage {
 
 pub struct SessionStore {
     session_handles: HashMap<SessionId, Arc<Mutex<WarpgateServerHandle>>>,
-    session_close_senders: HashMap<SessionId, broadcast::Sender<()>>,
     session_timestamps: HashMap<SessionId, Instant>,
     this: Weak<Mutex<Self>>,
 }
@@ -71,7 +70,6 @@ impl SessionStore {
         Arc::new_cyclic(|me| {
             Mutex::new(Self {
                 session_handles: HashMap::new(),
-                session_close_senders: HashMap::new(),
                 session_timestamps: HashMap::new(),
                 this: me.clone(),
             })
@@ -121,9 +119,7 @@ impl SessionStore {
         .await?;
 
         let id = server_handle.lock().await.id();
-        let (session_close_sender, _) = broadcast::channel(1);
         self.session_handles.insert(id, server_handle.clone());
-        self.session_close_senders.insert(id, session_close_sender);
 
         session.set(SESSION_ID_SESSION_KEY, id);
 
@@ -142,7 +138,8 @@ impl SessionStore {
                             }
                             info!(%id, "Removed HTTP session");
                             let mut that = this.lock().await;
-                            that.remove_session_by_id(id);
+                            that.session_handles.remove(&id);
+                            that.session_timestamps.remove(&id);
                         }
                     }
                 }
@@ -161,19 +158,10 @@ impl SessionStore {
             .and_then(|id| self.session_handles.get(&id).cloned())
     }
 
-    pub fn close_receiver_for(&self, session: &Session) -> Option<broadcast::Receiver<()>> {
-        session
-            .get::<SessionId>(SESSION_ID_SESSION_KEY)
-            .and_then(|id| {
-                self.session_close_senders
-                    .get(&id)
-                    .map(|sender| sender.subscribe())
-            })
-    }
-
     pub fn remove_session(&mut self, session: &Session) {
         if let Some(id) = session.get::<SessionId>(SESSION_ID_SESSION_KEY) {
-            self.remove_session_by_id(id);
+            self.session_handles.remove(&id);
+            self.session_timestamps.remove(&id);
         }
     }
 
@@ -186,15 +174,8 @@ impl SessionStore {
             }
         }
         for id in to_remove {
-            self.remove_session_by_id(id);
+            self.session_handles.remove(&id);
+            self.session_timestamps.remove(&id);
         }
-    }
-
-    fn remove_session_by_id(&mut self, id: SessionId) {
-        if let Some(sender) = self.session_close_senders.remove(&id) {
-            let _ = sender.send(());
-        }
-        self.session_handles.remove(&id);
-        self.session_timestamps.remove(&id);
     }
 }

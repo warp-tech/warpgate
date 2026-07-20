@@ -1,12 +1,6 @@
 import ssl
-import time
-
 import requests
-from websocket import (
-    WebSocketConnectionClosedException,
-    WebSocketTimeoutException,
-    create_connection,
-)
+from websocket import create_connection
 from uuid import uuid4
 
 from .api_client import admin_client, sdk
@@ -64,72 +58,4 @@ class TestHTTPWebsocket:
         ws.send_binary(b"test")
         assert ws.recv() == b"test"
         ws.ping()
-        ws.close()
-
-    def test_logout_closes_connection(
-        self,
-        echo_server_port,
-        shared_wg: WarpgateProcess,
-    ):
-        url = f"https://localhost:{shared_wg.http_port}"
-        with admin_client(url) as api:
-            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
-            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
-            api.create_password_credential(
-                user.id, sdk.NewPasswordCredential(password="123")
-            )
-            api.add_user_role(user.id, role.id)
-            echo_target = api.create_target(sdk.TargetDataRequest(
-                name=f"echo-{uuid4()}",
-                options=sdk.TargetOptions(sdk.TargetOptionsTargetHTTPOptions(
-                    kind="Http",
-                    url=f"http://localhost:{echo_server_port}",
-                    tls=sdk.Tls(
-                        mode=sdk.TlsMode.DISABLED,
-                        verify=False,
-                    ),
-                )),
-            ))
-            api.add_target_role(echo_target.id, role.id)
-
-        session = requests.Session()
-        session.verify = False
-
-        response = session.post(
-            f"{url}/@warpgate/api/auth/login",
-            json={
-                "username": user.username,
-                "password": "123",
-            },
-        )
-        assert response.status_code // 100 == 2
-
-        cookies = session.cookies.get_dict()
-        cookie = "; ".join([f"{k}={v}" for k, v in cookies.items()])
-        ws = create_connection(
-            f"wss://localhost:{shared_wg.http_port}/socket?warpgate-target={echo_target.name}",
-            cookie=cookie,
-            sslopt={"cert_reqs": ssl.CERT_NONE},
-        )
-        ws.send("test")
-        assert ws.recv() == "test"
-
-        response = session.post(f"{url}/@warpgate/api/auth/logout")
-        assert response.status_code // 100 == 2
-
-        ws.settimeout(0.25)
-        deadline = time.monotonic() + 5
-        closed = False
-        while time.monotonic() < deadline:
-            try:
-                if ws.recv() == "":
-                    closed = True
-                    break
-            except WebSocketConnectionClosedException:
-                closed = True
-                break
-            except WebSocketTimeoutException:
-                continue
-
-        assert closed
         ws.close()

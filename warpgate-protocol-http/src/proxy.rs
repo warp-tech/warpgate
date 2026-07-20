@@ -11,10 +11,8 @@ use http::header::HeaderName;
 use http::uri::{Authority, PathAndQuery, Scheme};
 use http::{HeaderValue, StatusCode, Uri};
 use poem::session::Session;
-use poem::web::Data;
 use poem::web::websocket::WebSocket;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
-use tokio::sync::Mutex;
 use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
 use tracing::{debug, error, warn};
 use url::{Url, form_urlencoded};
@@ -24,15 +22,12 @@ use warpgate_common::http_headers::{
 };
 use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
 use warpgate_common_http::logging::{get_client_ip, log_request_result};
-use warpgate_common_http::{
-    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-};
+use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
 use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
 use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
-use crate::session::SessionStore;
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
 static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
@@ -448,20 +443,6 @@ async fn proxy_ws_inner(
     ctx: &AuthenticatedRequestContext,
     options: &TargetHTTPOptions,
 ) -> poem::Result<impl IntoResponse> {
-    let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
-        .await?
-        .clone();
-    let session = <&Session>::from_request_without_body(req).await?;
-    let mut close_rx = session_middleware.lock().await.close_receiver_for(session);
-    if close_rx.is_none()
-        && matches!(
-            &ctx.auth,
-            RequestAuthorization::Session(SessionAuthorization::User { .. })
-        )
-    {
-        return Err(poem::Error::from_status(StatusCode::UNAUTHORIZED));
-    }
-
     let (authorization_header, uri) = extract_basic_auth(uri)?;
     let mut client_request = http::request::Builder::new()
         .uri(uri.clone())
@@ -514,7 +495,7 @@ async fn proxy_ws_inner(
             let (server_sink, server_source) = socket.split();
 
             if let Err(error) = {
-                let mut server_to_client =
+                let server_to_client =
                     tokio::spawn(pump_websocket(server_source, client_sink, |msg| {
                         Box::pin(async {
                             tracing::debug!("Server: {:?}", msg);
@@ -522,7 +503,7 @@ async fn proxy_ws_inner(
                         })
                     }));
 
-                let mut client_to_server =
+                let client_to_server =
                     tokio::spawn(pump_websocket(client_source, server_sink, |msg| {
                         Box::pin(async {
                             tracing::debug!("Client: {:?}", msg);
@@ -530,47 +511,8 @@ async fn proxy_ws_inner(
                         })
                     }));
 
-                let (server_finished, pump_result): (
-                    bool,
-                    Option<Result<anyhow::Result<()>, tokio::task::JoinError>>,
-                ) = tokio::select! {
-                    result = &mut server_to_client => {
-                        (true, Some(result))
-                    }
-                    result = &mut client_to_server => {
-                        (false, Some(result))
-                    }
-                    () = async {
-                        match close_rx.as_mut() {
-                            Some(close_rx) => {
-                                let _ = close_rx.recv().await;
-                            }
-                            None => std::future::pending::<()>().await,
-                        }
-                    } => {
-                        (false, None)
-                    }
-                };
-
-                match pump_result {
-                    Some(result) if server_finished => {
-                        client_to_server.abort();
-                        let _ = client_to_server.await;
-                        result.context("server-to-client WebSocket pump task failed")??;
-                    }
-                    Some(result) => {
-                        server_to_client.abort();
-                        let _ = server_to_client.await;
-                        result.context("client-to-server WebSocket pump task failed")??;
-                    }
-                    None => {
-                        debug!("Closing WebSocket stream after HTTP session ended");
-                        server_to_client.abort();
-                        client_to_server.abort();
-                        let _ = server_to_client.await;
-                        let _ = client_to_server.await;
-                    }
-                }
+                server_to_client.await??;
+                client_to_server.await??;
                 debug!("Closing Websocket stream");
 
                 Ok::<_, anyhow::Error>(())
