@@ -52,7 +52,7 @@ warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-tls = { path = "../warpgate-tls" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 webpki = { version = "0.22", default-features = false }
-zune-jpeg = "0.4"
+zune-jpeg = "0.5"
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]

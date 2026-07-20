@@ -29,4 +29,4 @@ warpgate-web-clients-common = { path = "../warpgate-web-clients-common" }
 
 [dev-dependencies]
 # Decodes our own JPEG output so the channel-order test can assert on actual pixels.
-zune-jpeg = "0.4"
+zune-jpeg = "0.5"
