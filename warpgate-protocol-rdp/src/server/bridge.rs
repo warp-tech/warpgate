@@ -63,6 +63,10 @@ async fn frame_bridge(
                 warn!(%message, "RDP target reported an error");
                 continue;
             }
+            DesktopEvent::State(state @ (DesktopState::Connecting | DesktopState::Connected)) => {
+                info!(?state, "RDP target");
+                continue;
+            }
             // The client helper only emits Connecting/Connected/Resize/RawImage/Error/
             // Disconnected; the remaining framebuffer variants never occur on this path.
             _ => continue,

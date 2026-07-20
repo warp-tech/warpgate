@@ -13,7 +13,7 @@
 
 use std::cell::RefCell;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
@@ -28,6 +28,12 @@ use ironrdp::session::image::DecodedImage;
 use ironrdp::session::{ActiveStage, ActiveStageOutput};
 use sspi::network_client::reqwest_network_client::ReqwestNetworkClient;
 use warpgate_rdp_ipc::client::{ConnectConfig, Event as OutputMessage, Input as InputMessage};
+
+/// Deadline for the TCP connect to the target.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Deadline for each blocking read/write of the RDP handshake, until the active stage
+/// switches the socket to its short interleaving timeout.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
 thread_local! {
     /// Reused scratch for the framebuffer hot path — the encoded IMAGE frame body.
@@ -459,8 +465,18 @@ fn connect(
     port: u16,
     verify_tls: bool,
 ) -> Result<(ConnectionResult, UpgradedFramed)> {
-    let tcp_stream = TcpStream::connect((server_name.as_str(), port)).context("TCP connect")?;
+    let address = (server_name.as_str(), port)
+        .to_socket_addrs()
+        .context("resolving target address")?
+        .next()
+        .context("target address resolved to nothing")?;
+    let tcp_stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).context("TCP connect")?;
     tcp_stream.set_nodelay(true).ok();
+    // The handshake below (X.224, TLS, CredSSP — the last of which may reach out to a KDC)
+    // is fully blocking, so without a deadline a target that accepts the TCP connection but
+    // stalls mid-handshake wedges the helper forever with no event for Warpgate to report.
+    tcp_stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).ok();
+    tcp_stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT)).ok();
     let client_addr = tcp_stream.local_addr().context("local addr")?;
 
     let mut framed = ironrdp_blocking::Framed::new(tcp_stream);
