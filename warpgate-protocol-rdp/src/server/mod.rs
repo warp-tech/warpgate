@@ -38,6 +38,7 @@ use warpgate_core::{DesktopInput, Services, SessionStateInit, State, WarpgateSer
 use warpgate_rdp_ipc::server::{
     Event as ServerHelperEvent, Input as ServerHelperInput, ServeConfig,
 };
+use warpgate_rdp_ipc::{DEFAULT_SCREEN_H, DEFAULT_SCREEN_W};
 
 use crate::PROTOCOL_NAME;
 use crate::session_handle::RdpSessionHandle;
@@ -55,10 +56,6 @@ use warpgate_desktop_auth::{
 /// The fd number at which the serve helper receives its end of the RDP transport
 /// socketpair (`dup2`'d into place by `pre_exec`, then passed to the helper as a CLI arg).
 const HELPER_STREAM_FD: i32 = 3;
-/// Desktop size advertised to the viewer before the target connects (the target's real
-/// resolution arrives as a `Resize` shortly after).
-const DEFAULT_WIDTH: u16 = 1280;
-const DEFAULT_HEIGHT: u16 = 800;
 
 /// Length-delimited frame reader/writer over the serve helper's stdio. Frames can be a
 /// full-screen BGRA rect, so the size cap is raised past the codec's 8 MB default.
@@ -219,8 +216,8 @@ async fn handle_connection(
     let config = ServeConfig {
         cert_pem,
         key_pem,
-        width: DEFAULT_WIDTH,
-        height: DEFAULT_HEIGHT,
+        width: DEFAULT_SCREEN_W,
+        height: DEFAULT_SCREEN_H,
     };
     let mut config_buf = Vec::new();
     warpgate_rdp_ipc::encode_json_into(&config, &mut config_buf);
@@ -265,6 +262,13 @@ async fn control_loop(
 ) -> Result<()> {
     let mut frames = FramedRead::new(stdout, helper_codec());
     let mut backend: Option<BackendBridge> = None;
+    // What the helper says the session settled on, which is what we paint and what we ask
+    // the target for. Seeded with the size we advertised, in case we dial before the
+    // capability exchange reports back.
+    let mut screen = warpgate_desktop_ui::Screen {
+        width: DEFAULT_SCREEN_W,
+        height: DEFAULT_SCREEN_H,
+    };
 
     while let Some(frame) = frames.next().await {
         let frame = frame.context("reading serve helper output")?;
@@ -302,6 +306,7 @@ async fn control_loop(
                                 user_info,
                                 target,
                                 options,
+                                screen,
                             )
                             .await?,
                         );
@@ -322,8 +327,14 @@ async fn control_loop(
                         {
                             break;
                         }
-                        match run_hold_screen(&services, &interactive, &mut frames, &helper_in_tx)
-                            .await
+                        match run_hold_screen(
+                            &services,
+                            &interactive,
+                            &mut frames,
+                            &helper_in_tx,
+                            screen,
+                        )
+                        .await
                         {
                             Ok(Some(user_info)) => {
                                 match finalize_user_auth::<RdpProto>(
@@ -342,6 +353,7 @@ async fn control_loop(
                                                 user_info,
                                                 target,
                                                 options,
+                                                screen,
                                             )
                                             .await?,
                                         );
@@ -376,6 +388,10 @@ async fn control_loop(
                             helper_in_tx.send(ServerHelperInput::AuthResponse { accept: false });
                     }
                 }
+                continue;
+            }
+            ServerHelperEvent::Size { width, height } => {
+                screen = warpgate_desktop_ui::Screen { width, height };
                 continue;
             }
             ServerHelperEvent::Error { message } => {

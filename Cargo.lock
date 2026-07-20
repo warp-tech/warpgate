@@ -8443,6 +8443,7 @@ dependencies = [
  "minifb",
  "png",
  "warpgate-common",
+ "warpgate-rdp-ipc",
 ]
 
 [[package]]

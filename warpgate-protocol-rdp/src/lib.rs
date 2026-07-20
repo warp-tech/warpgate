@@ -37,6 +37,8 @@ use warpgate_tls::TlsCertificateAndPrivateKey;
 
 pub static PROTOCOL_NAME: ProtocolName = "RDP";
 
+pub use warpgate_rdp_ipc::DEFAULT_SIZE;
+
 /// The native RDP server endpoint. Standard RDP clients (mstsc/FreeRDP) connect
 /// directly to Warpgate's RDP port; per connection it brokers between the viewer-facing
 /// serve helper and the existing target-facing client helper (see [`server`]).
@@ -90,7 +92,7 @@ pub struct RdpClientHandles {
 }
 
 /// Spawn the RDP helper for a target and bridge it to normalised desktop streams.
-pub fn connect(options: TargetRdpOptions) -> RdpClientHandles {
+pub fn connect(options: TargetRdpOptions, size: (u16, u16)) -> RdpClientHandles {
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
     let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);
     let (abort_tx, abort_rx) = unbounded_channel::<()>();
@@ -98,7 +100,7 @@ pub fn connect(options: TargetRdpOptions) -> RdpClientHandles {
     let span = info_span!("RDP-client", host = %options.host, port = options.port);
     tokio::spawn(
         async move {
-            if let Err(error) = run(options, event_tx.clone(), input_rx, abort_rx).await {
+            if let Err(error) = run(options, size, event_tx.clone(), input_rx, abort_rx).await {
                 error!(%error, "RDP helper failed");
                 let _ = event_tx.send(DesktopEvent::Error(error.to_string())).await;
             }
@@ -118,6 +120,7 @@ pub fn connect(options: TargetRdpOptions) -> RdpClientHandles {
 
 async fn run(
     options: TargetRdpOptions,
+    (width, height): (u16, u16),
     event_tx: tokio::sync::mpsc::Sender<DesktopEvent>,
     mut input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
@@ -172,8 +175,8 @@ async fn run(
         username: options.username.clone(),
         password,
         domain: options.domain.clone(),
-        width: 1280,
-        height: 800,
+        width,
+        height,
         verify_tls: options.verify_tls,
     };
     let mut config_buf = Vec::new();

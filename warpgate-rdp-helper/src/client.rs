@@ -81,8 +81,7 @@ fn run() -> Result<()> {
         .ok();
 
     // First stdin frame is the connection config.
-    let config_frame =
-        read_frame(&mut std::io::stdin().lock()).context("reading config frame")?;
+    let config_frame = read_frame(&mut std::io::stdin().lock()).context("reading config frame")?;
     let config: ConnectConfig =
         warpgate_rdp_ipc::decode_json(&config_frame).context("parsing config")?;
 
@@ -470,7 +469,8 @@ fn connect(
         .context("resolving target address")?
         .next()
         .context("target address resolved to nothing")?;
-    let tcp_stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).context("TCP connect")?;
+    let tcp_stream =
+        TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).context("TCP connect")?;
     tcp_stream.set_nodelay(true).ok();
     // The handshake below (X.224, TLS, CredSSP — the last of which may reach out to a KDC)
     // is fully blocking, so without a deadline a target that accepts the TCP connection but

@@ -32,6 +32,7 @@ pub(super) async fn run_hold_screen(
     interactive: &InteractiveAuth,
     frames: &mut HelperReader,
     helper_in_tx: &UnboundedSender<ServerHelperInput>,
+    screen: ui::Screen,
 ) -> Result<Option<AuthStateUserInfo>> {
     let state = services
         .auth_state_store
@@ -45,14 +46,10 @@ pub(super) async fn run_hold_screen(
         .await
         .subscribe(interactive.state_id);
 
-    // Size the viewer to the UI canvas; the target's real size follows once it connects.
-    let _ = helper_in_tx.send(ServerHelperInput::Resize {
-        width: ui::SCREEN_W,
-        height: ui::SCREEN_H,
-    });
-
+    // Hold screen renders at the negotiated screen size,
+    // resizing means a reactivation which races with the resize itself
     let mut otp = OtpEntry::new("rdp");
-    let mut painter = HoldPainter::new();
+    let mut painter = HoldPainter::new(screen);
     let mut ticker = tokio::time::interval(HOLD_RENDER_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -126,7 +123,7 @@ pub(super) async fn run_hold_screen(
                         }
                 },
                 _ = ticker.tick() => {
-                    painter.paint(helper_in_tx, |tick| ui::render_authentication(tick, &prompt))?;
+                    painter.paint(helper_in_tx, |screen, tick| ui::render_authentication(screen, tick, &prompt))?;
                 },
             }
         }
@@ -138,11 +135,12 @@ pub(super) async fn run_hold_screen(
 /// "Connecting" screens go through one code path.
 struct HoldPainter {
     tick: u64,
+    screen: ui::Screen,
 }
 
 impl HoldPainter {
-    const fn new() -> Self {
-        Self { tick: 0 }
+    const fn new(screen: ui::Screen) -> Self {
+        Self { tick: 0, screen }
     }
 
     /// Render one frame with `render_frame(tick)` (RGB888), convert it to the BGRA the serve
@@ -150,9 +148,9 @@ impl HoldPainter {
     fn paint(
         &mut self,
         helper_in_tx: &UnboundedSender<ServerHelperInput>,
-        render_frame: impl FnOnce(u64) -> Result<Vec<u8>, Infallible>,
+        render_frame: impl FnOnce(ui::Screen, u64) -> Result<Vec<u8>, Infallible>,
     ) -> Result<()> {
-        let rgb = render_frame(self.tick).unwrap_or_default();
+        let rgb = render_frame(self.screen, self.tick).unwrap_or_default();
         self.tick = self.tick.wrapping_add(1);
 
         let mut bgra = Vec::with_capacity(rgb.len() / 3 * 4);
@@ -165,8 +163,8 @@ impl HoldPainter {
             .send(ServerHelperInput::Frame {
                 x: 0,
                 y: 0,
-                width: ui::SCREEN_W,
-                height: ui::SCREEN_H,
+                width: self.screen.width,
+                height: self.screen.height,
                 data: bgra.into(),
             })
             .is_err()

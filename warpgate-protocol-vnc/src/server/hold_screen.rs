@@ -95,9 +95,10 @@ where
         };
 
         if let AuthPrompt::WebApproval { url, .. } = &prompt
-            && let Some(url) = url {
-                write_server_cut_text(viewer_wr, url).await.ok();
-            }
+            && let Some(url) = url
+        {
+            write_server_cut_text(viewer_wr, url).await.ok();
+        }
 
         loop {
             tokio::select! {
@@ -127,7 +128,7 @@ where
                     }
                 }
                 () = sleep(SPINNER_INTERVAL), if render.pending_request => {
-                    render.paint(viewer_wr, |tick| ui::render_authentication(tick, &prompt)).await?;
+                    render.paint(viewer_wr, |screen, tick| ui::render_authentication(screen, tick, &prompt)).await?;
                 }
             }
         }

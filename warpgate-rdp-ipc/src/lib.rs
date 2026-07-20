@@ -324,6 +324,13 @@ pub mod server {
             #[serde(default)]
             domain: Option<String>,
         },
+        /// The desktop size settled with the viewer. Sent once the capability exchange
+        /// completes, and again after every renegotiation, so Warpgate can paint and dial
+        /// the target at the size the viewer is actually showing.
+        Size {
+            width: u16,
+            height: u16,
+        },
         Pointer {
             x: u16,
             y: u16,
@@ -360,11 +367,17 @@ pub mod server {
     }
 }
 
+pub const DEFAULT_SCREEN_W: u16 = 1024;
+pub const DEFAULT_SCREEN_H: u16 = 768;
+
+/// Desktop size used when nothing has negotiated one yet.
+pub const DEFAULT_SIZE: (u16, u16) = (DEFAULT_SCREEN_W, DEFAULT_SCREEN_H);
+
 const fn default_width() -> u16 {
-    1280
+    DEFAULT_SCREEN_W
 }
 const fn default_height() -> u16 {
-    800
+    DEFAULT_SCREEN_H
 }
 
 #[cfg(test)]

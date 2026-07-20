@@ -17,18 +17,31 @@ use embedded_graphics::primitives::{CornerRadii, PrimitiveStyle, Rectangle, Roun
 use embedded_graphics::text::{Alignment, Text};
 use framebuffer::Framebuffer;
 use warpgate_common::helpers::otp::OTP_DIGITS;
+pub use warpgate_rdp_ipc::{DEFAULT_SCREEN_H as SCREEN_W, DEFAULT_SCREEN_W as SCREEN_H};
 
 use crate::char_boxes::draw_char_boxes;
 use crate::logo::logo;
 
-pub const SCREEN_W: u16 = 1024;
-pub const SCREEN_H: u16 = 768;
+#[derive(Clone, Copy)]
+pub struct Screen {
+    pub width: u16,
+    pub height: u16,
+}
+
+impl Default for Screen {
+    fn default() -> Self {
+        Self {
+            width: SCREEN_W,
+            height: SCREEN_H,
+        }
+    }
+}
 
 const BG: Rgb888 = Rgb888::new(0x14, 0x14, 0x1a);
 const FG: Rgb888 = Rgb888::new(0xc1, 0xc9, 0xe4);
 
-pub fn render_connecting(tick: u64) -> Result<Vec<u8>, Infallible> {
-    render(tick, "Connecting", None)
+pub fn render_connecting(screen: Screen, tick: u64) -> Result<Vec<u8>, Infallible> {
+    render(screen, tick, "Connecting", None)
 }
 
 pub enum AuthPrompt {
@@ -41,7 +54,11 @@ pub enum AuthPrompt {
     },
 }
 
-pub fn render_authentication(tick: u64, prompt: &AuthPrompt) -> Result<Vec<u8>, Infallible> {
+pub fn render_authentication(
+    screen: Screen,
+    tick: u64,
+    prompt: &AuthPrompt,
+) -> Result<Vec<u8>, Infallible> {
     match prompt {
         AuthPrompt::WebApproval { url, security_key } => {
             let mut text = String::new();
@@ -59,9 +76,10 @@ pub fn render_authentication(tick: u64, prompt: &AuthPrompt) -> Result<Vec<u8>, 
                 slots: security_key.chars().count(),
             };
             text.push_str("\n\nSecurity key:");
-            render(tick, &text, Some(boxes))
+            render(screen, tick, &text, Some(boxes))
         }
         AuthPrompt::Otp { entered } => render(
+            screen,
             tick,
             "One-time password:",
             Some(CharBoxes {
@@ -77,15 +95,31 @@ struct CharBoxes<'a> {
     slots: usize,
 }
 
-fn render(tick: u64, text: &str, boxes: Option<CharBoxes>) -> Result<Vec<u8>, Infallible> {
-    let mut fb = Framebuffer::new(u32::from(SCREEN_W), u32::from(SCREEN_H), BG);
+/// Vertical gap kept between the logo and the ball once the screen is too short for
+/// [`LOGO_Y`], below which the logo is pinned to the top edge.
+const LOGO_GAP: i32 = 40;
+/// Logo offset from the top on a screen with room to spare.
+const LOGO_Y: i32 = 60;
 
-    let cx = i32::from(SCREEN_W) / 2;
-    let cy = i32::from(SCREEN_H) / 2 - 24;
+fn render(
+    screen: Screen,
+    tick: u64,
+    text: &str,
+    boxes: Option<CharBoxes>,
+) -> Result<Vec<u8>, Infallible> {
+    let (w, h) = (i32::from(screen.width), i32::from(screen.height));
+    let mut fb = Framebuffer::new(u32::from(screen.width), u32::from(screen.height), BG);
+
+    let cx = w / 2;
+    let cy = h / 2 - 24;
 
     let image = logo();
-    let x0 = (i32::from(SCREEN_W) - image.size().width.cast_signed()) / 2;
-    Image::new(image, Point::new(x0, 60)).draw(&mut fb)?;
+    let x0 = (w - image.size().width.cast_signed()) / 2;
+    // Sits at a fixed offset when there's room, and slides up (never off) when there isn't.
+    let logo_y = LOGO_Y
+        .min(cy - image.size().height.cast_signed() - LOGO_GAP)
+        .max(0);
+    Image::new(image, Point::new(x0, logo_y)).draw(&mut fb)?;
 
     bouncy_ball::bouncy_ball(tick, cx, cy)
         .into_styled(PrimitiveStyle::with_fill(FG))

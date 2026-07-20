@@ -2,34 +2,36 @@ use std::convert::Infallible;
 use std::error::Error;
 
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
-use warpgate_desktop_ui::{
-    AuthPrompt, SCREEN_H, SCREEN_W, render_authentication, render_connecting,
-};
+use warpgate_desktop_ui::{AuthPrompt, SCREEN_H, SCREEN_W, Screen, render_authentication, render_connecting};
 
 fn screen(n: u8, tick: u64) -> Result<Vec<u8>, Infallible> {
+    let screen = Screen::default();
     match n {
         2 => render_authentication(
+            screen,
             tick,
             &AuthPrompt::WebApproval {
                 url: Some("https://warpgate.acme.inc/test".into()),
                 security_key: "1234".into(),
             },
         ),
-        3 => render_authentication(tick, &AuthPrompt::Otp { entered: "".into() }),
+        3 => render_authentication(screen, tick, &AuthPrompt::Otp { entered: "".into() }),
         4 => render_authentication(
+            screen,
             tick,
             &AuthPrompt::Otp {
                 entered: "042".into(),
             },
         ),
         5 => render_authentication(
+            screen,
             tick,
             &AuthPrompt::WebApproval {
                 url: None,
                 security_key: "1234".into(),
             },
         ),
-        _ => render_connecting(tick),
+        _ => render_connecting(screen, tick),
     }
 }
 

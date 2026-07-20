@@ -9,6 +9,7 @@ publish = false
 embedded-graphics = "0.8"
 png = "0.18"
 warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-rdp-ipc = { path = "../warpgate-rdp-ipc", default-features = false }
 
 [dev-dependencies]
 minifb = "0.28"

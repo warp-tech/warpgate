@@ -109,7 +109,10 @@ impl WebDesktopClientManager {
                 (h.event_rx, h.input_tx, h.abort_tx, false)
             }
             TargetOptions::Rdp(options) => {
-                let h = warpgate_protocol_rdp::connect(options);
+                // The browser canvas follows whatever size the target reports, so ask for
+                // the helper's default rather than dictating one.
+                let h =
+                    warpgate_protocol_rdp::connect(options, warpgate_protocol_rdp::DEFAULT_SIZE);
                 // The RDP helper only ever emits raw RGBA.
                 (h.event_rx, h.input_tx, h.abort_tx, true)
             }

@@ -422,11 +422,13 @@ impl RenderState {
     async fn paint<W, R>(&mut self, viewer_wr: &mut W, render_frame: R) -> Result<()>
     where
         W: AsyncWrite + Unpin,
-        R: FnOnce(u64) -> Result<Vec<u8>, Infallible>,
+        R: FnOnce(ui::Screen, u64) -> Result<Vec<u8>, Infallible>,
     {
-        let image = render_frame(self.tick)?;
+        // VNC dictates the framebuffer size in its ServerInit, so it is always the default.
+        let screen = ui::Screen::default();
+        let image = render_frame(screen, self.tick)?;
         let pixels = pack_rgb(&self.pixel_format, &image);
-        write_raw_rect(viewer_wr, 0, 0, ui::SCREEN_W, ui::SCREEN_H, &pixels).await?;
+        write_raw_rect(viewer_wr, 0, 0, screen.width, screen.height, &pixels).await?;
         self.tick += 1;
         self.pending_request = false;
         Ok(())

@@ -137,6 +137,7 @@ pub(super) async fn connect_backend(
     user_info: AuthStateUserInfo,
     target: Target,
     options: TargetRdpOptions,
+    screen: warpgate_desktop_ui::Screen,
 ) -> Result<BackendBridge> {
     {
         let handle = server_handle.lock().await;
@@ -154,7 +155,7 @@ pub(super) async fn connect_backend(
         event_rx,
         input_tx,
         abort_tx,
-    } = crate::connect(options);
+    } = crate::connect(options, (screen.width, screen.height));
     let frame_bridge = tokio::spawn(frame_bridge(
         event_rx,
         helper_in_tx.clone(),

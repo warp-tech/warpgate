@@ -30,8 +30,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use ironrdp_server::tokio_rustls::TlsAcceptor;
 use ironrdp_server::tokio_rustls::rustls::ServerConfig as TlsServerConfig;
+use ironrdp_server::tokio_rustls::TlsAcceptor;
 use ironrdp_server::{
     BitmapUpdate, CredentialDecision, CredentialValidationError, CredentialValidator, Credentials,
     DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent, PixelFormat, RdpServer,
@@ -39,7 +39,7 @@ use ironrdp_server::{
 };
 use tokio::io::{Stdin, Stdout};
 use tokio::net::UnixStream as TokioUnixStream;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{mpsc, Mutex};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::warn;
 use warpgate_rdp_ipc::server::{Event as ControlOut, Input as ControlIn, ServeConfig};
@@ -99,9 +99,19 @@ async fn run() -> Result<()> {
     let (frame_tx, frame_rx) = mpsc::channel::<DisplayUpdate>(256);
     let (auth_tx, auth_rx) = mpsc::channel::<bool>(1);
 
+    let size = Arc::new(Mutex::new(DesktopSize {
+        width: config.width,
+        height: config.height,
+    }));
+
     let stdout_frames = FramedWrite::new(tokio::io::stdout(), codec());
     let writer_handle = tokio::spawn(stdout_writer(stdout_frames, out_rx));
-    let router_handle = tokio::spawn(stdin_router(stdin_frames, frame_tx, auth_tx));
+    let router_handle = tokio::spawn(stdin_router(
+        stdin_frames,
+        frame_tx,
+        auth_tx,
+        Arc::clone(&size),
+    ));
 
     let tls = build_tls_acceptor(&config.cert_pem, &config.key_pem)?;
 
@@ -116,9 +126,9 @@ async fn run() -> Result<()> {
     let stream = TokioUnixStream::from_std(std_stream).context("wrapping the RDP transport")?;
 
     let display = DisplayHandler {
-        width: config.width,
-        height: config.height,
+        size,
         updates: Arc::new(Mutex::new(frame_rx)),
+        out: out_tx.clone(),
     };
     let input = InputHandler {
         out: out_tx.clone(),
@@ -208,6 +218,7 @@ async fn stdin_router(
     mut rd: FramedRead<Stdin, LengthDelimitedCodec>,
     frame_tx: mpsc::Sender<DisplayUpdate>,
     auth_tx: mpsc::Sender<bool>,
+    size: Arc<Mutex<DesktopSize>>,
 ) {
     while let Some(frame) = rd.next().await {
         let Ok(frame) = frame else {
@@ -237,11 +248,15 @@ async fn stdin_router(
                 }
             }
             ControlIn::Resize { width, height } => {
-                if frame_tx
-                    .send(DisplayUpdate::Resize(DesktopSize { width, height }))
-                    .await
-                    .is_err()
-                {
+                let new = DesktopSize { width, height };
+                // A resize costs a deactivation-reactivation: the server tears the session
+                // down to the acceptor and renegotiates capabilities with the viewer. Skip
+                // it when the size is unchanged so an already-correct session is never
+                // disturbed.
+                if core::mem::replace(&mut *size.lock().await, new) == new {
+                    continue;
+                }
+                if frame_tx.send(DisplayUpdate::Resize(new)).await.is_err() {
                     break;
                 }
             }
@@ -276,23 +291,33 @@ fn frame_to_update(x: u16, y: u16, width: u16, height: u16, data: Bytes) -> Opti
 /// Display backend: hands the IronRDP server a receiver of framebuffer updates
 /// fed (via the stdin router) by Warpgate.
 struct DisplayHandler {
-    width: u16,
-    height: u16,
+    /// `size()` is re-queried on every deactivation-reactivation to build the new
+    /// `UpdateEncoder`, so this has to track the size last renegotiated with the client,
+    /// not the one the session started at.
+    size: Arc<Mutex<DesktopSize>>,
     // Shared, not `take()`n: ironrdp-server calls `updates()` again after every
     // deactivation-reactivation (e.g. an mstsc / MS Remote Desktop resize), so a
     // one-shot receiver would fail the second connection with "already taken".
     updates: Arc<Mutex<mpsc::Receiver<DisplayUpdate>>>,
+    out: mpsc::UnboundedSender<ControlOut>,
 }
 
 #[async_trait::async_trait]
 impl RdpServerDisplay for DisplayHandler {
     async fn size(&mut self) -> DesktopSize {
-        // Called before authentication / before the target connects, so we return
-        // the configured default; a `Resize` update follows once the real size is known.
-        DesktopSize {
-            width: self.width,
-            height: self.height,
-        }
+        *self.size.lock().await
+    }
+
+    /// The server dictates the desktop size, so whatever we return here is what the session
+    /// runs at - report it so Warpgate works at exactly this size
+    /// instead of assuming the size it asked for was honored
+    async fn request_initial_size(&mut self, _client_size: DesktopSize) -> DesktopSize {
+        let size = self.size().await;
+        let _ = self.out.send(ControlOut::Size {
+            width: size.width,
+            height: size.height,
+        });
+        size
     }
 
     async fn updates(&mut self) -> Result<Box<dyn RdpServerDisplayUpdates>> {
