@@ -288,6 +288,37 @@ fn frame_to_update(x: u16, y: u16, width: u16, height: u16, data: Bytes) -> Opti
     }))
 }
 
+/// Smallest desktop MS-RDPBCGR allows a client to ask for; also keeps the hold screen from
+/// being asked to render into a degenerate framebuffer.
+const MIN_DESKTOP_DIM: u16 = 200;
+/// Largest desktop dimension we will honour.
+const MAX_DESKTOP_DIM: u16 = 8192;
+
+/// Bound a viewer-supplied desktop size. This arrives during the capability exchange — before
+/// the credential validator has run — and drives full-screen framebuffer allocations of
+/// `width * height * 4`, so it is untrusted input. Sizes whose full-screen frame would not fit
+/// a single IPC frame fall back to the default rather than being silently squashed to a
+/// different aspect ratio.
+fn clamp_desktop_size(requested: DesktopSize) -> DesktopSize {
+    let size = DesktopSize {
+        width: requested.width.clamp(MIN_DESKTOP_DIM, MAX_DESKTOP_DIM),
+        height: requested.height.clamp(MIN_DESKTOP_DIM, MAX_DESKTOP_DIM),
+    };
+    let frame_len = usize::from(size.width) * usize::from(size.height) * 4;
+    if frame_len > warpgate_rdp_ipc::MAX_FRAME_LEN {
+        warn!(
+            width = size.width,
+            height = size.height,
+            "viewer requested a desktop too large to frame; using the default"
+        );
+        return DesktopSize {
+            width: warpgate_rdp_ipc::DEFAULT_SIZE.0,
+            height: warpgate_rdp_ipc::DEFAULT_SIZE.1,
+        };
+    }
+    size
+}
+
 /// Display backend: hands the IronRDP server a receiver of framebuffer updates
 /// fed (via the stdin router) by Warpgate.
 struct DisplayHandler {
@@ -308,11 +339,12 @@ impl RdpServerDisplay for DisplayHandler {
         *self.size.lock().await
     }
 
-    /// The server dictates the desktop size, so whatever we return here is what the session
-    /// runs at - report it so Warpgate works at exactly this size
-    /// instead of assuming the size it asked for was honored
-    async fn request_initial_size(&mut self, _client_size: DesktopSize) -> DesktopSize {
-        let size = self.size().await;
+    /// Whatever this returns is what the session runs at — RDP lets the server dictate, and
+    /// the viewer resizes to match. Honour what the viewer asked for, then report it so
+    /// Warpgate paints the hold screen and dials the target at that same size.
+    async fn request_initial_size(&mut self, client_size: DesktopSize) -> DesktopSize {
+        let size = clamp_desktop_size(client_size);
+        *self.size.lock().await = size;
         let _ = self.out.send(ControlOut::Size {
             width: size.width,
             height: size.height,
@@ -491,4 +523,44 @@ fn wheel_notches(value: i16) -> i16 {
 
 fn clamp_to_i16(value: i32) -> i16 {
     value.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
+}
+
+#[cfg(test)]
+mod desktop_size_tests {
+    use super::{clamp_desktop_size, DesktopSize, MAX_DESKTOP_DIM, MIN_DESKTOP_DIM};
+
+    fn size(width: u16, height: u16) -> DesktopSize {
+        DesktopSize { width, height }
+    }
+
+    #[test]
+    fn honours_a_reasonable_request() {
+        assert_eq!(clamp_desktop_size(size(2560, 1440)), size(2560, 1440));
+    }
+
+    #[test]
+    fn clamps_degenerate_and_oversized_dimensions() {
+        assert_eq!(
+            clamp_desktop_size(size(0, 0)),
+            size(MIN_DESKTOP_DIM, MIN_DESKTOP_DIM)
+        );
+        // Clamped per dimension, and the resulting area still has to fit a single IPC frame.
+        let clamped = clamp_desktop_size(size(u16::MAX, 240));
+        assert_eq!(clamped, size(MAX_DESKTOP_DIM, 240));
+    }
+
+    #[test]
+    fn falls_back_when_a_full_frame_would_not_fit() {
+        // 8192x8192 BGRA is 256 MB — past MAX_FRAME_LEN, so neither dimension is trusted.
+        let fallback = clamp_desktop_size(size(MAX_DESKTOP_DIM, MAX_DESKTOP_DIM));
+        assert_eq!(
+            fallback,
+            size(
+                warpgate_rdp_ipc::DEFAULT_SIZE.0,
+                warpgate_rdp_ipc::DEFAULT_SIZE.1
+            )
+        );
+        let frame_len = usize::from(fallback.width) * usize::from(fallback.height) * 4;
+        assert!(frame_len <= warpgate_rdp_ipc::MAX_FRAME_LEN);
+    }
 }
