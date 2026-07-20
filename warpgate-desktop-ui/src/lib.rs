@@ -17,8 +17,13 @@ use embedded_graphics::primitives::{CornerRadii, PrimitiveStyle, Rectangle, Roun
 use embedded_graphics::text::{Alignment, Text};
 use framebuffer::Framebuffer;
 use warpgate_common::helpers::otp::OTP_DIGITS;
-pub use warpgate_rdp_ipc::{DEFAULT_SCREEN_H as SCREEN_W, DEFAULT_SCREEN_W as SCREEN_H};
 
+/// Framebuffer size assumed before a viewer or target reports its own.
+pub const DEFAULT_SCREEN_W: u16 = 1024;
+pub const DEFAULT_SCREEN_H: u16 = 768;
+pub const DEFAULT_SIZE: (u16, u16) = (DEFAULT_SCREEN_W, DEFAULT_SCREEN_H);
+
+pub use self::{DEFAULT_SCREEN_H as SCREEN_H, DEFAULT_SCREEN_W as SCREEN_W};
 use crate::char_boxes::draw_char_boxes;
 use crate::logo::logo;
 

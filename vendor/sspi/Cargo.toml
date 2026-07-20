@@ -338,6 +338,8 @@ unnecessary_safety_comment = "warn"
 unused_result_ok = "warn"
 
 [lints.rust]
+# Vendored code: silence upstream lints so they do not surface in our builds.
+warnings = { level = "allow", priority = 1 }
 ambiguous_negative_literals = "warn"
 elided_lifetimes_in_paths = "warn"
 redundant_lifetimes = "warn"

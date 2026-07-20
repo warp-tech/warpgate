@@ -3644,19 +3644,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ironrdp-blocking"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11f69f98a65a1aaf7b359ccec058a8dc8a227f8905d4e472a757b2b701f74071"
-dependencies = [
- "bytes",
- "ironrdp-connector",
- "ironrdp-core",
- "ironrdp-pdu",
- "tracing",
-]
-
-[[package]]
 name = "ironrdp-bulk"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5645,15 +5632,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
-name = "portpicker"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be97d76faf1bfab666e1375477b23fde79eccf0276e9b63b92a39d676a889ba9"
-dependencies = [
- "rand 0.8.6",
-]
-
-[[package]]
 name = "postgres-protocol"
 version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6256,7 +6234,6 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "futures-channel",
  "futures-core",
  "futures-util",
  "h2 0.4.14",
@@ -7828,13 +7805,10 @@ dependencies = [
  "picky-asn1-der",
  "picky-asn1-x509",
  "picky-krb",
- "portpicker",
  "rand 0.10.2",
  "rand_core 0.10.1",
- "reqwest 0.12.28",
  "rsa 0.10.0-rc.18",
  "rustls 0.23.41",
- "rustls-native-certs",
  "serde",
  "sha1 0.11.0",
  "sha2 0.11.0",
@@ -8531,12 +8505,10 @@ dependencies = [
  "once_cell",
  "regex-automata",
  "sharded-slab",
- "smallvec",
  "thread_local",
  "time",
  "tracing",
  "tracing-core",
- "tracing-log",
 ]
 
 [[package]]
@@ -9203,7 +9175,6 @@ dependencies = [
  "minifb",
  "png",
  "warpgate-common",
- "warpgate-rdp-ipc",
 ]
 
 [[package]]
@@ -9364,26 +9335,24 @@ name = "warpgate-protocol-rdp"
 version = "0.23.4"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytes",
- "flate2",
  "futures",
- "libc",
- "rustix 1.1.4",
- "serde",
- "serde_json",
- "tempfile",
+ "ironrdp",
+ "ironrdp-server",
+ "ironrdp-tokio",
+ "rustls 0.23.41",
+ "rustls-native-certs",
+ "rustls-pemfile",
  "tokio",
  "tokio-stream",
- "tokio-util",
  "tracing",
- "uuid",
  "warpgate-common",
- "warpgate-common-http",
  "warpgate-core",
  "warpgate-desktop-auth",
  "warpgate-desktop-ui",
- "warpgate-rdp-ipc",
  "warpgate-tls",
+ "x509-cert",
 ]
 
 [[package]]
@@ -9447,40 +9416,6 @@ dependencies = [
  "warpgate-desktop-auth",
  "warpgate-desktop-ui",
  "warpgate-tls",
-]
-
-[[package]]
-name = "warpgate-rdp-helper"
-version = "0.23.4"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "futures",
- "ironrdp",
- "ironrdp-blocking",
- "ironrdp-server",
- "rustls 0.23.41",
- "rustls-native-certs",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "sspi",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "warpgate-rdp-ipc",
- "x509-cert",
-]
-
-[[package]]
-name = "warpgate-rdp-ipc"
-version = "0.23.4"
-dependencies = [
- "bytes",
- "serde",
- "serde_json",
 ]
 
 [[package]]

@@ -19,8 +19,6 @@ members = [
     "warpgate-protocol-mysql",
     "warpgate-protocol-postgres",
     "warpgate-protocol-rdp",
-    "warpgate-rdp-helper",
-    "warpgate-rdp-ipc",
     "warpgate-protocol-ssh",
     "warpgate-protocol-vnc",
     "warpgate-desktop-ui",

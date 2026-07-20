@@ -333,3 +333,7 @@ version = "0.26"
 
 [dev-dependencies.tempfile]
 version = "3.22"
+
+[lints.rust]
+# Vendored code: silence upstream lints so they do not surface in our builds.
+warnings = "allow"

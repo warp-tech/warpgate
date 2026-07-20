@@ -38,3 +38,12 @@
  [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.tokio]
  version = "1.52"
  features = [
+@@ -368,6 +338,8 @@
+ unused_result_ok = "warn"
+ 
+ [lints.rust]
++# Vendored code: silence upstream lints so they do not surface in our builds.
++warnings = { level = "allow", priority = 1 }
+ ambiguous_negative_literals = "warn"
+ elided_lifetimes_in_paths = "warn"
+ redundant_lifetimes = "warn"

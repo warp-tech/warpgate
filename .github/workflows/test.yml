@@ -48,9 +48,6 @@ jobs:
 
       # Built separately (own lockfile) so the workspace coverage build embeds it
       # and warpgate-protocol-rdp's extraction test runs.
-      - name: Build RDP helper
-        run: just build-rdp-helper
-
       - name: Run Rust unit tests
         run: cargo llvm-cov test --workspace
 

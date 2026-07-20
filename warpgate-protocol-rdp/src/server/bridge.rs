@@ -1,30 +1,36 @@
-//! Target-side bridging: once auth succeeds, dial the target (via the client helper),
-//! pump its framebuffer to the serve helper, and record the session. Also owns the single
-//! serve-helper stdin writer (with drop-oldest frame shedding).
+//! Target-side bridging: once auth succeeds, dial the target, pump its framebuffer to the
+//! viewer-facing RDP server, and record the session. Owns the single feed into that server,
+//! shedding stale frames so a slow viewer can't grow the queue without limit.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 
 use anyhow::Result;
-use futures::SinkExt;
 use tokio::sync::Mutex;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::Sender;
 use tracing::{info, warn};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{Target, TargetRdpOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{DesktopEvent, DesktopState, Services, WarpgateServerHandle};
-use warpgate_rdp_ipc::server::Input as ServerHelperInput;
 
-use super::{BackendBridge, HelperWriter};
+use super::BackendBridge;
+use super::protocol::Input as ServerInput;
 
-/// Bridge target-side desktop events to the serve helper. Recording runs on its own task
-/// so its (serialising) `write_event` never gates live frame delivery — `DesktopEvent`
-/// clones are cheap (`RawImage` holds ref-counted `Bytes`). The recorder is also shared
-/// with `control_loop` (viewer input); the recording finalises once every handle drops.
+/// How many framebuffer updates may be queued toward the RDP server before we shed the
+/// oldest. Queued `Frame`s are cheap (ref-counted `Bytes`), but if the viewer falls behind
+/// an unbounded queue would lag the screen far behind live. Small on purpose so we deliver
+/// the live edge.
+const MAX_PENDING_FRAMES: usize = 8;
+
+/// Bridge target-side desktop events to the viewer-facing RDP server, batching each burst
+/// so the oldest frames can be dropped before delivery. Recording runs on its own task so
+/// its (serialising) `write_event` never gates live frame delivery — `DesktopEvent` clones
+/// are cheap (`RawImage` holds ref-counted `Bytes`). The recorder is also shared with
+/// `control_loop` (viewer input); the recording finalises once every handle drops.
 async fn frame_bridge(
     mut event_rx: tokio::sync::mpsc::Receiver<DesktopEvent>,
-    helper_in_tx: UnboundedSender<ServerHelperInput>,
+    server_in: Sender<ServerInput>,
     recorder: Option<Arc<DesktopRecorder>>,
 ) {
     let record_tx = recorder.map(|recorder| {
@@ -39,73 +45,23 @@ async fn frame_bridge(
         tx
     });
 
-    while let Some(event) = event_rx.recv().await {
-        if let Some(record_tx) = &record_tx {
-            // Best-effort: recording must never stall the live path, so drop under overload.
-            let _ = record_tx.try_send(event.clone());
-        }
-
-        let message = match event {
-            DesktopEvent::Resize { width, height } => ServerHelperInput::Resize { width, height },
-            DesktopEvent::RawImage { rect, data } => ServerHelperInput::Frame {
-                x: rect.x,
-                y: rect.y,
-                width: rect.width,
-                height: rect.height,
-                // `data` is ref-counted `Bytes` — moved into the frame, no framebuffer copy.
-                data,
-            },
-            DesktopEvent::State(DesktopState::Disconnected) => {
-                let _ = helper_in_tx.send(ServerHelperInput::Shutdown);
-                break;
-            }
-            DesktopEvent::Error(message) => {
-                warn!(%message, "RDP target reported an error");
-                continue;
-            }
-            DesktopEvent::State(state @ (DesktopState::Connecting | DesktopState::Connected)) => {
-                info!(?state, "RDP target");
-                continue;
-            }
-            // The client helper only emits Connecting/Connected/Resize/RawImage/Error/
-            // Disconnected; the remaining framebuffer variants never occur on this path.
-            _ => continue,
-        };
-
-        if helper_in_tx.send(message).is_err() {
-            break;
-        }
-    }
-}
-
-/// How many framebuffer updates may be queued toward the serve helper before we start
-/// shedding the oldest. Queued `Frame`s are cheap (ref-counted `Bytes`), but each still
-/// costs a copy at the framed write; if the viewer/helper falls behind, an unbounded queue
-/// would lag the screen far behind live. Small on purpose so we deliver the live edge.
-const MAX_PENDING_HELPER_FRAMES: usize = 8;
-
-pub(super) async fn helper_stdin_writer(
-    mut stdin: HelperWriter,
-    mut rx: UnboundedReceiver<ServerHelperInput>,
-) {
-    let mut batch: VecDeque<ServerHelperInput> = VecDeque::new();
-    let mut body = Vec::new();
+    let mut batch: VecDeque<ServerInput> = VecDeque::new();
     loop {
-        // Block for at least one message, then drain everything else already queued so we
-        // can shed staleness across the whole burst before doing any expensive work.
-        match rx.recv().await {
-            Some(msg) => batch.push_back(msg),
-            None => return,
-        }
-        while let Ok(msg) = rx.try_recv() {
-            batch.push_back(msg);
+        // Block for one event, then drain the rest of the burst so we can shed across the
+        // whole batch before doing any delivery.
+        let Some(first) = event_rx.recv().await else {
+            return;
+        };
+        let mut shutdown = push_event(first, &record_tx, &mut batch);
+        while let Ok(event) = event_rx.try_recv() {
+            shutdown |= push_event(event, &record_tx, &mut batch);
         }
 
         // Drop the oldest framebuffer updates beyond the cap; never drop control messages
-        // (auth verdicts / resize / shutdown), whose loss would desync the viewer.
-        let is_frame = |m: &ServerHelperInput| matches!(m, ServerHelperInput::Frame { .. });
+        // (resize / shutdown), whose loss would desync the viewer.
+        let is_frame = |m: &ServerInput| matches!(m, ServerInput::Frame { .. });
         let mut frames = batch.iter().filter(|m| is_frame(m)).count();
-        while frames > MAX_PENDING_HELPER_FRAMES {
+        while frames > MAX_PENDING_FRAMES {
             if let Some(pos) = batch.iter().position(is_frame) {
                 batch.remove(pos);
                 frames -= 1;
@@ -115,25 +71,58 @@ pub(super) async fn helper_stdin_writer(
         }
 
         for msg in batch.drain(..) {
-            msg.encode_into(&mut body);
-            // `feed` (not `send`) to avoid a flush per message; flush once after the batch.
-            if stdin
-                .feed(bytes::Bytes::copy_from_slice(&body))
-                .await
-                .is_err()
-            {
+            if server_in.send(msg).await.is_err() {
                 return;
             }
         }
-        let _ = stdin.flush().await;
+        if shutdown {
+            let _ = server_in.send(ServerInput::Shutdown).await;
+            return;
+        }
     }
+}
+
+/// Record `event`, map it to a [`ServerInput`], and queue it. Returns `true` when the
+/// target has disconnected and the session should be torn down after the batch drains.
+fn push_event(
+    event: DesktopEvent,
+    record_tx: &Option<tokio::sync::mpsc::Sender<DesktopEvent>>,
+    batch: &mut VecDeque<ServerInput>,
+) -> bool {
+    if let Some(record_tx) = record_tx {
+        // Best-effort: recording must never stall the live path, so drop under overload.
+        let _ = record_tx.try_send(event.clone());
+    }
+
+    match event {
+        DesktopEvent::Resize { width, height } => {
+            batch.push_back(ServerInput::Resize { width, height });
+        }
+        DesktopEvent::RawImage { rect, data } => batch.push_back(ServerInput::Frame {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            // `data` is ref-counted `Bytes` — moved into the frame, no framebuffer copy.
+            data,
+        }),
+        DesktopEvent::State(DesktopState::Disconnected) => return true,
+        DesktopEvent::Error(message) => warn!(%message, "RDP target reported an error"),
+        DesktopEvent::State(state @ (DesktopState::Connecting | DesktopState::Connected)) => {
+            info!(?state, "RDP target");
+        }
+        // The client only emits Connecting/Connected/Resize/RawImage/Error/Disconnected;
+        // the remaining framebuffer variants never occur on this path.
+        _ => {}
+    }
+    false
 }
 
 /// Connect to the target and start bridging its framebuffer, once auth is complete.
 pub(super) async fn connect_backend(
     services: &Services,
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
-    helper_in_tx: &UnboundedSender<ServerHelperInput>,
+    server_in_tx: &Sender<ServerInput>,
     user_info: AuthStateUserInfo,
     target: Target,
     options: TargetRdpOptions,
@@ -158,7 +147,7 @@ pub(super) async fn connect_backend(
     } = crate::connect(options, (screen.width, screen.height));
     let frame_bridge = tokio::spawn(frame_bridge(
         event_rx,
-        helper_in_tx.clone(),
+        server_in_tx.clone(),
         recorder.clone(),
     ));
     Ok(BackendBridge {

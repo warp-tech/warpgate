@@ -84,3 +84,11 @@
  features = ["static_secrets"]
  
  [dependencies.zeroize]
+@@ -351,3 +333,7 @@
+ 
+ [dev-dependencies.tempfile]
+ version = "3.22"
++
++[lints.rust]
++# Vendored code: silence upstream lints so they do not surface in our builds.
++warnings = "allow"
