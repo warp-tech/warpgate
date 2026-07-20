@@ -9,6 +9,7 @@ publish = false
 anyhow.workspace = true
 bytes.workspace = true
 futures.workspace = true
+jpeg-encoder.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
 sea-orm.workspace = true
@@ -25,3 +26,7 @@ warpgate-db-entities = { path = "../warpgate-db-entities", default-features = fa
 warpgate-protocol-vnc = { path = "../warpgate-protocol-vnc" }
 warpgate-protocol-rdp = { path = "../warpgate-protocol-rdp" }
 warpgate-web-clients-common = { path = "../warpgate-web-clients-common" }
+
+[dev-dependencies]
+# Decodes our own JPEG output so the channel-order test can assert on actual pixels.
+zune-jpeg = "0.4"

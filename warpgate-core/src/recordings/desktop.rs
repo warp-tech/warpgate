@@ -6,8 +6,8 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use warpgate_db_entities::Recording::RecordingKind;
 
-use super::framebuffer::{Framebuffer, Rect, decode_jpeg_rgb, encode_png_rgba};
 use super::{Error, Recorder, Result};
+use crate::protocols::framebuffer::{Framebuffer, Rect, decode_jpeg_rgb, encode_png_rgba};
 use crate::recordings::RecordingWriterOpener;
 use crate::recordings::writer::NDJsonRecordingWriter;
 use crate::{DesktopEvent, DesktopInput, DesktopRect};
@@ -248,7 +248,7 @@ impl DesktopRecorder {
     ) -> (Vec<u8>, Vec<u8>, Result<()>) {
         if rgba.len() >= PNG_OFFLOAD_ENCODING_ABOVE_SIZE {
             match tokio::task::spawn_blocking(move || {
-                let r = encode_png_rgba(w, h, &rgba, &mut out);
+                let r = encode_png_rgba(w, h, &rgba, &mut out).map_err(Error::PngEncode);
                 (rgba, out, r)
             })
             .await
@@ -257,7 +257,7 @@ impl DesktopRecorder {
                 Err(e) => (Vec::new(), Vec::new(), Err(Error::Codec(e.to_string()))),
             }
         } else {
-            let r = encode_png_rgba(w, h, &rgba, &mut out);
+            let r = encode_png_rgba(w, h, &rgba, &mut out).map_err(Error::PngEncode);
             (rgba, out, r)
         }
     }

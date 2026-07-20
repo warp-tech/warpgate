@@ -41,6 +41,17 @@ pub async fn ws_handler(
     Ok(ws.on_upgrade(move |socket| async move {
         let (mut sink, mut stream) = socket.split();
 
+        // Hand the viewer a base image before anything else. Without it a fresh attach —
+        // a page reload, or a backend that painted before the socket arrived — would apply
+        // deltas to a blank canvas and show a black screen until the target next repainted
+        // the full surface, which it may never do.
+        if let Some(keyframe) = session.keyframe().await
+            && let WsPayload::Binary(bytes) = keyframe.ws_payload()
+            && sink.send(Message::Binary(bytes)).await.is_err()
+        {
+            return;
+        }
+
         // The loop below drains the (reconnect) buffer at the top of its first iteration.
         let mut keepalive = tokio::time::interval(Duration::from_secs(30));
         keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -80,9 +91,17 @@ pub async fn ws_handler(
                 maybe_msg = stream.next() => {
                     match maybe_msg {
                         Some(Ok(Message::Text(text))) => {
-                            if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text)
-                                && let Some(input) = Option::<DesktopInput>::from(client_msg) {
-                                session.send_input(input).await;
+                            if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text) {
+                                // Answer a refresh from our own surface as well as asking the
+                                // backend. RDP has no repaint request wired through the helper,
+                                // so forwarding alone would leave the viewer stuck on black.
+                                if matches!(client_msg, ClientMessage::Refresh)
+                                    && let Some(keyframe) = session.keyframe().await {
+                                    session.push(keyframe).await;
+                                }
+                                if let Some(input) = Option::<DesktopInput>::from(client_msg) {
+                                    session.send_input(input).await;
+                                }
                             }
                         }
                         Some(Ok(Message::Close(_))) | None => break,

@@ -103,6 +103,13 @@ pub enum ServerMessage {
         #[serde(with = "warpgate_common::helpers::serde_base64")]
         data: Bytes,
     },
+    /// Full-canvas PNG snapshot handed to a viewer as it attaches, so it has a base image
+    /// to paint deltas onto. Structural: a viewer that loses this one paints onto black.
+    Keyframe {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
     CopyRect {
         dst: WsRect,
         src_x: u16,
@@ -145,6 +152,7 @@ impl ServerMessage {
             Self::RawImage { rect, data } => WsPayload::Binary(encode_image(1, *rect, data)),
             Self::JpegImage { rect, data } => WsPayload::Binary(encode_image(2, *rect, data)),
             Self::Cursor { rect, data } => WsPayload::Binary(encode_image(3, *rect, data)),
+            Self::Keyframe { rect, data } => WsPayload::Binary(encode_image(4, *rect, data)),
             other => WsPayload::Text(serde_json::to_string(other).unwrap_or_default()),
         }
     }

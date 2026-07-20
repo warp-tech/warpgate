@@ -7,11 +7,13 @@ use warpgate_common::ListenEndpoint;
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
 mod desktop;
+pub(crate) mod framebuffer;
 mod handle;
 
 pub use desktop::{
     DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
 };
+pub use framebuffer::{Framebuffer, PngEncodeError};
 pub use handle::{SessionHandle, WarpgateServerHandle};
 
 #[derive(Debug, thiserror::Error)]

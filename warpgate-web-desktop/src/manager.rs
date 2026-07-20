@@ -98,15 +98,20 @@ impl WebDesktopClientManager {
         let target_kind = TargetKind::from(&target.options);
 
         // Each backend exposes the same (event_rx, input_tx, abort_tx) handle shape
-        // over the shared DesktopEvent/DesktopInput types.
-        let (event_rx, input_tx, abort_tx) = match target.options.clone() {
+        // over the shared DesktopEvent/DesktopInput types. The trailing flag asks the
+        // event loop to re-encode raw tiles as JPEG for the browser.
+        let (event_rx, input_tx, abort_tx, encode_jpeg) = match target.options.clone() {
             TargetOptions::Vnc(options) => {
                 let h = warpgate_protocol_vnc::connect(options);
-                (h.event_rx, h.input_tx, h.abort_tx)
+                // Tight already picks JPEG for photographic tiles and keeps text and UI
+                // lossless, so re-encoding what it deliberately sent as raw would only
+                // degrade it.
+                (h.event_rx, h.input_tx, h.abort_tx, false)
             }
             TargetOptions::Rdp(options) => {
                 let h = warpgate_protocol_rdp::connect(options);
-                (h.event_rx, h.input_tx, h.abort_tx)
+                // The RDP helper only ever emits raw RGBA.
+                (h.event_rx, h.input_tx, h.abort_tx, true)
             }
             _ => return Err(WarpgateError::InvalidTarget),
         };
@@ -158,7 +163,13 @@ impl WebDesktopClientManager {
 
         self.insert(session.clone()).await;
 
-        spawn_event_loop(session.clone(), event_rx, self.sessions(), recorder);
+        spawn_event_loop(
+            session.clone(),
+            event_rx,
+            self.sessions(),
+            recorder,
+            encode_jpeg,
+        );
 
         debug!(session=%session_id, user=%username, target=%target_name, "Web-desktop session created");
 
@@ -171,12 +182,22 @@ fn spawn_event_loop(
     mut event_rx: mpsc::Receiver<warpgate_core::DesktopEvent>,
     sessions: Arc<Mutex<HashMap<Uuid, Arc<WebDesktopSession>>>>,
     recorder: Option<Arc<DesktopRecorder>>,
+    encode_jpeg: bool,
 ) {
     let session_id = session.id();
     let span = info_span!("web-desktop", session=%session_id);
     tokio::spawn(
         async move {
             while let Some(event) = event_rx.recv().await {
+                // Composite before any re-encoding, so this is a plain blit rather than a
+                // JPEG decode round-trip. Gives a viewer attaching later a base image.
+                session.composite(&event).await;
+                // Ahead of the recorder, so recordings shrink along with the wire.
+                let event = if encode_jpeg {
+                    crate::jpeg::encode_raw_images(event).await
+                } else {
+                    event
+                };
                 if let Some(recorder) = &recorder
                     && let Err(error) = recorder.write_event(&event).await
                 {
