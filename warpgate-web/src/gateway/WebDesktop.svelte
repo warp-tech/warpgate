@@ -124,6 +124,9 @@
             case 4:
                 // Full-canvas base image sent on attach; never shed from the queue.
                 return { type: 'png_image', rect, data, keyframe: true }
+            case 5:
+                // Lossless resend of a region that stopped changing.
+                return { type: 'png_image', rect, data }
             default:
                 return null
         }

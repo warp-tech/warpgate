@@ -7,7 +7,9 @@ use tokio::time::Instant;
 use warpgate_db_entities::Recording::RecordingKind;
 
 use super::{Error, Recorder, Result};
-use crate::protocols::framebuffer::{Framebuffer, Rect, decode_jpeg_rgb, encode_png_rgba};
+use crate::protocols::framebuffer::{
+    Framebuffer, Rect, decode_jpeg_rgb, decode_png_rgba, encode_png_rgba,
+};
 use crate::recordings::RecordingWriterOpener;
 use crate::recordings::writer::NDJsonRecordingWriter;
 use crate::{DesktopEvent, DesktopInput, DesktopRect};
@@ -353,6 +355,29 @@ impl DesktopRecorder {
                 let item = DesktopRecordingItem::JpegImage {
                     time,
                     rect,
+                    data: data.clone(),
+                };
+                self.write_data_item(&mut st, &item).await?;
+            }
+            DesktopEvent::PngImage { rect, data } => {
+                // Ordered before this PNG in the stream: flush any pending raw pixels.
+                self.flush_delta(&mut st, time).await?;
+                let rect: RecordingRect = (*rect).into();
+                // Composite so keyframes carry the refined pixels, and pass the already
+                // lossless PNG through to the stream unchanged.
+                if let Some((_, _, rgba)) = decode_png_rgba(data) {
+                    st.fb.blit_rgba(
+                        u32::from(rect.x),
+                        u32::from(rect.y),
+                        u32::from(rect.width),
+                        u32::from(rect.height),
+                        &rgba,
+                    );
+                }
+                let item = DesktopRecordingItem::PngImage {
+                    time,
+                    rect,
+                    keyframe: false,
                     data: data.clone(),
                 };
                 self.write_data_item(&mut st, &item).await?;

@@ -40,6 +40,8 @@ pub enum DesktopEvent {
     RawImage { rect: DesktopRect, data: Bytes },
     /// A region updated with a JPEG-encoded image.
     JpegImage { rect: DesktopRect, data: Bytes },
+    /// A region updated with a lossless PNG.
+    PngImage { rect: DesktopRect, data: Bytes },
     /// A region was copied from elsewhere in the framebuffer.
     CopyRect {
         dst: DesktopRect,
