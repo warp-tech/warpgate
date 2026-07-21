@@ -9,6 +9,7 @@ use serde_json::Value;
 use tokio::sync::{Mutex, broadcast};
 use tracing::info;
 use warpgate_common::SessionId;
+use warpgate_common_http::SessionKeepalive;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::{SessionStateInit, State, WarpgateServerHandle};
 
@@ -60,6 +61,7 @@ pub struct SessionStore {
     session_handles: HashMap<SessionId, Arc<Mutex<WarpgateServerHandle>>>,
     session_close_senders: HashMap<SessionId, broadcast::Sender<()>>,
     session_timestamps: HashMap<SessionId, Instant>,
+    session_keepalives: HashMap<SessionId, Weak<()>>,
     this: Weak<Mutex<Self>>,
 }
 
@@ -73,12 +75,13 @@ impl SessionStore {
                 session_handles: HashMap::new(),
                 session_close_senders: HashMap::new(),
                 session_timestamps: HashMap::new(),
+                session_keepalives: HashMap::new(),
                 this: me.clone(),
             })
         })
     }
 
-    pub async fn process_request(&mut self, req: Request) -> poem::Result<Request> {
+    pub async fn process_request(&mut self, mut req: Request) -> poem::Result<Request> {
         let session = <&Session>::from_request_without_body(&req).await?;
 
         let request_counter = session.get::<u64>(REQUEST_COUNTER_SESSION_KEY).unwrap_or(0);
@@ -86,6 +89,7 @@ impl SessionStore {
 
         if let Some(session_id) = session.get::<SessionId>(SESSION_ID_SESSION_KEY) {
             self.session_timestamps.insert(session_id, Instant::now());
+            req.set_data(SessionKeepalive::new(self.keepalive(session_id)));
             // } else if request_counter == 5 {
             // Start logging sessions when they've got 5 requests
             // self.create_handle_for(&req).await?;
@@ -171,21 +175,50 @@ impl SessionStore {
             })
     }
 
+    /// Get a token that prevents the session from getting cleaned up
+    /// until it's dropped
+    fn keepalive(&mut self, id: SessionId) -> Arc<()> {
+        if let Some(token) = self.session_keepalives.get(&id).and_then(Weak::upgrade) {
+            return token;
+        }
+        let token = Arc::new(());
+        self.session_keepalives.insert(id, Arc::downgrade(&token));
+        token
+    }
+
     pub fn remove_session(&mut self, session: &Session) {
         if let Some(id) = session.get::<SessionId>(SESSION_ID_SESSION_KEY) {
             self.remove_session_by_id(id);
         }
     }
 
-    pub fn vacuum(&mut self, session_max_age: Duration) {
+    pub async fn vacuum(&mut self, session_max_age: Duration) {
         let now = Instant::now();
         let mut to_remove = vec![];
         for (id, timestamp) in &self.session_timestamps {
-            if now.duration_since(*timestamp) > session_max_age {
+            if now.duration_since(*timestamp) > session_max_age
+                && !self
+                    .session_keepalives
+                    .get(id)
+                    .is_some_and(|token| token.strong_count() > 0)
+            {
                 to_remove.push(*id);
             }
         }
         for id in to_remove {
+            info!(%id, "Expiring idle HTTP session");
+            // Closing the handle also drops the browser-side session, so the client
+            // reauthenticates instead of keeping a cookie whose session no longer exists.
+            if let Some(handle) = self.session_handles.get(&id).cloned() {
+                handle
+                    .lock()
+                    .await
+                    .session_state()
+                    .lock()
+                    .await
+                    .handle
+                    .close();
+            }
             self.remove_session_by_id(id);
         }
     }
@@ -196,5 +229,43 @@ impl SessionStore {
         }
         self.session_handles.remove(&id);
         self.session_timestamps.remove(&id);
+        self.session_keepalives.remove(&id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn expired_store(id: SessionId) -> Arc<Mutex<SessionStore>> {
+        let store = SessionStore::new();
+        store
+            .lock()
+            .await
+            .session_timestamps
+            .insert(id, Instant::now() - Duration::from_secs(60));
+        store
+    }
+
+    #[tokio::test]
+    async fn vacuum_expires_idle_session() {
+        let id = SessionId::new_v4();
+        let store = expired_store(id).await;
+        store.lock().await.vacuum(Duration::from_secs(1)).await;
+        assert!(!store.lock().await.session_timestamps.contains_key(&id));
+    }
+
+    #[tokio::test]
+    async fn vacuum_spares_session_with_live_connection() {
+        let id = SessionId::new_v4();
+        let store = expired_store(id).await;
+
+        let token = store.lock().await.keepalive(id);
+        store.lock().await.vacuum(Duration::from_secs(1)).await;
+        assert!(store.lock().await.session_timestamps.contains_key(&id));
+
+        drop(token);
+        store.lock().await.vacuum(Duration::from_secs(1)).await;
+        assert!(!store.lock().await.session_timestamps.contains_key(&id));
     }
 }
