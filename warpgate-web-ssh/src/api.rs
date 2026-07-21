@@ -7,6 +7,7 @@ use poem::web::websocket::{Message, WebSocket};
 use poem::web::{Data, Path};
 use poem::{IntoResponse, handler};
 use uuid::Uuid;
+use warpgate_common_http::SessionKeepalive;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_protocol_ssh::known_hosts::KnownHosts;
 
@@ -19,6 +20,7 @@ pub async fn ws_handler(
     Path(session_id): Path<Uuid>,
     ctx: Data<&AuthenticatedRequestContext>,
     manager: Data<&Arc<WebSshClientManager>>,
+    session_keepalive: Option<Data<&SessionKeepalive>>,
     ws: WebSocket,
 ) -> poem::Result<impl IntoResponse> {
     let requesting_user_id = ctx.auth.user_id();
@@ -39,6 +41,7 @@ pub async fn ws_handler(
 
     let manager = (*manager).clone();
     let db = ctx.services().db.clone();
+    let session_keepalive = session_keepalive.map(|x| x.guard());
 
     Ok(ws.on_upgrade(move |socket| async move {
         let (mut sink, mut stream) = socket.split();
@@ -99,6 +102,8 @@ pub async fn ws_handler(
         }
 
         session.start_disconnect_timer(manager.clone()).await;
+
+        drop(session_keepalive)
     }))
 }
 

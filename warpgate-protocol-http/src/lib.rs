@@ -346,7 +346,7 @@ impl ProtocolServer for HTTPProtocolServer {
 
         tokio::spawn(async move {
             loop {
-                session_store.lock().await.vacuum(session_max_age);
+                session_store.lock().await.vacuum(session_max_age).await;
                 http_client_cache.vacuum().await;
                 tokio::time::sleep(HTTP_CLIENT_CACHE_VACUUM_INTERVAL).await;
             }
