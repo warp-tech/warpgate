@@ -26,6 +26,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
+use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetRdpOptions};
 use warpgate_core::recordings::DesktopRecorder;
@@ -47,8 +48,9 @@ use warpgate_desktop_auth::{
     DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
 };
 
-/// How many pending messages the viewer-facing RDP server accepts before its bounded feed
-/// applies backpressure; `frame_bridge` sheds stale frames ahead of it.
+/// Depth of the feed into the viewer-facing RDP server. Bounded so a slow viewer
+/// backpressures `frame_bridge` (and through it the target) rather than letting delta
+/// frames queue without limit; kept small so the target paces close to the live edge.
 const SERVER_INPUT_CAPACITY: usize = 16;
 
 /// Size of each direction of the in-memory duplex carrying raw RDP bytes between the
@@ -166,8 +168,8 @@ async fn handle_connection(
     // Warpgate owns the viewer socket and the session; `rdp` runs the RDP server state
     // machine over it and terminates TLS toward the viewer.
     let (server_out_tx, server_out_rx) = unbounded_channel::<ServerEvent>();
-    // Bounded so a slow viewer applies backpressure; `frame_bridge` sheds stale frames
-    // ahead of it, and control_loop's occasional auth verdicts share the same feed.
+    // Bounded so a slow viewer backpressures the target losslessly; `frame_bridge` frames
+    // and control_loop's occasional auth verdicts share this one ordered feed.
     let (server_in_tx, server_in_rx) = channel::<ServerInput>(SERVER_INPUT_CAPACITY);
 
     // `ironrdp-server` requires a `Sync` transport, which the session-wrapped viewer
@@ -216,9 +218,14 @@ async fn control_loop(
     server_in_tx: Sender<ServerInput>,
 ) -> Result<()> {
     let mut backend: Option<BackendBridge> = None;
-    // What the RDP server says the session settled on, which is what we paint and what we
-    // ask the target for. Seeded with the size we advertised, in case we dial before the
-    // capability exchange reports back.
+    // Authorized target awaiting the first `Size` event before we dial it. The RDP
+    // sequence delivers the viewer's credentials (CredSSP) *before* its desktop size
+    // (capability exchange), so we hold the authorized target here and dial once the
+    // negotiated resolution arrives — otherwise the target would be dialed at the
+    // pre-negotiation default and the whole session would run at that size.
+    let mut pending_dial: Option<(AuthStateUserInfo, Target, TargetRdpOptions)> = None;
+    // What the RDP server settled on with the viewer, which is what we ask the target for.
+    // Seeded with the size we advertised, used only if the viewer never negotiates one.
     let mut screen = warpgate_desktop_ui::Screen {
         width: DEFAULT_SCREEN_W,
         height: DEFAULT_SCREEN_H,
@@ -229,8 +236,9 @@ async fn control_loop(
             ServerEvent::AuthRequest {
                 username, password, ..
             } => {
-                if backend.is_some() {
-                    // Already authenticated; ignore a duplicate request.
+                if backend.is_some() || pending_dial.is_some() {
+                    // Already authenticated (dialed, or awaiting the size to dial); ignore
+                    // a duplicate request.
                     continue;
                 }
                 match authenticate::<RdpProto>(
@@ -247,18 +255,8 @@ async fn control_loop(
                         target,
                         options,
                     }) => {
-                        backend = Some(
-                            connect_backend(
-                                &services,
-                                &server_handle,
-                                &server_in_tx,
-                                user_info,
-                                target,
-                                options,
-                                screen,
-                            )
-                            .await?,
-                        );
+                        // Accept the NLA so the capability exchange proceeds and reports
+                        // the viewer's desktop size; defer the target dial to that `Size`.
                         if server_in_tx
                             .send(ServerInput::AuthResponse { accept: true })
                             .await
@@ -266,6 +264,7 @@ async fn control_loop(
                         {
                             break;
                         }
+                        pending_dial = Some((user_info, target, options));
                     }
                     Ok(DesktopAuthOutcome::NeedsInteractive(interactive)) => {
                         // Accept the NLA so the RDP session starts, then collect the second
@@ -283,7 +282,7 @@ async fn control_loop(
                             &interactive,
                             &mut events,
                             &server_in_tx,
-                            screen,
+                            &mut screen,
                         )
                         .await
                         {
@@ -296,18 +295,18 @@ async fn control_loop(
                                 .await
                                 {
                                     Ok((target, options)) => {
-                                        backend = Some(
-                                            connect_backend(
-                                                &services,
-                                                &server_handle,
-                                                &server_in_tx,
-                                                user_info,
-                                                target,
-                                                options,
-                                                screen,
-                                            )
-                                            .await?,
-                                        );
+                                        // `screen` was updated by `run_hold_screen` as the
+                                        // viewer negotiated its size during the 2FA prompt.
+                                        pending_dial = Some((user_info, target, options));
+                                        dial_if_pending(
+                                            &mut backend,
+                                            &mut pending_dial,
+                                            &services,
+                                            &server_handle,
+                                            &server_in_tx,
+                                            screen,
+                                        )
+                                        .await?;
                                     }
                                     Err(error) => {
                                         warn!(%error, "Authorization failed after second factor");
@@ -345,12 +344,33 @@ async fn control_loop(
             }
             ServerEvent::Size { width, height } => {
                 screen = warpgate_desktop_ui::Screen { width, height };
+                dial_if_pending(
+                    &mut backend,
+                    &mut pending_dial,
+                    &services,
+                    &server_handle,
+                    &server_in_tx,
+                    screen,
+                )
+                .await?;
                 continue;
             }
             // Viewer input: record it for audit (like native VNC) then forward to the
             // target. `break` once the target client is gone (send fails).
             ServerEvent::Input(input) => input,
         };
+
+        // A viewer that never negotiates a size won't emit `Size`; dial the pending target
+        // on its first input so the session still connects (at the advertised default).
+        dial_if_pending(
+            &mut backend,
+            &mut pending_dial,
+            &services,
+            &server_handle,
+            &server_in_tx,
+            screen,
+        )
+        .await?;
 
         // Reached only for the viewer-input variants above.
         let Some(backend) = &backend else {
@@ -368,6 +388,37 @@ async fn control_loop(
 
     if let Some(backend) = backend {
         backend.shutdown();
+    }
+    Ok(())
+}
+
+/// An authorized target held until the viewer's negotiated size is known.
+type PendingDial = (AuthStateUserInfo, Target, TargetRdpOptions);
+
+/// Dial the pending target, if there is one and it hasn't been dialed yet, at `screen`.
+async fn dial_if_pending(
+    backend: &mut Option<BackendBridge>,
+    pending: &mut Option<PendingDial>,
+    services: &Services,
+    server_handle: &Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
+    server_in_tx: &Sender<ServerInput>,
+    screen: warpgate_desktop_ui::Screen,
+) -> Result<()> {
+    if backend.is_none()
+        && let Some((user_info, target, options)) = pending.take()
+    {
+        *backend = Some(
+            connect_backend(
+                services,
+                server_handle,
+                server_in_tx,
+                user_info,
+                target,
+                options,
+                screen,
+            )
+            .await?,
+        );
     }
     Ok(())
 }

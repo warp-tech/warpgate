@@ -122,6 +122,9 @@ where
         .with_tls(tls)
         .with_input_handler(input)
         .with_display_handler(display)
+        // Opt in to calling `request_initial_size`; without it the acceptor ignores the
+        // viewer's requested resolution and pins the session to `size()`'s seed.
+        .with_honor_client_desktop_size(true)
         .with_credential_validator(Some(validator))
         .build();
 

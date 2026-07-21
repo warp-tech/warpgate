@@ -30,7 +30,7 @@ pub(super) async fn run_hold_screen(
     interactive: &InteractiveAuth,
     events: &mut UnboundedReceiver<ServerEvent>,
     server_in_tx: &Sender<ServerInput>,
-    screen: ui::Screen,
+    screen: &mut ui::Screen,
 ) -> Result<Option<AuthStateUserInfo>> {
     let state = services
         .auth_state_store
@@ -47,7 +47,7 @@ pub(super) async fn run_hold_screen(
     // Hold screen renders at the negotiated screen size,
     // resizing means a reactivation which races with the resize itself
     let mut otp = OtpEntry::new("rdp");
-    let mut painter = HoldPainter::new(screen);
+    let mut painter = HoldPainter::new(*screen);
     let mut ticker = tokio::time::interval(HOLD_RENDER_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -100,6 +100,13 @@ pub(super) async fn run_hold_screen(
                         ServerEvent::Input(DesktopInput::Key { keysym, down }) if down => {
                             key_otp_action(keysym)
                         }
+                        // Track the viewer's negotiated size so the hold screen renders at
+                        // it and the caller dials the target at it once auth completes.
+                        ServerEvent::Size { width, height } => {
+                            *screen = ui::Screen { width, height };
+                            painter.set_screen(*screen);
+                            None
+                        }
                         _ => None,
                     };
                     if !awaiting_web
@@ -143,6 +150,10 @@ struct HoldPainter {
 impl HoldPainter {
     const fn new(screen: ui::Screen) -> Self {
         Self { tick: 0, screen }
+    }
+
+    fn set_screen(&mut self, screen: ui::Screen) {
+        self.screen = screen;
     }
 
     /// Render one frame with `render_frame(tick)` (RGB888), convert it to the BGRA the RDP
