@@ -9393,7 +9393,7 @@ dependencies = [
 name = "warpgate-protocol-vnc"
 version = "0.23.4"
 dependencies = [
- "aes 0.8.4",
+ "aes 0.9.1",
  "anyhow",
  "bytes",
  "ecb",

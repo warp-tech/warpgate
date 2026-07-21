@@ -23,7 +23,7 @@ uuid.workspace = true
 thiserror.workspace = true
 rustls.workspace = true
 tokio-rustls.workspace = true
-aes = { version = "0.8", default-features = false }
+aes = { version = "0.9", default-features = false }
 ecb = { version = "0.1", default-features = false, features = ["block-padding"] }
 md-5 = { version = "0.11", default-features = false }
 num-bigint = { version = "0.4", default-features = false }
