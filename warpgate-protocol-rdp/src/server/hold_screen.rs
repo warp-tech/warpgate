@@ -6,18 +6,16 @@ use std::convert::Infallible;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use tokio::sync::mpsc::UnboundedSender;
-use tokio_stream::StreamExt;
+use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use tracing::warn;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
-use warpgate_core::Services;
+use warpgate_core::{DesktopInput, Services};
 use warpgate_desktop_auth::{
     InteractiveAuth, OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt,
 };
 use warpgate_desktop_ui::{self as ui, AuthPrompt};
-use warpgate_rdp_ipc::server::{Event as ServerHelperEvent, Input as ServerHelperInput};
 
-use super::HelperReader;
+use super::protocol::{Event as ServerEvent, Input as ServerInput};
 
 /// How often the holding screen repaints (spinner animation cadence).
 const HOLD_RENDER_INTERVAL: Duration = Duration::from_millis(100);
@@ -25,14 +23,14 @@ const HOLD_RENDER_INTERVAL: Duration = Duration::from_millis(100);
 /// Render a holding screen to the viewer and collect the interactive second factor — a
 /// TOTP typed on the viewer's keyboard, or an out-of-band web approval — until the auth
 /// state is fully accepted. Returns the authenticated user on success, `None` on failure
-/// or viewer disconnect. Input events are read from the same serve-helper channel as the
-/// main control loop, so it hands us `&mut lines` for the duration.
+/// or viewer disconnect. Input events are read from the same channel as the main control
+/// loop, so it hands us `&mut events` for the duration.
 pub(super) async fn run_hold_screen(
     services: &Services,
     interactive: &InteractiveAuth,
-    frames: &mut HelperReader,
-    helper_in_tx: &UnboundedSender<ServerHelperInput>,
-    screen: ui::Screen,
+    events: &mut UnboundedReceiver<ServerEvent>,
+    server_in_tx: &Sender<ServerInput>,
+    screen: &mut ui::Screen,
 ) -> Result<Option<AuthStateUserInfo>> {
     let state = services
         .auth_state_store
@@ -49,7 +47,7 @@ pub(super) async fn run_hold_screen(
     // Hold screen renders at the negotiated screen size,
     // resizing means a reactivation which races with the resize itself
     let mut otp = OtpEntry::new("rdp");
-    let mut painter = HoldPainter::new(screen);
+    let mut painter = HoldPainter::new(*screen);
     let mut ticker = tokio::time::interval(HOLD_RENDER_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -71,7 +69,7 @@ pub(super) async fn run_hold_screen(
                     .await;
                 // Swap the OTP prompt for a "Connecting" screen before the caller blocks on
                 // the backend connect, so the viewer gets feedback instead of a frozen frame.
-                let _ = painter.paint(helper_in_tx, ui::render_connecting);
+                let _ = painter.paint(server_in_tx, ui::render_connecting).await;
                 return Ok(Some(user_info));
             }
             AuthResult::Rejected => return Ok(None),
@@ -91,17 +89,24 @@ pub(super) async fn run_hold_screen(
             tokio::select! {
                 // Browser approval landed (or the signal lagged/closed); re-verify on the next loop.
                 _ = approval.recv(), if awaiting_web => break,
-                frame = frames.next() => {
-                    let Some(frame) = frame else {
+                event = events.recv() => {
+                    let Some(event) = event else {
                         return Ok(None);
                     };
-                    let frame = frame.context("reading serve helper output")?;
-                    let action = match ServerHelperEvent::decode(&frame) {
-                        Some(ServerHelperEvent::Disconnected) => return Ok(None),
-                        Some(ServerHelperEvent::Scancode { code, down, .. }) if down => {
+                    let action = match event {
+                        ServerEvent::Input(DesktopInput::Scancode { code, down, .. }) if down => {
                             scancode_otp_action(code)
                         }
-                        Some(ServerHelperEvent::Key { keysym, down }) if down => key_otp_action(keysym),
+                        ServerEvent::Input(DesktopInput::Key { keysym, down }) if down => {
+                            key_otp_action(keysym)
+                        }
+                        // Track the viewer's negotiated size so the hold screen renders at
+                        // it and the caller dials the target at it once auth completes.
+                        ServerEvent::Size { width, height } => {
+                            *screen = ui::Screen { width, height };
+                            painter.set_screen(*screen);
+                            None
+                        }
                         _ => None,
                     };
                     if !awaiting_web
@@ -123,14 +128,18 @@ pub(super) async fn run_hold_screen(
                         }
                 },
                 _ = ticker.tick() => {
-                    painter.paint(helper_in_tx, |screen, tick| ui::render_authentication(screen, tick, &prompt))?;
+                    painter
+                        .paint(server_in_tx, |screen, tick| {
+                            ui::render_authentication(screen, tick, &prompt)
+                        })
+                        .await?;
                 },
             }
         }
     }
 }
 
-/// Paints the full-screen hold-screen UI to the RDP viewer via the serve helper, owning the
+/// Paints the full-screen hold-screen UI to the RDP viewer, owning the
 /// spinner tick. `paint` takes a UI render function (`ui::render_*`) so the prompt and
 /// "Connecting" screens go through one code path.
 struct HoldPainter {
@@ -143,11 +152,15 @@ impl HoldPainter {
         Self { tick: 0, screen }
     }
 
-    /// Render one frame with `render_frame(tick)` (RGB888), convert it to the BGRA the serve
-    /// helper expects, and push it as a full-screen frame. Advances the spinner tick.
-    fn paint(
+    fn set_screen(&mut self, screen: ui::Screen) {
+        self.screen = screen;
+    }
+
+    /// Render one frame with `render_frame(tick)` (RGB888), convert it to the BGRA the RDP
+    /// server expects, and push it as a full-screen frame. Advances the spinner tick.
+    async fn paint(
         &mut self,
-        helper_in_tx: &UnboundedSender<ServerHelperInput>,
+        server_in_tx: &Sender<ServerInput>,
         render_frame: impl FnOnce(ui::Screen, u64) -> Result<Vec<u8>, Infallible>,
     ) -> Result<()> {
         let rgb = render_frame(self.screen, self.tick).unwrap_or_default();
@@ -159,17 +172,18 @@ impl HoldPainter {
                 bgra.extend_from_slice(&[b, g, r, 255]);
             }
         }
-        if helper_in_tx
-            .send(ServerHelperInput::Frame {
+        if server_in_tx
+            .send(ServerInput::Frame {
                 x: 0,
                 y: 0,
                 width: self.screen.width,
                 height: self.screen.height,
                 data: bgra.into(),
             })
+            .await
             .is_err()
         {
-            bail!("serve helper channel closed");
+            bail!("RDP server channel closed");
         }
         Ok(())
     }

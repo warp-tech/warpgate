@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.89"
 name = "ironrdp-session"
-version = "0.9.0"
+version = "0.11.0"
 authors = [
     "Devolutions Inc. <infos@devolutions.net>",
     "Teleport <goteleport.com>",
@@ -59,30 +59,27 @@ doctest = false
 [dependencies.ironrdp-bulk]
 version = "0.1"
 
-[dependencies.ironrdp-connector]
-version = "0.9"
-
 [dependencies.ironrdp-core]
 version = "0.2"
 
 [dependencies.ironrdp-displaycontrol]
-version = "0.6"
+version = "0.8"
 
 [dependencies.ironrdp-dvc]
-version = "0.6"
+version = "0.8"
 
 [dependencies.ironrdp-error]
 version = "0.2"
 
 [dependencies.ironrdp-graphics]
-version = "0.8"
+version = "0.9"
 
 [dependencies.ironrdp-pdu]
-version = "0.8"
+version = "0.9"
 features = ["std"]
 
 [dependencies.ironrdp-svc]
-version = "0.7"
+version = "0.8"
 
 [dependencies.qoicoubeh]
 version = "0.5"
@@ -190,6 +187,8 @@ wildcard_dependencies = "warn"
 wildcard_imports = "warn"
 
 [lints.rust]
+# Vendored code: silence upstream lints so they do not surface in our builds.
+warnings = { level = "allow", priority = 1 }
 absolute_paths_not_starting_with_crate = "warn"
 ambiguous_negative_literals = "warn"
 elided_lifetimes_in_paths = "warn"

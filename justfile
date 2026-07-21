@@ -6,10 +6,6 @@ run *ARGS='run':
 run-release *ARGS='run':
     RUST_BACKTRACE=1 cargo run --all-features --release -- --config config.yaml {{ARGS}}
 
-# Run before `cargo build` so warpgate-protocol-rdp's build script can embed it into the main binary.
-build-rdp-helper *ARGS:
-    cd warpgate-rdp-helper && cargo build --release {{ARGS}}
-
 fmt:
     for p in {{projects}}; do cargo fmt -p $p -v; done
 
@@ -18,7 +14,6 @@ fix *ARGS:
 
 clippy *ARGS:
     cargo cranky --workspace --all-features {{ARGS}}
-    cd warpgate-rdp-helper && cargo cranky --workspace --all-features {{ARGS}}
 
 bless *ARGS:
     for p in {{projects}}; do cargo bless --manifest-path $p/Cargo.toml {{ARGS}}; done

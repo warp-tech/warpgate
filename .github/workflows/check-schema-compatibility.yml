@@ -24,7 +24,6 @@ jobs:
       - name: Generate API schema files
         run: |
           mkdir warpgate-web/dist
-          just build-rdp-helper
           just openapi-all
 
       - name: Checkout main branch to compare
