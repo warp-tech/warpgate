@@ -7,22 +7,31 @@ publish = false
 
 [dependencies]
 warpgate-common = { path = "../warpgate-common", default-features = false }
-warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-desktop-auth = { path = "../warpgate-desktop-auth" }
 warpgate-desktop-ui = { path = "../warpgate-desktop-ui" }
-warpgate-rdp-ipc = { path = "../warpgate-rdp-ipc" }
 warpgate-tls = { path = "../warpgate-tls" }
 anyhow.workspace = true
+async-trait.workspace = true
 bytes.workspace = true
-flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
-libc = "0.2"
 futures.workspace = true
-serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
-tempfile = "3"
+ironrdp = { version = "0.17", features = [
+    "connector",
+    "session",
+    "graphics",
+    "input",
+] }
+ironrdp-server = "0.13"
+ironrdp-tokio = "0.10"
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+    "logging",
+] }
+rustls-native-certs = "0.8"
+rustls-pemfile = "2"
 tokio = { workspace = true, features = [
-    "process",
     "io-util",
     "net",
     "sync",
@@ -32,12 +41,5 @@ tokio = { workspace = true, features = [
     "fs",
 ] }
 tokio-stream.workspace = true
-tokio-util = { version = "0.7", features = ["codec"] }
 tracing.workspace = true
-uuid.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
-rustix = { version = "1", default-features = false, features = ["std", "fs"] }
-
-[build-dependencies]
-flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }

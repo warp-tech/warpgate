@@ -2,7 +2,9 @@ use std::convert::Infallible;
 use std::error::Error;
 
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
-use warpgate_desktop_ui::{AuthPrompt, SCREEN_H, SCREEN_W, Screen, render_authentication, render_connecting};
+use warpgate_desktop_ui::{
+    AuthPrompt, SCREEN_H, SCREEN_W, Screen, render_authentication, render_connecting,
+};
 
 fn screen(n: u8, tick: u64) -> Result<Vec<u8>, Infallible> {
     let screen = Screen::default();

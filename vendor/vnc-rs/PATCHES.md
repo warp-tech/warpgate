@@ -50,4 +50,6 @@ wire and consume decoded events — no additional exposure required.
 
 To re-sync with a newer upstream, re-apply the two changes above (grep the tree for
 `Warpgate fork`). The `Cargo.toml` here is a hand-written minimal manifest equivalent to
-upstream's `Cargo.toml.orig` (same dependencies), with `publish = false`.
+upstream's `Cargo.toml.orig` (same dependencies), with `publish = false` and a
+`[lints.rust] warnings = "allow"` so this vendored path dependency's warnings don't surface
+in Warpgate's builds.
