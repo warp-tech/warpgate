@@ -61,7 +61,9 @@ export class ReconnectingWebSocket {
     }
 
     send(data: string): void {
-        this.socket?.send(data)
+        if (this.socket?.readyState === WebSocket.OPEN) {
+            this.socket.send(data)
+        }
     }
 
     close(): void {

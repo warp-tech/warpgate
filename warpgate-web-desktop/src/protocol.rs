@@ -103,6 +103,11 @@ pub enum ServerMessage {
         #[serde(with = "warpgate_common::helpers::serde_base64")]
         data: Bytes,
     },
+    PngImage {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
     /// Full-canvas PNG snapshot handed to a viewer as it attaches, so it has a base image
     /// to paint deltas onto. Structural: a viewer that loses this one paints onto black.
     Keyframe {
@@ -138,6 +143,7 @@ impl ServerMessage {
             self,
             Self::RawImage { .. }
                 | Self::JpegImage { .. }
+                | Self::PngImage { .. }
                 | Self::CopyRect { .. }
                 | Self::Cursor { .. }
         )
@@ -153,6 +159,7 @@ impl ServerMessage {
             Self::JpegImage { rect, data } => WsPayload::Binary(encode_image(2, *rect, data)),
             Self::Cursor { rect, data } => WsPayload::Binary(encode_image(3, *rect, data)),
             Self::Keyframe { rect, data } => WsPayload::Binary(encode_image(4, *rect, data)),
+            Self::PngImage { rect, data } => WsPayload::Binary(encode_image(5, *rect, data)),
             other => WsPayload::Text(serde_json::to_string(other).unwrap_or_default()),
         }
     }
@@ -196,6 +203,10 @@ impl From<DesktopEvent> for ServerMessage {
                 data,
             },
             DesktopEvent::JpegImage { rect, data } => Self::JpegImage {
+                rect: rect.into(),
+                data,
+            },
+            DesktopEvent::PngImage { rect, data } => Self::PngImage {
                 rect: rect.into(),
                 data,
             },

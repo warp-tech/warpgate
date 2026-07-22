@@ -13,7 +13,7 @@ mod handle;
 pub use desktop::{
     DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
 };
-pub use framebuffer::{Framebuffer, PngEncodeError};
+pub use framebuffer::{Framebuffer, PngEncodeError, Rect, decode_png_rgba};
 pub use handle::{SessionHandle, WarpgateServerHandle};
 
 #[derive(Debug, thiserror::Error)]

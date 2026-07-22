@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, anyhow};
 use tokio::sync::{Mutex, mpsc};
@@ -9,10 +10,11 @@ use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{Target, TargetOptions, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
-use warpgate_core::{ConfigProvider, Services, SessionStateInit, State};
+use warpgate_core::{ConfigProvider, DesktopEvent, Services, SessionStateInit, State};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
+use crate::dirty::DirtyTracker;
 use crate::protocol::ServerMessage;
 use crate::session::WebDesktopSession;
 
@@ -180,6 +182,21 @@ impl WebDesktopClientManager {
     }
 }
 
+/// Record an event, then send it. Both the live stream and refinements go out this way, so
+/// a recording plays back at the same progressive quality the viewer saw.
+async fn emit(
+    session: &WebDesktopSession,
+    recorder: Option<&DesktopRecorder>,
+    event: DesktopEvent,
+) {
+    if let Some(recorder) = recorder
+        && let Err(error) = recorder.write_event(&event).await
+    {
+        warn!(%error, "Failed to record desktop event");
+    }
+    session.push(ServerMessage::from(event)).await;
+}
+
 fn spawn_event_loop(
     session: Arc<WebDesktopSession>,
     mut event_rx: mpsc::Receiver<warpgate_core::DesktopEvent>,
@@ -191,22 +208,59 @@ fn spawn_event_loop(
     let span = info_span!("web-desktop", session=%session_id);
     tokio::spawn(
         async move {
-            while let Some(event) = event_rx.recv().await {
-                // Composite before any re-encoding, so this is a plain blit rather than a
-                // JPEG decode round-trip. Gives a viewer attaching later a base image.
-                session.composite(&event).await;
-                // Ahead of the recorder, so recordings shrink along with the wire.
-                let event = if encode_jpeg {
-                    crate::jpeg::encode_raw_images(event).await
-                } else {
-                    event
+            // Only the JPEG path loses detail, so only it has anything to refine.
+            let mut dirty = DirtyTracker::new();
+            loop {
+                // No pending regions means nothing to wake up for; park on the far future
+                // rather than spinning, and let an incoming event arm the timer.
+                let next_due = dirty.next_due();
+                let refine = async {
+                    match next_due {
+                        Some(due) => tokio::time::sleep_until(due.into()).await,
+                        None => std::future::pending().await,
+                    }
                 };
-                if let Some(recorder) = &recorder
-                    && let Err(error) = recorder.write_event(&event).await
-                {
-                    warn!(%error, "Failed to record desktop event");
+
+                tokio::select! {
+                    event = event_rx.recv() => {
+                        let Some(event) = event else { break };
+                        // Composite before any re-encoding, so this is a plain blit rather
+                        // than a JPEG decode round-trip. Gives a viewer attaching later a
+                        // base image, and is the source the refinement reads back from.
+                        session.composite(&event).await;
+
+                        // Ahead of the recorder, so recordings shrink along with the wire.
+                        let event = if encode_jpeg {
+                            crate::jpeg::encode_raw_images(event).await
+                        } else {
+                            event
+                        };
+
+                        match &event {
+                            DesktopEvent::Resize { width, height } => {
+                                dirty.resize(*width, *height);
+                            }
+                            DesktopEvent::JpegImage { rect, .. } if encode_jpeg => {
+                                dirty.touch(*rect, Instant::now());
+                            }
+                            _ => {}
+                        }
+                        emit(&session, recorder.as_deref(), event).await;
+                    }
+                    () = refine => {
+                        for rect in dirty.take_settled(Instant::now()) {
+                            match session.refinement(rect).await {
+                                Some(event) => {
+                                    debug!(?rect, "Refining settled region");
+                                    emit(&session, recorder.as_deref(), event).await;
+                                }
+                                // The region left the surface (resize)
+                                // or failed to encode
+                                None => debug!(?rect, "Settled region no longer refinable"),
+                            }
+                        }
+                    }
                 }
-                session.push(ServerMessage::from(event)).await;
             }
             // Backend ended; dropping `recorder` here finalises the recording.
             session.close();

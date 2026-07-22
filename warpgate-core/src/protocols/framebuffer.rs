@@ -44,6 +44,14 @@ impl Rect {
     }
 }
 
+/// Read the leading R, G, B of a pixel as opaque RGBA, whatever the source stride.
+fn rgb_opaque(px: &[u8]) -> [u8; 4] {
+    match (px.first(), px.get(1), px.get(2)) {
+        (Some(&r), Some(&g), Some(&b)) => [r, g, b, 255],
+        _ => [0, 0, 0, 255],
+    }
+}
+
 /// RGBA (row-major, 4 bytes/pixel) framebuffer reconstructed from desktop deltas.
 #[derive(Default)]
 pub struct Framebuffer {
@@ -90,12 +98,14 @@ impl Framebuffer {
     /// Blit an RGB rectangle (decoded JPEG) at (x, y).
     #[allow(clippy::many_single_char_names)]
     pub(crate) fn blit_rgb(&mut self, x: u32, y: u32, w: u32, h: u32, data: &[u8]) {
-        self.blit::<3>(x, y, w, h, data, |px| {
-            match (px.first(), px.get(1), px.get(2)) {
-                (Some(&r), Some(&g), Some(&b)) => [r, g, b, 255],
-                _ => [0, 0, 0, 255],
-            }
-        });
+        self.blit::<3>(x, y, w, h, data, rgb_opaque);
+    }
+
+    /// Blit an RGBA rectangle (decoded PNG) at (x, y). Alpha is dropped — the surface is
+    /// opaque, so only the leading three channels differ from [`Self::blit_rgb`].
+    #[allow(clippy::many_single_char_names)]
+    pub(crate) fn blit_rgba(&mut self, x: u32, y: u32, w: u32, h: u32, data: &[u8]) {
+        self.blit::<4>(x, y, w, h, data, rgb_opaque);
     }
 
     fn blit<const SRC: usize>(
@@ -170,6 +180,15 @@ impl Framebuffer {
         })
     }
 
+    /// Encode a rect as a lossless PNG into `png`, returning the rect actually covered.
+    /// Both buffers are reused (cleared first): a settling screen encodes many regions in a
+    /// row, and `rgba` alone is a full copy of the region's pixels.
+    pub fn region_png(&self, rect: Rect, rgba: &mut Vec<u8>, png: &mut Vec<u8>) -> Option<Rect> {
+        let clipped = self.copy_region_rgba(rect, rgba)?;
+        encode_png_rgba(clipped.width, clipped.height, rgba, png).ok()?;
+        Some(clipped)
+    }
+
     /// Composite one event, ignoring those that carry no framebuffer pixels.
     ///
     /// The cursor is deliberately not composited: the server renders the pointer into the
@@ -197,6 +216,18 @@ impl Framebuffer {
                         u32::from(rect.width),
                         u32::from(rect.height),
                         &rgb,
+                    );
+                }
+            }
+            DesktopEvent::PngImage { rect, data } => {
+                // Best-effort: on a decode failure that region stays stale until repainted.
+                if let Some((_, _, rgba)) = decode_png_rgba(data) {
+                    self.blit_rgba(
+                        u32::from(rect.x),
+                        u32::from(rect.y),
+                        u32::from(rect.width),
+                        u32::from(rect.height),
+                        &rgba,
                     );
                 }
             }
@@ -292,6 +323,21 @@ pub fn encode_png_rgba(
     Ok(())
 }
 
+/// Decode a PNG to RGBA. Best-effort, like [`decode_jpeg_rgb`]: `None` on any error, and
+/// only 8-bit RGBA input (what [`encode_png_rgba`] produces) is accepted.
+pub fn decode_png_rgba(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    let mut reader = png::Decoder::new(std::io::Cursor::new(data))
+        .read_info()
+        .ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
+        return None;
+    }
+    buf.truncate(info.buffer_size());
+    Some((info.width, info.height, buf))
+}
+
 /// Decode a JPEG (VNC tight encoding) to RGB. Best-effort: returns `None` on any error so
 /// the recording continues (that framebuffer region is simply left stale until repaint).
 pub fn decode_jpeg_rgb(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
@@ -318,6 +364,66 @@ mod tests {
         let info = reader.next_frame(&mut buf).unwrap();
         buf.truncate(info.buffer_size());
         (info.width, info.height, buf)
+    }
+
+    /// A refinement must be pixel-exact: it exists to replace lossy pixels, so any loss
+    /// here defeats the whole feature.
+    #[test]
+    fn region_png_roundtrips_losslessly() {
+        let mut fb = Framebuffer::default();
+        fb.resize(4, 4);
+        // Saturated colours, which is what catches a channel swap.
+        let bgra: Vec<u8> = [0u8, 0, 255, 255].repeat(16);
+        fb.blit_bgra(0, 0, 4, 4, &bgra);
+
+        let (mut rgba, mut png) = (Vec::new(), Vec::new());
+        let clipped = fb
+            .region_png(
+                Rect {
+                    x: 1,
+                    y: 1,
+                    width: 2,
+                    height: 2,
+                },
+                &mut rgba,
+                &mut png,
+            )
+            .expect("region inside the surface");
+        assert_eq!(clipped.width, 2);
+        assert_eq!(clipped.height, 2);
+
+        let (w, h, rgba) = decode_png_rgba(&png).expect("valid RGBA PNG");
+        assert_eq!((w, h), (2, 2));
+        // Red, exactly — not merely close, as a lossy codec would give.
+        assert_eq!(rgba, [255u8, 0, 0, 255].repeat(4));
+    }
+
+    /// The refinement path composites back into a viewer's surface; a decode that silently
+    /// produced the wrong pixels would corrupt it.
+    #[test]
+    fn apply_png_image_composites_the_refined_pixels() {
+        let mut fb = Framebuffer::default();
+        fb.resize(2, 2);
+        let mut png = Vec::new();
+        encode_png_rgba(1, 1, &[9, 8, 7, 255], &mut png).unwrap();
+
+        fb.apply(&DesktopEvent::PngImage {
+            rect: DesktopRect {
+                x: 1,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            data: png.into(),
+        });
+
+        assert_eq!(fb.rgba().get(4..8), Some(&[9u8, 8, 7, 255][..]));
+    }
+
+    #[test]
+    fn decode_png_rgba_rejects_non_rgba() {
+        assert!(decode_png_rgba(&[]).is_none());
+        assert!(decode_png_rgba(b"not a png at all").is_none());
     }
 
     #[test]
