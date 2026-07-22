@@ -14,11 +14,11 @@ use poem::session::Session;
 use poem::web::Data;
 use poem::web::websocket::WebSocket;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::Mutex;
 use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
 use tracing::{debug, error, warn};
 use url::{Url, form_urlencoded};
-use warpgate_common::helpers::websocket::pump_websocket_until;
+use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::{
     X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO, may_forward_header,
 };
