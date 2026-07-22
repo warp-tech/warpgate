@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-protocol-postgres"
-version = "0.27.0-beta.1"
+version = "0.27.0-beta.2"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
