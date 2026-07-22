@@ -24,9 +24,7 @@ use warpgate_common::http_headers::{
 };
 use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
 use warpgate_common_http::logging::{get_client_ip, log_request_result};
-use warpgate_common_http::{
-    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-};
+use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization, SessionKeepalive};
 use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
@@ -453,14 +451,11 @@ async fn proxy_ws_inner(
         .clone();
     let session = <&Session>::from_request_without_body(req).await?;
     let mut close_rx = session_middleware.lock().await.close_receiver_for(session);
-    if close_rx.is_none()
-        && matches!(
-            &ctx.auth,
-            RequestAuthorization::Session(SessionAuthorization::User { .. })
-        )
-    {
-        return Err(poem::Error::from_status(StatusCode::UNAUTHORIZED));
-    }
+
+    let keepalive_guard = Data::<&SessionKeepalive>::from_request_without_body(req)
+        .await
+        .ok()
+        .map(|x| x.guard());
 
     let (authorization_header, uri) = extract_basic_auth(uri)?;
     let mut client_request = http::request::Builder::new()
@@ -577,6 +572,9 @@ async fn proxy_ws_inner(
             } {
                 error!(?error, "Websocket stream error");
             }
+
+            drop(keepalive_guard);
+
             Ok::<_, anyhow::Error>(())
         })
         .into_response();
