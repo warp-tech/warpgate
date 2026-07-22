@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.27.0-beta.1-3-ga1a5c670-modified"
+    "version": "v0.27.0-beta.1-45-g9f24f0f7-modified"
   },
   "servers": [
     {
@@ -1940,7 +1940,9 @@
           "target_click_action",
           "web_clients_enabled",
           "has_ldap",
-          "should_prompt_analytics"
+          "should_prompt_analytics",
+          "banner",
+          "show_session_menu"
         ],
         "properties": {
           "version": {
@@ -2017,6 +2019,13 @@
             "type": "boolean"
           },
           "should_prompt_analytics": {
+            "type": "boolean"
+          },
+          "banner": {
+            "type": "string",
+            "description": "Login banner, shown to unauthenticated visitors too. Empty when unset."
+          },
+          "show_session_menu": {
             "type": "boolean"
           }
         }

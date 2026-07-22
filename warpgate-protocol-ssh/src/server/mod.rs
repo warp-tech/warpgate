@@ -102,16 +102,11 @@ async fn _handle_connection(
 
     let banner = {
         let db = &services.db;
-        let text = Parameters::Entity::get(db).await?.ssh_banner;
-        if text.trim().is_empty() {
-            None
-        } else {
-            // Normalize line endings for terminal display.
-            Some(format!(
-                "{}\r\n",
-                text.replace("\r\n", "\n").replace('\n', "\r\n")
-            ))
-        }
+        // Normalize line endings for terminal display.
+        Parameters::Entity::get(db)
+            .await?
+            .banner_text()
+            .map(|text| format!("{}\r\n", text.replace("\r\n", "\n").replace('\n', "\r\n")))
     };
 
     let handler = ServerHandler { event_tx, banner };

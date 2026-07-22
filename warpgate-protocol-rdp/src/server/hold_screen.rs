@@ -139,6 +139,50 @@ pub(super) async fn run_hold_screen(
     }
 }
 
+/// Show the login banner and block until the viewer acknowledges it with any key or click.
+/// Returns `false` if the viewer disconnected instead. Like [`run_hold_screen`], it tracks
+/// the viewer's negotiated size in `screen` while it holds the event stream.
+pub(super) async fn run_banner_screen(
+    banner: &str,
+    events: &mut UnboundedReceiver<ServerEvent>,
+    server_in_tx: &Sender<ServerInput>,
+    screen: &mut ui::Screen,
+) -> Result<bool> {
+    let mut painter = HoldPainter::new(*screen);
+    let mut ticker = tokio::time::interval(HOLD_RENDER_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            event = events.recv() => {
+                let Some(event) = event else {
+                    return Ok(false);
+                };
+                match event {
+                    ServerEvent::Input(
+                        DesktopInput::Scancode { down: true, .. }
+                        | DesktopInput::Key { down: true, .. },
+                    ) => return Ok(true),
+                    // Any button press
+                    ServerEvent::Input(DesktopInput::Pointer { buttons, .. }) if buttons != 0 => {
+                        return Ok(true);
+                    }
+                    ServerEvent::Size { width, height } => {
+                        *screen = ui::Screen { width, height };
+                        painter.set_screen(*screen);
+                    }
+                    _ => (),
+                }
+            },
+            _ = ticker.tick() => {
+                painter
+                    .paint(server_in_tx, |screen, tick| ui::render_banner(screen, tick, banner))
+                    .await?;
+            },
+        }
+    }
+}
+
 /// Paints the full-screen hold-screen UI to the RDP viewer, owning the
 /// spinner tick. `paint` takes a UI render function (`ui::render_*`) so the prompt and
 /// "Connecting" screens go through one code path.

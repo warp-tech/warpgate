@@ -13,6 +13,7 @@ use tokio::time::sleep;
 use uuid::Uuid;
 use warpgate_common::auth::AuthResult;
 use warpgate_core::Services;
+use warpgate_db_entities::Parameters;
 use warpgate_desktop_auth::{OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt};
 use warpgate_desktop_ui::{self as ui, AuthPrompt};
 
@@ -47,6 +48,46 @@ where
 
 /// ui animation frame interval while connecting to the backend
 const SPINNER_INTERVAL: Duration = Duration::from_millis(30);
+
+/// Show the login banner, if one is configured, and block until the viewer acknowledges it
+/// with any key or pointer button.
+pub(super) async fn show_banner<W>(
+    viewer_wr: &mut W,
+    events_rx: &mut mpsc::UnboundedReceiver<ClientEvent>,
+    render: &mut RenderState,
+    services: &Services,
+) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    let Some(banner) = Parameters::Entity::get(&services.db)
+        .await?
+        .banner_text()
+        .map(str::to_owned)
+    else {
+        return Ok(());
+    };
+
+    loop {
+        tokio::select! {
+            event = events_rx.recv(), if !render.reader_done => {
+                let acknowledged = matches!(
+                    event,
+                    Some(ClientEvent::Key { down: true, .. })
+                        // Any pressed button; a bare move (empty mask) isn't an acknowledgement.
+                        | Some(ClientEvent::Pointer { buttons: 1.., .. })
+                );
+                render.note_event(event.as_ref());
+                if acknowledged {
+                    return Ok(());
+                }
+            }
+            () = sleep(SPINNER_INTERVAL), if render.pending_request => {
+                render.paint(viewer_wr, |screen, tick| ui::render_banner(screen, tick, &banner)).await?;
+            }
+        }
+    }
+}
 
 /// Render hold screen UI while collecting OTP/waiting for web auth
 pub(super) async fn collect_additional_credentials<W>(

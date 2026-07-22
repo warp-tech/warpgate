@@ -107,6 +107,9 @@ pub struct Info {
     admin_permissions: Option<AdminPermissions>,
     running_on_ec2: Option<bool>,
     should_prompt_analytics: bool,
+    /// Login banner, shown to unauthenticated visitors too. Empty when unset.
+    banner: String,
+    show_session_menu: bool,
 }
 
 #[derive(ApiResponse)]
@@ -364,6 +367,8 @@ impl Api {
                 None
             },
             should_prompt_analytics,
+            banner: parameters.banner.clone(),
+            show_session_menu: parameters.show_session_menu,
         })))
     }
 

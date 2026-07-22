@@ -49,6 +49,16 @@ pub fn render_connecting(screen: Screen, tick: u64) -> Result<Vec<u8>, Infallibl
     render(screen, tick, "Connecting", None)
 }
 
+/// The login banner, shown until the viewer acknowledges it with any key or click.
+pub fn render_banner(screen: Screen, tick: u64, banner: &str) -> Result<Vec<u8>, Infallible> {
+    render(
+        screen,
+        tick,
+        &format!("{banner}\n\nPress any key to continue"),
+        None,
+    )
+}
+
 pub enum AuthPrompt {
     WebApproval {
         url: Option<String>,

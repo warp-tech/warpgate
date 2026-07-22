@@ -3,6 +3,7 @@
     import { Button } from '@sveltestrap/sveltestrap'
     import { hasAdminAccess } from 'admin/lib/store'
     import AuthBar from 'common/AuthBar.svelte'
+    import BannerModal from 'common/BannerModal.svelte'
     import Brand from 'common/Brand.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -110,6 +111,8 @@
 </script>
 
 <svelte:window on:pageshow={onPageResume} />
+
+<BannerModal banner={$serverInfo?.banner ?? ''} />
 
 <div class="container">
     <Loadable promise={initPromise}>

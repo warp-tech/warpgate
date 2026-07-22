@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.0-beta.1-38-g1ea235bb-modified"
+    "version": "v0.27.0-beta.1-45-g9f24f0f7-modified"
   },
   "servers": [
     {
@@ -5455,7 +5455,7 @@
           "lp_user_exempt_admins": {
             "type": "boolean"
           },
-          "ssh_banner": {
+          "banner": {
             "type": "string"
           },
           "web_clients_enabled": {
@@ -5514,7 +5514,7 @@
           "lp_user_auto_unlock",
           "lp_user_lockout_duration_seconds",
           "lp_user_exempt_admins",
-          "ssh_banner",
+          "banner",
           "web_ssh_enabled",
           "web_clients_enabled",
           "analytics_consent",
@@ -5631,7 +5631,7 @@
           "lp_user_exempt_admins": {
             "type": "boolean"
           },
-          "ssh_banner": {
+          "banner": {
             "type": "string"
           },
           "web_ssh_enabled": {
