@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use sea_orm::DatabaseConnection;
 use sea_orm_migration::MigrationTrait;
 use sea_orm_migration::prelude::*;
@@ -151,8 +153,62 @@ impl MigratorTrait for Migrator {
     }
 }
 
+const MIGRATION_LOCK_KEY: i64 = 0x1337_1337_1337_1337;
+
+async fn run_locked<
+    RF: Future<Output = Result<R, DbErr>> + Send,
+    F: FnOnce() -> RF + Send,
+    R: Send,
+>(
+    connection: &DatabaseConnection,
+    key: impl Display,
+    f: F,
+) -> Result<R, DbErr> {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
+
+    match connection.get_database_backend() {
+        DatabaseBackend::Postgres => {
+            let lock = connection.begin().await?;
+            // lock is tx scoped
+            lock.execute(Statement::from_string(
+                DatabaseBackend::Postgres,
+                format!("SELECT pg_advisory_xact_lock({key})"),
+            ))
+            .await?;
+            let result = f().await;
+            lock.commit().await?;
+            result
+        }
+        DatabaseBackend::MySql => {
+            let lock = connection.begin().await?;
+            // lock is session scoped
+            lock.execute(Statement::from_string(
+                DatabaseBackend::MySql,
+                format!("SELECT GET_LOCK('warpgate_migration_{key}', -1)"),
+            ))
+            .await?;
+            let result = f().await;
+            let release = lock
+                .execute(Statement::from_string(
+                    DatabaseBackend::MySql,
+                    format!("SELECT RELEASE_LOCK('warpgate_migration_{key}')"),
+                ))
+                .await;
+            lock.commit().await?;
+            release?;
+            result
+        }
+        DatabaseBackend::Sqlite => f().await,
+    }
+}
+
 pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbErr> {
-    Migrator::up(connection, None).await
+    run_locked(connection, MIGRATION_LOCK_KEY, async move || {
+        Migrator::up(connection, None).await
+    })
+    .await?;
+
+    Ok(())
 }
 
 /// Apply `steps` pending migrations.
