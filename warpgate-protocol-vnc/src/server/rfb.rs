@@ -167,7 +167,7 @@ E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFF";
 
         // Server ephemeral keypair.
         let mut priv_bytes = vec![0u8; key_len];
-        getrandom::getrandom(&mut priv_bytes).map_err(|e| anyhow::anyhow!("getrandom: {e}"))?;
+        getrandom::fill(&mut priv_bytes).map_err(|e| anyhow::anyhow!("getrandom: {e}"))?;
         let server_private = BigUint::from_bytes_be(&priv_bytes) % &prime;
         let server_public = generator.modpow(&server_private, &prime);
 
@@ -235,11 +235,11 @@ E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFF";
     fn aes128_ecb_decrypt(key: &[u8; 16], data: &[u8]) -> Result<Vec<u8>> {
         use ecb::Decryptor;
         use ecb::cipher::block_padding::NoPadding;
-        use ecb::cipher::{BlockDecryptMut, KeyInit};
+        use ecb::cipher::{BlockModeDecrypt, KeyInit};
 
         let mut buf = data.to_vec();
         let plain = Decryptor::<aes::Aes128>::new(&(*key).into())
-            .decrypt_padded_mut::<NoPadding>(&mut buf)
+            .decrypt_padded::<NoPadding>(&mut buf)
             .map_err(|e| anyhow::anyhow!("AES-ECB decrypt: {e}"))?;
         Ok(plain.to_vec())
     }

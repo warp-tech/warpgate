@@ -11,6 +11,8 @@
 //! actually wrote — its keyframes are indexed by byte offset, so compositing an event that
 //! was dropped from the recording stream would desync seeking.
 
+use zune_jpeg::zune_core::bytestream::ZCursor;
+
 use super::DesktopEvent;
 
 /// PNG encoding failed. Carries the codec's message; callers map it into their own error.
@@ -330,7 +332,7 @@ pub fn decode_png_rgba(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
         .read_info()
         .ok()?;
     let mut buf = vec![0; reader.output_buffer_size()?];
-    let info = reader.next_frame(&mut buf).ok()?;
+    let info = reader.next_frame(&mut buf[..]).ok()?;
     if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
         return None;
     }
@@ -346,7 +348,7 @@ pub fn decode_jpeg_rgb(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     use zune_jpeg::zune_core::options::DecoderOptions;
 
     let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB);
-    let mut decoder = JpegDecoder::new_with_options(data, options);
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::from(data), options);
     let pixels = decoder.decode().ok()?;
     let (w, h) = decoder.dimensions()?;
     Some((w as u32, h as u32, pixels))
@@ -361,7 +363,7 @@ mod tests {
         let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
         let mut reader = decoder.read_info().unwrap();
         let mut buf = vec![0; reader.output_buffer_size().unwrap()];
-        let info = reader.next_frame(&mut buf).unwrap();
+        let info = reader.next_frame(&mut buf[..]).unwrap();
         buf.truncate(info.buffer_size());
         (info.width, info.height, buf)
     }

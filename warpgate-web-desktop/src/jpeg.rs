@@ -90,7 +90,7 @@ mod tests {
         let jpeg = encode(rect(64, 64), &tile).unwrap();
 
         let mut decoder = zune_jpeg::JpegDecoder::new_with_options(
-            &jpeg[..],
+            ZCursor::from(&jpeg[..]),
             zune_jpeg::zune_core::options::DecoderOptions::default()
                 .jpeg_set_out_colorspace(zune_jpeg::zune_core::colorspace::ColorSpace::RGB),
         );
