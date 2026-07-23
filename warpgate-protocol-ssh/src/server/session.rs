@@ -39,6 +39,7 @@ use warpgate_core::{
 use warpgate_db_entities::Parameters;
 
 use super::channel_writer::ChannelWriter;
+use super::command_detector::CommandDetector;
 use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
@@ -96,6 +97,7 @@ pub struct ServerSession {
     pty_channels: Vec<Uuid>,
     all_channels: Vec<Uuid>,
     channel_recorders: HashMap<Uuid, TerminalRecorder>,
+    command_detectors: HashMap<Uuid, CommandDetector>,
     channel_map: BiMap<ServerChannelId, Uuid>,
     channel_pty_size_map: HashMap<Uuid, PtyRequest>,
     pending_server_channel_opens: HashSet<Uuid>,
@@ -173,6 +175,7 @@ impl ServerSession {
             pty_channels: vec![],
             all_channels: vec![],
             channel_recorders: HashMap::new(),
+            command_detectors: HashMap::new(),
             channel_map: BiMap::new(),
             channel_pty_size_map: HashMap::new(),
             pending_server_channel_opens: HashSet::new(),
@@ -792,6 +795,7 @@ impl ServerSession {
                     },
                 )
                 .await;
+                self.maybe_start_command_detector(channel_id);
 
                 info!(%channel_id, "Opening shell");
 
@@ -996,6 +1000,12 @@ impl ServerSession {
                 {
                     error!(%channel, ?error, "Failed to record traffic data");
                     self.traffic_connection_recorders.remove(&channel);
+                }
+
+                if let Some(detector) = self.command_detectors.get_mut(&channel)
+                    && let Some(command) = detector.on_output(&data)
+                {
+                    info!(channel_id=%channel, %command, "Shell command");
                 }
 
                 let server_channel_id = self.map_channel_reverse(&channel)?;
@@ -1402,6 +1412,11 @@ impl ServerSession {
             self.channel_recorders.remove(&channel_id);
         }
 
+        if let Some(detector) = self.command_detectors.get_mut(&channel_id) {
+            let (cols, rows) = request.screen_size();
+            detector.on_resize(cols, rows);
+        }
+
         if matches!(self.target, TargetSelection::Menu) {
             let _ = self
                 .event_sender
@@ -1433,7 +1448,7 @@ impl ServerSession {
         let command = std::str::from_utf8(&data).inspect_err(|_| {
             error!(channel=%channel_id, ?data, "Requested exec - invalid UTF-8");
         })?;
-        debug!(channel=%channel_id, %command, "Requested exec");
+        info!(channel=%channel_id, command=%command, "Exec command");
 
         let is_scp = command == "scp" || command.starts_with("scp ");
         let _ = self.maybe_connect_remote().await;
@@ -1498,6 +1513,18 @@ impl ServerSession {
                 error => error!(channel=%channel_id, ?error, "Failed to start recording"),
             },
         }
+    }
+
+    fn maybe_start_command_detector(&mut self, channel_id: Uuid) {
+        if !self.pty_channels.contains(&channel_id) {
+            return;
+        }
+        let (cols, rows) = self
+            .channel_pty_size_map
+            .get(&channel_id)
+            .map_or((80, 24), PtyRequest::screen_size);
+        self.command_detectors
+            .insert(channel_id, CommandDetector::new(cols, rows));
     }
 
     async fn _channel_x11_request(
@@ -1614,6 +1641,10 @@ impl ServerSession {
         // request) must not be dropped (#2065).
         if matches!(self.target, TargetSelection::Menu) {
             return Ok(());
+        }
+
+        if let Some(detector) = self.command_detectors.get_mut(&channel_id) {
+            detector.on_input(&data);
         }
 
         let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));
