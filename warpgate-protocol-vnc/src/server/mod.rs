@@ -32,7 +32,7 @@ use warpgate_desktop_ui as ui;
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
 use self::bridge::{run_proxy_session, wait_for_backend_size};
-use self::hold_screen::{collect_additional_credentials, render_while};
+use self::hold_screen::{collect_additional_credentials, render_while, show_banner};
 use self::protocol::{
     ClientEvent, DEFAULT_PIXEL_FORMAT, PixelFormat, pack_rgb, read_client_messages,
     write_desktop_size, write_raw_rect, write_server_init,
@@ -314,6 +314,8 @@ async fn negotiate_and_authorize(
     }
 
     info!(target=%target.name, "Authorized");
+
+    show_banner(&mut viewer_wr, &mut events_rx, &mut render, services).await?;
 
     // Start a recording if enabled; `None` just means we don't tap the decoded stream.
     // Either way the session takes the same decode-and-re-encode path below, so the

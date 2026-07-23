@@ -141,7 +141,7 @@ pub struct Model {
     pub lp_user_lockout_duration_seconds: i32,
     pub lp_user_exempt_admins: bool,
     #[sea_orm(column_type = "Text")]
-    pub ssh_banner: String,
+    pub banner: String,
     pub web_clients_enabled: bool,
     pub analytics_consent: AnalyticsConsent,
     pub analytics_normal: bool,
@@ -165,6 +165,11 @@ impl Model {
     /// silently reverting to disk.
     pub fn recordings_storage_config(&self) -> Result<RecordingsStorageConfig, serde_json::Error> {
         serde_json::from_str(&self.recordings_storage)
+    }
+
+    /// The login banner shown to connecting clients, or `None` when it's blank.
+    pub fn banner_text(&self) -> Option<&str> {
+        Some(self.banner.trim()).filter(|text| !text.is_empty())
     }
 }
 
@@ -230,7 +235,7 @@ impl Entity {
                     lp_user_auto_unlock: Set(true),
                     lp_user_lockout_duration_seconds: Set(3600),
                     lp_user_exempt_admins: Set(true),
-                    ssh_banner: Set("".into()),
+                    banner: Set("".into()),
                     web_clients_enabled: Set(true),
                     analytics_consent: Set(AnalyticsConsent::Undecided),
                     analytics_normal: Set(false),

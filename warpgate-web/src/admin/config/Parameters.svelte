@@ -355,22 +355,6 @@
                                             from wasting storage space.
                                         </HelpText>
                                     {/if}
-
-                                    <FormGroup>
-                                        <label class="mb-2" for="sshBanner"
-                                            >Login banner</label
-                                        >
-                                        <Input
-                                            id="sshBanner"
-                                            type="textarea"
-                                            rows={4}
-                                            bind:value={parameters.sshBanner}
-                                        />
-                                    </FormGroup>
-                                    <HelpText class="mt-3 mb-3">
-                                        Optional message shown to SSH clients
-                                        during authentication.
-                                    </HelpText>
                                 </Subsection>
                             </Section>
 
@@ -631,6 +615,24 @@
                                     it for new sessions by the same user to the
                                     same target from the same IP. Blank = never
                                     cache approvals.
+                                </HelpText>
+
+                                <FormGroup>
+                                    <label class="mb-2" for="banner"
+                                        >Login banner</label
+                                    >
+                                    <Input
+                                        id="banner"
+                                        type="textarea"
+                                        rows={4}
+                                        bind:value={parameters.banner}
+                                    />
+                                </FormGroup>
+                                <HelpText class="mt-3 mb-3">
+                                    Optional message shown to users when they connect to a target: during SSH authentication, as a
+                                    modal in the UI and proxied HTTP
+                                    targets, on the RDP/VNC hold screen and as a
+                                    PostgreSQL connection notice.
                                 </HelpText>
                             </Section>
 
@@ -938,9 +940,9 @@
                                         >
                                     </FormGroup>
                                     <HelpText>
-                                        The bucket needs a CORS policy
-                                        allowing this origin to issue
-                                        GET requests with a Range header.
+                                        The bucket needs a CORS policy allowing
+                                        this origin to issue GET requests with a
+                                        Range header.
                                     </HelpText>
                                     <FormGroup floating label="Region">
                                         <input

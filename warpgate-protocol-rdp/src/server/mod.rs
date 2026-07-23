@@ -31,6 +31,7 @@ use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetRdpOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{DesktopInput, Services, SessionStateInit, State, WarpgateServerHandle};
+use warpgate_db_entities::Parameters;
 use warpgate_desktop_ui::{DEFAULT_SCREEN_H, DEFAULT_SCREEN_W};
 
 use crate::PROTOCOL_NAME;
@@ -42,7 +43,7 @@ mod protocol;
 mod rdp;
 
 use bridge::connect_backend;
-use hold_screen::run_hold_screen;
+use hold_screen::{run_banner_screen, run_hold_screen};
 use protocol::{Event as ServerEvent, Input as ServerInput};
 use warpgate_desktop_auth::{
     DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
@@ -265,6 +266,26 @@ async fn control_loop(
                             break;
                         }
                         pending_dial = Some((user_info, target, options));
+                        // The banner screen consumes the viewer's `Size` event while it waits,
+                        // so dial here once it's dismissed rather than waiting for a `Size`
+                        // that has already been delivered.
+                        match acknowledge_banner(&services, &mut events, &server_in_tx, &mut screen)
+                            .await?
+                        {
+                            BannerOutcome::NotShown => (),
+                            BannerOutcome::Acknowledged => {
+                                dial_if_pending(
+                                    &mut backend,
+                                    &mut pending_dial,
+                                    &services,
+                                    &server_handle,
+                                    &server_in_tx,
+                                    screen,
+                                )
+                                .await?;
+                            }
+                            BannerOutcome::Disconnected => break,
+                        }
                     }
                     Ok(DesktopAuthOutcome::NeedsInteractive(interactive)) => {
                         // Accept the NLA so the RDP session starts, then collect the second
@@ -298,6 +319,18 @@ async fn control_loop(
                                         // `screen` was updated by `run_hold_screen` as the
                                         // viewer negotiated its size during the 2FA prompt.
                                         pending_dial = Some((user_info, target, options));
+                                        if matches!(
+                                            acknowledge_banner(
+                                                &services,
+                                                &mut events,
+                                                &server_in_tx,
+                                                &mut screen,
+                                            )
+                                            .await?,
+                                            BannerOutcome::Disconnected
+                                        ) {
+                                            break;
+                                        }
                                         dial_if_pending(
                                             &mut backend,
                                             &mut pending_dial,
@@ -394,6 +427,37 @@ async fn control_loop(
 
 /// An authorized target held until the viewer's negotiated size is known.
 type PendingDial = (AuthStateUserInfo, Target, TargetRdpOptions);
+
+enum BannerOutcome {
+    /// No banner is configured, so nothing was rendered and no events were consumed.
+    NotShown,
+    /// The viewer acknowledged the banner; its negotiated size is now in `screen`.
+    Acknowledged,
+    Disconnected,
+}
+
+/// Show the login banner, if one is configured, and wait for the viewer to acknowledge it.
+async fn acknowledge_banner(
+    services: &Services,
+    events: &mut UnboundedReceiver<ServerEvent>,
+    server_in_tx: &Sender<ServerInput>,
+    screen: &mut warpgate_desktop_ui::Screen,
+) -> Result<BannerOutcome> {
+    let Some(banner) = Parameters::Entity::get(&services.db)
+        .await?
+        .banner_text()
+        .map(str::to_owned)
+    else {
+        return Ok(BannerOutcome::NotShown);
+    };
+    Ok(
+        if run_banner_screen(&banner, events, server_in_tx, screen).await? {
+            BannerOutcome::Acknowledged
+        } else {
+            BannerOutcome::Disconnected
+        },
+    )
+}
 
 /// Dial the pending target, if there is one and it hasn't been dialed yet, at `screen`.
 async fn dial_if_pending(

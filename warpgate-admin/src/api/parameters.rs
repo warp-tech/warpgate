@@ -79,7 +79,7 @@ struct ParameterValues {
     pub lp_user_auto_unlock: bool,
     pub lp_user_lockout_duration_seconds: i32,
     pub lp_user_exempt_admins: bool,
-    pub ssh_banner: String,
+    pub banner: String,
     /// Deprecated in 0.27: superseded by `web_clients_enabled`
     pub web_ssh_enabled: bool,
     pub web_clients_enabled: bool,
@@ -123,7 +123,7 @@ struct ParameterUpdate {
     pub lp_user_auto_unlock: Option<bool>,
     pub lp_user_lockout_duration_seconds: Option<i32>,
     pub lp_user_exempt_admins: Option<bool>,
-    pub ssh_banner: Option<String>,
+    pub banner: Option<String>,
     pub web_clients_enabled: Option<bool>,
     pub web_auth_max_age_seconds: Option<Option<i64>>,
     pub web_approval_grace_period_seconds: Option<Option<i64>>,
@@ -219,7 +219,7 @@ impl Api {
             lp_user_auto_unlock: parameters.lp_user_auto_unlock,
             lp_user_lockout_duration_seconds: parameters.lp_user_lockout_duration_seconds,
             lp_user_exempt_admins: parameters.lp_user_exempt_admins,
-            ssh_banner: parameters.ssh_banner,
+            banner: parameters.banner,
             web_ssh_enabled: parameters.web_clients_enabled,
             web_clients_enabled: parameters.web_clients_enabled,
             web_auth_max_age_seconds: parameters.web_auth_max_age_seconds,
@@ -333,7 +333,7 @@ impl Api {
         parameters.lp_user_lockout_duration_seconds =
             body.lp_user_lockout_duration_seconds.map_or(NotSet, Set);
         parameters.lp_user_exempt_admins = body.lp_user_exempt_admins.map_or(NotSet, Set);
-        parameters.ssh_banner = body.ssh_banner.clone().map_or(NotSet, Set);
+        parameters.banner = body.banner.clone().map_or(NotSet, Set);
         parameters.web_clients_enabled = body.web_clients_enabled.map_or(NotSet, Set);
         parameters.web_auth_max_age_seconds = body.web_auth_max_age_seconds.map_or(NotSet, Set);
         parameters.web_approval_grace_period_seconds =

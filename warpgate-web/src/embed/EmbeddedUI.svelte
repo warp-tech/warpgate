@@ -1,4 +1,5 @@
 <script lang="ts">
+    import BannerModal from 'common/BannerModal.svelte'
     import { api } from 'gateway/lib/api'
     import { onMount } from 'svelte'
     import logo from '../../public/assets/favicon.svg'
@@ -13,6 +14,10 @@
     let position = { x: 0.1, y: 0.8 }
     let dragStartCoords: { x: number; y: number } | undefined
     let externalHost: string | undefined
+    let banner = ''
+    // The embedded UI is also injected when only the banner is enabled, so the
+    // floating menu renders separately from it.
+    let showMenu = false
 
     if (localStorage.warpgateMenuLocation) {
         position = JSON.parse(localStorage.warpgateMenuLocation)
@@ -22,6 +27,8 @@
     onMount(async () => {
         ready = true
         const info = await api.getInfo()
+        banner = info.banner
+        showMenu = info.showSessionMenu
         externalHost = `${info.externalHosts?.http ?? info.externalHost}:${info.ports.http ?? 443}`
     })
 
@@ -79,34 +86,38 @@
 
 <svelte:window on:pointerup={() => (menuVisible = false)} />
 
-<div
-    class="embedded-ui"
-    class:wg-hidden={!ready}
-    style="left: {position.x * 100}%; top: {position.y * 100}%"
->
-    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-    <img
-        class="menu-toggle"
-        src={logo}
-        alt="Warpgate"
-        on:pointerdown|preventDefault={startDragging}
-        on:pointermove={drag}
-        on:pointerup|stopPropagation|preventDefault={() => {
+<BannerModal {banner} />
+
+{#if showMenu}
+    <div
+        class="embedded-ui"
+        class:wg-hidden={!ready}
+        style="left: {position.x * 100}%; top: {position.y * 100}%"
+    >
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <img
+            class="menu-toggle"
+            src={logo}
+            alt="Warpgate"
+            on:pointerdown|preventDefault={startDragging}
+            on:pointermove={drag}
+            on:pointerup|stopPropagation|preventDefault={() => {
             if (!dragging) {
                 menuVisible = !menuVisible
             }
             endDragging()
         }}
-        on:pointercancel={endDragging}
-    >
+            on:pointercancel={endDragging}
+        >
 
-    {#if menuVisible}
-        <div class="menu">
-            <button type="button" on:pointerup={goHome}>Home</button>
-            <button type="button" on:pointerup={logout}>Log out</button>
-        </div>
-    {/if}
-</div>
+        {#if menuVisible}
+            <div class="menu">
+                <button type="button" on:pointerup={goHome}>Home</button>
+                <button type="button" on:pointerup={logout}>Log out</button>
+            </div>
+        {/if}
+    </div>
+{/if}
 
 <style lang="scss">
     .embedded-ui {

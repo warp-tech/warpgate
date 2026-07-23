@@ -314,18 +314,19 @@ pub async fn proxy_normal_request(
 
     copy_client_response(&client_response, &mut response);
 
-    // The session can be embedded if embedding is enabled and the response is a usable HTML page.
-    // We for example don't want to embed a 404 page or a JS file.
-    let embed_session_menu = response.status() == StatusCode::OK
+    // The embedded UI can go in if the response is a usable HTML page - we for example
+    // don't want to embed into a 404 page or a JS file - and it has something to show:
+    // the session menu, the login banner, or both.
+    let embed_ui = response.status() == StatusCode::OK
         && response
             .content_type()
             .is_some_and(|content_type| content_type.starts_with("text/html"))
         && ctx
             .parameters()
             .await
-            .map(|p| p.show_session_menu)
+            .map(|p| p.show_session_menu || p.banner_text().is_some())
             .unwrap_or(true);
-    copy_client_body(client_response, &mut response, embed_session_menu).await?;
+    copy_client_body(client_response, &mut response, embed_ui).await?;
 
     log_request_result(
         req.method(),
@@ -341,9 +342,9 @@ pub async fn proxy_normal_request(
 async fn copy_client_body(
     client_response: reqwest::Response,
     response: &mut Response,
-    embed_session_menu: bool,
+    embed_ui: bool,
 ) -> Result<()> {
-    if embed_session_menu {
+    if embed_ui {
         copy_client_body_and_embed(client_response, response).await?;
         return Ok(());
     }

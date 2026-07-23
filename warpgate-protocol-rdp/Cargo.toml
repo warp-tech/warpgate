@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
 warpgate-desktop-auth = { path = "../warpgate-desktop-auth" }
 warpgate-desktop-ui = { path = "../warpgate-desktop-ui" }
 warpgate-tls = { path = "../warpgate-tls" }

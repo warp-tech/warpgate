@@ -9327,6 +9327,7 @@ dependencies = [
  "warpgate-common",
  "warpgate-common-http",
  "warpgate-core",
+ "warpgate-db-entities",
  "warpgate-tls",
 ]
 
@@ -9349,6 +9350,7 @@ dependencies = [
  "tracing",
  "warpgate-common",
  "warpgate-core",
+ "warpgate-db-entities",
  "warpgate-desktop-auth",
  "warpgate-desktop-ui",
  "warpgate-tls",

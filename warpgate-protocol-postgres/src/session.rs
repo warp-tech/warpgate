@@ -454,6 +454,20 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         user_info: AuthStateUserInfo,
         target_name: String,
     ) -> Result<(), PostgresError> {
+        if let Some(banner) = warpgate_db_entities::Parameters::Entity::get(&self.services.db)
+            .await
+            .map_err(PostgresError::other)?
+            .banner_text()
+        {
+            self.stream
+                .push(pgwire::messages::response::NoticeResponse::new(vec![
+                    (b'S', "NOTICE".into()),
+                    (b'V', "NOTICE".into()),
+                    (b'C', "WG002".into()),
+                    (b'M', banner.into()),
+                ]))?;
+        }
+
         self.stream.flush().await?;
 
         let target = {
