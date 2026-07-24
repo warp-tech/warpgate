@@ -10,7 +10,7 @@
 //! shell's own echo, not the individual edits.
 //!
 //! The input stream is used only to locate the prompt boundary and to spot
-//! Enter, Ctrl-C, and bracketed-paste markers — never for text content.
+//! Enter and Ctrl-C — never for text content.
 //!
 //! This is an audit aid, not a security boundary: a determined user can defeat
 //! any stream-derived logging. Known heuristic limitations, all exercised by
@@ -27,6 +27,13 @@ const ETX: u8 = 0x03; // Ctrl-C
 /// this many output bytes, so a shell that never echoes one cannot wedge the
 /// detector on a single line forever.
 const MAX_PENDING_OUTPUT: usize = 2048;
+
+const fn sane_size(cols: u16, rows: u16) -> (u16, u16) {
+    (
+        if cols < 2 { 80 } else { cols },
+        if rows < 2 { 24 } else { rows },
+    )
+}
 
 #[derive(Clone, Copy)]
 enum State {
@@ -56,14 +63,16 @@ pub struct CommandDetector {
 
 impl CommandDetector {
     pub fn new(cols: u16, rows: u16) -> Self {
+        let (cols, rows) = sane_size(cols, rows);
         Self {
-            parser: vt100::Parser::new(rows.max(1), cols.max(1), 0),
+            parser: vt100::Parser::new(rows, cols, 0),
             state: State::Idle,
         }
     }
 
     pub fn on_resize(&mut self, cols: u16, rows: u16) {
-        self.parser.set_size(rows.max(1), cols.max(1));
+        let (cols, rows) = sane_size(cols, rows);
+        self.parser.set_size(rows, cols);
         self.state = match self.state {
             State::Editing { .. } => State::Discarding,
             State::Submitted { scanned, .. } => State::Discarded { scanned },
@@ -224,6 +233,22 @@ mod tests {
         let mut d = CommandDetector::new(80, 24);
         prompt(&mut d, "$ ");
         assert_eq!(enter(&mut d), None);
+    }
+
+    #[test]
+    fn degenerate_pty_size_does_not_panic() {
+        // A 0x0 pty-req (e.g. an `expect` spawn with no controlling tty) must
+        // not build an emulator small enough to underflow vt100 on wrapping
+        // output — under release `panic = "abort"` that aborts the whole
+        // process. The detector falls back to 80x24 and still works.
+        let mut d = CommandDetector::new(0, 0);
+        prompt(&mut d, "user@host:~$ ");
+        typed(&mut d, "echo hello world");
+        assert_eq!(enter(&mut d).as_deref(), Some("echo hello world"));
+        d.on_resize(0, 0);
+        prompt(&mut d, "user@host:~$ ");
+        typed(&mut d, "id");
+        assert_eq!(enter(&mut d).as_deref(), Some("id"));
     }
 
     #[test]
