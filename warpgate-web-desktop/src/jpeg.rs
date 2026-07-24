@@ -62,6 +62,8 @@ fn encode(rect: DesktopRect, data: &[u8]) -> Option<Bytes> {
 
 #[cfg(test)]
 mod tests {
+    use zune_jpeg::zune_core::bytestream::ZCursor;
+
     use super::*;
 
     fn rect(width: u16, height: u16) -> DesktopRect {
