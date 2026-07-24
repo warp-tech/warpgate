@@ -14,6 +14,17 @@ pub struct PtyRequest {
     pub modes: Vec<(Pty, u32)>,
 }
 
+impl PtyRequest {
+    /// Terminal dimensions as `(cols, rows)`, clamped to `u16` with a
+    /// conventional 80x24 fallback for out-of-range values.
+    pub fn screen_size(&self) -> (u16, u16) {
+        (
+            u16::try_from(self.col_width).unwrap_or(80),
+            u16::try_from(self.row_height).unwrap_or(24),
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
 pub struct ServerChannelId(pub ChannelId);
 
