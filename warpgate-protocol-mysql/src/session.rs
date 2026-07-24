@@ -445,6 +445,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 client.stream.flush().await?;
 
                 let mut eof_ctr = 0;
+                let mut first_packet = true;
                 loop {
                     let Some(response) = client.stream.recv().await? else {
                         return Err(MySqlError::Eof);
@@ -452,19 +453,37 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                     trace!(?response, "client got packet");
                     self.stream.push(&&response[..], ())?;
                     self.stream.flush().await?;
-                    if let Some(com) = response.first() {
-                        if com == &0xfe {
-                            if self.capabilities.contains(Capabilities::DEPRECATE_EOF) {
+
+                    let com = response.first();
+                    if first_packet {
+                        first_packet = false;
+                        // OK or ERR as the first packet means there is no
+                        // result set; later packets starting with 0x00 are
+                        // rows with an empty first column
+                        if com == Some(&0) || com == Some(&0xff) {
+                            break;
+                        }
+                        continue;
+                    }
+                    // 0xff is not a valid length-encoded value prefix, so
+                    // no row or column definition can start with it
+                    if com == Some(&0xff) {
+                        break;
+                    }
+                    if com == Some(&0xfe) {
+                        // Rows can also start with 0xfe (a length-encoded
+                        // value >= 2^24); real EOF and terminating OK
+                        // packets are shorter than these thresholds
+                        if client.capabilities.contains(Capabilities::DEPRECATE_EOF) {
+                            if response.len() < 0xff_ffff {
                                 break;
                             }
+                        } else if response.len() < 9 {
                             eof_ctr += 1;
                             if eof_ctr == 2 {
                                 // todo check multiple results
                                 break;
                             }
-                        }
-                        if com == &0 || com == &0xff {
-                            break;
                         }
                     }
                 }
