@@ -21,7 +21,7 @@
     "openapi": "npm run openapi:schema:admin && npm run openapi:schema:gateway && npm run openapi:client:admin && npm run openapi:client:gateway"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.4",
+    "@biomejs/biome": "^2.5.5",
     "@fontsource/poppins": "^5.2.7",
     "@fontsource/work-sans": "^5.2.8",
     "@fortawesome/free-brands-svg-icons": "^7.3.1",
