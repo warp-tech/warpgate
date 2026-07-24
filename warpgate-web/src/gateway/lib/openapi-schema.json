@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.27.0-beta.2-39-geb453d49-modified"
+    "version": "v0.27.0-beta.2-7-g109c3caa-modified"
   },
   "servers": [
     {
@@ -180,14 +180,6 @@
             "description": ""
           }
         },
-        "security": [
-          {
-            "TokenSecurityScheme": []
-          },
-          {
-            "CookieSecurityScheme": []
-          }
-        ],
         "operationId": "get_auth_state"
       }
     },
@@ -784,14 +776,6 @@
             "description": ""
           }
         },
-        "security": [
-          {
-            "TokenSecurityScheme": []
-          },
-          {
-            "CookieSecurityScheme": []
-          }
-        ],
         "operationId": "issue_my_certificate"
       }
     },
@@ -821,14 +805,6 @@
             "description": ""
           }
         },
-        "security": [
-          {
-            "TokenSecurityScheme": []
-          },
-          {
-            "CookieSecurityScheme": []
-          }
-        ],
         "operationId": "revoke_my_certificate"
       }
     },
@@ -852,14 +828,6 @@
             "description": ""
           }
         },
-        "security": [
-          {
-            "TokenSecurityScheme": []
-          },
-          {
-            "CookieSecurityScheme": []
-          }
-        ],
         "operationId": "get_my_api_tokens"
       },
       "post": {
@@ -898,14 +866,6 @@
             "description": ""
           }
         },
-        "security": [
-          {
-            "TokenSecurityScheme": []
-          },
-          {
-            "CookieSecurityScheme": []
-          }
-        ],
         "operationId": "create_api_token"
       }
     },
@@ -935,14 +895,6 @@
             "description": ""
           }
         },
-        "security": [
-          {
-            "TokenSecurityScheme": []
-          },
-          {
-            "CookieSecurityScheme": []
-          }
-        ],
         "operationId": "delete_my_api_token"
       }
     },

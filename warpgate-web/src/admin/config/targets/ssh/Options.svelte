@@ -3,6 +3,7 @@
     import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import {
         api,
+        type SSHClientKey,
         type Target,
         type TargetOptionsTargetSSHOptions,
     } from 'admin/lib/api'
@@ -22,6 +23,11 @@
 
     let hostKeyCheckInvalidated = $state(false)
     let sshTargets = $state<Target[]>([])
+    let clientKeys = $state<SSHClientKey[]>([])
+
+    api.getSshClientKeys().then(keys => {
+        clientKeys = keys
+    })
 
     $effect(() => {
         options // run effect when options get reassigned after saving
@@ -49,6 +55,28 @@
         const jumpHost = options.jumpHost
         untrack(() => {
             jumpHostSelectValue = jumpHost ?? ''
+        })
+    })
+
+    // svelte-ignore state_referenced_locally
+    let clientKeySelectValue = $state(
+        options.auth.kind === 'PublicKey' ? (options.auth.keyId ?? '') : '',
+    )
+
+    $effect(() => {
+        const val = clientKeySelectValue
+        untrack(() => {
+            if (options.auth.kind === 'PublicKey') {
+                options.auth.keyId = val || undefined
+            }
+        })
+    })
+
+    $effect(() => {
+        const keyId =
+            options.auth.kind === 'PublicKey' ? options.auth.keyId : undefined
+        untrack(() => {
+            clientKeySelectValue = keyId ?? ''
         })
     })
 </script>
@@ -125,6 +153,17 @@
         </select>
     </FormGroup>
     {#if options.auth.kind === 'PublicKey'}
+        <FormGroup floating label="Key" class="w-100 ms-3">
+            <select class="form-control" bind:value={clientKeySelectValue}>
+                <option value="">Use default key</option>
+                {#each clientKeys as key (key.id)}
+                    <option value={key.id}>
+                        {key.label}
+                        ({key.kind}){key.isDefault ? ' — default' : ''}
+                    </option>
+                {/each}
+            </select>
+        </FormGroup>
         <a
             class="btn btn-link mb-3 d-flex align-items-center"
             href="/@warpgate/admin#/config/ssh"

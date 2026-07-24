@@ -34,7 +34,7 @@ use warpgate_core::{ConfigProvider, Services};
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
-use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_keys, load_preferred_key};
+use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_client_keys};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -72,6 +72,9 @@ pub enum ConnectionError {
 
     #[error("Jump host target not found")]
     JumpHostTargetNotFound,
+
+    #[error(transparent)]
+    Warpgate(#[from] WarpgateError),
 }
 
 pub struct ResolvedSshChainHost {
@@ -818,14 +821,12 @@ impl RemoteClient {
                         Some("Password authentication was rejected by the SSH target".to_string());
                 }
             }
-            SSHTargetAuth::PublicKey(_) => {
+            SSHTargetAuth::PublicKey(auth) => {
                 let best_hash = session.best_supported_rsa_hash().await?.flatten();
-                #[allow(clippy::explicit_auto_deref)]
-                let keys = load_keys(
-                    &*self.services.config.lock().await,
-                    &self.services.global_params,
-                    "client",
-                )?;
+                let keys = load_client_keys(&self.services.db, auth.key_id).await?;
+                if keys.is_empty() {
+                    auth_error_msg = Some("No SSH client keys are configured".into());
+                }
                 for key in keys {
                     let key = Arc::new(key);
                     if key.key_data().is_rsa() && best_hash.is_none() && !allow_insecure_algos {
@@ -876,11 +877,13 @@ impl RemoteClient {
             SSHTargetAuth::IamRole(_) => {
                 let instance_info = warpgate_aws::find_instance_by_ip(host).await?;
 
-                let key = load_preferred_key(
-                    &*self.services.config.lock().await,
-                    &self.services.global_params,
-                    "client",
-                )?;
+                let key = load_client_keys(&self.services.db, None)
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        WarpgateError::InconsistentState("No SSH client keys are configured".into())
+                    })?;
 
                 let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
 

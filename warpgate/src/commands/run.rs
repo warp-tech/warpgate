@@ -82,6 +82,10 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     install_database_logger(services.db.clone());
 
+    // Runs even when the SSH listener is disabled so that the admin UI can
+    // manage the keys and other protocols' features relying on them work.
+    warpgate_protocol_ssh::ensure_client_keys(&services.db, &config, params).await?;
+
     if console::user_attended() {
         info!("--------------------------------------------");
         info!("Warpgate is now running.");
