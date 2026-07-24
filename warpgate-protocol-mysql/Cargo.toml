@@ -12,10 +12,14 @@ bytes.workspace = true
 flate2 = { version = "1", features = ["zlib"], default-features = false }
 futures.workspace = true
 mysql_common = { version = "0.37", default-features = false }
-password-hash.workspace = true
 rand.workspace = true
+rsa = { version = "0.10.0-rc.18", default-features = false, features = [
+    "std",
+    "encoding",
+] }
 rustls.workspace = true
 sha1 = { version = "0.11", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 thiserror.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true

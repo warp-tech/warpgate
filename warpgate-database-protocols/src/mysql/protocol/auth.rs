@@ -13,7 +13,7 @@ pub enum AuthPlugin {
 }
 
 impl AuthPlugin {
-    pub(crate) fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             AuthPlugin::MySqlClearPassword => "mysql_clear_password",
             AuthPlugin::MySqlNativePassword => "mysql_native_password",

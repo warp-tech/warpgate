@@ -26,15 +26,13 @@ impl Decode<'_> for AuthSwitchRequest {
 
         let plugin = buf.get_str_nul()?.parse()?;
 
+        // Scramble-based plugins send a NUL-terminated challenge; others
+        // (e.g. mysql_clear_password) may send no data at all.
         // See: https://github.com/mysql/mysql-server/blob/ea7d2e2d16ac03afdd9cb72a972a95981107bf51/sql/auth/sha2_password.cc#L942
-        if buf.len() != 21 {
-            return Err(err_protocol!(
-                "expected 21 bytes but found {} bytes",
-                buf.len()
-            ));
-        }
-        let data = buf.get_bytes(20);
-        buf.advance(1); // NUL-terminator
+        let data = match buf.last() {
+            Some(0) => buf.slice(..buf.len() - 1),
+            _ => buf,
+        };
 
         Ok(Self { plugin, data })
     }
