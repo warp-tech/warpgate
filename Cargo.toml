@@ -177,6 +177,7 @@ tokio-tungstenite = { version = "0.29", features = [
 reqwest-websocket = { version = "0.6.0", default-features = false }
 time = { version = "0.3", default-features = false }
 url = { version = "2.4", default-features = false }
+zune-jpeg = "0.5"
 
 [profile.dev]
 debug = "line-tables-only"

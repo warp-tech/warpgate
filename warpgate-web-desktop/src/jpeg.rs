@@ -62,6 +62,8 @@ fn encode(rect: DesktopRect, data: &[u8]) -> Option<Bytes> {
 
 #[cfg(test)]
 mod tests {
+    use zune_jpeg::zune_core::bytestream::ZCursor;
+
     use super::*;
 
     fn rect(width: u16, height: u16) -> DesktopRect {
@@ -90,7 +92,7 @@ mod tests {
         let jpeg = encode(rect(64, 64), &tile).unwrap();
 
         let mut decoder = zune_jpeg::JpegDecoder::new_with_options(
-            &jpeg[..],
+            ZCursor::from(&jpeg[..]),
             zune_jpeg::zune_core::options::DecoderOptions::default()
                 .jpeg_set_out_colorspace(zune_jpeg::zune_core::colorspace::ColorSpace::RGB),
         );
