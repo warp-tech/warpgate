@@ -72,7 +72,7 @@ impl WebDesktopClientManager {
 
         let server_handle = State::register_session(
             &services.state,
-            &protocol_name,
+            protocol_name,
             SessionStateInit {
                 remote_address,
                 handle: Box::new(session_handle),

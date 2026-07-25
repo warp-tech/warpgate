@@ -12,11 +12,11 @@ pub use common::*;
 use futures::future::BoxFuture;
 pub use keys::*;
 pub use server::bind_server;
-use warpgate_common::{ListenEndpoint, ProtocolName};
+use warpgate_common::{ListenEndpoint, Protocol};
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
-pub static PROTOCOL_NAME: ProtocolName = "SSH";
+pub const PROTOCOL_NAME: Protocol = Protocol::Ssh;
 
 #[derive(Clone)]
 pub struct SSHProtocolServer {

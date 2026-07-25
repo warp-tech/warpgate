@@ -14,7 +14,7 @@ use super::{
     CredentialPolicyResponse,
 };
 use crate::helpers::logging::format_related_ids;
-use crate::{SessionId, User};
+use crate::{Protocol, SessionId, User, WarpgateError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
@@ -33,7 +33,7 @@ pub struct AuthStateUserInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebApprovalMatchKey {
     pub remote_ip: IpAddr,
-    pub protocol: String,
+    pub protocol: Protocol,
     pub username: String,
     /// `None` when the approval was granted for *all* targets;
     /// `Some(name)` binds it to one target.
@@ -66,7 +66,7 @@ pub struct AuthState {
     user_info: AuthStateUserInfo,
     session_id: Option<Uuid>,
     remote_ip: Option<IpAddr>,
-    protocol: String,
+    protocol: Protocol,
     target_name: String,
     force_rejected: bool,
     policy: Box<dyn CredentialPolicy + Sync + Send>,
@@ -94,7 +94,7 @@ impl AuthState {
         session_id: Option<SessionId>,
         remote_ip: Option<IpAddr>,
         user_info: AuthStateUserInfo,
-        protocol: String,
+        protocol: Protocol,
         target_name: String,
         policy: Box<dyn CredentialPolicy + Sync + Send>,
         state_change_signal: broadcast::Sender<AuthResult>,
@@ -135,8 +135,8 @@ impl AuthState {
         &self.user_info
     }
 
-    pub fn protocol(&self) -> &str {
-        &self.protocol
+    pub const fn protocol(&self) -> Protocol {
+        self.protocol
     }
 
     pub fn target_name(&self) -> &str {
@@ -162,7 +162,7 @@ impl AuthState {
 
         Some(WebApprovalMatchKey {
             remote_ip,
-            protocol: self.protocol.clone(),
+            protocol: self.protocol,
             username: self.user_info.username.to_lowercase(),
             target_name: Some(self.target_name.clone()),
             other_credentials,
@@ -283,6 +283,7 @@ impl AuthState {
         match self
             .policy
             .is_sufficient(&self.protocol, &self.valid_credentials[..])
+            .is_sufficient(self.protocol, &self.valid_credentials[..])
         {
             CredentialPolicyResponse::Ok => AuthResult::Accepted {
                 user_info: self.user_info.clone(),

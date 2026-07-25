@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{ProtocolName, SessionId, WarpgateError};
+use warpgate_common::{Protocol, SessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
@@ -28,7 +28,7 @@ use warpgate_sso::WarpgateIdToken;
 
 use crate::session::SessionStore;
 
-pub const PROTOCOL_NAME: ProtocolName = "HTTP";
+pub const PROTOCOL_NAME: Protocol = Protocol::Http;
 static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
 static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";

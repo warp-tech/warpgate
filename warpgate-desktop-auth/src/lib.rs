@@ -20,7 +20,7 @@ use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
 };
-use warpgate_common::{Secret, Target};
+use warpgate_common::{Protocol, Secret, Target};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::validate_and_add_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
@@ -34,8 +34,8 @@ use warpgate_desktop_ui::AuthPrompt;
 pub trait DesktopProtocol {
     /// The protocol's target-options type (`TargetRdpOptions` / `TargetVncOptions`).
     type Options;
-    /// Warpgate protocol name, recorded on the auth state (e.g. `"RDP"`).
-    const NAME: &'static str;
+    /// Warpgate protocol, recorded on the auth state.
+    const NAME: Protocol;
     /// Lowercase audit / brute-force label (e.g. `"rdp"`).
     const LABEL: &'static str;
     /// Clone out this protocol's options from a target, or `None` if it's a different kind.

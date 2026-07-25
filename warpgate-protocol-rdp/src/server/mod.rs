@@ -28,7 +28,7 @@ use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::net::detect_port_knock;
-use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetRdpOptions};
+use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetRdpOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{DesktopInput, Services, SessionStateInit, State, WarpgateServerHandle};
 use warpgate_db_entities::Parameters;
@@ -112,7 +112,7 @@ pub async fn bind_server(
 
                 let server_handle = match State::register_session(
                     &services.state,
-                    &PROTOCOL_NAME,
+                    PROTOCOL_NAME,
                     SessionStateInit {
                         remote_address: Some(remote_address),
                         handle: Box::new(session_handle),
@@ -492,7 +492,7 @@ struct RdpProto;
 
 impl DesktopProtocol for RdpProto {
     type Options = TargetRdpOptions;
-    const NAME: &'static str = PROTOCOL_NAME;
+    const NAME: Protocol = PROTOCOL_NAME;
     const LABEL: &'static str = "rdp";
 
     fn options(target: &Target) -> Option<TargetRdpOptions> {

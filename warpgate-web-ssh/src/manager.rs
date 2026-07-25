@@ -78,7 +78,7 @@ impl WebSshClientManager {
 
         let server_handle = State::register_session(
             &services.state,
-            &warpgate_protocol_ssh::PROTOCOL_NAME,
+            warpgate_protocol_ssh::PROTOCOL_NAME,
             SessionStateInit {
                 remote_address,
                 handle: Box::new(session_handle),

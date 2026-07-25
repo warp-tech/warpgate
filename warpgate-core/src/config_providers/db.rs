@@ -16,7 +16,7 @@ use warpgate_common::auth::{
 use warpgate_common::helpers::hash::verify_password_hash;
 use warpgate_common::helpers::otp::verify_totp;
 use warpgate_common::{
-    Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
+    Protocol, Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
     UserRequireCredentialsPolicy, UserSsoCredential, UserTotpCredential, WarpgateError,
 };
 use warpgate_db_entities as entities;
@@ -405,59 +405,36 @@ impl ConfigProvider for DatabaseConfigProvider {
                 protocols: HashMap::new(),
             };
 
-            if let Some(p) = req.http {
-                policy.protocols.insert(
-                    "HTTP",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.mysql {
-                policy.protocols.insert(
-                    "MySQL",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.postgres {
-                policy.protocols.insert(
-                    "PostgreSQL",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.ssh {
-                policy.protocols.insert(
-                    "SSH",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.vnc {
-                policy.protocols.insert(
-                    "VNC",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.rdp {
-                policy.protocols.insert(
-                    "RDP",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types,
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
+            // Full destructuring so a new per-protocol config field can't be
+            // silently left out of the policy map.
+            let UserRequireCredentialsPolicy {
+                http,
+                kubernetes,
+                ssh,
+                mysql,
+                postgres,
+                vnc,
+                rdp,
+            } = req;
+
+            for (protocol, required) in [
+                (Protocol::Http, http),
+                (Protocol::Kubernetes, kubernetes),
+                (Protocol::Ssh, ssh),
+                (Protocol::MySql, mysql),
+                (Protocol::Postgres, postgres),
+                (Protocol::Vnc, vnc),
+                (Protocol::Rdp, rdp),
+            ] {
+                if let Some(required) = required {
+                    policy.protocols.insert(
+                        protocol,
+                        Box::new(AllCredentialsPolicy {
+                            supported_credential_types: supported_credential_types.clone(),
+                            required_credential_types: required.into_iter().collect(),
+                        }),
+                    );
+                }
             }
 
             Ok(Some(

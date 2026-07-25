@@ -10,7 +10,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{SessionId, User, WarpgateError};
+use warpgate_common::{Protocol, SessionId, User, WarpgateError};
 
 use crate::login_protection::{FailedAttemptInfo, LoginProtectionService};
 use crate::{ConfigProvider, ConfigProviderEnum};
@@ -75,7 +75,7 @@ fn check_ip_allowed(
 async fn record_unknown_user_attempt(
     login_protection: &LoginProtectionService,
     username: &str,
-    protocol: &str,
+    protocol: Protocol,
     remote_ip: Option<IpAddr>,
     credential_type: Option<&str>,
 ) {
@@ -86,7 +86,7 @@ async fn record_unknown_user_attempt(
         .record_failed_attempt(FailedAttemptInfo {
             username: username.to_string(),
             remote_ip,
-            protocol: protocol.to_string(),
+            protocol: protocol.name().to_string(),
             credential_type: credential_type.to_string(),
         })
         .await;
@@ -160,7 +160,7 @@ impl AuthStateStore {
         config_provider: &Arc<ConfigProviderEnum>,
         login_protection: &LoginProtectionService,
         username: &str,
-        protocol: &str,
+        protocol: Protocol,
         supported_credential_types: &[CredentialKind],
         remote_ip: Option<IpAddr>,
         rate_limit_credential_type: Option<&str>,
@@ -212,7 +212,7 @@ impl AuthStateStore {
         &mut self,
         session_id: Option<&SessionId>,
         user: &User,
-        protocol: &str,
+        protocol: Protocol,
         target_name: &str,
         policy: Box<dyn CredentialPolicy + Sync + Send>,
         remote_ip: Option<IpAddr>,
@@ -234,7 +234,7 @@ impl AuthStateStore {
             session_id.copied(),
             remote_ip,
             user.into(),
-            protocol.to_string(),
+            protocol,
             target_name.to_string(),
             policy,
             state_change_tx,

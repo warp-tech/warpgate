@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, CredentialKind};
-use warpgate_common::{GlobalParams, Secret, SessionId, WarpgateConfig, WarpgateError};
+use warpgate_common::{GlobalParams, Protocol, Secret, SessionId, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Parameters;
 
 use crate::cluster::Cluster;
@@ -145,7 +145,7 @@ impl Services {
         &self,
         session_id: Option<&SessionId>,
         username: &str,
-        protocol: &str,
+        protocol: Protocol,
         target_name: &str,
         supported_credential_types: &[CredentialKind],
         remote_ip: Option<IpAddr>,

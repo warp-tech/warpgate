@@ -47,7 +47,7 @@ impl RequestCorrelator {
 
         let handle = State::register_session(
             &self.services.state,
-            &crate::PROTOCOL_NAME,
+            crate::PROTOCOL_NAME,
             SessionStateInit {
                 remote_address: ip.and_then(|x| x.parse().ok()),
                 handle: Box::new(KubernetesSessionHandle),

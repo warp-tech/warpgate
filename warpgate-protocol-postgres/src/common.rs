@@ -1,3 +1,3 @@
-use warpgate_common::ProtocolName;
+use warpgate_common::Protocol;
 
-pub const PROTOCOL_NAME: ProtocolName = "PostgreSQL";
+pub const PROTOCOL_NAME: Protocol = Protocol::Postgres;
