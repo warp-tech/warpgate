@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
+use sea_orm::{ActiveModelTrait, DatabaseConnection};
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
 use tracing::error;
@@ -111,24 +111,11 @@ impl State {
             }
         }
 
-        if let Err(error) = self.mark_session_complete(id).await {
+        if let Err(error) = crate::db::mark_session_ended(&self.db, id).await {
             error!(%error, %id, "Could not update session in the DB");
         }
 
         let _ = self.change_sender.send(());
-    }
-
-    async fn mark_session_complete(&self, id: Uuid) -> Result<()> {
-        use sea_orm::ActiveValue::Set;
-        let db = &self.db;
-        let session = Session::Entity::find_by_id(id)
-            .one(db)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
-        let mut model: Session::ActiveModel = session.into();
-        model.ended = Set(Some(OffsetDateTime::now_utc()));
-        model.update(db).await?;
-        Ok(())
     }
 }
 

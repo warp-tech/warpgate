@@ -3,11 +3,12 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ConnectOptions, Database, DatabaseConnection, EntityOrSelect, EntityTrait, ModelTrait,
-    QueryFilter, QuerySelect,
+    ConnectOptions, Database, DatabaseConnection, EntityOrSelect, EntityTrait, QueryFilter,
+    QuerySelect,
 };
 use time::OffsetDateTime;
 use tracing::error;
+use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Parameters::ConfigMigrationValues;
@@ -120,28 +121,18 @@ pub async fn migrate_down(connection: &DatabaseConnection, steps: u32) -> Result
     Ok(())
 }
 
-pub async fn populate_db(
-    db: &DatabaseConnection,
-    _config: &mut WarpgateConfig,
-) -> Result<(), WarpgateError> {
-    use sea_orm::ActiveValue::Set;
-    use warpgate_db_entities::{Recording, Session};
-
-    Recording::Entity::update_many()
-        .set(Recording::ActiveModel {
-            ended: Set(Some(OffsetDateTime::now_utc())),
-            ..Default::default()
-        })
-        .filter(Expr::col(Recording::Column::Ended).is_null())
-        .exec(db)
-        .await
-        .map_err(WarpgateError::from)?;
+/// Mark a single still-open session as ended. Idempotent: a no-op if the
+/// session was already ended or has been removed, so it is safe to call from
+/// an admin close even when the session's own teardown will run later.
+pub async fn mark_session_ended(db: &DatabaseConnection, id: Uuid) -> Result<(), WarpgateError> {
+    use warpgate_db_entities::Session;
 
     Session::Entity::update_many()
-        .set(Session::ActiveModel {
-            ended: Set(Some(OffsetDateTime::now_utc())),
-            ..Default::default()
-        })
+        .col_expr(
+            Session::Column::Ended,
+            Expr::value(OffsetDateTime::now_utc()),
+        )
+        .filter(Expr::col(Session::Column::Id).eq(id))
         .filter(Expr::col(Session::Column::Ended).is_null())
         .exec(db)
         .await
@@ -201,27 +192,50 @@ pub async fn cleanup_db(
         request_deletion.exec(db).await?;
     }
 
-    let recordings_to_delete = Recording::Entity::find()
+    // Recordings are cleaned up by their parent session's `ended`, not their
+    // own: a session ended abnormally (inactivity reaper, node shutdown, admin
+    // close) never finalizes its recording, so `recording.ended` stays null and
+    // the files would otherwise leak on disk forever.
+    let expired_session_ids: Vec<Uuid> = Session::Entity::find()
         .filter(Expr::col(Session::Column::Ended).is_not_null())
         .filter(Expr::col(Session::Column::Ended).lt(recording_cutoff))
         .all(db)
-        .await?;
+        .await?
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
 
-    for recording in recordings_to_delete {
-        if let Err(error) = recordings
-            .remove(&recording.session_id, &recording.name)
-            .await
-        {
-            error!(session=%recording.session_id, name=%recording.name, %error, "Failed to remove recording");
+    if !expired_session_ids.is_empty() {
+        let recordings_to_delete = Recording::Entity::find()
+            .filter(
+                Expr::col(Recording::Column::SessionId).is_in(expired_session_ids.iter().copied()),
+            )
+            .all(db)
+            .await?;
+
+        for recording in recordings_to_delete {
+            if let Err(error) = recordings
+                .remove(&recording.session_id, &recording.name)
+                .await
+            {
+                error!(session=%recording.session_id, name=%recording.name, %error, "Failed to remove recording");
+            }
         }
-        recording.delete(db).await?;
-    }
 
-    Session::Entity::delete_many()
-        .filter(Expr::col(Session::Column::Ended).is_not_null())
-        .filter(Expr::col(Session::Column::Ended).lt(recording_cutoff))
-        .exec(db)
-        .await?;
+        // Delete recording rows explicitly rather than relying on the FK cascade,
+        // which SQLite does not enforce unless `foreign_keys` is on.
+        Recording::Entity::delete_many()
+            .filter(
+                Expr::col(Recording::Column::SessionId).is_in(expired_session_ids.iter().copied()),
+            )
+            .exec(db)
+            .await?;
+
+        Session::Entity::delete_many()
+            .filter(Expr::col(Session::Column::Id).is_in(expired_session_ids))
+            .exec(db)
+            .await?;
+    }
 
     Ok(())
 }
