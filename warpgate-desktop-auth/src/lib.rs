@@ -31,8 +31,8 @@ use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    Services, TargetAuthorization, WarpgateServerHandle, authorize_for_target_by_name,
-    authorize_ticket, consume_ticket,
+    AuthorizedIdentity, Services, TargetAuthorization, WarpgateServerHandle,
+    authorize_for_target_by_name, authorize_ticket, consume_ticket,
 };
 use warpgate_desktop_ui::AuthPrompt;
 
@@ -200,6 +200,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                 &services.login_protection,
                 &secret,
                 Some(remote_address.ip()),
+                P::NAME,
             )
             .await?
             {
@@ -230,8 +231,10 @@ pub async fn finalize_user_auth<P: DesktopProtocol>(
     user_info: &AuthStateUserInfo,
     target_name: &str,
 ) -> Result<(TargetAuthorization, P::Options)> {
+    // Reached only after the holding screen drove the auth state to `Accepted`.
+    let identity = AuthorizedIdentity::for_authenticated_session(user_info.clone(), P::NAME);
     let Some(authorization) =
-        authorize_for_target_by_name(services.config_provider.as_ref(), user_info, target_name)
+        authorize_for_target_by_name(services.config_provider.as_ref(), &identity, target_name)
             .await?
     else {
         bail!(

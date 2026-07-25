@@ -71,14 +71,14 @@ where
 {
     match event {
         DesktopEvent::RawImage { rect, data } => {
-            let pixels = pack_bgra(&render.pixel_format, &data);
+            let pixels = pack_bgra(&render.caps.pixel_format, &data);
             write_raw_rect(viewer_wr, rect.x, rect.y, rect.width, rect.height, &pixels).await?;
             render.pending_request = false;
         }
         // The backend compressed this rect with Tight's JPEG sub-encoding. The viewer
         // negotiated Tight, so it decodes JPEG itself — forward the bytes straight through
         // as a Tight/JPEG rect rather than decoding and re-encoding as (much larger) Raw.
-        DesktopEvent::JpegImage { rect, data } if render.viewer_supports_tight => {
+        DesktopEvent::JpegImage { rect, data } if render.caps.viewer_supports_tight => {
             write_tight_jpeg_rect(viewer_wr, rect.x, rect.y, rect.width, rect.height, &data)
                 .await?;
             render.pending_request = false;
@@ -90,7 +90,7 @@ where
             warn!("viewer did not negotiate Tight; dropping backend JPEG rect");
             render.pending_request = false;
         }
-        DesktopEvent::Resize { width, height } if render.supports_desktop_size => {
+        DesktopEvent::Resize { width, height } if render.caps.supports_desktop_size => {
             write_desktop_size(viewer_wr, width, height).await?;
             render.pending_request = false;
         }
@@ -144,13 +144,13 @@ pub(super) async fn run_proxy_session(session: ProxySession) -> Result<()> {
             event = viewer_events.recv() => {
                 match event {
                     Some(ClientEvent::WantsFrame) => render.pending_request = true,
-                    Some(ClientEvent::PixelFormat(pf)) => render.pixel_format = pf,
+                    Some(ClientEvent::PixelFormat(pf)) => render.caps.pixel_format = pf,
                     Some(ClientEvent::Encodings {
                         desktop_size,
                         tight,
                     }) => {
-                        render.supports_desktop_size = desktop_size;
-                        render.viewer_supports_tight = tight;
+                        render.caps.supports_desktop_size = desktop_size;
+                        render.caps.viewer_supports_tight = tight;
                     }
                     Some(ClientEvent::Key { down, keysym }) => {
                         let input = DesktopInput::Key { keysym, down };

@@ -3,17 +3,19 @@
 //! Collects that factor over the live RDP session before the target is dialed.
 
 use std::convert::Infallible;
+use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
-use tracing::warn;
-use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
-use warpgate_core::{DesktopInput, Services, TIMEOUT};
+use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_core::{DesktopInput, Services};
 use warpgate_desktop_auth::{
-    InteractiveAuth, OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt,
+    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter as HoldPainterExt, InteractiveAuth,
+    OtpAction, run_hold_screen as run_hold_screen_driver,
 };
-use warpgate_desktop_ui::{self as ui, AuthPrompt};
+use warpgate_desktop_ui as ui;
 
 use super::protocol::{Event as ServerEvent, Input as ServerInput};
 
@@ -32,110 +34,94 @@ pub(super) async fn run_hold_screen(
     server_in_tx: &Sender<ServerInput>,
     screen: &mut ui::Screen,
 ) -> Result<Option<AuthStateUserInfo>> {
-    let state = services
-        .auth_state_store
-        .lock()
-        .await
-        .get(&interactive.state_id)
-        .context("auth state expired")?;
-    let mut approval = state.lock().await.subscribe();
+    // The negotiated size is written by viewer resize events (in the input source) and read
+    // by the painter — and, once auth completes, by the caller to dial the target at it.
+    // Shared behind a lock because the input and painter are separate objects (so the driver
+    // can await input and paint without aliasing one `&mut` across its `select!`).
+    let shared_screen = Arc::new(Mutex::new(*screen));
+    let mut input = RdpHoldInput {
+        events,
+        screen: shared_screen.clone(),
+    };
+    let mut painter = RdpHoldPainter {
+        inner: HoldPainter::new(*screen),
+        server_in_tx: server_in_tx.clone(),
+        screen: shared_screen.clone(),
+    };
 
-    // Hold screen renders at the negotiated screen size,
-    // resizing means a reactivation which races with the resize itself
-    let mut otp = OtpEntry::new(crate::PROTOCOL_NAME);
-    let mut painter = HoldPainter::new(*screen);
-    let mut ticker = tokio::time::interval(HOLD_RENDER_INTERVAL);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let result = run_hold_screen_driver(
+        services,
+        interactive.state_id,
+        crate::PROTOCOL_NAME,
+        &interactive.username,
+        interactive.remote_ip,
+        &mut input,
+        &mut painter,
+        Deadline::until_auth_state_expires(),
+    )
+    .await;
 
-    // The auth state is vacuumed from the store after this long, at which point
-    // an approval can no longer arrive — give up instead of holding the screen
-    // forever.
-    let deadline = tokio::time::sleep(*TIMEOUT);
-    tokio::pin!(deadline);
+    // Hand the size the viewer settled on back to the caller so it dials the target at it.
+    *screen = *shared_screen.lock().await;
+    result
+}
 
-    loop {
-        // Bind to a local so the `state` guard drops here — the arms below
-        // re-lock the same mutex (`auth_prompt`, OTP validation).
-        let verification = state.lock().await.verify();
-        let need = match verification {
-            AuthResult::Accepted { user_info } => {
-                let _ = services
-                    .login_protection
-                    .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
-                    .await;
-                // Swap the OTP prompt for a "Connecting" screen before the caller blocks on
-                // the backend connect, so the viewer gets feedback instead of a frozen frame.
-                let _ = painter.paint(server_in_tx, ui::render_connecting).await;
-                return Ok(Some(user_info));
+/// Reads RDP viewer input for the hold screen, mapping scancodes / Unicode keys to OTP
+/// actions and tracking the viewer's negotiated size.
+struct RdpHoldInput<'a> {
+    events: &'a mut UnboundedReceiver<ServerEvent>,
+    screen: Arc<Mutex<ui::Screen>>,
+}
+
+impl HoldInputSource for RdpHoldInput<'_> {
+    async fn next(&mut self) -> HoldEvent {
+        match self.events.recv().await {
+            None => HoldEvent::Disconnected,
+            Some(ServerEvent::Input(DesktopInput::Scancode {
+                code, down: true, ..
+            })) => scancode_otp_action(code).map_or(HoldEvent::Other, HoldEvent::Otp),
+            Some(ServerEvent::Input(DesktopInput::Key {
+                keysym,
+                down: true,
+            })) => key_otp_action(keysym).map_or(HoldEvent::Other, HoldEvent::Otp),
+            Some(ServerEvent::Size { width, height }) => {
+                *self.screen.lock().await = ui::Screen { width, height };
+                HoldEvent::Other
             }
-            AuthResult::Rejected => return Ok(None),
-            AuthResult::Need(need) => need,
-        };
+            Some(_) => HoldEvent::Other,
+        }
+    }
+}
 
-        let Some(mut prompt) = auth_prompt(services, &state, &need, otp.entered()).await else {
-            warn!(
-                "RDP auth policy requires a factor that can't be collected on the holding screen"
-            );
-            return Ok(None);
-        };
+/// Paints the RDP hold screen: renders the UI to RGB, converts to BGRA and pushes a
+/// full-screen frame via the shared [`HoldPainter`].
+struct RdpHoldPainter {
+    inner: HoldPainter,
+    server_in_tx: Sender<ServerInput>,
+    screen: Arc<Mutex<ui::Screen>>,
+}
 
-        let awaiting_web = matches!(prompt, ui::AuthPrompt::WebApproval { .. });
-
-        loop {
-            tokio::select! {
-                // Browser approval landed (or the signal lagged); re-verify on the next loop.
-                _ = approval.recv(), if awaiting_web => break,
-                () = &mut deadline => {
-                    warn!("RDP interactive authentication timed out");
-                    return Ok(None);
-                },
-                event = events.recv() => {
-                    let Some(event) = event else {
-                        return Ok(None);
-                    };
-                    let action = match event {
-                        ServerEvent::Input(DesktopInput::Scancode { code, down, .. }) if down => {
-                            scancode_otp_action(code)
-                        }
-                        ServerEvent::Input(DesktopInput::Key { keysym, down }) if down => {
-                            key_otp_action(keysym)
-                        }
-                        // Track the viewer's negotiated size so the hold screen renders at
-                        // it and the caller dials the target at it once auth completes.
-                        ServerEvent::Size { width, height } => {
-                            *screen = ui::Screen { width, height };
-                            painter.set_screen(*screen);
-                            None
-                        }
-                        _ => None,
-                    };
-                    if !awaiting_web
-                        && let Some(action) = action
-                        && let AuthPrompt::Otp { entered } = &mut prompt
-                        {
-                        match otp
-                            .apply(action, services, &state, &interactive.username, interactive.remote_ip)
-                            .await {
-                                OtpActionApplyOutcome::Applied =>  {
-                                    *entered = otp.entered().to_string();
-                                },
-                                OtpActionApplyOutcome::AcceptedAndValidated => break,
-                                OtpActionApplyOutcome::TooManyFailures => {
-                                    warn!("too many incorrect one-time passwords");
-                                    return Ok(None);
-                                }
-                            }
-                        }
-                },
-                _ = ticker.tick() => {
-                    painter
-                        .paint(server_in_tx, |screen, tick| {
-                            ui::render_authentication(screen, tick, &prompt)
-                        })
-                        .await?;
-                },
+impl HoldPainterExt for RdpHoldPainter {
+    async fn paint(&mut self, frame: HoldFrame<'_>) -> Result<()> {
+        self.inner.set_screen(*self.screen.lock().await);
+        match frame {
+            HoldFrame::Prompt(prompt) => {
+                self.inner
+                    .paint(&self.server_in_tx, |screen, tick| {
+                        ui::render_authentication(screen, tick, prompt)
+                    })
+                    .await
+            }
+            HoldFrame::Connecting => {
+                self.inner
+                    .paint(&self.server_in_tx, ui::render_connecting)
+                    .await
             }
         }
+    }
+
+    fn render_interval(&self) -> Duration {
+        HOLD_RENDER_INTERVAL
     }
 }
 

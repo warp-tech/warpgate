@@ -328,7 +328,7 @@ async fn negotiate_and_authorize(
     .await??;
 
     // Resize the viewer to match backend geometry (only if it advertised DesktopSize).
-    if render.supports_desktop_size {
+    if render.caps.supports_desktop_size {
         write_desktop_size(&mut viewer_wr, backend_w, backend_h).await?;
     } else {
         warn!(
@@ -361,13 +361,33 @@ struct ProxySession {
     recorder: Option<DesktopRecorder>,
 }
 
-/// Shared state for the hold screen
-struct RenderState {
+/// The viewer's negotiated capabilities, updated from its handshake / control messages and
+/// read wherever we re-encode toward it (the hold screen and the proxy loop).
+#[derive(Clone)]
+struct ViewerCaps {
     pixel_format: PixelFormat,
     supports_desktop_size: bool,
     /// The viewer negotiated the Tight encoding, so backend JPEG rects can be forwarded
     /// through as Tight/JPEG instead of being decoded and re-encoded as Raw.
     viewer_supports_tight: bool,
+}
+
+impl ViewerCaps {
+    const fn new() -> Self {
+        Self {
+            pixel_format: DEFAULT_PIXEL_FORMAT,
+            supports_desktop_size: false,
+            viewer_supports_tight: false,
+        }
+    }
+}
+
+/// Viewer-facing render state: the negotiated [`ViewerCaps`], whether the viewer has an
+/// outstanding frame request (VNC is pull-based, so we only paint when it asks), whether its
+/// reader task has ended, and the hold-screen animation tick.
+#[derive(Clone)]
+struct RenderState {
+    caps: ViewerCaps,
     pending_request: bool,
     reader_done: bool,
     tick: u64,
@@ -376,26 +396,24 @@ struct RenderState {
 impl RenderState {
     const fn new() -> Self {
         Self {
-            pixel_format: DEFAULT_PIXEL_FORMAT,
-            supports_desktop_size: false,
-            viewer_supports_tight: false,
+            caps: ViewerCaps::new(),
             pending_request: false,
             reader_done: false,
             tick: 0,
         }
     }
 
-    /// Update state from a viewer message
-    /// Returns keysym of a keypress (the only interesting action)
+    /// Update state from a viewer message. Returns the keysym of a keypress — the only event
+    /// the hold screen acts on — or `None`.
     const fn note_event(&mut self, event: Option<&ClientEvent>) -> Option<u32> {
         match event {
-            Some(ClientEvent::PixelFormat(pf)) => self.pixel_format = *pf,
+            Some(ClientEvent::PixelFormat(pf)) => self.caps.pixel_format = *pf,
             Some(ClientEvent::Encodings {
                 desktop_size,
                 tight,
             }) => {
-                self.supports_desktop_size = *desktop_size;
-                self.viewer_supports_tight = *tight;
+                self.caps.supports_desktop_size = *desktop_size;
+                self.caps.viewer_supports_tight = *tight;
             }
             Some(ClientEvent::WantsFrame) => self.pending_request = true,
             Some(ClientEvent::Key { down: true, keysym }) => return Some(*keysym),
@@ -417,7 +435,7 @@ impl RenderState {
         // VNC dictates the framebuffer size in its ServerInit, so it is always the default.
         let screen = ui::Screen::default();
         let image = render_frame(screen, self.tick)?;
-        let pixels = pack_rgb(&self.pixel_format, &image);
+        let pixels = pack_rgb(&self.caps.pixel_format, &image);
         write_raw_rect(viewer_wr, 0, 0, screen.width, screen.height, &pixels).await?;
         self.tick += 1;
         self.pending_request = false;
