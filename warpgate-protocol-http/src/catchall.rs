@@ -101,7 +101,9 @@ async fn get_target_for_request(
     let request_host = ctx.trusted_hostname(req);
 
     let host_based_target = if let Some(host) = request_host {
-        let found = config_provider.get_target_by_hostname(host.as_str()).await?;
+        let found = config_provider
+            .get_target_by_hostname(host.as_str())
+            .await?;
         if found.is_some() {
             debug!(
                 "Domain rebinding detected: host={} -> target={:?}",
@@ -131,7 +133,9 @@ async fn get_target_for_request(
             if let Some(target) = host_based_target.filter(|target| target.name == target_name) {
                 Some(target)
             } else {
-                config_provider.get_target_by_name(target_name.as_str()).await?
+                config_provider
+                    .get_target_by_name(target_name.as_str())
+                    .await?
             };
 
         let user_info = AuthStateUserInfo {

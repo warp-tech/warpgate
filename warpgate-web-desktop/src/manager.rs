@@ -9,9 +9,7 @@ use tracing::{Instrument, debug, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::{TargetOptions, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
-use warpgate_core::{
-    DesktopEvent, Services, SessionStateInit, State, TargetAuthorization,
-};
+use warpgate_core::{DesktopEvent, Services, SessionStateInit, State, TargetAuthorization};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 

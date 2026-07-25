@@ -8,9 +8,7 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, error, info_span, warn};
 use uuid::Uuid;
-use warpgate_common::{
-    SshHostKeyVerificationMode, TargetOptions, TargetSSHOptions, WarpgateError,
-};
+use warpgate_common::{SshHostKeyVerificationMode, TargetOptions, TargetSSHOptions, WarpgateError};
 use warpgate_core::recordings::TerminalRecordingStreamId;
 use warpgate_core::{Services, SessionStateInit, State, TargetAuthorization};
 use warpgate_db_entities::Target::TargetKind;

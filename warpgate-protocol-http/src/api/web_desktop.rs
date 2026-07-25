@@ -91,7 +91,9 @@ impl Api {
             WebClientTargetAccess::Forbidden => {
                 return Ok(CreateWebDesktopSessionResponse::Forbidden);
             }
-            WebClientTargetAccess::NotFound => return Ok(CreateWebDesktopSessionResponse::NotFound),
+            WebClientTargetAccess::NotFound => {
+                return Ok(CreateWebDesktopSessionResponse::NotFound);
+            }
         };
 
         let session_id = manager
