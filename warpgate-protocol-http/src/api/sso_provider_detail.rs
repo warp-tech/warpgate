@@ -41,7 +41,11 @@ pub struct SsoContext {
     pub request: SsoLoginRequest,
     pub next_url: Option<String>,
     pub supports_single_logout: bool,
-    pub return_host: Option<String>,
+    /// Origin the identity provider will return the browser to, taken from the
+    /// return URL rather than from the request, so it carries the same
+    /// `return_domain_whitelist` validation. The post-login redirect is
+    /// resolved against it.
+    pub return_origin: String,
 }
 
 #[OpenApi]
@@ -96,10 +100,15 @@ impl Api {
         ));
         debug!("Return URL: {return_url}");
 
+        // The browser lands back on this origin, and it has already passed the
+        // provider's domain whitelist. Re-reading the Host header here instead
+        // would take an attacker-supplied authority into the post-login
+        // redirect.
+        let return_origin = return_url.origin().ascii_serialization();
+
         let client = SsoClient::new(provider_config.provider.clone())?;
 
         let sso_req = client.start_login(return_url.to_string()).await?;
-        let return_host = ctx.trusted_host_header(req);
 
         let url = sso_req.auth_url().to_string();
         session.set(
@@ -109,7 +118,7 @@ impl Api {
                 request: sso_req,
                 next_url: next.0.clone(),
                 supports_single_logout: client.supports_single_logout().await?,
-                return_host,
+                return_origin,
             },
         );
 
