@@ -125,7 +125,7 @@ impl TargetAuthorization {
 ///
 /// Takes the resolved [`Target`] rather than a name so the authorization and the
 /// subsequent connection are provably about the same row.
-pub async fn authorize_for_target<C: ConfigProvider>(
+pub async fn authorize_for_target<C: ConfigProvider + ?Sized>(
     config_provider: &C,
     user_info: &AuthStateUserInfo,
     target: Target,
@@ -142,7 +142,7 @@ pub async fn authorize_for_target<C: ConfigProvider>(
 /// Resolves the target by name and checks authorization. A target that
 /// doesn't exist and one the user may not reach are the same `None` here, so
 /// a caller can't be used as a target-existence oracle.
-pub async fn authorize_for_target_by_name<C: ConfigProvider>(
+pub async fn authorize_for_target_by_name<C: ConfigProvider + ?Sized>(
     config_provider: &C,
     user_info: &AuthStateUserInfo,
     target_name: &str,
