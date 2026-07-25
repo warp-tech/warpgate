@@ -405,59 +405,41 @@ impl ConfigProvider for DatabaseConfigProvider {
                 protocols: HashMap::new(),
             };
 
+            // Native protocols can't carry an SSO exchange on the wire; their
+            // SSO login happens through the in-browser approval flow, so a
+            // required `Sso` is satisfied by `WebUserApproval`. HTTP performs
+            // SSO inline and keeps `Sso` as-is.
+            let make_policy = |required: Vec<CredentialKind>, native: bool| {
+                let required_credential_types = required
+                    .into_iter()
+                    .map(|kind| match kind {
+                        CredentialKind::Sso if native => CredentialKind::WebUserApproval,
+                        kind => kind,
+                    })
+                    .collect();
+                Box::new(AllCredentialsPolicy {
+                    supported_credential_types: supported_credential_types.clone(),
+                    required_credential_types,
+                }) as Box<dyn CredentialPolicy + Sync + Send>
+            };
+
             if let Some(p) = req.http {
-                policy.protocols.insert(
-                    "HTTP",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
+                policy.protocols.insert("HTTP", make_policy(p, false));
             }
             if let Some(p) = req.mysql {
-                policy.protocols.insert(
-                    "MySQL",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
+                policy.protocols.insert("MySQL", make_policy(p, true));
             }
             if let Some(p) = req.postgres {
-                policy.protocols.insert(
-                    "PostgreSQL",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
+                policy.protocols.insert("PostgreSQL", make_policy(p, true));
             }
             if let Some(p) = req.ssh {
-                policy.protocols.insert(
-                    "SSH",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
+                policy.protocols.insert("SSH", make_policy(p, true));
             }
             if let Some(p) = req.vnc {
-                policy.protocols.insert(
-                    "VNC",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
+                policy.protocols.insert("VNC", make_policy(p, true));
             }
             if let Some(p) = req.rdp {
-                policy.protocols.insert(
-                    "RDP",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types,
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
+                policy.protocols.insert("RDP", make_policy(p, true));
             }
 
             Ok(Some(
