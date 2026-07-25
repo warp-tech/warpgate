@@ -15,7 +15,7 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_admin::api::AnySecurityScheme;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
+use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind, SubmitOutcome};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
@@ -182,6 +182,16 @@ impl From<AuthResult> for ApiAuthState {
     }
 }
 
+/// Whether submitting this credential should authorize the session.
+///
+/// Only a *valid* credential that satisfies the policy qualifies. An invalid
+/// credential can still leave the overall state `Accepted` — a wrong extra
+/// factor against an already-satisfied policy yields `Invalid(Accepted { .. })`
+/// — and must never (re-)authorize the session or re-stamp its auth time.
+const fn is_login_success(outcome: &SubmitOutcome) -> bool {
+    matches!(outcome, SubmitOutcome::Valid(AuthResult::Accepted { .. }))
+}
+
 #[OpenApi]
 impl Api {
     #[oai(path = "/auth/login", method = "post", operation_id = "login")]
@@ -276,8 +286,9 @@ impl Api {
         .await?;
 
         let credential_valid = outcome.is_valid();
+        let login_success = is_login_success(&outcome);
         match outcome.into_result() {
-            AuthResult::Accepted { user_info } => {
+            AuthResult::Accepted { user_info } if login_success => {
                 let username = user_info.username.clone();
                 authorize_session(req, &ctx, user_info).await?;
                 state.emit_authenticated_event_once();
@@ -308,7 +319,13 @@ impl Api {
                     }
                 }
                 Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                    state: x.into(),
+                    // An invalid extra credential can leave the overall state
+                    // `Accepted`; the attempt was still rejected, so it must
+                    // report a failure rather than `Success` to the client.
+                    state: match x {
+                        AuthResult::Accepted { .. } => ApiAuthState::Failed,
+                        other => other.into(),
+                    },
                     credential_rejected: !credential_valid,
                 })))
             }
@@ -372,8 +389,9 @@ impl Api {
         .await?;
 
         let credential_valid = outcome.is_valid();
+        let login_success = is_login_success(&outcome);
         match outcome.into_result() {
-            AuthResult::Accepted { user_info } => {
+            AuthResult::Accepted { user_info } if login_success => {
                 let username = user_info.username.clone();
                 authorize_session(req, &ctx, user_info).await?;
                 state.emit_authenticated_event_once();
@@ -400,7 +418,13 @@ impl Api {
                         .await;
                 }
                 Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                    state: x.into(),
+                    // An invalid extra credential can leave the overall state
+                    // `Accepted`; the attempt was still rejected, so it must
+                    // report a failure rather than `Success` to the client.
+                    state: match x {
+                        AuthResult::Accepted { .. } => ApiAuthState::Failed,
+                        other => other.into(),
+                    },
                     credential_rejected: !credential_valid,
                 })))
             }
@@ -730,4 +754,38 @@ pub async fn api_get_web_auth_requests_stream(
 
         Ok::<(), anyhow::Error>(())
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use uuid::Uuid;
+    use warpgate_common::auth::{AuthResult, AuthStateUserInfo, CredentialKind, SubmitOutcome};
+
+    use super::is_login_success;
+
+    fn accepted() -> AuthResult {
+        AuthResult::Accepted {
+            user_info: AuthStateUserInfo {
+                id: Uuid::nil(),
+                username: "alice".into(),
+            },
+        }
+    }
+
+    fn need() -> AuthResult {
+        AuthResult::Need(HashSet::from([CredentialKind::Password]))
+    }
+
+    #[test]
+    fn only_valid_accepted_authorizes() {
+        // A wrong extra credential leaves the overall state `Accepted`; it must
+        // not be treated as a login success.
+        assert!(is_login_success(&SubmitOutcome::Valid(accepted())));
+        assert!(!is_login_success(&SubmitOutcome::Invalid(accepted())));
+        // A valid credential still needing another factor is not yet a success.
+        assert!(!is_login_success(&SubmitOutcome::Valid(need())));
+        assert!(!is_login_success(&SubmitOutcome::Invalid(need())));
+    }
 }

@@ -4,15 +4,28 @@ use base64::{self, Engine};
 use poem::Addr;
 use poem::listener::Acceptor;
 use poem::web::{LocalAddr, RemoteAddr};
+use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, ServerConfig, SignatureScheme};
 use tokio_rustls::server::TlsStream;
 use tracing::{debug, warn};
 
-/// Custom client certificate verifier that accepts any client certificate
+/// Client certificate verifier that proves the peer holds the presented
+/// certificate's private key (by verifying the handshake signature) but does
+/// **not** validate the certificate chain against a trust anchor. The
+/// certificate's identity is matched against Warpgate's credential database
+/// afterwards in [`crate::server::auth::validate_client_certificate`].
 #[derive(Debug)]
-pub struct AcceptAnyClientCert;
+pub struct AcceptAnyClientCert {
+    provider: Arc<CryptoProvider>,
+}
+
+impl AcceptAnyClientCert {
+    pub fn new(provider: Arc<CryptoProvider>) -> Self {
+        Self { provider }
+    }
+}
 
 impl ClientCertVerifier for AcceptAnyClientCert {
     fn offer_client_auth(&self) -> bool {
@@ -36,37 +49,36 @@ impl ClientCertVerifier for AcceptAnyClientCert {
 
     fn verify_tls12_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
     }
 
     fn verify_tls13_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        vec![
-            SignatureScheme::RSA_PKCS1_SHA1,
-            SignatureScheme::RSA_PKCS1_SHA256,
-            SignatureScheme::RSA_PKCS1_SHA384,
-            SignatureScheme::RSA_PKCS1_SHA512,
-            SignatureScheme::ECDSA_NISTP256_SHA256,
-            SignatureScheme::ECDSA_NISTP384_SHA384,
-            SignatureScheme::ECDSA_NISTP521_SHA512,
-            SignatureScheme::RSA_PSS_SHA256,
-            SignatureScheme::RSA_PSS_SHA384,
-            SignatureScheme::RSA_PSS_SHA512,
-            SignatureScheme::ED25519,
-            SignatureScheme::ED448,
-        ]
+        self.provider
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 
     fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {

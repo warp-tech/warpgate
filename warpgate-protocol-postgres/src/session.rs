@@ -180,25 +180,20 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         let selector: AuthSelector = username.into();
         let remote_ip = self.remote_address.ip();
 
-        // Check if IP is blocked
-        match self
+        // A lookup error must fail closed: propagate it rather than letting a
+        // possibly-blocked IP through.
+        if let Some(block_info) = self
             .services
             .login_protection
             .check_ip_blocked(&remote_ip)
-            .await
+            .await?
         {
-            Ok(Some(block_info)) => {
-                warn!(
-                    ip = %remote_ip,
-                    expires_at = %block_info.expires_at,
-                    "PostgreSQL auth from blocked IP"
-                );
-                return fail(&mut self).await;
-            }
-            Ok(None) => {}
-            Err(e) => {
-                warn!(?e, "Failed to check IP block status");
-            }
+            warn!(
+                ip = %remote_ip,
+                expires_at = %block_info.expires_at,
+                "PostgreSQL auth from blocked IP"
+            );
+            return fail(&mut self).await;
         }
 
         match selector {
@@ -206,24 +201,20 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 username,
                 target_name,
             } => {
-                // Check if user is locked
-                match self
+                // A lookup error must fail closed: propagate it rather than
+                // letting a possibly-locked user through.
+                if self
                     .services
                     .login_protection
                     .check_user_locked(&username)
-                    .await
+                    .await?
+                    .is_some()
                 {
-                    Ok(Some(_lock_info)) => {
-                        warn!(
-                            username = %username,
-                            "PostgreSQL auth for locked user"
-                        );
-                        return fail(&mut self).await;
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        warn!(?e, "Failed to check user lockout status");
-                    }
+                    warn!(
+                        username = %username,
+                        "PostgreSQL auth for locked user"
+                    );
+                    return fail(&mut self).await;
                 }
 
                 let session_id = self.server_handle.lock().await.id();
@@ -528,61 +519,47 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             x => x,
         }?;
 
-        // Parse idle timeout from config
-        let idle_timeout = options
-            .idle_timeout
-            .as_ref()
-            .and_then(|s| {
-                let trimmed = s.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    humantime::parse_duration(trimmed)
-                        .map_err(|e| {
-                            warn!(
-                                timeout_string = %trimmed,
-                                error = %e,
-                                "Invalid idle_timeout value, falling back to default"
-                            );
-                            e
-                        })
-                        .ok()
-                }
-            })
-            .unwrap_or(Duration::from_secs(60 * 10)); // Default 10 minutes
-
-        if idle_timeout.as_secs() > 0 {
-            info!(
-                idle_timeout_seconds = idle_timeout.as_secs(),
-                "Using configured idle timeout for session"
-            );
-        }
+        let idle_timeout = match parse_idle_timeout(options.idle_timeout.as_deref()) {
+            IdlePolicy::Disabled => None,
+            IdlePolicy::Timeout(timeout) => {
+                info!(
+                    idle_timeout_seconds = timeout.as_secs(),
+                    "Using configured idle timeout for session"
+                );
+                Some(timeout)
+            }
+        };
 
         let mut last_activity = std::time::Instant::now();
         let check_interval = Duration::from_secs(5); // Check idle timeout every 5 seconds
 
         loop {
-            let elapsed = last_activity.elapsed();
-            if elapsed > idle_timeout {
-                info!(
-                    idle_seconds = elapsed.as_secs(),
-                    timeout_seconds = idle_timeout.as_secs(),
-                    "Session idle timeout exceeded, closing connection"
-                );
-                self.send_error_response(
-                    "57P01".into(),
-                    format!(
-                        "Session idle for {} exceeded configured timeout of {}. Please reconnect.",
-                        humantime::format_duration(elapsed),
-                        humantime::format_duration(idle_timeout)
-                    ),
-                )
-                .await?;
-                break;
-            }
-
-            let remaining_timeout = idle_timeout.saturating_sub(elapsed);
-            let select_timeout = remaining_timeout.min(check_interval);
+            // With the idle timeout disabled we still wake up on check_interval
+            // to re-poll the sockets, but never close the connection ourselves.
+            let select_timeout = match idle_timeout {
+                Some(timeout) => {
+                    let elapsed = last_activity.elapsed();
+                    if elapsed > timeout {
+                        info!(
+                            idle_seconds = elapsed.as_secs(),
+                            timeout_seconds = timeout.as_secs(),
+                            "Session idle timeout exceeded, closing connection"
+                        );
+                        self.send_error_response(
+                            "57P01".into(),
+                            format!(
+                                "Session idle for {} exceeded configured timeout of {}. Please reconnect.",
+                                humantime::format_duration(elapsed),
+                                humantime::format_duration(timeout)
+                            ),
+                        )
+                        .await?;
+                        break;
+                    }
+                    timeout.saturating_sub(elapsed).min(check_interval)
+                }
+                None => check_interval,
+            };
 
             tokio::select! {
                 c_to_s = time::timeout(select_timeout, self.stream.recv::<PgWireGenericFrontendMessage>(&self.decode_context)) => {
@@ -708,5 +685,70 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         if let PgWireBackendMessage::ErrorResponse(error) = msg {
             info!(?error, "PostgreSQL error");
         }
+    }
+}
+
+const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 10);
+
+enum IdlePolicy {
+    /// No idle timeout: the proxy never closes an idle session.
+    Disabled,
+    Timeout(Duration),
+}
+
+/// Map a configured `idle_timeout` string to an effective policy. An explicit
+/// zero duration (`"0"`, `"0s"`) disables the timeout; an unset or unparseable
+/// value falls back to [`DEFAULT_IDLE_TIMEOUT`].
+fn parse_idle_timeout(value: Option<&str>) -> IdlePolicy {
+    let Some(trimmed) = value.map(str::trim).filter(|s| !s.is_empty()) else {
+        return IdlePolicy::Timeout(DEFAULT_IDLE_TIMEOUT);
+    };
+    match humantime::parse_duration(trimmed) {
+        Ok(duration) if duration.is_zero() => IdlePolicy::Disabled,
+        Ok(duration) => IdlePolicy::Timeout(duration),
+        Err(error) => {
+            warn!(
+                timeout_string = %trimmed,
+                error = %error,
+                "Invalid idle_timeout value, falling back to default"
+            );
+            IdlePolicy::Timeout(DEFAULT_IDLE_TIMEOUT)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{DEFAULT_IDLE_TIMEOUT, IdlePolicy, parse_idle_timeout};
+
+    #[test]
+    fn explicit_zero_disables() {
+        assert!(matches!(parse_idle_timeout(Some("0")), IdlePolicy::Disabled));
+        assert!(matches!(
+            parse_idle_timeout(Some("0s")),
+            IdlePolicy::Disabled
+        ));
+    }
+
+    #[test]
+    fn valid_duration_is_used() {
+        assert!(matches!(
+            parse_idle_timeout(Some("30m")),
+            IdlePolicy::Timeout(d) if d == Duration::from_secs(30 * 60)
+        ));
+    }
+
+    #[test]
+    fn unset_or_unparseable_uses_default() {
+        assert!(matches!(
+            parse_idle_timeout(None),
+            IdlePolicy::Timeout(d) if d == DEFAULT_IDLE_TIMEOUT
+        ));
+        assert!(matches!(
+            parse_idle_timeout(Some("garbage")),
+            IdlePolicy::Timeout(d) if d == DEFAULT_IDLE_TIMEOUT
+        ));
     }
 }

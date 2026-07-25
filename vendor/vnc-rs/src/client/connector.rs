@@ -4,7 +4,7 @@ use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tracing::{info, trace};
 
-use super::auth::{AuthHelper, AuthResult, SecurityType};
+use super::auth::{read_reason_string, AuthHelper, AuthResult, SecurityType};
 use super::connection::VncClient;
 use crate::{PixelFormat, VncEncoding, VncError, VncVersion};
 
@@ -121,9 +121,7 @@ where
                                 // error message before closing the connection.
                                 return Err(VncError::WrongPassword);
                             } else {
-                                let _ = connector.stream.read_u32().await?;
-                                let mut err_msg = String::new();
-                                connector.stream.read_to_string(&mut err_msg).await?;
+                                let err_msg = read_reason_string(&mut connector.stream).await?;
                                 return Err(VncError::General(err_msg));
                             }
                         }

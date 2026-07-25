@@ -193,25 +193,20 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         let selector: AuthSelector = handshake.username.deref().into();
         let remote_ip = self.remote_address.ip();
 
-        // Check if IP is blocked
-        match self
+        // A lookup error must fail closed: propagate it rather than letting a
+        // possibly-blocked IP through.
+        if let Some(block_info) = self
             .services
             .login_protection
             .check_ip_blocked(&remote_ip)
-            .await
+            .await?
         {
-            Ok(Some(block_info)) => {
-                warn!(
-                    ip = %remote_ip,
-                    expires_at = %block_info.expires_at,
-                    "MySQL auth from blocked IP"
-                );
-                return fail(&mut self).await;
-            }
-            Ok(None) => {}
-            Err(e) => {
-                warn!(?e, "Failed to check IP block status");
-            }
+            warn!(
+                ip = %remote_ip,
+                expires_at = %block_info.expires_at,
+                "MySQL auth from blocked IP"
+            );
+            return fail(&mut self).await;
         }
 
         match selector {
@@ -219,24 +214,20 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 username,
                 target_name,
             } => {
-                // Check if user is locked
-                match self
+                // A lookup error must fail closed: propagate it rather than
+                // letting a possibly-locked user through.
+                if self
                     .services
                     .login_protection
                     .check_user_locked(&username)
-                    .await
+                    .await?
+                    .is_some()
                 {
-                    Ok(Some(_lock_info)) => {
-                        warn!(
-                            username = %username,
-                            "MySQL auth for locked user"
-                        );
-                        return fail(&mut self).await;
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        warn!(?e, "Failed to check user lockout status");
-                    }
+                    warn!(
+                        username = %username,
+                        "MySQL auth for locked user"
+                    );
+                    return fail(&mut self).await;
                 }
 
                 let session_id = self.server_handle.lock().await.id();
@@ -414,6 +405,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             }
             x => x,
         }?;
+
+        // The handshake's max_packet_size is forwarded to the target; the
+        // proxy's own codecs must honor it too, in both directions, or a
+        // >4 MiB row/statement/BLOB would abort the session.
+        self.stream.set_max_packet_size(handshake.max_packet_size);
+        client.stream.set_max_packet_size(handshake.max_packet_size);
 
         loop {
             self.stream.reset_sequence_id();

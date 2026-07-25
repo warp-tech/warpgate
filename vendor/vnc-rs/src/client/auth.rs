@@ -3,6 +3,28 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use super::security;
 use crate::{VncError, VncVersion};
 
+/// Warpgate fork: cap for RFB failure-reason strings. Comparable to the Warpgate VNC
+/// server's `MAX_STRING_LEN`. See PATCHES.md.
+const MAX_REASON_LEN: usize = 4096;
+
+/// Warpgate fork: read a U32-length-prefixed RFB failure-reason string, rejecting an
+/// over-`MAX_REASON_LEN` length before allocating. Upstream read these with
+/// `read_to_string` (to EOF), letting a hostile target stream forever. See PATCHES.md.
+pub(super) async fn read_reason_string<S>(reader: &mut S) -> Result<String, VncError>
+where
+    S: AsyncRead + Unpin,
+{
+    let len = reader.read_u32().await? as usize;
+    if len > MAX_REASON_LEN {
+        return Err(VncError::General(format!(
+            "VNC failure reason too long ({len} bytes)"
+        )));
+    }
+    let mut buf = vec![0u8; len];
+    reader.read_exact(&mut buf).await?;
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -49,10 +71,7 @@ impl SecurityType {
                 let security_type = reader.read_u32().await?;
                 let security_type = (security_type as u8).try_into()?;
                 if let SecurityType::Invalid = security_type {
-                    let _ = reader.read_u32().await?;
-                    let mut err_msg = String::new();
-                    reader.read_to_string(&mut err_msg).await?;
-                    return Err(VncError::General(err_msg));
+                    return Err(VncError::General(read_reason_string(reader).await?));
                 }
                 Ok(vec![security_type])
             }
@@ -67,10 +86,7 @@ impl SecurityType {
                 let num = reader.read_u8().await?;
 
                 if num == 0 {
-                    let _ = reader.read_u32().await?;
-                    let mut err_msg = String::new();
-                    reader.read_to_string(&mut err_msg).await?;
-                    return Err(VncError::General(err_msg));
+                    return Err(VncError::General(read_reason_string(reader).await?));
                 }
                 let mut sec_types = vec![];
                 for _ in 0..num {
@@ -98,9 +114,19 @@ pub(super) enum AuthResult {
     Failed = 1,
 }
 
-impl From<u32> for AuthResult {
-    fn from(num: u32) -> Self {
-        unsafe { std::mem::transmute(num) }
+// Warpgate fork: the SecurityResult word comes straight off an untrusted target socket.
+// Upstream `transmute`d any u32 into this 2-variant enum — instant UB for values != 0/1.
+// Validate with a plain match instead. See PATCHES.md.
+impl TryFrom<u32> for AuthResult {
+    type Error = VncError;
+    fn try_from(num: u32) -> Result<Self, Self::Error> {
+        match num {
+            0 => Ok(AuthResult::Ok),
+            1 => Ok(AuthResult::Failed),
+            other => Err(VncError::General(format!(
+                "Unknown VNC SecurityResult value: {other}"
+            ))),
+        }
     }
 }
 
@@ -155,6 +181,36 @@ impl AuthHelper {
         S: AsyncRead + AsyncWrite + Unpin,
     {
         let result = reader.read_u32().await?;
-        Ok(result.into())
+        result.try_into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_result_try_from_validates() {
+        assert!(matches!(AuthResult::try_from(0), Ok(AuthResult::Ok)));
+        assert!(matches!(AuthResult::try_from(1), Ok(AuthResult::Failed)));
+        assert!(AuthResult::try_from(2).is_err());
+        assert!(AuthResult::try_from(u32::MAX).is_err());
+    }
+
+    #[tokio::test]
+    async fn read_reason_string_rejects_over_cap() {
+        let buf = u32::MAX.to_be_bytes();
+        let mut reader: &[u8] = &buf;
+        assert!(read_reason_string(&mut reader).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn read_reason_string_reads_in_cap() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&5u32.to_be_bytes());
+        data.extend_from_slice(b"hello");
+        let mut reader: &[u8] = &data;
+        let s = read_reason_string(&mut reader).await.unwrap();
+        assert_eq!(s, "hello");
     }
 }

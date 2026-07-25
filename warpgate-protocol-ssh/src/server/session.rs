@@ -137,7 +137,10 @@ pub struct ServerSession {
     main_event_subscription: EventSubscription<Event>,
     service_output: ServiceOutput,
     channel_writer: ChannelWriter,
-    auth_state: Option<Arc<Mutex<AuthState>>>,
+    /// Cached auth state together with the target name it was created for. The
+    /// state's `target_name` is fixed at construction and scopes web approvals,
+    /// so it can only be reused for that same target.
+    auth_state: Option<(Arc<Mutex<AuthState>>, String)>,
     keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
@@ -326,37 +329,32 @@ impl ServerSession {
         target_name: &str,
         rate_limit_credential_type: Option<&str>,
     ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
-        #[allow(clippy::unwrap_used)]
-        if self.auth_state.is_none()
-            || !username_eq_ci(
-                &self
-                    .auth_state
-                    .as_ref()
-                    .unwrap()
-                    .lock()
-                    .await
-                    .user_info()
-                    .username,
-                username,
-            )
+        // The cached state may only be reused for the same username *and* the
+        // same target: its `target_name` scopes web approvals, so switching
+        // targets on one connection must not carry over the previous target's
+        // approval.
+        if let Some((state, cached_target)) = &self.auth_state
+            && cached_target == target_name
+            && username_eq_ci(&state.lock().await.user_info().username, username)
         {
-            let state = self
-                .services
-                .create_auth_state(
-                    Some(&self.id),
-                    username,
-                    crate::PROTOCOL_NAME,
-                    target_name,
-                    &self.supported_credential_kinds(),
-                    Some(self.remote_address.ip()),
-                    rate_limit_credential_type,
-                )
-                .await?
-                .1;
-            self.auth_state = Some(state);
+            return Ok(state.clone());
         }
-        #[allow(clippy::unwrap_used)]
-        Ok(self.auth_state.clone().unwrap())
+
+        let state = self
+            .services
+            .create_auth_state(
+                Some(&self.id),
+                username,
+                crate::PROTOCOL_NAME,
+                target_name,
+                &self.supported_credential_kinds(),
+                Some(self.remote_address.ip()),
+                rate_limit_credential_type,
+            )
+            .await?
+            .1;
+        self.auth_state = Some((state.clone(), target_name.to_string()));
+        Ok(state)
     }
 
     /// SSH counts only password/OTP guesses toward rate-limiting — public-key
@@ -410,6 +408,16 @@ impl ServerSession {
 
     fn channel_mut(&mut self, id: Uuid) -> &mut Channel {
         self.channels.entry(id).or_default()
+    }
+
+    /// Tear down a closed channel: dropping its [`Channel`] finalizes the
+    /// recorders (their background writers flush on drop, as they do at session
+    /// end) and frees both id maps, so a long-lived session doesn't accumulate
+    /// per-channel state. Idempotent — the SSH close handshake reaches here from
+    /// both the client and the target side.
+    fn close_channel(&mut self, id: Uuid) {
+        self.channels.remove(&id);
+        self.channel_map.remove_by_right(&id);
     }
 
     /// Opens a server->client channel in the background and delivers the
@@ -1106,15 +1114,17 @@ impl ServerSession {
                 // Flush any pending writes before closing the channel
                 let _ = self.channel_writer.flush().await;
 
-                let server_channel_id = self.map_channel_reverse(&channel)?;
-                let _ = self
-                    .maybe_with_session(|handle| async move {
-                        handle
-                            .close(server_channel_id.0)
-                            .await
-                            .context("failed to close ch")
-                    })
-                    .await;
+                if let Ok(server_channel_id) = self.map_channel_reverse(&channel) {
+                    let _ = self
+                        .maybe_with_session(|handle| async move {
+                            handle
+                                .close(server_channel_id.0)
+                                .await
+                                .context("failed to close ch")
+                        })
+                        .await;
+                }
+                self.close_channel(channel);
             }
             RCEvent::Eof(channel) => {
                 // Flush any pending writes before sending EOF
@@ -1805,6 +1815,14 @@ impl ServerSession {
             return russh::server::Auth::reject();
         }
 
+        // Tickets aren't authenticated with public keys, and the eager auth path
+        // consumes a ticket use. Running it here — during the unauthenticated
+        // offer/query phase — would drain the ticket before the client actually
+        // authenticates, so reject and let auth proceed via another method.
+        if let AuthSelector::Ticket { .. } = selector {
+            return russh::server::Auth::reject();
+        }
+
         if matches!(
             self.try_validate_public_key_offer(
                 &selector,
@@ -1819,7 +1837,6 @@ impl ServerSession {
             return russh::server::Auth::Accept;
         }
 
-        let selector: AuthSelector = ssh_username.expose_secret().into();
         match self.try_auth_lazy(&selector, None).await {
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
@@ -1953,7 +1970,7 @@ impl ServerSession {
                 let mut auth_instructions = String::new();
                 let mut auth_prompts = vec![];
 
-                let Some(auth_state) = self.auth_state.as_ref() else {
+                let Some((auth_state, _)) = self.auth_state.as_ref() else {
                     return Ok(russh::server::Auth::Reject {
                         proceed_with_methods: None,
                         partial_success: false,
@@ -2288,10 +2305,14 @@ impl ServerSession {
             return Ok(());
         }
 
-        let channel_id = self.map_channel(server_channel_id)?;
+        let Ok(channel_id) = self.map_channel(server_channel_id) else {
+            debug!(channel=%server_channel_id.0, "Channel already closed");
+            return Ok(());
+        };
         debug!(channel=%channel_id, "Closing channel");
         self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Close))
             .await?;
+        self.close_channel(channel_id);
         Ok(())
     }
 

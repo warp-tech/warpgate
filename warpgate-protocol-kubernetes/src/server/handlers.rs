@@ -27,6 +27,30 @@ use crate::correlator::RequestCorrelator;
 use crate::recording::{deduce_exec_recording_metadata, start_recording_api, start_recording_exec};
 use crate::server::auth::{authenticate_and_get_target, create_authenticated_client};
 
+/// A client-supplied impersonation header (`Impersonate-User`,
+/// `Impersonate-Group`, `Impersonate-Uid`, `Impersonate-Extra-*`). These let a
+/// caller assume another identity on the cluster and must never be forwarded,
+/// recorded, or logged.
+fn is_impersonation_header(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with("impersonate-")
+}
+
+/// Headers whose values are secrets or identity-spoofing vectors and so must
+/// never be written to a recording or a log line.
+fn is_sensitive_header(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == "authorization" || lower == "cookie" || is_impersonation_header(&lower)
+}
+
+/// Copy of `headers` with sensitive entries removed, for recording and logging.
+fn redact_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
+    headers
+        .iter()
+        .filter(|(name, _)| !is_sensitive_header(name))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 fn construct_target_url(
     req: &Request,
     path: &str,
@@ -167,6 +191,11 @@ async fn _handle_normal_request_inner(
     // Extract headers
     let mut headers = HashMap::new();
     for (name, value) in req.headers() {
+        // Client-supplied impersonation must never reach the cluster (nor be
+        // recorded or logged), so drop it at the point of ingestion.
+        if is_impersonation_header(name.as_str()) {
+            continue;
+        }
         // Still forward Accept-Encoding to allow for chunked encoding
         if !may_forward_header(name) && name != http::header::ACCEPT_ENCODING {
             continue;
@@ -185,6 +214,10 @@ async fn _handle_normal_request_inner(
             headers.insert(name.to_string(), value_str.clone());
         }
     }
+
+    // Bearer tokens and cookies must not be persisted to a recording or emitted
+    // to a log line; this redacted view is used for both.
+    let redacted_headers = redact_headers(&headers);
 
     // Get request body
     let body_bytes = body.into_bytes().await.context("reading request body")?;
@@ -241,7 +274,7 @@ async fn _handle_normal_request_inner(
     }
 
     debug!(
-        filtered_headers = ?upstream_headers,
+        filtered_headers = ?redact_headers(&upstream_headers),
         "Headers being sent to upstream Kubernetes API"
     );
 
@@ -253,7 +286,7 @@ async fn _handle_normal_request_inner(
     debug!(
         method = method,
         url = %full_url,
-        headers = ?headers,
+        headers = ?redacted_headers,
         body_size = body_bytes.len(),
         "Sending request to upstream Kubernetes API"
     );
@@ -312,7 +345,7 @@ async fn _handle_normal_request_inner(
             .record_response(
                 method,
                 full_url.as_ref(),
-                headers,
+                redacted_headers,
                 &body_bytes,
                 status.as_u16(),
                 body_for_recording.unwrap_or_default().as_ref(),
@@ -502,4 +535,39 @@ async fn _handle_websocket_request_inner(
             Ok::<(), anyhow::Error>(())
         })
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::{is_impersonation_header, redact_headers};
+
+    #[test]
+    fn impersonation_detection_is_case_insensitive() {
+        assert!(is_impersonation_header("Impersonate-User"));
+        assert!(is_impersonation_header("impersonate-group"));
+        assert!(is_impersonation_header("Impersonate-Uid"));
+        assert!(is_impersonation_header("IMPERSONATE-Extra-scopes"));
+        assert!(!is_impersonation_header("authorization"));
+        assert!(!is_impersonation_header("accept"));
+    }
+
+    #[test]
+    fn redact_drops_secrets_and_impersonation() {
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".into(), "Bearer secret".into());
+        headers.insert("Cookie".into(), "session=1".into());
+        headers.insert("Impersonate-User".into(), "root".into());
+        headers.insert("Impersonate-Group".into(), "system:masters".into());
+        headers.insert("Accept".into(), "application/json".into());
+
+        let redacted = redact_headers(&headers);
+
+        assert_eq!(redacted.len(), 1);
+        assert!(redacted.contains_key("Accept"));
+        assert!(!redacted.contains_key("Authorization"));
+        assert!(!redacted.contains_key("Cookie"));
+        assert!(!redacted.keys().any(|k| is_impersonation_header(k)));
+    }
 }

@@ -17,13 +17,15 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use tokio::io::copy_bidirectional;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
+use tokio::time::{Instant, timeout_at};
 use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::detect_port_knock;
@@ -58,6 +60,8 @@ const SERVER_INPUT_CAPACITY: usize = 16;
 /// Size of each direction of the in-memory duplex carrying raw RDP bytes between the
 /// viewer socket and the RDP server.
 const RELAY_BUFFER_BYTES: usize = 64 * 1024;
+
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Handles to the connected target-side RDP client, kept once authentication succeeds.
 struct BackendBridge {
@@ -233,7 +237,21 @@ async fn control_loop(
         height: DEFAULT_SCREEN_H,
     };
 
-    while let Some(event) = events.recv().await {
+    let handshake_deadline = Instant::now() + HANDSHAKE_TIMEOUT;
+
+    loop {
+        // Bound the wait only until the target is dialed; once `backend` is set the
+        // established proxy session runs without a time limit.
+        let event = if backend.is_some() {
+            events.recv().await
+        } else {
+            timeout_at(handshake_deadline, events.recv())
+                .await
+                .map_err(|_| anyhow!("RDP pre-authorization handshake timed out"))?
+        };
+        let Some(event) = event else {
+            break;
+        };
         let input = match event {
             ServerEvent::AuthRequest {
                 username, password, ..

@@ -252,8 +252,6 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         });
     }
 
-    tokio::spawn(watch_config_and_reload(services.clone(), config_rx.clone()));
-
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
 
@@ -291,30 +289,5 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     }
 
     info!("Exiting");
-    Ok(())
-}
-
-pub async fn watch_config_and_reload(
-    services: Services,
-    mut config_rx: watch::Receiver<WarpgateConfig>,
-) -> Result<()> {
-    while config_rx.changed().await.is_ok() {
-        let state = services.state.lock().await;
-        let cp = &services.config_provider;
-        // TODO no longer happens since everything is in the DB
-        for (id, session) in &state.sessions {
-            let mut session = session.lock().await;
-            if let (Some(user_info), Some(target)) =
-                (session.user_info.as_ref(), session.target.as_ref())
-                && !cp
-                    .authorize_target(&user_info.username, &target.name)
-                    .await?
-            {
-                warn!(sesson_id=%id, %user_info.username, target=&target.name, "Session no longer authorized after config reload");
-                session.handle.close();
-            }
-        }
-    }
-
     Ok(())
 }

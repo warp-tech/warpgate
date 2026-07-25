@@ -2,6 +2,11 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::{PixelFormat, Rect, VncEncoding, VncError};
 
+/// Warpgate fork: cap the target-driven ServerCutText length before allocating. More
+/// lenient than the Warpgate VNC server's `MAX_CLIPBOARD_LEN` because this only bounds a
+/// recording tee, but still rejects a hostile multi-gigabyte U32 length. See PATCHES.md.
+const MAX_CUT_TEXT_LEN: usize = 1024 * 1024;
+
 #[derive(Debug)]
 pub(super) enum ClientMsg {
     SetPixelFormat(PixelFormat),
@@ -194,8 +199,14 @@ impl ServerMsg {
                 // +--------------+--------------+--------------+
                 let mut padding = [0; 3];
                 reader.read_exact(&mut padding).await?;
-                let len = reader.read_u32().await?;
-                let mut buffer_str = vec![0; len as usize];
+                // Warpgate fork: cap the target-driven length before allocating. See PATCHES.md.
+                let len = reader.read_u32().await? as usize;
+                if len > MAX_CUT_TEXT_LEN {
+                    return Err(VncError::General(format!(
+                        "ServerCutText too long ({len} bytes)"
+                    )));
+                }
+                let mut buffer_str = vec![0; len];
                 reader.read_exact(&mut buffer_str).await?;
                 Ok(Self::ServerCutText(
                     String::from_utf8_lossy(&buffer_str).to_string(),

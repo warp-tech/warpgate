@@ -3,7 +3,7 @@ use std::future::Future;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::error;
 
-use super::uninit_vec;
+use super::uninit_vec_capped;
 use crate::{PixelFormat, Rect, VncError, VncEvent};
 
 async fn read_run_length<S>(reader: &mut S) -> Result<usize, VncError>
@@ -65,7 +65,8 @@ impl Decoder {
         Fut: Future<Output = Result<(), VncError>>,
     {
         let data_len = input.read_u32().await? as usize;
-        let mut zlib_data = uninit_vec(data_len);
+        // Warpgate fork: cap the target-driven length before allocating. See PATCHES.md.
+        let mut zlib_data = uninit_vec_capped(data_len)?;
         input.read_exact(&mut zlib_data).await?;
 
         let bpp = format.bits_per_pixel as usize / 8;

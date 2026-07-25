@@ -24,12 +24,12 @@ mod m00017_descriptions;
 mod m00018_ticket_description;
 mod m00019_rate_limits;
 mod m00020_target_groups;
-mod m00021_ldap_server;
-mod m00022_user_ldap_link;
+mod m00020_ldap_server;
+mod m00021_user_ldap_link;
 mod m00023_ldap_username_attribute;
 mod m00024_ssh_key_attribute;
 mod m00025_ldap_uuid_attribute;
-mod m00026_ssh_client_auth;
+mod m00025_ssh_client_auth;
 mod m00027_ca;
 mod m00028_certificate_credentials;
 mod m00029_certificate_revocation;
@@ -42,8 +42,8 @@ mod m00035_ticket_user_target_id;
 mod m00036_user_role_expiry_history;
 mod m00037_database_target_auth;
 mod m00038_fix_target_auth_tags;
-mod m00039_show_session_menu;
-mod m00040_allowed_ip_range;
+mod m00037_show_session_menu;
+mod m00037_allowed_ip_range;
 mod m00041_fix_user_role_assignment_dates;
 mod m00042_database_target_auth_again;
 mod m00043_unique_usernames;
@@ -101,12 +101,12 @@ impl MigratorTrait for Migrator {
             Box::new(m00018_ticket_description::Migration),
             Box::new(m00019_rate_limits::Migration),
             Box::new(m00020_target_groups::Migration),
-            Box::new(m00021_ldap_server::Migration),
-            Box::new(m00022_user_ldap_link::Migration),
+            Box::new(m00020_ldap_server::Migration),
+            Box::new(m00021_user_ldap_link::Migration),
             Box::new(m00023_ldap_username_attribute::Migration),
             Box::new(m00024_ssh_key_attribute::Migration),
             Box::new(m00025_ldap_uuid_attribute::Migration),
-            Box::new(m00026_ssh_client_auth::Migration),
+            Box::new(m00025_ssh_client_auth::Migration),
             Box::new(m00027_ca::Migration),
             Box::new(m00028_certificate_credentials::Migration),
             Box::new(m00029_certificate_revocation::Migration),
@@ -119,8 +119,8 @@ impl MigratorTrait for Migrator {
             Box::new(m00036_user_role_expiry_history::Migration),
             Box::new(m00037_database_target_auth::Migration),
             Box::new(m00038_fix_target_auth_tags::Migration),
-            Box::new(m00039_show_session_menu::Migration),
-            Box::new(m00040_allowed_ip_range::Migration),
+            Box::new(m00037_show_session_menu::Migration),
+            Box::new(m00037_allowed_ip_range::Migration),
             Box::new(m00041_fix_user_role_assignment_dates::Migration),
             Box::new(m00042_database_target_auth_again::Migration),
             Box::new(m00043_unique_usernames::Migration),

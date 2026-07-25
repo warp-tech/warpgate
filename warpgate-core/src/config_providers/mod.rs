@@ -204,6 +204,19 @@ pub async fn authorize_ticket(
             return Ok(None);
         }
 
+        // A ticket inherits its user's IP restrictions. This path mints
+        // authorization directly, bypassing the auth state store where
+        // interactive logins are IP-checked, so enforce the same allow-list
+        // here. A denied IP returns the missing-ticket shape, preserving the
+        // no-existence-oracle property.
+        if !crate::auth_state_store::ip_allowed(user.allowed_ip_ranges.as_ref(), remote_ip) {
+            warn!(
+                "Ticket presented from an IP outside the allowed ranges for user: {}",
+                user.username
+            );
+            return Ok(None);
+        }
+
         let Some(ticket_target) = e::Target::Entity::find_by_id(ticket.target_id)
             .one(db)
             .await?

@@ -14,6 +14,10 @@ use tracing::*;
 use crate::{codec, PixelFormat, Rect, VncEncoding, VncError, VncEvent, X11Event};
 const CHANNEL_SIZE: usize = 4096;
 
+/// Warpgate fork: cap the target-driven ServerInit desktop-name length before allocating.
+/// Comparable to the Warpgate VNC server's `MAX_STRING_LEN`. See PATCHES.md.
+const MAX_NAME_LEN: usize = 4096;
+
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
 #[cfg(target_arch = "wasm32")]
@@ -351,8 +355,14 @@ where
         send_our_pf = true;
     }
 
-    let name_len = stream.read_u32().await?;
-    let mut name_buf = vec![0_u8; name_len as usize];
+    // Warpgate fork: cap the target-driven name length before allocating. See PATCHES.md.
+    let name_len = stream.read_u32().await? as usize;
+    if name_len > MAX_NAME_LEN {
+        return Err(VncError::General(format!(
+            "ServerInit name too long ({name_len} bytes)"
+        )));
+    }
+    let mut name_buf = vec![0_u8; name_len];
     stream.read_exact(&mut name_buf).await?;
     let name = String::from_utf8_lossy(&name_buf).into_owned();
 

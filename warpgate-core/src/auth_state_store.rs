@@ -33,37 +33,44 @@ const fn normalize_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
+/// Whether `remote_ip` is permitted by the user's `allowed_ip_ranges`.
+///
+/// An unset or empty range list, or an unknown remote IP, counts as
+/// unrestricted. Both the interactive auth path and the ticket path decide IP
+/// access through this, so the two can't drift.
+pub(crate) fn ip_allowed(
+    allowed_ip_ranges: Option<&Vec<WarpgateIpNet>>,
+    remote_ip: Option<IpAddr>,
+) -> bool {
+    let Some(ranges) = allowed_ip_ranges else {
+        return true;
+    };
+    if ranges.is_empty() {
+        return true;
+    }
+    let Some(raw_ip) = remote_ip else {
+        return true;
+    };
+    let ip = normalize_ip(raw_ip);
+    ranges.iter().any(|network| network.contains(&ip))
+}
+
 /// Checks whether the given IP is allowed by the user's `allowed_ip_ranges` setting.
 /// Returns `Ok(())` if access is allowed, or an appropriate `WarpgateError` if denied.
-fn check_ip_allowed(
+pub fn check_ip_allowed(
     allowed_ip_ranges: Option<&Vec<WarpgateIpNet>>,
     remote_ip: Option<IpAddr>,
     username: &str,
 ) -> Result<(), WarpgateError> {
-    let Some(ranges) = allowed_ip_ranges else {
-        return Ok(());
-    };
-    if ranges.is_empty() {
+    if ip_allowed(allowed_ip_ranges, remote_ip) {
         return Ok(());
     }
-    let Some(raw_ip) = remote_ip else {
-        return Ok(());
-    };
-    let ip = normalize_ip(raw_ip);
-    for network in ranges {
-        if network.contains(&ip) {
-            return Ok(());
-        }
-    }
+    // `ip_allowed` only denies when a remote IP is present and outside the ranges.
+    let ip_str = remote_ip.map_or_else(String::new, |ip| normalize_ip(ip).to_string());
     tracing::warn!(
-        "Access denied for IP '{}' (not in any allowed range for user '{}')",
-        ip,
-        username
+        "Access denied for IP '{ip_str}' (not in any allowed range for user '{username}')"
     );
-    Err(WarpgateError::IpAddrNotAllowed(
-        ip.to_string(),
-        username.into(),
-    ))
+    Err(WarpgateError::IpAddrNotAllowed(ip_str, username.into()))
 }
 
 /// Record a failed attempt for an unknown username so that username
@@ -500,6 +507,21 @@ mod tests {
         let range = Some(vec![IpNet::from_str("192.168.1.0/24").unwrap().into()]);
         let ip: IpAddr = "::ffff:10.0.0.1".parse().unwrap();
         assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_err());
+    }
+
+    #[test]
+    fn ip_allowed_helper_matches_auth_path_semantics() {
+        let range = Some(vec![IpNet::from_str("10.0.0.0/8").unwrap().into()]);
+        // In range -> allowed.
+        assert!(ip_allowed(range.as_ref(), Some("10.1.2.3".parse().unwrap())));
+        // Out of range -> denied.
+        assert!(!ip_allowed(range.as_ref(), Some("192.168.0.1".parse().unwrap())));
+        // Empty range list is unrestricted.
+        assert!(ip_allowed(Some(&vec![]), Some("192.168.0.1".parse().unwrap())));
+        // No remote IP is treated as unrestricted.
+        assert!(ip_allowed(range.as_ref(), None));
+        // No restriction configured.
+        assert!(ip_allowed(None, Some("192.168.0.1".parse().unwrap())));
     }
 
     fn approval_key(scope: WebApprovalScopeKey) -> WebApprovalMatchKey {

@@ -1,34 +1,152 @@
+use std::net::IpAddr;
+use std::time::SystemTime;
+
 use anyhow::Context;
 use poem::Request;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
+use uuid::Uuid;
 use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{TargetKubernetesOptions, TargetOptions, User};
-use warpgate_core::{ConfigProvider, Services, TargetAuthorization, authorize_for_target};
+use warpgate_common_http::logging::get_client_ip;
+use warpgate_core::login_protection::FailedAttemptInfo;
+use warpgate_core::{
+    ConfigProvider, Services, TargetAuthorization, authorize_for_target, check_ip_allowed,
+};
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation};
 
 use crate::server::client_certs::RequestCertificateExt;
+
+fn unauthorized() -> poem::Error {
+    poem::Error::from_string(
+        "Unauthorized: provide a valid Bearer token or client certificate",
+        poem::http::StatusCode::UNAUTHORIZED,
+    )
+}
+
+/// What kind of credential the client presented, for audit and rate-limiting.
+/// `None` means no credential was presented at all — an unauthenticated probe,
+/// not a failed login attempt.
+fn presented_credential_kind(req: &Request) -> Option<&'static str> {
+    let has_bearer = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("Bearer "));
+    if has_bearer {
+        Some("token")
+    } else if req.client_certificate().is_some() {
+        Some("certificate")
+    } else {
+        None
+    }
+}
+
+/// Emit the shared `UserAuthenticationFailed1` audit event. A failed Kubernetes
+/// auth has no established session, so a fresh id tags this attempt.
+fn emit_authentication_failed(client_ip: Option<IpAddr>, credential_type: &str, reason: &str) {
+    let client_ip = client_ip.map_or_else(|| "<unknown>".to_string(), |ip| ip.to_string());
+    info!(
+        target: "audit",
+        _type = "UserAuthenticationFailed1",
+        session = %Uuid::new_v4(),
+        client_ip = %client_ip,
+        username = "",
+        credentials = %credential_type,
+        reason = %reason,
+        "Authentication failed",
+    );
+}
 
 pub async fn authenticate_and_get_target(
     req: &Request,
     target_name: &str,
     services: &Services,
 ) -> poem::Result<TargetAuthorization> {
-    // Check for Bearer token authentication (API tokens)
+    let client_ip: Option<IpAddr> = get_client_ip(req, services)
+        .await
+        .and_then(|ip| ip.parse().ok());
+
+    // Fail closed if login protection currently has this source IP blocked.
+    if let Some(ip) = client_ip
+        && services
+            .login_protection
+            .check_ip_blocked(&ip)
+            .await?
+            .is_some()
+    {
+        warn!(ip = %ip, "Kubernetes auth attempt from blocked IP");
+        return Err(unauthorized());
+    }
+
+    let credential_kind = presented_credential_kind(req);
+
+    let Some(user) = authenticate(req, services).await? else {
+        // A presented-but-invalid credential counts toward brute-force
+        // protection and is audited; a request with no credential at all is a
+        // plain unauthenticated probe and is neither recorded nor audited.
+        if let (Some(ip), Some(kind)) = (client_ip, credential_kind) {
+            let _ = services
+                .login_protection
+                .record_failed_attempt(FailedAttemptInfo {
+                    username: String::new(),
+                    remote_ip: ip,
+                    protocol: crate::PROTOCOL_NAME.name().to_string(),
+                    credential_type: kind.to_string(),
+                })
+                .await;
+            emit_authentication_failed(client_ip, kind, "no matching credential");
+        }
+        return Err(unauthorized());
+    };
+
+    // Account lockout and the user's IP allow-list, both fail-closed.
+    if services
+        .login_protection
+        .check_user_locked(&user.username)
+        .await?
+        .is_some()
+    {
+        warn!(username = %user.username, "Kubernetes auth for locked user");
+        return Err(unauthorized());
+    }
+    if check_ip_allowed(user.allowed_ip_ranges.as_ref(), client_ip, &user.username).is_err() {
+        return Err(unauthorized());
+    }
+
+    let authorization = lookup_authorized_k8s_target(
+        services.config_provider.as_ref(),
+        target_name,
+        &(&user).into(),
+    )
+    .await?;
+
+    // Successful auth resets the failed-attempt counter for this user/IP.
+    if let Some(ip) = client_ip {
+        let _ = services
+            .login_protection
+            .clear_failed_attempts(&ip, &user.username)
+            .await;
+    }
+
+    Ok(authorization)
+}
+
+/// Resolve the caller's identity from the request's credentials (API token,
+/// OIDC bearer token, or client certificate). Returns the authenticated user,
+/// or `None` if no presented credential validated. Genuine lookup/verification
+/// errors propagate rather than being treated as an auth failure.
+async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option<User>> {
+    // Bearer token authentication (API tokens, then OIDC ID tokens).
     if let Some(auth_header) = req.headers().get("authorization")
         && let Ok(auth_str) = auth_header.to_str()
         && let Some(token) = auth_str.strip_prefix("Bearer ")
     {
         if let Ok(Some(user)) = services.config_provider.validate_api_token(token).await {
-            return lookup_authorized_k8s_target(
-                services.config_provider.as_ref(),
-                target_name,
-                &(&user).into(),
-            )
-            .await;
+            return Ok(Some(user));
         }
 
         // API token did not match — try OIDC ID token validation against any SSO
@@ -84,52 +202,30 @@ pub async fn authenticate_and_get_target(
                 continue;
             };
 
-            let user_info = user_info_for_username(services, &username).await?;
-            return lookup_authorized_k8s_target(
-                services.config_provider.as_ref(),
-                target_name,
-                &user_info,
-            )
-            .await;
+            return Ok(Some(user_for_username(services, &username).await?));
         }
     }
 
-    // Check for client certificate authentication
-    // Use certificate extracted by middleware if present
+    // Client certificate authentication, using the certificate extracted by the
+    // middleware if present.
     if let Some(client_cert) = req.client_certificate() {
         debug!("Found client certificate from middleware, validating against database");
 
         match validate_client_certificate(&client_cert.der_bytes, services).await {
-            Ok(Some(user_info)) => {
-                // Look up the specific target by name from the URL
-                return lookup_authorized_k8s_target(
-                    services.config_provider.as_ref(),
-                    target_name,
-                    &user_info,
-                )
-                .await;
-            }
-            Ok(None) => {
-                debug!("Client certificate provided but not found in database");
-            }
-            Err(e) => {
-                warn!(error = %e, "Error validating client certificate");
-            }
+            Ok(Some(user)) => return Ok(Some(user)),
+            Ok(None) => debug!("Client certificate provided but not found in database"),
+            Err(e) => warn!(error = %e, "Error validating client certificate"),
         }
     } else {
         debug!("No client certificate provided in TLS connection");
     }
 
-    // Return unauthorized if no valid authentication found
-    Err(poem::Error::from_string(
-        "Unauthorized: Please provide either a valid Bearer token or a client certificate",
-        poem::http::StatusCode::UNAUTHORIZED,
-    ))
+    Ok(None)
 }
 
 /// Look up a Kubernetes target by name and prove the user is authorized for it.
 /// Shared by the API-token, OIDC and client-certificate auth paths.
-async fn lookup_authorized_k8s_target<C: ConfigProvider + Send + ?Sized>(
+async fn lookup_authorized_k8s_target<C: ConfigProvider + Send>(
     config_provider: &C,
     target_name: &str,
     user_info: &AuthStateUserInfo,
@@ -156,11 +252,8 @@ async fn lookup_authorized_k8s_target<C: ConfigProvider + Send + ?Sized>(
         })
 }
 
-/// Load a resolved SSO user's `AuthStateUserInfo` by username.
-async fn user_info_for_username(
-    services: &Services,
-    username: &str,
-) -> poem::Result<AuthStateUserInfo> {
+/// Load a resolved SSO user by username.
+async fn user_for_username(services: &Services, username: &str) -> poem::Result<User> {
     let db = &services.db;
     let model = warpgate_db_entities::User::Entity::find()
         .filter(warpgate_db_entities::User::Entity::username_eq_ci(username))
@@ -173,13 +266,12 @@ async fn user_info_for_username(
                 poem::http::StatusCode::UNAUTHORIZED,
             )
         })?;
-    let user = User::try_from(model).map_err(|e| {
+    User::try_from(model).map_err(|e| {
         poem::Error::from_string(
             format!("Failed to convert user model: {e}"),
             poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         )
-    })?;
-    Ok((&user).into())
+    })
 }
 
 pub async fn create_authenticated_client(
@@ -253,18 +345,36 @@ pub async fn create_authenticated_client(
     Ok(client_builder)
 }
 
+/// True if `now` falls within the certificate's `[not_before, not_after]`
+/// validity window (bounds inclusive).
+fn cert_is_currently_valid(not_before: SystemTime, not_after: SystemTime, now: SystemTime) -> bool {
+    now >= not_before && now <= not_after
+}
+
 // Helper function to validate client certificate against database
 pub async fn validate_client_certificate(
     cert_der: &[u8],
     services: &Services,
-) -> anyhow::Result<Option<AuthStateUserInfo>> {
+) -> anyhow::Result<Option<User>> {
     // Convert DER to PEM format for comparison
     let cert_pem = der_to_pem(cert_der);
 
     let db = &services.db;
 
-    // Check if certificate is revoked (by serial number)
     let cert = deserialize_certificate(&cert_pem)?;
+
+    // Reject certificates outside their validity period.
+    let validity = &cert.tbs_certificate.validity;
+    if !cert_is_currently_valid(
+        validity.not_before.to_system_time(),
+        validity.not_after.to_system_time(),
+        SystemTime::now(),
+    ) {
+        warn!("Client certificate is outside its validity period");
+        return Ok(None);
+    }
+
+    // Check if certificate is revoked (by serial number)
     let serial_b64 = serialize_certificate_serial(&cert);
     if CertificateRevocation::Entity::find()
         .filter(CertificateRevocation::Column::SerialNumberBase64.eq(&serial_b64))
@@ -302,7 +412,7 @@ pub async fn validate_client_certificate(
                     warn!("Failed to update certificate last_used timestamp: {}", e);
                 }
 
-                return Ok(Some((&User::try_from(user)?).into()));
+                return Ok(Some(User::try_from(user)?));
             }
         }
     }
