@@ -375,7 +375,7 @@ impl ServerSession {
             .record_failed_attempt(FailedAttemptInfo {
                 username: username.to_string(),
                 remote_ip: self.remote_address.ip(),
-                protocol: "ssh".to_string(),
+                protocol: crate::PROTOCOL_NAME,
                 credential_type: credential_type.to_string(),
             })
             .await;

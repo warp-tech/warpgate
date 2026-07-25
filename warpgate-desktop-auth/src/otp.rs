@@ -13,6 +13,7 @@ use tracing::warn;
 use warpgate_common::Secret;
 use warpgate_common::auth::{AuthCredential, AuthState};
 use warpgate_common::helpers::otp::OTP_DIGITS;
+use warpgate_common::Protocol;
 use warpgate_core::Services;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
@@ -31,8 +32,8 @@ pub enum OtpAction {
 pub struct OtpEntry {
     entered: String,
     failures: usize,
-    /// Lowercase audit / brute-force label (`"rdp"` / `"vnc"`).
-    protocol_label: &'static str,
+    /// Recorded on failed attempts for audit and brute-force accounting.
+    protocol: Protocol,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,11 +44,11 @@ pub enum OtpActionApplyOutcome {
 }
 
 impl OtpEntry {
-    pub const fn new(protocol_label: &'static str) -> Self {
+    pub const fn new(protocol: Protocol) -> Self {
         Self {
             entered: String::new(),
             failures: 0,
-            protocol_label,
+            protocol,
         }
     }
 
@@ -101,7 +102,7 @@ impl OtpEntry {
         }
 
         warn!(
-            protocol = self.protocol_label,
+            protocol = %self.protocol,
             "Incorrect one-time password"
         );
         self.failures += 1;
@@ -110,7 +111,7 @@ impl OtpEntry {
             .record_failed_attempt(FailedAttemptInfo {
                 username: username.to_string(),
                 remote_ip,
-                protocol: self.protocol_label.to_string(),
+                protocol: self.protocol,
                 credential_type: "otp".to_string(),
             })
             .await;

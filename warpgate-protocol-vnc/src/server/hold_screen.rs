@@ -110,7 +110,7 @@ where
         .get(&state_id)
         .context("auth state expired")?;
 
-    let mut otp = OtpEntry::new("vnc");
+    let mut otp = OtpEntry::new(crate::PROTOCOL_NAME);
     let mut approval = state.lock().await.subscribe();
 
     // The auth state is vacuumed from the store after this long, at which point

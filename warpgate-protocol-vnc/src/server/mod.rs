@@ -431,7 +431,6 @@ struct VncProto;
 impl DesktopProtocol for VncProto {
     type Options = TargetVncOptions;
     const NAME: Protocol = PROTOCOL_NAME;
-    const LABEL: &'static str = "vnc";
 
     fn options(target: &Target) -> Option<TargetVncOptions> {
         match &target.options {

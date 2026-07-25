@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time", "macros"] }
 tracing.workspace = true
 uuid.workspace = true
 warpgate-common = { path = "../warpgate-common", default-features = false }

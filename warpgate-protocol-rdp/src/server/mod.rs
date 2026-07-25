@@ -510,7 +510,6 @@ struct RdpProto;
 impl DesktopProtocol for RdpProto {
     type Options = TargetRdpOptions;
     const NAME: Protocol = PROTOCOL_NAME;
-    const LABEL: &'static str = "rdp";
 
     fn options(target: &Target) -> Option<TargetRdpOptions> {
         match &target.options {

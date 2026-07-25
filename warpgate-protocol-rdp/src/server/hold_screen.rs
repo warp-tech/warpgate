@@ -42,7 +42,7 @@ pub(super) async fn run_hold_screen(
 
     // Hold screen renders at the negotiated screen size,
     // resizing means a reactivation which races with the resize itself
-    let mut otp = OtpEntry::new("rdp");
+    let mut otp = OtpEntry::new(crate::PROTOCOL_NAME);
     let mut painter = HoldPainter::new(*screen);
     let mut ticker = tokio::time::interval(HOLD_RENDER_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

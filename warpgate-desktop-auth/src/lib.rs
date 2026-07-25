@@ -6,7 +6,12 @@
 //! URL are identical between them and live here once; each protocol supplies only its name,
 //! audit label, and target-options extractor via [`DesktopProtocol`].
 
+mod hold_screen;
 mod otp;
+
+pub use hold_screen::{
+    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter, run_hold_screen,
+};
 
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
@@ -37,8 +42,6 @@ pub trait DesktopProtocol {
     type Options;
     /// Warpgate protocol, recorded on the auth state.
     const NAME: Protocol;
-    /// Lowercase audit / brute-force label (e.g. `"rdp"`).
-    const LABEL: &'static str;
     /// Clone out this protocol's options from a target, or `None` if it's a different kind.
     fn options(target: &Target) -> Option<Self::Options>;
 }
@@ -97,7 +100,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                 .await?
                 .is_some()
             {
-                warn!(ip = %remote_ip, protocol = P::LABEL, "Desktop auth attempt from blocked IP");
+                warn!(ip = %remote_ip, protocol = %P::NAME, "Desktop auth attempt from blocked IP");
                 return Ok(DesktopAuthOutcome::Failed);
             }
             if services
@@ -106,7 +109,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                 .await?
                 .is_some()
             {
-                warn!(username = %username, protocol = P::LABEL, "Desktop auth attempt for locked user");
+                warn!(username = %username, protocol = %P::NAME, "Desktop auth attempt for locked user");
                 return Ok(DesktopAuthOutcome::Failed);
             }
 
@@ -142,7 +145,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                         .record_failed_attempt(FailedAttemptInfo {
                             username: username.clone(),
                             remote_ip,
-                            protocol: P::LABEL.to_string(),
+                            protocol: P::NAME,
                             credential_type: "password".to_string(),
                         })
                         .await;
@@ -206,7 +209,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                         bail!(
                             "Target {} is not a {} target",
                             authorization.target().name,
-                            P::LABEL
+                            P::NAME
                         );
                     };
                     Ok(DesktopAuthOutcome::Authorized {
@@ -237,7 +240,7 @@ pub async fn finalize_user_auth<P: DesktopProtocol>(
         );
     };
     let Some(options) = P::options(authorization.target()) else {
-        bail!("Target {target_name} is not a {} target", P::LABEL);
+        bail!("Target {target_name} is not a {} target", P::NAME);
     };
     Ok((authorization, options))
 }
