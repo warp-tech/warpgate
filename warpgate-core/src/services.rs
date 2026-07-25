@@ -13,7 +13,7 @@ use warpgate_common::{GlobalParams, Secret, SessionId, WarpgateConfig, WarpgateE
 use warpgate_db_entities::Parameters;
 
 use crate::cluster::Cluster;
-use crate::db::{connect_to_db_and_migrate, populate_db};
+use crate::db::connect_to_db_and_migrate;
 use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
@@ -65,12 +65,11 @@ async fn resolve_cluster_token(db: &DatabaseConnection) -> Result<Secret<String>
 
 impl Services {
     pub async fn new(
-        mut config: WarpgateConfig,
+        config: WarpgateConfig,
         admin_token: Option<String>,
         params: GlobalParams,
     ) -> Result<Self> {
         let db = connect_to_db_and_migrate(&config, &params).await?;
-        populate_db(&db, &mut config).await?;
         let recordings = SessionRecordings::new(db.clone(), &params);
         let recordings = Arc::new(Mutex::new(recordings));
 

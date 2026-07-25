@@ -8,6 +8,7 @@ use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::SessionSnapshot;
+use warpgate_core::db::mark_session_ended;
 use warpgate_db_entities::{Node, Recording, Session};
 
 use super::AnySecurityScheme;
@@ -106,6 +107,9 @@ impl Api {
             let state = ctx.services().state.lock().await;
             if let Some(s) = state.sessions.get(&id) {
                 s.lock().await.handle.close();
+                drop(state);
+                // a stuck event loop might never mark a session ended
+                mark_session_ended(&ctx.services().db, id.0).await?;
                 return Ok(CloseSessionResponse::Ok);
             }
         }
