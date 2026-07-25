@@ -34,8 +34,8 @@ use warpgate_core::recordings::{
     TrafficRecorder,
 };
 use warpgate_core::{
-    ConfigProvider, Services, TargetAuthorization, WarpgateServerHandle, authorize_for_target,
-    authorize_for_target_by_name, authorize_ticket, consume_ticket,
+    AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, WarpgateServerHandle,
+    authorize_for_target, authorize_for_target_by_name, authorize_ticket, consume_ticket,
 };
 use warpgate_db_entities::Parameters;
 
@@ -94,22 +94,48 @@ pub enum TrafficRecorderKey {
     Socket(String),
 }
 
+/// How far a channel has got through its lifecycle. A channel that is gone is
+/// absent from [`ServerSession::channels`] entirely, so there is no "closed"
+/// state to go stale.
+#[derive(Default)]
+enum ChannelState {
+    /// Open initiated on our side, not yet confirmed by the peer. Server-initiated
+    /// channels (forwarded-tcpip, forwarded-streamlocal) accumulate resources here
+    /// while the client's confirmation is in flight.
+    #[default]
+    Opening,
+    /// Confirmed open on both sides. `pty` marks channels that had a PTY
+    /// allocated — those receive service output and drive the interactive
+    /// target-selection menu.
+    Open { pty: bool },
+}
+
 /// All per-channel resources, held in [`ServerSession::channels`]. Living in
 /// one struct per channel (rather than parallel per-resource maps) means they
 /// can't fall out of sync as channels come and go, and a new per-channel
 /// resource only needs a field here.
 #[derive(Default)]
 struct Channel {
-    /// Set once the channel is confirmed open on both sides; only open
-    /// channels are bulk-closed when the session disconnects.
-    open: bool,
-    /// Whether a PTY was allocated — such channels receive service output and
-    /// drive the interactive target-selection menu.
-    pty: bool,
+    state: ChannelState,
     recorder: Option<TerminalRecorder>,
     command_detector: Option<CommandDetector>,
     pty_size: Option<PtyRequest>,
     traffic_recorder: Option<ConnectionRecorder>,
+}
+
+impl Channel {
+    const fn has_pty(&self) -> bool {
+        matches!(self.state, ChannelState::Open { pty: true })
+    }
+
+    /// Carries `pty` across the transition: a channel can be confirmed open
+    /// after its PTY was already recorded, and assigning `Open { pty: false }`
+    /// outright would drop that.
+    const fn mark_open(&mut self) {
+        self.state = ChannelState::Open {
+            pty: self.has_pty(),
+        };
+    }
 }
 
 pub struct ServerSession {
@@ -406,7 +432,13 @@ impl ServerSession {
             .ok_or_else(|| anyhow::anyhow!("Channel not known"))
     }
 
-    fn channel_mut(&mut self, id: Uuid) -> &mut Channel {
+    /// The channel's resources, creating them in [`ChannelState::Opening`] if
+    /// this is the first thing to touch the channel. Inserting, so it is only
+    /// correct where the channel is genuinely being established — anywhere that
+    /// expects an existing channel must go through [`HashMap::get_mut`] and
+    /// handle absence, because a channel can be closed underneath an in-flight
+    /// request.
+    fn channel_entry(&mut self, id: Uuid) -> &mut Channel {
         self.channels.entry(id).or_default()
     }
 
@@ -467,7 +499,7 @@ impl ServerSession {
         let channels = self
             .channels
             .iter()
-            .filter(|(_, c)| c.pty)
+            .filter(|(_, c)| c.has_pty())
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
         for channel in channels {
@@ -601,12 +633,13 @@ impl ServerSession {
                 // The menu list was authorized when it was built; permissions
                 // may have changed while it was open, so re-check on selection.
                 let target_name = target.name.clone();
-                let Some(authorization) = authorize_for_target(
-                    self.services.config_provider.as_ref(),
-                    &user_info,
-                    target,
-                )
-                .await?
+                let identity = AuthorizedIdentity::for_authenticated_session(
+                    user_info.clone(),
+                    crate::PROTOCOL_NAME,
+                );
+                let Some(authorization) =
+                    authorize_for_target(self.services.config_provider.as_ref(), &identity, target)
+                        .await?
                 else {
                     warn!(
                         "Target {} not authorized for user {}",
@@ -683,7 +716,7 @@ impl ServerSession {
                     match result {
                         Ok(server_channel_id) => {
                             self.channel_map.insert(server_channel_id, id);
-                            self.channel_mut(id).open = true;
+                            self.channel_entry(id).mark_open();
                         }
                         Err(error) => {
                             warn!(channel=%id, ?error, "Failed to open a channel to the client");
@@ -770,7 +803,7 @@ impl ServerSession {
 
     async fn maybe_start_target_selection_menu(&self, channel_id: Uuid) -> Result<()> {
         if matches!(self.target, TargetSelection::Menu)
-            && self.channels.get(&channel_id).is_some_and(|c| c.pty)
+            && self.channels.get(&channel_id).is_some_and(Channel::has_pty)
         {
             self.start_target_selection_menu(channel_id).await?;
         }
@@ -794,11 +827,15 @@ impl ServerSession {
                     .await
                 {
                     Ok(()) => {
-                        self.channel_mut(channel).open = true;
+                        self.channel_entry(channel).mark_open();
                         let _ = reply.send(true);
                         Ok(())
                     }
                     Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => {
+                        // The mapping was inserted before the open was attempted;
+                        // drop it so a later request can't resolve a channel that
+                        // was never established.
+                        self.close_channel(channel);
                         let _ = reply.send(false);
                         Ok(())
                     }
@@ -825,7 +862,12 @@ impl ServerSession {
 
             ServerHandlerEvent::PtyRequest(server_channel_id, request, reply) => {
                 let channel_id = self.map_channel(server_channel_id)?;
-                let channel_state = self.channel_mut(channel_id);
+                let Some(channel_state) = self.channels.get_mut(&channel_id) else {
+                    return Err(WarpgateError::InconsistentState(
+                        "PTY requested for a channel that was never opened".into(),
+                    )
+                    .into());
+                };
                 channel_state.pty_size = Some(request.clone());
                 if let Some(recorder) = channel_state.recorder.as_mut()
                     && let Err(error) = recorder
@@ -847,7 +889,18 @@ impl ServerSession {
                     .context("Invalid session state")?
                     .channel_success(server_channel_id.0)
                     .await;
-                self.channel_mut(channel_id).pty = true;
+                // Waiting for the target above pumps the event loop, so the
+                // channel may have been closed in the meantime. Recording a PTY
+                // against a resurrected entry would leave a channel that
+                // `emit_pty_output` selects but cannot map back to the client,
+                // silently killing every later service message.
+                if let Some(Channel {
+                    state: ChannelState::Open { pty },
+                    ..
+                }) = self.channels.get_mut(&channel_id)
+                {
+                    *pty = true;
+                }
                 let _ = reply.send(());
             }
 
@@ -1232,7 +1285,7 @@ impl ServerSession {
                         if let Err(error) = recorder.write_connection_setup().await {
                             error!(channel=%id, ?error, "Failed to record connection setup");
                         }
-                        self.channel_mut(id).traffic_recorder = Some(recorder);
+                        self.channel_entry(id).traffic_recorder = Some(recorder);
                     }
                 }
             }
@@ -1261,7 +1314,7 @@ impl ServerSession {
                         if let Err(error) = recorder.write_connection_setup().await {
                             error!(channel=%id, ?error, "Failed to record connection setup");
                         }
-                        self.channel_mut(id).traffic_recorder = Some(recorder);
+                        self.channel_entry(id).traffic_recorder = Some(recorder);
                     }
                 }
             }
@@ -1313,7 +1366,7 @@ impl ServerSession {
             return Ok(());
         }
 
-        if !self.channels.values().any(|c| c.pty) {
+        if !self.channels.values().any(Channel::has_pty) {
             warn!(
                 "Target host key is not trusted, but there is no active PTY channel to show the trust prompt on."
             );
@@ -1394,7 +1447,7 @@ impl ServerSession {
             .await
         {
             Ok(()) => {
-                self.channel_mut(uuid).open = true;
+                self.channel_entry(uuid).mark_open();
 
                 let recorder = self
                     .traffic_recorder_for(
@@ -1419,12 +1472,17 @@ impl ServerSession {
                     if let Err(error) = recorder.write_connection_setup().await {
                         error!(%channel, ?error, "Failed to record connection setup");
                     }
-                    self.channel_mut(uuid).traffic_recorder = Some(recorder);
+                    if let Some(channel_state) = self.channels.get_mut(&uuid) {
+                        channel_state.traffic_recorder = Some(recorder);
+                    }
                 }
 
                 Ok(true)
             }
-            Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => Ok(false),
+            Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => {
+                self.close_channel(uuid);
+                Ok(false)
+            }
             Err(x) => Err(x.into()),
         }
     }
@@ -1449,7 +1507,7 @@ impl ServerSession {
             .await
         {
             Ok(()) => {
-                self.channel_mut(uuid).open = true;
+                self.channel_entry(uuid).mark_open();
 
                 let recorder = self
                     .traffic_recorder_for(
@@ -1464,12 +1522,17 @@ impl ServerSession {
                     if let Err(error) = recorder.write_connection_setup().await {
                         error!(%channel, ?error, "Failed to record connection setup");
                     }
-                    self.channel_mut(uuid).traffic_recorder = Some(recorder);
+                    if let Some(channel_state) = self.channels.get_mut(&uuid) {
+                        channel_state.traffic_recorder = Some(recorder);
+                    }
                 }
 
                 Ok(true)
             }
-            Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => Ok(false),
+            Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => {
+                self.close_channel(uuid);
+                Ok(false)
+            }
             Err(x) => Err(x.into()),
         }
     }
@@ -1480,7 +1543,12 @@ impl ServerSession {
         request: PtyRequest,
     ) -> Result<()> {
         let channel_id = self.map_channel(server_channel_id)?;
-        let channel_state = self.channel_mut(channel_id);
+        let Some(channel_state) = self.channels.get_mut(&channel_id) else {
+            return Err(WarpgateError::InconsistentState(
+                "Window change for a channel that was never opened".into(),
+            )
+            .into());
+        };
         channel_state.pty_size = Some(request.clone());
         if let Some(recorder) = channel_state.recorder.as_mut()
             && let Err(error) = recorder
@@ -1589,7 +1657,13 @@ impl ServerSession {
         .await;
         match recorder {
             Ok(recorder) => {
-                self.channel_mut(channel_id).recorder = Some(recorder);
+                // Starting the recording awaits, so the channel can be gone by
+                // now — e.g. target selection failed and tore the session down.
+                if let Some(channel_state) = self.channels.get_mut(&channel_id) {
+                    channel_state.recorder = Some(recorder);
+                } else {
+                    debug!(channel=%channel_id, "Recording started for a channel that is already gone");
+                }
             }
             Err(error) => match error {
                 recordings::Error::Disabled => (),
@@ -1602,7 +1676,7 @@ impl ServerSession {
         let Some(channel_state) = self.channels.get_mut(&channel_id) else {
             return;
         };
-        if !channel_state.pty {
+        if !channel_state.has_pty() {
             return;
         }
         let (cols, rows) = channel_state
@@ -1712,7 +1786,7 @@ impl ServerSession {
             }
         }
 
-        if self.channels.get(&channel_id).is_some_and(|c| c.pty) {
+        if self.channels.get(&channel_id).is_some_and(Channel::has_pty) {
             let _ = self
                 .event_sender
                 .send_once(Event::ConsoleInput(data.clone()))
@@ -2215,9 +2289,13 @@ impl ServerSession {
                         let authorization = if target_name.is_empty() {
                             None
                         } else {
+                            // The state is `Accepted` here, so this yields the sealed proof.
+                            let Some(identity) = AuthorizedIdentity::from_auth_state(&state) else {
+                                return Ok(AuthResult::Rejected);
+                            };
                             let Some(authorization) = authorize_for_target_by_name(
                                 self.services.config_provider.as_ref(),
-                                &user_info,
+                                &identity,
                                 target_name,
                             )
                             .await?
@@ -2242,6 +2320,7 @@ impl ServerSession {
                     &self.services.login_protection,
                     secret,
                     Some(remote_ip),
+                    crate::PROTOCOL_NAME,
                 )
                 .await?
                 {
@@ -2395,17 +2474,15 @@ impl ServerSession {
         // to the client before the channels are closed.
         let _ = self.channel_writer.flush().await;
 
-        let mut open_channels = Vec::new();
-        for (id, channel) in &mut self.channels {
-            if channel.open {
-                channel.open = false;
-                open_channels.push(*id);
-            }
-        }
-        let channels = open_channels
-            .into_iter()
-            .map(|x| self.map_channel_reverse(&x))
-            .filter_map(std::result::Result::ok)
+        // Entries stay in place: several callers return into the running event
+        // loop, which still needs the channels to record trailing output and to
+        // map target events back to the client. Closing twice is harmless —
+        // `session_handle` is cleared below, so the second pass sends nothing.
+        let channels = self
+            .channels
+            .iter()
+            .filter(|(_, channel)| matches!(channel.state, ChannelState::Open { .. }))
+            .filter_map(|(id, _)| self.map_channel_reverse(id).ok())
             .collect::<Vec<_>>();
 
         let _ = self
