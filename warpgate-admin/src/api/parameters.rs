@@ -346,12 +346,11 @@ impl Api {
 
         Parameters::Entity::update(parameters).exec(db).await?;
 
-        services
-            .rate_limiter_registry
-            .lock()
-            .await
-            .apply_new_rate_limits(&*services.state.lock().await)
-            .await?;
+        warpgate_core::rate_limiting::apply_new_rate_limits(
+            &services.rate_limiter_registry,
+            &services.state,
+        )
+        .await?;
 
         Ok(UpdateParametersResponse::Done)
     }

@@ -242,12 +242,11 @@ impl DetailApi {
         });
         let user = model.update(db).await?;
 
-        ctx.services()
-            .rate_limiter_registry
-            .lock()
-            .await
-            .apply_new_rate_limits(&*ctx.services().state.lock().await)
-            .await?;
+        warpgate_core::rate_limiting::apply_new_rate_limits(
+            &ctx.services().rate_limiter_registry,
+            &ctx.services().state,
+        )
+        .await?;
 
         Ok(UpdateUserResponse::Ok(Json(user.try_into()?)))
     }

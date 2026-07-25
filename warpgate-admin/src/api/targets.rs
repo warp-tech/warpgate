@@ -270,12 +270,11 @@ impl DetailApi {
         model.ticket_max_uses = Set(body.ticket_max_uses);
         let target = model.update(db).await?;
 
-        services
-            .rate_limiter_registry
-            .lock()
-            .await
-            .apply_new_rate_limits(&*services.state.lock().await)
-            .await?;
+        warpgate_core::rate_limiting::apply_new_rate_limits(
+            &services.rate_limiter_registry,
+            &services.state,
+        )
+        .await?;
 
         Ok(UpdateTargetResponse::Ok(Json(
             target.try_into().map_err(WarpgateError::from)?,
