@@ -7,9 +7,7 @@ use sea_orm::EntityTrait;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{Target as TargetConfig, TargetOptions, WarpgateError};
-use warpgate_common_http::{
-    RequestAuthorization, SessionAuthorization,
-};
+use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup};
@@ -44,11 +42,7 @@ enum GetTargetsResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(
-        path = "/targets",
-        method = "get",
-        operation_id = "get_targets"
-    )]
+    #[oai(path = "/targets", method = "get", operation_id = "get_targets")]
     async fn api_get_all_targets(
         &self,
         ctx: AuthedSession,

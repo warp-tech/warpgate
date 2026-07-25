@@ -94,7 +94,7 @@ pub async fn authenticate_and_get_target(
                 .record_failed_attempt(FailedAttemptInfo {
                     username: String::new(),
                     remote_ip: ip,
-                    protocol: crate::PROTOCOL_NAME.name().to_string(),
+                    protocol: crate::PROTOCOL_NAME,
                     credential_type: kind.to_string(),
                 })
                 .await;

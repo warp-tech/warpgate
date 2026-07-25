@@ -93,7 +93,7 @@ async fn record_unknown_user_attempt(
         .record_failed_attempt(FailedAttemptInfo {
             username: username.to_string(),
             remote_ip,
-            protocol: protocol.name().to_string(),
+            protocol,
             credential_type: credential_type.to_string(),
         })
         .await;
@@ -513,11 +513,20 @@ mod tests {
     fn ip_allowed_helper_matches_auth_path_semantics() {
         let range = Some(vec![IpNet::from_str("10.0.0.0/8").unwrap().into()]);
         // In range -> allowed.
-        assert!(ip_allowed(range.as_ref(), Some("10.1.2.3".parse().unwrap())));
+        assert!(ip_allowed(
+            range.as_ref(),
+            Some("10.1.2.3".parse().unwrap())
+        ));
         // Out of range -> denied.
-        assert!(!ip_allowed(range.as_ref(), Some("192.168.0.1".parse().unwrap())));
+        assert!(!ip_allowed(
+            range.as_ref(),
+            Some("192.168.0.1".parse().unwrap())
+        ));
         // Empty range list is unrestricted.
-        assert!(ip_allowed(Some(&vec![]), Some("192.168.0.1".parse().unwrap())));
+        assert!(ip_allowed(
+            Some(&vec![]),
+            Some("192.168.0.1".parse().unwrap())
+        ));
         // No remote IP is treated as unrestricted.
         assert!(ip_allowed(range.as_ref(), None));
         // No restriction configured.

@@ -327,11 +327,7 @@ impl Api {
         }
     }
 
-    #[oai(
-        path = "/my-tickets",
-        method = "get",
-        operation_id = "get_my_tickets"
-    )]
+    #[oai(path = "/my-tickets", method = "get", operation_id = "get_my_tickets")]
     async fn api_get_my_tickets(
         &self,
         ctx: AuthedSession,

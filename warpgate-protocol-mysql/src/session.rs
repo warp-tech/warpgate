@@ -8,15 +8,15 @@ use rustls::ServerConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, trace, warn};
+use url::Url;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthSelector, CredentialKind};
+use warpgate_common::auth::AuthSelector;
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
-use warpgate_core::auth::submit_credential;
-use warpgate_core::login_protection::FailedAttemptInfo;
+use warpgate_common::{Protocol, Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    Services, TargetAuthorization, WarpgateServerHandle, authorize_for_target_by_name,
-    authorize_ticket, consume_ticket,
+    AuthOkPermit, DbAuthTransport, Services, TargetAuthorization, WarpgateServerHandle,
+    run_db_authorization,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
 use warpgate_database_protocols::mysql::protocol::Capabilities;
@@ -43,6 +43,54 @@ pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     id: Uuid,
     services: Services,
     remote_address: SocketAddr,
+    /// MySQL carries the password in the handshake, so the shared auth flow can
+    /// only be handed it — never prompted for it a second time.
+    handshake_password: Option<Secret<String>>,
+}
+
+impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for MySqlSession<S> {
+    type Error = MySqlError;
+
+    const PROTOCOL: Protocol = crate::common::PROTOCOL_NAME;
+
+    /// The password arrived in the handshake. There is no second prompt in the
+    /// MySQL protocol, so a repeat request denies the login.
+    async fn prompt_password(&mut self) -> Result<Option<Secret<String>>, MySqlError> {
+        Ok(self.handshake_password.take())
+    }
+
+    async fn send_auth_ok(&mut self, _permit: AuthOkPermit) -> Result<(), MySqlError> {
+        self.stream.push(
+            &OkPacket {
+                affected_rows: 0,
+                last_insert_id: 0,
+                status: Status::empty(),
+                warnings: 0,
+            },
+            (),
+        )?;
+        self.stream.flush().await?;
+        Ok(())
+    }
+
+    async fn external_url(&mut self) -> Result<Url, MySqlError> {
+        Ok(construct_external_url(None, &*self.services.config.lock().await, None).await?)
+    }
+
+    /// The MySQL connection phase has no packet for showing the user a link, so
+    /// a policy requiring web approval can't be satisfied over MySQL.
+    async fn send_web_approval_prompt(
+        &mut self,
+        _url: &Url,
+        _identification_string: &str,
+    ) -> Result<bool, MySqlError> {
+        warn!("Web user approval is not supported over MySQL");
+        Ok(false)
+    }
+
+    async fn send_denied(&mut self) -> Result<(), MySqlError> {
+        self.send_access_denied().await
+    }
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
@@ -78,6 +126,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             server_handle,
             id,
             remote_address,
+            handshake_password: None,
         }
     }
 
@@ -170,167 +219,29 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         Ok(())
     }
 
+    async fn send_access_denied(&mut self) -> Result<(), MySqlError> {
+        self.send_error(1, "Warpgate access denied").await
+    }
+
     pub async fn run_authorization(
         mut self,
         handshake: HandshakeResponse,
         password: Secret<String>,
     ) -> Result<(), MySqlError> {
-        async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
-            this: &mut MySqlSession<S>,
-        ) -> Result<(), MySqlError> {
-            this.stream.push(
-                &ErrPacket {
-                    error_code: 1,
-                    error_message: "Warpgate access denied".to_owned(),
-                    sql_state: None,
-                },
-                (),
-            )?;
-            this.stream.flush().await?;
-            Ok(())
-        }
-
         let selector: AuthSelector = handshake.username.deref().into();
         let remote_ip = self.remote_address.ip();
+        let session_id = self.server_handle.lock().await.id();
 
-        // A lookup error must fail closed: propagate it rather than letting a
-        // possibly-blocked IP through.
-        if let Some(block_info) = self
-            .services
-            .login_protection
-            .check_ip_blocked(&remote_ip)
-            .await?
-        {
-            warn!(
-                ip = %remote_ip,
-                expires_at = %block_info.expires_at,
-                "MySQL auth from blocked IP"
-            );
-            return fail(&mut self).await;
-        }
+        self.handshake_password = Some(password);
 
-        match selector {
-            AuthSelector::User {
-                username,
-                target_name,
-            } => {
-                // A lookup error must fail closed: propagate it rather than
-                // letting a possibly-locked user through.
-                if self
-                    .services
-                    .login_protection
-                    .check_user_locked(&username)
-                    .await?
-                    .is_some()
-                {
-                    warn!(
-                        username = %username,
-                        "MySQL auth for locked user"
-                    );
-                    return fail(&mut self).await;
-                }
+        let services = self.services.clone();
+        let Some(authorization) =
+            run_db_authorization(&mut self, &services, session_id, selector, remote_ip).await?
+        else {
+            return Ok(());
+        };
 
-                let session_id = self.server_handle.lock().await.id();
-                let state_arc = self
-                    .services
-                    .create_auth_state(
-                        Some(&session_id),
-                        &username,
-                        crate::common::PROTOCOL_NAME,
-                        &target_name,
-                        &[CredentialKind::Password],
-                        Some(self.remote_address.ip()),
-                        Some("password"),
-                    )
-                    .await?
-                    .1;
-                let mut state = state_arc.lock().await;
-
-                let outcome = submit_credential(
-                    &mut state,
-                    AuthCredential::Password(password),
-                    self.services.config_provider.as_ref(),
-                )
-                .await?;
-
-                // Only an invalid password counts toward brute-force
-                // protection; a valid one that needs another factor does not.
-                if !outcome.is_valid() {
-                    let _ = self
-                        .services
-                        .login_protection
-                        .record_failed_attempt(FailedAttemptInfo {
-                            username: username.clone(),
-                            remote_ip,
-                            protocol: "mysql".to_string(),
-                            credential_type: "password".to_string(),
-                        })
-                        .await;
-                    return fail(&mut self).await;
-                }
-
-                match outcome.into_accepted() {
-                    Ok(user_info) => {
-                        let Some(authorization) = authorize_for_target_by_name(
-                            self.services.config_provider.as_ref(),
-                            &user_info,
-                            &target_name,
-                        )
-                        .await?
-                        else {
-                            warn!(
-                                "Target {} not authorized for user {}",
-                                target_name, user_info.username
-                            );
-                            // Record failed attempt
-                            let _ = self
-                                .services
-                                .login_protection
-                                .record_failed_attempt(FailedAttemptInfo {
-                                    username: username.clone(),
-                                    remote_ip,
-                                    protocol: "mysql".to_string(),
-                                    credential_type: "password".to_string(),
-                                })
-                                .await;
-                            return fail(&mut self).await;
-                        };
-                        // Clear failed attempts on successful auth
-                        let _ = self
-                            .services
-                            .login_protection
-                            .clear_failed_attempts(&remote_ip, &user_info.username)
-                            .await;
-                        self.run_authorized(handshake, authorization).await
-                    }
-                    Err(_) => fail(&mut self).await, // TODO SSO
-                }
-            }
-            AuthSelector::Ticket { secret } => {
-                match authorize_ticket(
-                    &self.services.db,
-                    &self.services.login_protection,
-                    &secret,
-                    Some(remote_ip),
-                )
-                .await
-                .map_err(MySqlError::other)?
-                {
-                    Some((ticket, authorization)) => {
-                        info!(
-                            "Authorized for {} with a ticket",
-                            authorization.target().name
-                        );
-                        consume_ticket(&self.services.db, &ticket.id)
-                            .await
-                            .map_err(MySqlError::other)?;
-
-                        self.run_authorized(handshake, authorization).await
-                    }
-                    _ => fail(&mut self).await,
-                }
-            }
-        }
+        self.run_authorized(handshake, authorization).await
     }
 
     async fn run_authorized(
@@ -338,17 +249,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         handshake: HandshakeResponse,
         authorization: TargetAuthorization,
     ) -> Result<(), MySqlError> {
-        self.stream.push(
-            &OkPacket {
-                affected_rows: 0,
-                last_insert_id: 0,
-                status: Status::empty(),
-                warnings: 0,
-            },
-            (),
-        )?;
-        self.stream.flush().await?;
-
         let (user_info, target) = authorization.into_parts();
 
         let TargetOptions::MySql(ref mysql_options) = target.options else {

@@ -3,10 +3,7 @@ use poem_openapi::SecurityScheme;
 use poem_openapi::auth::ApiKey;
 use warpgate_common_http::AuthenticatedRequestContext;
 
-async fn authenticated_context(
-    req: &Request,
-    _key: ApiKey,
-) -> Option<AuthenticatedRequestContext> {
+async fn authenticated_context(req: &Request, _key: ApiKey) -> Option<AuthenticatedRequestContext> {
     req.data::<AuthenticatedRequestContext>().cloned()
 }
 

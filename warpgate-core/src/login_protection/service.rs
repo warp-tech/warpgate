@@ -8,7 +8,7 @@ use sea_orm::{
 use time::OffsetDateTime;
 use tracing::{debug, info};
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
+use warpgate_common::{Protocol, WarpgateError};
 use warpgate_db_entities::{
     FailedLoginAttempt, IpBlock, Parameters, User, UserAdminRoleAssignment, UserLockout,
 };
@@ -54,7 +54,7 @@ struct LoginProtectionConfig {
 pub struct FailedAttemptInfo {
     pub username: String,
     pub remote_ip: IpAddr,
-    pub protocol: String,
+    pub protocol: Protocol,
     pub credential_type: String,
 }
 
@@ -264,7 +264,7 @@ impl LoginProtectionService {
             id: Set(Uuid::new_v4()),
             username: Set(attempt.username.clone()),
             remote_ip: Set(attempt.remote_ip.to_string()),
-            protocol: Set(attempt.protocol.clone()),
+            protocol: Set(attempt.protocol.name().to_owned()),
             credential_type: Set(attempt.credential_type.clone()),
             timestamp: Set(now),
         }

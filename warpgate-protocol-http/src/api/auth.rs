@@ -300,7 +300,7 @@ impl Api {
                             .record_failed_attempt(FailedAttemptInfo {
                                 username: state.user_info().username.clone(),
                                 remote_ip: ip,
-                                protocol: "http".to_string(),
+                                protocol: crate::common::PROTOCOL_NAME,
                                 credential_type: "password".to_string(),
                             })
                             .await;
@@ -392,13 +392,15 @@ impl Api {
             }
             Err(rejection) => {
                 // Only an invalid OTP counts as a failed attempt.
-                if rejection.credential_rejected && let Some(ip) = client_ip {
+                if rejection.credential_rejected
+                    && let Some(ip) = client_ip
+                {
                     let _ = services
                         .login_protection
                         .record_failed_attempt(FailedAttemptInfo {
                             username: state.user_info().username.clone(),
                             remote_ip: ip,
-                            protocol: "http".to_string(),
+                            protocol: crate::common::PROTOCOL_NAME,
                             credential_type: "otp".to_string(),
                         })
                         .await;

@@ -14,15 +14,16 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{debug, error, info, info_span, warn};
+use url::Url;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
-use warpgate_common::{PostgresProtocolVersion, Secret, TargetOptions, TargetPostgresOptions};
+use warpgate_common::auth::AuthSelector;
+use warpgate_common::{
+    PostgresProtocolVersion, Protocol, Secret, TargetOptions, TargetPostgresOptions,
+};
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::auth::submit_credential;
-use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
-    Services, TargetAuthorization, WarpgateServerHandle, authorize_for_target_by_name,
-    authorize_ticket, consume_ticket, wait_for_auth_completion,
+    AuthOkPermit, DbAuthTransport, Services, TargetAuthorization, WarpgateServerHandle,
+    run_db_authorization,
 };
 use warpgate_tls::ServerTlsStream;
 
@@ -49,6 +50,89 @@ pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     /// Used to remap cancel keys when the target uses protocol 3.0
     /// but the client already supports 3.2
     cancel_key_upgrade_map: HashMap<SecretKey, SecretKey>,
+}
+
+impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for PostgresSession<S> {
+    type Error = PostgresError;
+
+    const PROTOCOL: Protocol = crate::common::PROTOCOL_NAME;
+
+    async fn prompt_password(&mut self) -> Result<Option<Secret<String>>, PostgresError> {
+        self.stream
+            .push(pgwire::messages::startup::Authentication::CleartextPassword)?;
+        self.stream.flush().await?;
+
+        let Some(PgWireGenericFrontendMessage(PgWireFrontendMessage::PasswordMessageFamily(
+            message,
+        ))) = self
+            .stream
+            .recv::<PgWireGenericFrontendMessage>(&self.decode_context)
+            .await?
+        else {
+            return Err(PostgresError::Eof);
+        };
+
+        Ok(Some(Secret::from(
+            message
+                .into_password()
+                .map_err(PostgresError::from)?
+                .password,
+        )))
+    }
+
+    async fn send_auth_ok(&mut self, _permit: AuthOkPermit) -> Result<(), PostgresError> {
+        self.stream
+            .push(pgwire::messages::startup::Authentication::Ok)?;
+        Ok(())
+    }
+
+    async fn external_url(&mut self) -> Result<Url, PostgresError> {
+        Ok(construct_external_url(None, &*self.services.config.lock().await, None).await?)
+    }
+
+    async fn send_web_approval_prompt(
+        &mut self,
+        url: &Url,
+        identification_string: &str,
+    ) -> Result<bool, PostgresError> {
+        self.stream
+            .push(pgwire::messages::response::NoticeResponse::new(vec![
+                (b'S', "WARNING".into()),
+                (b'V', "WARNING".into()),
+                (b'C', "WG001".into()),
+                (
+                    b'M',
+                    "Warpgate authentication: please open the following URL in your browser:"
+                        .into(),
+                ),
+                (b'D', url.to_string()),
+                (
+                    b'H',
+                    format!(
+                        "Make sure you're seeing this security key: {}\n",
+                        identification_string
+                            .chars()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    ),
+                ),
+            ]))?;
+        self.stream.flush().await?;
+        Ok(true)
+    }
+
+    async fn send_denied(&mut self) -> Result<(), PostgresError> {
+        let error_info = ErrorInfo::new(
+            "FATAL".to_owned(),
+            "28P01".to_owned(),
+            "Authentication failed".to_owned(),
+        );
+        self.stream
+            .push(pgwire::messages::response::ErrorResponse::from(error_info))?;
+        self.stream.flush().await?;
+        Ok(())
+    }
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
@@ -162,276 +246,18 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         startup: pgwire::messages::startup::Startup,
         username: &String,
     ) -> Result<(), PostgresError> {
-        async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
-            this: &mut PostgresSession<S>,
-        ) -> Result<(), PostgresError> {
-            let error_info = ErrorInfo::new(
-                "FATAL".to_owned(),
-                "28P01".to_owned(),
-                "Authentication failed".to_owned(),
-            );
-
-            this.stream
-                .push(pgwire::messages::response::ErrorResponse::from(error_info))?;
-            this.stream.flush().await?;
-            Ok(())
-        }
-
         let selector: AuthSelector = username.into();
         let remote_ip = self.remote_address.ip();
+        let session_id = self.server_handle.lock().await.id();
 
-        // A lookup error must fail closed: propagate it rather than letting a
-        // possibly-blocked IP through.
-        if let Some(block_info) = self
-            .services
-            .login_protection
-            .check_ip_blocked(&remote_ip)
-            .await?
-        {
-            warn!(
-                ip = %remote_ip,
-                expires_at = %block_info.expires_at,
-                "PostgreSQL auth from blocked IP"
-            );
-            return fail(&mut self).await;
-        }
+        let services = self.services.clone();
+        let Some(authorization) =
+            run_db_authorization(&mut self, &services, session_id, selector, remote_ip).await?
+        else {
+            return Ok(());
+        };
 
-        match selector {
-            AuthSelector::User {
-                username,
-                target_name,
-            } => {
-                // A lookup error must fail closed: propagate it rather than
-                // letting a possibly-locked user through.
-                if self
-                    .services
-                    .login_protection
-                    .check_user_locked(&username)
-                    .await?
-                    .is_some()
-                {
-                    warn!(
-                        username = %username,
-                        "PostgreSQL auth for locked user"
-                    );
-                    return fail(&mut self).await;
-                }
-
-                let session_id = self.server_handle.lock().await.id();
-                let state_arc = self
-                    .services
-                    .create_auth_state(
-                        Some(&session_id),
-                        &username,
-                        crate::common::PROTOCOL_NAME,
-                        &target_name,
-                        &[CredentialKind::Password],
-                        Some(self.remote_address.ip()),
-                        Some("password"),
-                    )
-                    .await?
-                    .1;
-
-                let mut auth_ok_sent = false;
-
-                loop {
-                    let user_auth_result = state_arc.lock().await.verify();
-
-                    match user_auth_result {
-                        AuthResult::Accepted { user_info } => {
-                            let Some(authorization) = authorize_for_target_by_name(
-                                self.services.config_provider.as_ref(),
-                                &user_info,
-                                &target_name,
-                            )
-                            .await?
-                            else {
-                                warn!("Target {target_name} not authorized for user {username}",);
-                                // Record failed attempt
-                                let _ = self
-                                    .services
-                                    .login_protection
-                                    .record_failed_attempt(FailedAttemptInfo {
-                                        username: username.clone(),
-                                        remote_ip,
-                                        protocol: "postgres".to_string(),
-                                        credential_type: "password".to_string(),
-                                    })
-                                    .await;
-                                return fail(&mut self).await;
-                            };
-
-                            if !auth_ok_sent {
-                                self.stream
-                                    .push(pgwire::messages::startup::Authentication::Ok)?;
-                            }
-                            // Clear failed attempts on successful auth
-                            let _ = self
-                                .services
-                                .login_protection
-                                .clear_failed_attempts(&remote_ip, &user_info.username)
-                                .await;
-                            return self.run_authorized(startup, authorization).await;
-                        }
-                        AuthResult::Need(kinds) => {
-                            if kinds.contains(&CredentialKind::Password) {
-                                self.stream.push(
-                                    pgwire::messages::startup::Authentication::CleartextPassword,
-                                )?;
-                                self.stream.flush().await?;
-
-                                let Some(PgWireGenericFrontendMessage(
-                                    PgWireFrontendMessage::PasswordMessageFamily(message),
-                                )) = self
-                                    .stream
-                                    .recv::<PgWireGenericFrontendMessage>(&self.decode_context)
-                                    .await?
-                                else {
-                                    return Err(PostgresError::Eof);
-                                };
-
-                                let password = Secret::from(
-                                    message
-                                        .into_password()
-                                        .map_err(PostgresError::from)?
-                                        .password,
-                                );
-
-                                let mut state = state_arc.lock().await;
-
-                                if !submit_credential(
-                                    &mut state,
-                                    AuthCredential::Password(password),
-                                    self.services.config_provider.as_ref(),
-                                )
-                                .await?
-                                .is_valid()
-                                {
-                                    // Postgres CLI will just send the same password in a loop without prompting the user again
-                                    // Record failed attempt
-                                    let _ = self
-                                        .services
-                                        .login_protection
-                                        .record_failed_attempt(FailedAttemptInfo {
-                                            username: username.clone(),
-                                            remote_ip,
-                                            protocol: "postgres".to_string(),
-                                            credential_type: "password".to_string(),
-                                        })
-                                        .await;
-                                    return fail(&mut self).await;
-                                }
-                            } else if kinds.contains(&CredentialKind::WebUserApproval) {
-                                // Only WebUserApproval is needed, i.e. the password was either correct or not required, otherwise just fail early
-
-                                if self
-                                    .services
-                                    .try_web_approval_bypass(&state_arc)
-                                    .await
-                                    .map_err(PostgresError::other)?
-                                {
-                                    continue;
-                                }
-
-                                let identification_string =
-                                    state_arc.lock().await.identification_string().to_owned();
-
-                                let ext_url_result = construct_external_url(
-                                    None,
-                                    &*self.services.config.lock().await,
-                                    None,
-                                )
-                                .await;
-
-                                let login_url = match ext_url_result {
-                                    Ok(ext_url) => {
-                                        state_arc.lock().await.construct_web_approval_url(ext_url)
-                                    }
-                                    Err(error) => {
-                                        error!(?error, "Failed to construct external URL");
-                                        return fail(&mut self).await;
-                                    }
-                                };
-
-                                if !auth_ok_sent {
-                                    self.stream
-                                        .push(pgwire::messages::startup::Authentication::Ok)?;
-                                    auth_ok_sent = true;
-                                }
-
-                                self.stream
-                                    .push(pgwire::messages::response::NoticeResponse::new(vec![
-                                        (b'S', "WARNING".into()),
-                                        (b'V', "WARNING".into()),
-                                        (b'C', "WG001".into()),
-                                        (b'M', "Warpgate authentication: please open the following URL in your browser:".into()),
-                                        (b'D', login_url.into()),
-                                        (b'H', format!(
-                                            "Make sure you're seeing this security key: {}\n",
-                                            identification_string
-                                                .chars()
-                                                .map(|x| x.to_string())
-                                                .collect::<Vec<_>>()
-                                                .join(" ")
-                                        )),
-                                    ]))?;
-                                self.stream.flush().await?;
-
-                                if !matches!(
-                                    wait_for_auth_completion(&state_arc).await,
-                                    AuthResult::Accepted { .. }
-                                ) {
-                                    warn!("Web user approval failed");
-                                    return fail(&mut self).await;
-                                }
-                            } else {
-                                return fail(&mut self).await;
-                            }
-                        }
-                        AuthResult::Rejected => {
-                            // Record failed attempt
-                            let _ = self
-                                .services
-                                .login_protection
-                                .record_failed_attempt(FailedAttemptInfo {
-                                    username: username.clone(),
-                                    remote_ip,
-                                    protocol: "postgres".to_string(),
-                                    credential_type: "password".to_string(),
-                                })
-                                .await;
-                            return fail(&mut self).await;
-                        }
-                    }
-                }
-            }
-            AuthSelector::Ticket { secret } => {
-                match authorize_ticket(
-                    &self.services.db,
-                    &self.services.login_protection,
-                    &secret,
-                    Some(remote_ip),
-                )
-                .await
-                .map_err(PostgresError::other)?
-                {
-                    Some((ticket, authorization)) => {
-                        info!(
-                            "Authorized for {} with a ticket",
-                            authorization.target().name
-                        );
-                        consume_ticket(&self.services.db, &ticket.id)
-                            .await
-                            .map_err(PostgresError::other)?;
-
-                        self.stream
-                            .push(pgwire::messages::startup::Authentication::Ok)?;
-                        self.run_authorized(startup, authorization).await
-                    }
-                    _ => fail(&mut self).await,
-                }
-            }
-        }
+        self.run_authorized(startup, authorization).await
     }
 
     async fn run_authorized(
@@ -725,7 +551,10 @@ mod tests {
 
     #[test]
     fn explicit_zero_disables() {
-        assert!(matches!(parse_idle_timeout(Some("0")), IdlePolicy::Disabled));
+        assert!(matches!(
+            parse_idle_timeout(Some("0")),
+            IdlePolicy::Disabled
+        ));
         assert!(matches!(
             parse_idle_timeout(Some("0s")),
             IdlePolicy::Disabled
