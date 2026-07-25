@@ -12,7 +12,9 @@ use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
-use warpgate_core::{ConfigProvider, WarpgateServerHandle, authorize_for_target};
+use warpgate_core::{
+    AuthorizedIdentity, ConfigProvider, WarpgateServerHandle, authorize_for_target,
+};
 
 use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
@@ -138,14 +140,19 @@ async fn get_target_for_request(
                     .await?
             };
 
-        let user_info = AuthStateUserInfo {
-            id: *user_id,
-            username: username.clone(),
-        };
+        // Reached only for a `SessionAuthorization::User` (ticket sessions are
+        // handled separately above), so the session is the prior-auth evidence.
+        let identity = AuthorizedIdentity::for_authenticated_session(
+            AuthStateUserInfo {
+                id: *user_id,
+                username: username.clone(),
+            },
+            crate::common::PROTOCOL_NAME,
+        );
 
         if let Some(target) = target
             && let Some(authorization) =
-                authorize_for_target(config_provider, &user_info, target).await?
+                authorize_for_target(config_provider, &identity, target).await?
             && let Some(target_and_options) = as_http_target(authorization.into_parts().1)
         {
             return Ok(Some(target_and_options));

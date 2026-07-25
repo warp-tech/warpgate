@@ -7,7 +7,9 @@ use warpgate_common::{SessionId, WarpgateError};
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, FullUserAuthorization, web_reauth_required,
 };
-use warpgate_core::{ConfigProvider, TargetAuthorization, authorize_for_target};
+use warpgate_core::{
+    AuthorizedIdentity, ConfigProvider, TargetAuthorization, authorize_for_target,
+};
 use warpgate_db_entities as entities;
 
 use crate::session::SessionStore;
@@ -75,12 +77,17 @@ pub async fn authorize_web_client_target(
         return Ok(WebClientTargetAccess::NotFound);
     };
 
-    let user_info = AuthStateUserInfo {
-        id: full.user_id(),
-        username: full.username().to_owned(),
-    };
+    // The session already authenticated as a full user (checked above), so this
+    // is a legitimate out-of-band identity for the authorization check.
+    let identity = AuthorizedIdentity::for_authenticated_session(
+        AuthStateUserInfo {
+            id: full.user_id(),
+            username: full.username().to_owned(),
+        },
+        crate::common::PROTOCOL_NAME,
+    );
 
-    Ok(authorize_for_target(config_provider, &user_info, target)
+    Ok(authorize_for_target(config_provider, &identity, target)
         .await?
         .map_or(
             WebClientTargetAccess::Forbidden,

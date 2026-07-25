@@ -16,8 +16,8 @@ use warpgate_common::{Protocol, Secret, SessionId, WarpgateError};
 use crate::auth::submit_credential;
 use crate::login_protection::FailedAttemptInfo;
 use crate::{
-    Services, TargetAuthorization, authorize_for_target_by_name, authorize_ticket, consume_ticket,
-    wait_for_auth_completion,
+    AuthorizedIdentity, Services, TargetAuthorization, authorize_for_target_by_name,
+    authorize_ticket, consume_ticket, wait_for_auth_completion,
 };
 
 /// Proof that the success message has not been sent yet. Exactly one is minted
@@ -110,6 +110,7 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                 &services.login_protection,
                 &secret,
                 Some(remote_ip),
+                T::PROTOCOL,
             )
             .await?
             else {
@@ -171,9 +172,20 @@ async fn authorize_user<T: DbAuthTransport>(
 
         match verification {
             AuthResult::Accepted { user_info } => {
+                let identity = {
+                    let state = state_arc.lock().await;
+                    AuthorizedIdentity::from_auth_state(&state)
+                };
+                // Verified `Accepted` a moment ago; a state that no longer is
+                // means the login was concurrently rejected — deny.
+                let Some(identity) = identity else {
+                    transport.send_denied().await?;
+                    return Ok(None);
+                };
+
                 let Some(authorization) = authorize_for_target_by_name(
                     services.config_provider.as_ref(),
-                    &user_info,
+                    &identity,
                     target_name,
                 )
                 .await?

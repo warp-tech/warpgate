@@ -74,6 +74,7 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                         &ctx.services().login_protection,
                         &ticket_secret,
                         client_ip,
+                        crate::common::PROTOCOL_NAME,
                     )
                     .await?
                     {

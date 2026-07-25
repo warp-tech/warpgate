@@ -12,8 +12,10 @@ pub use sso_user::resolve_and_map_sso_user;
 use time::OffsetDateTime;
 use tracing::warn;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthStateUserInfo, CredentialKind, CredentialPolicy};
-use warpgate_common::{Secret, Target, User, WarpgateError};
+use warpgate_common::auth::{
+    AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialKind, CredentialPolicy,
+};
+use warpgate_common::{Protocol, Secret, Target, User, WarpgateError};
 use warpgate_db_entities as e;
 use warpgate_sso::SsoProviderConfig;
 
@@ -91,6 +93,62 @@ pub trait ConfigProvider {
     async fn validate_api_token(&self, token: &str) -> Result<Option<User>, WarpgateError>;
 }
 
+/// Proof that a user authenticated for a given protocol, and so may be handed to
+/// [`authorize_for_target`]. Every constructor corresponds to a real
+/// authentication path, so a new protocol can't authorize a target by building an
+/// [`AuthStateUserInfo`] out of thin air — it has to route through one of these.
+#[derive(Clone)]
+pub struct AuthorizedIdentity {
+    user_info: AuthStateUserInfo,
+    protocol: Protocol,
+}
+
+impl AuthorizedIdentity {
+    /// From an [`AuthState`] that has reached [`AuthResult::Accepted`] — i.e. the
+    /// per-protocol credential policy was satisfied. `None` otherwise, so the
+    /// gate can't be reached with an unsatisfied state.
+    pub fn from_auth_state(state: &AuthState) -> Option<Self> {
+        match state.verify() {
+            AuthResult::Accepted { user_info } => Some(Self {
+                user_info,
+                protocol: state.protocol(),
+            }),
+            AuthResult::Need(_) | AuthResult::Rejected => None,
+        }
+    }
+
+    /// For a request already authenticated out of band — an established HTTP
+    /// session (backed by a `FullUserAuthorization`) or a Kubernetes credential
+    /// the caller validated itself. The caller vouches that authentication
+    /// happened; this is the one path that isn't a fresh [`AuthState`], so its
+    /// call sites are the ones to audit when reasoning about the gate.
+    pub const fn for_authenticated_session(
+        user_info: AuthStateUserInfo,
+        protocol: Protocol,
+    ) -> Self {
+        Self {
+            user_info,
+            protocol,
+        }
+    }
+
+    pub const fn user_info(&self) -> &AuthStateUserInfo {
+        &self.user_info
+    }
+
+    pub const fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+}
+
+impl std::ops::Deref for AuthorizedIdentity {
+    type Target = AuthStateUserInfo;
+
+    fn deref(&self) -> &Self::Target {
+        &self.user_info
+    }
+}
+
 /// Proof that a user is authorized for a specific target. Only
 /// [`authorize_for_target`] and [`authorize_ticket`] construct it, so a
 /// session can't be opened for a target without passing authorization.
@@ -98,6 +156,7 @@ pub trait ConfigProvider {
 pub struct TargetAuthorization {
     user_info: AuthStateUserInfo,
     target: Target,
+    protocol: Protocol,
 }
 
 impl TargetAuthorization {
@@ -109,6 +168,11 @@ impl TargetAuthorization {
     /// site never has to re-resolve — and so can't resolve a *different* one.
     pub const fn target(&self) -> &Target {
         &self.target
+    }
+
+    /// The protocol the authorizing authentication ran under.
+    pub const fn protocol(&self) -> Protocol {
+        self.protocol
     }
 
     pub fn into_user_info(self) -> AuthStateUserInfo {
@@ -127,15 +191,16 @@ impl TargetAuthorization {
 /// subsequent connection are provably about the same row.
 pub async fn authorize_for_target<C: ConfigProvider + ?Sized>(
     config_provider: &C,
-    user_info: &AuthStateUserInfo,
+    identity: &AuthorizedIdentity,
     target: Target,
 ) -> Result<Option<TargetAuthorization>, WarpgateError> {
     Ok(config_provider
-        .authorize_target_by_id(user_info.id, target.id)
+        .authorize_target_by_id(identity.user_info.id, target.id)
         .await?
         .then(|| TargetAuthorization {
-            user_info: user_info.clone(),
+            user_info: identity.user_info.clone(),
             target,
+            protocol: identity.protocol,
         }))
 }
 
@@ -144,11 +209,11 @@ pub async fn authorize_for_target<C: ConfigProvider + ?Sized>(
 /// a caller can't be used as a target-existence oracle.
 pub async fn authorize_for_target_by_name<C: ConfigProvider + ?Sized>(
     config_provider: &C,
-    user_info: &AuthStateUserInfo,
+    identity: &AuthorizedIdentity,
     target_name: &str,
 ) -> Result<Option<TargetAuthorization>, WarpgateError> {
     match config_provider.get_target_by_name(target_name).await? {
-        Some(target) => authorize_for_target(config_provider, user_info, target).await,
+        Some(target) => authorize_for_target(config_provider, identity, target).await,
         None => Ok(None),
     }
 }
@@ -159,6 +224,7 @@ pub async fn authorize_ticket(
     login_protection: &LoginProtectionService,
     secret: &Secret<String>,
     remote_ip: Option<IpAddr>,
+    protocol: Protocol,
 ) -> Result<Option<(e::Ticket::Model, TargetAuthorization)>, WarpgateError> {
     // Spending a ticket is a login, so a blocked IP can't do it either. Checked ahead of the
     // lookup so a blocked caller can't use this as a ticket-existence oracle.
@@ -230,6 +296,7 @@ pub async fn authorize_ticket(
         let authorization = TargetAuthorization {
             user_info: (&user).into(),
             target: Target::try_from(ticket_target)?,
+            protocol,
         };
         Ok(Some((ticket, authorization)))
     } else {
@@ -261,4 +328,53 @@ pub async fn consume_ticket(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::broadcast;
+    use warpgate_common::auth::CredentialPolicyResponse;
+
+    use super::*;
+
+    struct FixedPolicy(bool);
+    impl CredentialPolicy for FixedPolicy {
+        fn is_sufficient(&self, _p: Protocol, _c: &[AuthCredential]) -> CredentialPolicyResponse {
+            if self.0 {
+                CredentialPolicyResponse::Ok
+            } else {
+                CredentialPolicyResponse::Need([CredentialKind::Password].into_iter().collect())
+            }
+        }
+    }
+
+    fn auth_state(satisfied: bool) -> AuthState {
+        let (tx, _rx) = broadcast::channel(1);
+        AuthState::new(
+            Uuid::new_v4(),
+            None,
+            None,
+            AuthStateUserInfo {
+                id: Uuid::nil(),
+                username: "alice".into(),
+            },
+            Protocol::Kubernetes,
+            String::new(),
+            Box::new(FixedPolicy(satisfied)),
+            tx,
+        )
+    }
+
+    #[test]
+    fn identity_minted_only_from_accepted_state() {
+        // Accepted → a sealed identity carrying the state's protocol and user.
+        let accepted = AuthorizedIdentity::from_auth_state(&auth_state(true))
+            .expect("an accepted state yields an identity");
+        assert_eq!(accepted.protocol(), Protocol::Kubernetes);
+        assert_eq!(accepted.user_info().username, "alice");
+
+        // An unsatisfied policy yields no identity, so `authorize_for_target`
+        // can't be reached from a state that never passed the policy.
+        assert!(AuthorizedIdentity::from_auth_state(&auth_state(false)).is_none());
+    }
 }
