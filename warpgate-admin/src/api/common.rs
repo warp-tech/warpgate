@@ -5,7 +5,7 @@ use sea_orm::{
     RelationTrait,
 };
 use warpgate_common::{AdminPermission, WarpgateError};
-pub use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
+pub use warpgate_common_http::RequestAuthorization;
 use warpgate_db_entities::{AdminRole, User, UserAdminRoleAssignment};
 
 pub async fn has_admin_permission(
@@ -22,14 +22,13 @@ pub async fn has_admin_permission(
         return Ok(false);
     }
 
-    let username = match auth {
-        RequestAuthorization::Session(
-            SessionAuthorization::User { username, .. }
-            | SessionAuthorization::Ticket { username, .. },
-        )
-        | RequestAuthorization::UserToken { username, .. } => username,
-        RequestAuthorization::AdminToken | RequestAuthorization::ClusterToken => unreachable!(),
+    // A ticket is scoped to a single target and must never confer admin rights;
+    // only a full account (a user session or a user's API token) can. Admin and
+    // cluster tokens are handled above.
+    let Some(full) = auth.as_full_user() else {
+        return Ok(false);
     };
+    let username = full.username();
 
     let db = &ctx.services().db;
 

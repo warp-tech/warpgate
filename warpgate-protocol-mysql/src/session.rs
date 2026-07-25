@@ -9,7 +9,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, trace, warn};
 use uuid::Uuid;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
+use warpgate_common::auth::{AuthCredential, AuthSelector, CredentialKind};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
 use warpgate_core::auth::submit_credential;
@@ -269,8 +269,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                     return fail(&mut self).await;
                 }
 
-                match outcome.into_result() {
-                    AuthResult::Accepted { user_info } => {
+                match outcome.into_accepted() {
+                    Ok(user_info) => {
                         let Some(authorization) = authorize_for_target_by_name(
                             self.services.config_provider.as_ref(),
                             &user_info,
@@ -303,7 +303,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                             .await;
                         self.run_authorized(handshake, authorization).await
                     }
-                    AuthResult::Rejected | AuthResult::Need(_) => fail(&mut self).await, // TODO SSO
+                    Err(_) => fail(&mut self).await, // TODO SSO
                 }
             }
             AuthSelector::Ticket { secret } => {

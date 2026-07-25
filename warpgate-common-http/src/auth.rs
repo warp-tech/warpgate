@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
+use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_db_entities::Parameters;
 
 use crate::request::{trusted_host_header, trusted_proto};
@@ -205,6 +206,22 @@ impl Deref for AuthenticatedRequestContext {
     }
 }
 
+/// Proof that the caller is acting as a full user and not a ticket
+/// Created only by RequestAuthorization::as_full_user
+/// (compile time enforcement)
+#[derive(Debug, Clone)]
+pub struct FullUserAuthorization(AuthStateUserInfo);
+
+impl FullUserAuthorization {
+    pub const fn user_id(&self) -> Uuid {
+        self.0.id
+    }
+
+    pub fn username(&self) -> &str {
+        &self.0.username
+    }
+}
+
 impl RequestAuthorization {
     /// Returns a username if one is present (admin token has none)
     pub const fn username(&self) -> Option<&String> {
@@ -223,9 +240,62 @@ impl RequestAuthorization {
             Self::AdminToken | Self::ClusterToken => Uuid::nil(),
         }
     }
+
+    /// Ticket requests cannot grant access to user-scoped functions such as cred management
+    pub fn as_full_user(&self) -> Option<FullUserAuthorization> {
+        match self {
+            Self::Session(SessionAuthorization::User { user_id, username })
+            | Self::UserToken { user_id, username } => {
+                Some(FullUserAuthorization(AuthStateUserInfo {
+                    id: *user_id,
+                    username: username.clone(),
+                }))
+            }
+            Self::Session(SessionAuthorization::Ticket { .. })
+            | Self::AdminToken
+            | Self::ClusterToken => None,
+        }
+    }
 }
 
 /// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
 pub fn is_localhost_host(host: &str) -> bool {
     host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::{RequestAuthorization, SessionAuthorization};
+
+    #[test]
+    fn only_full_accounts_are_full_users() {
+        // A ticket is scoped to a single target: it must never resolve to a
+        // full account, or credential/token/admin endpoints would be reachable
+        // with it.
+        let ticket = RequestAuthorization::Session(SessionAuthorization::Ticket {
+            user_id: Uuid::nil(),
+            username: "alice".into(),
+            target_id: Uuid::nil(),
+        });
+        assert!(ticket.as_full_user().is_none());
+
+        // A user session and a user's API token are full accounts.
+        let user = RequestAuthorization::Session(SessionAuthorization::User {
+            user_id: Uuid::nil(),
+            username: "alice".into(),
+        });
+        assert!(user.as_full_user().is_some());
+
+        let token = RequestAuthorization::UserToken {
+            user_id: Uuid::nil(),
+            username: "alice".into(),
+        };
+        assert!(token.as_full_user().is_some());
+
+        // Machine tokens carry no user identity.
+        assert!(RequestAuthorization::AdminToken.as_full_user().is_none());
+        assert!(RequestAuthorization::ClusterToken.as_full_user().is_none());
+    }
 }

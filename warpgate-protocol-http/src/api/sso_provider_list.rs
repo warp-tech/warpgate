@@ -10,8 +10,8 @@ use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 use warpgate_common::WarpgateError;
-use warpgate_common::auth::{AuthCredential, AuthResult};
-use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
+use warpgate_common::auth::AuthCredential;
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::ConfigProvider;
 use warpgate_core::auth::submit_credential;
@@ -19,10 +19,10 @@ use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SSO_CONTEXT_SESSION_KEY, SsoContext};
 use crate::SsoLoginState;
-use crate::api::AnySecurityScheme;
+use crate::api::auth_scheme::AuthedSession;
 use crate::api::common::{emit_unknown_authentication_failed_event, logout};
 use crate::common::{
-    SessionExt, authorize_session, endpoint_auth, get_or_create_auth_state_for_request,
+    SessionExt, authorize_session, get_or_create_auth_state_for_request,
     session_id_for_request,
 };
 use crate::session::SessionStore;
@@ -343,7 +343,7 @@ impl Api {
             )));
         }
 
-        if let AuthResult::Accepted { user_info } = outcome.into_result() {
+        if let Ok(user_info) = outcome.into_accepted() {
             authorize_session(req, &ctx, user_info).await?;
             state.emit_authenticated_event_once();
             drop(state);
@@ -420,13 +420,11 @@ impl Api {
     #[oai(
         path = "/sso/kubernetes-configs",
         method = "get",
-        operation_id = "get_sso_kubernetes_configs",
-        transform = "endpoint_auth"
+        operation_id = "get_sso_kubernetes_configs"
     )]
     async fn api_get_sso_kubernetes_configs(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        ctx: AuthedSession,
     ) -> Result<GetSsoKubernetesConfigsResponse, WarpgateError> {
         let mut providers = ctx
             .services()

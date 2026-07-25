@@ -4,8 +4,9 @@ use tracing::info;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{SessionId, WarpgateError};
-use warpgate_common_http::RequestAuthorization;
-use warpgate_common_http::auth::{AuthenticatedRequestContext, web_reauth_required};
+use warpgate_common_http::auth::{
+    AuthenticatedRequestContext, FullUserAuthorization, web_reauth_required,
+};
 use warpgate_core::{ConfigProvider, TargetAuthorization, authorize_for_target};
 use warpgate_db_entities as entities;
 
@@ -54,7 +55,10 @@ pub async fn authorize_web_client_target(
     session: &Session,
     target_id: Uuid,
 ) -> poem::Result<WebClientTargetAccess> {
-    let Some(username) = ctx.auth.username() else {
+    // A ticket is authorized for exactly one target; it must not be able to open
+    // an in-browser client to any target the *user* can reach. Requiring a
+    // full-user proof keeps this endpoint off the ticket path entirely.
+    let Some(full) = ctx.auth.as_full_user() else {
         return Ok(WebClientTargetAccess::Forbidden);
     };
 
@@ -72,8 +76,8 @@ pub async fn authorize_web_client_target(
     };
 
     let user_info = AuthStateUserInfo {
-        id: ctx.auth.user_id(),
-        username: username.to_owned(),
+        id: full.user_id(),
+        username: full.username().to_owned(),
     };
 
     Ok(authorize_for_target(config_provider, &user_info, target)
@@ -84,16 +88,16 @@ pub async fn authorize_web_client_target(
         ))
 }
 
+/// Resolves the model for the authenticated account. Takes a
+/// [`FullUserAuthorization`] rather than a raw `RequestAuthorization` so a
+/// target-scoped ticket cannot be resolved to a full account here — the callers
+/// that manage credentials and tokens all route through this.
 pub async fn get_user(
-    auth: &RequestAuthorization,
+    auth: &FullUserAuthorization,
     db: &DatabaseConnection,
 ) -> Result<Option<entities::User::Model>, WarpgateError> {
-    let Some(username) = auth.username() else {
-        return Ok(None);
-    };
-
     let Some(user_model) = entities::User::Entity::find()
-        .filter(entities::User::Entity::username_eq_ci(username))
+        .filter(entities::User::Entity::username_eq_ci(auth.username()))
         .one(db)
         .await?
     else {

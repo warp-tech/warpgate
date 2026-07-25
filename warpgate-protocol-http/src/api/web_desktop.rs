@@ -7,13 +7,11 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
-use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_desktop::WebDesktopClientManager;
 
-use crate::api::AnySecurityScheme;
+use crate::api::auth_scheme::AuthedSession;
 use crate::api::common::{WebClientTargetAccess, authorize_web_client_target};
-use crate::common::endpoint_auth;
 
 pub struct Api;
 
@@ -70,17 +68,15 @@ impl Api {
     #[oai(
         path = "/web-desktop/sessions",
         method = "post",
-        operation_id = "create_web_desktop_session",
-        transform = "endpoint_auth"
+        operation_id = "create_web_desktop_session"
     )]
     async fn api_create_web_desktop_session(
         &self,
         remote_addr: &RemoteAddr,
         session: &Session,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<CreateWebDesktopSessionBody>,
         manager: Data<&Arc<WebDesktopClientManager>>,
-        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<CreateWebDesktopSessionResponse> {
         let authorization = match authorize_web_client_target(&ctx, session, body.target_id).await?
         {
@@ -122,15 +118,13 @@ impl Api {
     #[oai(
         path = "/web-desktop/sessions/:session_id",
         method = "get",
-        operation_id = "get_web_desktop_session",
-        transform = "endpoint_auth"
+        operation_id = "get_web_desktop_session"
     )]
     async fn api_get_web_desktop_session(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         session_id: Path<Uuid>,
         manager: Data<&Arc<WebDesktopClientManager>>,
-        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetWebDesktopSessionResponse> {
         let Some(session) = manager.get_session(*session_id).await else {
             return Ok(GetWebDesktopSessionResponse::NotFound);
@@ -151,15 +145,13 @@ impl Api {
     #[oai(
         path = "/web-desktop/sessions/:session_id",
         method = "delete",
-        operation_id = "delete_web_desktop_session",
-        transform = "endpoint_auth"
+        operation_id = "delete_web_desktop_session"
     )]
     async fn api_delete_web_desktop_session(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         session_id: Path<Uuid>,
         manager: Data<&Arc<WebDesktopClientManager>>,
-        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<DeleteWebDesktopSessionResponse> {
         let Some(session) = manager.get_session(*session_id).await else {
             return Ok(DeleteWebDesktopSessionResponse::NotFound);

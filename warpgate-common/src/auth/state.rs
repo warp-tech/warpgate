@@ -40,6 +40,14 @@ pub enum SubmitOutcome {
     Invalid(AuthResult),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RejectedSubmission {
+    /// Whether the specific credential failed validation. False when
+    /// the cred was ok but the policy requires more
+    pub credential_rejected: bool,
+    pub state: AuthResult,
+}
+
 impl SubmitOutcome {
     pub const fn is_valid(&self) -> bool {
         matches!(self, Self::Valid(_))
@@ -51,9 +59,18 @@ impl SubmitOutcome {
         }
     }
 
-    pub fn into_result(self) -> AuthResult {
+    // Protects against an Invalid(Accepted) from authorising a session
+    pub fn into_accepted(self) -> Result<AuthStateUserInfo, RejectedSubmission> {
         match self {
-            Self::Valid(result) | Self::Invalid(result) => result,
+            Self::Valid(AuthResult::Accepted { user_info }) => Ok(user_info),
+            Self::Valid(state) => Err(RejectedSubmission {
+                credential_rejected: false,
+                state,
+            }),
+            Self::Invalid(state) => Err(RejectedSubmission {
+                credential_rejected: true,
+                state,
+            }),
         }
     }
 }
@@ -484,6 +501,22 @@ mod tests {
             .unwrap();
         assert!(!outcome.is_valid());
         assert!(matches!(outcome.result(), AuthResult::Accepted { .. }));
+
+        // ...and `into_accepted` refuses to hand back the user for it, so an
+        // invalid extra credential can never (re-)authorize the session.
+        let rejection = outcome.into_accepted().unwrap_err();
+        assert!(rejection.credential_rejected);
+        assert!(matches!(rejection.state, AuthResult::Accepted { .. }));
+    }
+
+    #[tokio::test]
+    async fn into_accepted_yields_user_only_on_valid_success() {
+        let mut state = make_state(&[CredentialKind::Password]);
+        let outcome = state
+            .submit_credential(password(), |_, _| async { Ok(true) })
+            .await
+            .unwrap();
+        assert!(outcome.into_accepted().is_ok());
     }
 
     #[tokio::test]

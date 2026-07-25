@@ -180,6 +180,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_auth_state"
       }
     },
@@ -776,6 +784,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "issue_my_certificate"
       }
     },
@@ -805,6 +821,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "revoke_my_certificate"
       }
     },
@@ -828,6 +852,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "get_my_api_tokens"
       },
       "post": {
@@ -866,6 +898,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "create_api_token"
       }
     },
@@ -895,6 +935,14 @@
             "description": ""
           }
         },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
         "operationId": "delete_my_api_token"
       }
     },

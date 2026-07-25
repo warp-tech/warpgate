@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use poem::web::Data;
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -9,14 +8,13 @@ use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{Target as TargetConfig, TargetOptions, WarpgateError};
 use warpgate_common_http::{
-    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
+    RequestAuthorization, SessionAuthorization,
 };
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup};
 
-use crate::api::AnySecurityScheme;
-use crate::common::endpoint_auth;
+use crate::api::auth_scheme::AuthedSession;
 
 pub struct Api;
 
@@ -49,14 +47,12 @@ impl Api {
     #[oai(
         path = "/targets",
         method = "get",
-        operation_id = "get_targets",
-        transform = "endpoint_auth"
+        operation_id = "get_targets"
     )]
     async fn api_get_all_targets(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         search: Query<Option<String>>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         // Fetch target groups for group information
         let services = ctx.services();
