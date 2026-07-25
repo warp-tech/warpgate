@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::net::IpAddr;
 
 mod db;
 mod sso_user;
@@ -16,6 +17,8 @@ use warpgate_common::{Secret, Target, User, WarpgateError};
 use warpgate_db_entities as e;
 use warpgate_sso::SsoProviderConfig;
 
+use crate::login_protection::LoginProtectionService;
+
 #[enum_dispatch]
 pub enum ConfigProviderEnum {
     Database(DatabaseConfigProvider),
@@ -29,6 +32,8 @@ pub trait ConfigProvider {
     async fn list_targets(&self) -> Result<Vec<Target>, WarpgateError>;
 
     async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, WarpgateError>;
+
+    async fn get_target_by_id(&self, id: Uuid) -> Result<Option<Target>, WarpgateError>;
 
     async fn get_target_by_hostname(&self, hostname: &str)
     -> Result<Option<Target>, WarpgateError>;
@@ -86,11 +91,84 @@ pub trait ConfigProvider {
     async fn validate_api_token(&self, token: &str) -> Result<Option<User>, WarpgateError>;
 }
 
+/// Proof that a user is authorized for a specific target. Only
+/// [`authorize_for_target`] and [`authorize_ticket`] construct it, so a
+/// session can't be opened for a target without passing authorization.
+#[derive(Clone)]
+pub struct TargetAuthorization {
+    user_info: AuthStateUserInfo,
+    target: Target,
+}
+
+impl TargetAuthorization {
+    pub const fn user_info(&self) -> &AuthStateUserInfo {
+        &self.user_info
+    }
+
+    /// The target this authorization was granted for. Carrying it means a dial
+    /// site never has to re-resolve — and so can't resolve a *different* one.
+    pub const fn target(&self) -> &Target {
+        &self.target
+    }
+
+    pub fn into_user_info(self) -> AuthStateUserInfo {
+        self.user_info
+    }
+
+    pub fn into_parts(self) -> (AuthStateUserInfo, Target) {
+        (self.user_info, self.target)
+    }
+}
+
+/// Checks whether the user may access the target; `Ok(None)` means not
+/// authorized.
+///
+/// Takes the resolved [`Target`] rather than a name so the authorization and the
+/// subsequent connection are provably about the same row.
+pub async fn authorize_for_target<C: ConfigProvider>(
+    config_provider: &C,
+    user_info: &AuthStateUserInfo,
+    target: Target,
+) -> Result<Option<TargetAuthorization>, WarpgateError> {
+    Ok(config_provider
+        .authorize_target_by_id(user_info.id, target.id)
+        .await?
+        .then(|| TargetAuthorization {
+            user_info: user_info.clone(),
+            target,
+        }))
+}
+
+/// Resolves the target by name and checks authorization. A target that
+/// doesn't exist and one the user may not reach are the same `None` here, so
+/// a caller can't be used as a target-existence oracle.
+pub async fn authorize_for_target_by_name<C: ConfigProvider>(
+    config_provider: &C,
+    user_info: &AuthStateUserInfo,
+    target_name: &str,
+) -> Result<Option<TargetAuthorization>, WarpgateError> {
+    match config_provider.get_target_by_name(target_name).await? {
+        Some(target) => authorize_for_target(config_provider, user_info, target).await,
+        None => Ok(None),
+    }
+}
+
 //TODO: move this somewhere
 pub async fn authorize_ticket(
     db: &DatabaseConnection,
+    login_protection: &LoginProtectionService,
     secret: &Secret<String>,
-) -> Result<Option<(e::Ticket::Model, e::Target::Model, AuthStateUserInfo)>, WarpgateError> {
+    remote_ip: Option<IpAddr>,
+) -> Result<Option<(e::Ticket::Model, TargetAuthorization)>, WarpgateError> {
+    // Spending a ticket is a login, so a blocked IP can't do it either. Checked ahead of the
+    // lookup so a blocked caller can't use this as a ticket-existence oracle.
+    if let Some(ip) = remote_ip
+        && login_protection.check_ip_blocked(&ip).await?.is_some()
+    {
+        warn!("Ticket presented from a blocked IP: {ip}");
+        return Ok(None);
+    }
+
     let ticket = {
         e::Ticket::Entity::find()
             .filter(e::Ticket::Column::Secret.eq(&secret.expose_secret()[..]))
@@ -113,6 +191,18 @@ pub async fn authorize_ticket(
         let Some(ticket_user) = e::User::Entity::find_by_id(ticket.user_id).one(db).await? else {
             return Err(WarpgateError::UserNotFound(ticket.user_id.to_string()));
         };
+        let user = User::try_from(ticket_user)?;
+
+        // A ticket is only as good as its user: a locked user's tickets are
+        // locked with them.
+        if login_protection
+            .check_user_locked(&user.username)
+            .await?
+            .is_some()
+        {
+            warn!("Ticket belongs to a locked user: {}", user.username);
+            return Ok(None);
+        }
 
         let Some(ticket_target) = e::Target::Entity::find_by_id(ticket.target_id)
             .one(db)
@@ -122,11 +212,13 @@ pub async fn authorize_ticket(
             return Ok(None);
         };
 
-        Ok(Some((
-            ticket,
-            ticket_target,
-            (&User::try_from(ticket_user)?).into(),
-        )))
+        // A ticket binds user↔target directly, so it mints the proof without a
+        // role check — that's what makes it a ticket.
+        let authorization = TargetAuthorization {
+            user_info: (&user).into(),
+            target: Target::try_from(ticket_target)?,
+        };
+        Ok(Some((ticket, authorization)))
     } else {
         warn!("Ticket not found");
         Ok(None)

@@ -80,8 +80,8 @@ impl Api {
         }
 
         match &ctx.auth {
-            RequestAuthorization::Session(SessionAuthorization::Ticket { target_name, .. }) => {
-                targets.retain(|t| t.name == *target_name);
+            RequestAuthorization::Session(SessionAuthorization::Ticket { target_id, .. }) => {
+                targets.retain(|t| t.id == *target_id);
             }
             RequestAuthorization::AdminToken => {
                 targets.clear();

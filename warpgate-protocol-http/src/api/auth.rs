@@ -22,7 +22,7 @@ use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedReq
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::Services;
-use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_db_entities::Parameters;
 
@@ -268,26 +268,19 @@ impl Api {
             }?;
         let mut state = state_arc.lock().await;
 
-        let credential_valid = validate_and_add_credential(
+        let outcome = submit_credential(
             &mut state,
-            &AuthCredential::Password(Secret::new(body.password.clone())),
+            AuthCredential::Password(Secret::new(body.password.clone())),
             ctx.services().config_provider.as_ref(),
         )
         .await?;
 
-        match state.verify() {
+        let credential_valid = outcome.is_valid();
+        match outcome.into_result() {
             AuthResult::Accepted { user_info } => {
                 let username = user_info.username.clone();
                 authorize_session(req, &ctx, user_info).await?;
                 state.emit_authenticated_event_once();
-                let state_id = *state.id();
-                drop(state);
-                ctx.services()
-                    .auth_state_store
-                    .lock()
-                    .await
-                    .complete(&state_id)
-                    .await;
                 // Clear failed attempts on successful login
                 if let Some(ip) = client_ip {
                     let _ = services
@@ -371,26 +364,19 @@ impl Api {
             ))));
         }
 
-        let credential_valid = validate_and_add_credential(
+        let outcome = submit_credential(
             &mut state,
-            &AuthCredential::Otp(body.otp.clone().into()),
+            AuthCredential::Otp(body.otp.clone().into()),
             services.config_provider.as_ref(),
         )
         .await?;
 
-        match state.verify() {
+        let credential_valid = outcome.is_valid();
+        match outcome.into_result() {
             AuthResult::Accepted { user_info } => {
                 let username = user_info.username.clone();
                 authorize_session(req, &ctx, user_info).await?;
                 state.emit_authenticated_event_once();
-                let state_id = *state.id();
-                drop(state);
-                services
-                    .auth_state_store
-                    .lock()
-                    .await
-                    .complete(&state_id)
-                    .await;
                 // Clear failed attempts on successful login
                 if let Some(ip) = client_ip {
                     let _ = services
@@ -480,12 +466,6 @@ impl Api {
             return Ok(AuthStateResponse::NotFound);
         };
         state_arc.lock().await.reject();
-        services
-            .auth_state_store
-            .lock()
-            .await
-            .complete(&state_id.0)
-            .await;
         session.clear_auth_state();
 
         serialize_auth_state_inner(state_arc, services)
@@ -581,10 +561,10 @@ impl Api {
             return Ok(AuthStateResponse::NotFound);
         };
 
-        let (auth_result, match_key) = {
+        let match_key = {
             let mut state = state_arc.lock().await;
-            state.add_valid_credential(AuthCredential::WebUserApproval);
-            (state.verify(), state.web_approval_match_key())
+            state.add_web_user_approval();
+            state.web_approval_match_key()
         };
 
         // Remembered so matching attempts can be bypassed within the grace period.
@@ -600,10 +580,6 @@ impl Api {
                 .record_web_approval(match_key);
         }
 
-        if let AuthResult::Accepted { .. } = auth_result {
-            let mut store = services.auth_state_store.lock().await;
-            store.complete(&id).await;
-        }
         serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)
@@ -632,7 +608,6 @@ impl Api {
             state.emit_authentication_failed_event(Some(&credential), "rejected by user");
             state.reject();
         }
-        services.auth_state_store.lock().await.complete(&id).await;
         serialize_auth_state_inner(state_arc, services)
             .await
             .map(Json)

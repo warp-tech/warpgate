@@ -326,6 +326,15 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map_err(Into::into)
     }
 
+    async fn get_target_by_id(&self, id: Uuid) -> Result<Option<Target>, WarpgateError> {
+        entities::Target::Entity::find_by_id(id)
+            .one(&self.db)
+            .await?
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(Into::into)
+    }
+
     async fn get_target_by_hostname(
         &self,
         hostname: &str,

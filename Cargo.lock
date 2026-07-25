@@ -9322,7 +9322,6 @@ dependencies = [
  "warpgate-common",
  "warpgate-core",
  "warpgate-database-protocols",
- "warpgate-db-entities",
  "warpgate-tls",
  "webpki",
 ]

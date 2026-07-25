@@ -1,12 +1,11 @@
-use super::{
-    auth::{AuthHelper, AuthResult, SecurityType},
-    connection::VncClient,
-};
 use std::future::Future;
 use std::pin::Pin;
+
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tracing::{info, trace};
 
+use super::auth::{AuthHelper, AuthResult, SecurityType};
+use super::connection::VncClient;
 use crate::{PixelFormat, VncEncoding, VncError, VncVersion};
 
 pub enum VncState<S, F>

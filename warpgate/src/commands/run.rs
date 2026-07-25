@@ -134,15 +134,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             }
         });
         supervisors.push(
-            spawn_supervisor(
-                "HTTP",
-                true,
-                factory,
-                selector,
-                &config_rx,
-                status_registry,
-            )
-            .await?,
+            spawn_supervisor("HTTP", true, factory, selector, &config_rx, status_registry).await?,
         );
     }
 
@@ -165,15 +157,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 tls: Vec::new(),
             });
         supervisors.push(
-            spawn_supervisor(
-                "SSH",
-                false,
-                factory,
-                selector,
-                &config_rx,
-                status_registry,
-            )
-            .await?,
+            spawn_supervisor("SSH", false, factory, selector, &config_rx, status_registry).await?,
         );
     }
 

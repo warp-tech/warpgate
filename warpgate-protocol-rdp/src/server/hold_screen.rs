@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use tracing::warn;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
-use warpgate_core::{DesktopInput, Services};
+use warpgate_core::{DesktopInput, Services, TIMEOUT};
 use warpgate_desktop_auth::{
     InteractiveAuth, OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt,
 };
@@ -38,11 +38,7 @@ pub(super) async fn run_hold_screen(
         .await
         .get(&interactive.state_id)
         .context("auth state expired")?;
-    let mut approval = services
-        .auth_state_store
-        .lock()
-        .await
-        .subscribe(interactive.state_id);
+    let mut approval = state.lock().await.subscribe();
 
     // Hold screen renders at the negotiated screen size,
     // resizing means a reactivation which races with the resize itself
@@ -51,21 +47,21 @@ pub(super) async fn run_hold_screen(
     let mut ticker = tokio::time::interval(HOLD_RENDER_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+    // The auth state is vacuumed from the store after this long, at which point
+    // an approval can no longer arrive — give up instead of holding the screen
+    // forever.
+    let deadline = tokio::time::sleep(*TIMEOUT);
+    tokio::pin!(deadline);
+
     loop {
-        // Bind to a local so the `state` guard drops here — `complete()` below re-locks
-        // the same AuthState mutex, and holding a match-scrutinee guard across it deadlocks.
+        // Bind to a local so the `state` guard drops here — the arms below
+        // re-lock the same mutex (`auth_prompt`, OTP validation).
         let verification = state.lock().await.verify();
         let need = match verification {
             AuthResult::Accepted { user_info } => {
                 let _ = services
                     .login_protection
                     .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
-                    .await;
-                services
-                    .auth_state_store
-                    .lock()
-                    .await
-                    .complete(&interactive.state_id)
                     .await;
                 // Swap the OTP prompt for a "Connecting" screen before the caller blocks on
                 // the backend connect, so the viewer gets feedback instead of a frozen frame.
@@ -87,8 +83,12 @@ pub(super) async fn run_hold_screen(
 
         loop {
             tokio::select! {
-                // Browser approval landed (or the signal lagged/closed); re-verify on the next loop.
+                // Browser approval landed (or the signal lagged); re-verify on the next loop.
                 _ = approval.recv(), if awaiting_web => break,
+                () = &mut deadline => {
+                    warn!("RDP interactive authentication timed out");
+                    return Ok(None);
+                },
                 event = events.recv() => {
                     let Some(event) = event else {
                         return Ok(None);

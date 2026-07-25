@@ -14,7 +14,7 @@ use warpgate_common::Secret;
 use warpgate_common::auth::{AuthCredential, AuthState};
 use warpgate_common::helpers::otp::OTP_DIGITS;
 use warpgate_core::Services;
-use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 
 /// Max wrong one-time passwords before the holding screen gives up.
@@ -87,13 +87,14 @@ impl OtpEntry {
 
         let credential = AuthCredential::Otp(Secret::new(std::mem::take(&mut self.entered)));
         // Route through the shared validator so a bad OTP emits the same audit event as the
-        // other protocols.
-        let valid = validate_and_add_credential(
+        // other protocols. A validation error counts as an invalid code (fail closed).
+        let valid = submit_credential(
             &mut *state.lock().await,
-            &credential,
+            credential,
             services.config_provider.as_ref(),
         )
         .await
+        .map(|outcome| outcome.is_valid())
         .unwrap_or(false);
         if valid {
             return OtpActionApplyOutcome::AcceptedAndValidated;

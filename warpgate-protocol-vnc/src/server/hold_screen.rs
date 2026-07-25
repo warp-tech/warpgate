@@ -11,8 +11,8 @@ use tokio::io::AsyncWrite;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use uuid::Uuid;
-use warpgate_common::auth::AuthResult;
-use warpgate_core::Services;
+use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
+use warpgate_core::{Services, TIMEOUT};
 use warpgate_db_entities::Parameters;
 use warpgate_desktop_auth::{OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt};
 use warpgate_desktop_ui::{self as ui, AuthPrompt};
@@ -89,7 +89,8 @@ where
     }
 }
 
-/// Render hold screen UI while collecting OTP/waiting for web auth
+/// Render hold screen UI while collecting OTP/waiting for web auth. Returns
+/// the authenticated user once the auth state is fully accepted.
 pub(super) async fn collect_additional_credentials<W>(
     viewer_wr: &mut W,
     events_rx: &mut mpsc::UnboundedReceiver<ClientEvent>,
@@ -98,7 +99,7 @@ pub(super) async fn collect_additional_credentials<W>(
     state_id: Uuid,
     username: &str,
     remote_ip: IpAddr,
-) -> Result<()>
+) -> Result<AuthStateUserInfo>
 where
     W: AsyncWrite + Unpin,
 {
@@ -110,22 +111,21 @@ where
         .context("auth state expired")?;
 
     let mut otp = OtpEntry::new("vnc");
-    let mut approval = services.auth_state_store.lock().await.subscribe(state_id);
+    let mut approval = state.lock().await.subscribe();
+
+    // The auth state is vacuumed from the store after this long, at which point
+    // an approval can no longer arrive — give up instead of holding the screen
+    // forever.
+    let deadline = tokio::time::sleep(*TIMEOUT);
+    tokio::pin!(deadline);
 
     'next_prompt: loop {
-        // Bind to a local so the state guard drops before `complete()` re-locks the same
-        // AuthState mutex — holding a match-scrutinee guard across it deadlocks (same reason
-        // RDP's `run_hold_screen` does this).
+        // Bind to a local so the state guard drops here — the arms below
+        // re-lock the same mutex (`auth_prompt`, OTP validation).
         let verification = state.lock().await.verify();
         let need = match verification {
-            AuthResult::Accepted { .. } => {
-                services
-                    .auth_state_store
-                    .lock()
-                    .await
-                    .complete(&state_id)
-                    .await;
-                return Ok(());
+            AuthResult::Accepted { user_info } => {
+                return Ok(user_info);
             }
             AuthResult::Rejected => bail!("VNC authentication rejected"),
             AuthResult::Need(need) => need,
@@ -143,9 +143,12 @@ where
 
         loop {
             tokio::select! {
-                // Browser approval landed (or the signal lagged/closed); the loop re-verifies.
+                // Browser approval landed (or the signal lagged); the loop re-verifies.
                 _ = approval.recv(), if matches!(prompt, ui::AuthPrompt::WebApproval { ..}) => {
                     continue 'next_prompt // web approval accepted
+                }
+                () = &mut deadline => {
+                    bail!("interactive authentication timed out");
                 }
                 event = events_rx.recv(), if !render.reader_done => {
                     if let Some(keysym) = render.note_event(event.as_ref())

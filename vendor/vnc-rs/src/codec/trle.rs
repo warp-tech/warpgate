@@ -1,9 +1,10 @@
-use crate::{PixelFormat, Rect, VncError, VncEvent};
 use std::future::Future;
+
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::error;
 
 use super::uninit_vec;
+use crate::{PixelFormat, Rect, VncError, VncEvent};
 
 async fn read_run_length<S>(reader: &mut S) -> Result<usize, VncError>
 where

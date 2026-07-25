@@ -6,8 +6,8 @@ use tracing::{debug, warn};
 use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{Target, TargetKubernetesOptions, TargetOptions, User};
-use warpgate_core::{ConfigProvider, Services};
+use warpgate_common::{TargetKubernetesOptions, TargetOptions, User};
+use warpgate_core::{ConfigProvider, Services, TargetAuthorization, authorize_for_target};
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation};
 
 use crate::server::client_certs::RequestCertificateExt;
@@ -16,20 +16,19 @@ pub async fn authenticate_and_get_target(
     req: &Request,
     target_name: &str,
     services: &Services,
-) -> poem::Result<(AuthStateUserInfo, Target)> {
+) -> poem::Result<TargetAuthorization> {
     // Check for Bearer token authentication (API tokens)
     if let Some(auth_header) = req.headers().get("authorization")
         && let Ok(auth_str) = auth_header.to_str()
         && let Some(token) = auth_str.strip_prefix("Bearer ")
     {
         if let Ok(Some(user)) = services.config_provider.validate_api_token(token).await {
-            let target = lookup_authorized_k8s_target(
+            return lookup_authorized_k8s_target(
                 services.config_provider.as_ref(),
                 target_name,
-                user.id,
+                &(&user).into(),
             )
-            .await?;
-            return Ok(((&user).into(), target));
+            .await;
         }
 
         // API token did not match — try OIDC ID token validation against any SSO
@@ -86,14 +85,12 @@ pub async fn authenticate_and_get_target(
             };
 
             let user_info = user_info_for_username(services, &username).await?;
-            let target = lookup_authorized_k8s_target(
+            return lookup_authorized_k8s_target(
                 services.config_provider.as_ref(),
                 target_name,
-                user_info.id,
+                &user_info,
             )
-            .await?;
-
-            return Ok((user_info, target));
+            .await;
         }
     }
 
@@ -105,13 +102,12 @@ pub async fn authenticate_and_get_target(
         match validate_client_certificate(&client_cert.der_bytes, services).await {
             Ok(Some(user_info)) => {
                 // Look up the specific target by name from the URL
-                let target = lookup_authorized_k8s_target(
+                return lookup_authorized_k8s_target(
                     services.config_provider.as_ref(),
                     target_name,
-                    user_info.id,
+                    &user_info,
                 )
-                .await?;
-                return Ok((user_info, target));
+                .await;
             }
             Ok(None) => {
                 debug!("Client certificate provided but not found in database");
@@ -131,13 +127,13 @@ pub async fn authenticate_and_get_target(
     ))
 }
 
-/// Look up a Kubernetes target by name and ensure `username` is authorized for
-/// it. Shared by the API-token, OIDC and client-certificate auth paths.
+/// Look up a Kubernetes target by name and prove the user is authorized for it.
+/// Shared by the API-token, OIDC and client-certificate auth paths.
 async fn lookup_authorized_k8s_target<C: ConfigProvider + Send + ?Sized>(
     config_provider: &C,
     target_name: &str,
-    user_id: uuid::Uuid,
-) -> poem::Result<Target> {
+    user_info: &AuthStateUserInfo,
+) -> poem::Result<TargetAuthorization> {
     let target = config_provider
         .get_target_by_name(target_name)
         .await
@@ -150,18 +146,14 @@ async fn lookup_authorized_k8s_target<C: ConfigProvider + Send + ?Sized>(
             )
         })?;
 
-    if !config_provider
-        .authorize_target_by_id(user_id, target.id)
-        .await
-        .unwrap_or(false)
-    {
-        return Err(poem::Error::from_string(
-            format!("Access denied to target: {target_name}"),
-            poem::http::StatusCode::FORBIDDEN,
-        ));
-    }
-
-    Ok(target)
+    authorize_for_target(config_provider, user_info, target)
+        .await?
+        .ok_or_else(|| {
+            poem::Error::from_string(
+                format!("Access denied to target: {target_name}"),
+                poem::http::StatusCode::FORBIDDEN,
+            )
+        })
 }
 
 /// Load a resolved SSO user's `AuthStateUserInfo` by username.

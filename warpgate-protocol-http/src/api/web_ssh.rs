@@ -1,20 +1,18 @@
 use std::sync::Arc;
 
-use anyhow::Context;
 use poem::session::Session;
 use poem::web::{Data, RemoteAddr};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::EntityTrait;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
-use warpgate_common_http::auth::{AuthenticatedRequestContext, web_reauth_required};
-use warpgate_core::ConfigProvider;
-use warpgate_db_entities::Target::{self, TargetKind};
+use warpgate_common_http::auth::AuthenticatedRequestContext;
+use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_ssh::WebSshClientManager;
 
 use crate::api::AnySecurityScheme;
+use crate::api::common::{WebClientTargetAccess, authorize_web_client_target};
 use crate::common::endpoint_auth;
 
 pub struct Api;
@@ -84,42 +82,22 @@ impl Api {
         manager: Data<&Arc<WebSshClientManager>>,
         _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<CreateWebSshSessionResponse> {
-        let (Some(username), user_id) = (ctx.auth.username(), ctx.auth.user_id()) else {
-            return Ok(CreateWebSshSessionResponse::Forbidden);
+        let authorization = match authorize_web_client_target(&ctx, session, body.target_id).await?
+        {
+            WebClientTargetAccess::Authorized(authorization) => authorization,
+            WebClientTargetAccess::ReauthRequired => {
+                return Ok(CreateWebSshSessionResponse::ReauthRequired);
+            }
+            WebClientTargetAccess::Forbidden => {
+                return Ok(CreateWebSshSessionResponse::Forbidden);
+            }
+            WebClientTargetAccess::NotFound => return Ok(CreateWebSshSessionResponse::NotFound),
         };
-
-        if web_reauth_required(&ctx, session).await? {
-            return Ok(CreateWebSshSessionResponse::ReauthRequired);
-        }
-
-        if !ctx.parameters().await?.web_clients_enabled {
-            return Ok(CreateWebSshSessionResponse::Forbidden);
-        }
-
-        let Some(target) = Target::Entity::find_by_id(body.target_id)
-            .one(&ctx.services().db)
-            .await
-            .context("querying target")?
-        else {
-            return Ok(CreateWebSshSessionResponse::NotFound);
-        };
-
-        let services = ctx.services();
-        let authorized: bool = services
-            .config_provider
-            .authorize_target_by_id(user_id, target.id)
-            .await?;
-
-        if !authorized {
-            return Ok(CreateWebSshSessionResponse::Forbidden);
-        }
 
         let session_id = manager
             .create_session(
-                services,
-                user_id,
-                username,
-                &target.name,
+                ctx.services(),
+                authorization,
                 remote_addr.0.as_socket_addr().copied(),
             )
             .await;

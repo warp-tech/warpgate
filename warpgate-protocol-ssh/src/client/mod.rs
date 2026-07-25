@@ -155,6 +155,10 @@ pub enum RCEvent {
 
 impl RCEvent {
     /// The already-open channel this event refers to, if any.
+    ///
+    /// Deliberately a total match: event deferral during pending channel
+    /// opens keys off this (#1459), so a new variant must explicitly decide
+    /// whether it names a channel rather than silently defaulting to "no".
     pub(crate) const fn channel(&self) -> Option<Uuid> {
         match self {
             Self::Output(channel, _)
@@ -165,7 +169,19 @@ impl RCEvent {
             | Self::ExitStatus(channel, _)
             | Self::ExitSignal { channel, .. }
             | Self::ExtendedData { channel, .. } => Some(*channel),
-            _ => None,
+            // The Forwarded*/X11 variants carry a channel id but *establish*
+            // the channel — they must not wait for their own open to resolve.
+            Self::State(_)
+            | Self::Error(_)
+            | Self::ConnectionError(_)
+            | Self::HopConnected
+            | Self::Done
+            | Self::HostKeyReceived(_)
+            | Self::HostKeyUnknown(..)
+            | Self::ForwardedTcpIp(..)
+            | Self::ForwardedStreamlocal(..)
+            | Self::ForwardedAgent(_)
+            | Self::X11(..) => None,
         }
     }
 }

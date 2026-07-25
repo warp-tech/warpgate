@@ -260,14 +260,13 @@ async fn negotiate_and_authorize(
 
     let mut render = RenderState::new();
 
-    let (user_info, target, vnc_options) = match authenticated {
+    let (authorization, vnc_options) = match authenticated {
         DesktopAuthOutcome::Authorized {
-            user_info,
-            target,
+            authorization,
             options,
-        } => (user_info, target, options),
+        } => (authorization, options),
         DesktopAuthOutcome::NeedsInteractive(interactive) => {
-            collect_additional_credentials(
+            let user_info = collect_additional_credentials(
                 &mut viewer_wr,
                 &mut events_rx,
                 &mut render,
@@ -278,22 +277,9 @@ async fn negotiate_and_authorize(
             )
             .await?;
 
-            let user_info = services
-                .auth_state_store
-                .lock()
-                .await
-                .get(&interactive.state_id)
-                .context("auth state expired during approval")?
-                .lock()
-                .await
-                .user_info()
-                .clone();
-            let (target, options) = finalize_user_auth::<VncProto>(
-                services,
-                &interactive.username,
-                &interactive.target_name,
-            )
-            .await?;
+            let (authorization, options) =
+                finalize_user_auth::<VncProto>(services, &user_info, &interactive.target_name)
+                    .await?;
             // Interactive (TOTP / web-approval) auth fully succeeded: clear any failed
             // attempts, mirroring the password-only `Accepted` path in `authenticate` and
             // the SSH baseline, which clears counters once 2FA completes. Fail open.
@@ -301,11 +287,13 @@ async fn negotiate_and_authorize(
                 .login_protection
                 .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
                 .await;
-            (user_info, target, options)
+            (authorization, options)
         }
         // Already handled before the security handshake above.
         DesktopAuthOutcome::Failed => return Ok(None),
     };
+
+    let (user_info, target) = authorization.into_parts();
 
     {
         let handle = server_handle.lock().await;

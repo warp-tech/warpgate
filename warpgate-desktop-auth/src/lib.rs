@@ -22,11 +22,12 @@ use warpgate_common::auth::{
 };
 use warpgate_common::{Protocol, Secret, Target};
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
+    Services, TargetAuthorization, WarpgateServerHandle, authorize_for_target_by_name,
+    authorize_ticket, consume_ticket,
 };
 use warpgate_desktop_ui::AuthPrompt;
 
@@ -53,10 +54,10 @@ pub struct InteractiveAuth {
 /// Result of evaluating the viewer's up-front (password / ticket) credentials.
 #[allow(clippy::large_enum_variant)]
 pub enum DesktopAuthOutcome<O> {
-    /// Fully authenticated (password-only policy, or ticket auth).
+    /// Fully authenticated (password-only policy, or ticket auth). The target
+    /// travels inside the authorization.
     Authorized {
-        user_info: AuthStateUserInfo,
-        target: Target,
+        authorization: TargetAuthorization,
         options: O,
     },
     /// Password accepted, but the policy needs an interactive second factor — collected on
@@ -128,15 +129,14 @@ pub async fn authenticate<P: DesktopProtocol>(
 
             // Password is mandatory; we don't serve an anonymous session.
             {
-                let credential = AuthCredential::Password(Secret::new(password));
                 let mut state = state_arc.lock().await;
-                let credential_valid = validate_and_add_credential(
+                let outcome = submit_credential(
                     &mut state,
-                    &credential,
+                    AuthCredential::Password(Secret::new(password)),
                     services.config_provider.as_ref(),
                 )
                 .await?;
-                if !credential_valid {
+                if !outcome.is_valid() {
                     let _ = services
                         .login_protection
                         .record_failed_attempt(FailedAttemptInfo {
@@ -160,7 +160,6 @@ pub async fn authenticate<P: DesktopProtocol>(
                 services.try_web_approval_bypass(&state_arc).await?;
             }
 
-            // Bind to a local so the guard drops before `complete()` re-locks it.
             let verification = state_arc.lock().await.verify();
             match verification {
                 AuthResult::Accepted { user_info } => {
@@ -168,18 +167,10 @@ pub async fn authenticate<P: DesktopProtocol>(
                         .login_protection
                         .clear_failed_attempts(&remote_ip, &user_info.username)
                         .await;
-                    services
-                        .auth_state_store
-                        .lock()
-                        .await
-                        .complete(&state_id)
-                        .await;
-                    let (target, options) =
-                        finalize_user_auth::<P>(services, &user_info.username, &target_name)
-                            .await?;
+                    let (authorization, options) =
+                        finalize_user_auth::<P>(services, &user_info, &target_name).await?;
                     Ok(DesktopAuthOutcome::Authorized {
-                        user_info,
-                        target,
+                        authorization,
                         options,
                     })
                 }
@@ -200,18 +191,32 @@ pub async fn authenticate<P: DesktopProtocol>(
                 AuthResult::Need(_) | AuthResult::Rejected => Ok(DesktopAuthOutcome::Failed),
             }
         }
-        AuthSelector::Ticket { secret } => match authorize_ticket(&services.db, &secret).await? {
-            Some((ticket, target_model, user_info)) => {
-                consume_ticket(&services.db, &ticket.id).await?;
-                let (target, options) = find_target::<P>(services, &target_model.name).await?;
-                Ok(DesktopAuthOutcome::Authorized {
-                    user_info,
-                    target,
-                    options,
-                })
+        AuthSelector::Ticket { secret } => {
+            match authorize_ticket(
+                &services.db,
+                &services.login_protection,
+                &secret,
+                Some(remote_address.ip()),
+            )
+            .await?
+            {
+                Some((ticket, authorization)) => {
+                    consume_ticket(&services.db, &ticket.id).await?;
+                    let Some(options) = P::options(authorization.target()) else {
+                        bail!(
+                            "Target {} is not a {} target",
+                            authorization.target().name,
+                            P::LABEL
+                        );
+                    };
+                    Ok(DesktopAuthOutcome::Authorized {
+                        authorization,
+                        options,
+                    })
+                }
+                None => Ok(DesktopAuthOutcome::Failed),
             }
-            None => Ok(DesktopAuthOutcome::Failed),
-        },
+        }
     }
 }
 
@@ -219,34 +224,22 @@ pub async fn authenticate<P: DesktopProtocol>(
 /// the holding screen completes the interactive factor.
 pub async fn finalize_user_auth<P: DesktopProtocol>(
     services: &Services,
-    username: &str,
+    user_info: &AuthStateUserInfo,
     target_name: &str,
-) -> Result<(Target, P::Options)> {
-    let authorized = services
-        .config_provider
-        .authorize_target(username, target_name)
-        .await?;
-    if !authorized {
-        bail!("Target {target_name} not authorized for {username}");
-    }
-    find_target::<P>(services, target_name).await
-}
-
-async fn find_target<P: DesktopProtocol>(
-    services: &Services,
-    target_name: &str,
-) -> Result<(Target, P::Options)> {
-    let Some(target) = services
-        .config_provider
-        .get_target_by_name(target_name)
-        .await?
+) -> Result<(TargetAuthorization, P::Options)> {
+    let Some(authorization) =
+        authorize_for_target_by_name(services.config_provider.as_ref(), user_info, target_name)
+            .await?
     else {
-        bail!("Target {target_name} not found");
+        bail!(
+            "Target {target_name} not authorized for {}",
+            user_info.username
+        );
     };
-    let Some(options) = P::options(&target) else {
+    let Some(options) = P::options(authorization.target()) else {
         bail!("Target {target_name} is not a {} target", P::LABEL);
     };
-    Ok((target, options))
+    Ok((authorization, options))
 }
 
 /// Build the browser web-approval URL for the current auth state, or `None` if the external

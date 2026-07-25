@@ -64,7 +64,9 @@ pub enum SessionAuthorization {
     Ticket {
         user_id: Uuid,
         username: String,
-        target_name: String,
+        /// The row the ticket was issued for. Pinned by id so a rename — or a
+        /// new target claiming the old name — can't redirect the session.
+        target_id: Uuid,
     },
 }
 
@@ -86,7 +88,10 @@ impl SessionAuthorization {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum RequestAuthorization {
     Session(SessionAuthorization),
-    UserToken { user_id: Uuid, username: String },
+    UserToken {
+        user_id: Uuid,
+        username: String,
+    },
     AdminToken,
     /// Auth between cluster peers
     ClusterToken,

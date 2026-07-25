@@ -26,11 +26,12 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
-use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::net::detect_port_knock;
 use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetRdpOptions};
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{DesktopInput, Services, SessionStateInit, State, WarpgateServerHandle};
+use warpgate_core::{
+    DesktopInput, Services, SessionStateInit, State, TargetAuthorization, WarpgateServerHandle,
+};
 use warpgate_db_entities::Parameters;
 use warpgate_desktop_ui::{DEFAULT_SCREEN_H, DEFAULT_SCREEN_W};
 
@@ -224,7 +225,7 @@ async fn control_loop(
     // (capability exchange), so we hold the authorized target here and dial once the
     // negotiated resolution arrives — otherwise the target would be dialed at the
     // pre-negotiation default and the whole session would run at that size.
-    let mut pending_dial: Option<(AuthStateUserInfo, Target, TargetRdpOptions)> = None;
+    let mut pending_dial: Option<PendingDial> = None;
     // What the RDP server settled on with the viewer, which is what we ask the target for.
     // Seeded with the size we advertised, used only if the viewer never negotiates one.
     let mut screen = warpgate_desktop_ui::Screen {
@@ -252,8 +253,7 @@ async fn control_loop(
                 .await
                 {
                     Ok(DesktopAuthOutcome::Authorized {
-                        user_info,
-                        target,
+                        authorization,
                         options,
                     }) => {
                         // Accept the NLA so the capability exchange proceeds and reports
@@ -265,7 +265,7 @@ async fn control_loop(
                         {
                             break;
                         }
-                        pending_dial = Some((user_info, target, options));
+                        pending_dial = Some((authorization, options));
                         // The banner screen consumes the viewer's `Size` event while it waits,
                         // so dial here once it's dismissed rather than waiting for a `Size`
                         // that has already been delivered.
@@ -310,15 +310,15 @@ async fn control_loop(
                             Ok(Some(user_info)) => {
                                 match finalize_user_auth::<RdpProto>(
                                     &services,
-                                    &interactive.username,
+                                    &user_info,
                                     &interactive.target_name,
                                 )
                                 .await
                                 {
-                                    Ok((target, options)) => {
+                                    Ok((authorization, options)) => {
                                         // `screen` was updated by `run_hold_screen` as the
                                         // viewer negotiated its size during the 2FA prompt.
-                                        pending_dial = Some((user_info, target, options));
+                                        pending_dial = Some((authorization, options));
                                         if matches!(
                                             acknowledge_banner(
                                                 &services,
@@ -426,7 +426,7 @@ async fn control_loop(
 }
 
 /// An authorized target held until the viewer's negotiated size is known.
-type PendingDial = (AuthStateUserInfo, Target, TargetRdpOptions);
+type PendingDial = (TargetAuthorization, TargetRdpOptions);
 
 enum BannerOutcome {
     /// No banner is configured, so nothing was rendered and no events were consumed.
@@ -469,15 +469,14 @@ async fn dial_if_pending(
     screen: warpgate_desktop_ui::Screen,
 ) -> Result<()> {
     if backend.is_none()
-        && let Some((user_info, target, options)) = pending.take()
+        && let Some((authorization, options)) = pending.take()
     {
         *backend = Some(
             connect_backend(
                 services,
                 server_handle,
                 server_in_tx,
-                user_info,
-                target,
+                authorization,
                 options,
                 screen,
             )

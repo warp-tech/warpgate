@@ -14,7 +14,7 @@ use warpgate_common::auth::{AuthCredential, AuthResult};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::ConfigProvider;
-use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::auth::submit_credential;
 use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
 
 use super::sso_provider_detail::{SSO_CONTEXT_SESSION_KEY, SsoContext};
@@ -334,25 +334,19 @@ impl Api {
 
         let mut state = state_arc.lock().await;
 
-        if !validate_and_add_credential(&mut state, &cred, ctx.services().config_provider.as_ref())
-            .await?
-        {
+        let outcome =
+            submit_credential(&mut state, cred, ctx.services().config_provider.as_ref()).await?;
+
+        if !outcome.is_valid() {
             return Ok(Err(format!(
                 "Failed to validate SSO credential for {username}"
             )));
         }
 
-        if let AuthResult::Accepted { user_info } = state.verify() {
+        if let AuthResult::Accepted { user_info } = outcome.into_result() {
             authorize_session(req, &ctx, user_info).await?;
             state.emit_authenticated_event_once();
-            let state_id = *state.id();
             drop(state);
-            ctx.services()
-                .auth_state_store
-                .lock()
-                .await
-                .complete(&state_id)
-                .await;
             session.set_sso_login_state(SsoLoginState {
                 provider: context.provider,
                 token: response.id_token.clone(),

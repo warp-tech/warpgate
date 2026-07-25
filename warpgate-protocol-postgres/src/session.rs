@@ -15,15 +15,14 @@ use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{debug, error, info, info_span, warn};
 use uuid::Uuid;
-use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
-};
+use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
 use warpgate_common::{PostgresProtocolVersion, Secret, TargetOptions, TargetPostgresOptions};
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
-    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
+    Services, TargetAuthorization, WarpgateServerHandle, authorize_for_target_by_name,
+    authorize_ticket, consume_ticket, wait_for_auth_completion,
 };
 use warpgate_tls::ServerTlsStream;
 
@@ -249,20 +248,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
                     match user_auth_result {
                         AuthResult::Accepted { user_info } => {
-                            self.services
-                                .auth_state_store
-                                .lock()
-                                .await
-                                .complete(state_arc.lock().await.id())
-                                .await;
-                            let target_auth_result = {
-                                self.services
-                                    .config_provider
-                                    .authorize_target(&user_info.username, &target_name)
-                                    .await
-                                    .map_err(PostgresError::other)?
-                            };
-                            if !target_auth_result {
+                            let Some(authorization) = authorize_for_target_by_name(
+                                self.services.config_provider.as_ref(),
+                                &user_info,
+                                &target_name,
+                            )
+                            .await?
+                            else {
                                 warn!("Target {target_name} not authorized for user {username}",);
                                 // Record failed attempt
                                 let _ = self
@@ -276,7 +268,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                     })
                                     .await;
                                 return fail(&mut self).await;
-                            }
+                            };
 
                             if !auth_ok_sent {
                                 self.stream
@@ -288,7 +280,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                 .login_protection
                                 .clear_failed_attempts(&remote_ip, &user_info.username)
                                 .await;
-                            return self.run_authorized(startup, user_info, target_name).await;
+                            return self.run_authorized(startup, authorization).await;
                         }
                         AuthResult::Need(kinds) => {
                             if kinds.contains(&CredentialKind::Password) {
@@ -316,14 +308,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
                                 let mut state = state_arc.lock().await;
 
-                                let credential = AuthCredential::Password(password);
-
-                                if !validate_and_add_credential(
+                                if !submit_credential(
                                     &mut state,
-                                    &credential,
+                                    AuthCredential::Password(password),
                                     self.services.config_provider.as_ref(),
                                 )
                                 .await?
+                                .is_valid()
                                 {
                                     // Postgres CLI will just send the same password in a loop without prompting the user again
                                     // Record failed attempt
@@ -353,13 +344,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
                                 let identification_string =
                                     state_arc.lock().await.identification_string().to_owned();
-                                let auth_state_id = *state_arc.lock().await.id();
-                                let mut event = self
-                                    .services
-                                    .auth_state_store
-                                    .lock()
-                                    .await
-                                    .subscribe(auth_state_id);
 
                                 let ext_url_result = construct_external_url(
                                     None,
@@ -402,7 +386,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                                     ]))?;
                                 self.stream.flush().await?;
 
-                                if !matches!(event.recv().await, Ok(AuthResult::Accepted { .. })) {
+                                if !matches!(
+                                    wait_for_auth_completion(&state_arc).await,
+                                    AuthResult::Accepted { .. }
+                                ) {
                                     warn!("Web user approval failed");
                                     return fail(&mut self).await;
                                 }
@@ -428,19 +415,27 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 }
             }
             AuthSelector::Ticket { secret } => {
-                match authorize_ticket(&self.services.db, &secret)
-                    .await
-                    .map_err(PostgresError::other)?
+                match authorize_ticket(
+                    &self.services.db,
+                    &self.services.login_protection,
+                    &secret,
+                    Some(remote_ip),
+                )
+                .await
+                .map_err(PostgresError::other)?
                 {
-                    Some((ticket, target, user_info)) => {
-                        info!("Authorized for {} with a ticket", target.name);
+                    Some((ticket, authorization)) => {
+                        info!(
+                            "Authorized for {} with a ticket",
+                            authorization.target().name
+                        );
                         consume_ticket(&self.services.db, &ticket.id)
                             .await
                             .map_err(PostgresError::other)?;
 
                         self.stream
                             .push(pgwire::messages::startup::Authentication::Ok)?;
-                        self.run_authorized(startup, user_info, target.name).await
+                        self.run_authorized(startup, authorization).await
                     }
                     _ => fail(&mut self).await,
                 }
@@ -451,8 +446,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     async fn run_authorized(
         mut self,
         startup: pgwire::messages::startup::Startup,
-        user_info: AuthStateUserInfo,
-        target_name: String,
+        authorization: TargetAuthorization,
     ) -> Result<(), PostgresError> {
         if let Some(banner) = warpgate_db_entities::Parameters::Entity::get(&self.services.db)
             .await
@@ -470,26 +464,18 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
         self.stream.flush().await?;
 
-        let target = {
-            self.services
-                .config_provider
-                .get_target_by_name(&target_name)
-                .await?
-                .and_then(|t| match t.options {
-                    TargetOptions::Postgres(ref options) => Some((t.clone(), options.clone())),
-                    _ => None,
-                })
-        };
+        let (user_info, target) = authorization.into_parts();
 
-        let Some((target, postgres_options)) = target else {
-            warn!("Selected target not found");
+        let TargetOptions::Postgres(ref postgres_options) = target.options else {
+            warn!("Selected target is not a PostgreSQL target");
             self.send_error_response(
                 "0W001".into(),
-                format!("Warpgate target {target_name} not found"),
+                format!("Warpgate target {} not found", target.name),
             )
             .await?;
             return Ok(());
         };
+        let postgres_options = postgres_options.clone();
 
         {
             let handle = self.server_handle.lock().await;
