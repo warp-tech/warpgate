@@ -47,7 +47,7 @@ mod rdp;
 
 use bridge::connect_backend;
 use hold_screen::{run_banner_screen, run_hold_screen};
-use protocol::{Event as ServerEvent, Input as ServerInput};
+use protocol::{AuthVerdict, Event as ServerEvent, Input as ServerInput};
 use warpgate_desktop_auth::{
     DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
 };
@@ -254,11 +254,13 @@ async fn control_loop(
         };
         let input = match event {
             ServerEvent::AuthRequest {
-                username, password, ..
+                username,
+                password,
+                reply,
             } => {
                 if backend.is_some() || pending_dial.is_some() {
-                    // Already authenticated (dialed, or awaiting the size to dial); ignore
-                    // a duplicate request.
+                    // Already authenticated (dialed, or awaiting the size to dial); reject a
+                    // duplicate request by dropping its reply rather than answering twice.
                     continue;
                 }
                 match authenticate::<RdpProto>(
@@ -276,11 +278,7 @@ async fn control_loop(
                     }) => {
                         // Accept the NLA so the capability exchange proceeds and reports
                         // the viewer's desktop size; defer the target dial to that `Size`.
-                        if server_in_tx
-                            .send(ServerInput::AuthResponse { accept: true })
-                            .await
-                            .is_err()
-                        {
+                        if reply.send(AuthVerdict::StartSession).is_err() {
                             break;
                         }
                         pending_dial = Some((authorization, options));
@@ -309,11 +307,7 @@ async fn control_loop(
                         // Accept the NLA so the RDP session starts, then collect the second
                         // factor (TOTP / web approval) on a Warpgate-rendered holding screen
                         // before connecting to the target.
-                        if server_in_tx
-                            .send(ServerInput::AuthResponse { accept: true })
-                            .await
-                            .is_err()
-                        {
+                        if reply.send(AuthVerdict::StartSession).is_err() {
                             break;
                         }
                         match run_hold_screen(
@@ -380,15 +374,11 @@ async fn control_loop(
                     }
                     Ok(DesktopAuthOutcome::Failed) => {
                         warn!("Authentication failed");
-                        let _ = server_in_tx
-                            .send(ServerInput::AuthResponse { accept: false })
-                            .await;
+                        let _ = reply.send(AuthVerdict::Deny);
                     }
                     Err(error) => {
                         warn!(%error, "Authentication error");
-                        let _ = server_in_tx
-                            .send(ServerInput::AuthResponse { accept: false })
-                            .await;
+                        let _ = reply.send(AuthVerdict::Deny);
                     }
                 }
                 continue;
