@@ -253,25 +253,25 @@
         {/if}
 
         {#if reauthRequired}
-            <Alert color="warning">
+            <Alert class="mt-3" color="warning">
                 The security policy requires you to sign in again before
                 accessing this function.
             </Alert>
         {/if}
         {#if credentialRejected || authState === ApiAuthState.Failed}
-            <Alert color="danger">Incorrect credentials</Alert>
+            <Alert class="mt-3" color="danger">Incorrect credentials</Alert>
         {/if}
         {#if authState === ApiAuthState.IpRejected}
-            <Alert color="danger">
+            <Alert class="mt-3" color="danger">
                 Login denied: your IP address is not in the allowed range for
                 this user
             </Alert>
         {/if}
         {#if serverErrorMessage}
-            <Alert color="danger">{serverErrorMessage}</Alert>
+            <Alert class="mt-3" color="danger">{serverErrorMessage}</Alert>
         {/if}
         {#if error}
-            <Alert color="danger">{error}</Alert>
+            <Alert class="mt-3" color="danger">{error}</Alert>
         {/if}
 
         {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
