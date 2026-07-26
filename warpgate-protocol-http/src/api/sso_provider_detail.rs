@@ -100,11 +100,18 @@ impl Api {
         ));
         debug!("Return URL: {return_url}");
 
-        // The browser lands back on this origin, and it has already passed the
-        // provider's domain whitelist. Re-reading the Host header here instead
-        // would take an attacker-supplied authority into the post-login
-        // redirect.
-        let return_origin = return_url.origin().ascii_serialization();
+        // The post-login redirect lands on the host the user started from, which
+        // in `external_host` mode is not the return URL's host — the IdP callback
+        // goes to the parent domain there and hands off via the shared cookie.
+        // Built through `construct_external_url` so the authority is parsed
+        // rather than interpolated from the raw `Host` header. No whitelist is
+        // passed because this host has already been checked: `external_host` mode
+        // by the `IncompatibleSsoDomain` guard above, `host_header` mode by the
+        // return URL, which is this same host.
+        let return_origin = construct_external_url(Some(req), &config, None)
+            .await?
+            .origin()
+            .ascii_serialization();
 
         let client = SsoClient::new(provider_config.provider.clone())?;
 
