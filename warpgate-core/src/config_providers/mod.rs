@@ -175,10 +175,6 @@ impl TargetAuthorization {
         self.protocol
     }
 
-    pub fn into_user_info(self) -> AuthStateUserInfo {
-        self.user_info
-    }
-
     pub fn into_parts(self) -> (AuthStateUserInfo, Target) {
         (self.user_info, self.target)
     }

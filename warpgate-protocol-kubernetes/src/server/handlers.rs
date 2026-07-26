@@ -15,7 +15,7 @@ use url::Url;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
-use warpgate_common::{SessionId, TargetKubernetesOptions, WarpgateError};
+use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
@@ -115,9 +115,14 @@ pub async fn handle_api_request(
         }
     };
 
-    let (user_info, target, k8s_options) =
-        authorization.into_parts_typed::<TargetKubernetesOptions>()?;
-    let k8s_options = &k8s_options;
+    let (user_info, target) = authorization.into_parts();
+
+    let TargetOptions::Kubernetes(k8s_options) = &target.options else {
+        return Err(poem::Error::from_string(
+            "Invalid target type",
+            poem::http::StatusCode::BAD_REQUEST,
+        ));
+    };
 
     let (session_id, log_span) = {
         let handle: tokio::sync::MutexGuard<'_, warpgate_core::WarpgateServerHandle> =
