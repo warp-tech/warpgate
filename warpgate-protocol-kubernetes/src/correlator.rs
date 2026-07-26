@@ -7,14 +7,23 @@ use tokio::sync::Mutex;
 use warpgate_common::WarpgateError;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common_http::logging::get_client_ip;
-use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
+use warpgate_core::{Services, SessionStateInit, State, TargetAuthorization, WarpgateServerHandle};
 
 use crate::session_handle::KubernetesSessionHandle;
 
 type CorrelationKey = (String, String, Option<String>); // (username, target_name, ip)
 
+/// One correlated Kubernetes session. The `authorization` is resolved once (which
+/// is what runs the credential policy / web approval) and reused for every request
+/// in the session, so a single approval covers a whole `kubectl` command.
+struct SessionEntry {
+    handle: Arc<Mutex<WarpgateServerHandle>>,
+    created: Instant,
+    authorization: TargetAuthorization,
+}
+
 pub struct RequestCorrelator {
-    handles: HashMap<CorrelationKey, (Arc<Mutex<WarpgateServerHandle>>, Instant)>,
+    handles: HashMap<CorrelationKey, SessionEntry>,
     services: Services,
 }
 
@@ -28,19 +37,42 @@ impl RequestCorrelator {
         this
     }
 
-    pub async fn session_for_request(
+    /// The existing correlated session for this request, with its cached
+    /// authorization, if one is already open. A `Some` result lets the caller skip
+    /// re-authorizing (and so skip the web-approval prompt) for the rest of the
+    /// session.
+    pub async fn existing_session(
+        &self,
+        request: &Request,
+        user_info: &AuthStateUserInfo,
+        target_name: &str,
+    ) -> Result<Option<(Arc<Mutex<WarpgateServerHandle>>, TargetAuthorization)>, WarpgateError>
+    {
+        let key = self
+            .correlation_key_for_request(request, user_info, target_name)
+            .await?;
+        Ok(self
+            .handles
+            .get(&key)
+            .map(|entry| (entry.handle.clone(), entry.authorization.clone())))
+    }
+
+    /// Open a session for a freshly-authorized request, caching the authorization
+    /// so subsequent requests reuse it. If a concurrent request already opened the
+    /// session (a rare first-request race), its handle is returned instead — both
+    /// authorized the same user for the same target, so either is correct.
+    pub async fn register_authorized_session(
         &mut self,
         request: &Request,
         user_info: &AuthStateUserInfo,
         target_name: &str,
+        authorization: TargetAuthorization,
     ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
         let key = self
             .correlation_key_for_request(request, user_info, target_name)
             .await?;
-        let now = Instant::now();
-        if let Some((handle, _created)) = self.handles.get(&key) {
-            // Optionally, could update timestamp for LRU
-            return Ok(handle.clone());
+        if let Some(entry) = self.handles.get(&key) {
+            return Ok(entry.handle.clone());
         }
 
         let ip = get_client_ip(request, &self.services).await;
@@ -54,7 +86,14 @@ impl RequestCorrelator {
             },
         )
         .await?;
-        self.handles.insert(key, (handle.clone(), now));
+        self.handles.insert(
+            key,
+            SessionEntry {
+                handle: handle.clone(),
+                created: Instant::now(),
+                authorization,
+            },
+        );
         Ok(handle)
     }
 
@@ -80,7 +119,7 @@ impl RequestCorrelator {
             .session_max_age;
         let now = Instant::now();
         self.handles
-            .retain(|_, (_, created)| now.duration_since(*created) < max_age);
+            .retain(|_, entry| now.duration_since(entry.created) < max_age);
     }
 
     /// Spawns a background task to periodically call vacuum

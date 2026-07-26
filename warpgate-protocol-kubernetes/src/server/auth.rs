@@ -9,12 +9,13 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
-use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_common::auth::{AuthResult, CredentialKind};
 use warpgate_common::{TargetKubernetesOptions, TargetOptions, User};
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
-    ConfigProvider, Services, TargetAuthorization, authorize_for_target, check_ip_allowed,
+    AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, authorize_for_target,
+    check_ip_allowed, wait_for_auth_completion,
 };
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation};
 
@@ -61,11 +62,15 @@ fn emit_authentication_failed(client_ip: Option<IpAddr>, credential_type: &str, 
     );
 }
 
-pub async fn authenticate_and_get_target(
+/// Resolve and vet the caller's identity from the request's transport credentials
+/// (API token / OIDC token / client certificate). Runs on *every* request — it
+/// must, both to attribute the request to a session and to re-check the credential
+/// and account status — so it is deliberately cheap: no auth state, no web
+/// approval. `Err(unauthorized)` on any failure.
+pub async fn authenticate_kubernetes_user(
     req: &Request,
-    target_name: &str,
     services: &Services,
-) -> poem::Result<TargetAuthorization> {
+) -> poem::Result<User> {
     let client_ip: Option<IpAddr> = get_client_ip(req, services)
         .await
         .and_then(|ip| ip.parse().ok());
@@ -117,14 +122,7 @@ pub async fn authenticate_and_get_target(
         return Err(unauthorized());
     }
 
-    let authorization = lookup_authorized_k8s_target(
-        services.config_provider.as_ref(),
-        target_name,
-        &(&user).into(),
-    )
-    .await?;
-
-    // Successful auth resets the failed-attempt counter for this user/IP.
+    // A validated transport credential clears the failed-attempt counter.
     if let Some(ip) = client_ip {
         let _ = services
             .login_protection
@@ -132,13 +130,113 @@ pub async fn authenticate_and_get_target(
             .await;
     }
 
-    Ok(authorization)
+    Ok(user)
 }
 
-/// Resolve the caller's identity from the request's credentials (API token,
-/// OIDC bearer token, or client certificate). Returns the authenticated user,
-/// or `None` if no presented credential validated. Genuine lookup/verification
-/// errors propagate rather than being treated as an auth failure.
+/// Authorize an already-authenticated user for a Kubernetes target, applying the
+/// credential policy — in practice a web-approval factor, which may block. This is
+/// the expensive step, so the caller caches the result per correlated session so it
+/// runs once per session (one approval per `kubectl` command's fan-out of requests)
+/// rather than once per request.
+pub async fn authorize_kubernetes_target(
+    req: &Request,
+    user: &User,
+    target_name: &str,
+    services: &Services,
+) -> poem::Result<TargetAuthorization> {
+    let client_ip: Option<IpAddr> = get_client_ip(req, services)
+        .await
+        .and_then(|ip| ip.parse().ok());
+
+    // When the user has a Kubernetes credential policy, enforce its web-approval
+    // factor on top of the transport identity; otherwise use the identity directly.
+    let identity = authorize_kubernetes_identity(services, user, client_ip, target_name).await?;
+    lookup_authorized_k8s_target(services.config_provider.as_ref(), target_name, &identity).await
+}
+
+/// Turn a validated Kubernetes identity into an [`AuthorizedIdentity`], applying
+/// the user's Kubernetes credential policy when one is configured.
+///
+/// Transport authentication (WG API token, OIDC token, or client certificate)
+/// establishes *who* the caller is — it is the identity, verified out of band by
+/// [`authenticate`]. The Kubernetes credential policy only layers an optional
+/// web-approval factor on top, the one factor a non-interactive client can
+/// satisfy, so no transport credential is ever submitted to the auth state here.
+///
+/// With no policy the transport identity is used directly. With one, a fresh auth
+/// state enforces the web approval, cleared either by a cached grace-period bypass
+/// or by the user approving the pending request in the Warpgate UI while the
+/// request waits (kubectl has no default client timeout; the auth-state TTL bounds
+/// the wait).
+async fn authorize_kubernetes_identity(
+    services: &Services,
+    user: &User,
+    client_ip: Option<IpAddr>,
+    target_name: &str,
+) -> poem::Result<AuthorizedIdentity> {
+    let policy_configured = user
+        .credential_policy
+        .as_ref()
+        .and_then(|p| p.kubernetes.as_ref())
+        .is_some_and(|kinds| !kinds.is_empty());
+
+    if !policy_configured {
+        return Ok(AuthorizedIdentity::for_authenticated_session(
+            user.into(),
+            crate::PROTOCOL_NAME,
+        ));
+    }
+
+    let (_id, state_arc) = services
+        .create_auth_state(
+            None,
+            &user.username,
+            crate::PROTOCOL_NAME,
+            target_name,
+            &[CredentialKind::WebUserApproval],
+            client_ip,
+            None,
+        )
+        .await?;
+
+    loop {
+        let verification = state_arc.lock().await.verify();
+        match verification {
+            AuthResult::Accepted { .. } => {
+                return AuthorizedIdentity::from_auth_state(&*state_arc.lock().await)
+                    .ok_or_else(unauthorized);
+            }
+            AuthResult::Need(kinds) if kinds.contains(&CredentialKind::WebUserApproval) => {
+                if services.try_web_approval_bypass(&state_arc).await? {
+                    continue;
+                }
+                if !matches!(
+                    wait_for_auth_completion(&state_arc).await,
+                    AuthResult::Accepted { .. }
+                ) {
+                    warn!(username = %user.username, "Kubernetes web approval not granted");
+                    return Err(unauthorized());
+                }
+            }
+            // Kubernetes only enforces web approval on top of transport auth; a
+            // policy that requires any other factor can't be collected for a
+            // non-interactive client and is denied. The policy editor should not
+            // offer such a combination.
+            AuthResult::Need(_) | AuthResult::Rejected => {
+                warn!(username = %user.username, "Kubernetes credential policy not satisfiable");
+                return Err(unauthorized());
+            }
+        }
+    }
+}
+
+/// Resolve the caller's identity from the request's transport credentials (WG API
+/// token, OIDC bearer token, or client certificate). Each is verified here and
+/// establishes *who* the caller is; that transport auth is the identity, so the
+/// caller doesn't re-validate it against a credential policy (a policy only layers
+/// web approval on top). Returns `None` if no presented credential validated;
+/// genuine lookup/verification errors propagate rather than being treated as a
+/// failure.
 async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option<User>> {
     // Bearer token authentication (API tokens, then OIDC ID tokens).
     if let Some(auth_header) = req.headers().get("authorization")
@@ -202,6 +300,10 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
                 continue;
             };
 
+            // The verified OIDC token is the identity; it is not re-checked against
+            // the stored-SSO-linkage `validate_credential` arm, which would deny
+            // legitimately-authenticated users resolved via preferred-username or
+            // role mapping.
             return Ok(Some(user_for_username(services, &username).await?));
         }
     }
@@ -228,7 +330,7 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
 async fn lookup_authorized_k8s_target<C: ConfigProvider + Send>(
     config_provider: &C,
     target_name: &str,
-    user_info: &AuthStateUserInfo,
+    identity: &AuthorizedIdentity,
 ) -> poem::Result<TargetAuthorization> {
     let target = config_provider
         .get_target_by_name(target_name)
@@ -242,7 +344,7 @@ async fn lookup_authorized_k8s_target<C: ConfigProvider + Send>(
             )
         })?;
 
-    authorize_for_target(config_provider, user_info, target)
+    authorize_for_target(config_provider, identity, target)
         .await?
         .ok_or_else(|| {
             poem::Error::from_string(

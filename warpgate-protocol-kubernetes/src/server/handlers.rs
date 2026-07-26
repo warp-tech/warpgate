@@ -15,7 +15,7 @@ use url::Url;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
-use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, WarpgateError};
+use warpgate_common::{SessionId, TargetKubernetesOptions, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
@@ -25,7 +25,9 @@ use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 
 use crate::correlator::RequestCorrelator;
 use crate::recording::{deduce_exec_recording_metadata, start_recording_api, start_recording_exec};
-use crate::server::auth::{authenticate_and_get_target, create_authenticated_client};
+use crate::server::auth::{
+    authenticate_kubernetes_user, authorize_kubernetes_target, create_authenticated_client,
+};
 
 /// A client-supplied impersonation header (`Impersonate-User`,
 /// `Impersonate-Group`, `Impersonate-Uid`, `Impersonate-Extra-*`). These let a
@@ -84,22 +86,38 @@ pub async fn handle_api_request(
         "Handling Kubernetes API request"
     );
 
-    let (user_info, target) = authenticate_and_get_target(req, &target_name, ctx.services())
-        .await?
-        .into_parts();
+    // Authenticate the transport credential on every request (cheap; also enforces
+    // account status). Authorization — the credential policy / web approval — is
+    // resolved once per correlated session and reused, so a single `kubectl`
+    // command's fan-out of requests only prompts for approval once.
+    let user = authenticate_kubernetes_user(req, ctx.services()).await?;
+    let user_info: AuthStateUserInfo = (&user).into();
 
-    let TargetOptions::Kubernetes(k8s_options) = &target.options else {
-        return Err(poem::Error::from_string(
-            "Invalid target type",
-            poem::http::StatusCode::BAD_REQUEST,
-        ));
-    };
-
-    let handle = correlator
+    // Bound to its own `let` so the correlator lock is released before the match
+    // arms — the `None` arm re-locks it, and the tokio mutex is not reentrant.
+    let existing_session = correlator
         .lock()
         .await
-        .session_for_request(req, &user_info, &target.name)
+        .existing_session(req, &user_info, &target_name)
         .await?;
+    let (handle, authorization) = match existing_session {
+        Some(session) => session,
+        None => {
+            // The correlator lock is not held across this (possibly blocking) step.
+            let authorization =
+                authorize_kubernetes_target(req, &user, &target_name, ctx.services()).await?;
+            let handle = correlator
+                .lock()
+                .await
+                .register_authorized_session(req, &user_info, &target_name, authorization.clone())
+                .await?;
+            (handle, authorization)
+        }
+    };
+
+    let (user_info, target, k8s_options) =
+        authorization.into_parts_typed::<TargetKubernetesOptions>()?;
+    let k8s_options = &k8s_options;
 
     let (session_id, log_span) = {
         let handle: tokio::sync::MutexGuard<'_, warpgate_core::WarpgateServerHandle> =
