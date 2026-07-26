@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.0-beta.2-7-g109c3caa-modified"
+    "version": "v0.27.0-beta.2-27-gd137485f-modified"
   },
   "servers": [
     {
@@ -1245,6 +1245,61 @@
         "operationId": "import_ssh_client_key"
       }
     },
+    "/ssh/client-keys/generate": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateSSHClientKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "generate_ssh_client_key"
+      }
+    },
     "/ssh/client-keys/{id}": {
       "put": {
         "parameters": [
@@ -1277,16 +1332,6 @@
               "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/SSHClientKey"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
                 }
               }
             }
@@ -2154,6 +2199,16 @@
               "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -5000,6 +5055,22 @@
           }
         }
       },
+      "GenerateSSHClientKeyRequest": {
+        "type": "object",
+        "title": "GenerateSSHClientKeyRequest",
+        "required": [
+          "label",
+          "kind"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SSHClientKeyKind"
+          }
+        }
+      },
       "GetLogsRequest": {
         "type": "object",
         "title": "GetLogsRequest",
@@ -5063,7 +5134,8 @@
         "title": "ImportSSHClientKeyRequest",
         "required": [
           "label",
-          "secret_key"
+          "secret_key",
+          "is_default"
         ],
         "properties": {
           "label": {
@@ -5072,6 +5144,9 @@
           "secret_key": {
             "type": "string",
             "description": "Private key in OpenSSH or PKCS#8 PEM format, without a passphrase"
+          },
+          "is_default": {
+            "type": "boolean"
           }
         }
       },
@@ -6270,6 +6345,13 @@
           }
         }
       },
+      "SSHClientKeyKind": {
+        "type": "string",
+        "enum": [
+          "Ed25519",
+          "Rsa"
+        ]
+      },
       "SSHKey": {
         "type": "object",
         "title": "SSHKey",
@@ -6499,7 +6581,7 @@
           "key_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Specific stored client key to authenticate with; `None` uses the\ndefault key (and falls back to the remaining stored keys)."
+            "description": "Specific stored client key to authenticate with; `None` uses the keys\nmarked default."
           }
         }
       },

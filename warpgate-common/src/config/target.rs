@@ -61,8 +61,8 @@ pub struct SshTargetPasswordAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct SshTargetPublicKeyAuth {
-    /// Specific stored client key to authenticate with; `None` uses the
-    /// default key (and falls back to the remaining stored keys).
+    /// Specific stored client key to authenticate with; `None` uses the keys
+    /// marked default.
     #[serde(default)]
     pub key_id: Option<Uuid>,
 }

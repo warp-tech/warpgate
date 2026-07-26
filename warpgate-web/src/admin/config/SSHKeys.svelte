@@ -1,16 +1,24 @@
 <script lang="ts">
-    import { Alert, Button, FormGroup } from '@sveltestrap/sveltestrap'
-    import { api, type SSHClientKey, type SSHKnownHost } from 'admin/lib/api'
+    import { Alert, Badge, Button } from '@sveltestrap/sveltestrap'
+    import {
+        api,
+        type SSHClientKey,
+        type SSHClientKeyKind,
+        type SSHKnownHost,
+    } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import { stringifyError } from 'common/errors'
+    import InfoBox from 'common/InfoBox.svelte'
+    import ClientKeyModal from './ClientKeyModal.svelte'
+    import GenerateClientKeyModal from './GenerateClientKeyModal.svelte'
 
     let error: string | undefined = $state()
     let knownHosts: SSHKnownHost[] | undefined = $state()
     let clientKeys: SSHClientKey[] | undefined = $state()
-    let importLabel = $state('')
-    let importSecretKey = $state('')
+    let keyModalOpen = $state(false)
+    let editingKey: SSHClientKey | undefined = $state()
+    let generateModalOpen = $state(false)
 
     async function load() {
         clientKeys = await api.getSshClientKeys()
@@ -33,29 +41,38 @@
         }
     }
 
-    async function importKey() {
-        await run(async () => {
+    function openImportKey() {
+        editingKey = undefined
+        keyModalOpen = true
+    }
+
+    function openEditKey(key: SSHClientKey) {
+        editingKey = key
+        keyModalOpen = true
+    }
+
+    function saveKey(label: string, secretKey: string, isDefault: boolean) {
+        const key = editingKey
+        run(async () => {
+            if (key) {
+                await api.updateSshClientKey({
+                    id: key.id,
+                    updateSSHClientKeyRequest: { label, isDefault },
+                })
+                return
+            }
             await api.importSshClientKey({
-                importSSHClientKeyRequest: {
-                    label: importLabel,
-                    secretKey: importSecretKey,
-                },
+                importSSHClientKeyRequest: { label, secretKey, isDefault },
             })
-            importLabel = ''
-            importSecretKey = ''
         })
     }
 
-    async function makeDefault(key: SSHClientKey) {
-        await run(() =>
-            api.updateSshClientKey({
-                id: key.id,
-                updateSSHClientKeyRequest: {
-                    label: key.label,
-                    isDefault: true,
-                },
-            }),
-        )
+    function generateKey(label: string, kind: SSHClientKeyKind) {
+        run(async () => {
+            const created = await api.generateSshClientKey({
+                generateSSHClientKeyRequest: { label, kind },
+            })
+        })
     }
 
     async function deleteKey(key: SSHClientKey) {
@@ -68,7 +85,15 @@
 </script>
 
 <div class="page-summary-bar">
-    <h1>SSH</h1>
+    <h1>SSH keys</h1>
+    <div class="d-flex gap-2 ms-auto">
+        {#if $adminPermissions.configEdit}
+            <Button color="primary" onclick={() => (generateModalOpen = true)}>
+                Generate
+            </Button>
+            <Button color="secondary" onclick={openImportKey}> Import </Button>
+        {/if}
+    </div>
 </div>
 
 {#if error}
@@ -76,30 +101,29 @@
 {/if}
 
 {#if clientKeys}
-    <h2>Warpgate's own SSH keys</h2>
-    <Alert color="info"
-        >Add these keys to the targets'
+    <InfoBox>
+        Add one of these keys to the targets'
         <code>authorized_keys</code>
-        files</Alert
-    >
+        files
+    </InfoBox>
+
     <div class="list-group list-group-flush">
         {#each clientKeys as key (key.id)}
             <div class="list-group-item px-0">
-                <div class="d-flex align-items-center">
+                <div class="d-flex align-items-center gap-2">
                     <strong>{key.label}</strong>
-                    <span class="text-muted ms-2">{key.kind}</span>
                     {#if key.isDefault}
-                        <span class="ms-2">(default)</span>
+                        <Badge color="primary">Default</Badge>
                     {/if}
-                    {#if $adminPermissions.configEdit && !key.isDefault}
+                    {#if $adminPermissions.configEdit}
                         <Button
                             class="ms-auto"
                             color="link px-0"
                             onclick={e => {
                                 e.preventDefault()
-                                makeDefault(key)
+                                openEditKey(key)
                             }}
-                            >Make default</Button
+                            >Edit</Button
                         >
                         <Button
                             class="ms-3"
@@ -116,30 +140,21 @@
             </div>
         {/each}
     </div>
+{/if}
 
-    {#if $adminPermissions.configEdit}
-        <h3 class="mt-4">Import a key</h3>
-        <FormGroup floating label="Label">
-            <input class="form-control" bind:value={importLabel} required>
-        </FormGroup>
-        <FormGroup
-            floating
-            label="Private key (OpenSSH or PKCS#8 PEM, no passphrase)"
-        >
-            <textarea
-                class="form-control font-monospace"
-                style="height: 10rem"
-                bind:value={importSecretKey}
-                required
-            ></textarea>
-        </FormGroup>
-        <AsyncButton
-            color="primary"
-            disabled={!importLabel || !importSecretKey}
-            click={importKey}
-            >Import</AsyncButton
-        >
-    {/if}
+{#if keyModalOpen}
+    <ClientKeyModal
+        bind:isOpen={keyModalOpen}
+        instance={editingKey}
+        save={saveKey}
+    />
+{/if}
+
+{#if generateModalOpen}
+    <GenerateClientKeyModal
+        bind:isOpen={generateModalOpen}
+        save={generateKey}
+    />
 {/if}
 
 <div class="mb-3"></div>

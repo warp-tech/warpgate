@@ -79,6 +79,7 @@ struct ImportSSHClientKeyRequest {
     label: String,
     /// Private key in OpenSSH or PKCS#8 PEM format, without a passphrase
     secret_key: String,
+    is_default: bool,
 }
 
 #[derive(Object)]
@@ -186,7 +187,7 @@ impl Api {
             }
         };
 
-        Ok(store_new_key(&admin, &body.label, &key).await?)
+        Ok(store_new_key(&admin, &body.label, &key, body.is_default).await?)
     }
 
     #[oai(
@@ -205,7 +206,7 @@ impl Api {
         let key = PrivateKey::random(&mut get_crypto_rng(), kind.into())
             .map_err(russh::keys::Error::from)?;
 
-        Ok(store_new_key(&admin, &label, &key).await?)
+        Ok(store_new_key(&admin, &label, &key, false).await?)
     }
 
     #[oai(
@@ -272,8 +273,11 @@ async fn store_new_key(
     admin: &AdminContext,
     label: &str,
     key: &PrivateKey,
+    is_default: bool,
 ) -> Result<CreateSSHClientKeyResponse, WarpgateError> {
-    match warpgate_protocol_ssh::import_client_key(&admin.services().db, label, key, false).await? {
+    match warpgate_protocol_ssh::import_client_key(&admin.services().db, label, key, is_default)
+        .await?
+    {
         Some(model) => Ok(CreateSSHClientKeyResponse::Created(Json(model.into()))),
         None => Ok(CreateSSHClientKeyResponse::Conflict(Json(
             "This key is already imported".into(),

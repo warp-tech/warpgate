@@ -60,7 +60,12 @@
                 'The client is shown a link to approve the login in the browser, and is held on a waiting screen until confirmed.',
             ],
         ]),
-        rdp: new Map(),
+        rdp: new Map([
+            [
+                [CredentialKind.WebUserApproval, true],
+                'The client is shown a link to approve the login in the browser, and is held on a waiting screen until confirmed.',
+            ],
+        ]),
         kubernetes: new Map([
             [
                 [CredentialKind.WebUserApproval, true],

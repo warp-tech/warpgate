@@ -155,7 +155,7 @@
     {#if options.auth.kind === 'PublicKey'}
         <FormGroup floating label="Key" class="w-100 ms-3">
             <select class="form-control" bind:value={clientKeySelectValue}>
-                <option value="">Use default key</option>
+                <option value="">Use default keys</option>
                 {#each clientKeys as key (key.id)}
                     <option value={key.id}>
                         {key.label}

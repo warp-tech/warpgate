@@ -629,10 +629,12 @@
                                     />
                                 </FormGroup>
                                 <HelpText class="mt-3 mb-3">
-                                    Optional message shown to users when they connect to a target: during SSH authentication, as a
-                                    modal in the UI and proxied HTTP
-                                    targets, on the RDP/VNC hold screen and as a
-                                    PostgreSQL connection notice.
+                                    Optional message shown to users when they
+                                    connect to a target: during SSH
+                                    authentication, as a modal in the UI and
+                                    proxied HTTP targets, on the RDP/VNC hold
+                                    screen and as a PostgreSQL connection
+                                    notice.
                                 </HelpText>
                             </Section>
 

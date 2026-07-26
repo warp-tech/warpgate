@@ -162,7 +162,7 @@ async fn default_client_keys(
 ) -> Result<Vec<SshClientKey::Model>, WarpgateError> {
     let defaults = SshClientKey::Entity::find_default().all(db).await?;
     if defaults.is_empty() {
-        SshClientKey::Entity::find_ordered().all(db).await
+        Ok(SshClientKey::Entity::find_ordered().all(db).await?)
     } else {
         Ok(defaults)
     }
