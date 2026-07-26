@@ -34,6 +34,12 @@ pub trait DbAuthTransport {
 
     const PROTOCOL: Protocol;
 
+    /// Whether this protocol can present a web-approval prompt mid-authentication.
+    /// When false, a policy requiring web approval denies before the success
+    /// message is sent, so the client sees a clean denial rather than an OK packet
+    /// immediately followed by an error.
+    const SUPPORTS_WEB_APPROVAL: bool;
+
     /// Ask the client for a password. `Ok(None)` means this protocol has no way
     /// to ask again — MySQL sends its password once, inside the handshake — and
     /// the login is denied.
@@ -233,6 +239,18 @@ async fn authorize_user<T: DbAuthTransport>(
             AuthResult::Need(kinds) if kinds.contains(&CredentialKind::WebUserApproval) => {
                 if services.try_web_approval_bypass(&state_arc).await? {
                     continue;
+                }
+
+                // Deny before the success message is sent: a protocol that can't
+                // show the prompt would otherwise reach `send_denied` having
+                // already spent the permit, sending the client OK then error.
+                if !T::SUPPORTS_WEB_APPROVAL {
+                    warn!(
+                        protocol = %T::PROTOCOL,
+                        "Web user approval is required but not supported by this protocol"
+                    );
+                    transport.send_denied().await?;
+                    return Ok(None);
                 }
 
                 let identification_string =

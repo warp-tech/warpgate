@@ -56,6 +56,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for PostgresSessi
     type Error = PostgresError;
 
     const PROTOCOL: Protocol = crate::common::PROTOCOL_NAME;
+    const SUPPORTS_WEB_APPROVAL: bool = true;
 
     async fn prompt_password(&mut self) -> Result<Option<Secret<String>>, PostgresError> {
         self.stream

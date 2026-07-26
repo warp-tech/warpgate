@@ -52,6 +52,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for MySqlSession<
     type Error = MySqlError;
 
     const PROTOCOL: Protocol = crate::common::PROTOCOL_NAME;
+    const SUPPORTS_WEB_APPROVAL: bool = false;
 
     /// The password arrived in the handshake. There is no second prompt in the
     /// MySQL protocol, so a repeat request denies the login.
