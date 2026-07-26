@@ -1,4 +1,3 @@
-use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -9,12 +8,10 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, User};
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 fn certificate_fingerprint(certificate_pem: &str) -> Result<String, WarpgateError> {
     Ok(warpgate_ca::certificate_sha256_hex_fingerprint(
@@ -94,13 +91,12 @@ impl ListApi {
     )]
     async fn api_get_all(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         user_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
     ) -> Result<GetCertificateCredentialsResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
 
         let objects = CertificateCredential::Entity::find()
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
@@ -119,15 +115,14 @@ impl ListApi {
     )]
     async fn api_issue(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<IssueCertificateCredentialRequest>,
         user_id: Path<Uuid>,
-        _auth: AnySecurityScheme,
     ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = &ctx.services().db;
-        let params = ctx.parameters().await?;
+        let db = &admin.services().db;
+        let params = admin.parameters().await?;
         let ca =
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
         let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
@@ -159,7 +154,7 @@ impl ListApi {
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username.clone(),
-            actor_user_id: ctx.auth.user_id(),
+            actor_user_id: admin.auth.user_id(),
         }
         .emit();
 
@@ -191,15 +186,14 @@ impl DetailApi {
     )]
     async fn api_update(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<UpdateCertificateCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
     ) -> Result<UpdateCertificateCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
         let Some(cred) = CertificateCredential::Entity::find_by_id(id.0)
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
             .one(db)
@@ -225,14 +219,13 @@ impl DetailApi {
     )]
     async fn api_delete(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _auth: AnySecurityScheme,
     ) -> Result<RevokeCertificateCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
 
         let Some(model) = CertificateCredential::Entity::find_by_id(id.0)
             .filter(CertificateCredential::Column::UserId.eq(*user_id))
@@ -265,7 +258,7 @@ impl DetailApi {
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username,
-            actor_user_id: ctx.auth.user_id(),
+            actor_user_id: admin.auth.user_id(),
         }
         .emit();
 

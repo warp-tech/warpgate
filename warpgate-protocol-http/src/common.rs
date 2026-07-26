@@ -8,7 +8,6 @@ use poem::error::InternalServerError;
 use poem::session::Session;
 use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
@@ -23,7 +22,6 @@ use warpgate_common_http::{
     X_WARPGATE_CLUSTER_TOKEN,
 };
 use warpgate_core::ConfigProvider;
-use warpgate_db_entities::{User, UserAdminRoleAssignment};
 use warpgate_sso::WarpgateIdToken;
 
 use crate::session::SessionStore;
@@ -106,40 +104,12 @@ impl SessionExt for Session {
 pub struct AuthStateId(pub Uuid);
 
 pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bool> {
-    // A user is considered an administrator if they have any admin role assigned.
-    let services = ctx.services();
-
-    // Admin tokens bypass the database check and are always full administrators.
-    if matches!(ctx.auth, RequestAuthorization::AdminToken) {
-        return Ok(true);
-    }
-
-    let username = match &ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::User { username, .. })
-        | RequestAuthorization::UserToken { username, .. } => username,
-        RequestAuthorization::Session(SessionAuthorization::Ticket { .. })
-        | RequestAuthorization::ClusterToken => return Ok(false),
-        RequestAuthorization::AdminToken => unreachable!(),
-    };
-
-    let db = &services.db;
-
-    let Some(user_model) = User::Entity::find()
-        .filter(User::Entity::username_eq_ci(username))
-        .one(db)
+    // A user is an administrator if they hold any admin permission. Resolved through the one
+    // shared permission loader so this can't drift from the endpoint gate or the /info UI.
+    Ok(warpgate_admin::api::admin_permission_set(ctx)
         .await
         .map_err(InternalServerError)?
-    else {
-        return Ok(false);
-    };
-
-    let count: u64 = UserAdminRoleAssignment::Entity::find()
-        .filter(UserAdminRoleAssignment::Column::UserId.eq(user_model.id))
-        .count(db)
-        .await
-        .map_err(InternalServerError)?;
-
-    Ok(count > 0)
+        .is_admin())
 }
 
 pub async fn _inner_auth<E: Endpoint + 'static>(
