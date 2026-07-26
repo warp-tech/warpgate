@@ -16,7 +16,7 @@ class Test:
         verify Warpgate authenticates to the target with that specific key."""
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
-            key = api.generate_ssh_client_key(
+            key = api.generate_ssh_own_key(
                 sdk.GenerateSSHClientKeyRequest(
                     label=f"key-{uuid4()}",
                     kind=sdk.SSHClientKeyKind.ED25519,

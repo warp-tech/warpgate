@@ -235,6 +235,45 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200},
     ),
     AdminApiTestCase(
+        id="import_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.import_ssh_own_key_with_http_info(
+            sdk.ImportSSHClientKeyRequest(
+                label=f"key-{uuid4()}",
+                secret_key=open("ssh-keys/id_ed25519").read(),
+                is_default=False,
+            )
+        ),
+        expected_statuses={201, 409},
+    ),
+    AdminApiTestCase(
+        id="generate_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.generate_ssh_own_key_with_http_info(
+            sdk.GenerateSSHClientKeyRequest(
+                label=f"key-{uuid4()}", kind=sdk.SSHClientKeyKind.ED25519
+            )
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="update_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.update_ssh_own_key_with_http_info(
+            r["ssh_client_key_id"],
+            sdk.UpdateSSHClientKeyRequest(label=f"key-{uuid4()}", is_default=False),
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="delete_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.delete_ssh_own_key_with_http_info(
+            r["ssh_client_key_id"]
+        ),
+        expected_statuses={204, 400, 404},
+    ),
+    AdminApiTestCase(
         id="get_logs",
         permission=None,
         call=lambda api, r: api.get_logs_with_http_info(sdk.GetLogsRequest(search="")),
@@ -964,6 +1003,7 @@ def api_test_resources(
     resources["session_id"] = str(uuid4())
     resources["recording_id"] = str(uuid4())
     resources["ssh_known_host_id"] = str(uuid4())
+    resources["ssh_client_key_id"] = str(uuid4())
     resources["ticket_request_id"] = str(uuid4())
 
     target = ac.create_target(

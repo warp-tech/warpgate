@@ -25,7 +25,7 @@
     let sshTargets = $state<Target[]>([])
     let clientKeys = $state<SSHClientKey[]>([])
 
-    api.getSshClientKeys().then(keys => {
+    api.getSshOwnKeys().then(keys => {
         clientKeys = keys
     })
 

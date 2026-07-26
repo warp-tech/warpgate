@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.0-beta.2-27-gd137485f-modified"
+    "version": "v0.27.0-beta.3-2-g448c16d5-modified"
   },
   "servers": [
     {
@@ -1146,34 +1146,6 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/SSHKey"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "TokenSecurityScheme": []
-          },
-          {
-            "CookieSecurityScheme": []
-          }
-        ],
-        "operationId": "get_ssh_own_keys"
-      }
-    },
-    "/ssh/client-keys": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "array",
-                  "items": {
                     "$ref": "#/components/schemas/SSHClientKey"
                   }
                 }
@@ -1189,7 +1161,7 @@
             "CookieSecurityScheme": []
           }
         ],
-        "operationId": "get_ssh_client_keys"
+        "operationId": "get_ssh_own_keys"
       },
       "post": {
         "requestBody": {
@@ -1242,10 +1214,10 @@
             "CookieSecurityScheme": []
           }
         ],
-        "operationId": "import_ssh_client_key"
+        "operationId": "import_ssh_own_key"
       }
     },
-    "/ssh/client-keys/generate": {
+    "/ssh/own-keys/generate": {
       "post": {
         "requestBody": {
           "content": {
@@ -1297,10 +1269,10 @@
             "CookieSecurityScheme": []
           }
         ],
-        "operationId": "generate_ssh_client_key"
+        "operationId": "generate_ssh_own_key"
       }
     },
-    "/ssh/client-keys/{id}": {
+    "/ssh/own-keys/{id}": {
       "put": {
         "parameters": [
           {
@@ -1348,7 +1320,7 @@
             "CookieSecurityScheme": []
           }
         ],
-        "operationId": "update_ssh_client_key"
+        "operationId": "update_ssh_own_key"
       },
       "delete": {
         "parameters": [
@@ -1390,7 +1362,7 @@
             "CookieSecurityScheme": []
           }
         ],
-        "operationId": "delete_ssh_client_key"
+        "operationId": "delete_ssh_own_key"
       }
     },
     "/logs": {
@@ -6324,6 +6296,7 @@
           "label",
           "kind",
           "public_key",
+          "public_key_base64",
           "is_default"
         ],
         "properties": {
@@ -6340,6 +6313,10 @@
           "public_key": {
             "type": "string"
           },
+          "public_key_base64": {
+            "type": "string",
+            "description": "The base64 body without the algorithm prefix — kept for the\nbackwards-compatible `own-keys` consumers."
+          },
           "is_default": {
             "type": "boolean"
           }
@@ -6351,22 +6328,6 @@
           "Ed25519",
           "Rsa"
         ]
-      },
-      "SSHKey": {
-        "type": "object",
-        "title": "SSHKey",
-        "required": [
-          "kind",
-          "public_key_base64"
-        ],
-        "properties": {
-          "kind": {
-            "type": "string"
-          },
-          "public_key_base64": {
-            "type": "string"
-          }
-        }
       },
       "SSHKnownHost": {
         "type": "object",

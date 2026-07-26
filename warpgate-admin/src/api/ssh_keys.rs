@@ -14,31 +14,27 @@ use super::AdminContext;
 pub struct Api;
 
 #[derive(Serialize, Object)]
-struct SSHKey {
-    pub kind: String,
-    pub public_key_base64: String,
-}
-
-#[derive(Serialize, Object)]
 struct SSHClientKey {
     pub id: Uuid,
     pub label: String,
     pub kind: String,
     pub public_key: String,
+    /// The base64 body without the algorithm prefix — kept for the
+    /// backwards-compatible `own-keys` consumers.
+    pub public_key_base64: String,
     pub is_default: bool,
 }
 
 impl From<SshClientKey::Model> for SSHClientKey {
     fn from(model: SshClientKey::Model) -> Self {
+        let mut parts = model.public_key.split_whitespace();
+        let kind = parts.next().unwrap_or_default().into();
+        let public_key_base64 = parts.next().unwrap_or_default().into();
         Self {
-            kind: model
-                .public_key
-                .split_whitespace()
-                .next()
-                .unwrap_or_default()
-                .into(),
             id: model.id,
             label: model.label,
+            kind,
+            public_key_base64,
             public_key: model.public_key,
             is_default: model.is_default,
         }
@@ -64,12 +60,6 @@ impl From<SSHClientKeyKind> for Algorithm {
 
 #[derive(ApiResponse)]
 enum GetSSHOwnKeysResponse {
-    #[oai(status = 200)]
-    Ok(Json<Vec<SSHKey>>),
-}
-
-#[derive(ApiResponse)]
-enum GetSSHClientKeysResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<SSHClientKey>>),
 }
@@ -137,39 +127,15 @@ impl Api {
             .all(&admin.services().db)
             .await?
             .into_iter()
-            .map(|k| {
-                let mut parts = k.public_key.split_whitespace();
-                SSHKey {
-                    kind: parts.next().unwrap_or_default().into(),
-                    public_key_base64: parts.next().unwrap_or_default().into(),
-                }
-            })
+            .map(Into::into)
             .collect();
         Ok(GetSSHOwnKeysResponse::Ok(Json(keys)))
     }
 
     #[oai(
-        path = "/ssh/client-keys",
-        method = "get",
-        operation_id = "get_ssh_client_keys"
-    )]
-    async fn api_get_client_keys(
-        &self,
-        admin: AdminContext,
-    ) -> Result<GetSSHClientKeysResponse, WarpgateError> {
-        let keys = SshClientKey::Entity::find_ordered()
-            .all(&admin.services().db)
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect();
-        Ok(GetSSHClientKeysResponse::Ok(Json(keys)))
-    }
-
-    #[oai(
-        path = "/ssh/client-keys",
+        path = "/ssh/own-keys",
         method = "post",
-        operation_id = "import_ssh_client_key"
+        operation_id = "import_ssh_own_key"
     )]
     async fn api_import_client_key(
         &self,
@@ -191,9 +157,9 @@ impl Api {
     }
 
     #[oai(
-        path = "/ssh/client-keys/generate",
+        path = "/ssh/own-keys/generate",
         method = "post",
-        operation_id = "generate_ssh_client_key"
+        operation_id = "generate_ssh_own_key"
     )]
     async fn api_generate_client_key(
         &self,
@@ -210,9 +176,9 @@ impl Api {
     }
 
     #[oai(
-        path = "/ssh/client-keys/:id",
+        path = "/ssh/own-keys/:id",
         method = "put",
-        operation_id = "update_ssh_client_key"
+        operation_id = "update_ssh_own_key"
     )]
     async fn api_update_client_key(
         &self,
@@ -240,9 +206,9 @@ impl Api {
     }
 
     #[oai(
-        path = "/ssh/client-keys/:id",
+        path = "/ssh/own-keys/:id",
         method = "delete",
-        operation_id = "delete_ssh_client_key"
+        operation_id = "delete_ssh_own_key"
     )]
     async fn api_delete_client_key(
         &self,

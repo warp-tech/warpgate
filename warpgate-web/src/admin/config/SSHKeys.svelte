@@ -21,7 +21,7 @@
     let generateModalOpen = $state(false)
 
     async function load() {
-        clientKeys = await api.getSshClientKeys()
+        clientKeys = await api.getSshOwnKeys()
         if ($adminPermissions.configEdit) {
             knownHosts = await api.getSshKnownHosts()
         }
@@ -55,13 +55,13 @@
         const key = editingKey
         run(async () => {
             if (key) {
-                await api.updateSshClientKey({
+                await api.updateSshOwnKey({
                     id: key.id,
                     updateSSHClientKeyRequest: { label, isDefault },
                 })
                 return
             }
-            await api.importSshClientKey({
+            await api.importSshOwnKey({
                 importSSHClientKeyRequest: { label, secretKey, isDefault },
             })
         })
@@ -69,14 +69,14 @@
 
     function generateKey(label: string, kind: SSHClientKeyKind) {
         run(async () => {
-            const created = await api.generateSshClientKey({
+            await api.generateSshOwnKey({
                 generateSSHClientKeyRequest: { label, kind },
             })
         })
     }
 
     async function deleteKey(key: SSHClientKey) {
-        await run(() => api.deleteSshClientKey(key))
+        await run(() => api.deleteSshOwnKey(key))
     }
 
     async function deleteHost(host: SSHKnownHost) {
