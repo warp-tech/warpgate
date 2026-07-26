@@ -316,7 +316,16 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
         match validate_client_certificate(&client_cert.der_bytes, services).await {
             Ok(Some(user)) => return Ok(Some(user)),
             Ok(None) => debug!("Client certificate provided but not found in database"),
-            Err(e) => warn!(error = %e, "Error validating client certificate"),
+            // A rejected certificate returns `Ok(None)`; an `Err` is a fault in the
+            // certificate store (DB) or an unparseable cert, not a credential
+            // decision. Surfacing it as 500 keeps an outage from masquerading as a
+            // bad certificate.
+            Err(e) => {
+                return Err(poem::Error::from_string(
+                    format!("Client certificate validation failed: {e}"),
+                    poem::http::StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+            }
         }
     } else {
         debug!("No client certificate provided in TLS connection");
