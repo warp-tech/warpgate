@@ -19,6 +19,10 @@ pub const fn _default_mysql_port() -> u16 {
     3306
 }
 
+pub const fn _default_postgres_port() -> u16 {
+    5432
+}
+
 pub const fn _default_vnc_port() -> u16 {
     5900
 }

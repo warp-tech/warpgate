@@ -74,9 +74,8 @@ pub trait HoldPainter {
     fn render_interval(&self) -> Duration;
 }
 
-/// A single deadline for the whole interactive phase. Constructed once and threaded through
-/// so no protocol can accidentally cap it shorter — VNC previously wrapped the entire auth
-/// phase in a 120 s handshake timeout that pre-empted this, capping 2FA at 120 s.
+/// A single deadline for the whole interactive phase. Constructed once and threaded through so
+/// no protocol-level handshake timeout can cap the interactive phase (and thus 2FA) shorter.
 pub struct Deadline {
     sleep: Pin<Box<Sleep>>,
 }
@@ -100,8 +99,8 @@ impl Deadline {
 ///
 /// Returns the authenticated user on success, or `None` on rejection, timeout, an
 /// uncollectable required factor, or viewer disconnect. On success, clears the user's
-/// brute-force counters and paints a "connecting" screen before returning (both protocols,
-/// so the behaviour no longer diverges by where the caller happens to clear counters).
+/// brute-force counters and paints a "connecting" screen before returning, so every protocol
+/// clears counters at the same point.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_hold_screen<I, P>(
     services: &Services,

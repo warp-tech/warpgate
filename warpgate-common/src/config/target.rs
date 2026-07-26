@@ -7,8 +7,8 @@ use warpgate_tls::TlsMode;
 
 use super::defaults::{
     _default_empty_string, _default_empty_vec, _default_mysql_port,
-    _default_postgres_idle_timeout_str, _default_rdp_port, _default_ssh_port, _default_username,
-    _default_vnc_port,
+    _default_postgres_idle_timeout_str, _default_postgres_port, _default_rdp_port,
+    _default_ssh_port, _default_username, _default_vnc_port,
 };
 use crate::Secret;
 
@@ -209,7 +209,7 @@ pub struct TargetPostgresOptions {
     #[serde(default = "_default_empty_string")]
     pub host: String,
 
-    #[serde(default = "_default_mysql_port")]
+    #[serde(default = "_default_postgres_port")]
     pub port: u16,
 
     #[serde(default = "_default_username")]
@@ -419,8 +419,8 @@ pub enum TargetOptions {
 mod tests {
     use super::{TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions, Tls};
 
-    /// The two ways of saying "nothing specified" must not disagree — an absent
-    /// `tls` block used to mean *don't verify* while an empty one meant *verify*.
+    /// The two ways of saying "nothing specified" — an absent `tls` block and an
+    /// empty one — must both resolve to verifying.
     #[test]
     fn omitted_and_empty_tls_agree_on_verifying() {
         let absent: TargetHTTPOptions = serde_json::from_str(r#"{"url":"http://t"}"#).unwrap();
