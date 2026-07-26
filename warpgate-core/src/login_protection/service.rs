@@ -1,8 +1,9 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
+use sea_orm::sea_query::IntoCondition;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait,
     PaginatorTrait, QueryFilter, Set, TransactionTrait,
 };
 use time::OffsetDateTime;
@@ -211,7 +212,7 @@ impl LoginProtectionService {
         } else {
             let now = OffsetDateTime::now_utc();
             let lockout = UserLockout::Entity::find()
-                .filter(UserLockout::Column::Username.eq(username))
+                .filter(UserLockout::Entity::username_eq_ci(username))
                 .one(db)
                 .await?
                 .filter(|l| l.expires_at.is_none_or(|e| e > now));
@@ -287,7 +288,7 @@ impl LoginProtectionService {
         let user_window_start =
             now - time::Duration::seconds(i64::from(config.user_lockout.time_window_seconds));
         let user_count = FailedLoginAttempt::Entity::find()
-            .filter(FailedLoginAttempt::Column::Username.eq(&attempt.username))
+            .filter(FailedLoginAttempt::Entity::username_eq_ci(&attempt.username))
             .filter(FailedLoginAttempt::Column::Timestamp.gte(user_window_start))
             .count(&txn)
             .await?;
@@ -402,7 +403,7 @@ impl LoginProtectionService {
         config: &LoginProtectionConfig,
     ) -> Result<Option<UserLockInfo>, WarpgateError> {
         let already_locked = UserLockout::Entity::find()
-            .filter(UserLockout::Column::Username.eq(username))
+            .filter(UserLockout::Entity::username_eq_ci(username))
             .one(db)
             .await?
             .is_some();
@@ -458,9 +459,9 @@ impl LoginProtectionService {
 
         FailedLoginAttempt::Entity::delete_many()
             .filter(
-                FailedLoginAttempt::Column::RemoteIp
-                    .eq(ip.to_string())
-                    .or(FailedLoginAttempt::Column::Username.eq(username)),
+                Condition::any()
+                    .add(FailedLoginAttempt::Column::RemoteIp.eq(ip.to_string()))
+                    .add(FailedLoginAttempt::Entity::username_eq_ci(username).into_condition()),
             )
             .exec(db)
             .await?;
@@ -490,11 +491,11 @@ impl LoginProtectionService {
     pub async fn unlock_user(&self, username: &str) -> Result<(), WarpgateError> {
         let db = &self.db;
         UserLockout::Entity::delete_many()
-            .filter(UserLockout::Column::Username.eq(username))
+            .filter(UserLockout::Entity::username_eq_ci(username))
             .exec(db)
             .await?;
         FailedLoginAttempt::Entity::delete_many()
-            .filter(FailedLoginAttempt::Column::Username.eq(username))
+            .filter(FailedLoginAttempt::Entity::username_eq_ci(username))
             .exec(db)
             .await?;
 
