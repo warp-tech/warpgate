@@ -195,19 +195,19 @@
         </FormGroup>
 
         <Button
-            class="d-flex align-items-center"
+            class="d-flex align-items-center login-view-button"
             color="primary"
             type="submit"
             disabled={busy}
         >
-            Login
+            Log in
             <Fa class="ms-2" fw icon={faArrowRight} />
         </Button>
     </form>
 {/snippet}
 
 <Loadable promise={initPromise}>
-    <div class="mt-5">
+    <div class="content">
         <div class="page-summary-bar">
             {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
                 <h1>Welcome</h1>
@@ -252,22 +252,20 @@
             {@render localLoginForm()}
         {/if}
 
-        <div class="mt-3"></div>
-
         {#if reauthRequired}
-            <Alert color="warning"
-                >The security policy requires you to sign in again before
-                accessing this function.</Alert
-            >
+            <Alert color="warning">
+                The security policy requires you to sign in again before
+                accessing this function.
+            </Alert>
         {/if}
         {#if credentialRejected || authState === ApiAuthState.Failed}
             <Alert color="danger">Incorrect credentials</Alert>
         {/if}
         {#if authState === ApiAuthState.IpRejected}
-            <Alert color="danger"
-                >Login denied: your IP address is not in the allowed range for
-                this user</Alert
-            >
+            <Alert color="danger">
+                Login denied: your IP address is not in the allowed range for
+                this user
+            </Alert>
         {/if}
         {#if serverErrorMessage}
             <Alert color="danger">{serverErrorMessage}</Alert>
@@ -275,57 +273,63 @@
         {#if error}
             <Alert color="danger">{error}</Alert>
         {/if}
-    </div>
 
-    {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
-        <Loadable promise={ssoProvidersPromise}>
-            {#snippet children(ssoProviders)}
-                <div class="mt-3 sso-buttons">
-                    {#each ssoProviders as ssoProvider (ssoProvider.name)}
-                        <button
-                            type="button"
-                            class="btn btn-secondary"
-                            disabled={busy}
-                            onclick={() => startSSO(ssoProvider)}
-                        >
-                            {#if ssoProvider.kind === SsoProviderKind.Google}
-                                <Fa fw class="me-2" icon={faGoogle} />
-                            {/if}
-                            {#if ssoProvider.kind === SsoProviderKind.Azure}
-                                <Fa fw class="me-2" icon={faMicrosoft} />
-                            {/if}
-                            {#if ssoProvider.kind === SsoProviderKind.Apple}
-                                <Fa fw class="me-2" icon={faApple} />
-                            {/if}
-                            {ssoProvider.label || ssoProvider.name}
-                        </button>
-                    {/each}
-                </div>
-            {/snippet}
-        </Loadable>
-    {/if}
+        {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
+            <Loadable promise={ssoProvidersPromise}>
+                {#snippet children(ssoProviders)}
+                    {#if passwordLoginAllowed && !(passwordLoginMinimized && !showPasswordLogin)}
+                        <div class="sso-separator"></div>
+                    {/if}
+                    <div class="sso-buttons">
+                        {#each ssoProviders as ssoProvider (ssoProvider.name)}
+                            <button
+                                type="button"
+                                class="btn btn-secondary login-view-button"
+                                disabled={busy}
+                                onclick={() => startSSO(ssoProvider)}
+                            >
+                                {#if ssoProvider.kind === SsoProviderKind.Google}
+                                    <Fa fw class="me-2" icon={faGoogle} />
+                                {/if}
+                                {#if ssoProvider.kind === SsoProviderKind.Azure}
+                                    <Fa fw class="me-2" icon={faMicrosoft} />
+                                {/if}
+                                {#if ssoProvider.kind === SsoProviderKind.Apple}
+                                    <Fa fw class="me-2" icon={faApple} />
+                                {/if}
+                                {ssoProvider.label || ssoProvider.name}
+                            </button>
+                        {/each}
+                    </div>
+                    {#if passwordLoginAllowed && passwordLoginMinimized && !showPasswordLogin}
+                        <div class="sso-separator"></div>
+                    {/if}
+                {/snippet}
+            </Loadable>
+        {/if}
 
-    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginMinimized && !showPasswordLogin}
-        <div class="mt-3 text-center">
+        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginMinimized && !showPasswordLogin}
+            <div class="text-center">
+                <button
+                    type="button"
+                    class="btn btn-link"
+                    onclick={() => showPasswordLogin = true}
+                >
+                    Password login
+                </button>
+            </div>
+        {/if}
+
+        {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed && authState !== ApiAuthState.IpRejected}
             <button
                 type="button"
-                class="btn btn-link"
-                onclick={() => showPasswordLogin = true}
+                class="btn w-100 mt-3 btn-secondary login-view-button"
+                onclick={cancel}
             >
-                Password login
+                Cancel
             </button>
-        </div>
-    {/if}
-
-    {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed && authState !== ApiAuthState.IpRejected}
-        <button
-            type="button"
-            class="btn w-100 mt-3 btn-secondary"
-            onclick={cancel}
-        >
-            Cancel
-        </button>
-    {/if}
+        {/if}
+    </div>
 </Loadable>
 
 <style lang="scss">
@@ -347,5 +351,49 @@
         }
     }
 
+    .sso-separator {
+        position: relative;
+        text-align: center;
+        margin: 1.5rem 0;
+        font-style: italic;
+        font-size: 0.75rem;
+        opacity: 0.5;
 
+        &::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background-color: var(--bs-body-color);
+            opacity: 0.5;
+        }
+
+        &::after {
+            content: 'or';
+            position: relative;
+            display: inline-block;
+            padding: 0 1rem;
+            background-color: var(--bs-body-bg);
+        }
+    }
+
+    :global(.login-view-button) {
+        min-height: 45px;
+    }
+
+    .content {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+
+        padding-bottom: 5rem;
+    }
 </style>

@@ -6,7 +6,11 @@
     import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { get } from 'svelte/store'
-    import Router, { link, type WrappedComponent } from 'svelte-spa-router'
+    import Router, {
+        link,
+        router,
+        type WrappedComponent,
+    } from 'svelte-spa-router'
     import active from 'svelte-spa-router/active'
     import { wrap } from 'svelte-spa-router/wrap'
     import AnalyticsConsentModal from './AnalyticsConsentModal.svelte'
@@ -79,17 +83,34 @@
     routes['/config/*'] = routes['/config']!
     // biome-ignore lint/style/noNonNullAssertion: x
     routes['/status/*'] = routes['/status']!
+
+    const wideMode = $derived(router.location.startsWith('/log'))
 </script>
 
 <Loadable promise={initPromise}>
-    <div class="app container-lg">
+    <div
+        class="app"
+        class:container-lg={!wideMode}
+        class:container-max={wideMode}
+    >
         <header>
             <a href="/@warpgate" class="d-flex logo-link me-4">
                 <Brand />
             </a>
             {#if $serverInfo?.username}
-                <a use:link use:active href="/status/sessions">Status</a>
-                <a use:link use:active href="/config">Config</a>
+                <a
+                    use:link
+                    use:active={{path: /^\/status\//}}
+                    href="/status/sessions"
+                    >Status</a
+                >
+                <a
+                    use:link
+                    use:active
+                    use:active={{path: /^\/config\//}}
+                    href="/config/targets"
+                    >Config</a
+                >
                 <a use:link use:active href="/log">Log</a>
             {/if}
             <span class="ms-3"></span>
@@ -125,6 +146,10 @@
         min-height: 100vh;
         display: flex;
         flex-direction: column;
+
+        &.container-max {
+            margin: 0 30px;
+        }
     }
 
     header, footer {
