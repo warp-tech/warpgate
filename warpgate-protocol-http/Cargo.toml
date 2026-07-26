@@ -43,4 +43,5 @@ warpgate-tls = { path = "../warpgate-tls", default-features = false }
 warpgate-web = { path = "../warpgate-web", default-features = false }
 
 [dev-dependencies]
+poem = { workspace = true, features = ["test"] }
 rustls = { workspace = true, features = ["aws_lc_rs"] }

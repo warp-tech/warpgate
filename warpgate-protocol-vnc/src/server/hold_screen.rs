@@ -4,18 +4,21 @@
 
 use std::future::Future;
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use tokio::io::AsyncWrite;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
 use uuid::Uuid;
-use warpgate_common::auth::AuthResult;
+use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_core::Services;
 use warpgate_db_entities::Parameters;
-use warpgate_desktop_auth::{OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt};
-use warpgate_desktop_ui::{self as ui, AuthPrompt};
+use warpgate_desktop_auth::{
+    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter, OtpAction, run_hold_screen,
+};
+use warpgate_desktop_ui as ui;
 
 use super::RenderState;
 use super::protocol::{ClientEvent, write_server_cut_text};
@@ -89,7 +92,8 @@ where
     }
 }
 
-/// Render hold screen UI while collecting OTP/waiting for web auth
+/// Render hold screen UI while collecting OTP/waiting for web auth. Returns
+/// the authenticated user once the auth state is fully accepted.
 pub(super) async fn collect_additional_credentials<W>(
     viewer_wr: &mut W,
     events_rx: &mut mpsc::UnboundedReceiver<ClientEvent>,
@@ -98,81 +102,106 @@ pub(super) async fn collect_additional_credentials<W>(
     state_id: Uuid,
     username: &str,
     remote_ip: IpAddr,
-) -> Result<()>
+) -> Result<AuthStateUserInfo>
 where
-    W: AsyncWrite + Unpin,
+    W: AsyncWrite + Unpin + Send,
 {
-    let state = services
-        .auth_state_store
-        .lock()
-        .await
-        .get(&state_id)
-        .context("auth state expired")?;
+    // The hold-screen input and painter are separate objects (so the driver can await input
+    // and paint without aliasing one `&mut` across its `select!`); they share the viewer
+    // render state through a lock, seeded from `render` and copied back once done.
+    let shared = Arc::new(Mutex::new(render.clone()));
+    let mut input = VncHoldInput {
+        events_rx,
+        render: shared.clone(),
+    };
+    let mut painter = VncHoldPainter {
+        viewer_wr,
+        render: shared.clone(),
+    };
 
-    let mut otp = OtpEntry::new("vnc");
-    let mut approval = services.auth_state_store.lock().await.subscribe(state_id);
+    let result = run_hold_screen(
+        services,
+        state_id,
+        crate::PROTOCOL_NAME,
+        username,
+        remote_ip,
+        &mut input,
+        &mut painter,
+        Deadline::until_auth_state_expires(),
+    )
+    .await;
 
-    'next_prompt: loop {
-        // Bind to a local so the state guard drops before `complete()` re-locks the same
-        // AuthState mutex — holding a match-scrutinee guard across it deadlocks (same reason
-        // RDP's `run_hold_screen` does this).
-        let verification = state.lock().await.verify();
-        let need = match verification {
-            AuthResult::Accepted { .. } => {
-                services
-                    .auth_state_store
-                    .lock()
-                    .await
-                    .complete(&state_id)
-                    .await;
-                return Ok(());
+    *render = shared.lock().await.clone();
+    match result? {
+        Some(user_info) => Ok(user_info),
+        None => bail!("VNC interactive authentication was not completed"),
+    }
+}
+
+/// Reads VNC viewer input for the hold screen, mapping X11 keysyms to OTP actions and folding
+/// every other message into the shared [`RenderState`] via `note_event`.
+struct VncHoldInput<'a> {
+    events_rx: &'a mut mpsc::UnboundedReceiver<ClientEvent>,
+    render: Arc<Mutex<RenderState>>,
+}
+
+impl HoldInputSource for VncHoldInput<'_> {
+    async fn next(&mut self) -> HoldEvent {
+        match self.events_rx.recv().await {
+            None => {
+                self.render.lock().await.note_event(None);
+                HoldEvent::Disconnected
             }
-            AuthResult::Rejected => bail!("VNC authentication rejected"),
-            AuthResult::Need(need) => need,
-        };
-
-        let Some(mut prompt) = auth_prompt(services, &state, &need, otp.entered()).await else {
-            bail!("authentication policy requires a factor that cannot be collected over VNC");
-        };
-
-        if let AuthPrompt::WebApproval { url, .. } = &prompt
-            && let Some(url) = url
-        {
-            write_server_cut_text(viewer_wr, url).await.ok();
-        }
-
-        loop {
-            tokio::select! {
-                // Browser approval landed (or the signal lagged/closed); the loop re-verifies.
-                _ = approval.recv(), if matches!(prompt, ui::AuthPrompt::WebApproval { ..}) => {
-                    continue 'next_prompt // web approval accepted
-                }
-                event = events_rx.recv(), if !render.reader_done => {
-                    if let Some(keysym) = render.note_event(event.as_ref())
-                        && let AuthPrompt::Otp { entered } = &mut prompt
-                    {
-                        if let Some(action) = keysym_otp_action(keysym)
-
-                        {
-                            match otp.apply(action, services, &state, username, remote_ip).await {
-                                OtpActionApplyOutcome::Applied => {
-                                    *entered = otp.entered().to_string();
-                                },
-                                OtpActionApplyOutcome::AcceptedAndValidated => break,
-                                OtpActionApplyOutcome::TooManyFailures => {
-                                    bail!("too many incorrect one-time passwords");
-                                }
-                            }
-                        }
-                        render.pending_request = true; // reflect the input on the next paint
-                        continue 'next_prompt // OTP might have been accepted or rejected
+            some => {
+                let mut render = self.render.lock().await;
+                match render.note_event(some.as_ref()).and_then(keysym_otp_action) {
+                    Some(action) => {
+                        // Repaint so the typed digit shows even though the viewer only
+                        // requests frames on its own schedule.
+                        render.pending_request = true;
+                        HoldEvent::Otp(action)
                     }
-                }
-                () = sleep(SPINNER_INTERVAL), if render.pending_request => {
-                    render.paint(viewer_wr, |screen, tick| ui::render_authentication(screen, tick, &prompt)).await?;
+                    None => HoldEvent::Other,
                 }
             }
         }
+    }
+}
+
+/// Paints the VNC hold screen, gated on an outstanding viewer frame request (VNC is
+/// pull-based), and delivers the web-approval URL via server-cut-text.
+struct VncHoldPainter<'a, W> {
+    viewer_wr: &'a mut W,
+    render: Arc<Mutex<RenderState>>,
+}
+
+impl<W: AsyncWrite + Unpin + Send> HoldPainter for VncHoldPainter<'_, W> {
+    async fn paint(&mut self, frame: HoldFrame<'_>) -> Result<()> {
+        let mut render = self.render.lock().await;
+        if !render.pending_request {
+            return Ok(());
+        }
+        match frame {
+            HoldFrame::Prompt(prompt) => {
+                render
+                    .paint(self.viewer_wr, |screen, tick| {
+                        ui::render_authentication(screen, tick, prompt)
+                    })
+                    .await
+            }
+            HoldFrame::Connecting => render.paint(self.viewer_wr, ui::render_connecting).await,
+        }
+    }
+
+    async fn present_web_approval_url(&mut self, url: Option<&str>) -> Result<()> {
+        if let Some(url) = url {
+            write_server_cut_text(self.viewer_wr, url).await.ok();
+        }
+        Ok(())
+    }
+
+    fn render_interval(&self) -> Duration {
+        SPINNER_INTERVAL
     }
 }
 

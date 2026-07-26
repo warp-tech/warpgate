@@ -1,6 +1,5 @@
 use anyhow::Context;
 use poem::session::Session;
-use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::Set;
@@ -9,13 +8,11 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::helpers::hash::generate_ticket_secret;
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_common_http::auth::web_reauth_required;
 use warpgate_core::logging::AuditEvent;
 use warpgate_db_entities::{Target, Ticket, User};
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 pub struct Api;
 
@@ -108,14 +105,11 @@ impl Api {
     #[oai(path = "/tickets", method = "get", operation_id = "get_tickets")]
     async fn api_get_all_tickets(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        admin: AdminContext,
     ) -> Result<GetTicketsResponse, WarpgateError> {
         use warpgate_db_entities::Ticket;
 
-        require_admin_permission(&ctx, None).await?;
-
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
         let tickets = Ticket::Entity::find().all(db).await?;
         let tickets = futures::future::join_all(
             tickets
@@ -132,19 +126,18 @@ impl Api {
     async fn api_create_ticket(
         &self,
         session: &Session,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<CreateTicketRequest>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateTicketResponse, WarpgateError> {
         use warpgate_db_entities::Ticket;
 
-        require_admin_permission(&ctx, Some(AdminPermission::TicketsCreate)).await?;
+        admin.require(AdminPermission::TicketsCreate)?;
 
-        if web_reauth_required(&ctx, session).await? {
+        if web_reauth_required(&admin, session).await? {
             return Ok(CreateTicketResponse::ReauthRequired);
         }
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
 
         let Some(user) = (if let Some(user_id) = body.user_id {
             User::Entity::find_by_id(user_id).one(db).await?
@@ -196,7 +189,7 @@ impl Api {
             user_id: user.id,
             username: user.username.clone(),
             target: target.name.clone(),
-            actor_user_id: ctx.auth.user_id(),
+            actor_user_id: admin.auth.user_id(),
         }
         .emit();
 

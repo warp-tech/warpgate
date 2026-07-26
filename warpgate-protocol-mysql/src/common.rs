@@ -1,8 +1,8 @@
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
-use warpgate_common::ProtocolName;
+use warpgate_common::Protocol;
 
-pub const PROTOCOL_NAME: ProtocolName = "MySQL";
+pub const PROTOCOL_NAME: Protocol = Protocol::MySql;
 
 /// mysql_native_password scramble:
 /// SHA1(password) XOR SHA1(challenge || SHA1(SHA1(password)))

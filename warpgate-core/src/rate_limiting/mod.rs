@@ -33,7 +33,7 @@ mod swappable_cell;
 
 use governor::DefaultKeyedRateLimiter;
 pub use limiter::WarpgateRateLimiter;
-pub use registry::RateLimiterRegistry;
+pub use registry::{RateLimiterRegistry, apply_new_rate_limits};
 pub use shared_limiter::{SharedWarpgateRateLimiter, SharedWarpgateRateLimiterGuard};
 pub use stack::{RateLimiterStackHandle, stack_rate_limiters};
 pub use stream::RateLimitedStream;

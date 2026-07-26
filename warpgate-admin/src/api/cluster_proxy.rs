@@ -20,9 +20,9 @@ use poem::http::HeaderName;
 use poem::http::header::{CONNECTION, CONTENT_LENGTH, COOKIE, HOST, TRANSFER_ENCODING, UPGRADE};
 use poem::web::websocket::WebSocket;
 use poem::{Body, IntoResponse, Request, Response};
+use sea_orm::EntityTrait;
 use tokio_tungstenite::{Connector, client_async_tls_with_config, tungstenite};
 use warpgate_ca::CLUSTER_TLS_SNI_NAME;
-use sea_orm::EntityTrait;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
 use warpgate_common::{Secret, WarpgateError};
@@ -69,10 +69,7 @@ pub async fn session_owner(
     if owner_id == services.cluster.node_id {
         return Ok(Owner::Local);
     }
-    let Some(node) = Node::Entity::find_by_id(owner_id)
-        .one(&services.db)
-        .await?
-    else {
+    let Some(node) = Node::Entity::find_by_id(owner_id).one(&services.db).await? else {
         return Err(WarpgateError::NodeGone(owner_id));
     };
     Ok(Owner::remote(node))
@@ -165,9 +162,9 @@ async fn connect_any(addrs: &[SocketAddr]) -> poem::Result<tokio::net::TcpStream
             Err(error) => last_error = Some(error),
         }
     }
-    Err(poem::error::BadGateway(last_error.unwrap_or_else(|| {
-        std::io::Error::other("no peer address")
-    }))
+    Err(poem::error::BadGateway(
+        last_error.unwrap_or_else(|| std::io::Error::other("no peer address")),
+    )
     .into())
 }
 

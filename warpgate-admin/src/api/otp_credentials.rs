@@ -1,16 +1,13 @@
-use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserTotpCredential, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{OtpCredential, User};
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 #[derive(Object)]
 struct ExistingOtpCredential {
@@ -61,13 +58,12 @@ impl ListApi {
     )]
     async fn api_get_all(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         user_id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetOtpCredentialsResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
 
         let objects = OtpCredential::Entity::find()
             .filter(OtpCredential::Column::UserId.eq(*user_id))
@@ -86,14 +82,13 @@ impl ListApi {
     )]
     async fn api_create(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<NewOtpCredential>,
         user_id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
 
         let object = OtpCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -114,7 +109,7 @@ impl ListApi {
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username,
-            actor_user_id: ctx.auth.user_id(),
+            actor_user_id: admin.auth.user_id(),
         }
         .emit();
 
@@ -141,14 +136,13 @@ impl DetailApi {
     )]
     async fn api_delete(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
 
         let Some(role) = OtpCredential::Entity::find_by_id(id.0)
             .filter(OtpCredential::Column::UserId.eq(*user_id))
@@ -170,7 +164,7 @@ impl DetailApi {
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username,
-            actor_user_id: ctx.auth.user_id(),
+            actor_user_id: admin.auth.user_id(),
         }
         .emit();
 

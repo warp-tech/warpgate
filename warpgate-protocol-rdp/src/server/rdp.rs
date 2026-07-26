@@ -24,7 +24,7 @@ use tracing::warn;
 use warpgate_core::DesktopInput;
 use warpgate_desktop_ui::DEFAULT_SIZE;
 
-use super::protocol::{Event, Input};
+use super::protocol::{AuthVerdict, Event, Input};
 
 /// Upper bound on a single framebuffer update, and so on the desktop size we will accept
 /// from a viewer: a full-screen BGRA frame has to stay a sane allocation.
@@ -90,13 +90,12 @@ where
     let tls = build_tls_acceptor(&cert_pem, &key_pem)?;
 
     let (frame_tx, frame_rx) = mpsc::channel::<DisplayUpdate>(256);
-    let (auth_tx, auth_rx) = mpsc::channel::<bool>(1);
     let size = Arc::new(Mutex::new(DesktopSize {
         width: size.0,
         height: size.1,
     }));
 
-    let router = tokio::spawn(route_input(in_rx, frame_tx, auth_tx, Arc::clone(&size)));
+    let router = tokio::spawn(route_input(in_rx, frame_tx, Arc::clone(&size)));
 
     let display = DisplayHandler {
         size,
@@ -111,7 +110,6 @@ where
     };
     let validator: Arc<dyn CredentialValidator> = Arc::new(Validator {
         out: out_tx.clone(),
-        resp: Mutex::new(auth_rx),
     });
 
     let mut server = RdpServer::builder()
@@ -166,14 +164,10 @@ fn build_tls_acceptor(cert_pem: &str, key_pem: &str) -> Result<TlsAcceptor> {
 async fn route_input(
     mut rx: mpsc::Receiver<Input>,
     frame_tx: mpsc::Sender<DisplayUpdate>,
-    auth_tx: mpsc::Sender<bool>,
     size: Arc<Mutex<DesktopSize>>,
 ) {
     while let Some(msg) = rx.recv().await {
         match msg {
-            Input::AuthResponse { accept } => {
-                let _ = auth_tx.send(accept).await;
-            }
             Input::Frame {
                 x,
                 y,
@@ -309,10 +303,9 @@ impl RdpServerDisplayUpdates for DisplayUpdatesReceiver {
 }
 
 /// Credential validator: forwards the viewer's credentials to Warpgate and awaits its
-/// accept/reject verdict.
+/// verdict on a per-request reply channel.
 struct Validator {
     out: mpsc::UnboundedSender<Event>,
-    resp: Mutex<mpsc::Receiver<bool>>,
 }
 
 #[async_trait::async_trait]
@@ -321,15 +314,23 @@ impl CredentialValidator for Validator {
         &self,
         credentials: &Credentials,
     ) -> Result<CredentialDecision, CredentialValidationError> {
-        let _ = self.out.send(Event::AuthRequest {
-            username: credentials.username.clone(),
-            password: credentials.password.clone(),
-        });
-        let mut resp = self.resp.lock().await;
-        match resp.recv().await {
-            Some(true) => Ok(CredentialDecision::Accept),
-            // Reject on explicit denial or if Warpgate hung up before answering.
-            _ => Ok(CredentialDecision::Reject),
+        let (reply, verdict) = oneshot::channel();
+        if self
+            .out
+            .send(Event::AuthRequest {
+                username: credentials.username.clone(),
+                password: credentials.password.clone(),
+                reply,
+            })
+            .is_err()
+        {
+            // Warpgate hung up before we could ask.
+            return Ok(CredentialDecision::Reject);
+        }
+        match verdict.await {
+            Ok(AuthVerdict::StartSession) => Ok(CredentialDecision::Accept),
+            // Explicit denial, or the control loop dropped the reply without answering.
+            Ok(AuthVerdict::Deny) | Err(_) => Ok(CredentialDecision::Reject),
         }
     }
 }

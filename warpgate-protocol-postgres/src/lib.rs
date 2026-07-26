@@ -113,7 +113,7 @@ impl ProtocolServer for PostgresProtocolServer {
 
                     let server_handle = State::register_session(
                         &services.state,
-                        &crate::common::PROTOCOL_NAME,
+                        crate::common::PROTOCOL_NAME,
                         SessionStateInit {
                             remote_address: Some(remote_address),
                             handle: Box::new(session_handle),

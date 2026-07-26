@@ -13,8 +13,9 @@ use tracing::warn;
 use warpgate_common::Secret;
 use warpgate_common::auth::{AuthCredential, AuthState};
 use warpgate_common::helpers::otp::OTP_DIGITS;
+use warpgate_common::Protocol;
 use warpgate_core::Services;
-use warpgate_core::auth::validate_and_add_credential;
+use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 
 /// Max wrong one-time passwords before the holding screen gives up.
@@ -31,8 +32,8 @@ pub enum OtpAction {
 pub struct OtpEntry {
     entered: String,
     failures: usize,
-    /// Lowercase audit / brute-force label (`"rdp"` / `"vnc"`).
-    protocol_label: &'static str,
+    /// Recorded on failed attempts for audit and brute-force accounting.
+    protocol: Protocol,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,11 +44,11 @@ pub enum OtpActionApplyOutcome {
 }
 
 impl OtpEntry {
-    pub const fn new(protocol_label: &'static str) -> Self {
+    pub const fn new(protocol: Protocol) -> Self {
         Self {
             entered: String::new(),
             failures: 0,
-            protocol_label,
+            protocol,
         }
     }
 
@@ -87,20 +88,21 @@ impl OtpEntry {
 
         let credential = AuthCredential::Otp(Secret::new(std::mem::take(&mut self.entered)));
         // Route through the shared validator so a bad OTP emits the same audit event as the
-        // other protocols.
-        let valid = validate_and_add_credential(
+        // other protocols. A validation error counts as an invalid code (fail closed).
+        let valid = submit_credential(
             &mut *state.lock().await,
-            &credential,
+            credential,
             services.config_provider.as_ref(),
         )
         .await
+        .map(|outcome| outcome.is_valid())
         .unwrap_or(false);
         if valid {
             return OtpActionApplyOutcome::AcceptedAndValidated;
         }
 
         warn!(
-            protocol = self.protocol_label,
+            protocol = %self.protocol,
             "Incorrect one-time password"
         );
         self.failures += 1;
@@ -109,7 +111,7 @@ impl OtpEntry {
             .record_failed_attempt(FailedAttemptInfo {
                 username: username.to_string(),
                 remote_ip,
-                protocol: self.protocol_label.to_string(),
+                protocol: self.protocol,
                 credential_type: "otp".to_string(),
             })
             .await;

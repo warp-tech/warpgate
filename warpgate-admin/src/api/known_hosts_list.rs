@@ -1,18 +1,15 @@
 use std::str::FromStr;
 
 use anyhow::Context;
-use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::{Algorithm, PublicKey};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::KnownHost;
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 pub struct Api;
 
@@ -45,18 +42,17 @@ impl Api {
     )]
     async fn add_ssh_known_host(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<AddSshKnownHostRequest>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<AddSshKnownHostResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+        admin.require(AdminPermission::ConfigEdit)?;
 
         // Validate
         Algorithm::from_str(&body.key_type).context("parsing key type")?;
         PublicKey::from_openssh(&format!("{} {}", body.key_type, body.key_base64))
             .context("parsing key")?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
         let model = KnownHost::ActiveModel {
             id: Set(Uuid::new_v4()),
             host: Set(body.host.clone()),
@@ -76,12 +72,11 @@ impl Api {
     )]
     async fn get_ssh_known_hosts(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        admin: AdminContext,
     ) -> Result<GetSSHKnownHostsResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+        admin.require(AdminPermission::ConfigEdit)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
         let hosts = KnownHost::Entity::find().all(db).await?;
         Ok(GetSSHKnownHostsResponse::Ok(Json(hosts)))
     }

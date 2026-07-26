@@ -1,15 +1,12 @@
-use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
 use warpgate_common::{Target as TargetConfig, WarpgateError};
 use warpgate_common_http::SessionAuthorization;
-use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::Target;
 
-use crate::api::AnySecurityScheme;
-use crate::common::endpoint_auth;
+use crate::api::auth_scheme::AuthedSession;
 
 pub struct Api;
 
@@ -35,13 +32,11 @@ impl Api {
     #[oai(
         path = "/ticket-request-targets",
         method = "get",
-        operation_id = "get_ticket_request_targets",
-        transform = "endpoint_auth"
+        operation_id = "get_ticket_request_targets"
     )]
     async fn api_get_ticket_request_targets(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        ctx: AuthedSession,
     ) -> Result<GetTicketRequestTargetsResponse, WarpgateError> {
         if matches!(
             &ctx.auth,

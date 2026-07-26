@@ -14,16 +14,16 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{debug, error, info, info_span, warn};
+use url::Url;
 use uuid::Uuid;
-use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
+use warpgate_common::auth::AuthSelector;
+use warpgate_common::{
+    PostgresProtocolVersion, Protocol, Secret, TargetOptions, TargetPostgresOptions,
 };
-use warpgate_common::{PostgresProtocolVersion, Secret, TargetOptions, TargetPostgresOptions};
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::auth::validate_and_add_credential;
-use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
-    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
+    AuthOkPermit, DbAuthTransport, Services, TargetAuthorization, WarpgateServerHandle,
+    run_db_authorization,
 };
 use warpgate_tls::ServerTlsStream;
 
@@ -50,6 +50,89 @@ pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     /// Used to remap cancel keys when the target uses protocol 3.0
     /// but the client already supports 3.2
     cancel_key_upgrade_map: HashMap<SecretKey, SecretKey>,
+}
+
+impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for PostgresSession<S> {
+    type Error = PostgresError;
+
+    const PROTOCOL: Protocol = crate::common::PROTOCOL_NAME;
+
+    async fn prompt_password(&mut self) -> Result<Option<Secret<String>>, PostgresError> {
+        self.stream
+            .push(pgwire::messages::startup::Authentication::CleartextPassword)?;
+        self.stream.flush().await?;
+
+        let Some(PgWireGenericFrontendMessage(PgWireFrontendMessage::PasswordMessageFamily(
+            message,
+        ))) = self
+            .stream
+            .recv::<PgWireGenericFrontendMessage>(&self.decode_context)
+            .await?
+        else {
+            return Err(PostgresError::Eof);
+        };
+
+        Ok(Some(Secret::from(
+            message
+                .into_password()
+                .map_err(PostgresError::from)?
+                .password,
+        )))
+    }
+
+    async fn send_auth_ok(&mut self, _permit: AuthOkPermit) -> Result<(), PostgresError> {
+        self.stream
+            .push(pgwire::messages::startup::Authentication::Ok)?;
+        Ok(())
+    }
+
+    async fn external_url(&mut self) -> Result<Url, PostgresError> {
+        Ok(construct_external_url(None, &*self.services.config.lock().await, None).await?)
+    }
+
+    async fn send_web_approval_prompt(
+        &mut self,
+        url: &Url,
+        identification_string: &str,
+    ) -> Result<bool, PostgresError> {
+        self.stream
+            .push(pgwire::messages::response::NoticeResponse::new(vec![
+                (b'S', "WARNING".into()),
+                (b'V', "WARNING".into()),
+                (b'C', "WG001".into()),
+                (
+                    b'M',
+                    "Warpgate authentication: please open the following URL in your browser:"
+                        .into(),
+                ),
+                (b'D', url.to_string()),
+                (
+                    b'H',
+                    format!(
+                        "Make sure you're seeing this security key: {}\n",
+                        identification_string
+                            .chars()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    ),
+                ),
+            ]))?;
+        self.stream.flush().await?;
+        Ok(true)
+    }
+
+    async fn send_denied(&mut self) -> Result<(), PostgresError> {
+        let error_info = ErrorInfo::new(
+            "FATAL".to_owned(),
+            "28P01".to_owned(),
+            "Authentication failed".to_owned(),
+        );
+        self.stream
+            .push(pgwire::messages::response::ErrorResponse::from(error_info))?;
+        self.stream.flush().await?;
+        Ok(())
+    }
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
@@ -163,296 +246,24 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         startup: pgwire::messages::startup::Startup,
         username: &String,
     ) -> Result<(), PostgresError> {
-        async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
-            this: &mut PostgresSession<S>,
-        ) -> Result<(), PostgresError> {
-            let error_info = ErrorInfo::new(
-                "FATAL".to_owned(),
-                "28P01".to_owned(),
-                "Authentication failed".to_owned(),
-            );
-
-            this.stream
-                .push(pgwire::messages::response::ErrorResponse::from(error_info))?;
-            this.stream.flush().await?;
-            Ok(())
-        }
-
         let selector: AuthSelector = username.into();
         let remote_ip = self.remote_address.ip();
+        let session_id = self.server_handle.lock().await.id();
 
-        // Check if IP is blocked
-        match self
-            .services
-            .login_protection
-            .check_ip_blocked(&remote_ip)
-            .await
-        {
-            Ok(Some(block_info)) => {
-                warn!(
-                    ip = %remote_ip,
-                    expires_at = %block_info.expires_at,
-                    "PostgreSQL auth from blocked IP"
-                );
-                return fail(&mut self).await;
-            }
-            Ok(None) => {}
-            Err(e) => {
-                warn!(?e, "Failed to check IP block status");
-            }
-        }
+        let services = self.services.clone();
+        let Some(authorization) =
+            run_db_authorization(&mut self, &services, session_id, selector, remote_ip).await?
+        else {
+            return Ok(());
+        };
 
-        match selector {
-            AuthSelector::User {
-                username,
-                target_name,
-            } => {
-                // Check if user is locked
-                match self
-                    .services
-                    .login_protection
-                    .check_user_locked(&username)
-                    .await
-                {
-                    Ok(Some(_lock_info)) => {
-                        warn!(
-                            username = %username,
-                            "PostgreSQL auth for locked user"
-                        );
-                        return fail(&mut self).await;
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        warn!(?e, "Failed to check user lockout status");
-                    }
-                }
-
-                let session_id = self.server_handle.lock().await.id();
-                let state_arc = self
-                    .services
-                    .create_auth_state(
-                        Some(&session_id),
-                        &username,
-                        crate::common::PROTOCOL_NAME,
-                        &target_name,
-                        &[CredentialKind::Password],
-                        Some(self.remote_address.ip()),
-                        Some("password"),
-                    )
-                    .await?
-                    .1;
-
-                let mut auth_ok_sent = false;
-
-                loop {
-                    let user_auth_result = state_arc.lock().await.verify();
-
-                    match user_auth_result {
-                        AuthResult::Accepted { user_info } => {
-                            self.services
-                                .auth_state_store
-                                .lock()
-                                .await
-                                .complete(state_arc.lock().await.id())
-                                .await;
-                            let target_auth_result = {
-                                self.services
-                                    .config_provider
-                                    .authorize_target(&user_info.username, &target_name)
-                                    .await
-                                    .map_err(PostgresError::other)?
-                            };
-                            if !target_auth_result {
-                                warn!("Target {target_name} not authorized for user {username}",);
-                                // Record failed attempt
-                                let _ = self
-                                    .services
-                                    .login_protection
-                                    .record_failed_attempt(FailedAttemptInfo {
-                                        username: username.clone(),
-                                        remote_ip,
-                                        protocol: "postgres".to_string(),
-                                        credential_type: "password".to_string(),
-                                    })
-                                    .await;
-                                return fail(&mut self).await;
-                            }
-
-                            if !auth_ok_sent {
-                                self.stream
-                                    .push(pgwire::messages::startup::Authentication::Ok)?;
-                            }
-                            // Clear failed attempts on successful auth
-                            let _ = self
-                                .services
-                                .login_protection
-                                .clear_failed_attempts(&remote_ip, &user_info.username)
-                                .await;
-                            return self.run_authorized(startup, user_info, target_name).await;
-                        }
-                        AuthResult::Need(kinds) => {
-                            if kinds.contains(&CredentialKind::Password) {
-                                self.stream.push(
-                                    pgwire::messages::startup::Authentication::CleartextPassword,
-                                )?;
-                                self.stream.flush().await?;
-
-                                let Some(PgWireGenericFrontendMessage(
-                                    PgWireFrontendMessage::PasswordMessageFamily(message),
-                                )) = self
-                                    .stream
-                                    .recv::<PgWireGenericFrontendMessage>(&self.decode_context)
-                                    .await?
-                                else {
-                                    return Err(PostgresError::Eof);
-                                };
-
-                                let password = Secret::from(
-                                    message
-                                        .into_password()
-                                        .map_err(PostgresError::from)?
-                                        .password,
-                                );
-
-                                let mut state = state_arc.lock().await;
-
-                                let credential = AuthCredential::Password(password);
-
-                                if !validate_and_add_credential(
-                                    &mut state,
-                                    &credential,
-                                    self.services.config_provider.as_ref(),
-                                )
-                                .await?
-                                {
-                                    // Postgres CLI will just send the same password in a loop without prompting the user again
-                                    // Record failed attempt
-                                    let _ = self
-                                        .services
-                                        .login_protection
-                                        .record_failed_attempt(FailedAttemptInfo {
-                                            username: username.clone(),
-                                            remote_ip,
-                                            protocol: "postgres".to_string(),
-                                            credential_type: "password".to_string(),
-                                        })
-                                        .await;
-                                    return fail(&mut self).await;
-                                }
-                            } else if kinds.contains(&CredentialKind::WebUserApproval) {
-                                // Only WebUserApproval is needed, i.e. the password was either correct or not required, otherwise just fail early
-
-                                if self
-                                    .services
-                                    .try_web_approval_bypass(&state_arc)
-                                    .await
-                                    .map_err(PostgresError::other)?
-                                {
-                                    continue;
-                                }
-
-                                let identification_string =
-                                    state_arc.lock().await.identification_string().to_owned();
-                                let auth_state_id = *state_arc.lock().await.id();
-                                let mut event = self
-                                    .services
-                                    .auth_state_store
-                                    .lock()
-                                    .await
-                                    .subscribe(auth_state_id);
-
-                                let ext_url_result = construct_external_url(
-                                    None,
-                                    &*self.services.config.lock().await,
-                                    None,
-                                )
-                                .await;
-
-                                let login_url = match ext_url_result {
-                                    Ok(ext_url) => {
-                                        state_arc.lock().await.construct_web_approval_url(ext_url)
-                                    }
-                                    Err(error) => {
-                                        error!(?error, "Failed to construct external URL");
-                                        return fail(&mut self).await;
-                                    }
-                                };
-
-                                if !auth_ok_sent {
-                                    self.stream
-                                        .push(pgwire::messages::startup::Authentication::Ok)?;
-                                    auth_ok_sent = true;
-                                }
-
-                                self.stream
-                                    .push(pgwire::messages::response::NoticeResponse::new(vec![
-                                        (b'S', "WARNING".into()),
-                                        (b'V', "WARNING".into()),
-                                        (b'C', "WG001".into()),
-                                        (b'M', "Warpgate authentication: please open the following URL in your browser:".into()),
-                                        (b'D', login_url.into()),
-                                        (b'H', format!(
-                                            "Make sure you're seeing this security key: {}\n",
-                                            identification_string
-                                                .chars()
-                                                .map(|x| x.to_string())
-                                                .collect::<Vec<_>>()
-                                                .join(" ")
-                                        )),
-                                    ]))?;
-                                self.stream.flush().await?;
-
-                                if !matches!(event.recv().await, Ok(AuthResult::Accepted { .. })) {
-                                    warn!("Web user approval failed");
-                                    return fail(&mut self).await;
-                                }
-                            } else {
-                                return fail(&mut self).await;
-                            }
-                        }
-                        AuthResult::Rejected => {
-                            // Record failed attempt
-                            let _ = self
-                                .services
-                                .login_protection
-                                .record_failed_attempt(FailedAttemptInfo {
-                                    username: username.clone(),
-                                    remote_ip,
-                                    protocol: "postgres".to_string(),
-                                    credential_type: "password".to_string(),
-                                })
-                                .await;
-                            return fail(&mut self).await;
-                        }
-                    }
-                }
-            }
-            AuthSelector::Ticket { secret } => {
-                match authorize_ticket(&self.services.db, &secret)
-                    .await
-                    .map_err(PostgresError::other)?
-                {
-                    Some((ticket, target, user_info)) => {
-                        info!("Authorized for {} with a ticket", target.name);
-                        consume_ticket(&self.services.db, &ticket.id)
-                            .await
-                            .map_err(PostgresError::other)?;
-
-                        self.stream
-                            .push(pgwire::messages::startup::Authentication::Ok)?;
-                        self.run_authorized(startup, user_info, target.name).await
-                    }
-                    _ => fail(&mut self).await,
-                }
-            }
-        }
+        self.run_authorized(startup, authorization).await
     }
 
     async fn run_authorized(
         mut self,
         startup: pgwire::messages::startup::Startup,
-        user_info: AuthStateUserInfo,
-        target_name: String,
+        authorization: TargetAuthorization,
     ) -> Result<(), PostgresError> {
         if let Some(banner) = warpgate_db_entities::Parameters::Entity::get(&self.services.db)
             .await
@@ -470,26 +281,18 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
         self.stream.flush().await?;
 
-        let target = {
-            self.services
-                .config_provider
-                .get_target_by_name(&target_name)
-                .await?
-                .and_then(|t| match t.options {
-                    TargetOptions::Postgres(ref options) => Some((t.clone(), options.clone())),
-                    _ => None,
-                })
-        };
+        let (user_info, target) = authorization.into_parts();
 
-        let Some((target, postgres_options)) = target else {
-            warn!("Selected target not found");
+        let TargetOptions::Postgres(ref postgres_options) = target.options else {
+            warn!("Selected target is not a PostgreSQL target");
             self.send_error_response(
                 "0W001".into(),
-                format!("Warpgate target {target_name} not found"),
+                format!("Warpgate target {} not found", target.name),
             )
             .await?;
             return Ok(());
         };
+        let postgres_options = postgres_options.clone();
 
         {
             let handle = self.server_handle.lock().await;
@@ -542,61 +345,47 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             x => x,
         }?;
 
-        // Parse idle timeout from config
-        let idle_timeout = options
-            .idle_timeout
-            .as_ref()
-            .and_then(|s| {
-                let trimmed = s.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    humantime::parse_duration(trimmed)
-                        .map_err(|e| {
-                            warn!(
-                                timeout_string = %trimmed,
-                                error = %e,
-                                "Invalid idle_timeout value, falling back to default"
-                            );
-                            e
-                        })
-                        .ok()
-                }
-            })
-            .unwrap_or(Duration::from_secs(60 * 10)); // Default 10 minutes
-
-        if idle_timeout.as_secs() > 0 {
-            info!(
-                idle_timeout_seconds = idle_timeout.as_secs(),
-                "Using configured idle timeout for session"
-            );
-        }
+        let idle_timeout = match parse_idle_timeout(options.idle_timeout.as_deref()) {
+            IdlePolicy::Disabled => None,
+            IdlePolicy::Timeout(timeout) => {
+                info!(
+                    idle_timeout_seconds = timeout.as_secs(),
+                    "Using configured idle timeout for session"
+                );
+                Some(timeout)
+            }
+        };
 
         let mut last_activity = std::time::Instant::now();
         let check_interval = Duration::from_secs(5); // Check idle timeout every 5 seconds
 
         loop {
-            let elapsed = last_activity.elapsed();
-            if elapsed > idle_timeout {
-                info!(
-                    idle_seconds = elapsed.as_secs(),
-                    timeout_seconds = idle_timeout.as_secs(),
-                    "Session idle timeout exceeded, closing connection"
-                );
-                self.send_error_response(
-                    "57P01".into(),
-                    format!(
-                        "Session idle for {} exceeded configured timeout of {}. Please reconnect.",
-                        humantime::format_duration(elapsed),
-                        humantime::format_duration(idle_timeout)
-                    ),
-                )
-                .await?;
-                break;
-            }
-
-            let remaining_timeout = idle_timeout.saturating_sub(elapsed);
-            let select_timeout = remaining_timeout.min(check_interval);
+            // With the idle timeout disabled we still wake up on check_interval
+            // to re-poll the sockets, but never close the connection ourselves.
+            let select_timeout = match idle_timeout {
+                Some(timeout) => {
+                    let elapsed = last_activity.elapsed();
+                    if elapsed > timeout {
+                        info!(
+                            idle_seconds = elapsed.as_secs(),
+                            timeout_seconds = timeout.as_secs(),
+                            "Session idle timeout exceeded, closing connection"
+                        );
+                        self.send_error_response(
+                            "57P01".into(),
+                            format!(
+                                "Session idle for {} exceeded configured timeout of {}. Please reconnect.",
+                                humantime::format_duration(elapsed),
+                                humantime::format_duration(timeout)
+                            ),
+                        )
+                        .await?;
+                        break;
+                    }
+                    timeout.saturating_sub(elapsed).min(check_interval)
+                }
+                None => check_interval,
+            };
 
             tokio::select! {
                 c_to_s = time::timeout(select_timeout, self.stream.recv::<PgWireGenericFrontendMessage>(&self.decode_context)) => {
@@ -722,5 +511,73 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         if let PgWireBackendMessage::ErrorResponse(error) = msg {
             info!(?error, "PostgreSQL error");
         }
+    }
+}
+
+const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 10);
+
+enum IdlePolicy {
+    /// No idle timeout: the proxy never closes an idle session.
+    Disabled,
+    Timeout(Duration),
+}
+
+/// Map a configured `idle_timeout` string to an effective policy. An explicit
+/// zero duration (`"0"`, `"0s"`) disables the timeout; an unset or unparseable
+/// value falls back to [`DEFAULT_IDLE_TIMEOUT`].
+fn parse_idle_timeout(value: Option<&str>) -> IdlePolicy {
+    let Some(trimmed) = value.map(str::trim).filter(|s| !s.is_empty()) else {
+        return IdlePolicy::Timeout(DEFAULT_IDLE_TIMEOUT);
+    };
+    match humantime::parse_duration(trimmed) {
+        Ok(duration) if duration.is_zero() => IdlePolicy::Disabled,
+        Ok(duration) => IdlePolicy::Timeout(duration),
+        Err(error) => {
+            warn!(
+                timeout_string = %trimmed,
+                error = %error,
+                "Invalid idle_timeout value, falling back to default"
+            );
+            IdlePolicy::Timeout(DEFAULT_IDLE_TIMEOUT)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{DEFAULT_IDLE_TIMEOUT, IdlePolicy, parse_idle_timeout};
+
+    #[test]
+    fn explicit_zero_disables() {
+        assert!(matches!(
+            parse_idle_timeout(Some("0")),
+            IdlePolicy::Disabled
+        ));
+        assert!(matches!(
+            parse_idle_timeout(Some("0s")),
+            IdlePolicy::Disabled
+        ));
+    }
+
+    #[test]
+    fn valid_duration_is_used() {
+        assert!(matches!(
+            parse_idle_timeout(Some("30m")),
+            IdlePolicy::Timeout(d) if d == Duration::from_secs(30 * 60)
+        ));
+    }
+
+    #[test]
+    fn unset_or_unparseable_uses_default() {
+        assert!(matches!(
+            parse_idle_timeout(None),
+            IdlePolicy::Timeout(d) if d == DEFAULT_IDLE_TIMEOUT
+        ));
+        assert!(matches!(
+            parse_idle_timeout(Some("garbage")),
+            IdlePolicy::Timeout(d) if d == DEFAULT_IDLE_TIMEOUT
+        ));
     }
 }

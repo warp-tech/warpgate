@@ -1047,8 +1047,10 @@ def test_admin_api_permission_enforcement(
 ):
     url = f"https://localhost:{pg_wg.http_port}"
 
+    # Base-check endpoints (permission=None) admit any admin. An admin holds at least one
+    # permission — a permissionless role is not a real admin — so grant a benign baseline.
     allow_payload = make_limited_admin_role_payload(
-        **({case.permission: True} if case.permission else {})
+        **({case.permission: True} if case.permission else {"sessions_view": True})
     )
     allowed_role = _create_admin_role(admin_client, allow_payload)
     allowed_user = _create_user_with_role(admin_client, allowed_role.id)

@@ -189,6 +189,46 @@ class TestLoginProtection:
             f"Expected success after unblock, got {resp.status_code}"
         )
 
+    def test_ip_blocking_blocks_ticket_auth(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """Presenting a ticket is still a login, so a blocked IP can't spend a valid one."""
+        wg = _lp_wg(processes, ip_max=3, user_max=100)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, target = _create_test_user(api, echo_server_port)
+            secret = api.create_ticket(
+                sdk.CreateTicketRequest(
+                    target_name=target.name, username=user.username
+                )
+            ).secret
+
+        def _get_with_ticket():
+            s = requests.Session()
+            s.verify = False
+            return s.get(
+                f"{url}/some/path?warpgate-ticket={secret}", allow_redirects=False
+            )
+
+        # The ticket is good to begin with.
+        assert _get_with_ticket().status_code // 100 == 2
+
+        # 3 wrong passwords from this IP → threshold hit
+        for _ in range(3):
+            _post_login(url, user.username, "wrong")
+        time.sleep(0.2)
+
+        assert _get_with_ticket().status_code // 100 != 2, (
+            "blocked IP was still able to use a valid ticket"
+        )
+
+        # Unblocking restores it — proving the ticket itself was never consumed or
+        # invalidated, and the refusal above came from the IP block alone.
+        with admin_client(url) as api:
+            api.unblock_ip(sdk.UnblockIpRequest(ip="::1"))
+        assert _get_with_ticket().status_code // 100 == 2
+
     # ── user lockout ────────────────────────────────────────────────────────
 
     def test_user_lockout_triggers_and_blocks_correct_password(

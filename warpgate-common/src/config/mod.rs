@@ -209,7 +209,7 @@ pub struct AdminRole {
     pub ticket_requests_manage: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema, strum::EnumIter)]
 #[serde(rename_all = "snake_case")]
 pub enum AdminPermission {
     TargetsCreate,
@@ -254,6 +254,133 @@ impl AdminRole {
             AdminPermission::AdminRolesManage => self.admin_roles_manage,
             AdminPermission::TicketRequestsManage => self.ticket_requests_manage,
         }
+    }
+}
+
+use strum::IntoEnumIterator;
+
+impl AdminPermission {
+    /// The bit this permission occupies in an [`AdminPermissionSet`].
+    const fn bit(self) -> u32 {
+        1 << self as u32
+    }
+}
+
+/// The set of admin permissions a principal holds, folded from their assigned roles once so
+/// every consumer — the endpoint gate, the "is this an admin?" checks, and the UI
+/// serialization — reads one value instead of re-deriving the model three different ways.
+///
+/// An administrator is a principal holding at least one permission: a role that grants nothing
+/// confers no admin standing (there is no such thing as a permissionless admin).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdminPermissionSet(u32);
+
+impl AdminPermissionSet {
+    /// No permissions — the principal is not an administrator.
+    #[must_use]
+    pub const fn none() -> Self {
+        Self(0)
+    }
+
+    /// Every permission, e.g. for an admin token.
+    #[must_use]
+    pub fn all() -> Self {
+        Self(AdminPermission::iter().fold(0, |bits, perm| bits | perm.bit()))
+    }
+
+    /// The union of the permissions granted by `roles`.
+    #[must_use]
+    pub fn from_roles(roles: impl IntoIterator<Item = AdminRole>) -> Self {
+        let mut bits = 0;
+        for role in roles {
+            for perm in AdminPermission::iter() {
+                if role.has_permission(perm) {
+                    bits |= perm.bit();
+                }
+            }
+        }
+        Self(bits)
+    }
+
+    #[must_use]
+    pub const fn contains(&self, perm: AdminPermission) -> bool {
+        self.0 & perm.bit() != 0
+    }
+
+    /// Holding any permission at all makes the principal an administrator.
+    #[must_use]
+    pub const fn is_admin(&self) -> bool {
+        self.0 != 0
+    }
+}
+
+#[cfg(test)]
+mod admin_permission_set_tests {
+    use strum::IntoEnumIterator;
+    use uuid::Uuid;
+
+    use super::{AdminPermission, AdminPermissionSet, AdminRole};
+
+    fn empty_role() -> AdminRole {
+        AdminRole {
+            id: Uuid::nil(),
+            name: String::new(),
+            description: String::new(),
+            targets_create: false,
+            targets_edit: false,
+            targets_delete: false,
+            users_create: false,
+            users_edit: false,
+            users_delete: false,
+            access_roles_create: false,
+            access_roles_edit: false,
+            access_roles_delete: false,
+            access_roles_assign: false,
+            sessions_view: false,
+            sessions_terminate: false,
+            recordings_view: false,
+            tickets_create: false,
+            tickets_delete: false,
+            config_edit: false,
+            admin_roles_manage: false,
+            ticket_requests_manage: false,
+        }
+    }
+
+    #[test]
+    fn empty_is_not_admin() {
+        let set = AdminPermissionSet::from_roles([]);
+        assert_eq!(set, AdminPermissionSet::none());
+        assert!(!set.is_admin());
+        assert!(!set.contains(AdminPermission::ConfigEdit));
+    }
+
+    #[test]
+    fn unions_roles_and_reports_admin() {
+        let mut a = empty_role();
+        a.targets_create = true;
+        let mut b = empty_role();
+        b.config_edit = true;
+        let set = AdminPermissionSet::from_roles([a, b]);
+        assert!(set.is_admin());
+        assert!(set.contains(AdminPermission::TargetsCreate));
+        assert!(set.contains(AdminPermission::ConfigEdit));
+        assert!(!set.contains(AdminPermission::UsersDelete));
+    }
+
+    #[test]
+    fn all_contains_every_permission() {
+        let all = AdminPermissionSet::all();
+        for perm in AdminPermission::iter() {
+            assert!(all.contains(perm), "missing {perm:?}");
+        }
+    }
+
+    #[test]
+    fn role_granting_nothing_is_not_admin() {
+        let set = AdminPermissionSet::from_roles([empty_role()]);
+        assert!(!set.is_admin());
+        assert_eq!(set, AdminPermissionSet::none());
     }
 }
 

@@ -16,7 +16,7 @@ use warpgate_common::auth::{
 use warpgate_common::helpers::hash::verify_password_hash;
 use warpgate_common::helpers::otp::verify_totp;
 use warpgate_common::{
-    Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
+    Protocol, Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
     UserRequireCredentialsPolicy, UserSsoCredential, UserTotpCredential, WarpgateError,
 };
 use warpgate_db_entities as entities;
@@ -326,6 +326,15 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map_err(Into::into)
     }
 
+    async fn get_target_by_id(&self, id: Uuid) -> Result<Option<Target>, WarpgateError> {
+        entities::Target::Entity::find_by_id(id)
+            .one(&self.db)
+            .await?
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(Into::into)
+    }
+
     async fn get_target_by_hostname(
         &self,
         hostname: &str,
@@ -405,16 +414,17 @@ impl ConfigProvider for DatabaseConfigProvider {
                 protocols: HashMap::new(),
             };
 
-            // Native protocols can't carry an SSO exchange on the wire; their
-            // SSO login happens through the in-browser approval flow, so a
-            // required `Sso` is satisfied by `WebUserApproval`. HTTP performs
-            // SSO inline and keeps `Sso` as-is.
-            let make_policy = |required: Vec<CredentialKind>, native: bool| {
+            // Only HTTP performs an SSO exchange inline; no other protocol can
+            // carry one on the wire, so there a required `Sso` is satisfied by
+            // the in-browser approval flow instead. Keyed off the protocol
+            // rather than a per-entry flag so the rule has one statement.
+            let make_policy = |protocol: Protocol, required: Vec<CredentialKind>| {
                 let required_credential_types = required
                     .into_iter()
-                    .map(|kind| match kind {
-                        CredentialKind::Sso if native => CredentialKind::WebUserApproval,
-                        kind => kind,
+                    .map(|kind| match (kind, protocol) {
+                        (CredentialKind::Sso, Protocol::Http) => CredentialKind::Sso,
+                        (CredentialKind::Sso, _) => CredentialKind::WebUserApproval,
+                        (kind, _) => kind,
                     })
                     .collect();
                 Box::new(AllCredentialsPolicy {
@@ -423,23 +433,32 @@ impl ConfigProvider for DatabaseConfigProvider {
                 }) as Box<dyn CredentialPolicy + Sync + Send>
             };
 
-            if let Some(p) = req.http {
-                policy.protocols.insert("HTTP", make_policy(p, false));
-            }
-            if let Some(p) = req.mysql {
-                policy.protocols.insert("MySQL", make_policy(p, true));
-            }
-            if let Some(p) = req.postgres {
-                policy.protocols.insert("PostgreSQL", make_policy(p, true));
-            }
-            if let Some(p) = req.ssh {
-                policy.protocols.insert("SSH", make_policy(p, true));
-            }
-            if let Some(p) = req.vnc {
-                policy.protocols.insert("VNC", make_policy(p, true));
-            }
-            if let Some(p) = req.rdp {
-                policy.protocols.insert("RDP", make_policy(p, true));
+            // Full destructuring so a new per-protocol config field can't be
+            // silently left out of the policy map.
+            let UserRequireCredentialsPolicy {
+                http,
+                kubernetes,
+                ssh,
+                mysql,
+                postgres,
+                vnc,
+                rdp,
+            } = req;
+
+            for (protocol, required) in [
+                (Protocol::Http, http),
+                (Protocol::Kubernetes, kubernetes),
+                (Protocol::Ssh, ssh),
+                (Protocol::MySql, mysql),
+                (Protocol::Postgres, postgres),
+                (Protocol::Vnc, vnc),
+                (Protocol::Rdp, rdp),
+            ] {
+                if let Some(required) = required {
+                    policy
+                        .protocols
+                        .insert(protocol, make_policy(protocol, required));
+                }
             }
 
             Ok(Some(

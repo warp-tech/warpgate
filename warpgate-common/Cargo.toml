@@ -44,6 +44,7 @@ sea-orm.workspace = true
 sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+strum = { version = "0.26", features = ["derive"] }
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true

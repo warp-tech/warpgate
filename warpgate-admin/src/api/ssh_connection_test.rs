@@ -1,14 +1,11 @@
-use poem::web::Data;
 use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient, resolve_ssh_chain};
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 pub struct Api;
 
@@ -40,19 +37,18 @@ impl Api {
     )]
     async fn api_ssh_check_host_key(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<CheckSshHostKeyRequest>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CheckSshHostKeyResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
+        admin.require(AdminPermission::TargetsEdit)?;
 
-        let ssh_chain = resolve_ssh_chain(ctx.services(), body.target_id, ctx.auth.username())
+        let ssh_chain = resolve_ssh_chain(admin.services(), body.target_id, admin.auth.username())
             .await?
             .into_iter()
             .map(|x| x.ssh_options)
             .collect::<Vec<_>>();
 
-        let mut handles = RemoteClient::create(Uuid::new_v4(), ctx.services().clone())?;
+        let mut handles = RemoteClient::create(Uuid::new_v4(), admin.services().clone())?;
         let _ = handles
             .command_tx
             .send((RCCommand::Connect(ssh_chain), None));

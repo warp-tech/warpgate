@@ -1,4 +1,3 @@
-use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -9,12 +8,10 @@ use sea_orm::{
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserPublicKeyCredential, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{PublicKeyCredential, User};
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 async fn check_user_ldap_linked(
     db: &DatabaseConnection,
@@ -116,13 +113,12 @@ impl ListApi {
     )]
     async fn api_get_all(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         user_id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetPublicKeyCredentialsResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
 
         let objects = PublicKeyCredential::Entity::find()
             .filter(PublicKeyCredential::Column::UserId.eq(*user_id))
@@ -141,14 +137,13 @@ impl ListApi {
     )]
     async fn api_create(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<NewPublicKeyCredential>,
         user_id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
 
         // Ensure user exists and is not LDAP-linked
         let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
@@ -178,7 +173,7 @@ impl ListApi {
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username.clone(),
-            actor_user_id: ctx.auth.user_id(),
+            actor_user_id: admin.auth.user_id(),
         }
         .emit();
 
@@ -209,15 +204,14 @@ impl DetailApi {
     )]
     async fn api_update(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<NewPublicKeyCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdatePublicKeyCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
 
         // Ensure user exists and is not LDAP-linked
         let Some(_) = User::Entity::find_by_id(*user_id).one(db).await? else {
@@ -254,14 +248,13 @@ impl DetailApi {
     )]
     async fn api_delete(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
 
         if let Err(msg) = verify_user_not_ldap_linked(db, *user_id).await {
             return Ok(DeleteCredentialResponse::Forbidden(Json(msg)));
@@ -288,7 +281,7 @@ impl DetailApi {
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username,
-            actor_user_id: ctx.auth.user_id(),
+            actor_user_id: admin.auth.user_id(),
         }
         .emit();
 

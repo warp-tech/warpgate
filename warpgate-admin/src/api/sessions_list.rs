@@ -13,7 +13,7 @@ use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::SessionSnapshot;
 
-use super::AnySecurityScheme;
+use super::AdminContext;
 use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::common::require_admin_permission;
 
@@ -38,19 +38,18 @@ impl Api {
     #[allow(clippy::too_many_arguments)]
     async fn api_get_all_sessions(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         offset: Query<Option<u64>>,
         limit: Query<Option<u64>>,
         active_only: Query<Option<bool>>,
         logged_in_only: Query<Option<bool>>,
         username: Query<Option<String>>,
-        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetSessionsResponse> {
         use warpgate_db_entities::Session;
 
-        require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
+        admin.require(AdminPermission::SessionsView)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
         let mut q = Session::Entity::find().order_by_desc(Session::Column::Started);
 
         if active_only.unwrap_or(false) {
@@ -87,13 +86,12 @@ impl Api {
     )]
     async fn api_close_all_sessions(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         session: &Session,
-        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<CloseAllSessionsResponse> {
-        require_admin_permission(&ctx, Some(AdminPermission::SessionsTerminate)).await?;
+        admin.require(AdminPermission::SessionsTerminate)?;
 
-        let state = ctx.services().state.lock().await;
+        let state = admin.services().state.lock().await;
 
         for s in state.sessions.values() {
             let mut session = s.lock().await;

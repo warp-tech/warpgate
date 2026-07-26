@@ -11,14 +11,14 @@ use warpgate_common::{
     PasswordPolicy, PasswordPolicyViolation, User, UserPasswordCredential,
     UserRequireCredentialsPolicy, WarpgateError, validate_password,
 };
-use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{
     self as entities, CertificateCredential, PasswordCredential, PublicKeyCredential,
 };
 
 use super::common::get_user;
-use crate::api::AnySecurityScheme;
+use crate::api::auth_scheme::AuthedSession;
 use crate::common::endpoint_auth;
 
 pub struct Api;
@@ -246,13 +246,15 @@ impl Api {
     )]
     async fn api_get_credentials_state(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        ctx: AuthedSession,
     ) -> Result<CredentialsStateResponse, WarpgateError> {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(CredentialsStateResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(CredentialsStateResponse::Unauthorized);
         };
 
@@ -307,14 +309,16 @@ impl Api {
     )]
     async fn api_change_password(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<ChangePasswordRequest>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<ChangePasswordResponse, WarpgateError> {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(ChangePasswordResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(ChangePasswordResponse::Unauthorized);
         };
 
@@ -372,14 +376,16 @@ impl Api {
     )]
     async fn api_create_pk(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<NewPublicKeyCredential>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(CreatePublicKeyCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(CreatePublicKeyCredentialResponse::Unauthorized);
         };
 
@@ -419,14 +425,16 @@ impl Api {
     )]
     async fn api_delete_pk(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(DeleteCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);
         };
 
@@ -462,14 +470,16 @@ impl Api {
     )]
     async fn api_create_otp(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<NewOtpCredential>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(CreateOtpCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(CreateOtpCredentialResponse::Unauthorized);
         };
 
@@ -518,14 +528,16 @@ impl Api {
     )]
     async fn api_delete_otp(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(DeleteCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);
         };
 
@@ -561,13 +573,16 @@ impl Api {
     )]
     async fn api_issue_certificate(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<IssueCertificateCredentialRequest>,
     ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(IssueCertificateCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(IssueCertificateCredentialResponse::Unauthorized);
         };
 
@@ -619,13 +634,16 @@ impl Api {
     )]
     async fn api_revoke_certificate(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         id: Path<Uuid>,
     ) -> Result<DeleteCertificateCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(DeleteCertificateCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(DeleteCertificateCredentialResponse::Unauthorized);
         };
 

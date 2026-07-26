@@ -7,8 +7,8 @@ use warpgate_tls::TlsMode;
 
 use super::defaults::{
     _default_empty_string, _default_empty_vec, _default_mysql_port,
-    _default_postgres_idle_timeout_str, _default_rdp_port, _default_ssh_port, _default_true,
-    _default_username, _default_vnc_port,
+    _default_postgres_idle_timeout_str, _default_rdp_port, _default_ssh_port, _default_username,
+    _default_vnc_port,
 };
 use crate::Secret;
 
@@ -86,21 +86,25 @@ pub struct TargetHTTPOptions {
     pub external_host: Option<String>,
 }
 
+// `#[serde(default)]` sits on the container, not on each field, so that
+// `Default` is the single source for both an absent `tls` block and an absent
+// key inside a present one. Spelling the two separately is how `verify` came to
+// mean `false` for an omitted block and `true` for an empty one. Kept as a plain
+// comment: a doc comment here would surface in the OpenAPI schema.
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[serde(default)]
 pub struct Tls {
-    #[serde(default)]
     pub mode: TlsMode,
-
-    #[serde(default = "_default_true")]
     pub verify: bool,
 }
 
-#[allow(clippy::derivable_impls)]
 impl Default for Tls {
     fn default() -> Self {
         Self {
             mode: TlsMode::default(),
-            verify: false,
+            // A target that says nothing about certificate checking is not
+            // asking for it to be off.
+            verify: true,
         }
     }
 }
@@ -409,4 +413,40 @@ pub enum TargetOptions {
     Vnc(TargetVncOptions),
     #[serde(rename = "rdp")]
     Rdp(TargetRdpOptions),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions, Tls};
+
+    /// The two ways of saying "nothing specified" must not disagree — an absent
+    /// `tls` block used to mean *don't verify* while an empty one meant *verify*.
+    #[test]
+    fn omitted_and_empty_tls_agree_on_verifying() {
+        let absent: TargetHTTPOptions = serde_json::from_str(r#"{"url":"http://t"}"#).unwrap();
+        let empty: TargetHTTPOptions =
+            serde_json::from_str(r#"{"url":"http://t","tls":{}}"#).unwrap();
+
+        assert!(absent.tls.verify);
+        assert_eq!(absent.tls, empty.tls);
+        assert_eq!(absent.tls, Tls::default());
+    }
+
+    #[test]
+    fn every_target_kind_defaults_to_verifying() {
+        let mysql: TargetMySqlOptions = serde_json::from_str(r#"{"host":"t"}"#).unwrap();
+        let kubernetes: TargetKubernetesOptions = serde_json::from_str("{}").unwrap();
+
+        assert!(mysql.tls.verify);
+        assert!(kubernetes.tls.verify);
+    }
+
+    /// Turning verification off has to stay possible — it just has to be said.
+    #[test]
+    fn verification_can_still_be_opted_out_of() {
+        let off: TargetHTTPOptions =
+            serde_json::from_str(r#"{"url":"http://t","tls":{"verify":false}}"#).unwrap();
+
+        assert!(!off.tls.verify);
+    }
 }

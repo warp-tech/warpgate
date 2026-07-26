@@ -22,7 +22,7 @@ use tokio_rustls::TlsAcceptor;
 use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::detect_port_knock;
-use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetVncOptions};
+use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetVncOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
 use warpgate_desktop_auth::{
@@ -88,7 +88,7 @@ pub async fn bind_server(
 
                 let server_handle = match State::register_session(
                     &services.state,
-                    &PROTOCOL_NAME,
+                    PROTOCOL_NAME,
                     SessionStateInit {
                         remote_address: Some(remote_address),
                         handle: Box::new(session_handle),
@@ -260,14 +260,13 @@ async fn negotiate_and_authorize(
 
     let mut render = RenderState::new();
 
-    let (user_info, target, vnc_options) = match authenticated {
+    let (authorization, vnc_options) = match authenticated {
         DesktopAuthOutcome::Authorized {
-            user_info,
-            target,
+            authorization,
             options,
-        } => (user_info, target, options),
+        } => (authorization, options),
         DesktopAuthOutcome::NeedsInteractive(interactive) => {
-            collect_additional_credentials(
+            let user_info = collect_additional_credentials(
                 &mut viewer_wr,
                 &mut events_rx,
                 &mut render,
@@ -278,22 +277,9 @@ async fn negotiate_and_authorize(
             )
             .await?;
 
-            let user_info = services
-                .auth_state_store
-                .lock()
-                .await
-                .get(&interactive.state_id)
-                .context("auth state expired during approval")?
-                .lock()
-                .await
-                .user_info()
-                .clone();
-            let (target, options) = finalize_user_auth::<VncProto>(
-                services,
-                &interactive.username,
-                &interactive.target_name,
-            )
-            .await?;
+            let (authorization, options) =
+                finalize_user_auth::<VncProto>(services, &user_info, &interactive.target_name)
+                    .await?;
             // Interactive (TOTP / web-approval) auth fully succeeded: clear any failed
             // attempts, mirroring the password-only `Accepted` path in `authenticate` and
             // the SSH baseline, which clears counters once 2FA completes. Fail open.
@@ -301,11 +287,13 @@ async fn negotiate_and_authorize(
                 .login_protection
                 .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
                 .await;
-            (user_info, target, options)
+            (authorization, options)
         }
         // Already handled before the security handshake above.
         DesktopAuthOutcome::Failed => return Ok(None),
     };
+
+    let (user_info, target) = authorization.into_parts();
 
     {
         let handle = server_handle.lock().await;
@@ -340,7 +328,7 @@ async fn negotiate_and_authorize(
     .await??;
 
     // Resize the viewer to match backend geometry (only if it advertised DesktopSize).
-    if render.supports_desktop_size {
+    if render.caps.supports_desktop_size {
         write_desktop_size(&mut viewer_wr, backend_w, backend_h).await?;
     } else {
         warn!(
@@ -373,13 +361,33 @@ struct ProxySession {
     recorder: Option<DesktopRecorder>,
 }
 
-/// Shared state for the hold screen
-struct RenderState {
+/// The viewer's negotiated capabilities, updated from its handshake / control messages and
+/// read wherever we re-encode toward it (the hold screen and the proxy loop).
+#[derive(Clone)]
+struct ViewerCaps {
     pixel_format: PixelFormat,
     supports_desktop_size: bool,
     /// The viewer negotiated the Tight encoding, so backend JPEG rects can be forwarded
     /// through as Tight/JPEG instead of being decoded and re-encoded as Raw.
     viewer_supports_tight: bool,
+}
+
+impl ViewerCaps {
+    const fn new() -> Self {
+        Self {
+            pixel_format: DEFAULT_PIXEL_FORMAT,
+            supports_desktop_size: false,
+            viewer_supports_tight: false,
+        }
+    }
+}
+
+/// Viewer-facing render state: the negotiated [`ViewerCaps`], whether the viewer has an
+/// outstanding frame request (VNC is pull-based, so we only paint when it asks), whether its
+/// reader task has ended, and the hold-screen animation tick.
+#[derive(Clone)]
+struct RenderState {
+    caps: ViewerCaps,
     pending_request: bool,
     reader_done: bool,
     tick: u64,
@@ -388,26 +396,24 @@ struct RenderState {
 impl RenderState {
     const fn new() -> Self {
         Self {
-            pixel_format: DEFAULT_PIXEL_FORMAT,
-            supports_desktop_size: false,
-            viewer_supports_tight: false,
+            caps: ViewerCaps::new(),
             pending_request: false,
             reader_done: false,
             tick: 0,
         }
     }
 
-    /// Update state from a viewer message
-    /// Returns keysym of a keypress (the only interesting action)
+    /// Update state from a viewer message. Returns the keysym of a keypress — the only event
+    /// the hold screen acts on — or `None`.
     const fn note_event(&mut self, event: Option<&ClientEvent>) -> Option<u32> {
         match event {
-            Some(ClientEvent::PixelFormat(pf)) => self.pixel_format = *pf,
+            Some(ClientEvent::PixelFormat(pf)) => self.caps.pixel_format = *pf,
             Some(ClientEvent::Encodings {
                 desktop_size,
                 tight,
             }) => {
-                self.supports_desktop_size = *desktop_size;
-                self.viewer_supports_tight = *tight;
+                self.caps.supports_desktop_size = *desktop_size;
+                self.caps.viewer_supports_tight = *tight;
             }
             Some(ClientEvent::WantsFrame) => self.pending_request = true,
             Some(ClientEvent::Key { down: true, keysym }) => return Some(*keysym),
@@ -429,7 +435,7 @@ impl RenderState {
         // VNC dictates the framebuffer size in its ServerInit, so it is always the default.
         let screen = ui::Screen::default();
         let image = render_frame(screen, self.tick)?;
-        let pixels = pack_rgb(&self.pixel_format, &image);
+        let pixels = pack_rgb(&self.caps.pixel_format, &image);
         write_raw_rect(viewer_wr, 0, 0, screen.width, screen.height, &pixels).await?;
         self.tick += 1;
         self.pending_request = false;
@@ -442,8 +448,7 @@ struct VncProto;
 
 impl DesktopProtocol for VncProto {
     type Options = TargetVncOptions;
-    const NAME: &'static str = PROTOCOL_NAME;
-    const LABEL: &'static str = "vnc";
+    const NAME: Protocol = PROTOCOL_NAME;
 
     fn options(target: &Target) -> Option<TargetVncOptions> {
         match &target.options {

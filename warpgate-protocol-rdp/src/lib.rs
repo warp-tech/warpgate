@@ -14,14 +14,14 @@ use futures::future::BoxFuture;
 pub use server::bind_server;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender, channel, unbounded_channel};
 use tracing::{Instrument, error, info_span};
-use warpgate_common::{ListenEndpoint, ProtocolName, TargetRdpOptions};
+use warpgate_common::{ListenEndpoint, Protocol, TargetRdpOptions};
 use warpgate_core::{
     DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopState, ProtocolServer,
     Services,
 };
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
-pub static PROTOCOL_NAME: ProtocolName = "RDP";
+pub const PROTOCOL_NAME: Protocol = Protocol::Rdp;
 
 pub use warpgate_desktop_ui::DEFAULT_SIZE;
 

@@ -1,4 +1,3 @@
-use poem::web::Data;
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -7,12 +6,10 @@ use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use warpgate_aws::{S3Credentials, S3Storage};
 use warpgate_common::{AdminPermission, PasswordPolicy, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 pub struct Api;
 
@@ -178,12 +175,9 @@ impl Api {
     #[oai(path = "/parameters", method = "get", operation_id = "get_parameters")]
     async fn api_get(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        admin: AdminContext,
     ) -> Result<GetParametersResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
-
-        let parameters = ctx.parameters().await?.clone();
+        let parameters = admin.parameters().await?.clone();
         let recordings_storage = redact_secret(parameters.recordings_storage_config()?);
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
@@ -238,14 +232,13 @@ impl Api {
     )]
     async fn api_analytics_preview(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         normal: Query<bool>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetAnalyticsPreviewResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+        admin.require(AdminPermission::ConfigEdit)?;
 
         let (url, payload) =
-            warpgate_core::analytics::preview(&ctx.services().db, normal.0).await?;
+            warpgate_core::analytics::preview(&admin.services().db, normal.0).await?;
 
         Ok(GetAnalyticsPreviewResponse::Ok(Json(AnalyticsPreview {
             url,
@@ -260,15 +253,14 @@ impl Api {
     )]
     async fn api_update_parameters(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<ParameterUpdate>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateParametersResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+        admin.require(AdminPermission::ConfigEdit)?;
 
-        let services = ctx.services();
+        let services = admin.services();
         let db = &services.db;
-        let current = ctx.parameters().await?.clone();
+        let current = admin.parameters().await?.clone();
         let storage = match &body.recordings_storage {
             Some(incoming) => Some(serde_json::to_string(&merge_secret(
                 incoming.clone(),
@@ -346,12 +338,11 @@ impl Api {
 
         Parameters::Entity::update(parameters).exec(db).await?;
 
-        services
-            .rate_limiter_registry
-            .lock()
-            .await
-            .apply_new_rate_limits(&*services.state.lock().await)
-            .await?;
+        warpgate_core::rate_limiting::apply_new_rate_limits(
+            &services.rate_limiter_registry,
+            &services.state,
+        )
+        .await?;
 
         Ok(UpdateParametersResponse::Done)
     }
@@ -363,13 +354,12 @@ impl Api {
     )]
     async fn api_test_recordings_storage(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<RecordingsStorageConfig>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<TestRecordingsStorageResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+        admin.require(AdminPermission::ConfigEdit)?;
 
-        let current = ctx.parameters().await?;
+        let current = admin.parameters().await?;
         // The UI never receives the stored secret, so fill it back in before testing.
         let config = merge_secret(body.0, &current.recordings_storage_config()?);
 
