@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::Write;
 
-use ldap3::{Scope, SearchEntry};
+use ldap3::{Scope, SearchEntry, ldap_escape};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -163,18 +163,28 @@ pub async fn list_users(config: &LdapConfig) -> Result<Vec<LdapUser>> {
     Ok(all_users)
 }
 
+/// Filter matching a single user by their username attribute.
+///
+/// The username is attacker-influenced — an OIDC `preferred_username` claim
+/// reaches here through SSO auto-create — so it is escaped as a filter *value*.
+/// `config.user_filter` is deliberately left raw: it is an admin-authored filter
+/// fragment, and escaping it would break every existing configuration.
+fn username_filter(config: &LdapConfig, username: &str) -> String {
+    format!(
+        "(&{}({}={}))",
+        config.user_filter,
+        config.username_attribute.attribute_name(),
+        ldap_escape(username)
+    )
+}
+
 pub async fn find_user_by_username(
     config: &LdapConfig,
     username: &str,
 ) -> Result<Option<LdapUser>> {
     let mut ldap = connect(config).await?;
 
-    let filter = format!(
-        "(&{}({}={}))",
-        config.user_filter,
-        config.username_attribute.attribute_name(),
-        username
-    );
+    let filter = username_filter(config, username);
 
     if let Some(user) = find_user_by_filter(&mut ldap, config, &filter).await? {
         return Ok(Some(user));
@@ -203,9 +213,20 @@ async fn find_user_by_filter(
             .success()
             .map_err(|e| LdapError::QueryFailed(e.to_string()))?;
 
-        if !rs.is_empty() {
-            #[allow(clippy::unwrap_used, reason = "length checked")]
-            let search_entry = SearchEntry::construct(rs.into_iter().next().unwrap());
+        // More than one match means the filter didn't identify a single person.
+        // Taking the first would let a widened filter — say a username of `*`,
+        // turning this into a presence search — bind an account to an arbitrary
+        // directory entry, so an ambiguous result is an error rather than a
+        // choice.
+        if rs.len() > 1 {
+            return Err(LdapError::AmbiguousMatch {
+                filter: filter.to_owned(),
+                count: rs.len(),
+            });
+        }
+
+        if let Some(entry) = rs.into_iter().next() {
+            let search_entry = SearchEntry::construct(entry);
 
             match extract_ldap_user(&search_entry, config) {
                 Ok(user) => {
@@ -304,4 +325,67 @@ pub async fn find_user_by_uuid(
 
     debug!("No user found with UUID: {}", object_uuid);
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_tls::TlsMode;
+
+    use super::username_filter;
+    use crate::types::{LdapConfig, LdapUsernameAttribute};
+
+    fn config() -> LdapConfig {
+        LdapConfig {
+            host: "ldap.example.com".into(),
+            port: 389,
+            bind_dn: String::new(),
+            bind_password: String::new(),
+            tls_mode: TlsMode::Preferred,
+            tls_verify: true,
+            base_dns: vec!["dc=example,dc=com".into()],
+            user_filter: "(objectClass=person)".into(),
+            username_attribute: LdapUsernameAttribute::Cn,
+            ssh_key_attribute: "sshPublicKey".into(),
+            uuid_attribute: None,
+        }
+    }
+
+    #[test]
+    fn plain_username_is_unchanged() {
+        assert_eq!(
+            username_filter(&config(), "alice"),
+            "(&(objectClass=person)(cn=alice))"
+        );
+    }
+
+    #[test]
+    fn filter_metacharacters_in_a_username_are_escaped() {
+        // A bare `*` would otherwise turn this into a presence filter matching
+        // every entry, and `)(` would let the username close the clause and
+        // append one of its own.
+        for (username, escaped) in [
+            ("*", "\\2a"),
+            ("(", "\\28"),
+            (")", "\\29"),
+            ("\\", "\\5c"),
+            ("\0", "\\00"),
+        ] {
+            let filter = username_filter(&config(), username);
+            assert_eq!(filter, format!("(&(objectClass=person)(cn={escaped}))"));
+        }
+
+        assert_eq!(
+            username_filter(&config(), "x)(uid=admin"),
+            "(&(objectClass=person)(cn=x\\29\\28uid=admin))"
+        );
+    }
+
+    #[test]
+    fn admin_authored_user_filter_is_left_raw() {
+        let mut config = config();
+        config.user_filter = "(&(objectClass=person)(!(disabled=TRUE)))".into();
+        assert!(
+            username_filter(&config, "alice").starts_with("(&(&(objectClass=person)(!(disabled=TRUE)))")
+        );
+    }
 }

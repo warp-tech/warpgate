@@ -35,6 +35,9 @@ pub enum LdapError {
     #[error("cannot determine UUID for user DN: {0}")]
     NoUUID(String),
 
+    #[error("LDAP lookup matched {count} entries, expected at most one: {filter}")]
+    AmbiguousMatch { filter: String, count: usize },
+
     #[error("Other error: {0}")]
     Other(String),
 }
