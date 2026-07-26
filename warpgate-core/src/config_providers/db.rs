@@ -414,6 +414,25 @@ impl ConfigProvider for DatabaseConfigProvider {
                 protocols: HashMap::new(),
             };
 
+            // Only HTTP performs an SSO exchange inline; no other protocol can
+            // carry one on the wire, so there a required `Sso` is satisfied by
+            // the in-browser approval flow instead. Keyed off the protocol
+            // rather than a per-entry flag so the rule has one statement.
+            let make_policy = |protocol: Protocol, required: Vec<CredentialKind>| {
+                let required_credential_types = required
+                    .into_iter()
+                    .map(|kind| match (kind, protocol) {
+                        (CredentialKind::Sso, Protocol::Http) => CredentialKind::Sso,
+                        (CredentialKind::Sso, _) => CredentialKind::WebUserApproval,
+                        (kind, _) => kind,
+                    })
+                    .collect();
+                Box::new(AllCredentialsPolicy {
+                    supported_credential_types: supported_credential_types.clone(),
+                    required_credential_types,
+                }) as Box<dyn CredentialPolicy + Sync + Send>
+            };
+
             // Full destructuring so a new per-protocol config field can't be
             // silently left out of the policy map.
             let UserRequireCredentialsPolicy {
@@ -436,13 +455,9 @@ impl ConfigProvider for DatabaseConfigProvider {
                 (Protocol::Rdp, rdp),
             ] {
                 if let Some(required) = required {
-                    policy.protocols.insert(
-                        protocol,
-                        Box::new(AllCredentialsPolicy {
-                            supported_credential_types: supported_credential_types.clone(),
-                            required_credential_types: required.into_iter().collect(),
-                        }),
-                    );
+                    policy
+                        .protocols
+                        .insert(protocol, make_policy(protocol, required));
                 }
             }
 
