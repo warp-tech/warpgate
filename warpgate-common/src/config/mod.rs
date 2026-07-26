@@ -269,6 +269,9 @@ impl AdminPermission {
 /// The set of admin permissions a principal holds, folded from their assigned roles once so
 /// every consumer — the endpoint gate, the "is this an admin?" checks, and the UI
 /// serialization — reads one value instead of re-deriving the model three different ways.
+///
+/// An administrator is a principal holding at least one permission: a role that grants nothing
+/// confers no admin standing (there is no such thing as a permissionless admin).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AdminPermissionSet(u32);
 
@@ -371,6 +374,13 @@ mod admin_permission_set_tests {
         for perm in AdminPermission::iter() {
             assert!(all.contains(perm), "missing {perm:?}");
         }
+    }
+
+    #[test]
+    fn role_granting_nothing_is_not_admin() {
+        let set = AdminPermissionSet::from_roles([empty_role()]);
+        assert!(!set.is_admin());
+        assert_eq!(set, AdminPermissionSet::none());
     }
 }
 
