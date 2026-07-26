@@ -158,6 +158,7 @@
 
     main {
         flex: 1 0 0;
+        min-width: 0;
     }
 
     header {

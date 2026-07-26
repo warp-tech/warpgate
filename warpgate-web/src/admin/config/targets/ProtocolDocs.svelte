@@ -20,7 +20,11 @@
 </script>
 
 {#if html}
-    <Button color="link" class="p-0 d-flex align-items-center gap-2 text-start" on:click={() => open.set(!$open)}>
+    <Button
+        color="link"
+        class="p-0 d-flex align-items-center gap-2 text-start"
+        on:click={() => open.set(!$open)}
+    >
         <Fa fw icon={faChevronRight} rotate={$open ? 90 : 0} />
         <span>Protocol requirements &amp; supported features</span>
     </Button>

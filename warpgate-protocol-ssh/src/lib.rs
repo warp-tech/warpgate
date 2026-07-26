@@ -27,7 +27,7 @@ impl SSHProtocolServer {
     pub async fn new(services: &Services) -> Result<Self> {
         let config = services.config.lock().await;
         generate_keys(&config, &services.global_params, "host")?;
-        generate_keys(&config, &services.global_params, "client")?;
+        ensure_client_keys(&services.db, &config, &services.global_params).await?;
         Ok(Self {
             services: services.clone(),
         })

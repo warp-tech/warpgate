@@ -664,7 +664,7 @@
 </StickyActionBar>
 
 <style lang="scss">
-    @media (max-width: 767px) {
+    @media (max-width: 900px) {
         .main-container {
             flex-direction: column;
         }

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.0-beta.2-39-geb453d49-modified"
+    "version": "v0.27.0-beta.3-2-g448c16d5-modified"
   },
   "servers": [
     {
@@ -1146,7 +1146,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/SSHKey"
+                    "$ref": "#/components/schemas/SSHClientKey"
                   }
                 }
               }
@@ -1162,6 +1162,207 @@
           }
         ],
         "operationId": "get_ssh_own_keys"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSSHClientKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "import_ssh_own_key"
+      }
+    },
+    "/ssh/own-keys/generate": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateSSHClientKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "generate_ssh_own_key"
+      }
+    },
+    "/ssh/own-keys/{id}": {
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSSHClientKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_ssh_own_key"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_ssh_own_key"
       }
     },
     "/logs": {
@@ -4826,6 +5027,22 @@
           }
         }
       },
+      "GenerateSSHClientKeyRequest": {
+        "type": "object",
+        "title": "GenerateSSHClientKeyRequest",
+        "required": [
+          "label",
+          "kind"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SSHClientKeyKind"
+          }
+        }
+      },
       "GetLogsRequest": {
         "type": "object",
         "title": "GetLogsRequest",
@@ -4881,6 +5098,27 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "ImportSSHClientKeyRequest": {
+        "type": "object",
+        "title": "ImportSSHClientKeyRequest",
+        "required": [
+          "label",
+          "secret_key",
+          "is_default"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "secret_key": {
+            "type": "string",
+            "description": "Private key in OpenSSH or PKCS#8 PEM format, without a passphrase"
+          },
+          "is_default": {
+            "type": "boolean"
           }
         }
       },
@@ -6050,21 +6288,46 @@
           }
         }
       },
-      "SSHKey": {
+      "SSHClientKey": {
         "type": "object",
-        "title": "SSHKey",
+        "title": "SSHClientKey",
         "required": [
+          "id",
+          "label",
           "kind",
-          "public_key_base64"
+          "public_key",
+          "public_key_base64",
+          "is_default"
         ],
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
           "kind": {
             "type": "string"
           },
-          "public_key_base64": {
+          "public_key": {
             "type": "string"
+          },
+          "public_key_base64": {
+            "type": "string",
+            "description": "The base64 body without the algorithm prefix — kept for the\nbackwards-compatible `own-keys` consumers."
+          },
+          "is_default": {
+            "type": "boolean"
           }
         }
+      },
+      "SSHClientKeyKind": {
+        "type": "string",
+        "enum": [
+          "Ed25519",
+          "Rsa"
+        ]
       },
       "SSHKnownHost": {
         "type": "object",
@@ -6274,7 +6537,14 @@
       },
       "SshTargetPublicKeyAuth": {
         "type": "object",
-        "title": "SshTargetPublicKeyAuth"
+        "title": "SshTargetPublicKeyAuth",
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Specific stored client key to authenticate with; `None` uses the keys\nmarked default."
+          }
+        }
       },
       "StaticCredentials": {
         "type": "object",
@@ -7171,6 +7441,22 @@
           },
           "uuid_attribute": {
             "type": "string"
+          }
+        }
+      },
+      "UpdateSSHClientKeyRequest": {
+        "type": "object",
+        "title": "UpdateSSHClientKeyRequest",
+        "required": [
+          "label",
+          "is_default"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
           }
         }
       },

@@ -387,7 +387,6 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
 
     let config = load_config(params, true)?;
     warpgate_protocol_ssh::generate_keys(&config, params, "host")?;
-    warpgate_protocol_ssh::generate_keys(&config, params, "client")?;
 
     // Create the admin user
     crate::commands::create_user::command(
@@ -399,6 +398,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     .await?;
 
     let db = connect_to_db_and_migrate(&config, params).await?;
+    warpgate_protocol_ssh::ensure_client_keys(&db, &config, params).await?;
 
     #[allow(clippy::expect_used)]
     let user = User::Entity::find()

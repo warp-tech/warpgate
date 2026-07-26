@@ -66,7 +66,7 @@
             border-radius: 6px;
 
             &:hover {
-                color: #4a4545;
+                color: #fafafa;
                 background: #78787840;
             }
         }

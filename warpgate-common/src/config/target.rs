@@ -60,7 +60,12 @@ pub struct SshTargetPasswordAuth {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
-pub struct SshTargetPublicKeyAuth {}
+pub struct SshTargetPublicKeyAuth {
+    /// Specific stored client key to authenticate with; `None` uses the keys
+    /// marked default.
+    #[serde(default)]
+    pub key_id: Option<Uuid>,
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct SshTargetIamRoleAuth {}

@@ -72,6 +72,7 @@ mod m00065_authorization_indexes;
 mod m00066_cluster_token;
 mod m00067_node_tls_pin;
 mod m00068_rename_ssh_banner;
+mod m00069_ssh_client_keys;
 
 pub(crate) mod helpers;
 
@@ -149,6 +150,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00066_cluster_token::Migration),
             Box::new(m00067_node_tls_pin::Migration),
             Box::new(m00068_rename_ssh_banner::Migration),
+            Box::new(m00069_ssh_client_keys::Migration),
         ]
     }
 }
