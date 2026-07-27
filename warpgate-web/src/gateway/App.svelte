@@ -193,5 +193,8 @@
     main {
         flex: 1 0 auto;
         position: relative;
+
+        display: flex;
+        flex-direction: column;
     }
 </style>
