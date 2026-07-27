@@ -20,12 +20,12 @@ use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{AcceptorExt, Listener, RustlsConfig};
 use poem::middleware::SetHeader;
-use poem::session::{CookieConfig, MemoryStorage, ServerSession};
+use poem::session::{CookieConfig, ServerSession};
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
-use tracing::{Instrument, debug};
+use tracing::{Instrument, debug, warn};
 use warpgate_admin::admin_api_app;
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::proxy_protocol::ProxyProtocolAcceptor;
@@ -83,10 +83,6 @@ async fn recordings_s3_browser_origin(ctx: &UnauthenticatedRequestContext) -> Op
     }
 }
 
-fn make_session_storage() -> SharedSessionStorage {
-    SharedSessionStorage(Arc::new(Mutex::new(Box::<MemoryStorage>::default())))
-}
-
 fn make_rustls_config(tls: Vec<TlsCertificateAndPrivateKey>) -> Result<RustlsConfig> {
     let mut certificates = tls.into_iter();
     let primary = certificates
@@ -124,7 +120,7 @@ impl ProtocolServer for HTTPProtocolServer {
             });
         }
 
-        let session_storage = make_session_storage();
+        let session_storage = SharedSessionStorage(self.services.db.clone());
         let session_store = SessionStore::new();
         let http_client_cache = HttpClientCache::default();
 
@@ -343,11 +339,14 @@ impl ProtocolServer for HTTPProtocolServer {
             .data(UnauthenticatedRequestContext::new(self.services.clone()).await)
             .data(http_client_cache.clone())
             .data(session_store.clone())
-            .data(session_storage);
+            .data(session_storage.clone());
 
         tokio::spawn(async move {
             loop {
                 session_store.lock().await.vacuum(session_max_age).await;
+                if let Err(error) = session_storage.gc(cookie_max_age).await {
+                    warn!(%error, "Failed to expire stored HTTP sessions");
+                }
                 http_client_cache.vacuum().await;
                 tokio::time::sleep(HTTP_CLIENT_CACHE_VACUUM_INTERVAL).await;
             }

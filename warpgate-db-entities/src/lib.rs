@@ -5,6 +5,7 @@ pub mod ApiToken;
 pub mod CertificateCredential;
 pub mod CertificateRevocation;
 pub mod FailedLoginAttempt;
+pub mod HttpSession;
 pub mod IpBlock;
 pub mod KnownHost;
 pub mod LdapServer;

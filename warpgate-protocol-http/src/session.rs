@@ -2,39 +2,76 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-use poem::session::{MemoryStorage, Session, SessionStorage};
+use anyhow::Context;
+use poem::error::InternalServerError;
+use poem::session::{Session, SessionStorage};
 use poem::web::{Data, RemoteAddr};
 use poem::{FromRequest, Request};
+use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
 use serde_json::Value;
+use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
 use tracing::info;
-use warpgate_common::SessionId;
+use warpgate_common::{SessionId, WarpgateError};
 use warpgate_common_http::SessionKeepalive;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::{SessionStateInit, State, WarpgateServerHandle};
+use warpgate_db_entities::HttpSession;
 
 use crate::common::PROTOCOL_NAME;
 use crate::session_handle::{HttpSessionHandle, SessionHandleCommand};
 
 #[derive(Clone)]
-pub struct SharedSessionStorage(pub Arc<Mutex<Box<MemoryStorage>>>);
+pub struct SharedSessionStorage(pub DatabaseConnection);
 
 static POEM_SESSION_ID_SESSION_KEY: &str = "poem_session_id";
+
+impl SharedSessionStorage {
+    pub async fn gc(&self, max_age: Duration) -> Result<(), WarpgateError> {
+        let now = OffsetDateTime::now_utc();
+        HttpSession::Entity::delete_many()
+            .filter(
+                Condition::any()
+                    .add(HttpSession::Column::Expires.lt(now))
+                    .add(HttpSession::Column::Updated.lt(now - max_age)),
+            )
+            .exec(&self.0)
+            .await?;
+        Ok(())
+    }
+}
 
 impl SessionStorage for SharedSessionStorage {
     async fn load_session<'a>(
         &'a self,
         session_id: &'a str,
     ) -> poem::Result<Option<BTreeMap<String, Value>>> {
-        self.0.lock().await.load_session(session_id).await.map(|o| {
-            o.map(|mut s| {
-                s.insert(
-                    POEM_SESSION_ID_SESSION_KEY.to_string(),
-                    session_id.to_string().into(),
-                );
-                s
-            })
-        })
+        let Some(model) = HttpSession::Entity::find_by_id(session_id.to_owned())
+            .one(&self.0)
+            .await
+            .context("HTTP session not found")?
+        else {
+            return Ok(None);
+        };
+
+        if model
+            .expires
+            .is_some_and(|e| e <= OffsetDateTime::now_utc())
+        {
+            return Ok(None);
+        }
+
+        let mut entries: BTreeMap<String, Value> =
+            serde_json::from_str(&model.data).map_err(InternalServerError)?;
+        // Expose the poem session id so the Warpgate-session teardown path can
+        // evict this browser session (see `create_handle_for`).
+        entries.insert(
+            POEM_SESSION_ID_SESSION_KEY.to_string(),
+            session_id.to_string().into(),
+        );
+        Ok(Some(entries))
     }
 
     /// Insert or update a session.
@@ -44,16 +81,39 @@ impl SessionStorage for SharedSessionStorage {
         entries: &'a BTreeMap<String, Value>,
         expires: Option<Duration>,
     ) -> poem::Result<()> {
-        self.0
-            .lock()
+        let now = OffsetDateTime::now_utc();
+        let data = serde_json::to_string(entries).map_err(InternalServerError)?;
+        let model = HttpSession::ActiveModel {
+            id: Set(session_id.to_owned()),
+            expires: Set(expires.map(|d| now + d)),
+            data: Set(data),
+            updated: Set(now),
+        };
+        // `exec_without_returning` avoids the last-insert-id path, which MySQL
+        // upserts of a non-auto-increment PK misbehave on.
+        HttpSession::Entity::insert(model)
+            .on_conflict(
+                OnConflict::column(HttpSession::Column::Id)
+                    .update_columns([
+                        HttpSession::Column::Expires,
+                        HttpSession::Column::Data,
+                        HttpSession::Column::Updated,
+                    ])
+                    .to_owned(),
+            )
+            .exec_without_returning(&self.0)
             .await
-            .update_session(session_id, entries, expires)
-            .await
+            .map_err(InternalServerError)?;
+        Ok(())
     }
 
-    /// Remove a session by session id.
+    /// Remove a session by session id. Idempotent: removing an absent id is Ok.
     async fn remove_session<'a>(&'a self, session_id: &'a str) -> poem::Result<()> {
-        self.0.lock().await.remove_session(session_id).await
+        HttpSession::Entity::delete_by_id(session_id.to_owned())
+            .exec(&self.0)
+            .await
+            .map_err(InternalServerError)?;
+        Ok(())
     }
 }
 
@@ -78,8 +138,9 @@ pub struct SessionStore {
     this: Weak<Mutex<Self>>,
 }
 
-static SESSION_ID_SESSION_KEY: &str = "session_id";
-static REQUEST_COUNTER_SESSION_KEY: &str = "request_counter";
+const SESSION_ID_SESSION_KEY: &str = "session_id";
+const SESSION_TOUCH_SESSION_KEY: &str = "touched_at";
+const SESSION_TOUCH_DEBOUNCE_SECONDS: i64 = 60;
 
 impl SessionStore {
     pub fn new() -> Arc<Mutex<Self>> {
@@ -94,17 +155,19 @@ impl SessionStore {
     pub async fn process_request(&mut self, mut req: Request) -> poem::Result<Request> {
         let session = <&Session>::from_request_without_body(&req).await?;
 
-        let request_counter = session.get::<u64>(REQUEST_COUNTER_SESSION_KEY).unwrap_or(0);
-        session.set(REQUEST_COUNTER_SESSION_KEY, request_counter + 1);
+        if !session.is_empty() {
+            let now = OffsetDateTime::now_utc().unix_timestamp();
+            let touched = session.get::<i64>(SESSION_TOUCH_SESSION_KEY).unwrap_or(0);
+            if now - touched >= SESSION_TOUCH_DEBOUNCE_SECONDS {
+                session.set(SESSION_TOUCH_SESSION_KEY, now);
+            }
+        }
 
         if let Some(session_id) = session.get::<SessionId>(SESSION_ID_SESSION_KEY) {
             if let Some(entry) = self.sessions.get_mut(&session_id) {
                 entry.last_activity = Instant::now();
             }
             req.set_data(SessionKeepalive::new(self.keepalive(session_id)));
-            // } else if request_counter == 5 {
-            // Start logging sessions when they've got 5 requests
-            // self.create_handle_for(&req).await?;
         }
 
         Ok(req)
@@ -289,5 +352,144 @@ mod tests {
             now,
             Duration::from_secs(1)
         ));
+    }
+}
+
+#[cfg(test)]
+mod db_tests {
+    use sea_orm::Database;
+
+    use super::*;
+
+    async fn storage() -> SharedSessionStorage {
+        warpgate_db_entities::Parameters::set_config_migration_values(
+            warpgate_db_entities::Parameters::ConfigMigrationValues {
+                recordings_enable: false,
+                recordings_path: String::new(),
+            },
+        );
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        warpgate_db_migrations::migrate_database(&db).await.unwrap();
+        SharedSessionStorage(db)
+    }
+
+    fn entries(auth: &str) -> BTreeMap<String, Value> {
+        let mut m = BTreeMap::new();
+        m.insert("auth".to_string(), Value::from(auth));
+        m
+    }
+
+    fn expired_row(id: &str) -> HttpSession::ActiveModel {
+        let past = OffsetDateTime::now_utc() - Duration::from_secs(60);
+        HttpSession::ActiveModel {
+            id: Set(id.to_string()),
+            expires: Set(Some(past)),
+            data: Set("{}".to_string()),
+            updated: Set(past),
+        }
+    }
+
+    #[tokio::test]
+    async fn load_absent_is_none() {
+        let s = storage().await;
+        assert!(s.load_session("nope").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn roundtrip_injects_poem_id() {
+        let s = storage().await;
+        s.update_session("id1", &entries("stamp"), Some(Duration::from_secs(3600)))
+            .await
+            .unwrap();
+        let loaded = s.load_session("id1").await.unwrap().unwrap();
+        assert_eq!(loaded.get("auth"), Some(&Value::from("stamp")));
+        assert_eq!(
+            loaded.get(POEM_SESSION_ID_SESSION_KEY),
+            Some(&Value::from("id1"))
+        );
+    }
+
+    #[tokio::test]
+    async fn update_upserts() {
+        let s = storage().await;
+        s.update_session("id1", &entries("a"), Some(Duration::from_secs(3600)))
+            .await
+            .unwrap();
+        s.update_session("id1", &entries("b"), Some(Duration::from_secs(3600)))
+            .await
+            .unwrap();
+        let loaded = s.load_session("id1").await.unwrap().unwrap();
+        assert_eq!(loaded.get("auth"), Some(&Value::from("b")));
+    }
+
+    #[tokio::test]
+    async fn remove_is_idempotent() {
+        let s = storage().await;
+        s.update_session("id1", &entries("a"), Some(Duration::from_secs(3600)))
+            .await
+            .unwrap();
+        s.remove_session("id1").await.unwrap();
+        assert!(s.load_session("id1").await.unwrap().is_none());
+        // Removing an already-absent id is not an error.
+        s.remove_session("id1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn expired_row_refused_on_read() {
+        let s = storage().await;
+        HttpSession::Entity::insert(expired_row("old"))
+            .exec(&s.0)
+            .await
+            .unwrap();
+        // Load-time check refuses it even before a GC sweep runs.
+        assert!(s.load_session("old").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn gc_sweeps_expired() {
+        let s = storage().await;
+        HttpSession::Entity::insert(expired_row("old"))
+            .exec(&s.0)
+            .await
+            .unwrap();
+        s.update_session("live", &entries("a"), Some(Duration::from_secs(3600)))
+            .await
+            .unwrap();
+        s.gc(Duration::from_secs(86400)).await.unwrap();
+        assert!(
+            HttpSession::Entity::find_by_id("old".to_string())
+                .one(&s.0)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(s.load_session("live").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn gc_age_fallback_sweeps_stale_null_expires() {
+        let s = storage().await;
+        let stale = OffsetDateTime::now_utc() - Duration::from_secs(3600);
+        let null_row = |id: &str, updated| HttpSession::ActiveModel {
+            id: Set(id.to_string()),
+            expires: Set(None),
+            data: Set("{}".to_string()),
+            updated: Set(updated),
+        };
+        HttpSession::Entity::insert(null_row("stale", stale))
+            .exec(&s.0)
+            .await
+            .unwrap();
+        HttpSession::Entity::insert(null_row("fresh", OffsetDateTime::now_utc()))
+            .exec(&s.0)
+            .await
+            .unwrap();
+
+        s.gc(Duration::from_secs(1800)).await.unwrap();
+
+        // Untouched longer than the cap → reaped even with null expiry.
+        assert!(s.load_session("stale").await.unwrap().is_none());
+        // Recently written → kept.
+        assert!(s.load_session("fresh").await.unwrap().is_some());
     }
 }
