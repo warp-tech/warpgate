@@ -11,6 +11,13 @@ use poem::http::HeaderName;
 pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
 pub static X_WARPGATE_CLUSTER_TOKEN: HeaderName =
     HeaderName::from_static("x-warpgate-cluster-token");
+/// Set by the cluster proxy on a user-authenticated hop to carry the acting
+/// user's id, so the peer runs the forwarded request as that user rather than
+/// as an anonymous cluster peer. Honoured only alongside a valid cluster token;
+/// like every `x-warpgate-*` header it is stripped from untrusted requests, so a
+/// client cannot forge it.
+pub static X_WARPGATE_CLUSTER_IDENTITY: HeaderName =
+    HeaderName::from_static("x-warpgate-cluster-identity");
 
 // style-src unsafe-inline for Svelte
 // img-src data: for TOTP codes

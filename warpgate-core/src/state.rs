@@ -69,7 +69,7 @@ impl State {
                     .remote_address
                     .map_or_else(String::new, |x| x.to_string())),
                 protocol: Set(protocol.to_string()),
-                node_id: Set(Some(self_.node_id)),
+                node_id: Set(self_.node_id),
                 ..Default::default()
             };
 

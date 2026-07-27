@@ -10,7 +10,7 @@ use warpgate_core::db::mark_session_ended;
 use warpgate_db_entities::{Node, Recording, Session};
 
 use super::{AdminContext, ClusterOrAdminContext};
-use crate::api::cluster_proxy::{Owner, forward_http, session_owner};
+use crate::api::cluster_proxy::{ReparseForwardedResponse, proxy_or_serve, session_owner};
 
 pub struct Api;
 
@@ -37,6 +37,23 @@ enum CloseSessionResponse {
     NotFound,
 }
 
+impl ReparseForwardedResponse for CloseSessionResponse {
+    fn reparse_forwarded_response(
+        response: poem::Response,
+    ) -> impl std::future::Future<Output = poem::Result<Self>> + Send {
+        async move {
+            match response.status() {
+                StatusCode::CREATED => Ok(CloseSessionResponse::Ok),
+                StatusCode::NOT_FOUND => Ok(CloseSessionResponse::NotFound),
+                status => Err(poem::Error::from_string(
+                    format!("Unexpected response from the owner node: {status}"),
+                    StatusCode::BAD_GATEWAY,
+                )),
+            }
+        }
+    }
+}
+
 #[OpenApi]
 impl Api {
     #[oai(path = "/sessions/:id", method = "get", operation_id = "get_session")]
@@ -54,12 +71,10 @@ impl Api {
         };
 
         let mut snapshot: SessionSnapshot = session.into();
-        if let Some(node_id) = snapshot.node_id {
-            snapshot.node_hostname = Node::Entity::find_by_id(node_id)
-                .one(db)
-                .await?
-                .map(|node| node.hostname);
-        }
+        snapshot.node_hostname = Node::Entity::find_by_id(snapshot.node_id)
+            .one(db)
+            .await?
+            .map(|node| node.hostname);
         Ok(GetSessionResponse::Ok(Json(snapshot)))
     }
 
@@ -97,18 +112,6 @@ impl Api {
     ) -> poem::Result<CloseSessionResponse> {
         admin.require(AdminPermission::SessionsTerminate)?;
 
-        {
-            let state = admin.services().state.lock().await;
-            if let Some(s) = state.sessions.get(&id) {
-                s.lock().await.handle.close();
-                drop(state);
-                // a stuck event loop might never mark a session ended
-                mark_session_ended(&admin.services().db, id.0).await?;
-                return Ok(CloseSessionResponse::Ok);
-            }
-        }
-
-        // No live handle here — the session may be owned by another node.
         let session = Session::Entity::find_by_id(id.0)
             .one(&admin.services().db)
             .await
@@ -124,21 +127,20 @@ impl Api {
             Err(WarpgateError::NodeGone(_)) => return Ok(CloseSessionResponse::NotFound),
             owner => owner?,
         };
-        match owner {
-            // Owned here but no live handle — already terminated.
-            Owner::Local => Ok(CloseSessionResponse::NotFound),
-            Owner::Remote(remote) => {
-                let response =
-                    forward_http(&admin, req, remote, &admin.services().cluster_token).await?;
-                match response.status() {
-                    StatusCode::CREATED => Ok(CloseSessionResponse::Ok),
-                    StatusCode::NOT_FOUND => Ok(CloseSessionResponse::NotFound),
-                    status => Err(poem::Error::from_string(
-                        format!("Unexpected response from the owner node: {status}"),
-                        StatusCode::BAD_GATEWAY,
-                    )),
-                }
+
+        let state = admin.services().state.clone();
+        let db = admin.services().db.clone();
+        proxy_or_serve(&admin, req, owner, None::<&()>, async move || {
+            let state = state.lock().await;
+            if let Some(s) = state.sessions.get(&id) {
+                s.lock().await.handle.close();
+                drop(state);
+                // a stuck event loop might never mark a session ended
+                mark_session_ended(&db, id.0).await?;
+                return Ok(CloseSessionResponse::Ok);
             }
-        }
+            Ok(CloseSessionResponse::NotFound)
+        })
+        .await
     }
 }

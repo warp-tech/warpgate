@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.27.0-beta.2-27-gd137485f-modified"
+    "version": "v0.27.0-beta.3-7-g0bf4adcd-modified"
   },
   "servers": [
     {
@@ -145,6 +145,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_web_auth_requests"
@@ -186,6 +189,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_auth_state"
@@ -237,6 +243,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "approve_auth"
@@ -278,6 +287,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "reject_auth"
@@ -348,6 +360,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_targets"
@@ -478,6 +493,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_sso_kubernetes_configs"
@@ -551,6 +569,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_my_credentials"
@@ -602,6 +623,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "change_my_password"
@@ -640,6 +664,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "add_my_public_key"
@@ -677,6 +704,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_my_public_key"
@@ -715,6 +745,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "add_my_otp"
@@ -752,6 +785,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_my_otp"
@@ -790,6 +826,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "issue_my_certificate"
@@ -827,6 +866,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "revoke_my_certificate"
@@ -858,6 +900,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_my_api_tokens"
@@ -904,6 +949,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "create_api_token"
@@ -941,6 +989,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_my_api_token"
@@ -999,6 +1050,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "create_ticket_request"
@@ -1028,6 +1082,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_my_ticket_requests"
@@ -1072,6 +1129,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_my_ticket_request"
@@ -1136,6 +1196,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "activate_ticket_request"
@@ -1167,6 +1230,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_my_tickets"
@@ -1204,6 +1270,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_my_ticket"
@@ -1245,6 +1314,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_ticket_request_targets"
@@ -1292,6 +1364,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "create_web_ssh_session"
@@ -1333,6 +1408,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_web_ssh_session"
@@ -1368,6 +1446,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_web_ssh_session"
@@ -1415,6 +1496,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "create_web_desktop_session"
@@ -1456,6 +1540,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_web_desktop_session"
@@ -1491,6 +1578,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_web_desktop_session"
@@ -2779,6 +2869,12 @@
       }
     },
     "securitySchemes": {
+      "ClusterSecurityScheme": {
+        "type": "apiKey",
+        "description": "Requests forwarded by a cluster peer authenticate with the cluster token\n(plus the forwarded user identity resolved into the request authorization —\nsee `cluster_request_authorization`). The checker only reads the context\nthat `inject_request_authorization` attaches after verifying the token, so\na bogus header value alone never authenticates.",
+        "name": "x-warpgate-cluster-token",
+        "in": "header"
+      },
       "CookieSecurityScheme": {
         "type": "apiKey",
         "name": "warpgate-http-session",

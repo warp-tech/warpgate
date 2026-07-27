@@ -9,11 +9,16 @@ use poem::web::websocket::{Message, WebSocket};
 use poem::{IntoResponse, Request, handler};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
+use poem_openapi::types::{ParseFromJSON, ToJSON};
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
+use sea_orm::EntityTrait;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
 use tracing::{error, warn};
 use uuid::Uuid;
+use warpgate_admin::api::cluster_proxy::{
+    Owner, ReparseForwardedResponse, proxy_or_serve, session_owner,
+};
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, WarpgateError};
@@ -23,7 +28,7 @@ use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::Services;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_db_entities::Parameters;
+use warpgate_db_entities::{Parameters, Session as SessionEntity};
 
 use super::common::{emit_unknown_authentication_failed_event, logout};
 use crate::api::auth_scheme::AuthedSession;
@@ -538,18 +543,20 @@ impl Api {
     )]
     async fn api_auth_state(
         &self,
+        req: &Request,
         ctx: AuthedSession,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let services = ctx.services();
-        let state_arc = get_foreign_auth_state(&id, &ctx).await;
-        let Some(state_arc) = state_arc else {
-            return Ok(AuthStateResponse::NotFound);
-        };
-        serialize_auth_state_inner(state_arc, services)
-            .await
-            .map(Json)
-            .map(AuthStateResponse::Ok)
+        let owner = auth_state_owner(&ctx, &id).await?;
+        proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
+            let Some(state_arc) = local_auth_state_for_user(&ctx, &id).await else {
+                return Ok(AuthStateResponse::NotFound);
+            };
+            Ok(AuthStateResponse::Ok(Json(
+                serialize_auth_state_inner(state_arc, ctx.services()).await?,
+            )))
+        })
+        .await
     }
 
     #[oai(
@@ -559,38 +566,42 @@ impl Api {
     )]
     async fn api_approve_auth(
         &self,
+        req: &Request,
         ctx: AuthedSession,
         id: Path<Uuid>,
         body: Json<ApproveAuthRequest>,
     ) -> poem::Result<AuthStateResponse> {
-        let services = ctx.services();
-        let Some(state_arc) = get_foreign_auth_state(&id, &ctx).await else {
-            return Ok(AuthStateResponse::NotFound);
-        };
+        let owner = auth_state_owner(&ctx, &id).await?;
+        proxy_or_serve(&ctx, req, owner, Some(&body.to_json()), || async {
+            let services = ctx.services();
+            let Some(state_arc) = local_auth_state_for_user(&ctx, &id).await else {
+                return Ok(AuthStateResponse::NotFound);
+            };
 
-        let match_key = {
-            let mut state = state_arc.lock().await;
-            state.add_web_user_approval();
-            state.web_approval_match_key()
-        };
+            let match_key = {
+                let mut state = state_arc.lock().await;
+                state.add_web_user_approval();
+                state.web_approval_match_key()
+            };
 
-        // Remembered so matching attempts can be bypassed within the grace period.
-        if let Some(match_key) = match body.scope {
-            WebApprovalScope::Once => None,
-            WebApprovalScope::Target => match_key,
-            WebApprovalScope::AllTargets => match_key.map(|k| k.for_all_targets()),
-        } {
-            services
-                .auth_state_store
-                .lock()
-                .await
-                .record_web_approval(match_key);
-        }
+            // Remembered so matching attempts can be bypassed within the grace period.
+            if let Some(match_key) = match body.scope {
+                WebApprovalScope::Once => None,
+                WebApprovalScope::Target => match_key,
+                WebApprovalScope::AllTargets => match_key.map(|k| k.for_all_targets()),
+            } {
+                services
+                    .auth_state_store
+                    .lock()
+                    .await
+                    .record_web_approval(match_key);
+            }
 
-        serialize_auth_state_inner(state_arc, services)
-            .await
-            .map(Json)
-            .map(AuthStateResponse::Ok)
+            Ok(AuthStateResponse::Ok(Json(
+                serialize_auth_state_inner(state_arc, services).await?,
+            )))
+        })
+        .await
     }
 
     #[oai(
@@ -600,52 +611,89 @@ impl Api {
     )]
     async fn api_reject_auth(
         &self,
+        req: &Request,
         ctx: AuthedSession,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let services = ctx.services();
-        let Some(state_arc) = get_foreign_auth_state(&id, &ctx).await else {
-            return Ok(AuthStateResponse::NotFound);
-        };
-        {
-            let mut state = state_arc.lock().await;
-            let credential = AuthCredential::WebUserApproval;
-            state.emit_authentication_failed_event(Some(&credential), "rejected by user");
-            state.reject();
-        }
-        serialize_auth_state_inner(state_arc, services)
-            .await
-            .map(Json)
-            .map(AuthStateResponse::Ok)
+        let owner = auth_state_owner(&ctx, &id).await?;
+        proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
+            let Some(state_arc) = local_auth_state_for_user(&ctx, &id).await else {
+                return Ok(AuthStateResponse::NotFound);
+            };
+            {
+                let mut state = state_arc.lock().await;
+                let credential = AuthCredential::WebUserApproval;
+                state.emit_authentication_failed_event(Some(&credential), "rejected by user");
+                state.reject();
+            }
+            Ok(AuthStateResponse::Ok(Json(
+                serialize_auth_state_inner(state_arc, ctx.services()).await?,
+            )))
+        })
+        .await
     }
 }
 
-/// Used to obtain an AuthState that is not for this request
-/// like when doing a web approval of an SSH session
-async fn get_foreign_auth_state(
-    id: &Uuid,
-    ctx: &AuthenticatedRequestContext,
-) -> Option<Arc<Mutex<AuthState>>> {
-    let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
+/// The owner of an auth state: auth states are keyed by session id, so the
+/// owner is the session's node. An unknown session or a gone owner node both
+/// resolve to `Local`, where the store lookup then reports not-found and the
+/// originating connection times out and retries.
+async fn auth_state_owner(ctx: &AuthenticatedRequestContext, id: &Uuid) -> poem::Result<Owner> {
+    let Some(session) = SessionEntity::Entity::find_by_id(*id)
+        .one(&ctx.services().db)
+        .await
+        .map_err(poem::error::InternalServerError)?
     else {
-        return None;
+        return Ok(Owner::local());
     };
+    match session_owner(ctx, &session).await {
+        Err(WarpgateError::NodeGone(node_id)) => {
+            warn!(%node_id, "Auth state owner node is gone; reporting not found");
+            Ok(Owner::local())
+        }
+        owner => owner.map_err(Into::into),
+    }
+}
 
+impl ReparseForwardedResponse for AuthStateResponse {
+    async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
+        if response.status() == http::StatusCode::NOT_FOUND {
+            return Ok(AuthStateResponse::NotFound);
+        }
+        // `AuthStateResponseInternal` is a poem-openapi `Object` (no serde impls),
+        // so parse the JSON body through its `ParseFromJSON`.
+        let bytes = response
+            .into_body()
+            .into_bytes()
+            .await
+            .map_err(poem::error::InternalServerError)?;
+        let value = serde_json::from_slice(&bytes).map_err(poem::error::InternalServerError)?;
+        let body = AuthStateResponseInternal::parse_from_json(Some(value)).map_err(|e| {
+            poem::Error::from_string(e.into_message(), http::StatusCode::INTERNAL_SERVER_ERROR)
+        })?;
+        Ok(AuthStateResponse::Ok(Json(body)))
+    }
+}
+
+/// Looks up a locally-held auth state, enforcing that it belongs to the
+/// requesting user: a user may only act on auth states created for their own
+/// username. This runs on the node that holds the state, so a cluster-forwarded
+/// request (carrying the origin's user identity) is re-checked here.
+async fn local_auth_state_for_user(
+    ctx: &AuthenticatedRequestContext,
+    id: &Uuid,
+) -> Option<Arc<Mutex<AuthState>>> {
+    let username = ctx.auth.username().cloned()?;
     let state_arc = {
         let store = ctx.services().auth_state_store.lock().await;
         store.get(id)?
     };
-
-    {
-        let state = state_arc.lock().await;
-        if !username_eq_ci(&state.user_info().username, username) {
-            return None;
-        }
+    if username_eq_ci(&state_arc.lock().await.user_info().username, &username) {
+        Some(state_arc)
+    } else {
+        None
     }
-
-    Some(state_arc)
 }
-
 async fn serialize_auth_state_inner(
     state_arc: Arc<Mutex<AuthState>>,
     services: &Services,

@@ -8,6 +8,7 @@ use poem::error::InternalServerError;
 use poem::session::Session;
 use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
+use sea_orm::EntityTrait;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
@@ -19,9 +20,10 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-    X_WARPGATE_CLUSTER_TOKEN,
+    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN,
 };
 use warpgate_core::ConfigProvider;
+use warpgate_db_entities::User;
 use warpgate_sso::WarpgateIdToken;
 
 use crate::session::SessionStore;
@@ -182,10 +184,14 @@ pub async fn get_or_create_auth_state_for_request(
         }
     }
 
+    // Pass the browser session id so the auth state is keyed by it: a web
+    // approval landing on another node resolves the owner from the session's
+    // `node_id` in the DB (see `api::auth::auth_state_owner`).
+    let session_id = session_id_for_request(req, ctx).await?;
     let (id, state) = ctx
         .services()
         .create_auth_state(
-            None,
+            Some(&session_id),
             username,
             crate::common::PROTOCOL_NAME,
             "",
@@ -198,14 +204,6 @@ pub async fn get_or_create_auth_state_for_request(
             rate_limit_credential_type,
         )
         .await?;
-
-    {
-        let session_id = session_id_for_request(req, ctx).await?;
-        let mut state = state.lock().await;
-        if state.session_id() != Some(&session_id) {
-            state.set_session_id(session_id);
-        }
-    }
 
     session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
     Ok(state)
@@ -305,6 +303,33 @@ async fn cluster_token_matches(
         .into())
 }
 
+/// Authorization for a request authenticated by the cluster token. The proxying
+/// node forwards the acting user's id in `x-warpgate-cluster-identity` (see
+/// `cluster_proxy::forward_http`), so the request runs here as that user;
+/// without the header the peer acts as a bare cluster peer. An id that no
+/// longer resolves to a user fails closed (unauthenticated).
+async fn cluster_request_authorization(
+    ctx: &UnauthenticatedRequestContext,
+    req: &Request,
+) -> poem::Result<Option<RequestAuthorization>> {
+    let Some(header) = req.headers().get(&X_WARPGATE_CLUSTER_IDENTITY) else {
+        return Ok(Some(RequestAuthorization::ClusterToken));
+    };
+    let Some(user_id) = header.to_str().ok().and_then(|s| s.parse::<Uuid>().ok()) else {
+        return Ok(None);
+    };
+    Ok(User::Entity::find_by_id(user_id)
+        .one(&ctx.services().db)
+        .await
+        .map_err(poem::error::InternalServerError)?
+        .map(|user| {
+            RequestAuthorization::Session(SessionAuthorization::User {
+                user_id: user.id,
+                username: user.username,
+            })
+        }))
+}
+
 pub async fn inject_request_authorization<E: Endpoint + 'static>(
     ep: Arc<E>,
     req: Request,
@@ -347,7 +372,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     let auth = if let Some(auth) = session_auth {
         Some(RequestAuthorization::Session(auth))
     } else if cluster_token_matches(&ctx, &req).await? {
-        Some(RequestAuthorization::ClusterToken)
+        cluster_request_authorization(&ctx, &req).await?
     } else if let Some(token_from_header) = req.headers().get(&X_WARPGATE_TOKEN) {
         let token_from_header = token_from_header
             .to_str()
