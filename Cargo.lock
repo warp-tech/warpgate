@@ -9277,6 +9277,7 @@ dependencies = [
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-db-migrations",
  "warpgate-sso",
  "warpgate-tls",
  "warpgate-web",
