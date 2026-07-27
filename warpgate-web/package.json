@@ -27,7 +27,7 @@
     "@fortawesome/free-brands-svg-icons": "^7.3.1",
     "@fortawesome/free-regular-svg-icons": "^7.3.1",
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
-    "@openapitools/openapi-generator-cli": "^2.39.1",
+    "@openapitools/openapi-generator-cli": "^2.40.0",
     "@otplib/plugin-base32-enc-dec": "^12.0.1",
     "@otplib/plugin-crypto-js": "^12.0.1",
     "@otplib/preset-browser": "^12.0.1",
