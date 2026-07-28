@@ -48,9 +48,9 @@
             {/if}
 
             <div class="d-flex mt-3">
-                <AsyncButton color="primary" class="ms-auto" click={create}
-                    >Create</AsyncButton
-                >
+                <AsyncButton color="primary" class="ms-auto" click={create}>
+                    Create
+                </AsyncButton>
             </div>
         </div>
     </PermissionGate>

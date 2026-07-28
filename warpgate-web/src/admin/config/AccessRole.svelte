@@ -126,16 +126,18 @@
             disabled={!$adminPermissions.accessRolesEdit}
             class="ms-auto"
             click={update}
-            >Update</AsyncButton
         >
+            Update
+        </AsyncButton>
 
         <AsyncButton
             class="ms-2"
             disabled={!$adminPermissions.accessRolesDelete}
             color="danger"
             click={remove}
-            >Remove</AsyncButton
         >
+            Remove
+        </AsyncButton>
     </div>
 
     <h4 class="mt-5">Assigned users</h4>

@@ -145,8 +145,9 @@
                                 class="ms-auto"
                                 color="link"
                                 click={() => unblockIp(ip.ipAddress)}
-                                >Unblock</AsyncButton
                             >
+                                Unblock
+                            </AsyncButton>
                         </div>
                     </div>
                 {/each}
@@ -179,8 +180,9 @@
                                 class="ms-auto"
                                 color="link"
                                 click={() => unlockUser(user.username)}
-                                >Unlock</AsyncButton
                             >
+                                Unlock
+                            </AsyncButton>
                         </div>
                     </div>
                 {/each}

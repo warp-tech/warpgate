@@ -127,7 +127,7 @@
             <Input
                 bind:value={filter}
                 placeholder="Search..."
-                class="flex-grow-1 border-0"
+                class="flex-grow-1"
             />
         {/if}
         {@render header?.()}

@@ -646,9 +646,9 @@
                                 </HelpText>
 
                                 <FormGroup>
-                                    <label class="mb-2" for="banner"
-                                        >Login banner</label
-                                    >
+                                    <label class="mb-2" for="banner">
+                                        Login banner
+                                    </label>
                                     <Input
                                         id="banner"
                                         type="textarea"
@@ -789,13 +789,14 @@
                                         </div>
                                         <HelpText>
                                             Each block is
-                                            <strong
-                                                >multiplier × the previous block
-                                                duration</strong
-                                            >, capped at the maximum. The repeat
-                                            count resets only after the cooldown
-                                            period of <em>clean</em> activity —
-                                            not when a block expires.
+                                            <strong>
+                                                multiplier × the previous block
+                                                duration
+                                            </strong>, capped at the maximum.
+                                            The repeat count resets only after
+                                            the cooldown period of
+                                            <em>clean</em>
+                                            activity — not when a block expires.
                                         </HelpText>
 
                                         <Subsection title="User lockout">
@@ -908,8 +909,9 @@
                                             <a
                                                 href="/status/login-protection"
                                                 use:link
-                                                >Login protection</a
                                             >
+                                                Login protection
+                                            </a>
                                             page.
                                         </InfoBox>
                                     </Subsection>
@@ -1096,8 +1098,9 @@
                                         class="ms-auto"
                                         color="secondary"
                                         onclick={() => analyticsModalOpen = true}
-                                        >Change</Button
                                     >
+                                        Change
+                                    </Button>
                                 </div>
                             </Section>
                         </SectionedForm>

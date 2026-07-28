@@ -123,8 +123,9 @@
                                 e.preventDefault()
                                 openEditKey(key)
                             }}
-                            >Edit</Button
                         >
+                            Edit
+                        </Button>
                         <Button
                             class="ms-3"
                             color="link px-0"
@@ -132,8 +133,9 @@
                                 e.preventDefault()
                                 deleteKey(key)
                             }}
-                            >Delete</Button
                         >
+                            Delete
+                        </Button>
                     {/if}
                 </div>
                 <CopyableTextArea label="Public key" value={key.publicKey} />
@@ -178,8 +180,9 @@
                             deleteHost(host)
                         }}
                         disabled={!$adminPermissions.configEdit}
-                        >Delete</Button
                     >
+                        Delete
+                    </Button>
                 </div>
                 <pre>{host.keyType} {host.keyBase64}</pre>
             </div>

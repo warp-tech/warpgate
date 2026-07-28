@@ -1,11 +1,11 @@
 <script lang="ts">
+    import { faChevronRight } from '@fortawesome/free-solid-svg-icons'
+    import { Button } from '@sveltestrap/sveltestrap'
     import { autosave } from 'common/autosave'
     import type { TargetKind } from 'gateway/lib/api'
     import snarkdown from 'snarkdown'
-    import { protocolInfo } from './protocolInfo'
-    import { Button } from '@sveltestrap/sveltestrap'
     import Fa from 'svelte-fa'
-    import { faChevronRight } from '@fortawesome/free-solid-svg-icons'
+    import { protocolInfo } from './protocolInfo'
 
     interface Props {
         kind: TargetKind
@@ -20,14 +20,19 @@
 </script>
 
 {#if html}
-    <Button
-        color="link"
+    <!-- svelte-ignore a11y_invalid_attribute -->
+    <!-- svelte-ignore event_directive_deprecated -->
+    <a
+        href="#"
         class="p-0 d-flex align-items-center gap-2 text-start"
-        on:click={() => open.set(!$open)}
+        on:click={e => {
+            e.preventDefault()
+            open.set(!$open)
+        }}
     >
         <Fa fw icon={faChevronRight} rotate={$open ? 90 : 0} />
         <span>Protocol requirements &amp; supported features</span>
-    </Button>
+    </a>
     {#if $open}
         <div class="protocol-info-body small">{@html html}</div>
     {/if}
