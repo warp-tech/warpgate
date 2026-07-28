@@ -189,6 +189,9 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Hexalyse"><img src="https://avatars.githubusercontent.com/u/4415295?v=4?s=100" width="100px;" alt="Hexalyse"/><br /><sub><b>Hexalyse</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=Hexalyse" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/LarsSven"><img src="https://avatars.githubusercontent.com/u/60571459?v=4?s=100" width="100px;" alt="Lars"/><br /><sub><b>Lars</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=LarsSven" title="Code">💻</a></td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/basti-nis"><img src="https://avatars.githubusercontent.com/u/22980626?v=4?s=100" width="100px;" alt="basti-nis"/><br /><sub><b>basti-nis</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=basti-nis" title="Code">💻</a></td>
+    </tr>
   </tbody>
 </table>
 
