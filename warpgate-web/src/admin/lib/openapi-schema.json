@@ -5615,6 +5615,9 @@
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
           },
+          "ssh_host_key_verification": {
+            "$ref": "#/components/schemas/SshHostKeyVerificationMode"
+          },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
           },
@@ -5739,6 +5742,7 @@
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
+          "ssh_host_key_verification",
           "password_login_mode",
           "minimize_password_login",
           "ticket_self_service_enabled",
@@ -5786,6 +5790,9 @@
           },
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
+          },
+          "ssh_host_key_verification": {
+            "$ref": "#/components/schemas/SshHostKeyVerificationMode"
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
@@ -6519,6 +6526,16 @@
             "description": "Hostname of the owning node; only filled in by the session detail\nendpoint, and only while the node is registered."
           }
         }
+      },
+      "SshHostKeyVerificationMode": {
+        "type": "string",
+        "description": "What to do when a target's SSH host key isn't in the known hosts list.",
+        "enum": [
+          "Prompt",
+          "AutoAccept",
+          "AutoReject",
+          "Ignore"
+        ]
       },
       "SshTargetIamRoleAuth": {
         "type": "object",
