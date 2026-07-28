@@ -52,9 +52,6 @@ pub async fn web_reauth_required(
     Ok(now_unix() - auth_time >= max_age.cast_unsigned())
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct AuthStateId(pub Uuid);
-
 /// Represents the source of authentication of a session
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum SessionAuthorization {

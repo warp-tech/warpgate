@@ -12,8 +12,8 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_core::{DesktopInput, Services};
 use warpgate_desktop_auth::{
-    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter as HoldPainterExt, InteractiveAuth,
-    OtpAction, run_hold_screen as run_hold_screen_driver,
+    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter as HoldPainterExt,
+    InteractiveAuth, OtpAction, run_hold_screen as run_hold_screen_driver,
 };
 use warpgate_desktop_ui as ui;
 
@@ -80,10 +80,9 @@ impl HoldInputSource for RdpHoldInput<'_> {
             Some(ServerEvent::Input(DesktopInput::Scancode {
                 code, down: true, ..
             })) => scancode_otp_action(code).map_or(HoldEvent::Other, HoldEvent::Otp),
-            Some(ServerEvent::Input(DesktopInput::Key {
-                keysym,
-                down: true,
-            })) => key_otp_action(keysym).map_or(HoldEvent::Other, HoldEvent::Otp),
+            Some(ServerEvent::Input(DesktopInput::Key { keysym, down: true })) => {
+                key_otp_action(keysym).map_or(HoldEvent::Other, HoldEvent::Otp)
+            }
             Some(ServerEvent::Size { width, height }) => {
                 *self.screen.lock().await = ui::Screen { width, height };
                 HoldEvent::Other

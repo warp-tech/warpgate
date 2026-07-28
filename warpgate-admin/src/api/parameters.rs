@@ -173,10 +173,7 @@ enum TestRecordingsStorageResponse {
 #[OpenApi]
 impl Api {
     #[oai(path = "/parameters", method = "get", operation_id = "get_parameters")]
-    async fn api_get(
-        &self,
-        admin: AdminContext,
-    ) -> Result<GetParametersResponse, WarpgateError> {
+    async fn api_get(&self, admin: AdminContext) -> Result<GetParametersResponse, WarpgateError> {
         let parameters = admin.parameters().await?.clone();
         let recordings_storage = redact_secret(parameters.recordings_storage_config()?);
 

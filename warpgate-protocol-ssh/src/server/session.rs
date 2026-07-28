@@ -369,7 +369,7 @@ impl ServerSession {
         let state = self
             .services
             .create_auth_state(
-                Some(&self.id),
+                &self.id,
                 username,
                 crate::PROTOCOL_NAME,
                 target_name,
@@ -377,8 +377,7 @@ impl ServerSession {
                 Some(self.remote_address.ip()),
                 rate_limit_credential_type,
             )
-            .await?
-            .1;
+            .await?;
         self.auth_state = Some((state.clone(), target_name.to_string()));
         Ok(state)
     }

@@ -126,9 +126,8 @@ impl From<&User> for AuthStateUserInfo {
 }
 
 pub struct AuthState {
-    id: Uuid,
+    session_id: SessionId,
     user_info: AuthStateUserInfo,
-    session_id: Option<Uuid>,
     remote_ip: Option<IpAddr>,
     protocol: Protocol,
     target_name: String,
@@ -154,8 +153,7 @@ fn generate_identification_string() -> String {
 impl AuthState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: Uuid,
-        session_id: Option<SessionId>,
+        session_id: SessionId,
         remote_ip: Option<IpAddr>,
         user_info: AuthStateUserInfo,
         protocol: Protocol,
@@ -164,7 +162,6 @@ impl AuthState {
         state_change_signal: broadcast::Sender<AuthResult>,
     ) -> Self {
         let mut this = Self {
-            id,
             session_id,
             remote_ip,
             user_info,
@@ -183,16 +180,8 @@ impl AuthState {
         this
     }
 
-    pub const fn id(&self) -> &Uuid {
-        &self.id
-    }
-
-    pub const fn session_id(&self) -> Option<&SessionId> {
-        self.session_id.as_ref()
-    }
-
-    pub const fn set_session_id(&mut self, session_id: SessionId) {
-        self.session_id = Some(session_id);
+    pub const fn session_id(&self) -> &SessionId {
+        &self.session_id
     }
 
     pub const fn user_info(&self) -> &AuthStateUserInfo {
@@ -313,14 +302,10 @@ impl AuthState {
             return;
         };
 
-        let Some(session_id) = self.session_id.as_ref() else {
-            return;
-        };
-
         info!(
             target: "audit",
             _type = "UserAuthenticated1",
-            session = %session_id,
+            session = %self.session_id,
             client_ip = %self.client_ip_for_logging(),
             user_id = %self.user_info.id,
             username = %self.user_info.username,
@@ -333,14 +318,10 @@ impl AuthState {
     }
 
     pub fn emit_web_approval_bypassed_event(&self) {
-        let Some(session_id) = self.session_id.as_ref() else {
-            return;
-        };
-
         info!(
             target: "audit",
             _type = "WebApprovalBypassed1",
-            session = %session_id,
+            session = %self.session_id,
             client_ip = %self.client_ip_for_logging(),
             user_id = %self.user_info.id,
             username = %self.user_info.username,
@@ -356,17 +337,13 @@ impl AuthState {
         credential: Option<&AuthCredential>,
         reason: &str,
     ) {
-        let Some(session_id) = self.session_id.as_ref() else {
-            return;
-        };
-
         let credentials =
             credential.map_or_else(|| "<unknown>".to_string(), AuthCredential::safe_description);
 
         info!(
             target: "audit",
             _type = "UserAuthenticationFailed1",
-            session = %session_id,
+            session = %self.session_id,
             client_ip = %self.client_ip_for_logging(),
             user_id = %self.user_info.id,
             username = %self.user_info.username,
@@ -398,7 +375,7 @@ impl AuthState {
             self.emit_authenticated_event_once();
             debug!(
                 "Verification state changed for auth state {}: {:?} -> {:?}",
-                self.id, self.last_result, &new_result
+                self.session_id, self.last_result, &new_result
             );
             let _ = self.state_change_signal.send(new_result.clone());
             self.last_result = Some(new_result.clone());
@@ -409,7 +386,7 @@ impl AuthState {
 
     pub fn construct_web_approval_url(&self, mut external_url: Url) -> url::Url {
         external_url.set_path("@warpgate");
-        external_url.set_fragment(Some(&format!("/login/{}", self.id())));
+        external_url.set_fragment(Some(&format!("/login/{}", self.session_id())));
         external_url
     }
 }
@@ -441,7 +418,6 @@ mod tests {
     fn make_state(kinds: &[CredentialKind]) -> AuthState {
         AuthState::new(
             Uuid::new_v4(),
-            None,
             None,
             AuthStateUserInfo {
                 id: Uuid::new_v4(),

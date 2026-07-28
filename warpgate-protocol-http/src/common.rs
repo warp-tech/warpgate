@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
+use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Protocol, SessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
@@ -31,7 +31,6 @@ use crate::session::SessionStore;
 pub const PROTOCOL_NAME: Protocol = Protocol::Http;
 static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
-static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
 static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
 pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
@@ -58,8 +57,10 @@ pub trait SessionExt {
     fn set_target_name(&self, target_name: String);
     fn get_auth(&self) -> Option<SessionAuthorization>;
     fn set_auth(&self, auth: SessionAuthorization);
-    fn get_auth_state_id(&self) -> Option<AuthStateId>;
-    fn clear_auth_state(&self);
+    /// The Warpgate session id of this browser session, once one has been
+    /// registered for it. Unlike [`session_id_for_request`] this never creates
+    /// one.
+    fn get_session_id(&self) -> Option<SessionId>;
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState>;
     fn set_sso_login_state(&self, token: SsoLoginState);
@@ -82,12 +83,8 @@ impl SessionExt for Session {
         self.set(AUTH_SESSION_KEY, auth);
     }
 
-    fn get_auth_state_id(&self) -> Option<AuthStateId> {
-        self.get(AUTH_STATE_ID_SESSION_KEY)
-    }
-
-    fn clear_auth_state(&self) {
-        self.remove(AUTH_STATE_ID_SESSION_KEY);
+    fn get_session_id(&self) -> Option<SessionId> {
+        self.get(crate::session::SESSION_ID_SESSION_KEY)
     }
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState> {
@@ -101,9 +98,6 @@ impl SessionExt for Session {
         }
     }
 }
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct AuthStateId(pub Uuid);
 
 pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bool> {
     // A user is an administrator if they hold any admin permission. Resolved through the one
@@ -173,13 +167,16 @@ pub async fn get_or_create_auth_state_for_request(
     rate_limit_credential_type: Option<&str>,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
     let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
-    let session = <&Session>::from_request_without_body(req)
-        .await
-        .context("Session not in request")?;
 
     if let Some(state) = get_auth_state_for_request(req, ctx).await? {
-        let existing_matched = username_eq_ci(&state.lock().await.user_info().username, username);
-        if existing_matched {
+        let reusable = {
+            let state = state.lock().await;
+            // A terminally rejected attempt can never accept another
+            // credential, so a retry must start a fresh one.
+            username_eq_ci(&state.user_info().username, username)
+                && !matches!(state.verify(), AuthResult::Rejected)
+        };
+        if reusable {
             return Ok(state);
         }
     }
@@ -188,10 +185,11 @@ pub async fn get_or_create_auth_state_for_request(
     // approval landing on another node resolves the owner from the session's
     // `node_id` in the DB (see `api::auth::auth_state_owner`).
     let session_id = session_id_for_request(req, ctx).await?;
-    let (id, state) = ctx
+
+    let state = ctx
         .services()
         .create_auth_state(
-            Some(&session_id),
+            &session_id,
             username,
             crate::common::PROTOCOL_NAME,
             "",
@@ -205,33 +203,30 @@ pub async fn get_or_create_auth_state_for_request(
         )
         .await?;
 
-    session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
     Ok(state)
 }
 
+/// The login attempt in progress on this browser session, if any. Auth states
+/// are keyed by session id, so the session itself is the lookup key and there is
+/// nothing to keep in sync.
 pub async fn get_auth_state_for_request(
     req: &Request,
     ctx: &UnauthenticatedRequestContext,
 ) -> Result<Option<Arc<Mutex<AuthState>>>, WarpgateError> {
-    let store = ctx.services().auth_state_store.lock().await;
     let session = <&Session>::from_request_without_body(req)
         .await
         .context("Session not in request")?;
 
-    if let Some(id) = session.get_auth_state_id()
-        && !store.contains_key(&id.0)
-    {
-        session.clear_auth_state();
-    }
+    let Some(session_id) = session.get_session_id() else {
+        return Ok(None);
+    };
 
-    if let Some(id) = session.get_auth_state_id() {
-        let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState(
-            "unknown auth state id".into(),
-        ))?;
-        return Ok(Some(state));
-    }
-
-    Ok(None)
+    Ok(ctx
+        .services()
+        .auth_state_store
+        .lock()
+        .await
+        .get(&session_id))
 }
 
 pub async fn session_id_for_request(

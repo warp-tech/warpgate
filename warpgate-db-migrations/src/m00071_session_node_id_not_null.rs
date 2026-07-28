@@ -35,9 +35,7 @@ impl MigrationTrait for Migration {
                 .alter_table(
                     Table::alter()
                         .table(Alias::new("sessions"))
-                        .modify_column(
-                            ColumnDef::new(Alias::new("node_id")).uuid().not_null(),
-                        )
+                        .modify_column(ColumnDef::new(Alias::new("node_id")).uuid().not_null())
                         .to_owned(),
                 )
                 .await?;

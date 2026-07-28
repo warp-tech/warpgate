@@ -441,18 +441,11 @@ impl Api {
     )]
     async fn api_default_auth_state(
         &self,
-        session: &Session,
+        req: &Request,
         ctx: Data<&UnauthenticatedRequestContext>,
     ) -> poem::Result<AuthStateResponse> {
         let services = ctx.services();
-        let Some(state_id) = session.get_auth_state_id() else {
-            return Ok(AuthStateResponse::NotFound);
-        };
-        let state_arc = {
-            let store = services.auth_state_store.lock().await;
-            store.get(&state_id.0)
-        };
-        let Some(state_arc) = state_arc else {
+        let Some(state_arc) = get_auth_state_for_request(req, &ctx).await? else {
             return Ok(AuthStateResponse::NotFound);
         };
         serialize_auth_state_inner(state_arc, services)
@@ -468,22 +461,24 @@ impl Api {
     )]
     async fn api_cancel_default_auth(
         &self,
+        req: &Request,
         session: &Session,
         ctx: Data<&UnauthenticatedRequestContext>,
     ) -> poem::Result<AuthStateResponse> {
         let services = ctx.services();
-        let Some(state_id) = session.get_auth_state_id() else {
+        let Some(state_arc) = get_auth_state_for_request(req, &ctx).await? else {
             return Ok(AuthStateResponse::NotFound);
         };
-        let state_arc = {
-            let store = services.auth_state_store.lock().await;
-            store.get(&state_id.0)
-        };
-        let Some(state_arc) = state_arc else {
-            return Ok(AuthStateResponse::NotFound);
-        };
+        // Rejected first, so anything waiting on the state sees the outcome
+        // before it is dropped.
         state_arc.lock().await.reject();
-        session.clear_auth_state();
+        if let Some(session_id) = session.get_session_id() {
+            services
+                .auth_state_store
+                .lock()
+                .await
+                .remove_if_same(&session_id, &state_arc);
+        }
 
         serialize_auth_state_inner(state_arc, services)
             .await
@@ -705,9 +700,10 @@ async fn serialize_auth_state_inner(
     // session state store lock across another lock acquisition.
     let session_state = {
         let session_state_store = services.state.lock().await;
-        state
-            .session_id()
-            .and_then(|session_id| session_state_store.sessions.get(session_id).cloned())
+        session_state_store
+            .sessions
+            .get(state.session_id())
+            .cloned()
     };
 
     let peer_addr = match session_state {
@@ -721,7 +717,7 @@ async fn serialize_auth_state_inner(
         .and_then(|d| i64::try_from(d.as_secs()).ok());
 
     Ok(AuthStateResponseInternal {
-        id: state.id().to_string(),
+        id: state.session_id().to_string(),
         protocol: state.protocol().to_string(),
         address: peer_addr.map(|x| x.ip().to_string()),
         started: *state.started(),
