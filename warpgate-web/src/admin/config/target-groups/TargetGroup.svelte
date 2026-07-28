@@ -158,14 +158,16 @@
                         click={update}
                         color="primary"
                         disabled={!$adminPermissions.targetsEdit}
-                        >Update</AsyncButton
                     >
+                        Update
+                    </AsyncButton>
                     <Button
                         color="danger"
                         onclick={remove}
                         disabled={!$adminPermissions.targetsDelete}
-                        >Remove</Button
                     >
+                        Remove
+                    </Button>
                 </div>
             </form>
         </div>

@@ -8,9 +8,11 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, error, info_span, warn};
 use uuid::Uuid;
-use warpgate_common::{SshHostKeyVerificationMode, TargetOptions, TargetSSHOptions, WarpgateError};
+use warpgate_common::{TargetOptions, TargetSSHOptions, WarpgateError};
 use warpgate_core::recordings::TerminalRecordingStreamId;
 use warpgate_core::{Services, SessionStateInit, State, TargetAuthorization};
+use warpgate_db_entities::Parameters;
+use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::known_hosts::KnownHosts;
 use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient, resolve_ssh_chain};
@@ -222,14 +224,20 @@ fn spawn_event_loop(
                             debug!(%session_id, "Host key received: {}", key.algorithm());
                         }
                         RCEvent::HostKeyUnknown(key, reply) => {
-                            let mode = services
-                                .config
-                                .lock()
-                                .await
-                                .store
-                                .ssh
-                                .host_key_verification;
+                            let mode = match Parameters::Entity::get(&services.db).await {
+                                Ok(p) => p.ssh_host_key_verification,
+                                Err(e) => {
+                                    error!(%session_id, ?e, "Failed to read the host key verification mode");
+                                    let _ = reply.send(false);
+                                    continue;
+                                }
+                            };
                             match mode {
+                                // `Ignore` never gets here - the key is accepted
+                                // without a lookup - but don't store it either.
+                                SshHostKeyVerificationMode::Ignore => {
+                                    let _ = reply.send(true);
+                                }
                                 SshHostKeyVerificationMode::AutoAccept => {
                                     let known_hosts = KnownHosts::new(&services.db);
                                     if let Err(e) = known_hosts

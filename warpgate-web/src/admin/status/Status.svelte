@@ -19,7 +19,7 @@
     }
 </script>
 
-<SidebarNavContainer {routes} prefix="/status">
+<SidebarNavContainer {routes} prefix="/status" returnLink>
     {#snippet navItems()}
         <NavListItem
             small

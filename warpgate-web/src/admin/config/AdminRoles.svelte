@@ -36,8 +36,9 @@
                 class="btn btn-primary ms-auto"
                 href="/config/admin-roles/create"
                 use:link
-                >Create</a
             >
+                Create
+            </a>
         </div>
 
         <ItemList load={loadRoles} showSearch={true}>

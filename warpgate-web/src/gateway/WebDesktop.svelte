@@ -349,9 +349,9 @@
         >
             <Fa icon={isFullscreen ? faCompress : faExpand} fw />
         </button>
-        <Button color="danger" size="sm" onclick={disconnect}
-            >Disconnect</Button
-        >
+        <Button color="danger" size="sm" onclick={disconnect}>
+            Disconnect
+        </Button>
     </div>
 
     {#if connectionError}

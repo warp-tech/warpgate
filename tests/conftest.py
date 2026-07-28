@@ -818,6 +818,9 @@ class ProcessManager:
                 # lives in the DB (seeded from config at setup-time migration), so it
                 # must be set here rather than patched into the config file afterwards.
                 "--record-sessions",
+                # Likewise a DB parameter seeded from the config at setup time.
+                "--host-key-verification",
+                "auto-accept",
             ]
             if database_url:
                 setup_args += ["--database-url", database_url]
@@ -832,7 +835,6 @@ class ProcessManager:
             import yaml
 
             config = yaml.safe_load(config_path.open())
-            config["ssh"]["host_key_verification"] = "auto_accept"
             # unattended-setup has no --vnc-port, so enable the VNC listener here,
             # reusing the TLS cert/key already copied into the data dir (for VeNCrypt).
             config["vnc"] = {

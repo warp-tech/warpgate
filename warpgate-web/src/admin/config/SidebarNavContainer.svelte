@@ -1,21 +1,22 @@
 <script lang="ts">
-    import NavListItem from 'common/NavListItem.svelte'
-    import { serverInfo } from 'gateway/lib/store'
+    import { faArrowLeft, faNavicon } from '@fortawesome/free-solid-svg-icons'
+    import { Button } from '@sveltestrap/sveltestrap'
     import type { Snippet } from 'svelte'
+    import Fa from 'svelte-fa'
     import Router, {
-        type RouteDefinition,
+        link,
         type RouteDetail,
         type WrappedComponent,
     } from 'svelte-spa-router'
-    import { wrap } from 'svelte-spa-router/wrap'
 
     interface Props {
         routes: Record<string, WrappedComponent>
         prefix: string
+        returnLink?: boolean
         navItems: Snippet<[sidebarMode: boolean]>
     }
 
-    const { routes, prefix, navItems }: Props = $props()
+    const { routes, prefix, returnLink, navItems }: Props = $props()
 
     let sidebarMode = $state(false)
 
@@ -25,6 +26,16 @@
 </script>
 
 <div class="wrapper" class:d-none={!sidebarMode}>
+    {#if returnLink}
+        <a
+            class="nav-return-link btn btn-link"
+            use:link
+            href={prefix}
+            color="link"
+        >
+            <Fa icon={faArrowLeft} size="lg" />
+        </a>
+    {/if}
     <div class="sidebar">
         {@render navItems(sidebarMode)}
     </div>
@@ -46,10 +57,10 @@
 
     .wrapper {
         display: flex;
-        gap: $sb-m;
 
         > .sidebar {
             width: $sb-w;
+            margin-right: $sb-m;
             flex: none;
         }
 
@@ -60,9 +71,18 @@
         }
     }
 
+    .nav-return-link {
+        display: none;
+        margin-top: 12px;
+    }
+
     @media (max-width: #{720px + $sb-m + $sb-w}) {
         .sidebar {
             display: none;
+        }
+
+        .nav-return-link {
+            display: block;
         }
     }
 </style>

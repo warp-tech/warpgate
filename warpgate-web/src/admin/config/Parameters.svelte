@@ -6,6 +6,7 @@
         api,
         type ParameterValues,
         type PasswordLoginMode,
+        type SshHostKeyVerificationMode,
         type TargetClickAction,
     } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
@@ -331,6 +332,33 @@
                                     </HelpText>
                                 </Subsection>
 
+                                <Subsection title="Target host keys">
+                                    <FormGroup
+                                        floating
+                                        label="Unknown host key handling"
+                                    >
+                                        <select
+                                            id="sshHostKeyVerification"
+                                            class="form-select"
+                                            value={parameters.sshHostKeyVerification ?? 'Prompt'}
+                                            onchange={e => parameters.sshHostKeyVerification = e.currentTarget.value as SshHostKeyVerificationMode}
+                                        >
+                                            <option value="Prompt">
+                                                Ask the user to trust the key
+                                            </option>
+                                            <option value="AutoAccept">
+                                                Trust and remember the key
+                                            </option>
+                                            <option value="AutoReject">
+                                                Refuse to connect
+                                            </option>
+                                            <option value="Ignore">
+                                                Don't check host keys at all
+                                            </option>
+                                        </select>
+                                    </FormGroup>
+                                </Subsection>
+
                                 <Subsection title="Quirks">
                                     {#if parameters.recordingsEnable}
                                         <label
@@ -618,9 +646,9 @@
                                 </HelpText>
 
                                 <FormGroup>
-                                    <label class="mb-2" for="banner"
-                                        >Login banner</label
-                                    >
+                                    <label class="mb-2" for="banner">
+                                        Login banner
+                                    </label>
                                     <Input
                                         id="banner"
                                         type="textarea"
@@ -761,13 +789,14 @@
                                         </div>
                                         <HelpText>
                                             Each block is
-                                            <strong
-                                                >multiplier × the previous block
-                                                duration</strong
-                                            >, capped at the maximum. The repeat
-                                            count resets only after the cooldown
-                                            period of <em>clean</em> activity —
-                                            not when a block expires.
+                                            <strong>
+                                                multiplier × the previous block
+                                                duration
+                                            </strong>, capped at the maximum.
+                                            The repeat count resets only after
+                                            the cooldown period of
+                                            <em>clean</em>
+                                            activity — not when a block expires.
                                         </HelpText>
 
                                         <Subsection title="User lockout">
@@ -880,8 +909,9 @@
                                             <a
                                                 href="/status/login-protection"
                                                 use:link
-                                                >Login protection</a
                                             >
+                                                Login protection
+                                            </a>
                                             page.
                                         </InfoBox>
                                     </Subsection>
@@ -1068,8 +1098,9 @@
                                         class="ms-auto"
                                         color="secondary"
                                         onclick={() => analyticsModalOpen = true}
-                                        >Change</Button
                                     >
+                                        Change
+                                    </Button>
                                 </div>
                             </Section>
                         </SectionedForm>
