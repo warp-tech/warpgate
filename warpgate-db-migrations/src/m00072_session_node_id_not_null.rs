@@ -6,13 +6,8 @@ use uuid::Uuid;
 /// was gone) with the nil UUID and makes the column non-nullable, so the entity
 /// can drop the `Option`. The nil UUID is the in-code sentinel for "no owning
 /// node" (see `cluster_proxy::node_owner`).
+#[derive(DeriveMigrationName)]
 pub struct Migration;
-
-impl MigrationName for Migration {
-    fn name(&self) -> &str {
-        "m00071_session_node_id_not_null"
-    }
-}
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
