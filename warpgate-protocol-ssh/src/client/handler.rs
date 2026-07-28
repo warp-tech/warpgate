@@ -6,6 +6,8 @@ use tokio::sync::oneshot;
 use tracing::*;
 use warpgate_common::{SessionId, TargetSSHOptions};
 use warpgate_core::Services;
+use warpgate_db_entities::Parameters;
+use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 
 use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
 use crate::{ConnectionError, ForwardedStreamlocalParams, ForwardedTcpIpParams};
@@ -53,6 +55,20 @@ impl russh::client::Handler for ClientHandler {
                 server_public_key.clone(),
             ))
             .map_err(|_| ClientHandlerError::ConnectionError(ConnectionError::Internal))?;
+
+        let mode = Parameters::Entity::get(&self.services.db)
+            .await
+            .map_err(|error| {
+                error!(?error, session=%self.session_id, "Failed to read the host key verification mode");
+                ClientHandlerError::Internal
+            })?
+            .ssh_host_key_verification;
+
+        if mode == SshHostKeyVerificationMode::Ignore {
+            debug!(session=%self.session_id, "Not checking the host key (verification is disabled)");
+            return Ok(true);
+        }
+
         match known_hosts
             .validate(
                 &self.ssh_options.host,

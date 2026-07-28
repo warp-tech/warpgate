@@ -494,6 +494,7 @@
           "minimum": 0
         },
         "host_key_verification": {
+          "description": "Only seeds the `ssh_host_key_verification` parameter when the database\nrow is first created; the admin UI owns the setting afterwards.",
           "$ref": "#/$defs/SshHostKeyVerificationMode",
           "default": "prompt"
         },
@@ -532,7 +533,8 @@
       "enum": [
         "prompt",
         "auto_accept",
-        "auto_reject"
+        "auto_reject",
+        "ignore"
       ]
     },
     "SsoInternalProviderConfig": {

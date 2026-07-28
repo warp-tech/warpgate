@@ -31,6 +31,40 @@ pub enum PasswordLoginMode {
     Disabled,
 }
 
+/// What to do when a target's SSH host key isn't in the known hosts list.
+#[derive(
+    Debug, Default, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
+pub enum SshHostKeyVerificationMode {
+    /// Ask the user to trust the key, then remember it.
+    #[default]
+    #[sea_orm(string_value = "Prompt")]
+    Prompt,
+    /// Trust and remember the key without asking.
+    #[sea_orm(string_value = "AutoAccept")]
+    AutoAccept,
+    /// Refuse to connect to hosts with unknown keys.
+    #[sea_orm(string_value = "AutoReject")]
+    AutoReject,
+    /// Don't check or remember host keys at all - no protection against MITM,
+    /// but tolerates hosts that rotate their keys.
+    #[sea_orm(string_value = "Ignore")]
+    Ignore,
+}
+
+impl From<warpgate_common::SshHostKeyVerificationMode> for SshHostKeyVerificationMode {
+    fn from(mode: warpgate_common::SshHostKeyVerificationMode) -> Self {
+        use warpgate_common::SshHostKeyVerificationMode as C;
+        match mode {
+            C::Prompt => Self::Prompt,
+            C::AutoAccept => Self::AutoAccept,
+            C::AutoReject => Self::AutoReject,
+            C::Ignore => Self::Ignore,
+        }
+    }
+}
+
 /// Whether the instance reports anonymous usage analytics, and at which
 /// payload level. `Undecided` triggers the one-time opt-in prompt in the admin
 /// UI; the instance never reports until the choice is made.
@@ -68,13 +102,14 @@ impl Default for RecordingsStorageConfig {
     }
 }
 
-/// The config-file recordings settings (enable + already-serialized storage
-/// config), published by the process before migrations run so that the `m00063`
-/// migration can copy them into the row (existing installs) and `Entity::get`
-/// can seed a fresh row from them.
+/// The config-file settings that have since moved into the parameters row,
+/// published by the process before migrations run so that the migrations can
+/// copy them into the row of an existing install.
+#[derive(Default)]
 pub struct ConfigMigrationValues {
     pub recordings_enable: bool,
     pub recordings_path: String,
+    pub ssh_host_key_verification: SshHostKeyVerificationMode,
 }
 
 static CONFIG_MIGRATION_VALUES: std::sync::OnceLock<ConfigMigrationValues> =
@@ -110,6 +145,7 @@ pub struct Model {
     pub ssh_client_auth_publickey: bool,
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
+    pub ssh_host_key_verification: SshHostKeyVerificationMode,
     pub password_login_mode: PasswordLoginMode,
     pub ticket_self_service_enabled: bool,
     pub ticket_auto_approve_existing_access: bool,
@@ -205,6 +241,9 @@ impl Entity {
                     ssh_client_auth_publickey: Set(true),
                     ssh_client_auth_password: Set(true),
                     ssh_client_auth_keyboard_interactive: Set(true),
+                    ssh_host_key_verification: Set(
+                        get_config_migration_values().ssh_host_key_verification
+                    ),
                     password_login_mode: Set(PasswordLoginMode::Enabled),
                     ticket_self_service_enabled: Set(false),
                     ticket_auto_approve_existing_access: Set(true),
