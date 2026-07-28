@@ -327,6 +327,14 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
 
     store.ssh.keys = data_path.join("ssh-keys").to_string_lossy().to_string();
 
+    if let Commands::UnattendedSetup {
+        host_key_verification,
+        ..
+    } = &cli.command
+    {
+        store.ssh.host_key_verification = *host_key_verification;
+    }
+
     // ---
 
     let recordings = store.recordings.get_or_insert_with(Default::default);

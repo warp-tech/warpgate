@@ -92,6 +92,10 @@ pub(crate) enum Commands {
         #[clap(long)]
         record_sessions: bool,
 
+        /// How to handle unknown SSH host keys of the targets
+        #[clap(long, value_enum, default_value_t)]
+        host_key_verification: warpgate_common::SshHostKeyVerificationMode,
+
         /// Password for the initial user (required if WARPGATE_ADMIN_PASSWORD env var is not set)
         #[clap(long)]
         admin_password: Option<String>,

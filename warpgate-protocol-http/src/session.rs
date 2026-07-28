@@ -363,10 +363,7 @@ mod db_tests {
 
     async fn storage() -> SharedSessionStorage {
         warpgate_db_entities::Parameters::set_config_migration_values(
-            warpgate_db_entities::Parameters::ConfigMigrationValues {
-                recordings_enable: false,
-                recordings_path: String::new(),
-            },
+            warpgate_db_entities::Parameters::ConfigMigrationValues::default(),
         );
         let db = Database::connect("sqlite::memory:").await.unwrap();
         warpgate_db_migrations::migrate_database(&db).await.unwrap();

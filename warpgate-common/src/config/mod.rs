@@ -384,7 +384,9 @@ mod admin_permission_set_tests {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema)]
+#[derive(
+    Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema, clap::ValueEnum,
+)]
 pub enum SshHostKeyVerificationMode {
     #[serde(rename = "prompt")]
     #[default]
@@ -393,6 +395,8 @@ pub enum SshHostKeyVerificationMode {
     AutoAccept,
     #[serde(rename = "auto_reject")]
     AutoReject,
+    #[serde(rename = "ignore")]
+    Ignore,
 }
 
 #[derive(
@@ -426,6 +430,8 @@ pub struct SshConfig {
     #[serde(default = "_default_ssh_keys_path")]
     pub keys: String,
 
+    /// Only seeds the `ssh_host_key_verification` parameter when the database
+    /// row is first created; the admin UI owns the setting afterwards.
     #[serde(default)]
     pub host_key_verification: SshHostKeyVerificationMode,
 
