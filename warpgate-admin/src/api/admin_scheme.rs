@@ -135,12 +135,27 @@ pub(crate) struct ClusterOrAdminTokenAuth(AdminAccess);
 )]
 pub(crate) struct ClusterOrAdminCookieAuth(AdminAccess);
 
+/// Peer-to-peer cluster token.
+// A forwarded request carries no admin token or cookie - the cluster token header is its only
+// credential, so it has to be a key this scheme accepts. The value here is not trusted:
+// `cluster_or_admin_access` goes by the authorization the middleware already validated.
+#[derive(SecurityScheme)]
+#[oai(
+    rename = "ClusterTokenSecurityScheme",
+    ty = "api_key",
+    key_name = "X-Warpgate-Cluster-Token",
+    key_in = "header",
+    checker = "cluster_or_admin_access"
+)]
+pub(crate) struct ClusterTokenAuth(AdminAccess);
+
 /// Like [`AdminContext`], but also accepts a cluster token (peer-forwarded admin requests).
 /// Use only on endpoints that are legitimately cross-node forwardable.
 #[derive(SecurityScheme)]
 pub(crate) enum ClusterOrAdminContext {
     Token(ClusterOrAdminTokenAuth),
     Cookie(ClusterOrAdminCookieAuth),
+    ClusterToken(ClusterTokenAuth),
 }
 
 impl ClusterOrAdminContext {
@@ -148,6 +163,7 @@ impl ClusterOrAdminContext {
         match self {
             Self::Token(t) => &t.0,
             Self::Cookie(c) => &c.0,
+            Self::ClusterToken(t) => &t.0,
         }
     }
 

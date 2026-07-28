@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use futures::{SinkExt, StreamExt};
 use poem::http::StatusCode;
 use poem::session::Session;
@@ -10,6 +12,7 @@ use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::prelude::Expr;
 use sea_orm::sea_query::Func;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use tokio::time::timeout;
 use tracing::warn;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
@@ -111,52 +114,55 @@ impl Api {
         // A session's handle lives only on the node owning its connection, so
         // the request goes out to every other node too.
         if !local_only.unwrap_or(false) {
-            close_on_peers(&admin, req).await?;
+            close_on_peers(&admin, req).await;
         }
 
         Ok(CloseAllSessionsResponse::Ok)
     }
 }
 
+/// How long a single peer gets to close its sessions. A node that is registered
+/// but unreachable must not hold up the rest of the fan-out.
+const PEER_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Forward the close-all request to every other registered cluster node.
-async fn close_on_peers(
-    ctx: &AuthenticatedRequestContext,
-    req: &poem::Request,
-) -> poem::Result<()> {
+///
+/// Best effort: a node can be registered but already gone (a crashed node stays
+/// in the registry until the reaper drops it), and its sessions get marked ended
+/// there anyway - so an unreachable peer is logged, not raised.
+async fn close_on_peers(ctx: &AuthenticatedRequestContext, req: &poem::Request) {
     let services = ctx.services();
     let peers = Node::Entity::find()
         .filter(Node::Column::Id.ne(services.cluster.node_id))
         .all(&services.db)
-        .await
-        .map_err(WarpgateError::from)?;
+        .await;
+    let peers = match peers {
+        Ok(peers) => peers,
+        Err(error) => {
+            warn!(%error, "Failed to list cluster nodes");
+            return;
+        }
+    };
 
     // `local_only` stops the peers from fanning out again
     let path = format!("{}?local_only=true", req.original_uri().path());
 
-    let mut failed = vec![];
     for peer in peers {
         let hostname = peer.hostname.clone();
-        match forward_http_to(ctx, req, &path, peer.into(), &services.cluster_token).await {
-            Ok(response) if response.status() == StatusCode::CREATED => {}
-            Ok(response) => {
+        let forward = forward_http_to(ctx, req, &path, peer.into(), &services.cluster_token);
+        match timeout(PEER_TIMEOUT, forward).await {
+            Ok(Ok(response)) if response.status() == StatusCode::CREATED => {}
+            Ok(Ok(response)) => {
                 let status = response.status();
                 warn!(node = %hostname, %status, "Failed to close sessions on a cluster node");
-                failed.push(hostname);
             }
-            Err(error) => {
+            Ok(Err(error)) => {
                 warn!(node = %hostname, %error, "Failed to close sessions on a cluster node");
-                failed.push(hostname);
+            }
+            Err(_) => {
+                warn!(node = %hostname, "Timed out closing sessions on a cluster node");
             }
         }
-    }
-
-    if failed.is_empty() {
-        Ok(())
-    } else {
-        Err(poem::Error::from_string(
-            format!("Failed to close sessions on: {}", failed.join(", ")),
-            StatusCode::BAD_GATEWAY,
-        ))
     }
 }
 

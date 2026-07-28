@@ -90,6 +90,19 @@
         "operationId": "get_sessions"
       },
       "delete": {
+        "parameters": [
+          {
+            "name": "local_only",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "description": "Close only this node's own sessions instead of the whole cluster's.\nSet on cluster-forwarded copies of the request.",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
         "responses": {
           "201": {
             "description": ""
@@ -101,6 +114,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
           }
         ],
         "operationId": "close_all_sessions"
@@ -217,6 +233,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
           }
         ],
         "operationId": "close_session"
@@ -258,6 +277,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
           }
         ],
         "operationId": "get_recording"
@@ -7728,6 +7750,12 @@
       }
     },
     "securitySchemes": {
+      "ClusterTokenSecurityScheme": {
+        "type": "apiKey",
+        "description": "Peer-to-peer cluster token.",
+        "name": "X-Warpgate-Cluster-Token",
+        "in": "header"
+      },
       "CookieSecurityScheme": {
         "type": "apiKey",
         "name": "warpgate-http-session",
