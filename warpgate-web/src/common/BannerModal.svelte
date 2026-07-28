@@ -60,6 +60,7 @@
 
             border: 1px solid rgba(128, 128, 128, .25);
             background: #33333380;
+            color: #dadada;
             backdrop-filter: blur(4px);
             padding: .5rem 1rem;
             border-radius: 6px;

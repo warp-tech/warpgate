@@ -41,6 +41,12 @@ updates:
     labels: ["type/deps"]
     schedule:
       interval: daily
+    groups:
+      version-bumps:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: docker
     directory: /docker

@@ -22,7 +22,7 @@ use warpgate_core::recordings::{LiveChunk, RecordingFile};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_db_entities::Session;
 
-use super::AnySecurityScheme;
+use super::ClusterOrAdminContext;
 use crate::api::cluster_proxy::{Owner, proxy_or_serve, proxy_or_serve_websocket, session_owner};
 use crate::api::common::require_cluster_or_admin_permission;
 
@@ -45,13 +45,12 @@ impl Api {
     )]
     async fn api_get_recording(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: ClusterOrAdminContext,
         id: poem_openapi::param::Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<GetRecordingResponse> {
-        require_cluster_or_admin_permission(&ctx, AdminPermission::RecordingsView).await?;
+        admin.require(AdminPermission::RecordingsView)?;
 
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
 
         let recording = Recording::Entity::find_by_id(id.0)
             .one(db)

@@ -92,6 +92,10 @@ pub(crate) enum Commands {
         #[clap(long)]
         record_sessions: bool,
 
+        /// How to handle unknown SSH host keys of the targets
+        #[clap(long, value_enum, default_value_t)]
+        host_key_verification: warpgate_common::SshHostKeyVerificationMode,
+
         /// Password for the initial user (required if WARPGATE_ADMIN_PASSWORD env var is not set)
         #[clap(long)]
         admin_password: Option<String>,
@@ -189,7 +193,7 @@ async fn _main() -> Result<()> {
         Commands::Setup { .. } | Commands::UnattendedSetup { .. } => {
             crate::commands::setup::command(&cli, &params).await
         }
-        Commands::ClientKeys => crate::commands::client_keys::command(&params),
+        Commands::ClientKeys => crate::commands::client_keys::command(&params).await,
         Commands::RecoverAccess { username } => {
             crate::commands::recover_access::command(&params, username.as_ref()).await
         }

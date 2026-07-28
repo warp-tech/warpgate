@@ -3,14 +3,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, info_span, warn};
 use uuid::Uuid;
-use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{Target, TargetOptions, WarpgateError};
+use warpgate_common::{TargetOptions, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
-use warpgate_core::{ConfigProvider, DesktopEvent, Services, SessionStateInit, State};
+use warpgate_core::{DesktopEvent, Services, SessionStateInit, State, TargetAuthorization};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
@@ -44,22 +43,16 @@ impl WebDesktopClientManager {
     pub async fn create_session(
         &self,
         services: &Services,
-        user_id: Uuid,
-        username: &str,
-        target_name: &str,
+        authorization: TargetAuthorization,
         remote_address: Option<SocketAddr>,
     ) -> Result<Uuid, WarpgateError> {
+        let user_id = authorization.user_info().id;
         if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
             return Err(WarpgateError::SessionLimitReached);
         }
 
-        let target: Target = {
-            services
-                .config_provider
-                .get_target_by_name(target_name)
-                .await?
-                .ok_or_else(|| anyhow!("Desktop target {target_name:?} not found"))?
-        };
+        let (user_info, target) = authorization.into_parts();
+        let username = user_info.username.clone();
 
         let protocol_name = match &target.options {
             TargetOptions::Vnc(_) => warpgate_protocol_vnc::PROTOCOL_NAME,
@@ -72,7 +65,7 @@ impl WebDesktopClientManager {
 
         let server_handle = State::register_session(
             &services.state,
-            &protocol_name,
+            protocol_name,
             SessionStateInit {
                 remote_address,
                 handle: Box::new(session_handle),
@@ -84,10 +77,7 @@ impl WebDesktopClientManager {
         {
             let server_handle = server_handle.lock().await;
             server_handle
-                .set_user_info(AuthStateUserInfo {
-                    id: user_id,
-                    username: username.to_owned(),
-                })
+                .set_user_info(user_info)
                 .await
                 .context("setting user info on server handle")?;
             server_handle
@@ -142,7 +132,7 @@ impl WebDesktopClientManager {
         let session = Arc::new(WebDesktopSession::new(
             session_id,
             user_id,
-            target_name.to_owned(),
+            target.name.clone(),
             target_kind,
             server_handle,
             input_tx,
@@ -176,7 +166,7 @@ impl WebDesktopClientManager {
             encode_jpeg,
         );
 
-        debug!(session=%session_id, user=%username, target=%target_name, "Web-desktop session created");
+        debug!(session=%session_id, user=%username, target=%target.name, "Web-desktop session created");
 
         Ok(session_id)
     }

@@ -1,15 +1,13 @@
-use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::LogEntry;
 
-use super::AnySecurityScheme;
-use crate::api::common::{case_insensitive_search, require_admin_permission};
+use super::AdminContext;
+use crate::api::common::case_insensitive_search;
 
 pub struct Api;
 
@@ -38,15 +36,12 @@ impl Api {
     #[oai(path = "/logs", method = "post", operation_id = "get_logs")]
     async fn api_get_all_logs(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<GetLogsRequest>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetLogsResponse, WarpgateError> {
         use warpgate_db_entities::LogEntry;
 
-        require_admin_permission(&ctx, None).await?;
-
-        let db = &ctx.services().db;
+        let db = &admin.services().db;
         let mut q = LogEntry::Entity::find()
             .order_by_desc(LogEntry::Column::Timestamp)
             .limit(body.limit.unwrap_or(100));

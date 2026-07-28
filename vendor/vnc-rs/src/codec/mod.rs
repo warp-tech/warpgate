@@ -18,3 +18,19 @@ fn uninit_vec(len: usize) -> Vec<u8> {
     };
     v
 }
+
+/// Warpgate fork: per-rectangle cap for target-driven zlib blob allocations (ZRLE/TRLE).
+/// A single RFB rectangle's compressed data never legitimately approaches this; the wire
+/// U32 length field would otherwise let a hostile target demand a multi-gigabyte buffer.
+const MAX_RECT_DATA_LEN: usize = 64 * 1024 * 1024;
+
+/// Warpgate fork: bounded [`uninit_vec`] — rejects lengths above [`MAX_RECT_DATA_LEN`]
+/// before allocating. The returned buffer is only ever filled by an immediately following
+/// `read_exact` of the same length, so the uninitialised bytes are never observed. See
+/// PATCHES.md.
+pub(crate) fn uninit_vec_capped(len: usize) -> Result<Vec<u8>, crate::VncError> {
+    if len > MAX_RECT_DATA_LEN {
+        return Err(crate::VncError::InvalidImageData);
+    }
+    Ok(uninit_vec(len))
+}

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{AuthCredential, CredentialKind};
+use crate::Protocol;
 
 pub enum CredentialPolicyResponse {
     Ok,
@@ -10,7 +11,7 @@ pub enum CredentialPolicyResponse {
 pub trait CredentialPolicy {
     fn is_sufficient(
         &self,
-        protocol: &str,
+        protocol: Protocol,
         valid_credentials: &[AuthCredential],
     ) -> CredentialPolicyResponse;
 }
@@ -25,14 +26,14 @@ pub struct AllCredentialsPolicy {
 }
 
 pub struct PerProtocolCredentialPolicy {
-    pub protocols: HashMap<&'static str, Box<dyn CredentialPolicy + Send + Sync>>,
+    pub protocols: HashMap<Protocol, Box<dyn CredentialPolicy + Send + Sync>>,
     pub default: Box<dyn CredentialPolicy + Send + Sync>,
 }
 
 impl CredentialPolicy for AnySingleCredentialPolicy {
     fn is_sufficient(
         &self,
-        _protocol: &str,
+        _protocol: Protocol,
         valid_credentials: &[AuthCredential],
     ) -> CredentialPolicyResponse {
         if valid_credentials.is_empty() {
@@ -51,7 +52,7 @@ impl CredentialPolicy for AnySingleCredentialPolicy {
 impl CredentialPolicy for AllCredentialsPolicy {
     fn is_sufficient(
         &self,
-        _protocol: &str,
+        _protocol: Protocol,
         valid_credentials: &[AuthCredential],
     ) -> CredentialPolicyResponse {
         let valid_credential_types: HashSet<CredentialKind> =
@@ -75,11 +76,13 @@ impl CredentialPolicy for AllCredentialsPolicy {
 impl CredentialPolicy for PerProtocolCredentialPolicy {
     fn is_sufficient(
         &self,
-        protocol: &str,
+        protocol: Protocol,
         valid_credentials: &[AuthCredential],
     ) -> CredentialPolicyResponse {
+        // A protocol without a configured override intentionally falls back to
+        // the default policy.
         self.protocols
-            .get(protocol)
+            .get(&protocol)
             .unwrap_or(&self.default)
             .is_sufficient(protocol, valid_credentials)
     }

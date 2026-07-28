@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::error;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{ProtocolName, SessionId, Target, WarpgateError};
+use warpgate_common::{Protocol, SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
 use crate::logging::AuditEvent;
@@ -43,7 +43,7 @@ impl State {
 
     pub async fn register_session(
         this: &Arc<Mutex<Self>>,
-        protocol: &ProtocolName,
+        protocol: Protocol,
         state: SessionStateInit,
     ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
         let this_copy = this.clone();

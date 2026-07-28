@@ -53,6 +53,10 @@ pub enum ServerHandlerEvent {
 impl ServerHandlerEvent {
     /// The already-open channel this event refers to, if any.
     /// Channel open events establish new channels and are not included.
+    ///
+    /// Deliberately a total match: event deferral during pending channel
+    /// opens keys off this (#1459), so a new variant must explicitly decide
+    /// whether it names a channel rather than silently defaulting to "no".
     pub(crate) const fn existing_channel(&self) -> Option<ServerChannelId> {
         match self {
             Self::SubsystemRequest(channel, ..)
@@ -68,7 +72,19 @@ impl ServerHandlerEvent {
             | Self::EnvRequest(channel, ..)
             | Self::X11Request(channel, ..)
             | Self::AgentForward(channel, ..) => Some(*channel),
-            _ => None,
+            Self::Authenticated(_)
+            | Self::ChannelOpenSession(..)
+            | Self::AuthPublicKey(..)
+            | Self::AuthPublicKeyOffer(..)
+            | Self::AuthPassword(..)
+            | Self::AuthKeyboardInteractive(..)
+            | Self::ChannelOpenDirectTcpIp(..)
+            | Self::ChannelOpenDirectStreamlocal(..)
+            | Self::TcpIpForward(..)
+            | Self::CancelTcpIpForward(..)
+            | Self::StreamlocalForward(..)
+            | Self::CancelStreamlocalForward(..)
+            | Self::Disconnect => None,
         }
     }
 }

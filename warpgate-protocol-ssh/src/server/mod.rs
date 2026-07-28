@@ -88,7 +88,7 @@ async fn _handle_connection(
 
     let server_handle = State::register_session(
         &services.state,
-        &crate::PROTOCOL_NAME,
+        crate::PROTOCOL_NAME,
         SessionStateInit {
             remote_address: Some(remote_address),
             handle: Box::new(session_handle),

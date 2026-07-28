@@ -5,7 +5,7 @@ use std::sync::Arc;
 /// Used for websockets
 /// One strong Arc is provided as Data<> to every request that belongs to a session
 #[derive(Clone)]
-pub struct SessionKeepalive( Arc<()>);
+pub struct SessionKeepalive(Arc<()>);
 
 impl SessionKeepalive {
     pub fn new(token: Arc<()>) -> Self {

@@ -104,7 +104,9 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
 
         if store.get("recordings").is_some() {
             warn!("The `recordings` config section is deprecated.");
-            warn!("Its values have been imported into the database, you can remove this section from the file.");
+            warn!(
+                "Its values have been imported into the database, you can remove this section from the file."
+            );
         }
     }
 }

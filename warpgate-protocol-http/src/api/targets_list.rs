@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use poem::web::Data;
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -8,15 +7,12 @@ use sea_orm::EntityTrait;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{Target as TargetConfig, TargetOptions, WarpgateError};
-use warpgate_common_http::{
-    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-};
+use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup};
 
-use crate::api::AnySecurityScheme;
-use crate::common::endpoint_auth;
+use crate::api::auth_scheme::AuthedSession;
 
 pub struct Api;
 
@@ -46,17 +42,11 @@ enum GetTargetsResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(
-        path = "/targets",
-        method = "get",
-        operation_id = "get_targets",
-        transform = "endpoint_auth"
-    )]
+    #[oai(path = "/targets", method = "get", operation_id = "get_targets")]
     async fn api_get_all_targets(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         search: Query<Option<String>>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         // Fetch target groups for group information
         let services = ctx.services();
@@ -80,8 +70,8 @@ impl Api {
         }
 
         match &ctx.auth {
-            RequestAuthorization::Session(SessionAuthorization::Ticket { target_name, .. }) => {
-                targets.retain(|t| t.name == *target_name);
+            RequestAuthorization::Session(SessionAuthorization::Ticket { target_id, .. }) => {
+                targets.retain(|t| t.id == *target_id);
             }
             RequestAuthorization::AdminToken => {
                 targets.clear();

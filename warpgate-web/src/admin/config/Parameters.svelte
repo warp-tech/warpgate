@@ -6,6 +6,7 @@
         api,
         type ParameterValues,
         type PasswordLoginMode,
+        type SshHostKeyVerificationMode,
         type TargetClickAction,
     } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
@@ -331,6 +332,33 @@
                                     </HelpText>
                                 </Subsection>
 
+                                <Subsection title="Target host keys">
+                                    <FormGroup
+                                        floating
+                                        label="Unknown host key handling"
+                                    >
+                                        <select
+                                            id="sshHostKeyVerification"
+                                            class="form-select"
+                                            value={parameters.sshHostKeyVerification ?? 'Prompt'}
+                                            onchange={e => parameters.sshHostKeyVerification = e.currentTarget.value as SshHostKeyVerificationMode}
+                                        >
+                                            <option value="Prompt">
+                                                Ask the user to trust the key
+                                            </option>
+                                            <option value="AutoAccept">
+                                                Trust and remember the key
+                                            </option>
+                                            <option value="AutoReject">
+                                                Refuse to connect
+                                            </option>
+                                            <option value="Ignore">
+                                                Don't check host keys at all
+                                            </option>
+                                        </select>
+                                    </FormGroup>
+                                </Subsection>
+
                                 <Subsection title="Quirks">
                                     {#if parameters.recordingsEnable}
                                         <label
@@ -629,10 +657,12 @@
                                     />
                                 </FormGroup>
                                 <HelpText class="mt-3 mb-3">
-                                    Optional message shown to users when they connect to a target: during SSH authentication, as a
-                                    modal in the UI and proxied HTTP
-                                    targets, on the RDP/VNC hold screen and as a
-                                    PostgreSQL connection notice.
+                                    Optional message shown to users when they
+                                    connect to a target: during SSH
+                                    authentication, as a modal in the UI and
+                                    proxied HTTP targets, on the RDP/VNC hold
+                                    screen and as a PostgreSQL connection
+                                    notice.
                                 </HelpText>
                             </Section>
 

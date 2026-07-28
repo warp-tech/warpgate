@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -92,15 +93,26 @@ pub enum SessionRecordingMetadata {
     },
 }
 
+/// Monotonic sequence giving every API request its own recording name.
+///
+/// `SessionRecordings::start` keys a recording by (session_id, name, kind) and
+/// reuses the existing writer for a repeated name — so a fixed name would open
+/// two `data.ndjson` writers on the same folder for concurrent requests and let
+/// them clobber each other. A process-wide counter is monotonic (never random
+/// or time-based) and is unique within any single session, which is all that is
+/// required to keep each request's recording separate.
+static API_RECORDING_SEQ: AtomicU64 = AtomicU64::new(0);
+
 pub async fn start_recording_api(
     session_id: &SessionId,
     recordings: &Arc<Mutex<SessionRecordings>>,
 ) -> anyhow::Result<KubernetesRecorder> {
+    let seq = API_RECORDING_SEQ.fetch_add(1, Ordering::Relaxed);
     let recordings = recordings.lock().await;
     recordings
         .start::<KubernetesRecorder, _>(
             session_id,
-            Some("api".into()),
+            Some(format!("api-{seq}")),
             SessionRecordingMetadata::Api,
         )
         .await

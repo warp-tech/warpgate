@@ -1,88 +1,50 @@
 use sea_orm::prelude::Expr;
 use sea_orm::sea_query::{Func, IntoCondition};
-use sea_orm::{
-    ColumnTrait, Condition, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QuerySelect,
-    RelationTrait,
-};
-use warpgate_common::{AdminPermission, WarpgateError};
-pub use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
-use warpgate_db_entities::{AdminRole, User, UserAdminRoleAssignment};
+use sea_orm::{ColumnTrait, Condition, EntityTrait, ModelTrait, QueryFilter};
+use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
+pub use warpgate_common_http::RequestAuthorization;
+use warpgate_db_entities::{AdminRole, User};
+
+/// The admin permissions the request's principal holds — the single place that resolves the
+/// permission model from the DB. `has_admin_permission`, `is_user_admin` and the `/info` UI
+/// serialization all read the result instead of re-deriving it three different ways.
+///
+/// An admin token holds every permission; a ticket, a cluster token, or an unauthenticated
+/// caller holds none (a ticket is scoped to one target and must never confer admin rights).
+pub async fn admin_permission_set(
+    ctx: &warpgate_common_http::AuthenticatedRequestContext,
+) -> Result<AdminPermissionSet, WarpgateError> {
+    if matches!(ctx.auth, RequestAuthorization::AdminToken) {
+        return Ok(AdminPermissionSet::all());
+    }
+    let Some(full) = ctx.auth.as_full_user() else {
+        return Ok(AdminPermissionSet::none());
+    };
+
+    let db = &ctx.services().db;
+    let Some(user_model) = User::Entity::find()
+        .filter(User::Entity::username_eq_ci(full.username()))
+        .one(db)
+        .await?
+    else {
+        return Ok(AdminPermissionSet::none());
+    };
+
+    let roles = user_model.find_related(AdminRole::Entity).all(db).await?;
+    Ok(AdminPermissionSet::from_roles(
+        roles.into_iter().map(Into::into),
+    ))
+}
 
 pub async fn has_admin_permission(
     ctx: &warpgate_common_http::AuthenticatedRequestContext,
     specific_permission: Option<AdminPermission>,
 ) -> Result<bool, WarpgateError> {
-    // Admin tokens have all permissions
-    let auth = &ctx.auth;
-    if matches!(auth, RequestAuthorization::AdminToken) {
-        return Ok(true);
-    }
-    // Cluster tokens are scoped to cross-node proxied endpoints, never general admin.
-    if matches!(auth, RequestAuthorization::ClusterToken) {
-        return Ok(false);
-    }
-
-    let username = match auth {
-        RequestAuthorization::Session(
-            SessionAuthorization::User { username, .. }
-            | SessionAuthorization::Ticket { username, .. },
-        )
-        | RequestAuthorization::UserToken { username, .. } => username,
-        RequestAuthorization::AdminToken | RequestAuthorization::ClusterToken => unreachable!(),
-    };
-
-    let db = &ctx.services().db;
-
-    let Some(user_model) = User::Entity::find()
-        .filter(User::Entity::username_eq_ci(username))
-        .one(db)
-        .await?
-    else {
-        return Ok(false);
-    };
-
-    let mut query = UserAdminRoleAssignment::Entity::find()
-        .filter(UserAdminRoleAssignment::Column::UserId.eq(user_model.id))
-        .join(
-            JoinType::InnerJoin,
-            UserAdminRoleAssignment::Relation::AdminRole.def(),
-        );
-
-    if let Some(perm) = specific_permission {
-        query = query.filter(match perm {
-            AdminPermission::TargetsCreate => AdminRole::Column::TargetsCreate.eq(true),
-            AdminPermission::TargetsEdit => AdminRole::Column::TargetsEdit.eq(true),
-            AdminPermission::TargetsDelete => AdminRole::Column::TargetsDelete.eq(true),
-
-            AdminPermission::UsersCreate => AdminRole::Column::UsersCreate.eq(true),
-            AdminPermission::UsersEdit => AdminRole::Column::UsersEdit.eq(true),
-            AdminPermission::UsersDelete => AdminRole::Column::UsersDelete.eq(true),
-
-            AdminPermission::AccessRolesCreate => AdminRole::Column::AccessRolesCreate.eq(true),
-            AdminPermission::AccessRolesEdit => AdminRole::Column::AccessRolesEdit.eq(true),
-            AdminPermission::AccessRolesDelete => AdminRole::Column::AccessRolesDelete.eq(true),
-            AdminPermission::AccessRolesAssign => AdminRole::Column::AccessRolesAssign.eq(true),
-
-            AdminPermission::SessionsView => AdminRole::Column::SessionsView.eq(true),
-            AdminPermission::SessionsTerminate => AdminRole::Column::SessionsTerminate.eq(true),
-
-            AdminPermission::RecordingsView => AdminRole::Column::RecordingsView.eq(true),
-
-            AdminPermission::TicketsCreate => AdminRole::Column::TicketsCreate.eq(true),
-            AdminPermission::TicketsDelete => AdminRole::Column::TicketsDelete.eq(true),
-
-            AdminPermission::ConfigEdit => AdminRole::Column::ConfigEdit.eq(true),
-
-            AdminPermission::AdminRolesManage => AdminRole::Column::AdminRolesManage.eq(true),
-
-            AdminPermission::TicketRequestsManage => {
-                AdminRole::Column::TicketRequestsManage.eq(true)
-            }
-        });
-    }
-
-    let count = query.count(db).await?;
-    Ok(count > 0)
+    let permissions = admin_permission_set(ctx).await?;
+    Ok(match specific_permission {
+        Some(permission) => permissions.contains(permission),
+        None => permissions.is_admin(),
+    })
 }
 
 pub async fn require_admin_permission(

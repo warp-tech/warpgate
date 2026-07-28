@@ -111,21 +111,26 @@
                         >
                             Authorize & remember for {graceLabel}
                         </AsyncButton>
-                            <Dropdown class="btn-group">
-                                <DropdownToggle color="primary" caret class="ps-2" />
-                                <DropdownMenu end>
-                                    <DropdownItem
-                                        onclick={() => approve(WebApprovalScope.AllTargets)}
-                                    >
-                                        Authorize for all targets & remember for {graceLabel}
-                                    </DropdownItem>
-                                    <DropdownItem
-                                        onclick={() => approve(WebApprovalScope.Once)}
-                                    >
-                                        Authorize this time only
-                                    </DropdownItem>
-                                </DropdownMenu>
-                            </Dropdown>
+                        <Dropdown class="btn-group">
+                            <DropdownToggle
+                                color="primary"
+                                caret
+                                class="ps-2"
+                            />
+                            <DropdownMenu end>
+                                <DropdownItem
+                                    onclick={() => approve(WebApprovalScope.AllTargets)}
+                                >
+                                    Authorize for all targets & remember for
+                                    {graceLabel}
+                                </DropdownItem>
+                                <DropdownItem
+                                    onclick={() => approve(WebApprovalScope.Once)}
+                                >
+                                    Authorize this time only
+                                </DropdownItem>
+                            </DropdownMenu>
+                        </Dropdown>
                     </ButtonGroup>
                 {:else}
                     <AsyncButton

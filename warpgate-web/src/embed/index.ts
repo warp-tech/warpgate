@@ -46,11 +46,10 @@ const container = document.createElement('div')
 container.id = 'warpgate-embedded-ui'
 document.body.appendChild(container)
 
-setTimeout(
-    () =>
-        mount(EmbeddedUI, {
-            target: container,
-        }),
+setTimeout(() =>
+    mount(EmbeddedUI, {
+        target: container,
+    }),
 )
 
 forceSecureWebSocketURLs()

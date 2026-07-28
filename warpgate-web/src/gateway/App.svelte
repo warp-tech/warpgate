@@ -184,5 +184,17 @@
     .container {
         width: 600px;
         max-width: 100vw;
+        min-height: 100vh;
+
+        display: flex;
+        flex-direction: column;
+    }
+
+    main {
+        flex: 1 0 auto;
+        position: relative;
+
+        display: flex;
+        flex-direction: column;
     }
 </style>

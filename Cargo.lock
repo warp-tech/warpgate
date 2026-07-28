@@ -2391,7 +2391,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2711,6 +2711,19 @@ dependencies = [
  "memchr",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "futures_codec"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad004dd81205978a2bba6c566ed70535ccf88c0be34649e628186474603f43ca"
+dependencies = [
+ "bytes",
+ "futures-sink",
+ "futures-util",
+ "memchr",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -3307,7 +3320,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.4",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -4600,7 +4613,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5510,6 +5523,7 @@ dependencies = [
  "serde_urlencoded",
  "serde_yaml",
  "smallvec",
+ "sse-codec",
  "sync_wrapper",
  "tempfile",
  "thiserror 2.0.18",
@@ -6416,9 +6430,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.62.3"
+version = "0.62.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "059dd24c0fe20721639f7acad7b82cd51ec3dd3254ed8cf7a0b7df6c20eaff1c"
+checksum = "b8b67b5a0d8068c89dcbe9d95df986af7a851d1f3c604525274c37468e60464f"
 dependencies = [
  "aes 0.9.1",
  "aws-lc-rs",
@@ -6597,7 +6611,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6676,7 +6690,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7459,7 +7473,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7708,6 +7722,17 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "sse-codec"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a395a858c7ff5c4b42aeab0501e07c978ac5e1ae5059f301884dab3fa405f47"
+dependencies = [
+ "futures-io",
+ "futures_codec",
+ "memchr",
 ]
 
 [[package]]
@@ -7971,7 +7996,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7993,7 +8018,7 @@ dependencies = [
  "parking_lot",
  "rustix 1.1.4",
  "signal-hook",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8865,7 +8890,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8914,7 +8939,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8982,7 +9007,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ca"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -9003,7 +9028,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -9036,6 +9061,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "strum 0.26.3",
  "thiserror 2.0.18",
  "time",
  "tokio",
@@ -9058,7 +9084,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common-http"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "poem",
  "poem-openapi",
@@ -9074,7 +9100,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -9126,7 +9152,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "bitflags 2.13.0",
  "bytes",
@@ -9139,7 +9165,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "bytes",
  "ipnet",
@@ -9159,7 +9185,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "data-encoding",
  "regex",
@@ -9202,7 +9228,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ldap"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "anyhow",
  "ldap3",
@@ -9218,7 +9244,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9251,6 +9277,7 @@ dependencies = [
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-db-migrations",
  "warpgate-sso",
  "warpgate-tls",
  "warpgate-web",
@@ -9260,7 +9287,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-kubernetes"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9300,7 +9327,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9317,19 +9344,20 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tracing",
+ "url",
  "uuid",
  "warpgate-aws",
  "warpgate-common",
+ "warpgate-common-http",
  "warpgate-core",
  "warpgate-database-protocols",
- "warpgate-db-entities",
  "warpgate-tls",
  "webpki",
 ]
 
 [[package]]
 name = "warpgate-protocol-postgres"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9346,6 +9374,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tracing",
+ "url",
  "uuid",
  "warpgate-aws",
  "warpgate-common",
@@ -9383,7 +9412,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9447,7 +9476,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9467,7 +9496,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-tls"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "bytes",
  "poem",
@@ -9490,7 +9519,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.27.0-beta.2"
+version = "0.27.0-beta.3"
 dependencies = [
  "rust-embed",
  "serde",
@@ -9954,7 +9983,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

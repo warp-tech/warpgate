@@ -16,7 +16,9 @@ pub trait SessionHandle {
     fn close(&mut self);
 }
 
-#[derive(Clone)]
+// Deliberately not Clone: `Drop` tears the session down, so a second copy
+// would end the session while the first is still proxying. Share via the
+// surrounding `Arc<Mutex<..>>` instead.
 pub struct WarpgateServerHandle {
     id: SessionId,
     db: DatabaseConnection,

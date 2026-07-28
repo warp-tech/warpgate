@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use sea_orm::{DatabaseConnection, EntityTrait};
+use tokio::sync::Mutex;
 use tracing::debug;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
@@ -144,17 +146,30 @@ impl RateLimiterRegistry {
 
         Ok(())
     }
+}
 
-    /// Force refresh all rate limiters in all sessions
-    pub async fn apply_new_rate_limits(&mut self, state: &State) -> Result<(), WarpgateError> {
-        // Refresh the global rate limiter
-        self.refresh().await?;
+/// Force refresh all rate limiters in all sessions.
+///
+/// Lock order within each session is session state first, then the registry —
+/// the same order `WarpgateServerHandle::wrap_stream` uses on every new
+/// stream; taking them in the reverse order here would deadlock. The global
+/// `State` lock is released before any session is locked so a stuck session
+/// can't block session registration.
+pub async fn apply_new_rate_limits(
+    registry: &Arc<Mutex<RateLimiterRegistry>>,
+    state: &Arc<Mutex<State>>,
+) -> Result<(), WarpgateError> {
+    // Refresh the global rate limiter
+    registry.lock().await.refresh().await?;
 
-        // Update all session rate limiters
-        for session_state in state.sessions.values() {
-            let mut session_state = session_state.lock().await;
-            self.update_all_rate_limiters(&mut session_state).await?;
-        }
-        Ok(())
+    let sessions: Vec<_> = state.lock().await.sessions.values().cloned().collect();
+    for session_state in sessions {
+        let mut session_state = session_state.lock().await;
+        registry
+            .lock()
+            .await
+            .update_all_rate_limiters(&mut session_state)
+            .await?;
     }
+    Ok(())
 }
