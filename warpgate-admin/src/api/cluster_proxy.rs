@@ -13,23 +13,33 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
+use futures::future::join_all;
 use futures::{StreamExt, TryStreamExt};
-use poem::http::HeaderName;
 use poem::http::header::{CONNECTION, CONTENT_LENGTH, COOKIE, HOST, TRANSFER_ENCODING, UPGRADE};
+use poem::http::{HeaderName, StatusCode};
 use poem::web::websocket::WebSocket;
 use poem::{Body, IntoResponse, Request, Response};
-use sea_orm::EntityTrait;
+use poem_openapi::types::ParseFromJSON;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
+use tokio::time::timeout;
 use tokio_tungstenite::{Connector, client_async_tls_with_config, tungstenite};
+use tracing::warn;
+use uuid::Uuid;
 use warpgate_ca::CLUSTER_TLS_SNI_NAME;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
 use warpgate_common::{Secret, WarpgateError};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::logging::get_client_ip;
 use warpgate_common_http::{
-    AuthenticatedRequestContext, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN,
+    AuthenticatedRequestContext, RequestAuthorization, X_WARPGATE_CLUSTER_CLIENT_IP,
+    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN, is_cluster_peer_request,
 };
+use warpgate_core::Services;
 use warpgate_db_entities::{Node, Parameters, Session};
 use warpgate_tls::configure_cluster_tls_connector;
 
@@ -69,8 +79,8 @@ impl Owner {
 /// or this node's own id, is [`Owner::Local`]; a foreign id is looked up in the
 /// registry and yields [`WarpgateError::NodeGone`] if it is no longer there.
 pub async fn node_owner(
-    ctx: &AuthenticatedRequestContext,
-    node_id: uuid::Uuid,
+    ctx: &UnauthenticatedRequestContext,
+    node_id: Uuid,
 ) -> Result<Owner, WarpgateError> {
     let services = ctx.services();
     if node_id.is_nil() || node_id == services.cluster.node_id {
@@ -83,14 +93,39 @@ pub async fn node_owner(
 }
 
 pub async fn session_owner(
-    ctx: &AuthenticatedRequestContext,
+    ctx: &UnauthenticatedRequestContext,
     session: &Session::Model,
 ) -> Result<Owner, WarpgateError> {
     node_owner(ctx, session.node_id).await
 }
 
-/// Serve a request with `serve_local`, or if data is owned by another node,
-/// forward the request there instead.
+/// Who a forwarded request acts as on the peer.
+enum ForwardIdentity<'a> {
+    /// An authenticated request: the peer runs it as this user and re-checks
+    /// ownership of whatever the path names. The browser session cookie is
+    /// dropped — peer hops authenticate via the cluster token, not the cookie.
+    User(&'a RequestAuthorization),
+    /// An in-progress, not-yet-authenticated login: there is no identity to
+    /// stamp, and the session cookie is forwarded instead so the peer resolves
+    /// the same session and reaches the auth state only it holds.
+    PendingLogin,
+}
+
+impl ForwardIdentity<'_> {
+    fn user_id(&self) -> Option<Uuid> {
+        match self {
+            Self::User(auth) => auth.as_full_user().map(|u| u.user_id()),
+            Self::PendingLogin => None,
+        }
+    }
+
+    fn forwards_cookie(&self) -> bool {
+        matches!(self, Self::PendingLogin)
+    }
+}
+
+/// Serve a request with `serve_local`, or if the resource is owned by another
+/// node, forward the request there instead.
 pub async fn proxy_or_serve<F, Fut, B: Serialize, R: ReparseForwardedResponse>(
     ctx: &AuthenticatedRequestContext,
     req: &Request,
@@ -102,13 +137,62 @@ where
     F: FnOnce() -> Fut,
     Fut: Future<Output = poem::Result<R>>,
 {
+    proxy_or_serve_as(
+        ctx,
+        ForwardIdentity::User(&ctx.auth),
+        req,
+        owner,
+        body,
+        serve_local,
+    )
+    .await
+}
+
+/// [`proxy_or_serve`] for a login step that has not authenticated yet: the peer
+/// is reached as the browser session rather than as a user.
+pub async fn proxy_or_serve_pending_login<F, Fut, B: Serialize, R: ReparseForwardedResponse>(
+    ctx: &UnauthenticatedRequestContext,
+    req: &Request,
+    owner: Owner,
+    body: Option<&B>,
+    serve_local: F,
+) -> poem::Result<R>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = poem::Result<R>>,
+{
+    proxy_or_serve_as(
+        ctx,
+        ForwardIdentity::PendingLogin,
+        req,
+        owner,
+        body,
+        serve_local,
+    )
+    .await
+}
+
+async fn proxy_or_serve_as<F, Fut, B: Serialize, R: ReparseForwardedResponse>(
+    ctx: &UnauthenticatedRequestContext,
+    identity: ForwardIdentity<'_>,
+    req: &Request,
+    owner: Owner,
+    body: Option<&B>,
+    serve_local: F,
+) -> poem::Result<R>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = poem::Result<R>>,
+{
     match owner {
         Owner::Remote(remote) => {
-            let response = forward_http(
-                ctx,
+            let response = forward_http_inner(
+                ctx.services(),
                 req,
+                &path_and_query(req),
                 remote,
                 &ctx.services().cluster_token,
+                identity,
                 body.map(|b| serde_json::to_vec(&b))
                     .transpose()
                     .context("serializing body for forwarding")?,
@@ -140,10 +224,73 @@ where
     }
 }
 
+/// How long a single peer gets to answer. A node that is registered but
+/// unreachable must not hold up the rest of a fan-out.
+const PEER_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Forwards `req` as `path` to every other registered node and collects what
+/// they answer, paired with the node's hostname for logging.
+///
+/// Best effort: a node can be registered but already gone (a crashed node stays
+/// in the registry until the reaper drops it), so an unreachable peer is logged,
+/// not raised. Callers must not fan out a request that arrived from a peer -
+/// see [`reject_second_hop`].
+pub async fn fan_out_to_peers(
+    ctx: &AuthenticatedRequestContext,
+    req: &Request,
+    path: &str,
+) -> Vec<(String, Response)> {
+    let services = ctx.services();
+    let peers = Node::Entity::find()
+        .filter(Node::Column::Id.ne(services.cluster.node_id))
+        .all(&services.db)
+        .await;
+    let peers = match peers {
+        Ok(peers) => peers,
+        Err(error) => {
+            warn!(%error, "Failed to list cluster nodes");
+            return vec![];
+        }
+    };
+
+    // Concurrently, so the fan-out costs one slow peer rather than their sum.
+    join_all(peers.into_iter().map(|peer| {
+        let hostname = peer.hostname.clone();
+        async move {
+            let forward = forward_http_to(ctx, req, path, peer.into(), &services.cluster_token);
+            match timeout(PEER_TIMEOUT, forward).await {
+                Ok(Ok(response)) => Some((hostname, response)),
+                Ok(Err(error)) => {
+                    warn!(node = %hostname, %error, "Cluster node request failed");
+                    None
+                }
+                Err(_) => {
+                    warn!(node = %hostname, "Cluster node request timed out");
+                    None
+                }
+            }
+        }
+    }))
+    .await
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn reject_second_hop(req: &Request, services: &Services) -> poem::Result<()> {
+    if is_cluster_peer_request(req, &services.cluster_token) {
+        return Err(poem::Error::from_string(
+            "Refusing to forward an already-forwarded cluster request",
+            StatusCode::BAD_GATEWAY,
+        ));
+    }
+    Ok(())
+}
+
 /// Peer TLS config plus every address `owner.address` resolves to, so callers
 /// can try each rather than only the first record.
 async fn peer_connection(
-    ctx: &AuthenticatedRequestContext,
+    services: &Services,
     owner: &RemoteNode,
 ) -> poem::Result<(rustls::ClientConfig, Vec<SocketAddr>)> {
     let Some(pin) = owner.tls_spki_sha256.clone() else {
@@ -152,7 +299,7 @@ async fn peer_connection(
         )
         .into());
     };
-    let params = Parameters::Entity::get(&ctx.services().db)
+    let params = Parameters::Entity::get(&services.db)
         .await
         .map_err(poem::error::InternalServerError)?;
     let tls = configure_cluster_tls_connector(params.ca_certificate_pem.as_bytes(), pin)
@@ -194,27 +341,39 @@ async fn connect_any(addrs: &[SocketAddr]) -> poem::Result<tokio::net::TcpStream
     .into())
 }
 
-async fn forward_http(
-    ctx: &AuthenticatedRequestContext,
-    req: &Request,
-    owner: RemoteNode,
-    token: &Secret<String>,
-    body: Option<Vec<u8>>,
-) -> poem::Result<Response> {
-    forward_http_to(ctx, req, &path_and_query(req), owner, token, body).await
-}
-
-/// [`forward_http`], but to `path` on the peer rather than the request's own
-/// path - for when the peer's copy of the request needs different parameters.
+/// Forwards `req` to `path` on the peer rather than the request's own path - for
+/// when the peer's copy of the request needs different parameters.
 pub(crate) async fn forward_http_to(
     ctx: &AuthenticatedRequestContext,
     req: &Request,
     path: &str,
     owner: RemoteNode,
     token: &Secret<String>,
+) -> poem::Result<Response> {
+    forward_http_inner(
+        ctx.services(),
+        req,
+        path,
+        owner,
+        token,
+        ForwardIdentity::User(&ctx.auth),
+        None,
+    )
+    .await
+}
+
+/// Forwards `req` to `owner` as `identity`.
+async fn forward_http_inner(
+    services: &Services,
+    req: &Request,
+    path: &str,
+    owner: RemoteNode,
+    token: &Secret<String>,
+    identity: ForwardIdentity<'_>,
     body: Option<Vec<u8>>,
 ) -> poem::Result<Response> {
-    let (tls, addrs) = peer_connection(ctx, &owner).await?;
+    reject_second_hop(req, services)?;
+    let (tls, addrs) = peer_connection(services, &owner).await?;
     let url = format!(
         "https://{CLUSTER_TLS_SNI_NAME}:{}{path}",
         peer_port(&addrs)?,
@@ -222,7 +381,7 @@ pub(crate) async fn forward_http_to(
 
     let mut headers = poem::http::HeaderMap::new();
     for (name, value) in req.headers() {
-        if should_forward(name) {
+        if should_forward(name) || (identity.forwards_cookie() && name == COOKIE) {
             headers.insert(name.clone(), value.clone());
         }
     }
@@ -240,8 +399,12 @@ pub(crate) async fn forward_http_to(
         .request(req.method().clone(), &url)
         .headers(headers)
         .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret());
-    if let Some(user_id) = ctx.auth.as_full_user().map(|x| x.user_id()) {
+    if let Some(user_id) = identity.user_id() {
         request = request.header(X_WARPGATE_CLUSTER_IDENTITY.clone(), user_id.to_string());
+    }
+    // The peer's TCP peer is this node, so pass on who the client really is.
+    if let Some(client_ip) = get_client_ip(req, services).await {
+        request = request.header(X_WARPGATE_CLUSTER_CLIENT_IP.clone(), client_ip);
     }
     if let Some(body) = body {
         request = request.body(body);
@@ -266,7 +429,8 @@ async fn forward_websocket(
     owner: RemoteNode,
     token: &Secret<String>,
 ) -> poem::Result<Response> {
-    let (tls, addrs) = peer_connection(ctx, &owner).await?;
+    reject_second_hop(req, ctx.services())?;
+    let (tls, addrs) = peer_connection(ctx.services(), &owner).await?;
     let host = format!("{CLUSTER_TLS_SNI_NAME}:{}", peer_port(&addrs)?);
     let url = format!("wss://{host}{}", path_and_query(req));
 
@@ -334,6 +498,27 @@ pub trait ReparseForwardedResponse: Sized {
     fn reparse_forwarded_response(
         response: Response,
     ) -> impl Future<Output = poem::Result<Self>> + Send;
+}
+
+/// Parses a forwarded response body as a poem-openapi object, which have no
+/// serde impls of their own.
+pub async fn parse_forwarded_body<T: ParseFromJSON>(response: Response) -> poem::Result<T> {
+    let bytes = response
+        .into_body()
+        .into_bytes()
+        .await
+        .map_err(poem::error::InternalServerError)?;
+    let value = serde_json::from_slice(&bytes).map_err(poem::error::InternalServerError)?;
+    T::parse_from_json(Some(value))
+        .map_err(|e| poem::Error::from_string(e.into_message(), StatusCode::INTERNAL_SERVER_ERROR))
+}
+
+/// A peer response outside the endpoint's own set of outcomes, surfaced with the
+/// peer's status and body rather than parsed as one of them.
+pub async fn forwarded_error(response: Response) -> poem::Error {
+    let status = response.status();
+    let body = response.into_body().into_string().await.unwrap_or_default();
+    poem::Error::from_string(body, status)
 }
 
 impl ReparseForwardedResponse for Response {

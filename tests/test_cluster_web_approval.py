@@ -87,6 +87,14 @@ class Test:
             assert state["protocol"] == "SSH"
             assert state["state"] == "WebUserApprovalNeeded"
 
+            # The pending-approvals list is built from each node's in-memory
+            # auth states, so node B only sees this one by fanning out to A.
+            response = await session.get(
+                f"{url_b}/@warpgate/api/auth/web-auth-requests", ssl=False
+            )
+            assert response.status == 200
+            assert auth_id in [x["id"] for x in await response.json()]
+
             response = await session.post(
                 f"{url_b}/@warpgate/api/auth/state/{auth_id}/approve",
                 json={"scope": "Once"},

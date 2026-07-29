@@ -29,6 +29,33 @@ pub struct SharedSessionStorage(pub DatabaseConnection);
 static POEM_SESSION_ID_SESSION_KEY: &str = "poem_session_id";
 
 impl SharedSessionStorage {
+    /// Replaces `session`'s contents with the stored row.
+    ///
+    /// Forwarding a request to a peer leaves this node holding the copy of the
+    /// browser session it loaded before the hop, and the session middleware
+    /// writes that copy back at the end of the request — over whatever the peer
+    /// stored meanwhile, such as the authorization from a login the peer just
+    /// completed. Adopting the stored row makes that write-back a no-op.
+    pub async fn adopt_stored(&self, session: &Session) -> poem::Result<()> {
+        let Some(id) = session.get::<String>(POEM_SESSION_ID_SESSION_KEY) else {
+            return Ok(());
+        };
+        let Some(entries) = self.load_session(&id).await? else {
+            session.purge();
+            return Ok(());
+        };
+        // Leaving the session untouched keeps its status `Unchanged`, so a
+        // forwarded request the peer did not alter costs no write-back.
+        if entries == session.entries() {
+            return Ok(());
+        }
+        session.clear();
+        for (key, value) in entries {
+            session.set(&key, value);
+        }
+        Ok(())
+    }
+
     pub async fn gc(&self, max_age: Duration) -> Result<(), WarpgateError> {
         let now = OffsetDateTime::now_utc();
         HttpSession::Entity::delete_many()
@@ -417,6 +444,36 @@ mod db_tests {
             .unwrap();
         let loaded = s.load_session("id1").await.unwrap().unwrap();
         assert_eq!(loaded.get("auth"), Some(&Value::from("b")));
+    }
+
+    #[tokio::test]
+    async fn adopt_stored_replaces_the_local_copy() {
+        let s = storage().await;
+        s.update_session("id1", &entries("peer"), Some(Duration::from_secs(3600)))
+            .await
+            .unwrap();
+
+        // What a forwarding node still holds: the copy it loaded before the hop.
+        let session = Session::default();
+        session.set(POEM_SESSION_ID_SESSION_KEY, "id1");
+        session.set("auth", "stale");
+        session.set("dropped_by_peer", true);
+
+        s.adopt_stored(&session).await.unwrap();
+
+        assert_eq!(session.get::<String>("auth").as_deref(), Some("peer"));
+        assert_eq!(session.get::<bool>("dropped_by_peer"), None);
+    }
+
+    #[tokio::test]
+    async fn adopt_stored_purges_a_session_the_peer_removed() {
+        let s = storage().await;
+        let session = Session::default();
+        session.set(POEM_SESSION_ID_SESSION_KEY, "id1");
+
+        s.adopt_stored(&session).await.unwrap();
+
+        assert_eq!(session.status(), poem::session::SessionStatus::Purged);
     }
 
     #[tokio::test]

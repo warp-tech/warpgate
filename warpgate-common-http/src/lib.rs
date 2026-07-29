@@ -6,7 +6,10 @@ mod request;
 
 pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization};
 pub use keepalive::SessionKeepalive;
+use poem::Request;
 use poem::http::HeaderName;
+use subtle::ConstantTimeEq;
+use warpgate_common::Secret;
 
 pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
 pub static X_WARPGATE_CLUSTER_TOKEN: HeaderName =
@@ -18,6 +21,26 @@ pub static X_WARPGATE_CLUSTER_TOKEN: HeaderName =
 /// client cannot forge it.
 pub static X_WARPGATE_CLUSTER_IDENTITY: HeaderName =
     HeaderName::from_static("x-warpgate-cluster-identity");
+/// Set by the cluster proxy to carry the origin node's view of the client's
+/// address: the peer's TCP peer is the forwarding node, so IP-sensitive logic
+/// (login protection, audit) would otherwise attribute the request to a node.
+/// Honoured only alongside a valid cluster token.
+pub static X_WARPGATE_CLUSTER_CLIENT_IP: HeaderName =
+    HeaderName::from_static("x-warpgate-cluster-client-ip");
+
+/// True if the request carries a valid cluster token, i.e. it was forwarded by
+/// a peer node. Gates every other `x-warpgate-cluster-*` header.
+pub fn is_cluster_peer_request(req: &Request, cluster_token: &Secret<String>) -> bool {
+    let Some(provided) = req.header(&X_WARPGATE_CLUSTER_TOKEN) else {
+        return false;
+    };
+    // Constant-time comparison to prevent timing attacks.
+    cluster_token
+        .expose_secret()
+        .as_bytes()
+        .ct_eq(provided.as_bytes())
+        .into()
+}
 
 // style-src unsafe-inline for Svelte
 // img-src data: for TOTP codes
