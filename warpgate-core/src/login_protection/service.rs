@@ -288,7 +288,9 @@ impl LoginProtectionService {
         let user_window_start =
             now - time::Duration::seconds(i64::from(config.user_lockout.time_window_seconds));
         let user_count = FailedLoginAttempt::Entity::find()
-            .filter(FailedLoginAttempt::Entity::username_eq_ci(&attempt.username))
+            .filter(FailedLoginAttempt::Entity::username_eq_ci(
+                &attempt.username,
+            ))
             .filter(FailedLoginAttempt::Column::Timestamp.gte(user_window_start))
             .count(&txn)
             .await?;

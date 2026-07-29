@@ -9,15 +9,14 @@
 mod hold_screen;
 mod otp;
 
-pub use hold_screen::{
-    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter, run_hold_screen,
-};
-
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
+pub use hold_screen::{
+    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter, run_hold_screen,
+};
 pub use otp::{MAX_OTP_ATTEMPTS, OtpAction, OtpActionApplyOutcome, OtpEntry};
 use tokio::sync::Mutex;
 use tracing::warn;
@@ -114,9 +113,10 @@ pub async fn authenticate<P: DesktopProtocol>(
             }
 
             let session_id = server_handle.lock().await.id();
-            let (state_id, state_arc) = services
+
+            let state_arc = services
                 .create_auth_state(
-                    Some(&session_id),
+                    &session_id,
                     &username,
                     P::NAME,
                     &target_name,
@@ -185,7 +185,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                     }) =>
                 {
                     Ok(DesktopAuthOutcome::NeedsInteractive(InteractiveAuth {
-                        state_id,
+                        state_id: session_id,
                         username,
                         target_name,
                         remote_ip,

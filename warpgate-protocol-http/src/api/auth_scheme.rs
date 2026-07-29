@@ -27,11 +27,27 @@ pub(crate) struct TokenAuth(AuthenticatedRequestContext);
 )]
 pub(crate) struct CookieAuth(AuthenticatedRequestContext);
 
+/// Requests forwarded by a cluster peer authenticate with the cluster token
+/// (plus the forwarded user identity resolved into the request authorization —
+/// see `cluster_request_authorization`). The checker only reads the context
+/// that `inject_request_authorization` attaches after verifying the token, so
+/// a bogus header value alone never authenticates.
+#[derive(SecurityScheme)]
+#[oai(
+    rename = "ClusterSecurityScheme",
+    ty = "api_key",
+    key_name = "x-warpgate-cluster-token",
+    key_in = "header",
+    checker = "authenticated_context"
+)]
+pub(crate) struct ClusterAuth(AuthenticatedRequestContext);
+
 /// Auth gate - both a check and a AuthenticatedRequestContext extractor at once
 #[derive(SecurityScheme)]
 pub(crate) enum AuthedSession {
     Token(TokenAuth),
     Cookie(CookieAuth),
+    Cluster(ClusterAuth),
 }
 
 impl AuthedSession {
@@ -39,6 +55,7 @@ impl AuthedSession {
         match self {
             Self::Token(t) => &t.0,
             Self::Cookie(c) => &c.0,
+            Self::Cluster(c) => &c.0,
         }
     }
 }
@@ -90,6 +107,16 @@ mod tests {
     #[tokio::test]
     async fn rejects_request_with_no_credentials() {
         let resp = client().get("/guarded").send().await;
+        resp.assert_status(http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn rejects_unverified_cluster_token_header() {
+        let resp = client()
+            .get("/guarded")
+            .header("x-warpgate-cluster-token", "anything")
+            .send()
+            .await;
         resp.assert_status(http::StatusCode::UNAUTHORIZED);
     }
 }

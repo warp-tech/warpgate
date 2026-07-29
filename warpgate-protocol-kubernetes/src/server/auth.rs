@@ -1,16 +1,18 @@
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::Context;
 use poem::Request;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
+use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
-use warpgate_common::auth::{AuthResult, CredentialKind};
-use warpgate_common::{TargetKubernetesOptions, TargetOptions, User};
+use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
+use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, User};
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
@@ -21,7 +23,7 @@ use warpgate_db_entities::{CertificateCredential, CertificateRevocation};
 
 use crate::server::client_certs::RequestCertificateExt;
 
-fn unauthorized() -> poem::Error {
+pub(crate) fn unauthorized() -> poem::Error {
     poem::Error::from_string(
         "Unauthorized: provide a valid Bearer token or client certificate",
         poem::http::StatusCode::UNAUTHORIZED,
@@ -138,10 +140,15 @@ pub async fn authenticate_kubernetes_user(
 /// the expensive step, so the caller caches the result per correlated session so it
 /// runs once per session (one approval per `kubectl` command's fan-out of requests)
 /// rather than once per request.
+///
+/// `session_id` is that of the session the caller has registered for this
+/// request: the auth state is keyed by it, which is what lets a web approval
+/// raised on another node be routed back to the waiting request.
 pub async fn authorize_kubernetes_target(
     req: &Request,
     user: &User,
     target_name: &str,
+    session_id: SessionId,
     services: &Services,
 ) -> poem::Result<TargetAuthorization> {
     let client_ip: Option<IpAddr> = get_client_ip(req, services)
@@ -150,7 +157,8 @@ pub async fn authorize_kubernetes_target(
 
     // When the user has a Kubernetes credential policy, enforce its web-approval
     // factor on top of the transport identity; otherwise use the identity directly.
-    let identity = authorize_kubernetes_identity(services, user, client_ip, target_name).await?;
+    let identity =
+        authorize_kubernetes_identity(services, user, client_ip, target_name, session_id).await?;
     lookup_authorized_k8s_target(services.config_provider.as_ref(), target_name, &identity).await
 }
 
@@ -173,6 +181,7 @@ async fn authorize_kubernetes_identity(
     user: &User,
     client_ip: Option<IpAddr>,
     target_name: &str,
+    session_id: SessionId,
 ) -> poem::Result<AuthorizedIdentity> {
     let policy_configured = user
         .credential_policy
@@ -187,9 +196,9 @@ async fn authorize_kubernetes_identity(
         ));
     }
 
-    let (_id, state_arc) = services
+    let state_arc = services
         .create_auth_state(
-            None,
+            &session_id,
             &user.username,
             crate::PROTOCOL_NAME,
             target_name,
@@ -199,6 +208,16 @@ async fn authorize_kubernetes_identity(
         )
         .await?;
 
+    await_kubernetes_web_approval(services, user, &state_arc).await
+}
+
+/// Blocks until the pending web approval resolves, either from a cached
+/// grace-period bypass or from the user acting on the request in the UI.
+async fn await_kubernetes_web_approval(
+    services: &Services,
+    user: &User,
+    state_arc: &Arc<Mutex<AuthState>>,
+) -> poem::Result<AuthorizedIdentity> {
     loop {
         let verification = state_arc.lock().await.verify();
         match verification {
@@ -207,11 +226,11 @@ async fn authorize_kubernetes_identity(
                     .ok_or_else(unauthorized);
             }
             AuthResult::Need(kinds) if kinds.contains(&CredentialKind::WebUserApproval) => {
-                if services.try_web_approval_bypass(&state_arc).await? {
+                if services.try_web_approval_bypass(state_arc).await? {
                     continue;
                 }
                 if !matches!(
-                    wait_for_auth_completion(&state_arc).await,
+                    wait_for_auth_completion(state_arc).await,
                     AuthResult::Accepted { .. }
                 ) {
                     warn!(username = %user.username, "Kubernetes web approval not granted");

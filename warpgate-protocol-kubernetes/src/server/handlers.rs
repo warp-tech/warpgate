@@ -23,11 +23,9 @@ use warpgate_common_http::logging::{
 use warpgate_core::Services;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 
-use crate::correlator::RequestCorrelator;
+use crate::correlator::{RequestCorrelator, correlated_authorization};
 use crate::recording::{deduce_exec_recording_metadata, start_recording_api, start_recording_exec};
-use crate::server::auth::{
-    authenticate_kubernetes_user, authorize_kubernetes_target, create_authenticated_client,
-};
+use crate::server::auth::{authenticate_kubernetes_user, create_authenticated_client};
 
 /// A client-supplied impersonation header (`Impersonate-User`,
 /// `Impersonate-Group`, `Impersonate-Uid`, `Impersonate-Extra-*`). These let a
@@ -91,29 +89,9 @@ pub async fn handle_api_request(
     // resolved once per correlated session and reused, so a single `kubectl`
     // command's fan-out of requests only prompts for approval once.
     let user = authenticate_kubernetes_user(req, ctx.services()).await?;
-    let user_info: AuthStateUserInfo = (&user).into();
 
-    // Bound to its own `let` so the correlator lock is released before the match
-    // arms — the `None` arm re-locks it, and the tokio mutex is not reentrant.
-    let existing_session = correlator
-        .lock()
-        .await
-        .existing_session(req, &user_info, &target_name)
-        .await?;
-    let (handle, authorization) = match existing_session {
-        Some(session) => session,
-        None => {
-            // The correlator lock is not held across this (possibly blocking) step.
-            let authorization =
-                authorize_kubernetes_target(req, &user, &target_name, ctx.services()).await?;
-            let handle = correlator
-                .lock()
-                .await
-                .register_authorized_session(req, &user_info, &target_name, authorization.clone())
-                .await?;
-            (handle, authorization)
-        }
-    };
+    let (handle, authorization) =
+        correlated_authorization(correlator.0, req, &user, &target_name, ctx.services()).await?;
 
     let (user_info, target) = authorization.into_parts();
 
@@ -125,9 +103,9 @@ pub async fn handle_api_request(
     };
 
     let (session_id, log_span) = {
-        let handle: tokio::sync::MutexGuard<'_, warpgate_core::WarpgateServerHandle> =
-            handle.lock().await;
-        handle.set_user_info(user_info.clone()).await?;
+        // The user info is already on the session: it is set when the session is
+        // registered, before its authorization is resolved.
+        let handle = handle.lock().await;
         handle.set_target(&target).await?;
         (
             handle.id(),

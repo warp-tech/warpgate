@@ -14,7 +14,7 @@ pub struct SessionSnapshot {
     pub ended: Option<OffsetDateTime>,
     pub ticket_id: Option<Uuid>,
     pub protocol: String,
-    pub node_id: Option<Uuid>,
+    pub node_id: Uuid,
     /// Hostname of the owning node; only filled in by the session detail
     /// endpoint, and only while the node is registered.
     pub node_hostname: Option<String>,

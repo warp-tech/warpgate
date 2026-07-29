@@ -349,7 +349,6 @@ mod tests {
         AuthState::new(
             Uuid::new_v4(),
             None,
-            None,
             AuthStateUserInfo {
                 id: Uuid::nil(),
                 username: "alice".into(),

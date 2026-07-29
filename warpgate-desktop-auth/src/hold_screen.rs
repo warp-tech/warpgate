@@ -18,9 +18,8 @@ use anyhow::{Context, Result};
 use tokio::time::{MissedTickBehavior, Sleep, interval, sleep};
 use tracing::warn;
 use uuid::Uuid;
-use warpgate_common::auth::AuthResult;
-use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::Protocol;
+use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
 use warpgate_core::{Services, TIMEOUT};
 use warpgate_desktop_ui::AuthPrompt;
 

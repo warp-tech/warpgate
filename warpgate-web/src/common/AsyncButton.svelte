@@ -82,7 +82,11 @@
 </script>
 
 <Button
-    on:click={_click}
+    on:click={() => {
+        if (!(st === State.Progress || st === State.ProgressWithSpinner)) {
+            _click()
+        }
+    }}
     bind:inner={button}
     style="min-width: {lastWidth}px; min-height: {lastHeight}px;"
     class={cls}
@@ -91,7 +95,7 @@
     {type}
     {size}
     {id}
-    disabled={disabled || st === State.Progress || st === State.ProgressWithSpinner}
+    {disabled}
 >
     {#if st === State.Normal || st === State.Progress}
         {#if children}

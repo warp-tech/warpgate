@@ -75,6 +75,7 @@ mod m00068_rename_ssh_banner;
 mod m00069_ssh_client_keys;
 mod m00070_http_sessions;
 mod m00071_ssh_host_key_verification;
+mod m00072_session_node_id_not_null;
 
 pub(crate) mod helpers;
 
@@ -155,6 +156,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00069_ssh_client_keys::Migration),
             Box::new(m00070_http_sessions::Migration),
             Box::new(m00071_ssh_host_key_verification::Migration),
+            Box::new(m00072_session_node_id_not_null::Migration),
         ]
     }
 }

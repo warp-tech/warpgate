@@ -6488,7 +6488,8 @@
         "required": [
           "id",
           "started",
-          "protocol"
+          "protocol",
+          "node_id"
         ],
         "properties": {
           "id": {

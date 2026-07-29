@@ -242,16 +242,25 @@ impl AuthStateStore {
     ///
     /// This is deliberately synchronous and does no database I/O, so the store
     /// lock is only held for the in-memory insert.
+    ///
+    /// A session holds at most one auth state, keyed by its session id, so a new
+    /// attempt on the same session (a different username or target) supersedes
+    /// the previous one. Anything already waiting on the old state holds its
+    /// `Arc` and still observes its outcome; it just stops being reachable by
+    /// session id.
     pub(crate) fn create(
         &mut self,
-        session_id: Option<&SessionId>,
+        session_id: &SessionId,
         user: &User,
         protocol: Protocol,
         target_name: &str,
         policy: Box<dyn CredentialPolicy + Sync + Send>,
         remote_ip: Option<IpAddr>,
-    ) -> (Uuid, Arc<Mutex<AuthState>>) {
-        let id = Uuid::new_v4();
+    ) -> Arc<Mutex<AuthState>> {
+        // The auth state is identified by its session id, so a cross-node web
+        // approval can resolve the owning node straight from the `sessions`
+        // table (which records `node_id`).
+        let id = *session_id;
 
         // Small backlog so subscribers that briefly fall behind still see the
         // terminal transition; laggards re-check the state directly.
@@ -267,7 +276,6 @@ impl AuthStateStore {
 
         let state = AuthState::new(
             id,
-            session_id.copied(),
             remote_ip,
             user.into(),
             protocol,
@@ -278,7 +286,25 @@ impl AuthStateStore {
         let state_arc = Arc::new(Mutex::new(state));
         self.store.insert(id, (state_arc.clone(), Instant::now()));
 
-        (id, state_arc)
+        state_arc
+    }
+
+    /// Drops a session's auth state, so a cancelled login stops being reachable
+    /// by session id.
+    pub fn remove(&mut self, session_id: &SessionId) {
+        self.store.remove(session_id);
+    }
+
+    /// Drops a session's auth state only if it is still `state`: a concurrent
+    /// attempt may have superseded it, and the newer attempt must not be torn
+    /// down by the older one's cleanup.
+    pub fn remove_if_same(&mut self, session_id: &SessionId, state: &Arc<Mutex<AuthState>>) {
+        if self
+            .get(session_id)
+            .is_some_and(|current| Arc::ptr_eq(&current, state))
+        {
+            self.store.remove(session_id);
+        }
     }
 
     /// Records a web approval for later bypass checks
@@ -371,7 +397,6 @@ mod tests {
         Arc::new(Mutex::new(AuthState::new(
             Uuid::new_v4(),
             None,
-            None,
             AuthStateUserInfo {
                 id: Uuid::new_v4(),
                 username: "alice".into(),
@@ -381,6 +406,65 @@ mod tests {
             Box::new(RequireWebApproval),
             broadcast::channel(8).0,
         )))
+    }
+
+    fn test_user() -> User {
+        User {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+            description: String::new(),
+            credential_policy: None,
+            rate_limit_bytes_per_second: None,
+            ldap_server_id: None,
+            allowed_ip_ranges: None,
+        }
+    }
+
+    fn create_for(
+        store: &mut AuthStateStore,
+        user: &User,
+        session_id: &SessionId,
+    ) -> Arc<Mutex<AuthState>> {
+        store.create(
+            session_id,
+            user,
+            Protocol::Ssh,
+            "target",
+            Box::new(RequireWebApproval),
+            None,
+        )
+    }
+
+    // Cross-node web-approval routing keys on this: an auth state is identified
+    // by its session id, so the owning node resolves from the `sessions` table.
+    #[tokio::test]
+    async fn create_keys_auth_state_by_session_id() {
+        let mut store = AuthStateStore::new();
+        let user = test_user();
+        let session_id = Uuid::new_v4();
+
+        let state = create_for(&mut store, &user, &session_id);
+        assert!(Arc::ptr_eq(&store.get(&session_id).unwrap(), &state));
+    }
+
+    #[tokio::test]
+    async fn a_new_attempt_supersedes_the_session_s_previous_state() {
+        let mut store = AuthStateStore::new();
+        let user = test_user();
+        let session_id = Uuid::new_v4();
+
+        let first = create_for(&mut store, &user, &session_id);
+        let second = create_for(&mut store, &user, &session_id);
+
+        assert!(!Arc::ptr_eq(&second, &first));
+        assert!(Arc::ptr_eq(&store.get(&session_id).unwrap(), &second));
+
+        // The superseded attempt's cleanup must not tear down the newer one.
+        store.remove_if_same(&session_id, &first);
+        assert!(store.contains_key(&session_id));
+
+        store.remove_if_same(&session_id, &second);
+        assert!(!store.contains_key(&session_id));
     }
 
     #[tokio::test]
