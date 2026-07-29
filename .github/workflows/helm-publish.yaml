@@ -62,7 +62,7 @@ jobs:
           cat ${{ env.CHART_PATH }}/Chart.yaml
 
       - name: Log into registry ${{ env.REGISTRY }}
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
