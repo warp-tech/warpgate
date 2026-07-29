@@ -302,9 +302,9 @@
 
     {#if kubeconfigMode === 'oidc' && k8sOidcConfigs.length > 0}
         {#if k8sOidcConfigs.length > 1}
-            <label class="form-label" for="oidc-provider-select"
-                >SSO provider</label
-            >
+            <label class="form-label" for="oidc-provider-select">
+                SSO provider
+            </label>
             <select
                 id="oidc-provider-select"
                 class="form-select mb-3"
@@ -322,8 +322,9 @@
                 href="https://github.com/int128/kubelogin"
                 target="_blank"
                 rel="noreferrer noopener"
-                >kubelogin</a
             >
+                kubelogin
+            </a>
             (oidc-login) kubectl plugin.
         </div>
     {/if}
@@ -360,14 +361,16 @@
                                         <Badge
                                             id="cert-status-badge-{cert.credential.id}"
                                             color="success"
-                                            >Key available</Badge
                                         >
+                                            Key available
+                                        </Badge>
                                     {:else}
                                         <Badge
                                             id="cert-status-badge-{cert.credential.id}"
                                             color="warning"
-                                            >No private key</Badge
                                         >
+                                            No private key
+                                        </Badge>
                                     {/if}
                                     <Tooltip
                                         target={`cert-status-badge-${cert.credential.id}`}

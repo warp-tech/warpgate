@@ -164,12 +164,13 @@
                 color="primary"
                 disabled={!totpValid}
                 on:click={() => validated = true}
-                >Create</Button
             >
+                Create
+            </Button>
 
-            <Button class="modal-button" color="danger" on:click={_cancel}
-                >Cancel</Button
-            >
+            <Button class="modal-button" color="danger" on:click={_cancel}>
+                Cancel
+            </Button>
         </ModalFooter>
     </Form>
 </Modal>

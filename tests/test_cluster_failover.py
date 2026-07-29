@@ -130,6 +130,35 @@ class Test:
             node_b.config_path, session_id
         ), "dead node's session was not marked ended"
 
+    def test_close_all_sessions_fans_out(
+        self,
+        processes: ProcessManager,
+        timeout,
+        wg_c_ed25519_pubkey,
+    ):
+        # A session lives only on the node that owns it, so close-all issued on
+        # B must reach A's session too.
+        node_a = processes.start_wg()
+        wait_port(node_a.http_port, recv=False)
+        node_b = processes.start_wg(share_with=node_a)
+        wait_port(node_b.http_port, recv=False)
+
+        session_id, _ = _open_session_on_a(
+            processes, node_a, wg_c_ed25519_pubkey, timeout
+        )
+
+        with admin_client(f"https://localhost:{node_b.http_port}") as api:
+            api.close_all_sessions()
+
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not _session_ended(
+            node_a.config_path, session_id
+        ):
+            time.sleep(0.5)
+        assert _session_ended(
+            node_a.config_path, session_id
+        ), "close-all on node B did not close node A's session"
+
     def test_proxy_fails_cleanly_when_owner_dies(
         self,
         processes: ProcessManager,

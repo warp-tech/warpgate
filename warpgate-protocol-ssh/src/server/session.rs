@@ -23,9 +23,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{
-    Secret, SessionId, SshHostKeyVerificationMode, TargetOptions, WarpgateError,
-};
+use warpgate_common::{Secret, SessionId, TargetOptions, WarpgateError};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
@@ -38,6 +36,7 @@ use warpgate_core::{
     authorize_for_target, authorize_for_target_by_name, authorize_ticket, consume_ticket,
 };
 use warpgate_db_entities::Parameters;
+use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 
 use super::channel_writer::ChannelWriter;
 use super::command_detector::CommandDetector;
@@ -369,7 +368,7 @@ impl ServerSession {
         let state = self
             .services
             .create_auth_state(
-                Some(&self.id),
+                &self.id,
                 username,
                 crate::PROTOCOL_NAME,
                 target_name,
@@ -377,8 +376,7 @@ impl ServerSession {
                 Some(self.remote_address.ip()),
                 rate_limit_credential_type,
             )
-            .await?
-            .1;
+            .await?;
         self.auth_state = Some((state.clone(), target_name.to_string()));
         Ok(state)
     }
@@ -1345,15 +1343,11 @@ impl ServerSession {
     ) -> Result<()> {
         self.service_output.stop_progress();
 
-        let mode = self
-            .services
-            .config
-            .lock()
-            .await
-            .store
-            .ssh
-            .host_key_verification;
+        let mode = Parameters::Entity::get(&self.services.db)
+            .await?
+            .ssh_host_key_verification;
 
+        // `Ignore` never gets here - the key is accepted without a lookup.
         if mode == SshHostKeyVerificationMode::AutoAccept {
             let _ = reply.send(true);
             info!("Accepted untrusted host key (auto-accept is enabled)");

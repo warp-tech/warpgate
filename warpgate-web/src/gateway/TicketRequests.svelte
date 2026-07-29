@@ -256,9 +256,9 @@
                             onblur={() => descriptionTouched = true}
                         >
                         {#if descriptionMissing}
-                            <small class="form-text text-muted"
-                                >A description is required for ticket requests.</small
-                            >
+                            <small class="form-text text-muted">
+                                A description is required for ticket requests.
+                            </small>
                         {/if}
                     </FormGroup>
 
@@ -273,14 +273,14 @@
                         {#if durationError}
                             <div class="invalid-feedback">{durationError}</div>
                         {:else if maxDurationSeconds}
-                            <small class="form-text text-muted"
-                                >Maximum:
-                                {formatDurationAsHumantime(maxDurationSeconds)}</small
-                            >
+                            <small class="form-text text-muted">
+                                Maximum:
+                                {formatDurationAsHumantime(maxDurationSeconds)}
+                            </small>
                         {:else}
-                            <small class="form-text text-muted"
-                                >Examples: 30m, 8h, 1d, 2h30m</small
-                            >
+                            <small class="form-text text-muted">
+                                Examples: 30m, 8h, 1d, 2h30m
+                            </small>
                         {/if}
                     </FormGroup>
                 </form>
@@ -338,8 +338,9 @@
                             <AsyncButton
                                 color="success"
                                 click={() => activateRequest(request)}
-                                >Activate</AsyncButton
                             >
+                                Activate
+                            </AsyncButton>
                         {/if}
                         <small class="text-muted flex-shrink-0">
                             <RelativeDate date={request.created} />
@@ -391,8 +392,9 @@
                             color="link"
                             size="sm"
                             onclick={() => deleteTicket(ticket)}
-                            >Revoke</Button
                         >
+                            Revoke
+                        </Button>
                     </div>
                 {/each}
             </div>

@@ -600,9 +600,9 @@
                                     </div>
                                 {:else if richEntry?._type === 'UserAuthenticationFailed1'}
                                     <div class="rich-entry auth-failed">
-                                        <span class="event-label"
-                                            >Authentication failed</span
-                                        >
+                                        <span class="event-label">
+                                            Authentication failed
+                                        </span>
                                         {#if richEntry.user_id}
                                             <UserBadge
                                                 id={richEntry.user_id}
@@ -673,9 +673,9 @@
                                             name={richEntry.username}
                                         />
                                         {#if richEntry.via === 'self-service'}
-                                            <span class="badge bg-secondary"
-                                                >self-service</span
-                                            >
+                                            <span class="badge bg-secondary">
+                                                self-service
+                                            </span>
                                         {/if}
                                     </div>
                                 {:else if richEntry?._type === 'CredentialDeleted1'}
@@ -694,9 +694,9 @@
                                             name={richEntry.username}
                                         />
                                         {#if richEntry.via === 'self-service'}
-                                            <span class="badge bg-secondary"
-                                                >self-service</span
-                                            >
+                                            <span class="badge bg-secondary">
+                                                self-service
+                                            </span>
                                         {/if}
                                     </div>
                                 {:else if richEntry?._type === 'TicketCreated1'}

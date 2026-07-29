@@ -7,7 +7,6 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use tracing::warn;
-use uuid::Uuid;
 use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{GlobalParams, Protocol, Secret, SessionId, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Parameters;
@@ -142,14 +141,14 @@ impl Services {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_auth_state(
         &self,
-        session_id: Option<&SessionId>,
+        session_id: &SessionId,
         username: &str,
         protocol: Protocol,
         target_name: &str,
         supported_credential_types: &[CredentialKind],
         remote_ip: Option<IpAddr>,
         rate_limit_credential_type: Option<&str>,
-    ) -> Result<(Uuid, Arc<Mutex<AuthState>>), WarpgateError> {
+    ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
         let (user, policy) = AuthStateStore::resolve_user_and_policy(
             &self.config_provider,
             &self.login_protection,

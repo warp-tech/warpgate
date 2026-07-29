@@ -59,8 +59,9 @@
         creatingToken = true
         e.preventDefault()
     }}
-        >Create token</Button
     >
+        Create token
+    </Button>
 </div>
 
 {#if error}

@@ -27,6 +27,10 @@
     import StickyActionBar from 'common/StickyActionBar.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
+    import {
+        openWebDesktopSession,
+        openWebSshSession,
+    } from 'gateway/lib/webSessions'
     import { replace } from 'svelte-spa-router'
     import TlsConfiguration from '../../TlsConfiguration.svelte'
     import HttpHeadersEditor from './http/HeadersEditor.svelte'
@@ -88,6 +92,19 @@
         if (confirm(`Delete target ${target.name}?`)) {
             await api.deleteTarget(target)
             replace('/config/targets')
+        }
+    }
+
+    async function connect() {
+        if (!target) return
+        try {
+            if (target.options.kind === 'Ssh') {
+                await openWebSshSession(target.id)
+            } else {
+                await openWebDesktopSession(target.id)
+            }
+        } catch (err) {
+            error = await stringifyError(err)
         }
     }
 
@@ -638,6 +655,11 @@
 
 <StickyActionBar>
     {#snippet start()}
+        {#if ($serverInfo?.webClientsEnabled ?? true) && target && (target.options.kind === 'Ssh' || target.options.kind === 'Rdp' || target.options.kind === 'Vnc')}
+            <AsyncButton color="secondary" click={connect}>
+                Connect
+            </AsyncButton>
+        {/if}
         <Button
             color="secondary"
             onclick={() => { connectionsInstructionsModalOpen = true }}

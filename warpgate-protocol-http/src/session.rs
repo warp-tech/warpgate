@@ -20,7 +20,7 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::{SessionStateInit, State, WarpgateServerHandle};
 use warpgate_db_entities::HttpSession;
 
-use crate::common::PROTOCOL_NAME;
+use crate::common::{PROTOCOL_NAME, SessionExt};
 use crate::session_handle::{HttpSessionHandle, SessionHandleCommand};
 
 #[derive(Clone)]
@@ -138,7 +138,7 @@ pub struct SessionStore {
     this: Weak<Mutex<Self>>,
 }
 
-const SESSION_ID_SESSION_KEY: &str = "session_id";
+pub(crate) const SESSION_ID_SESSION_KEY: &str = "session_id";
 const SESSION_TOUCH_SESSION_KEY: &str = "touched_at";
 const SESSION_TOUCH_DEBOUNCE_SECONDS: i64 = 60;
 
@@ -163,7 +163,7 @@ impl SessionStore {
             }
         }
 
-        if let Some(session_id) = session.get::<SessionId>(SESSION_ID_SESSION_KEY) {
+        if let Some(session_id) = session.get_session_id() {
             if let Some(entry) = self.sessions.get_mut(&session_id) {
                 entry.last_activity = Instant::now();
             }
@@ -241,14 +241,14 @@ impl SessionStore {
 
     pub fn handle_for(&self, session: &Session) -> Option<Arc<Mutex<WarpgateServerHandle>>> {
         session
-            .get::<SessionId>(SESSION_ID_SESSION_KEY)
+            .get_session_id()
             .and_then(|id| self.sessions.get(&id))
             .map(|entry| entry.handle.clone())
     }
 
     pub fn close_receiver_for(&self, session: &Session) -> Option<broadcast::Receiver<()>> {
         session
-            .get::<SessionId>(SESSION_ID_SESSION_KEY)
+            .get_session_id()
             .and_then(|id| self.sessions.get(&id))
             .map(|entry| entry.close_sender.subscribe())
     }
@@ -269,7 +269,7 @@ impl SessionStore {
     }
 
     pub fn remove_session(&mut self, session: &Session) {
-        if let Some(id) = session.get::<SessionId>(SESSION_ID_SESSION_KEY) {
+        if let Some(id) = session.get_session_id() {
             self.remove_session_by_id(id);
         }
     }
@@ -363,10 +363,7 @@ mod db_tests {
 
     async fn storage() -> SharedSessionStorage {
         warpgate_db_entities::Parameters::set_config_migration_values(
-            warpgate_db_entities::Parameters::ConfigMigrationValues {
-                recordings_enable: false,
-                recordings_path: String::new(),
-            },
+            warpgate_db_entities::Parameters::ConfigMigrationValues::default(),
         );
         let db = Database::connect("sqlite::memory:").await.unwrap();
         warpgate_db_migrations::migrate_database(&db).await.unwrap();

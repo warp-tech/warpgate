@@ -1,11 +1,13 @@
 <script lang="ts">
+    import { faGithub } from '@fortawesome/free-brands-svg-icons'
+    import { faBriefcase } from '@fortawesome/free-solid-svg-icons'
     import AuthBar from 'common/AuthBar.svelte'
     import Brand from 'common/Brand.svelte'
     import Loadable from 'common/Loadable.svelte'
     import Redirect from 'common/Redirect.svelte'
     import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
-    import { get } from 'svelte/store'
+    import Fa from 'svelte-fa'
     import Router, {
         link,
         router,
@@ -13,6 +15,7 @@
     } from 'svelte-spa-router'
     import active from 'svelte-spa-router/active'
     import { wrap } from 'svelte-spa-router/wrap'
+    import { get } from 'svelte/store'
     import AnalyticsConsentModal from './AnalyticsConsentModal.svelte'
 
     let showAnalyticsModal = $state(false)
@@ -102,15 +105,17 @@
                     use:link
                     use:active={{path: /^\/status\//}}
                     href="/status/sessions"
-                    >Status</a
                 >
+                    Status
+                </a>
                 <a
                     use:link
                     use:active
                     use:active={{path: /^\/config\//}}
                     href="/config/targets"
-                    >Config</a
                 >
+                    Config
+                </a>
                 <a use:link use:active href="/log">Log</a>
             {/if}
             <span class="ms-3"></span>
@@ -122,10 +127,28 @@
             <Router {routes} />
         </main>
 
-        <footer class="mt-5">
-            <span class="me-auto ms-3">
+        <footer class="d-flex mt-5 gap-3">
+            <div>
                 {$serverInfo?.version}
-            </span>
+            </div>
+            &middot;
+            <div class="d-flex align-items-center gap-2">
+                <Fa icon={faGithub} class="text-muted" />
+                <a target="_blank" href="https://github.com/warp-tech/warpgate">
+                    GitHub
+                </a>
+            </div>
+            &middot;
+            <div class="d-flex align-items-center gap-2">
+                <Fa icon={faBriefcase} class="text-muted" />
+                <a
+                    target="_blank"
+                    href="https://warpgate.null.page/for-business/"
+                >
+                    Professional support
+                </a>
+            </div>
+            <div class="me-auto"></div>
             <ThemeSwitcher />
         </footer>
     </div>

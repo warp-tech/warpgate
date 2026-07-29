@@ -118,7 +118,11 @@ impl Api {
             Ok(addr) => addr,
             Err(_) => return Ok(UnblockIpResponse::InvalidIp),
         };
-        admin.services().login_protection.unblock_ip(&ip_addr).await?;
+        admin
+            .services()
+            .login_protection
+            .unblock_ip(&ip_addr)
+            .await?;
         Ok(UnblockIpResponse::Ok)
     }
 
@@ -132,7 +136,11 @@ impl Api {
         &self,
         admin: AdminContext,
     ) -> Result<ListLockedUsersResponse, WarpgateError> {
-        let locked_users = admin.services().login_protection.list_locked_users().await?;
+        let locked_users = admin
+            .services()
+            .login_protection
+            .list_locked_users()
+            .await?;
         let result: Vec<LockedUserInfo> = locked_users
             .into_iter()
             .map(|info| LockedUserInfo {

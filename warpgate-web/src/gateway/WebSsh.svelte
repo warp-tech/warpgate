@@ -371,9 +371,9 @@
                         >
                             <Fa icon={faMinus} />
                         </button>
-                        <span class="text-nowrap ms-auto me-auto"
-                            >{fontSize}px</span
-                        >
+                        <span class="text-nowrap ms-auto me-auto">
+                            {fontSize}px
+                        </span>
                         <button
                             type="button"
                             class="btn btn-sm btn-secondary"
@@ -416,8 +416,9 @@
                 color="secondary"
                 class="modal-button"
                 onclick={() => showInstructions = false}
-                >Close</Button
             >
+                Close
+            </Button>
         </ModalFooter>
     </Modal>
 {/if}
@@ -441,8 +442,9 @@
                 pendingHostKey = null
                 disconnect()
             }}
-                >Reject and disconnect</Button
             >
+                Reject and disconnect
+            </Button>
             <Button
                 color="primary"
                 class="modal-button"
@@ -450,8 +452,9 @@
                 send({ type: 'accept_host_key' })
                 pendingHostKey = null
             }}
-                >Accept and connect</Button
             >
+                Accept and connect
+            </Button>
         </ModalFooter>
     </Modal>
 {/if}

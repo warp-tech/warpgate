@@ -90,7 +90,7 @@ pub async fn api_get_recording_tcpdump(
 
     let recording = find_recording(&ctx, id.0, Some(RecordingKind::Traffic)).await?;
     let owner = recording_owner(&ctx, &recording).await?;
-    proxy_or_serve(&ctx, req, owner, || {
+    proxy_or_serve(&ctx, req, owner, None::<&()>, || {
         serve_recording_file(&ctx, &recording, RecordingFile::TcpDumpData, static_req)
     })
     .await
@@ -107,7 +107,7 @@ pub async fn api_get_recording_data(
 
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
-    proxy_or_serve(&ctx, req, owner, || {
+    proxy_or_serve(&ctx, req, owner, None::<&()>, || {
         serve_recording_file(&ctx, &recording, RecordingFile::NDJsonData, static_req)
     })
     .await
@@ -124,7 +124,7 @@ pub async fn api_get_recording_index(
 
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
-    proxy_or_serve(&ctx, req, owner, || {
+    proxy_or_serve(&ctx, req, owner, None::<&()>, || {
         serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req)
     })
     .await

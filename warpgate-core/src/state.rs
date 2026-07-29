@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use sea_orm::{ActiveModelTrait, DatabaseConnection};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
 use tracing::error;
@@ -69,7 +69,7 @@ impl State {
                     .remote_address
                     .map_or_else(String::new, |x| x.to_string())),
                 protocol: Set(protocol.to_string()),
-                node_id: Set(Some(self_.node_id)),
+                node_id: Set(self_.node_id),
                 ..Default::default()
             };
 
@@ -94,6 +94,19 @@ impl State {
 
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
         self.change_sender.subscribe()
+    }
+
+    /// Removes a session that never completed authentication, deleting its row
+    /// rather than marking it ended — see
+    /// [`WarpgateServerHandle::mark_provisional`].
+    pub async fn discard_session(&mut self, id: SessionId) {
+        self.sessions.remove(&id);
+
+        if let Err(error) = Session::Entity::delete_by_id(id).exec(&self.db).await {
+            error!(%error, %id, "Could not delete session from the DB");
+        }
+
+        let _ = self.change_sender.send(());
     }
 
     pub async fn remove_session(&mut self, id: SessionId) {

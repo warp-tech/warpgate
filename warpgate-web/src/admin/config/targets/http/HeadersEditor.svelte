@@ -81,8 +81,9 @@
         href="https://warpgate.null.page/targets/http/#built-in-headers"
         target="_blank"
         rel="noopener noreferrer"
-        >Some headers</a
     >
+        Some headers
+    </a>
     are automatically set by Warpgate.
 </small>
 

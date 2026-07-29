@@ -14,19 +14,22 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use futures::{StreamExt, TryStreamExt};
 use poem::http::HeaderName;
 use poem::http::header::{CONNECTION, CONTENT_LENGTH, COOKIE, HOST, TRANSFER_ENCODING, UPGRADE};
 use poem::web::websocket::WebSocket;
 use poem::{Body, IntoResponse, Request, Response};
 use sea_orm::EntityTrait;
+use serde::Serialize;
 use tokio_tungstenite::{Connector, client_async_tls_with_config, tungstenite};
 use warpgate_ca::CLUSTER_TLS_SNI_NAME;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
 use warpgate_common::{Secret, WarpgateError};
-use warpgate_common_http::{AuthenticatedRequestContext, X_WARPGATE_CLUSTER_TOKEN};
+use warpgate_common_http::{
+    AuthenticatedRequestContext, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN,
+};
 use warpgate_db_entities::{Node, Parameters, Session};
 use warpgate_tls::configure_cluster_tls_connector;
 
@@ -43,53 +46,76 @@ pub enum Owner {
     Remote(RemoteNode),
 }
 
+impl From<Node::Model> for RemoteNode {
+    fn from(node: Node::Model) -> Self {
+        Self {
+            address: node.address,
+            tls_spki_sha256: node.tls_spki_sha256,
+        }
+    }
+}
+
 impl Owner {
     pub fn local() -> Self {
         Self::Local
     }
 
     pub fn remote(node: Node::Model) -> Self {
-        Self::Remote(RemoteNode {
-            address: node.address,
-            tls_spki_sha256: node.tls_spki_sha256,
-        })
+        Self::Remote(node.into())
     }
 }
 
-/// Which node owns a session's live handle. `Local` also covers sessions with
-/// no recorded owner (from before clustering).
-pub async fn session_owner(
+/// Resolves an owning node id to an [`Owner`]. The nil UUID (no owning node),
+/// or this node's own id, is [`Owner::Local`]; a foreign id is looked up in the
+/// registry and yields [`WarpgateError::NodeGone`] if it is no longer there.
+pub async fn node_owner(
     ctx: &AuthenticatedRequestContext,
-    session: &Session::Model,
+    node_id: uuid::Uuid,
 ) -> Result<Owner, WarpgateError> {
     let services = ctx.services();
-    let Some(owner_id) = session.node_id else {
-        return Ok(Owner::Local);
-    };
-    if owner_id == services.cluster.node_id {
+    if node_id.is_nil() || node_id == services.cluster.node_id {
         return Ok(Owner::Local);
     }
-    let Some(node) = Node::Entity::find_by_id(owner_id).one(&services.db).await? else {
-        return Err(WarpgateError::NodeGone(owner_id));
+    let Some(node) = Node::Entity::find_by_id(node_id).one(&services.db).await? else {
+        return Err(WarpgateError::NodeGone(node_id));
     };
     Ok(Owner::remote(node))
 }
 
-/// Serve a request with `serve_local`, or if data is owned
-/// by another node, forward the request there instead
-pub async fn proxy_or_serve<F, Fut>(
+pub async fn session_owner(
+    ctx: &AuthenticatedRequestContext,
+    session: &Session::Model,
+) -> Result<Owner, WarpgateError> {
+    node_owner(ctx, session.node_id).await
+}
+
+/// Serve a request with `serve_local`, or if data is owned by another node,
+/// forward the request there instead.
+pub async fn proxy_or_serve<F, Fut, B: Serialize, R: ReparseForwardedResponse>(
     ctx: &AuthenticatedRequestContext,
     req: &Request,
     owner: Owner,
+    body: Option<&B>,
     serve_local: F,
-) -> poem::Result<Response>
+) -> poem::Result<R>
 where
     F: FnOnce() -> Fut,
-    Fut: Future<Output = poem::Result<Response>>,
+    Fut: Future<Output = poem::Result<R>>,
 {
     match owner {
         Owner::Remote(remote) => {
-            forward_http(ctx, req, remote, &ctx.services().cluster_token).await
+            let response = forward_http(
+                ctx,
+                req,
+                remote,
+                &ctx.services().cluster_token,
+                body.map(|b| serde_json::to_vec(&b))
+                    .transpose()
+                    .context("serializing body for forwarding")?,
+            )
+            .await?;
+
+            Ok(R::reparse_forwarded_response(response).await?)
         }
         Owner::Local => serve_local().await,
     }
@@ -168,17 +194,30 @@ async fn connect_any(addrs: &[SocketAddr]) -> poem::Result<tokio::net::TcpStream
     .into())
 }
 
-pub(crate) async fn forward_http(
+async fn forward_http(
     ctx: &AuthenticatedRequestContext,
     req: &Request,
     owner: RemoteNode,
     token: &Secret<String>,
+    body: Option<Vec<u8>>,
+) -> poem::Result<Response> {
+    forward_http_to(ctx, req, &path_and_query(req), owner, token, body).await
+}
+
+/// [`forward_http`], but to `path` on the peer rather than the request's own
+/// path - for when the peer's copy of the request needs different parameters.
+pub(crate) async fn forward_http_to(
+    ctx: &AuthenticatedRequestContext,
+    req: &Request,
+    path: &str,
+    owner: RemoteNode,
+    token: &Secret<String>,
+    body: Option<Vec<u8>>,
 ) -> poem::Result<Response> {
     let (tls, addrs) = peer_connection(ctx, &owner).await?;
     let url = format!(
-        "https://{CLUSTER_TLS_SNI_NAME}:{}{}",
+        "https://{CLUSTER_TLS_SNI_NAME}:{}{path}",
         peer_port(&addrs)?,
-        path_and_query(req)
     );
 
     let mut headers = poem::http::HeaderMap::new();
@@ -197,13 +236,17 @@ pub(crate) async fn forward_http(
         .build()
         .map_err(poem::error::InternalServerError)?;
 
-    let response = client
+    let mut request = client
         .request(req.method().clone(), &url)
         .headers(headers)
-        .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret())
-        .send()
-        .await
-        .map_err(poem::error::BadGateway)?;
+        .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret());
+    if let Some(user_id) = ctx.auth.as_full_user().map(|x| x.user_id()) {
+        request = request.header(X_WARPGATE_CLUSTER_IDENTITY.clone(), user_id.to_string());
+    }
+    if let Some(body) = body {
+        request = request.body(body);
+    }
+    let response = request.send().await.map_err(poem::error::BadGateway)?;
 
     let mut builder = Response::builder().status(response.status());
     for (name, value) in response.headers() {
@@ -227,7 +270,7 @@ async fn forward_websocket(
     let host = format!("{CLUSTER_TLS_SNI_NAME}:{}", peer_port(&addrs)?);
     let url = format!("wss://{host}{}", path_and_query(req));
 
-    let request = poem::http::Request::builder()
+    let mut builder = poem::http::Request::builder()
         .uri(&url)
         .header(CONNECTION, "Upgrade")
         .header(UPGRADE, "websocket")
@@ -237,9 +280,11 @@ async fn forward_websocket(
             tungstenite::handshake::client::generate_key(),
         )
         .header(HOST, host)
-        .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret())
-        .body(())
-        .map_err(poem::error::InternalServerError)?;
+        .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret());
+    if let Some(user_id) = ctx.auth.as_full_user().map(|x| x.user_id()) {
+        builder = builder.header(X_WARPGATE_CLUSTER_IDENTITY.clone(), user_id.to_string());
+    }
+    let request = builder.body(()).map_err(poem::error::InternalServerError)?;
 
     let stream = connect_any(&addrs).await?;
     let (peer, _) = client_async_tls_with_config(
@@ -283,4 +328,16 @@ fn should_forward(name: &HeaderName) -> bool {
         && name != CONTENT_LENGTH
         && name != TRANSFER_ENCODING
         && name != COOKIE
+}
+
+pub trait ReparseForwardedResponse: Sized {
+    fn reparse_forwarded_response(
+        response: Response,
+    ) -> impl Future<Output = poem::Result<Self>> + Send;
+}
+
+impl ReparseForwardedResponse for Response {
+    async fn reparse_forwarded_response(response: Response) -> poem::Result<Self> {
+        Ok(response)
+    }
 }

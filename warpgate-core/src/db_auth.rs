@@ -158,7 +158,7 @@ async fn authorize_user<T: DbAuthTransport>(
 
     let state_arc = services
         .create_auth_state(
-            Some(&session_id),
+            &session_id,
             username,
             T::PROTOCOL,
             target_name,
@@ -166,8 +166,7 @@ async fn authorize_user<T: DbAuthTransport>(
             Some(remote_ip),
             Some("password"),
         )
-        .await?
-        .1;
+        .await?;
 
     // Sent before the approval prompt because some clients discard anything that
     // arrives ahead of it, which spends the permit early.

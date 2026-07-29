@@ -22,7 +22,6 @@
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
-    import { handleReauthError } from 'common/reauth'
     import {
         api,
         BootstrapThemeColor,
@@ -35,6 +34,7 @@
     import Fa from 'svelte-fa'
     import { firstBy } from 'thenby'
     import { serverInfo } from './lib/store'
+    import { openWebDesktopSession, openWebSshSession } from './lib/webSessions'
 
     let instructionsTarget: TargetSnapshot | undefined = $state()
 
@@ -42,32 +42,6 @@
         $serverInfo?.adminPermissions?.targetsEdit ?? false,
     )
     const webClientsEnabled = $derived($serverInfo?.webClientsEnabled ?? true)
-
-    async function openWebSsh(target: TargetSnapshot) {
-        try {
-            const { sessionId } = await api.createWebSshSession({
-                createWebSshSessionBody: { targetId: target.id },
-            })
-            window.open(`/@warpgate#/web-ssh/${sessionId}`, '_blank')
-        } catch (err) {
-            if (!(await handleReauthError(err))) {
-                throw err
-            }
-        }
-    }
-
-    async function openWebDesktop(target: TargetSnapshot) {
-        try {
-            const { sessionId } = await api.createWebDesktopSession({
-                createWebDesktopSessionBody: { targetId: target.id },
-            })
-            window.open(`/@warpgate#/web-desktop/${sessionId}`, '_blank')
-        } catch (err) {
-            if (!(await handleReauthError(err))) {
-                throw err
-            }
-        }
-    }
 
     function loadTargets(
         options: LoadOptions,
@@ -121,7 +95,7 @@
             ) {
                 instructionsTarget = target
             } else {
-                openWebSsh(target)
+                openWebSshSession(target.id)
             }
         } else if (
             target.kind === TargetKind.Vnc ||
@@ -130,7 +104,7 @@
             if (!webClientsEnabled) {
                 instructionsTarget = target
             } else {
-                openWebDesktop(target)
+                openWebDesktopSession(target.id)
             }
         } else {
             instructionsTarget = target
@@ -253,22 +227,24 @@
                     {#if target.kind === TargetKind.Ssh && webClientsEnabled}
                         <DropdownItem
                             onclick={e => {
-                            openWebSsh(target)
+                            openWebSshSession(target.id)
                             e.preventDefault()
                             e.stopPropagation()
                         }}
-                            >Web terminal</DropdownItem
                         >
+                            Web terminal
+                        </DropdownItem>
                     {/if}
                     {#if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) && webClientsEnabled}
                         <DropdownItem
                             onclick={e => {
-                            openWebDesktop(target)
+                            openWebDesktopSession(target.id)
                             e.preventDefault()
                             e.stopPropagation()
                         }}
-                            >Web desktop</DropdownItem
                         >
+                            Web desktop
+                        </DropdownItem>
                     {/if}
                     <DropdownItem
                         onclick={e => {
@@ -276,14 +252,16 @@
                         e.preventDefault()
                         e.stopPropagation()
                     }}
-                        >Connection instructions</DropdownItem
                     >
+                        Connection instructions
+                    </DropdownItem>
                     {#if canEditTargets}
                         <DropdownItem
                             href={`/@warpgate/admin#/config/targets/${target.id}`}
                             onclick={e => e.stopPropagation()}
-                            >Edit target</DropdownItem
                         >
+                            Edit target
+                        </DropdownItem>
                     {/if}
                 </DropdownMenu>
             </Dropdown>
@@ -320,7 +298,7 @@
             <Button
                 color="primary"
                 class="d-flex align-items-center justify-content-center gap-2 modal-button"
-                onclick={() => openWebSsh(sshTarget)}
+                onclick={() => openWebSshSession(sshTarget.id)}
             >
                 <Fa icon={faTerminal} />
                 Web terminal

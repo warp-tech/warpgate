@@ -25,6 +25,7 @@ pub struct WarpgateServerHandle {
     state: Arc<Mutex<State>>,
     session_state: Arc<Mutex<SessionState>>,
     rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
+    provisional: bool,
 }
 
 impl WarpgateServerHandle {
@@ -41,11 +42,26 @@ impl WarpgateServerHandle {
             state,
             session_state,
             rate_limiters_registry,
+            provisional: false,
         }
     }
 
     pub const fn id(&self) -> SessionId {
         self.id
+    }
+
+    /// Marks a session that was registered before its authentication finished
+    /// (so that it is addressable across the cluster while a web approval is
+    /// pending). Dropping the handle while still provisional deletes the
+    /// session instead of ending it, so an attempt that never became a session
+    /// leaves nothing behind.
+    pub const fn mark_provisional(&mut self) {
+        self.provisional = true;
+    }
+
+    /// Turns a provisional session into a real one.
+    pub const fn confirm(&mut self) {
+        self.provisional = false;
     }
 
     pub const fn session_state(&self) -> &Arc<Mutex<SessionState>> {
@@ -153,7 +169,12 @@ impl Drop for WarpgateServerHandle {
         let id = self.id;
         let state = self.state.clone();
         let session_state = self.session_state.clone();
+        let provisional = self.provisional;
         tokio::spawn(async move {
+            if provisional {
+                state.lock().await.discard_session(id).await;
+                return;
+            }
             // session ID from the span is needed for the audit log to get stored in the DB
             let username = session_state
                 .lock()
