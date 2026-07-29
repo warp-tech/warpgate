@@ -46,16 +46,22 @@ pub enum Owner {
     Remote(RemoteNode),
 }
 
+impl From<Node::Model> for RemoteNode {
+    fn from(node: Node::Model) -> Self {
+        Self {
+            address: node.address,
+            tls_spki_sha256: node.tls_spki_sha256,
+        }
+    }
+}
+
 impl Owner {
     pub fn local() -> Self {
         Self::Local
     }
 
     pub fn remote(node: Node::Model) -> Self {
-        Self::Remote(RemoteNode {
-            address: node.address,
-            tls_spki_sha256: node.tls_spki_sha256,
-        })
+        Self::Remote(node.into())
     }
 }
 
@@ -195,11 +201,22 @@ async fn forward_http(
     token: &Secret<String>,
     body: Option<Vec<u8>>,
 ) -> poem::Result<Response> {
+    forward_http_to(ctx, req, &path_and_query(req), owner, token).await
+}
+
+/// [`forward_http`], but to `path` on the peer rather than the request's own
+/// path - for when the peer's copy of the request needs different parameters.
+pub(crate) async fn forward_http_to(
+    ctx: &AuthenticatedRequestContext,
+    req: &Request,
+    path: &str,
+    owner: RemoteNode,
+    token: &Secret<String>,
+) -> poem::Result<Response> {
     let (tls, addrs) = peer_connection(ctx, &owner).await?;
     let url = format!(
-        "https://{CLUSTER_TLS_SNI_NAME}:{}{}",
+        "https://{CLUSTER_TLS_SNI_NAME}:{}{path}",
         peer_port(&addrs)?,
-        path_and_query(req)
     );
 
     let mut headers = poem::http::HeaderMap::new();
