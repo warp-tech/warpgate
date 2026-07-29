@@ -19,7 +19,6 @@ use ironrdp::pdu::rdp::capability_sets::MajorPlatformType;
 use ironrdp::pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
 use ironrdp::session::image::DecodedImage;
 use ironrdp::session::{ActiveStageBuilder, ActiveStageOutput};
-use ironrdp_server::tokio_rustls::client::TlsStream;
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
@@ -35,7 +34,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// would wedge the session forever with no event to report.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
-type Framed = TokioFramed<TlsStream<TcpStream>>;
+type Framed = TokioFramed<tls::TargetTlsStream>;
 
 /// Signals that the session was aborted from the Warpgate side.
 struct Aborted;
@@ -63,6 +62,8 @@ pub async fn run(
             options.host.clone(),
             options.port,
             options.verify_tls,
+            options.tls_backend,
+            options.tls_openssl_cipher_list.clone(),
         ),
     )
     .await
@@ -304,6 +305,8 @@ async fn connect(
     server_name: String,
     port: u16,
     verify_tls: bool,
+    tls_backend: warpgate_common::RdpTlsBackend,
+    tls_openssl_cipher_list: Option<String>,
 ) -> Result<(ConnectionResult, Framed)> {
     let tcp_stream = tokio::time::timeout(
         CONNECT_TIMEOUT,
@@ -323,10 +326,15 @@ async fn connect(
         .context("connect_begin")?;
 
     let initial_stream = framed.into_inner_no_leftover();
-    let (upgraded_stream, server_public_key) =
-        tls::upgrade(initial_stream, server_name.clone(), verify_tls)
-            .await
-            .context("TLS upgrade")?;
+    let (upgraded_stream, server_public_key) = tls::upgrade(
+        initial_stream,
+        server_name.clone(),
+        verify_tls,
+        tls_backend,
+        tls_openssl_cipher_list.as_deref(),
+    )
+    .await
+    .context("TLS upgrade")?;
 
     let upgraded = ironrdp_tokio::mark_as_upgraded(should_upgrade, &mut connector);
     let mut upgraded_framed = TokioFramed::new(upgraded_stream);

@@ -1,11 +1,80 @@
 //! TLS setup for the target-facing RDP connection.
 
+use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context as TaskContext, Poll};
 
 use anyhow::{Context, Result};
 use ironrdp_server::tokio_rustls::TlsConnector;
-use ironrdp_server::tokio_rustls::client::TlsStream;
+use ironrdp_server::tokio_rustls::client::TlsStream as RustlsTlsStream;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
+use warpgate_common::RdpTlsBackend;
+
+#[cfg(feature = "openssl-tls")]
+const OPENSSL_LEGACY_RDP_CIPHER_LIST: &str = concat!(
+    "ECDHE-RSA-AES128-SHA256:",
+    "ECDHE-RSA-AES256-SHA384:",
+    "ECDHE-RSA-AES128-SHA:",
+    "ECDHE-RSA-AES256-SHA:",
+    "AES128-GCM-SHA256:",
+    "AES256-GCM-SHA384:",
+    "AES128-SHA256:",
+    "AES256-SHA256:",
+    "AES128-SHA:",
+    "AES256-SHA"
+);
+
+pub enum TargetTlsStream {
+    Rustls(RustlsTlsStream<TcpStream>),
+    #[cfg(feature = "openssl-tls")]
+    OpenSsl(tokio_openssl::SslStream<TcpStream>),
+}
+
+impl AsyncRead for TargetTlsStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Rustls(stream) => Pin::new(stream).poll_read(cx, buf),
+            #[cfg(feature = "openssl-tls")]
+            Self::OpenSsl(stream) => Pin::new(stream).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for TargetTlsStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        match self.get_mut() {
+            Self::Rustls(stream) => Pin::new(stream).poll_write(cx, buf),
+            #[cfg(feature = "openssl-tls")]
+            Self::OpenSsl(stream) => Pin::new(stream).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Rustls(stream) => Pin::new(stream).poll_flush(cx),
+            #[cfg(feature = "openssl-tls")]
+            Self::OpenSsl(stream) => Pin::new(stream).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Rustls(stream) => Pin::new(stream).poll_shutdown(cx),
+            #[cfg(feature = "openssl-tls")]
+            Self::OpenSsl(stream) => Pin::new(stream).poll_shutdown(cx),
+        }
+    }
+}
 
 /// Wrap `stream` in TLS and return it alongside the server's public key, which CredSSP
 /// channel-binds to.
@@ -13,7 +82,33 @@ pub async fn upgrade(
     stream: TcpStream,
     server_name: String,
     verify: bool,
-) -> Result<(TlsStream<TcpStream>, Vec<u8>)> {
+    backend: RdpTlsBackend,
+    openssl_cipher_list: Option<&str>,
+) -> Result<(TargetTlsStream, Vec<u8>)> {
+    match backend {
+        RdpTlsBackend::Rustls => upgrade_rustls(stream, server_name, verify).await,
+        RdpTlsBackend::OpenSslLegacy => {
+            #[cfg(feature = "openssl-tls")]
+            {
+                upgrade_openssl_legacy(stream, server_name, verify, openssl_cipher_list).await
+            }
+
+            #[cfg(not(feature = "openssl-tls"))]
+            {
+                let _ = (stream, server_name, verify, openssl_cipher_list);
+                anyhow::bail!(
+                    "RDP TLS backend `openssl_legacy` requires building Warpgate with the `rdp-openssl-tls` feature"
+                )
+            }
+        }
+    }
+}
+
+async fn upgrade_rustls(
+    stream: TcpStream,
+    server_name: String,
+    verify: bool,
+) -> Result<(TargetTlsStream, Vec<u8>)> {
     let mut config = if verify {
         let mut roots = rustls::RootCertStore::empty();
         for cert in rustls_native_certs::load_native_certs().certs {
@@ -47,7 +142,59 @@ pub async fn upgrade(
         .context("missing peer certificate")?;
     let server_public_key = extract_server_public_key(cert)?;
 
-    Ok((tls_stream, server_public_key))
+    Ok((TargetTlsStream::Rustls(tls_stream), server_public_key))
+}
+
+#[cfg(feature = "openssl-tls")]
+async fn upgrade_openssl_legacy(
+    stream: TcpStream,
+    server_name: String,
+    verify: bool,
+    cipher_list: Option<&str>,
+) -> Result<(TargetTlsStream, Vec<u8>)> {
+    use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode, SslVersion};
+
+    let mut builder =
+        SslConnector::builder(SslMethod::tls_client()).context("OpenSSL connector")?;
+    builder
+        .set_min_proto_version(Some(SslVersion::TLS1_2))
+        .context("setting OpenSSL minimum TLS version")?;
+    builder
+        .set_cipher_list(
+            cipher_list
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(OPENSSL_LEGACY_RDP_CIPHER_LIST),
+        )
+        .context("setting OpenSSL cipher list")?;
+
+    if !verify {
+        builder.set_verify(SslVerifyMode::NONE);
+    }
+
+    let connector = builder.build();
+    let mut config = connector.configure().context("OpenSSL connect config")?;
+    if !verify {
+        config.set_verify_hostname(false);
+    }
+
+    let ssl = config
+        .into_ssl(&server_name)
+        .context("OpenSSL server name setup")?;
+    let mut tls_stream =
+        tokio_openssl::SslStream::new(ssl, stream).context("OpenSSL TLS stream")?;
+    Pin::new(&mut tls_stream)
+        .connect()
+        .await
+        .context("OpenSSL TLS handshake")?;
+
+    let cert = tls_stream
+        .ssl()
+        .peer_certificate()
+        .context("missing peer certificate")?;
+    let cert = cert.to_der().context("serializing peer certificate")?;
+    let server_public_key = extract_server_public_key(&cert)?;
+
+    Ok((TargetTlsStream::OpenSsl(tls_stream), server_public_key))
 }
 
 fn extract_server_public_key(cert: &[u8]) -> Result<Vec<u8>> {

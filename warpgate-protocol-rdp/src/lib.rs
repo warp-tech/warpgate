@@ -88,8 +88,9 @@ pub fn connect(options: TargetRdpOptions, size: (u16, u16)) -> RdpClientHandles 
             if let Err(error) =
                 client::run(options, size, event_tx.clone(), input_rx, abort_rx).await
             {
-                error!(%error, "RDP client failed");
-                let _ = event_tx.send(DesktopEvent::Error(error.to_string())).await;
+                let error_chain = format!("{error:#}");
+                error!(%error, %error_chain, "RDP client failed");
+                let _ = event_tx.send(DesktopEvent::Error(error_chain)).await;
             }
             let _ = event_tx
                 .send(DesktopEvent::State(DesktopState::Disconnected))

@@ -322,6 +322,32 @@ pub struct TargetRdpOptions {
     /// RDP servers commonly use self-signed certificates, so this is off by default.
     #[serde(default)]
     pub verify_tls: bool,
+
+    /// TLS implementation used for the target-facing RDP connection.
+    ///
+    /// `rustls` is the default. `openssl_legacy` is intended for older NLA/CredSSP
+    /// targets, such as Windows Server 2012, whose Schannel cipher list may only
+    /// overlap with OpenSSL-compatible CBC or static-RSA TLS 1.2 suites.
+    #[serde(default)]
+    #[oai(default)]
+    pub tls_backend: RdpTlsBackend,
+
+    /// Optional OpenSSL cipher-list expression used when `tls_backend` is `openssl_legacy`.
+    ///
+    /// When unset, Warpgate uses a conservative RDP compatibility list containing RSA
+    /// AES-GCM and ECDHE-RSA/RSA AES-CBC suites, while excluding RC4, 3DES and DHE.
+    #[serde(default)]
+    #[oai(default)]
+    pub tls_openssl_cipher_list: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
+pub enum RdpTlsBackend {
+    #[serde(rename = "rustls")]
+    #[default]
+    Rustls,
+    #[serde(rename = "openssl_legacy")]
+    OpenSslLegacy,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
@@ -422,7 +448,10 @@ pub enum TargetOptions {
 
 #[cfg(test)]
 mod tests {
-    use super::{TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions, Tls};
+    use super::{
+        RdpTlsBackend, TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions,
+        TargetRdpOptions, Tls,
+    };
 
     /// The two ways of saying "nothing specified" — an absent `tls` block and an
     /// empty one — must both resolve to verifying.
@@ -453,5 +482,27 @@ mod tests {
             serde_json::from_str(r#"{"url":"http://t","tls":{"verify":false}}"#).unwrap();
 
         assert!(!off.tls.verify);
+    }
+
+    #[test]
+    fn rdp_tls_backend_defaults_to_rustls() {
+        let target: TargetRdpOptions = serde_json::from_str(r#"{"host":"t"}"#).unwrap();
+
+        assert_eq!(target.tls_backend, RdpTlsBackend::Rustls);
+        assert_eq!(target.tls_openssl_cipher_list, None);
+    }
+
+    #[test]
+    fn rdp_openssl_legacy_backend_can_be_configured() {
+        let target: TargetRdpOptions = serde_json::from_str(
+            r#"{"host":"t","tls_backend":"openssl_legacy","tls_openssl_cipher_list":"AES128-GCM-SHA256"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(target.tls_backend, RdpTlsBackend::OpenSslLegacy);
+        assert_eq!(
+            target.tls_openssl_cipher_list.as_deref(),
+            Some("AES128-GCM-SHA256")
+        );
     }
 }

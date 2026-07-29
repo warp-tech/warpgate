@@ -6017,6 +6017,13 @@
           }
         }
       },
+      "RdpTlsBackend": {
+        "type": "string",
+        "enum": [
+          "Rustls",
+          "OpenSslLegacy"
+        ]
+      },
       "Recording": {
         "type": "object",
         "title": "Recording",
@@ -7053,6 +7060,24 @@
           "verify_tls": {
             "type": "boolean",
             "description": "Verify the RDP server's TLS certificate against the system root store.\nRDP servers commonly use self-signed certificates, so this is off by default."
+          },
+          "tls_backend": {
+            "description": "TLS implementation used for the target-facing RDP connection.\n\n`rustls` is the default. `openssl_legacy` is intended for older NLA/CredSSP\ntargets, such as Windows Server 2012, whose Schannel cipher list may only\noverlap with OpenSSL-compatible CBC or static-RSA TLS 1.2 suites.",
+            "default": "Rustls",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RdpTlsBackend"
+              },
+              {
+                "description": "TLS implementation used for the target-facing RDP connection.\n\n`rustls` is the default. `openssl_legacy` is intended for older NLA/CredSSP\ntargets, such as Windows Server 2012, whose Schannel cipher list may only\noverlap with OpenSSL-compatible CBC or static-RSA TLS 1.2 suites.",
+                "default": "Rustls"
+              }
+            ]
+          },
+          "tls_openssl_cipher_list": {
+            "type": "string",
+            "description": "Optional OpenSSL cipher-list expression used when `tls_backend` is `openssl_legacy`.\n\nWhen unset, Warpgate uses a conservative RDP compatibility list containing RSA\nAES-GCM and ECDHE-RSA/RSA AES-CBC suites, while excluding RC4, 3DES and DHE.",
+            "default": null
           }
         }
       },

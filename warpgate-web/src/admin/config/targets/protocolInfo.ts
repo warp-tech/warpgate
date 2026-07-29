@@ -133,6 +133,8 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 * Authenticates over CredSSP/NLA with a username and password.
 * TLS 1.2 at target is required.
 * \`Verify TLS certificate\` is off by default (RDP servers commonly self-sign)
+* The OpenSSL legacy TLS backend can be selected for old Schannel targets that
+  do not share a TLS 1.2 cipher suite with rustls.
 
 ## Warpgate ↔ client
 

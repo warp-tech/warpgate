@@ -54,6 +54,13 @@
 
 <h4 class="mt-4">TLS</h4>
 
+<FormGroup floating label="TLS backend">
+    <Input type="select" bind:value={options.tlsBackend}>
+        <option value="Rustls">rustls</option>
+        <option value="OpenSslLegacy">OpenSSL legacy</option>
+    </Input>
+</FormGroup>
+
 <Input
     type="switch"
     label="Verify certificate"
@@ -63,3 +70,17 @@
     Typically, RDP servers use self-signed certificates, so this is off by
     default.
 </HelpText>
+
+{#if options.tlsBackend === 'OpenSslLegacy'}
+    <FormGroup floating label="OpenSSL cipher list">
+        <input
+            class="form-control"
+            bind:value={options.tlsOpensslCipherList}
+            placeholder="Use Warpgate default"
+        >
+    </FormGroup>
+    <HelpText>
+        Leave empty to use the Windows Server 2012 compatibility list. TLS 1.2
+        remains the minimum.
+    </HelpText>
+{/if}
