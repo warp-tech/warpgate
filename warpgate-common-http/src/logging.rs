@@ -33,7 +33,12 @@ pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String>
         config.store.http.trust_x_forwarded_headers
     };
 
-    trusted_client_ip(req, raw_remote_ip(req), trust_x_forwarded_headers)
+    trusted_client_ip(
+        req,
+        &services.cluster_token,
+        raw_remote_ip(req),
+        trust_x_forwarded_headers,
+    )
 }
 
 pub async fn span_for_request(
