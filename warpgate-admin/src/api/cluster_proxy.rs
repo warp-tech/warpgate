@@ -201,7 +201,7 @@ async fn forward_http(
     token: &Secret<String>,
     body: Option<Vec<u8>>,
 ) -> poem::Result<Response> {
-    forward_http_to(ctx, req, &path_and_query(req), owner, token).await
+    forward_http_to(ctx, req, &path_and_query(req), owner, token, body).await
 }
 
 /// [`forward_http`], but to `path` on the peer rather than the request's own
@@ -212,6 +212,7 @@ pub(crate) async fn forward_http_to(
     path: &str,
     owner: RemoteNode,
     token: &Secret<String>,
+    body: Option<Vec<u8>>,
 ) -> poem::Result<Response> {
     let (tls, addrs) = peer_connection(ctx, &owner).await?;
     let url = format!(
