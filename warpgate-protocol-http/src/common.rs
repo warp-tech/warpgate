@@ -20,7 +20,7 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN,
+    X_WARPGATE_CLUSTER_IDENTITY, is_cluster_peer_request,
 };
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::User;
@@ -279,28 +279,9 @@ pub async fn authorize_session(
     Ok(())
 }
 
-/// True if the request carries a valid cluster token in its dedicated header.
-async fn cluster_token_matches(
-    ctx: &UnauthenticatedRequestContext,
-    req: &Request,
-) -> poem::Result<bool> {
-    let Some(header) = req.headers().get(&X_WARPGATE_CLUSTER_TOKEN) else {
-        return Ok(false);
-    };
-    let provided = header.to_str().map_err(poem::error::BadRequest)?;
-    // Constant-time comparison to prevent timing attacks.
-    Ok(ctx
-        .services()
-        .cluster_token
-        .expose_secret()
-        .as_bytes()
-        .ct_eq(provided.as_bytes())
-        .into())
-}
-
 /// Authorization for a request authenticated by the cluster token. The proxying
 /// node forwards the acting user's id in `x-warpgate-cluster-identity` (see
-/// `cluster_proxy::forward_http`), so the request runs here as that user;
+/// `cluster_proxy::proxy_or_serve`), so the request runs here as that user;
 /// without the header the peer acts as a bare cluster peer. An id that no
 /// longer resolves to a user fails closed (unauthenticated).
 async fn cluster_request_authorization(
@@ -335,9 +316,12 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         .await?
         .for_request();
     let session = <&Session>::from_request_without_body(&req).await?;
+    let is_cluster_peer = is_cluster_peer_request(&req, &ctx.services().cluster_token);
 
     let mut session_auth = session.get_auth();
-    if session_auth.is_some() {
+    // A forwarded request's Host is the cluster SNI name by construction, so the
+    // origin check below would reject - and clear - a session that is fine.
+    if session_auth.is_some() && !is_cluster_peer {
         let config = ctx.services().config.lock().await;
         if let Ok(base_url) = construct_external_url(None, &config, None).await
             && let Some(base_host) = base_url.host_str()
@@ -366,7 +350,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
 
     let auth = if let Some(auth) = session_auth {
         Some(RequestAuthorization::Session(auth))
-    } else if cluster_token_matches(&ctx, &req).await? {
+    } else if is_cluster_peer {
         cluster_request_authorization(&ctx, &req).await?
     } else if let Some(token_from_header) = req.headers().get(&X_WARPGATE_TOKEN) {
         let token_from_header = token_from_header
