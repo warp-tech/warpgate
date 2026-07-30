@@ -8,7 +8,6 @@
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import Loadable from 'common/Loadable.svelte'
     import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
-    import HttpTargetTabSwitcher from 'gateway/HttpTargetTabSwitcher.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
@@ -175,7 +174,6 @@
                 {:else}
                     <div class="me-auto"></div>
                 {/if}
-                <HttpTargetTabSwitcher />
                 <ThemeSwitcher />
             </footer>
         {/if}
