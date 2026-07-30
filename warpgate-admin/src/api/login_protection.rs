@@ -1,15 +1,12 @@
 use std::net::IpAddr;
 
-use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use time::OffsetDateTime;
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 pub struct Api;
 
@@ -86,11 +83,9 @@ impl Api {
     )]
     async fn list_blocked_ips(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        admin: AdminContext,
     ) -> Result<ListBlockedIpsResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
-        let blocked_ips = ctx.services().login_protection.list_blocked_ips().await?;
+        let blocked_ips = admin.services().login_protection.list_blocked_ips().await?;
         let result: Vec<BlockedIpInfo> = blocked_ips
             .into_iter()
             .map(|info| BlockedIpInfo {
@@ -115,16 +110,19 @@ impl Api {
     )]
     async fn unblock_ip(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<UnblockIpRequest>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<UnblockIpResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
+        admin.require(AdminPermission::ConfigEdit)?;
         let ip_addr: IpAddr = match body.ip.parse() {
             Ok(addr) => addr,
             Err(_) => return Ok(UnblockIpResponse::InvalidIp),
         };
-        ctx.services().login_protection.unblock_ip(&ip_addr).await?;
+        admin
+            .services()
+            .login_protection
+            .unblock_ip(&ip_addr)
+            .await?;
         Ok(UnblockIpResponse::Ok)
     }
 
@@ -136,11 +134,13 @@ impl Api {
     )]
     async fn list_locked_users(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        admin: AdminContext,
     ) -> Result<ListLockedUsersResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
-        let locked_users = ctx.services().login_protection.list_locked_users().await?;
+        let locked_users = admin
+            .services()
+            .login_protection
+            .list_locked_users()
+            .await?;
         let result: Vec<LockedUserInfo> = locked_users
             .into_iter()
             .map(|info| LockedUserInfo {
@@ -161,12 +161,12 @@ impl Api {
     )]
     async fn unlock_user(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         username: Path<String>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<UnlockUserResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::ConfigEdit)).await?;
-        ctx.services()
+        admin.require(AdminPermission::ConfigEdit)?;
+        admin
+            .services()
             .login_protection
             .unlock_user(&username.0)
             .await?;
@@ -181,11 +181,9 @@ impl Api {
     )]
     async fn get_security_status(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        admin: AdminContext,
     ) -> Result<SecurityStatusResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
-        let status = ctx
+        let status = admin
             .services()
             .login_protection
             .get_security_status()

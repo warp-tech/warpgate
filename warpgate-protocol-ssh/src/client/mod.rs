@@ -3,7 +3,7 @@ mod channel_session;
 mod error;
 mod handler;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -34,7 +34,7 @@ use warpgate_core::{ConfigProvider, Services};
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
-use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_keys, load_preferred_key};
+use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_client_keys};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -72,11 +72,52 @@ pub enum ConnectionError {
 
     #[error("Jump host target not found")]
     JumpHostTargetNotFound,
+
+    #[error(transparent)]
+    Warpgate(#[from] WarpgateError),
 }
 
 pub struct ResolvedSshChainHost {
     pub name: String,
     pub ssh_options: TargetSSHOptions,
+}
+
+/// A jump host that names a deleted or non-SSH target: a broken configuration
+/// that must fail the connection rather than silently shorten the chain, which
+/// would dial the target more directly than the operator intended.
+fn unresolvable_jump_host(id: Uuid) -> WarpgateError {
+    WarpgateError::InconsistentState(format!(
+        "SSH jump host {id} does not resolve to an SSH target"
+    ))
+}
+
+/// Follow `jump_host` links from `start`, returning the ordered target ids of
+/// the chain (the target itself first, then each successive jump host).
+///
+/// `lookup` resolves a target id: `Some(Some(jump))` — an SSH target that jumps
+/// through `jump`; `Some(None)` — an SSH target with no jump host, ending the
+/// chain; `None` — the id does not resolve to an SSH target. An unresolvable id,
+/// or one that repeats (a cycle), fails resolution.
+fn resolve_chain_ids(
+    start: Uuid,
+    lookup: impl Fn(Uuid) -> Option<Option<Uuid>>,
+) -> Result<Vec<Uuid>, WarpgateError> {
+    let mut ids = vec![];
+    let mut visited = HashSet::new();
+    let mut current = Some(start);
+    while let Some(id) = current {
+        if !visited.insert(id) {
+            return Err(WarpgateError::InconsistentState(format!(
+                "SSH jump host chain contains a cycle at target {id}"
+            )));
+        }
+        let Some(jump_host) = lookup(id) else {
+            return Err(unresolvable_jump_host(id));
+        };
+        ids.push(id);
+        current = jump_host;
+    }
+    Ok(ids)
 }
 
 /// Resolve the full ordered SSH jump chain for a target
@@ -87,33 +128,39 @@ pub async fn resolve_ssh_chain(
     target_id: Uuid,
     logged_in_username: Option<&String>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
+    let targets = services.config_provider.list_targets().await?;
+
+    let chain_ids = resolve_chain_ids(target_id, |id| {
+        targets
+            .iter()
+            .find(|t| t.id == id)
+            .and_then(|t| match &t.options {
+                TargetOptions::Ssh(opts) => Some(opts.jump_host),
+                _ => None,
+            })
+    })?;
+
     let mut jumps = vec![];
-    let mut current_jump_id = Some(target_id);
-    let targets = services.config_provider.lock().await.list_targets().await?;
-    while let Some(id) = current_jump_id {
+    for id in chain_ids {
         let Some(t) = targets.iter().find(|t| t.id == id) else {
-            break;
+            return Err(unresolvable_jump_host(id));
         };
-        let name = t.name.clone();
-        match &t.options {
-            TargetOptions::Ssh(opts) => {
-                let mut opts = opts.clone();
-                current_jump_id = opts.jump_host;
+        let TargetOptions::Ssh(opts) = &t.options else {
+            return Err(unresolvable_jump_host(id));
+        };
+        let mut opts = opts.clone();
 
-                // Forward username from the authenticated user to the target, if target has no username
-                if let Some(logged_in_username) = logged_in_username
-                    && opts.username.is_empty()
-                {
-                    opts.username = logged_in_username.clone();
-                }
-
-                jumps.push(ResolvedSshChainHost {
-                    name,
-                    ssh_options: opts.clone(),
-                });
-            }
-            _ => break,
+        // Forward username from the authenticated user to the target, if target has no username
+        if let Some(logged_in_username) = logged_in_username
+            && opts.username.is_empty()
+        {
+            opts.username = logged_in_username.clone();
         }
+
+        jumps.push(ResolvedSshChainHost {
+            name: t.name.clone(),
+            ssh_options: opts,
+        });
     }
     jumps.reverse();
     Ok(jumps)
@@ -155,6 +202,10 @@ pub enum RCEvent {
 
 impl RCEvent {
     /// The already-open channel this event refers to, if any.
+    ///
+    /// Deliberately a total match: event deferral during pending channel
+    /// opens keys off this (#1459), so a new variant must explicitly decide
+    /// whether it names a channel rather than silently defaulting to "no".
     pub(crate) const fn channel(&self) -> Option<Uuid> {
         match self {
             Self::Output(channel, _)
@@ -165,7 +216,19 @@ impl RCEvent {
             | Self::ExitStatus(channel, _)
             | Self::ExitSignal { channel, .. }
             | Self::ExtendedData { channel, .. } => Some(*channel),
-            _ => None,
+            // The Forwarded*/X11 variants carry a channel id but *establish*
+            // the channel — they must not wait for their own open to resolve.
+            Self::State(_)
+            | Self::Error(_)
+            | Self::ConnectionError(_)
+            | Self::HopConnected
+            | Self::Done
+            | Self::HostKeyReceived(_)
+            | Self::HostKeyUnknown(..)
+            | Self::ForwardedTcpIp(..)
+            | Self::ForwardedStreamlocal(..)
+            | Self::ForwardedAgent(_)
+            | Self::X11(..) => None,
         }
     }
 }
@@ -758,14 +821,12 @@ impl RemoteClient {
                         Some("Password authentication was rejected by the SSH target".to_string());
                 }
             }
-            SSHTargetAuth::PublicKey(_) => {
+            SSHTargetAuth::PublicKey(auth) => {
                 let best_hash = session.best_supported_rsa_hash().await?.flatten();
-                #[allow(clippy::explicit_auto_deref)]
-                let keys = load_keys(
-                    &*self.services.config.lock().await,
-                    &self.services.global_params,
-                    "client",
-                )?;
+                let keys = load_client_keys(&self.services.db, auth.key_id).await?;
+                if keys.is_empty() {
+                    auth_error_msg = Some("No SSH client keys are configured".into());
+                }
                 for key in keys {
                     let key = Arc::new(key);
                     if key.key_data().is_rsa() && best_hash.is_none() && !allow_insecure_algos {
@@ -816,11 +877,13 @@ impl RemoteClient {
             SSHTargetAuth::IamRole(_) => {
                 let instance_info = warpgate_aws::find_instance_by_ip(host).await?;
 
-                let key = load_preferred_key(
-                    &*self.services.config.lock().await,
-                    &self.services.global_params,
-                    "client",
-                )?;
+                let key = load_client_keys(&self.services.db, None)
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        WarpgateError::InconsistentState("No SSH client keys are configured".into())
+                    })?;
 
                 let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
 
@@ -1099,5 +1162,38 @@ impl Drop for RemoteClient {
         }
         info!("Closed connection");
         debug!("Dropped");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use uuid::Uuid;
+
+    use super::resolve_chain_ids;
+
+    #[test]
+    fn resolve_chain_ids_returns_ordered_chain() {
+        let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let jumps: HashMap<Uuid, Option<Uuid>> =
+            HashMap::from([(a, Some(b)), (b, Some(c)), (c, None)]);
+        let ids = resolve_chain_ids(a, |id| jumps.get(&id).copied()).unwrap();
+        assert_eq!(ids, vec![a, b, c]);
+    }
+
+    #[test]
+    fn resolve_chain_ids_detects_cycle() {
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let jumps: HashMap<Uuid, Option<Uuid>> = HashMap::from([(a, Some(b)), (b, Some(a))]);
+        assert!(resolve_chain_ids(a, |id| jumps.get(&id).copied()).is_err());
+    }
+
+    #[test]
+    fn resolve_chain_ids_rejects_unresolvable_jump_host() {
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        // `a` jumps through `b`, but `b` resolves to no SSH target.
+        let jumps: HashMap<Uuid, Option<Uuid>> = HashMap::from([(a, Some(b))]);
+        assert!(resolve_chain_ids(a, |id| jumps.get(&id).copied()).is_err());
     }
 }

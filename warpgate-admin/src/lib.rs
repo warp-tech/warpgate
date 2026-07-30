@@ -23,28 +23,20 @@ pub fn admin_api_app() -> impl IntoEndpoint {
         .nest("/playground", ui)
         .nest("/openapi.json", spec)
         .at(
-            "/recordings/:id/cast",
-            crate::api::recordings_detail::api_get_recording_cast,
-        )
-        .at(
             "/recordings/:id/stream",
-            crate::api::recordings_detail::api_get_recording_terminal_stream,
+            crate::api::recordings_detail::api_get_recording_stream,
         )
         .at(
             "/recordings/:id/tcpdump",
             crate::api::recordings_detail::api_get_recording_tcpdump,
         )
         .at(
-            "/recordings/:id/desktop",
-            crate::api::recordings_detail::api_get_recording_desktop,
+            "/recordings/:id/data",
+            crate::api::recordings_detail::api_get_recording_data,
         )
         .at(
-            "/recordings/:id/desktop/index",
-            crate::api::recordings_detail::api_get_recording_desktop_index,
-        )
-        .at(
-            "/recordings/:id/desktop-stream",
-            crate::api::recordings_detail::api_get_recording_desktop_stream,
+            "/recordings/:id/index",
+            crate::api::recordings_detail::api_get_recording_index,
         )
         .at(
             "/sessions/changes",

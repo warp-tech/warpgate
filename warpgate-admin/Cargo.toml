@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-admin"
-version = "0.27.0-beta.1"
+version = "0.27.0-beta.4"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -17,8 +17,10 @@ poem.workspace = true
 poem-openapi.workspace = true
 rcgen.workspace = true
 regex.workspace = true
+reqwest.workspace = true
 russh.workspace = true
 rust-embed = { version = "8.3", default-features = false }
+rustls.workspace = true
 rustls-pki-types.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
@@ -26,9 +28,11 @@ serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 warpgate-ca = { path = "../warpgate-ca" }
+warpgate-aws = { path = "../warpgate-aws" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core" }

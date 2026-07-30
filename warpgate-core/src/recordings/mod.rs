@@ -1,27 +1,41 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
-use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
-use tracing::info;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
+use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_directory;
-use warpgate_common::{GlobalParams, RecordingsConfig, SessionId, WarpgateConfig};
+use warpgate_common::{GlobalParams, SessionId};
+use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Recording::{self, RecordingKind};
 mod desktop;
-mod framebuffer;
+mod storage;
 mod terminal;
 mod traffic;
 mod writer;
 pub use desktop::*;
+pub use storage::FileAccess;
+use storage::Storage;
 pub use terminal::*;
 pub use traffic::*;
-pub use writer::{NDJsonRecordingWriter, RawRecordingWriter};
+use writer::WriterShutdown;
+pub use writer::{LiveChunk, NDJsonRecordingWriter, RawRecordingWriter};
+
+/// How long `SessionRecordings::shutdown` waits
+/// (just under kubernetes default)
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(25);
+
+/// The live-broadcast channel for a recording's primary data stream, keyed by
+/// recording id. Each item carries its end byte offset so a viewer can splice
+/// the live tail onto a history snapshot without gaps (see [`LiveChunk`]).
+type LiveMap = Arc<Mutex<HashMap<Uuid, broadcast::Sender<LiveChunk>>>>;
 
 // The possible files that a recording can open
 #[derive(Debug, Clone, Copy)]
@@ -32,11 +46,18 @@ pub enum RecordingFile {
 }
 
 impl RecordingFile {
-    fn filename(&self) -> &'static str {
+    const fn filename(self) -> &'static str {
         match self {
-            RecordingFile::NDJsonData => "data.ndjson",
-            RecordingFile::TcpDumpData => "data.tcpdump",
-            RecordingFile::Index => "index.ndjson",
+            Self::NDJsonData => "data.ndjson",
+            Self::TcpDumpData => "data.tcpdump",
+            Self::Index => "index.ndjson",
+        }
+    }
+
+    pub const fn mime_type(self) -> &'static str {
+        match self {
+            Self::NDJsonData | Self::Index => "application/x-ndjson",
+            Self::TcpDumpData => "application/vnd.tcpdump.pcap",
         }
     }
 }
@@ -55,6 +76,9 @@ pub enum Error {
     #[error("Image codec: {0}")]
     Codec(String),
 
+    #[error(transparent)]
+    PngEncode(#[from] crate::protocols::PngEncodeError),
+
     #[error("Writer is closed")]
     Closed,
 
@@ -63,16 +87,21 @@ pub enum Error {
 
     #[error("Invalid recording path")]
     InvalidPath,
+
+    #[error("Storage backend: {0}")]
+    Aws(#[from] warpgate_aws::AwsError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct RecordingWriterOpener {
-    folder: PathBuf,
+    storage: Storage,
     model: Recording::Model,
-    db: Arc<Mutex<DatabaseConnection>>,
-    live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
+    db: DatabaseConnection,
+    live: LiveMap,
     params: GlobalParams,
+    shutdown: CancellationToken,
+    shutdown_tracker: TaskTracker,
 }
 
 impl RecordingWriterOpener {
@@ -98,12 +127,20 @@ impl RecordingWriterOpener {
         // under the same id, and a live viewer would then receive the index (seek anchors,
         // no pixels) instead of the framebuffer.
         let live = matches!(file, RecordingFile::NDJsonData).then(|| self.live.clone());
+        let sink = self
+            .storage
+            .open_sink(&self.model, file, &self.params)
+            .await?;
+
         RawRecordingWriter::new(
-            self.folder.join(file.filename()),
+            sink,
             self.model.clone(),
             self.db.clone(),
             live,
-            &self.params,
+            WriterShutdown {
+                token: self.shutdown.clone(),
+                tracker: self.shutdown_tracker.clone(),
+            },
         )
         .await
     }
@@ -118,34 +155,49 @@ where
 }
 
 pub struct SessionRecordings {
-    db: Arc<Mutex<DatabaseConnection>>,
-    path: PathBuf,
-    config: RecordingsConfig,
-    live: Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>,
+    db: DatabaseConnection,
+    live: LiveMap,
     params: GlobalParams,
+    shutdown: CancellationToken,
+    shutdown_tracker: TaskTracker,
 }
 
 impl SessionRecordings {
-    pub fn new(
-        db: Arc<Mutex<DatabaseConnection>>,
-        config: &WarpgateConfig,
-        params: &GlobalParams,
-    ) -> Result<Self> {
-        let mut path = params.paths_relative_to().clone();
-        path.push(&config.store.recordings.path);
-        if config.store.recordings.enable {
-            std::fs::create_dir_all(&path)?;
-            if params.should_secure_files() {
-                secure_directory(&path)?;
-            }
-        }
-        Ok(Self {
+    pub fn new(db: DatabaseConnection, params: &GlobalParams) -> Self {
+        Self {
             db,
-            config: config.store.recordings.clone(),
-            path,
             live: Arc::new(Mutex::new(HashMap::new())),
             params: params.clone(),
-        })
+            shutdown: CancellationToken::new(),
+            shutdown_tracker: TaskTracker::new(),
+        }
+    }
+
+    /// Signal every in-flight writer to finalize, then wait (bounded)
+    pub async fn shutdown(&self) {
+        self.shutdown.cancel();
+        if self.shutdown_tracker.len() > 0 {
+            info!(
+                count = self.shutdown_tracker.len(),
+                "Waiting for session recording uploads to finish..."
+            );
+        }
+        self.shutdown_tracker.close();
+
+        if tokio::time::timeout(SHUTDOWN_TIMEOUT, self.shutdown_tracker.wait())
+            .await
+            .is_err()
+        {
+            warn!("Timed out waiting for recording uploads to finish");
+        }
+    }
+
+    async fn storage(&self) -> Result<Storage> {
+        Storage::load(&self.db, &self.params).await
+    }
+
+    pub async fn is_enabled(&self) -> Result<bool> {
+        Ok(Parameters::Entity::get(&self.db).await?.recordings_enable)
     }
 
     /// Starting a recording with the same name again will append to it
@@ -154,21 +206,24 @@ impl SessionRecordings {
         T: Recorder,
         M: Serialize + Debug,
     {
-        if !self.config.enable {
+        let storage = self.storage().await?;
+        if !storage.enabled() {
             return Err(Error::Disabled);
         }
 
         let name = name.unwrap_or_else(|| Uuid::new_v4().to_string());
         // Gen-2 recordings are folders holding fixed-name files (`data.ndjson`, and a
         // desktop `index.json`), so the recording path is a directory we create here.
-        let folder = self.path_for(id, &name);
+        // On S3 this folder is a scratch copy, live-readable while the session runs and
+        // dropped once each file finishes uploading.
+        let folder = storage.recording_folder(id, &name);
         tokio::fs::create_dir_all(&folder).await?;
         if self.params.should_secure_files() {
             secure_directory(&folder)?;
         }
 
         let model = {
-            let db = self.db.lock().await;
+            let db = &self.db;
             let existing = Recording::Entity::find()
                 .filter(
                     Recording::Column::SessionId
@@ -176,7 +231,7 @@ impl SessionRecordings {
                         .and(Recording::Column::Name.eq(name.clone()))
                         .and(Recording::Column::Kind.eq(T::kind())),
                 )
-                .one(&*db)
+                .one(db)
                 .await?;
             if let Some(e) = existing {
                 e
@@ -193,58 +248,40 @@ impl SessionRecordings {
                     generation: Set(2),
                     ..Default::default()
                 };
-                values.insert(&*db).await.map_err(Error::Database)?
+                values.insert(db).await.map_err(Error::Database)?
             }
         };
 
         let opener = RecordingWriterOpener {
-            folder: folder.clone(),
+            storage,
             model,
             db: self.db.clone(),
             live: self.live.clone(),
             params: self.params.clone(),
+            shutdown: self.shutdown.clone(),
+            shutdown_tracker: self.shutdown_tracker.clone(),
         };
 
-        Ok(T::new(&opener).await?)
+        T::new(&opener).await
     }
 
-    pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<Bytes>> {
+    pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<LiveChunk>> {
         let live = self.live.lock().await;
         live.get(id).map(broadcast::Sender::subscribe)
     }
 
     pub async fn remove(&self, session_id: &SessionId, name: &str) -> Result<()> {
-        let path = self.path_for(session_id, name);
-        // gen 2 is a folder, gen 1 a single file — pick by what's on disk.
-        if tokio::fs::metadata(&path).await?.is_dir() {
-            tokio::fs::remove_dir_all(&path).await?;
-        } else {
-            tokio::fs::remove_file(&path).await?;
-        }
-        if let Some(parent) = path.parent()
-            && tokio::fs::read_dir(parent)
-                .await?
-                .next_entry()
-                .await?
-                .is_none()
-        {
-            tokio::fs::remove_dir(parent).await?;
-        }
-        Ok(())
+        self.storage().await?.remove(session_id, name).await
     }
 
-    pub fn path_for<P: AsRef<Path>>(&self, session_id: &SessionId, name: P) -> PathBuf {
-        self.path.join(session_id.to_string()).join(&name)
-    }
-
-    /// On-disk path of a recording's primary data stream, generation-aware: gen 1 is a
-    /// single file, gen 2 is multiple files inside the recording folder.
-    pub fn file_path(&self, recording: &Recording::Model, file: RecordingFile) -> PathBuf {
-        let base = self.path_for(&recording.session_id, &recording.name);
-        if recording.generation >= 2 {
-            base.join(file.filename())
-        } else {
-            base
-        }
+    /// Open a recording file as a streaming reader (local file or S3 object),
+    /// without buffering the whole thing. Used by endpoints that transform the
+    /// file server-side.
+    pub async fn access(
+        &self,
+        recording: &Recording::Model,
+        file: RecordingFile,
+    ) -> Result<FileAccess> {
+        Ok(self.storage().await?.access(recording, file))
     }
 }

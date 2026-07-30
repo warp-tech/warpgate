@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-common"
-version = "0.27.0-beta.1"
+version = "0.27.0-beta.4"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -41,8 +41,10 @@ rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pki-types.workspace = true
 schemars.workspace = true
 sea-orm.workspace = true
+sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+strum = { version = "0.26", features = ["derive"] }
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true

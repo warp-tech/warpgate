@@ -29,7 +29,28 @@
     export let onGoLive: () => void
     // Called with the new scrubber position as a percentage (0..100).
     export let onSeek: (percent: number) => void
+
+    function isTextEntry(el: HTMLElement | null): boolean {
+        if (!el) {
+            return false
+        }
+        return (
+            el.tagName === 'TEXTAREA' ||
+            (el.tagName === 'INPUT' &&
+                (el as HTMLInputElement).type !== 'range')
+        )
+    }
+
+    function onKeydown(event: KeyboardEvent): void {
+        if (event.key !== ' ' || isTextEntry(event.target as HTMLElement)) {
+            return
+        }
+        event.preventDefault()
+        onTogglePlaying()
+    }
 </script>
+
+<svelte:window on:keydown={onKeydown} />
 
 <div class="toolbar" class:invisible={hidden}>
     <button type="button" class="btn btn-link" on:click={onTogglePlaying}>

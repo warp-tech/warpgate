@@ -45,11 +45,11 @@ jobs:
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a
+      - uses: rlespinasse/github-slug-action@ef93b2ea4b6405d06fd8684fc3ff795d262ecae8
 
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
@@ -58,7 +58,7 @@ jobs:
         with:
           key: "build"
 
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
 
@@ -92,11 +92,6 @@ jobs:
           just npm prune
           cd warpgate-web && NODE_ENV=dev cyclonedx-npm --output-format xml > ../cdx/admin-ui.cdx.xml
 
-      - name: Build RDP helper
-        run: just build-rdp-helper --target ${{ matrix.target }}
-        env:
-          SOURCE_DATE_EPOCH: "0" # for embedded-helper determinism
-
       - name: Build
         uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505
         with:
@@ -119,7 +114,7 @@ jobs:
         run: ./cyclonedx merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
 
       - name: Attest build
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           subject-path: target/${{ matrix.target }}/release/warpgate
@@ -143,7 +138,7 @@ jobs:
           mv cdx.xml dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
 
       - name: Upload release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
@@ -161,7 +156,7 @@ jobs:
           sudo apt update
           sudo apt install --no-install-recommends -y libssl-dev pkg-config
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
 

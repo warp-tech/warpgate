@@ -103,6 +103,18 @@ pub enum ServerMessage {
         #[serde(with = "warpgate_common::helpers::serde_base64")]
         data: Bytes,
     },
+    PngImage {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
+    /// Full-canvas PNG snapshot handed to a viewer as it attaches, so it has a base image
+    /// to paint deltas onto. Structural: a viewer that loses this one paints onto black.
+    Keyframe {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
     CopyRect {
         dst: WsRect,
         src_x: u16,
@@ -126,11 +138,12 @@ impl ServerMessage {
     /// Whether this is an incremental framebuffer delta that may be dropped under
     /// output-buffer pressure, as opposed to a structural message (resize, clipboard,
     /// connection state) whose loss would corrupt or desync the client.
-    pub fn is_incremental(&self) -> bool {
+    pub const fn is_incremental(&self) -> bool {
         matches!(
             self,
             Self::RawImage { .. }
                 | Self::JpegImage { .. }
+                | Self::PngImage { .. }
                 | Self::CopyRect { .. }
                 | Self::Cursor { .. }
         )
@@ -145,6 +158,8 @@ impl ServerMessage {
             Self::RawImage { rect, data } => WsPayload::Binary(encode_image(1, *rect, data)),
             Self::JpegImage { rect, data } => WsPayload::Binary(encode_image(2, *rect, data)),
             Self::Cursor { rect, data } => WsPayload::Binary(encode_image(3, *rect, data)),
+            Self::Keyframe { rect, data } => WsPayload::Binary(encode_image(4, *rect, data)),
+            Self::PngImage { rect, data } => WsPayload::Binary(encode_image(5, *rect, data)),
             other => WsPayload::Text(serde_json::to_string(other).unwrap_or_default()),
         }
     }
@@ -168,7 +183,7 @@ fn encode_image(kind: u8, rect: WsRect, data: &[u8]) -> Vec<u8> {
     out
 }
 
-fn state_name(state: DesktopState) -> &'static str {
+const fn state_name(state: DesktopState) -> &'static str {
     match state {
         DesktopState::Connecting => "connecting",
         DesktopState::Connected => "connected",
@@ -179,30 +194,34 @@ fn state_name(state: DesktopState) -> &'static str {
 impl From<DesktopEvent> for ServerMessage {
     fn from(event: DesktopEvent) -> Self {
         match event {
-            DesktopEvent::State(state) => ServerMessage::ConnectionState {
+            DesktopEvent::State(state) => Self::ConnectionState {
                 state: state_name(state),
             },
-            DesktopEvent::Resize { width, height } => ServerMessage::Resize { width, height },
-            DesktopEvent::RawImage { rect, data } => ServerMessage::RawImage {
+            DesktopEvent::Resize { width, height } => Self::Resize { width, height },
+            DesktopEvent::RawImage { rect, data } => Self::RawImage {
                 rect: rect.into(),
                 data,
             },
-            DesktopEvent::JpegImage { rect, data } => ServerMessage::JpegImage {
+            DesktopEvent::JpegImage { rect, data } => Self::JpegImage {
                 rect: rect.into(),
                 data,
             },
-            DesktopEvent::CopyRect { dst, src_x, src_y } => ServerMessage::CopyRect {
+            DesktopEvent::PngImage { rect, data } => Self::PngImage {
+                rect: rect.into(),
+                data,
+            },
+            DesktopEvent::CopyRect { dst, src_x, src_y } => Self::CopyRect {
                 dst: dst.into(),
                 src_x,
                 src_y,
             },
-            DesktopEvent::Cursor { rect, data } => ServerMessage::Cursor {
+            DesktopEvent::Cursor { rect, data } => Self::Cursor {
                 rect: rect.into(),
                 data,
             },
-            DesktopEvent::Clipboard(text) => ServerMessage::Clipboard { text },
-            DesktopEvent::Bell => ServerMessage::Bell,
-            DesktopEvent::Error(message) => ServerMessage::Error { message },
+            DesktopEvent::Clipboard(text) => Self::Clipboard { text },
+            DesktopEvent::Bell => Self::Bell,
+            DesktopEvent::Error(message) => Self::Error { message },
         }
     }
 }

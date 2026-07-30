@@ -8,29 +8,29 @@ use poem::error::InternalServerError;
 use poem::session::Session;
 use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::EntityTrait;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
+use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{ProtocolName, SessionId, WarpgateError};
+use warpgate_common::{Protocol, SessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
+    X_WARPGATE_CLUSTER_IDENTITY, is_cluster_peer_request,
 };
 use warpgate_core::ConfigProvider;
-use warpgate_db_entities::{User, UserAdminRoleAssignment};
+use warpgate_db_entities::User;
 use warpgate_sso::WarpgateIdToken;
 
 use crate::session::SessionStore;
 
-pub const PROTOCOL_NAME: ProtocolName = "HTTP";
+pub const PROTOCOL_NAME: Protocol = Protocol::Http;
 static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
-static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
 static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
 pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
@@ -57,8 +57,10 @@ pub trait SessionExt {
     fn set_target_name(&self, target_name: String);
     fn get_auth(&self) -> Option<SessionAuthorization>;
     fn set_auth(&self, auth: SessionAuthorization);
-    fn get_auth_state_id(&self) -> Option<AuthStateId>;
-    fn clear_auth_state(&self);
+    /// The Warpgate session id of this browser session, once one has been
+    /// registered for it. Unlike [`session_id_for_request`] this never creates
+    /// one.
+    fn get_session_id(&self) -> Option<SessionId>;
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState>;
     fn set_sso_login_state(&self, token: SsoLoginState);
@@ -81,12 +83,8 @@ impl SessionExt for Session {
         self.set(AUTH_SESSION_KEY, auth);
     }
 
-    fn get_auth_state_id(&self) -> Option<AuthStateId> {
-        self.get(AUTH_STATE_ID_SESSION_KEY)
-    }
-
-    fn clear_auth_state(&self) {
-        self.remove(AUTH_STATE_ID_SESSION_KEY);
+    fn get_session_id(&self) -> Option<SessionId> {
+        self.get(crate::session::SESSION_ID_SESSION_KEY)
     }
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState> {
@@ -101,43 +99,13 @@ impl SessionExt for Session {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct AuthStateId(pub Uuid);
-
 pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bool> {
-    // A user is considered an administrator if they have any admin role assigned.
-    let services = ctx.services();
-
-    // Admin tokens bypass the database check and are always full administrators.
-    if matches!(ctx.auth, RequestAuthorization::AdminToken) {
-        return Ok(true);
-    }
-
-    let username = match &ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::User { username, .. })
-        | RequestAuthorization::UserToken { username, .. } => username,
-        RequestAuthorization::Session(SessionAuthorization::Ticket { .. }) => return Ok(false),
-        RequestAuthorization::AdminToken => unreachable!(),
-    };
-
-    let db = services.db.lock().await;
-
-    let Some(user_model) = User::Entity::find()
-        .filter(User::Entity::username_eq_ci(username))
-        .one(&*db)
+    // A user is an administrator if they hold any admin permission. Resolved through the one
+    // shared permission loader so this can't drift from the endpoint gate or the /info UI.
+    Ok(warpgate_admin::api::admin_permission_set(ctx)
         .await
         .map_err(InternalServerError)?
-    else {
-        return Ok(false);
-    };
-
-    let count: u64 = UserAdminRoleAssignment::Entity::find()
-        .filter(UserAdminRoleAssignment::Column::UserId.eq(user_model.id))
-        .count(&*db)
-        .await
-        .map_err(InternalServerError)?;
-
-    Ok(count > 0)
+        .is_admin())
 }
 
 pub async fn _inner_auth<E: Endpoint + 'static>(
@@ -199,21 +167,29 @@ pub async fn get_or_create_auth_state_for_request(
     rate_limit_credential_type: Option<&str>,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
     let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
-    let session = <&Session>::from_request_without_body(req)
-        .await
-        .context("Session not in request")?;
 
     if let Some(state) = get_auth_state_for_request(req, ctx).await? {
-        let existing_matched = username_eq_ci(&state.lock().await.user_info().username, username);
-        if existing_matched {
+        let reusable = {
+            let state = state.lock().await;
+            // A terminally rejected attempt can never accept another
+            // credential, so a retry must start a fresh one.
+            username_eq_ci(&state.user_info().username, username)
+                && !matches!(state.verify(), AuthResult::Rejected)
+        };
+        if reusable {
             return Ok(state);
         }
     }
 
-    let (id, state) = ctx
+    // Pass the browser session id so the auth state is keyed by it: a web
+    // approval landing on another node resolves the owner from the session's
+    // `node_id` in the DB (see `api::auth::auth_state_owner`).
+    let session_id = session_id_for_request(req, ctx).await?;
+
+    let state = ctx
         .services()
         .create_auth_state(
-            None,
+            &session_id,
             username,
             crate::common::PROTOCOL_NAME,
             "",
@@ -227,41 +203,30 @@ pub async fn get_or_create_auth_state_for_request(
         )
         .await?;
 
-    {
-        let session_id = session_id_for_request(req, ctx).await?;
-        let mut state = state.lock().await;
-        if state.session_id() != Some(&session_id) {
-            state.set_session_id(session_id);
-        }
-    }
-
-    session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
     Ok(state)
 }
 
+/// The login attempt in progress on this browser session, if any. Auth states
+/// are keyed by session id, so the session itself is the lookup key and there is
+/// nothing to keep in sync.
 pub async fn get_auth_state_for_request(
     req: &Request,
     ctx: &UnauthenticatedRequestContext,
 ) -> Result<Option<Arc<Mutex<AuthState>>>, WarpgateError> {
-    let store = ctx.services().auth_state_store.lock().await;
     let session = <&Session>::from_request_without_body(req)
         .await
         .context("Session not in request")?;
 
-    if let Some(id) = session.get_auth_state_id()
-        && !store.contains_key(&id.0)
-    {
-        session.clear_auth_state();
-    }
+    let Some(session_id) = session.get_session_id() else {
+        return Ok(None);
+    };
 
-    if let Some(id) = session.get_auth_state_id() {
-        let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState(
-            "unknown auth state id".into(),
-        ))?;
-        return Ok(Some(state));
-    }
-
-    Ok(None)
+    Ok(ctx
+        .services()
+        .auth_state_store
+        .lock()
+        .await
+        .get(&session_id))
 }
 
 pub async fn session_id_for_request(
@@ -314,15 +279,49 @@ pub async fn authorize_session(
     Ok(())
 }
 
+/// Authorization for a request authenticated by the cluster token. The proxying
+/// node forwards the acting user's id in `x-warpgate-cluster-identity` (see
+/// `cluster_proxy::proxy_or_serve`), so the request runs here as that user;
+/// without the header the peer acts as a bare cluster peer. An id that no
+/// longer resolves to a user fails closed (unauthenticated).
+async fn cluster_request_authorization(
+    ctx: &UnauthenticatedRequestContext,
+    req: &Request,
+) -> poem::Result<Option<RequestAuthorization>> {
+    let Some(header) = req.headers().get(&X_WARPGATE_CLUSTER_IDENTITY) else {
+        return Ok(Some(RequestAuthorization::ClusterToken));
+    };
+    let Some(user_id) = header.to_str().ok().and_then(|s| s.parse::<Uuid>().ok()) else {
+        return Ok(None);
+    };
+    Ok(User::Entity::find_by_id(user_id)
+        .one(&ctx.services().db)
+        .await
+        .map_err(poem::error::InternalServerError)?
+        .map(|user| {
+            RequestAuthorization::Session(SessionAuthorization::User {
+                user_id: user.id,
+                username: user.username,
+            })
+        }))
+}
+
 pub async fn inject_request_authorization<E: Endpoint + 'static>(
     ep: Arc<E>,
     req: Request,
 ) -> poem::Result<E::Output> {
-    let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await?;
+    // Reinject a per-request copy so the parameter cache is request-scoped
+    // rather than shared with the startup singleton.
+    let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req)
+        .await?
+        .for_request();
     let session = <&Session>::from_request_without_body(&req).await?;
+    let is_cluster_peer = is_cluster_peer_request(&req, &ctx.services().cluster_token);
 
     let mut session_auth = session.get_auth();
-    if session_auth.is_some() {
+    // A forwarded request's Host is the cluster SNI name by construction, so the
+    // origin check below would reject - and clear - a session that is fine.
+    if session_auth.is_some() && !is_cluster_peer {
         let config = ctx.services().config.lock().await;
         if let Ok(base_url) = construct_external_url(None, &config, None).await
             && let Some(base_host) = base_url.host_str()
@@ -349,54 +348,49 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         }
     }
 
-    let auth = match session_auth {
-        Some(auth) => Some(RequestAuthorization::Session(auth)),
-        None => match req.headers().get(&X_WARPGATE_TOKEN) {
-            Some(token_from_header) => {
-                let token_from_header = token_from_header
-                    .to_str()
-                    .map_err(poem::error::BadRequest)?;
-                if ctx
-                    .services()
-                    .admin_token
-                    .lock()
-                    .await
-                    .as_deref()
-                    .is_some_and(|admin_token| {
-                        // Use constant time comparison to prevent timing attacks
-                        admin_token
-                            .as_bytes()
-                            .ct_eq(token_from_header.as_bytes())
-                            .into()
-                    })
-                {
-                    Some(RequestAuthorization::AdminToken)
-                } else if let Some(user) = ctx
-                    .services()
-                    .config_provider
-                    .lock()
-                    .await
-                    .validate_api_token(token_from_header)
-                    .await?
-                {
-                    Some(RequestAuthorization::UserToken {
-                        user_id: user.id,
-                        username: user.username,
-                    })
-                } else {
-                    None
-                }
-            }
-            None => None,
-        },
+    let auth = if let Some(auth) = session_auth {
+        Some(RequestAuthorization::Session(auth))
+    } else if is_cluster_peer {
+        cluster_request_authorization(&ctx, &req).await?
+    } else if let Some(token_from_header) = req.headers().get(&X_WARPGATE_TOKEN) {
+        let token_from_header = token_from_header
+            .to_str()
+            .map_err(poem::error::BadRequest)?;
+        if (*ctx.services().admin_token)
+            .as_ref()
+            .is_some_and(|admin_token| {
+                // Use constant time comparison to prevent timing attacks
+                admin_token
+                    .expose_secret()
+                    .as_bytes()
+                    .ct_eq(token_from_header.as_bytes())
+                    .into()
+            })
+        {
+            Some(RequestAuthorization::AdminToken)
+        } else if let Some(user) = ctx
+            .services()
+            .config_provider
+            .validate_api_token(token_from_header)
+            .await?
+        {
+            Some(RequestAuthorization::UserToken {
+                user_id: user.id,
+                username: user.username,
+            })
+        } else {
+            None
+        }
+    } else {
+        None
     };
 
     if let Some(auth) = auth {
         // build context and attach it instead of raw authorization
-        let ctx = ctx.to_authenticated(auth);
-        Ok(ep.data(ctx).call(req).await?)
+        let actx = ctx.to_authenticated(auth);
+        Ok(ep.data(actx).data(ctx).call(req).await?)
     } else {
-        Ok(ep.call(req).await?)
+        Ok(ep.data(ctx).call(req).await?)
     }
 }
 

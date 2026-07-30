@@ -1,7 +1,7 @@
 pre-commit:
   parallel: true
   jobs:
-    root: warpgate-web
+  - root: warpgate-web
     glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc,svelte}"
     run: npx @biomejs/biome check --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
     exclude:

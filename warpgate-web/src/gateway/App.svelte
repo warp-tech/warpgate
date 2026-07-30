@@ -3,6 +3,7 @@
     import { Button } from '@sveltestrap/sveltestrap'
     import { hasAdminAccess } from 'admin/lib/store'
     import AuthBar from 'common/AuthBar.svelte'
+    import BannerModal from 'common/BannerModal.svelte'
     import Brand from 'common/Brand.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -112,6 +113,8 @@
 
 <svelte:window on:pageshow={onPageResume} />
 
+<BannerModal banner={$serverInfo?.banner ?? ''} />
+
 <div class="container">
     <Loadable promise={initPromise}>
         {#if redirecting}
@@ -183,5 +186,17 @@
     .container {
         width: 600px;
         max-width: 100vw;
+        min-height: 100vh;
+
+        display: flex;
+        flex-direction: column;
+    }
+
+    main {
+        flex: 1 0 auto;
+        position: relative;
+
+        display: flex;
+        flex-direction: column;
     }
 </style>

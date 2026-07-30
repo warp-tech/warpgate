@@ -196,8 +196,9 @@
                                 color="success"
                                 class="me-1"
                                 click={() => approve(request)}
-                                >Approve</AsyncButton
                             >
+                                Approve
+                            </AsyncButton>
                             <Button
                                 color="danger"
                                 onclick={() => {
@@ -205,8 +206,9 @@
                             denyReason = ''
                             denyError = undefined
                         }}
-                                >Deny</Button
                             >
+                                Deny
+                            </Button>
                         </div>
                     </div>
                 {/each}
@@ -230,9 +232,9 @@
                                     {ticket.username}
                                 </strong>
                                 {#if ticket.selfService}
-                                    <span class="badge bg-info ms-2"
-                                        >self-service</span
-                                    >
+                                    <span class="badge bg-info ms-2">
+                                        self-service
+                                    </span>
                                 {/if}
                                 {#if ticket.description}
                                     <small class="d-block text-muted">
@@ -278,8 +280,9 @@
                                 e.preventDefault()
                             }}
                                 disabled={!$adminPermissions.ticketsDelete}
-                                >Delete</Button
                             >
+                                Delete
+                            </Button>
                         </div>
                     {/each}
                 </div>
@@ -405,15 +408,16 @@
         {/if}
     </ModalBody>
     <ModalFooter>
-        <AsyncButton class="modal-button" color="danger" click={deny}
-            >Deny</AsyncButton
-        >
+        <AsyncButton class="modal-button" color="danger" click={deny}>
+            Deny
+        </AsyncButton>
         <Button
             class="modal-button"
             color="secondary"
             onclick={() => denyModalRequest = undefined}
-            >Cancel</Button
         >
+            Cancel
+        </Button>
     </ModalFooter>
 </Modal>
 

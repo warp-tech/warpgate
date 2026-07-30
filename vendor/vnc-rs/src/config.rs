@@ -1,5 +1,6 @@
-use crate::VncError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+use crate::VncError;
 
 /// All supported vnc encodings
 #[allow(dead_code)]

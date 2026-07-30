@@ -3,13 +3,15 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ConnectOptions, Database, DatabaseConnection, EntityOrSelect, EntityTrait, ModelTrait,
-    QueryFilter, QuerySelect, TransactionTrait,
+    ConnectOptions, Database, DatabaseConnection, EntityOrSelect, EntityTrait, QueryFilter,
+    QuerySelect,
 };
 use time::OffsetDateTime;
 use tracing::error;
+use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateError};
+use warpgate_db_entities::Parameters::ConfigMigrationValues;
 use warpgate_db_migrations::{migrate_database, migrate_database_down, migrate_database_up};
 
 use crate::recordings::SessionRecordings;
@@ -20,6 +22,7 @@ pub async fn connect_to_db(
     params: &GlobalParams,
 ) -> Result<DatabaseConnection> {
     let mut url = url::Url::parse(&config.store.database_url.expose_secret()[..])?;
+
     if url.scheme() == "sqlite" {
         let path = url.path();
         let mut abs_path = params.paths_relative_to().clone();
@@ -35,15 +38,15 @@ pub async fn connect_to_db(
                 .to_str()
                 .ok_or_else(|| anyhow::anyhow!("Failed to convert database path to string"))?,
         );
-
         url.set_query(Some("mode=rwc"));
 
-        let db = Database::connect(ConnectOptions::new(url.to_string())).await?;
-        db.begin().await?.commit().await?;
+        let connection = connect_to_sqlite(url.as_str()).await?;
 
         if params.should_secure_files() {
             secure_file(&abs_path)?;
         }
+
+        return Ok(connection);
     }
 
     let mut opt = ConnectOptions::new(url.to_string());
@@ -59,11 +62,51 @@ pub async fn connect_to_db(
     Ok(connection)
 }
 
+/// WAL mode required to allow multiple concurrent writes to wait for each other
+/// instead of failing
+#[cfg(feature = "sqlite")]
+async fn connect_to_sqlite(url: &str) -> Result<DatabaseConnection> {
+    use std::str::FromStr;
+
+    use sea_orm::SqlxSqliteConnector;
+    use sea_orm::sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+
+    let connect_options = SqliteConnectOptions::from_str(url)?
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .busy_timeout(Duration::from_secs(30));
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(100)
+        .min_connections(5)
+        .acquire_timeout(Duration::from_secs(8))
+        .idle_timeout(Duration::from_secs(8))
+        .max_lifetime(Duration::from_secs(8))
+        .connect_with(connect_options)
+        .await?;
+
+    Ok(SqlxSqliteConnector::from_sqlx_sqlite_pool(pool))
+}
+
+#[cfg(not(feature = "sqlite"))]
+async fn connect_to_sqlite(_url: &str) -> Result<DatabaseConnection> {
+    anyhow::bail!("SQLite support is not enabled in this build")
+}
+
 pub async fn connect_to_db_and_migrate(
     config: &WarpgateConfig,
     params: &GlobalParams,
 ) -> Result<DatabaseConnection> {
     let connection = connect_to_db(config, params).await?;
+    // Publish the config-file settings that have moved into the parameters row
+    // so the migrations can copy them into the DB; afterwards the config file's
+    // copies are ignored.
+    let recordings = config.store.recordings.clone().unwrap_or_default();
+    warpgate_db_entities::Parameters::set_config_migration_values(ConfigMigrationValues {
+        recordings_enable: recordings.enable,
+        recordings_path: recordings.path,
+        ssh_host_key_verification: config.store.ssh.host_key_verification.into(),
+    });
     migrate_database(&connection).await?;
     Ok(connection)
 }
@@ -80,28 +123,18 @@ pub async fn migrate_down(connection: &DatabaseConnection, steps: u32) -> Result
     Ok(())
 }
 
-pub async fn populate_db(
-    db: &DatabaseConnection,
-    _config: &mut WarpgateConfig,
-) -> Result<(), WarpgateError> {
-    use sea_orm::ActiveValue::Set;
-    use warpgate_db_entities::{Recording, Session};
-
-    Recording::Entity::update_many()
-        .set(Recording::ActiveModel {
-            ended: Set(Some(OffsetDateTime::now_utc())),
-            ..Default::default()
-        })
-        .filter(Expr::col(Recording::Column::Ended).is_null())
-        .exec(db)
-        .await
-        .map_err(WarpgateError::from)?;
+/// Mark a single still-open session as ended. Idempotent: a no-op if the
+/// session was already ended or has been removed, so it is safe to call from
+/// an admin close even when the session's own teardown will run later.
+pub async fn mark_session_ended(db: &DatabaseConnection, id: Uuid) -> Result<(), WarpgateError> {
+    use warpgate_db_entities::Session;
 
     Session::Entity::update_many()
-        .set(Session::ActiveModel {
-            ended: Set(Some(OffsetDateTime::now_utc())),
-            ..Default::default()
-        })
+        .col_expr(
+            Session::Column::Ended,
+            Expr::value(OffsetDateTime::now_utc()),
+        )
+        .filter(Expr::col(Session::Column::Id).eq(id))
         .filter(Expr::col(Session::Column::Ended).is_null())
         .exec(db)
         .await
@@ -161,27 +194,50 @@ pub async fn cleanup_db(
         request_deletion.exec(db).await?;
     }
 
-    let recordings_to_delete = Recording::Entity::find()
+    // Recordings are cleaned up by their parent session's `ended`, not their
+    // own: a session ended abnormally (inactivity reaper, node shutdown, admin
+    // close) never finalizes its recording, so `recording.ended` stays null and
+    // the files would otherwise leak on disk forever.
+    let expired_session_ids: Vec<Uuid> = Session::Entity::find()
         .filter(Expr::col(Session::Column::Ended).is_not_null())
         .filter(Expr::col(Session::Column::Ended).lt(recording_cutoff))
         .all(db)
-        .await?;
+        .await?
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
 
-    for recording in recordings_to_delete {
-        if let Err(error) = recordings
-            .remove(&recording.session_id, &recording.name)
-            .await
-        {
-            error!(session=%recording.session_id, name=%recording.name, %error, "Failed to remove recording");
+    if !expired_session_ids.is_empty() {
+        let recordings_to_delete = Recording::Entity::find()
+            .filter(
+                Expr::col(Recording::Column::SessionId).is_in(expired_session_ids.iter().copied()),
+            )
+            .all(db)
+            .await?;
+
+        for recording in recordings_to_delete {
+            if let Err(error) = recordings
+                .remove(&recording.session_id, &recording.name)
+                .await
+            {
+                error!(session=%recording.session_id, name=%recording.name, %error, "Failed to remove recording");
+            }
         }
-        recording.delete(db).await?;
-    }
 
-    Session::Entity::delete_many()
-        .filter(Expr::col(Session::Column::Ended).is_not_null())
-        .filter(Expr::col(Session::Column::Ended).lt(recording_cutoff))
-        .exec(db)
-        .await?;
+        // Delete recording rows explicitly rather than relying on the FK cascade,
+        // which SQLite does not enforce unless `foreign_keys` is on.
+        Recording::Entity::delete_many()
+            .filter(
+                Expr::col(Recording::Column::SessionId).is_in(expired_session_ids.iter().copied()),
+            )
+            .exec(db)
+            .await?;
+
+        Session::Entity::delete_many()
+            .filter(Expr::col(Session::Column::Id).is_in(expired_session_ids))
+            .exec(db)
+            .await?;
+    }
 
     Ok(())
 }

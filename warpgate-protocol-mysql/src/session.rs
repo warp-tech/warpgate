@@ -8,16 +8,15 @@ use rustls::ServerConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, trace, warn};
+use url::Url;
 use uuid::Uuid;
-use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
-};
+use warpgate_common::auth::AuthSelector;
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
-use warpgate_core::auth::validate_and_add_credential;
-use warpgate_core::login_protection::FailedAttemptInfo;
+use warpgate_common::{Protocol, Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    ConfigProvider, Services, WarpgateServerHandle, authorize_ticket, consume_ticket,
+    AuthOkPermit, DbAuthTransport, Services, TargetAuthorization, WarpgateServerHandle,
+    run_db_authorization,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
 use warpgate_database_protocols::mysql::protocol::Capabilities;
@@ -44,6 +43,55 @@ pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     id: Uuid,
     services: Services,
     remote_address: SocketAddr,
+    /// MySQL carries the password in the handshake, so the shared auth flow can
+    /// only be handed it — never prompted for it a second time.
+    handshake_password: Option<Secret<String>>,
+}
+
+impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for MySqlSession<S> {
+    type Error = MySqlError;
+
+    const PROTOCOL: Protocol = crate::common::PROTOCOL_NAME;
+    const SUPPORTS_WEB_APPROVAL: bool = false;
+
+    /// The password arrived in the handshake. There is no second prompt in the
+    /// MySQL protocol, so a repeat request denies the login.
+    async fn prompt_password(&mut self) -> Result<Option<Secret<String>>, MySqlError> {
+        Ok(self.handshake_password.take())
+    }
+
+    async fn send_auth_ok(&mut self, _permit: AuthOkPermit) -> Result<(), MySqlError> {
+        self.stream.push(
+            &OkPacket {
+                affected_rows: 0,
+                last_insert_id: 0,
+                status: Status::empty(),
+                warnings: 0,
+            },
+            (),
+        )?;
+        self.stream.flush().await?;
+        Ok(())
+    }
+
+    async fn external_url(&mut self) -> Result<Url, MySqlError> {
+        Ok(construct_external_url(None, &*self.services.config.lock().await, None).await?)
+    }
+
+    /// The MySQL connection phase has no packet for showing the user a link, so
+    /// a policy requiring web approval can't be satisfied over MySQL.
+    async fn send_web_approval_prompt(
+        &mut self,
+        _url: &Url,
+        _identification_string: &str,
+    ) -> Result<bool, MySqlError> {
+        warn!("Web user approval is not supported over MySQL");
+        Ok(false)
+    }
+
+    async fn send_denied(&mut self) -> Result<(), MySqlError> {
+        self.send_access_denied().await
+    }
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
@@ -79,6 +127,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             server_handle,
             id,
             remote_address,
+            handshake_password: None,
         }
     }
 
@@ -171,6 +220,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         Ok(())
     }
 
+    async fn send_access_denied(&mut self) -> Result<(), MySqlError> {
+        self.send_error(1, "Warpgate access denied").await
+    }
+
     pub async fn run_authorization(
         mut self,
         handshake: HandshakeResponse,
@@ -178,207 +231,29 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
     ) -> Result<(), MySqlError> {
         let selector: AuthSelector = handshake.username.deref().into();
         let remote_ip = self.remote_address.ip();
+        let session_id = self.server_handle.lock().await.id();
 
-        async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
-            this: &mut MySqlSession<S>,
-        ) -> Result<(), MySqlError> {
-            this.stream.push(
-                &ErrPacket {
-                    error_code: 1,
-                    error_message: "Warpgate access denied".to_owned(),
-                    sql_state: None,
-                },
-                (),
-            )?;
-            this.stream.flush().await?;
-            Ok(())
-        }
+        self.handshake_password = Some(password);
 
-        // Check if IP is blocked
-        match self
-            .services
-            .login_protection
-            .check_ip_blocked(&remote_ip)
-            .await
-        {
-            Ok(Some(block_info)) => {
-                warn!(
-                    ip = %remote_ip,
-                    expires_at = %block_info.expires_at,
-                    "MySQL auth from blocked IP"
-                );
-                return fail(&mut self).await;
-            }
-            Ok(None) => {}
-            Err(e) => {
-                warn!(?e, "Failed to check IP block status");
-            }
-        }
+        let services = self.services.clone();
+        let Some(authorization) =
+            run_db_authorization(&mut self, &services, session_id, selector, remote_ip).await?
+        else {
+            return Ok(());
+        };
 
-        match selector {
-            AuthSelector::User {
-                username,
-                target_name,
-            } => {
-                // Check if user is locked
-                match self
-                    .services
-                    .login_protection
-                    .check_user_locked(&username)
-                    .await
-                {
-                    Ok(Some(_lock_info)) => {
-                        warn!(
-                            username = %username,
-                            "MySQL auth for locked user"
-                        );
-                        return fail(&mut self).await;
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        warn!(?e, "Failed to check user lockout status");
-                    }
-                }
-
-                let session_id = self.server_handle.lock().await.id();
-                let state_arc = self
-                    .services
-                    .create_auth_state(
-                        Some(&session_id),
-                        &username,
-                        crate::common::PROTOCOL_NAME,
-                        &target_name,
-                        &[CredentialKind::Password],
-                        Some(self.remote_address.ip()),
-                        Some("password"),
-                    )
-                    .await?
-                    .1;
-                let mut state = state_arc.lock().await;
-
-                let user_auth_result = {
-                    let credential = AuthCredential::Password(password);
-
-                    validate_and_add_credential(
-                        &mut state,
-                        &credential,
-                        &mut *self.services.config_provider.lock().await,
-                    )
-                    .await?;
-
-                    state.verify()
-                };
-
-                match user_auth_result {
-                    AuthResult::Accepted { user_info } => {
-                        self.services
-                            .auth_state_store
-                            .lock()
-                            .await
-                            .complete(state.id())
-                            .await;
-                        let target_auth_result = {
-                            self.services
-                                .config_provider
-                                .lock()
-                                .await
-                                .authorize_target(&user_info.username, &target_name)
-                                .await
-                                .map_err(MySqlError::other)?
-                        };
-                        if !target_auth_result {
-                            warn!(
-                                "Target {} not authorized for user {}",
-                                target_name, user_info.username
-                            );
-                            // Record failed attempt
-                            let _ = self
-                                .services
-                                .login_protection
-                                .record_failed_attempt(FailedAttemptInfo {
-                                    username: username.clone(),
-                                    remote_ip,
-                                    protocol: "mysql".to_string(),
-                                    credential_type: "password".to_string(),
-                                })
-                                .await;
-                            return fail(&mut self).await;
-                        }
-                        // Clear failed attempts on successful auth
-                        let _ = self
-                            .services
-                            .login_protection
-                            .clear_failed_attempts(&remote_ip, &user_info.username)
-                            .await;
-                        self.run_authorized(handshake, user_info, target_name).await
-                    }
-                    AuthResult::Rejected | AuthResult::Need(_) => {
-                        // Record failed attempt
-                        let _ = self
-                            .services
-                            .login_protection
-                            .record_failed_attempt(FailedAttemptInfo {
-                                username: username.clone(),
-                                remote_ip,
-                                protocol: "mysql".to_string(),
-                                credential_type: "password".to_string(),
-                            })
-                            .await;
-                        fail(&mut self).await
-                    } // TODO SSO
-                }
-            }
-            AuthSelector::Ticket { secret } => {
-                match authorize_ticket(&self.services.db, &secret)
-                    .await
-                    .map_err(MySqlError::other)?
-                {
-                    Some((ticket, target, user_info)) => {
-                        info!("Authorized for {} with a ticket", target.name);
-                        consume_ticket(&self.services.db, &ticket.id)
-                            .await
-                            .map_err(MySqlError::other)?;
-
-                        self.run_authorized(handshake, user_info, target.name).await
-                    }
-                    _ => fail(&mut self).await,
-                }
-            }
-        }
+        self.run_authorized(handshake, authorization).await
     }
 
     async fn run_authorized(
         mut self,
         handshake: HandshakeResponse,
-        user_info: AuthStateUserInfo,
-        target_name: String,
+        authorization: TargetAuthorization,
     ) -> Result<(), MySqlError> {
-        self.stream.push(
-            &OkPacket {
-                affected_rows: 0,
-                last_insert_id: 0,
-                status: Status::empty(),
-                warnings: 0,
-            },
-            (),
-        )?;
-        self.stream.flush().await?;
+        let (user_info, target) = authorization.into_parts();
 
-        let target = {
-            self.services
-                .config_provider
-                .lock()
-                .await
-                .get_target_by_name(&target_name)
-                .await?
-                .and_then(|t| match t.options {
-                    TargetOptions::MySql(ref options) => Some((t.clone(), options.clone())),
-                    _ => None,
-                })
-        };
-
-        let Some((target, mysql_options)) = target else {
-            warn!("Selected target not found");
+        let TargetOptions::MySql(ref mysql_options) = target.options else {
+            warn!("Selected target is not a MySQL target");
             self.stream.push(
                 &ErrPacket {
                     error_code: 1,
@@ -390,6 +265,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             self.stream.flush().await?;
             return Ok(());
         };
+
+        let mysql_options = mysql_options.clone();
 
         {
             let handle = self.server_handle.lock().await;
@@ -430,6 +307,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             x => x,
         }?;
 
+        // The handshake's max_packet_size is forwarded to the target; the
+        // proxy's own codecs must honor it too, in both directions, or a
+        // >4 MiB row/statement/BLOB would abort the session.
+        self.stream.set_max_packet_size(handshake.max_packet_size);
+        client.stream.set_max_packet_size(handshake.max_packet_size);
+
         loop {
             self.stream.reset_sequence_id();
             client.stream.reset_sequence_id();
@@ -449,6 +332,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 client.stream.flush().await?;
 
                 let mut eof_ctr = 0;
+                let mut first_packet = true;
                 loop {
                     let Some(response) = client.stream.recv().await? else {
                         return Err(MySqlError::Eof);
@@ -456,19 +340,37 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                     trace!(?response, "client got packet");
                     self.stream.push(&&response[..], ())?;
                     self.stream.flush().await?;
-                    if let Some(com) = response.first() {
-                        if com == &0xfe {
-                            if self.capabilities.contains(Capabilities::DEPRECATE_EOF) {
+
+                    let com = response.first();
+                    if first_packet {
+                        first_packet = false;
+                        // OK or ERR as the first packet means there is no
+                        // result set; later packets starting with 0x00 are
+                        // rows with an empty first column
+                        if com == Some(&0) || com == Some(&0xff) {
+                            break;
+                        }
+                        continue;
+                    }
+                    // 0xff is not a valid length-encoded value prefix, so
+                    // no row or column definition can start with it
+                    if com == Some(&0xff) {
+                        break;
+                    }
+                    if com == Some(&0xfe) {
+                        // Rows can also start with 0xfe (a length-encoded
+                        // value >= 2^24); real EOF and terminating OK
+                        // packets are shorter than these thresholds
+                        if client.capabilities.contains(Capabilities::DEPRECATE_EOF) {
+                            if response.len() < 0xff_ffff {
                                 break;
                             }
+                        } else if response.len() < 9 {
                             eof_ctr += 1;
                             if eof_ctr == 2 {
                                 // todo check multiple results
                                 break;
                             }
-                        }
-                        if com == &0 || com == &0xff {
-                            break;
                         }
                     }
                 }

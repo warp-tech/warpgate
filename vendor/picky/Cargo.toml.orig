@@ -1,0 +1,128 @@
+[package]
+name = "picky"
+version = "7.0.0-rc.25"
+authors = [
+    "Benoît CORTIER <bcortier@devolutions.net>",
+    "Jonathan Trepanier <jtrepanier@devolutions.net>",
+    "François Dubois <fdubois@devolutions.net>",
+    "Richard Markiewicz <rmarkiewicz@devolutions.net>",
+    "Ionut Mihalcea <ionut.mihalcea@arm.com>",
+    "Kim Altintop <kim@monadic.xyz>",
+    "Alexandr Yusuk <aleksandr.yusuk@apriorit.com>",
+    "Flavio Castelli <flavio@castelli.me>",
+    "Xynnn_ <xynnn@linux.alibaba.com>",
+]
+description = "Portable X.509, PKI, JOSE and HTTP signature implementation."
+keywords = ["x509", "jwt", "signature", "jose", "pki"]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Devolutions/picky-rs"
+include = ["src/**/*", "README.md", "CHANGELOG.md", "LICENSE-*"]
+
+[dependencies]
+picky-asn1 = { version = "0.10", path = "../picky-asn1", features = ["zeroize"] }
+picky-asn1-der = { version = "0.5", path = "../picky-asn1-der" }
+picky-asn1-x509 = { version = "0.15", path = "../picky-asn1-x509", features = ["legacy", "zeroize"] }
+serde = { version = "1", features = ["derive"] }
+base64 = "0.22"
+thiserror = "2"
+byteorder = { version = "1.5", optional = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"], optional = true }
+time = { version = "0.3", optional = true }
+serde_json = { version = "1", optional = true }
+hex = "0.4"
+http = { version = "1.4", optional = true }
+cab = { version = "0.6", optional = true }
+lexical-sort = { version = "0.3", optional = true }
+zeroize = "1.8"
+
+# FIXME: either use ureq, or even better: do not require this kind of dependency at all to let user decide which lib to use.
+# (currently users should *really* not forget to use `spawn_blocking` when calling associated functions from async context)
+reqwest = { version = "0.13", default-features = false, features = ["blocking"], optional = true }
+
+# /!\ ===== cryptography dependencies ===== /!\
+# These should be updated as soon as possible.
+# /!\ ===================================== /!\
+
+rand = "0.10"
+rand_core = "0.10"
+crypto-bigint = "0.7"
+
+ed25519-dalek = { version = "=3.0.0-rc.1", features = ["hazmat", "rand_core"] }
+x25519-dalek = { version = "=3.0.0-rc.1", features = ["static_secrets"] }
+
+p256 = { version = "=0.14.0-rc.14", features = ["ecdh"] }
+p384 = { version = "=0.14.0-rc.14", features = ["ecdh"] }
+p521 = { version = "=0.14.0-rc.14", features = ["ecdh"] }
+
+rsa = { version = "=0.10.0-rc.18", features = ["std"] }
+
+digest = "0.11"
+md5 = { package = "md-5", version = "0.11", features = ["oid"] }
+sha1 = { version = "0.11", features = ["oid"] }
+sha2 = { version = "0.11", features = ["oid"] }
+sha3 = { version = "0.12", features = ["oid"] }
+
+aes-gcm = { version = "=0.11.0-rc.4", optional = true }
+aes = { version = "0.9", optional = true }
+aes-kw = { version = "0.3", optional = true }
+argon2 = { version = "=0.6.0-rc.8", optional = true }
+ctr = { version = "0.10", optional = true }
+cbc = { version = "0.2", optional = true, features = ["alloc"] }
+bcrypt-pbkdf = { version = "0.11", optional = true }
+des = { version = "0.9", optional = true }
+rc2 = { version = "0.9", optional = true }
+pbkdf2 = { version = "0.13", optional = true }
+hmac = { version = "0.13", optional = true }
+crypto-common = "0.2"
+inout = "0.2.2"
+
+# Pin transitive dependencies versions.
+# TODO: Remove when stable versions will be released.
+blake2 = { version = "=0.11.0-rc.6", optional = true }
+ecdsa = "=0.17.0-rc.22"
+pkcs1 = "=0.8.0-rc.4"
+primeorder = "=0.14.0-rc.14"
+rustcrypto-ff = "=0.14.0-rc.1"
+rustcrypto-ff_derive = "=0.14.0-rc.0"
+rustcrypto-group = "=0.14.0-rc.1"
+curve25519-dalek = "=5.0.0-rc.1"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+cfg-if = "1.0"
+rand_chacha = "0.10"
+ring = "0.17"
+rstest = "0.26"
+expect-test = "1"
+tempfile = "3.22"
+picky-test-data = { path = "../picky-test-data", version = "0.1" }
+
+[features]
+default = ["x509", "jose", "http_signature", "http_trait_impl", "pkcs12"]
+
+# main features
+x509 = []
+jose = ["dep:serde_json", "dep:aes-gcm", "dep:ctr", "dep:cbc", "dep:aes-kw", "dep:aes"]
+http_signature = []
+pkcs12 = ["picky-asn1-x509/pkcs12", "dep:des", "dep:rc2", "dep:cbc", "dep:hmac", "dep:aes", "x509", "dep:pbkdf2"]
+
+# secondary features
+pkcs7 = ["x509", "picky-asn1-x509/pkcs7"]
+http_timestamp = ["dep:reqwest"]
+ctl = ["picky-asn1-x509/ctl", "pkcs7", "chrono_conversion"]
+ctl_http_fetch = ["dep:reqwest", "dep:cab", "ctl"]
+wincert = ["x509", "dep:byteorder"]
+ssh = ["dep:byteorder", "dep:aes", "dep:ctr", "dep:cbc", "dep:bcrypt-pbkdf", "dep:lexical-sort", "dep:hmac", "dep:pbkdf2"]
+http_trait_impl = ["dep:http"]
+chrono_conversion = ["dep:chrono", "picky-asn1/chrono_conversion"]
+time_conversion = ["dep:time", "picky-asn1/time_conversion"]
+putty = ["dep:argon2", "dep:hmac", "ssh",
+    # Transitive dependencies
+    "dep:blake2"
+]
+
+[package.metadata.docs.rs]
+# Enable all features when building documentation for docs.rs
+all-features = true

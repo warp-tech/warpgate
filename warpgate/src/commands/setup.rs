@@ -327,20 +327,29 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
 
     store.ssh.keys = data_path.join("ssh-keys").to_string_lossy().to_string();
 
+    if let Commands::UnattendedSetup {
+        host_key_verification,
+        ..
+    } = &cli.command
+    {
+        store.ssh.host_key_verification = *host_key_verification;
+    }
+
     // ---
 
+    let recordings = store.recordings.get_or_insert_with(Default::default);
     if let Commands::UnattendedSetup {
         record_sessions, ..
     } = &cli.command
     {
-        store.recordings.enable = *record_sessions;
+        recordings.enable = *record_sessions;
     } else {
-        store.recordings.enable = dialoguer::Confirm::with_theme(&theme)
+        recordings.enable = dialoguer::Confirm::with_theme(&theme)
             .default(true)
             .with_prompt("Do you want to record user sessions?")
             .interact()?;
     }
-    store.recordings.path = data_path.join("recordings").to_string_lossy().to_string();
+    recordings.path = data_path.join("recordings").to_string_lossy().to_string();
 
     // ---
 
@@ -386,7 +395,6 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
 
     let config = load_config(params, true)?;
     warpgate_protocol_ssh::generate_keys(&config, params, "host")?;
-    warpgate_protocol_ssh::generate_keys(&config, params, "client")?;
 
     // Create the admin user
     crate::commands::create_user::command(
@@ -398,6 +406,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     .await?;
 
     let db = connect_to_db_and_migrate(&config, params).await?;
+    warpgate_protocol_ssh::ensure_client_keys(&db, &config, params).await?;
 
     #[allow(clippy::expect_used)]
     let user = User::Entity::find()

@@ -46,8 +46,9 @@
                 color="primary"
                 click={create}
                 disabled={!$adminPermissions.usersCreate}
-                >Create user</AsyncButton
             >
+                Create user
+            </AsyncButton>
         </Form>
     </div>
 </div>

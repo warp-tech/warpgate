@@ -143,7 +143,7 @@
 </script>
 
 <div class="container-max-md">
-    <Loadable promise={initPromise}>
+    <Loadable promise={initPromise} bind:value={role}>
         {#snippet children(role)}
             <div class="page-summary-bar">
                 <div>
@@ -187,8 +187,9 @@
                                         <span
                                             id="warn-{key}"
                                             class="text-warning ms-1"
-                                            >⚠️</span
                                         >
+                                            ⚠️
+                                        </span>
                                         <Tooltip
                                             target="warn-{key}"
                                             animation
@@ -222,16 +223,18 @@
                     {disabled}
                     class="ms-auto"
                     click={update}
-                    >Update</AsyncButton
                 >
+                    Update
+                </AsyncButton>
 
                 <AsyncButton
                     class="ms-2"
                     {disabled}
                     color="danger"
                     click={remove}
-                    >Remove</AsyncButton
                 >
+                    Remove
+                </AsyncButton>
             </div>
 
             <h4 class="mt-4">Assigned users</h4>
@@ -255,9 +258,9 @@
                     </a>
                 {/snippet}
                 {#snippet empty()}
-                    <Alert color="info"
-                        >This admin role has no users assigned to it</Alert
-                    >
+                    <Alert color="info">
+                        This admin role has no users assigned to it
+                    </Alert>
                 {/snippet}
             </ItemList>
         {/snippet}

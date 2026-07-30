@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-protocol-http"
-version = "0.27.0-beta.1"
+version = "0.27.0-beta.4"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -41,3 +41,11 @@ warpgate-db-entities = { path = "../warpgate-db-entities", default-features = fa
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
 warpgate-web = { path = "../warpgate-web", default-features = false }
+
+[dev-dependencies]
+poem = { workspace = true, features = ["test"] }
+rustls = { workspace = true, features = ["aws_lc_rs"] }
+sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
+warpgate-db-migrations = { path = "../warpgate-db-migrations", features = [
+    "sqlite",
+] }

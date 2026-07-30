@@ -1,4 +1,3 @@
-use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -7,11 +6,10 @@ use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common::helpers::hash::generate_ticket_secret;
-use warpgate_common_http::auth::AuthenticatedRequestContext;
-use warpgate_db_entities::{ApiToken, Parameters};
+use warpgate_db_entities::ApiToken;
 
 use super::common::get_user;
-use crate::common::endpoint_auth;
+use crate::api::auth_scheme::AuthedSession;
 
 pub struct Api;
 
@@ -79,21 +77,23 @@ impl Api {
     #[oai(
         path = "/profile/api-tokens",
         method = "get",
-        operation_id = "get_my_api_tokens",
-        transform = "endpoint_auth"
+        operation_id = "get_my_api_tokens"
     )]
     async fn api_get_api_tokens(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
     ) -> Result<GetApiTokensResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(GetApiTokensResponse::Unauthorized);
+        };
+        let Some(user_model) = get_user(&full, db).await? else {
             return Ok(GetApiTokensResponse::Unauthorized);
         };
 
-        let api_tokens = user_model.find_related(ApiToken::Entity).all(&*db).await?;
+        let api_tokens = user_model.find_related(ApiToken::Entity).all(db).await?;
 
         Ok(GetApiTokensResponse::Ok(Json(
             api_tokens.into_iter().map(Into::into).collect(),
@@ -103,22 +103,24 @@ impl Api {
     #[oai(
         path = "/profile/api-tokens",
         method = "post",
-        operation_id = "create_api_token",
-        transform = "endpoint_auth"
+        operation_id = "create_api_token"
     )]
     async fn api_create_api_token(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<NewApiToken>,
     ) -> Result<CreateApiTokenResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(CreateApiTokenResponse::Unauthorized);
+        };
+        let Some(user_model) = get_user(&full, db).await? else {
             return Ok(CreateApiTokenResponse::Unauthorized);
         };
 
-        let parameters = Parameters::Entity::get(&db).await?;
+        let parameters = ctx.parameters().await?;
         if let Some(max_seconds) = parameters.max_api_token_duration_seconds {
             let max_expiry = OffsetDateTime::now_utc() + Duration::seconds(max_seconds);
             if body.expiry > max_expiry {
@@ -137,7 +139,7 @@ impl Api {
             label: Set(body.label.clone()),
             secret: Set(secret.expose_secret().clone()),
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
@@ -150,31 +152,33 @@ impl Api {
     #[oai(
         path = "/profile/api-tokens/:id",
         method = "delete",
-        operation_id = "delete_my_api_token",
-        transform = "endpoint_auth"
+        operation_id = "delete_my_api_token"
     )]
     async fn api_delete_api_token(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         id: Path<Uuid>,
     ) -> Result<DeleteApiTokenResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
-        let Some(user_model) = get_user(auth, &db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(DeleteApiTokenResponse::Unauthorized);
+        };
+        let Some(user_model) = get_user(&full, db).await? else {
             return Ok(DeleteApiTokenResponse::Unauthorized);
         };
 
         let Some(model) = user_model
             .find_related(ApiToken::Entity)
             .filter(ApiToken::Column::Id.eq(id.0))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteApiTokenResponse::NotFound);
         };
 
-        model.delete(&*db).await?;
+        model.delete(db).await?;
         Ok(DeleteApiTokenResponse::Deleted)
     }
 }

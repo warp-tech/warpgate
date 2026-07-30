@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-core"
-version = "0.27.0-beta.1"
+version = "0.27.0-beta.4"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -36,12 +36,15 @@ serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 totp-rs = { version = "5.0", features = ["otpauth"], default-features = false }
 tracing.workspace = true
 tracing-core = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 url.workspace = true
 uuid.workspace = true
+warpgate-aws = { path = "../warpgate-aws" }
+warpgate-ca = { path = "../warpgate-ca" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-db-migrations = { path = "../warpgate-db-migrations" }
@@ -49,7 +52,7 @@ warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-tls = { path = "../warpgate-tls" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 webpki = { version = "0.22", default-features = false }
-zune-jpeg = "0.4"
+zune-jpeg.workspace = true
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]

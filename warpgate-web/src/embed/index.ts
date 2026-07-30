@@ -1,3 +1,4 @@
+import { mount } from 'svelte'
 import { api } from 'gateway/lib/api'
 import EmbeddedUI from './EmbeddedUI.svelte'
 
@@ -22,13 +23,13 @@ function forceSecureWebSocketURLs() {
         return url
     }
 
-    class SecureWebSocket extends OriginalWebSocket {
-        constructor(url: string | URL, protocols?: string | string[]) {
-            super(makeUrlSecure(url), protocols)
-        }
-    }
-
-    window.WebSocket = SecureWebSocket
+    // noVNC probes the channel's immediate prototype
+    // and a subclass would hide those (#2254)
+    window.WebSocket = new Proxy(OriginalWebSocket, {
+        construct(target, [url, protocols]) {
+            return new target(makeUrlSecure(url), protocols)
+        },
+    })
 }
 
 navigator.serviceWorker.getRegistrations().then(registrations => {
@@ -45,11 +46,10 @@ const container = document.createElement('div')
 container.id = 'warpgate-embedded-ui'
 document.body.appendChild(container)
 
-setTimeout(
-    () =>
-        new EmbeddedUI({
-            target: container,
-        }),
+setTimeout(() =>
+    mount(EmbeddedUI, {
+        target: container,
+    }),
 )
 
 forceSecureWebSocketURLs()

@@ -128,9 +128,9 @@
         <div class="list-group list-group-flush mb-3">
             <div class="list-group-item credential">
                 {#if creds.password === PasswordState.Unset}
-                    <span class="label ms-3"
-                        >Your account has no password set</span
-                    >
+                    <span class="label ms-3">
+                        Your account has no password set
+                    </span>
                 {/if}
                 {#if creds.password === PasswordState.Set}
                     <Fa fw icon={faKeyboard} />
@@ -179,8 +179,9 @@
             creatingOtpCredential = true
             e.preventDefault()
         }}
-                >Add device</Button
             >
+                Add device
+            </Button>
         </div>
 
         <div class="list-group list-group-flush mb-3">
@@ -224,11 +225,16 @@
                 creatingPublicKeyCredential = true
                 e.preventDefault()
             }}
-                >Add key</Button
             >
-            <Tooltip delay="250" target="addPublicKeyCredentialButton" animation
-                >Public key credentials will be loaded from LDAP</Tooltip
+                Add key
+            </Button>
+            <Tooltip
+                delay="250"
+                target="addPublicKeyCredentialButton"
+                animation
             >
+                Public key credentials will be loaded from LDAP
+            </Tooltip>
         </div>
 
         <div class="list-group list-group-flush mb-3">
@@ -275,8 +281,9 @@
             issuingCertificateCredential = true
             e.preventDefault()
         }}
-                >Issue certificate</Button
             >
+                Issue certificate
+            </Button>
         </div>
 
         <div class="list-group list-group-flush mb-3">

@@ -5,6 +5,10 @@ use aws_lc_rs::error::KeyRejected;
 use aws_lc_rs::signature::{ECDSA_P384_SHA3_384_ASN1_SIGNING, EcdsaKeyPair};
 use data_encoding::BASE64;
 use der::{Decode, DecodePem, Encode};
+use rcgen::{
+    CertificateParams, DistinguishedName, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
+    KeyUsagePurpose,
+};
 use spki::{AlgorithmIdentifier, SubjectPublicKeyInfo};
 use uuid::Uuid;
 use x509_cert::serial_number::SerialNumber;
@@ -48,9 +52,7 @@ impl CertifiedKey {
     }
 }
 
-pub fn generate_root_certificate_rcgen() -> Result<(String, String), CaError> {
-    use rcgen::{CertificateParams, DistinguishedName, IsCa, KeyPair};
-
+pub fn issue_ca_root_certificate() -> Result<(String, String), CaError> {
     // Create a new key pair
     let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)?;
 
@@ -116,6 +118,70 @@ pub fn deserialize_ca(
     })
 }
 
+/// An artificial SNI name under which a cluster node presents its peer certificate
+/// instead of the normal certificates.
+pub const CLUSTER_TLS_SNI_NAME: &str = "warpgate-cluster.internal";
+
+/// A per-process cluster peer identity
+pub struct ClusterTlsIdentity {
+    pub certificate_pem: String,
+    pub private_key_pem: String,
+    pub spki_sha256_hex: String,
+}
+
+impl ClusterTlsIdentity {
+    pub fn issue(ca_certificate_pem: &str, ca_private_key_pem: &str) -> Result<Self, CaError> {
+        let ca_key = KeyPair::from_pem(ca_private_key_pem)?;
+        let issuer = Issuer::from_ca_cert_pem(ca_certificate_pem, ca_key)?;
+        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)?;
+
+        let mut params = CertificateParams::new(vec![CLUSTER_TLS_SNI_NAME.into()])?;
+        let mut dn = DistinguishedName::new();
+        dn.push(rcgen::DnType::CommonName, CLUSTER_TLS_SNI_NAME);
+        params.distinguished_name = dn;
+        params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+
+        // Backdated in case of clock skew
+        // long-lived cause it's never rotated until the process dies
+        params.not_before = (SystemTime::now() - Duration::from_secs(5 * 60)).into();
+        params.not_after =
+            (SystemTime::now() + Duration::from_secs(10 * 365 * 24 * 60 * 60)).into();
+
+        let certificate = params.signed_by(&key_pair, &issuer)?;
+        Ok(ClusterTlsIdentity {
+            spki_sha256_hex: certificate_der_spki_sha256_hex(certificate.der())?,
+            certificate_pem: certificate.pem(),
+            private_key_pem: key_pair.serialize_pem(),
+        })
+    }
+}
+
+/// SHA256 of the certificate's SPKI DER as used for peer verification
+pub fn certificate_der_spki_sha256_hex(cert_der: &[u8]) -> Result<String, CaError> {
+    let (_, cert) = x509_parser::parse_x509_certificate(cert_der)?;
+    Ok(hex::encode(
+        digest::digest(&digest::SHA256, cert.tbs_certificate.subject_pki.raw).as_ref(),
+    ))
+}
+
+/// A unique serial number derived from the subject name and current time.
+fn generate_serial_number(subject_name: &str) -> Result<SerialNumber, CaError> {
+    let mut hasher = digest::Context::new(&digest::SHA256);
+    hasher.update(subject_name.as_bytes());
+    hasher.update(
+        &SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .to_le_bytes(),
+    );
+    let hash = hasher.finish();
+    #[allow(clippy::indexing_slicing, reason = "length known")]
+    let serial_bytes = &hash.as_ref()[..8];
+    Ok(SerialNumber::new(serial_bytes)?)
+}
+
 /// Issue a client certificate signed by the CA
 pub fn issue_client_certificate(
     ca: &CertifiedKey,
@@ -155,22 +221,7 @@ pub fn issue_client_certificate(
     // Get the issuer name from the CA certificate
     let issuer = ca.certificate.tbs_certificate.issuer.clone();
 
-    let serial_number = {
-        // Generate a unique serial number
-        let mut hasher = digest::Context::new(&digest::SHA256);
-        hasher.update(subject_name.as_bytes());
-        hasher.update(
-            &SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-                .to_le_bytes(),
-        );
-        let hash = hasher.finish();
-        #[allow(clippy::indexing_slicing, reason = "length known")]
-        let serial_bytes = &hash.as_ref()[..8]; // Use first 8 bytes
-        SerialNumber::new(serial_bytes)?
-    };
+    let serial_number = generate_serial_number(subject_name)?;
 
     let public_key = SubjectPublicKeyInfo::from_pem(public_key_pem)?;
 
@@ -238,4 +289,21 @@ pub fn certificate_to_pem(certificate: &Certificate) -> Result<String, CaError> 
     let der = certificate.to_der()?;
     let pem_data = pem::Pem::new("CERTIFICATE", der);
     Ok(pem::encode(&pem_data))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cluster_identity_profile() {
+        let (ca_cert, ca_key) = issue_ca_root_certificate().unwrap();
+        let identity = ClusterTlsIdentity::issue(&ca_cert, &ca_key).unwrap();
+
+        let cert = deserialize_certificate(&identity.certificate_pem).unwrap();
+        assert_eq!(
+            certificate_der_spki_sha256_hex(&cert.to_der().unwrap()).unwrap(),
+            identity.spki_sha256_hex,
+        );
+    }
 }

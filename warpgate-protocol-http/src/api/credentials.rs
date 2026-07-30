@@ -11,14 +11,14 @@ use warpgate_common::{
     PasswordPolicy, PasswordPolicyViolation, User, UserPasswordCredential,
     UserRequireCredentialsPolicy, WarpgateError, validate_password,
 };
-use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{
-    self as entities, CertificateCredential, Parameters, PasswordCredential, PublicKeyCredential,
+    self as entities, CertificateCredential, PasswordCredential, PublicKeyCredential,
 };
 
 use super::common::get_user;
-use crate::api::AnySecurityScheme;
+use crate::api::auth_scheme::AuthedSession;
 use crate::common::endpoint_auth;
 
 pub struct Api;
@@ -225,10 +225,7 @@ enum DeleteCertificateCredentialResponse {
 pub fn parameters_based_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     e.around(|ep, req| async move {
         let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await?;
-        let services = ctx.services();
-        let parameters = Parameters::Entity::get(&*services.db.lock().await)
-            .await
-            .map_err(WarpgateError::from)?;
+        let parameters = ctx.parameters().await?;
         if !parameters.allow_own_credential_management {
             return Ok(poem::Response::builder()
                 .status(StatusCode::FORBIDDEN)
@@ -249,13 +246,15 @@ impl Api {
     )]
     async fn api_get_credentials_state(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        ctx: AuthedSession,
     ) -> Result<CredentialsStateResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, &db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(CredentialsStateResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(CredentialsStateResponse::Unauthorized);
         };
 
@@ -263,28 +262,28 @@ impl Api {
 
         let otp_creds = user
             .find_related(entities::OtpCredential::Entity)
-            .all(&*db)
+            .all(db)
             .await?;
         let password_creds = user
             .find_related(entities::PasswordCredential::Entity)
-            .all(&*db)
+            .all(db)
             .await?;
         let sso_creds = user
             .find_related(entities::SsoCredential::Entity)
-            .all(&*db)
+            .all(db)
             .await?;
 
         let pk_creds = user
             .find_related(entities::PublicKeyCredential::Entity)
-            .all(&*db)
+            .all(db)
             .await?;
 
         let cert_creds = user
             .find_related(entities::CertificateCredential::Entity)
-            .all(&*db)
+            .all(db)
             .await?;
 
-        let parameters = Parameters::Entity::get(&db).await?;
+        let parameters = ctx.parameters().await?;
 
         Ok(CredentialsStateResponse::Ok(Json(CredentialsState {
             password: match password_creds.len() {
@@ -310,18 +309,20 @@ impl Api {
     )]
     async fn api_change_password(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<ChangePasswordRequest>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<ChangePasswordResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, &db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(ChangePasswordResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(ChangePasswordResponse::Unauthorized);
         };
 
-        let parameters = Parameters::Entity::get(&db).await?;
+        let parameters = ctx.parameters().await?;
         let policy = parameters.password_policy();
         let violations = validate_password(&body.password, &policy);
         if !violations.is_empty() {
@@ -330,7 +331,7 @@ impl Api {
 
         entities::PasswordCredential::Entity::delete_many()
             .filter(entities::PasswordCredential::Column::UserId.eq(user.id))
-            .exec(&*db)
+            .exec(db)
             .await
             .map_err(WarpgateError::from)?;
 
@@ -341,7 +342,7 @@ impl Api {
                 &body.password.clone().into(),
             ))
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
@@ -351,7 +352,7 @@ impl Api {
                     .eq(user.id)
                     .and(entities::PasswordCredential::Column::Id.ne(new_credential.id)),
             )
-            .all(&*db)
+            .all(db)
             .await?;
 
         AuditEvent::CredentialCreated {
@@ -375,14 +376,16 @@ impl Api {
     )]
     async fn api_create_pk(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<NewPublicKeyCredential>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, &db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(CreatePublicKeyCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(CreatePublicKeyCredentialResponse::Unauthorized);
         };
 
@@ -394,7 +397,7 @@ impl Api {
             label: Set(body.label.clone()),
             openssh_public_key: Set(body.openssh_public_key.clone()),
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
@@ -422,27 +425,29 @@ impl Api {
     )]
     async fn api_delete_pk(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, &db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(DeleteCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);
         };
 
         let Some(model) = user
             .find_related(entities::PublicKeyCredential::Entity)
             .filter(entities::PublicKeyCredential::Column::Id.eq(id.0))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        model.delete(&*db).await?;
+        model.delete(db).await?;
 
         AuditEvent::CredentialDeleted {
             credential_type: "public_key".to_string(),
@@ -465,14 +470,16 @@ impl Api {
     )]
     async fn api_create_otp(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<NewOtpCredential>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, &db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(CreateOtpCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(CreateOtpCredentialResponse::Unauthorized);
         };
 
@@ -485,11 +492,11 @@ impl Api {
             user_id: Set(user_id),
             secret_key: Set(body.secret_key.clone()),
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
-        let details = user.load_details(&db).await?;
+        let details = user.load_details(db).await?;
         user_cfg.credential_policy = Some(
             user_cfg
                 .credential_policy
@@ -498,7 +505,7 @@ impl Api {
         );
 
         let user = entities::User::ActiveModel::try_from(user_cfg)?;
-        user.update(&*db).await?;
+        user.update(db).await?;
 
         AuditEvent::CredentialCreated {
             credential_type: "otp".to_string(),
@@ -521,27 +528,29 @@ impl Api {
     )]
     async fn api_delete_otp(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, &db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(DeleteCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(DeleteCredentialResponse::Unauthorized);
         };
 
         let Some(model) = user
             .find_related(entities::OtpCredential::Entity)
             .filter(entities::OtpCredential::Column::Id.eq(id.0))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        model.delete(&*db).await?;
+        model.delete(db).await?;
 
         AuditEvent::CredentialDeleted {
             credential_type: "otp".to_string(),
@@ -564,18 +573,21 @@ impl Api {
     )]
     async fn api_issue_certificate(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<IssueCertificateCredentialRequest>,
     ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, &db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(IssueCertificateCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(IssueCertificateCredentialResponse::Unauthorized);
         };
 
         // Fetch CA params
-        let params = Parameters::Entity::get(&db).await?;
+        let params = ctx.parameters().await?;
         let ca =
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
         let public_key_pem = body.public_key_pem.trim();
@@ -591,7 +603,7 @@ impl Api {
             label: Set(body.label.clone()),
             certificate_pem: Set(client_cert_pem.clone()),
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
@@ -622,20 +634,23 @@ impl Api {
     )]
     async fn api_revoke_certificate(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         id: Path<Uuid>,
     ) -> Result<DeleteCertificateCredentialResponse, WarpgateError> {
         let auth = &ctx.auth;
-        let db = ctx.services().db.lock().await;
+        let db = &ctx.services().db;
 
-        let Some(user) = get_user(auth, &db).await? else {
+        let Some(full) = auth.as_full_user() else {
+            return Ok(DeleteCertificateCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
             return Ok(DeleteCertificateCredentialResponse::Unauthorized);
         };
 
         let Some(model) = user
             .find_related(entities::CertificateCredential::Entity)
             .filter(entities::CertificateCredential::Column::Id.eq(id.0))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteCertificateCredentialResponse::NotFound);
@@ -648,10 +663,10 @@ impl Api {
             date_added: Set(OffsetDateTime::now_utc()),
             serial_number_base64: Set(warpgate_ca::serialize_certificate_serial(&cert)),
         }
-        .insert(&*db)
+        .insert(db)
         .await?;
 
-        model.delete(&*db).await?;
+        model.delete(db).await?;
 
         AuditEvent::CredentialDeleted {
             credential_type: "certificate".to_string(),

@@ -1,4 +1,5 @@
 mod channel_writer;
+mod command_detector;
 mod russh_handler;
 mod service_output;
 mod session;
@@ -87,7 +88,7 @@ async fn _handle_connection(
 
     let server_handle = State::register_session(
         &services.state,
-        &crate::PROTOCOL_NAME,
+        crate::PROTOCOL_NAME,
         SessionStateInit {
             remote_address: Some(remote_address),
             handle: Box::new(session_handle),
@@ -101,17 +102,12 @@ async fn _handle_connection(
     let (event_tx, event_rx) = unbounded_channel();
 
     let banner = {
-        let db = services.db.lock().await;
-        let text = Parameters::Entity::get(&db).await?.ssh_banner;
-        if text.trim().is_empty() {
-            None
-        } else {
-            // Normalize line endings for terminal display.
-            Some(format!(
-                "{}\r\n",
-                text.replace("\r\n", "\n").replace('\n', "\r\n")
-            ))
-        }
+        let db = &services.db;
+        // Normalize line endings for terminal display.
+        Parameters::Entity::get(db)
+            .await?
+            .banner_text()
+            .map(|text| format!("{}\r\n", text.replace("\r\n", "\n").replace('\n', "\r\n")))
     };
 
     let handler = ServerHandler { event_tx, banner };
@@ -203,8 +199,8 @@ where
 
 pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> {
     let parameters = {
-        let db = services.db.lock().await;
-        Parameters::Entity::get(&db).await?
+        let db = &services.db;
+        Parameters::Entity::get(db).await?
     };
 
     let mut methods_vec: Vec<MethodKind> = Vec::new();

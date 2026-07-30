@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthState, CredentialKind, CredentialPolicy, WebApprovalMatchKey,
+    AuthResult, AuthState, CredentialKind, CredentialPolicy, WebApprovalMatchKey,
 };
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{SessionId, User, WarpgateError};
+use warpgate_common::{Protocol, SessionId, User, WarpgateError};
 
 use crate::login_protection::{FailedAttemptInfo, LoginProtectionService};
 use crate::{ConfigProvider, ConfigProviderEnum};
@@ -33,37 +33,44 @@ const fn normalize_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
+/// Whether `remote_ip` is permitted by the user's `allowed_ip_ranges`.
+///
+/// An unset or empty range list, or an unknown remote IP, counts as
+/// unrestricted. Both the interactive auth path and the ticket path decide IP
+/// access through this, so the two can't drift.
+pub(crate) fn ip_allowed(
+    allowed_ip_ranges: Option<&Vec<WarpgateIpNet>>,
+    remote_ip: Option<IpAddr>,
+) -> bool {
+    let Some(ranges) = allowed_ip_ranges else {
+        return true;
+    };
+    if ranges.is_empty() {
+        return true;
+    }
+    let Some(raw_ip) = remote_ip else {
+        return true;
+    };
+    let ip = normalize_ip(raw_ip);
+    ranges.iter().any(|network| network.contains(&ip))
+}
+
 /// Checks whether the given IP is allowed by the user's `allowed_ip_ranges` setting.
 /// Returns `Ok(())` if access is allowed, or an appropriate `WarpgateError` if denied.
-fn check_ip_allowed(
+pub fn check_ip_allowed(
     allowed_ip_ranges: Option<&Vec<WarpgateIpNet>>,
     remote_ip: Option<IpAddr>,
     username: &str,
 ) -> Result<(), WarpgateError> {
-    let Some(ranges) = allowed_ip_ranges else {
-        return Ok(());
-    };
-    if ranges.is_empty() {
+    if ip_allowed(allowed_ip_ranges, remote_ip) {
         return Ok(());
     }
-    let Some(raw_ip) = remote_ip else {
-        return Ok(());
-    };
-    let ip = normalize_ip(raw_ip);
-    for network in ranges {
-        if network.contains(&ip) {
-            return Ok(());
-        }
-    }
+    // `ip_allowed` only denies when a remote IP is present and outside the ranges.
+    let ip_str = remote_ip.map_or_else(String::new, |ip| normalize_ip(ip).to_string());
     tracing::warn!(
-        "Access denied for IP '{}' (not in any allowed range for user '{}')",
-        ip,
-        username
+        "Access denied for IP '{ip_str}' (not in any allowed range for user '{username}')"
     );
-    Err(WarpgateError::IpAddrNotAllowed(
-        ip.to_string(),
-        username.into(),
-    ))
+    Err(WarpgateError::IpAddrNotAllowed(ip_str, username.into()))
 }
 
 /// Record a failed attempt for an unknown username so that username
@@ -75,7 +82,7 @@ fn check_ip_allowed(
 async fn record_unknown_user_attempt(
     login_protection: &LoginProtectionService,
     username: &str,
-    protocol: &str,
+    protocol: Protocol,
     remote_ip: Option<IpAddr>,
     credential_type: Option<&str>,
 ) {
@@ -86,26 +93,54 @@ async fn record_unknown_user_attempt(
         .record_failed_attempt(FailedAttemptInfo {
             username: username.to_string(),
             remote_ip,
-            protocol: protocol.to_string(),
+            protocol,
             credential_type: credential_type.to_string(),
         })
         .await;
 }
 
-struct AuthCompletionSignal {
-    sender: broadcast::Sender<AuthResult>,
-    created_at: Instant,
+/// Waits until the auth state reaches a terminal result (accepted or
+/// rejected), or [`TIMEOUT`] elapses (treated as rejection).
+///
+/// Subscribing and checking happen under a single state lock, and state
+/// changes are only broadcast while that same lock is held — so a transition
+/// cannot slip between the check and the subscription.
+pub async fn wait_for_auth_completion(state_arc: &Arc<Mutex<AuthState>>) -> AuthResult {
+    wait_for_auth_completion_within(state_arc, *TIMEOUT).await
 }
 
-impl AuthCompletionSignal {
-    pub fn is_expired(&self) -> bool {
-        self.created_at.elapsed() > *TIMEOUT
-    }
+async fn wait_for_auth_completion_within(
+    state_arc: &Arc<Mutex<AuthState>>,
+    timeout: Duration,
+) -> AuthResult {
+    let mut rx = {
+        let state = state_arc.lock().await;
+        match state.verify() {
+            result @ (AuthResult::Accepted { .. } | AuthResult::Rejected) => return result,
+            AuthResult::Need(_) => state.subscribe(),
+        }
+    };
+    tokio::time::timeout(timeout, async {
+        loop {
+            match rx.recv().await {
+                Ok(result @ (AuthResult::Accepted { .. } | AuthResult::Rejected)) => return result,
+                Ok(AuthResult::Need(_)) => (),
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let result = state_arc.lock().await.verify();
+                    if !matches!(result, AuthResult::Need(_)) {
+                        return result;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => return AuthResult::Rejected,
+            }
+        }
+    })
+    .await
+    .unwrap_or(AuthResult::Rejected)
 }
 
 pub struct AuthStateStore {
     store: HashMap<Uuid, (Arc<Mutex<AuthState>>, Instant)>,
-    completion_signals: HashMap<Uuid, AuthCompletionSignal>,
     web_auth_request_signal: broadcast::Sender<Uuid>,
     recent_approvals: HashMap<WebApprovalMatchKey, Instant>,
 }
@@ -120,7 +155,6 @@ impl AuthStateStore {
     pub fn new() -> Self {
         Self {
             store: HashMap::new(),
-            completion_signals: HashMap::new(),
             web_auth_request_signal: broadcast::channel(100).0,
             recent_approvals: HashMap::new(),
         }
@@ -157,17 +191,15 @@ impl AuthStateStore {
     /// and pass the result to [`AuthStateStore::create`], so that concurrent
     /// logins don't serialise on the store lock while doing database I/O.
     pub(crate) async fn resolve_user_and_policy(
-        config_provider: &Arc<Mutex<ConfigProviderEnum>>,
+        config_provider: &Arc<ConfigProviderEnum>,
         login_protection: &LoginProtectionService,
         username: &str,
-        protocol: &str,
+        protocol: Protocol,
         supported_credential_types: &[CredentialKind],
         remote_ip: Option<IpAddr>,
         rate_limit_credential_type: Option<&str>,
     ) -> Result<(User, Box<dyn CredentialPolicy + Sync + Send>), WarpgateError> {
         let Some(user) = config_provider
-            .lock()
-            .await
             .list_users()
             .await?
             .iter()
@@ -188,8 +220,6 @@ impl AuthStateStore {
         check_ip_allowed(user.allowed_ip_ranges.as_ref(), remote_ip, username)?;
 
         let policy = config_provider
-            .lock()
-            .await
             .get_credential_policy(username, supported_credential_types)
             .await?;
         let Some(policy) = policy else {
@@ -212,18 +242,29 @@ impl AuthStateStore {
     ///
     /// This is deliberately synchronous and does no database I/O, so the store
     /// lock is only held for the in-memory insert.
+    ///
+    /// A session holds at most one auth state, keyed by its session id, so a new
+    /// attempt on the same session (a different username or target) supersedes
+    /// the previous one. Anything already waiting on the old state holds its
+    /// `Arc` and still observes its outcome; it just stops being reachable by
+    /// session id.
     pub(crate) fn create(
         &mut self,
-        session_id: Option<&SessionId>,
+        session_id: &SessionId,
         user: &User,
-        protocol: &str,
+        protocol: Protocol,
         target_name: &str,
         policy: Box<dyn CredentialPolicy + Sync + Send>,
         remote_ip: Option<IpAddr>,
-    ) -> (Uuid, Arc<Mutex<AuthState>>) {
-        let id = Uuid::new_v4();
+    ) -> Arc<Mutex<AuthState>> {
+        // The auth state is identified by its session id, so a cross-node web
+        // approval can resolve the owning node straight from the `sessions`
+        // table (which records `node_id`).
+        let id = *session_id;
 
-        let (state_change_tx, mut state_change_rx) = broadcast::channel(1);
+        // Small backlog so subscribers that briefly fall behind still see the
+        // terminal transition; laggards re-check the state directly.
+        let (state_change_tx, mut state_change_rx) = broadcast::channel(8);
         let web_auth_request_signal = self.web_auth_request_signal.clone();
         tokio::spawn(async move {
             while let Ok(AuthResult::Need(result)) = state_change_rx.recv().await {
@@ -235,10 +276,9 @@ impl AuthStateStore {
 
         let state = AuthState::new(
             id,
-            session_id.copied(),
             remote_ip,
             user.into(),
-            protocol.to_string(),
+            protocol,
             target_name.to_string(),
             policy,
             state_change_tx,
@@ -246,7 +286,25 @@ impl AuthStateStore {
         let state_arc = Arc::new(Mutex::new(state));
         self.store.insert(id, (state_arc.clone(), Instant::now()));
 
-        (id, state_arc)
+        state_arc
+    }
+
+    /// Drops a session's auth state, so a cancelled login stops being reachable
+    /// by session id.
+    pub fn remove(&mut self, session_id: &SessionId) {
+        self.store.remove(session_id);
+    }
+
+    /// Drops a session's auth state only if it is still `state`: a concurrent
+    /// attempt may have superseded it, and the newer attempt must not be torn
+    /// down by the older one's cleanup.
+    pub fn remove_if_same(&mut self, session_id: &SessionId, state: &Arc<Mutex<AuthState>>) {
+        if self
+            .get(session_id)
+            .is_some_and(|current| Arc::ptr_eq(&current, state))
+        {
+            self.store.remove(session_id);
+        }
     }
 
     /// Records a web approval for later bypass checks
@@ -267,10 +325,16 @@ impl AuthStateStore {
         grace: Duration,
     ) -> Result<bool, WarpgateError> {
         let Some(key) = state_arc.lock().await.web_approval_match_key() else {
-            return Ok(false)
+            return Ok(false);
         };
 
-        if !self.recent_approval_is_fresh(&key, grace) {
+        // A remembered approval matches this exact scope, or one granted for all
+        // targets. The all-targets probe deliberately also covers an untargeted
+        // login: approving every target is strictly broader than approving a
+        // portal sign-in, so it subsumes it.
+        if !self.recent_approval_is_fresh(&key, grace)
+            && !self.recent_approval_is_fresh(&key.for_all_targets(), grace)
+        {
             return Ok(false);
         }
 
@@ -282,38 +346,14 @@ impl AuthStateStore {
             return Ok(false);
         }
 
-        state.add_valid_credential(AuthCredential::WebUserApproval);
+        state.add_web_user_approval();
         state.emit_web_approval_bypassed_event();
         Ok(true)
-    }
-
-    pub fn subscribe(&mut self, id: Uuid) -> broadcast::Receiver<AuthResult> {
-        let signal = self.completion_signals.entry(id).or_insert_with(|| {
-            let (sender, _) = broadcast::channel(1);
-            AuthCompletionSignal {
-                sender,
-                created_at: Instant::now(),
-            }
-        });
-
-        signal.sender.subscribe()
-    }
-
-    pub async fn complete(&mut self, id: &Uuid) {
-        let Some((state, _)) = self.store.get(id) else {
-            return;
-        };
-        if let Some(sig) = self.completion_signals.remove(id) {
-            let _ = sig.sender.send(state.lock().await.verify());
-        }
     }
 
     pub fn vacuum(&mut self) {
         self.store
             .retain(|_, (_, started_at)| started_at.elapsed() < *TIMEOUT);
-
-        self.completion_signals
-            .retain(|_, signal| !signal.is_expired());
 
         self.recent_approvals
             .retain(|_, at| at.elapsed() < RECENT_APPROVAL_RETENTION);
@@ -325,8 +365,150 @@ mod tests {
     use std::str::FromStr;
 
     use ipnet::IpNet;
+    use warpgate_common::auth::{
+        AuthCredential, AuthCredentialFingerprint, AuthStateUserInfo, CredentialPolicyResponse,
+        WebApprovalScopeKey,
+    };
 
     use super::*;
+
+    struct RequireWebApproval;
+
+    impl CredentialPolicy for RequireWebApproval {
+        fn is_sufficient(
+            &self,
+            _protocol: Protocol,
+            valid_credentials: &[AuthCredential],
+        ) -> CredentialPolicyResponse {
+            if valid_credentials
+                .iter()
+                .any(|c| c.kind() == CredentialKind::WebUserApproval)
+            {
+                CredentialPolicyResponse::Ok
+            } else {
+                CredentialPolicyResponse::Need(
+                    [CredentialKind::WebUserApproval].into_iter().collect(),
+                )
+            }
+        }
+    }
+
+    fn interactive_state() -> Arc<Mutex<AuthState>> {
+        Arc::new(Mutex::new(AuthState::new(
+            Uuid::new_v4(),
+            None,
+            AuthStateUserInfo {
+                id: Uuid::new_v4(),
+                username: "alice".into(),
+            },
+            Protocol::Ssh,
+            "target".into(),
+            Box::new(RequireWebApproval),
+            broadcast::channel(8).0,
+        )))
+    }
+
+    fn test_user() -> User {
+        User {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+            description: String::new(),
+            credential_policy: None,
+            rate_limit_bytes_per_second: None,
+            ldap_server_id: None,
+            allowed_ip_ranges: None,
+        }
+    }
+
+    fn create_for(
+        store: &mut AuthStateStore,
+        user: &User,
+        session_id: &SessionId,
+    ) -> Arc<Mutex<AuthState>> {
+        store.create(
+            session_id,
+            user,
+            Protocol::Ssh,
+            "target",
+            Box::new(RequireWebApproval),
+            None,
+        )
+    }
+
+    // Cross-node web-approval routing keys on this: an auth state is identified
+    // by its session id, so the owning node resolves from the `sessions` table.
+    #[tokio::test]
+    async fn create_keys_auth_state_by_session_id() {
+        let mut store = AuthStateStore::new();
+        let user = test_user();
+        let session_id = Uuid::new_v4();
+
+        let state = create_for(&mut store, &user, &session_id);
+        assert!(Arc::ptr_eq(&store.get(&session_id).unwrap(), &state));
+    }
+
+    #[tokio::test]
+    async fn a_new_attempt_supersedes_the_session_s_previous_state() {
+        let mut store = AuthStateStore::new();
+        let user = test_user();
+        let session_id = Uuid::new_v4();
+
+        let first = create_for(&mut store, &user, &session_id);
+        let second = create_for(&mut store, &user, &session_id);
+
+        assert!(!Arc::ptr_eq(&second, &first));
+        assert!(Arc::ptr_eq(&store.get(&session_id).unwrap(), &second));
+
+        // The superseded attempt's cleanup must not tear down the newer one.
+        store.remove_if_same(&session_id, &first);
+        assert!(store.contains_key(&session_id));
+
+        store.remove_if_same(&session_id, &second);
+        assert!(!store.contains_key(&session_id));
+    }
+
+    #[tokio::test]
+    async fn wait_returns_immediately_when_already_terminal() {
+        let state = interactive_state();
+        state.lock().await.reject();
+        assert!(matches!(
+            wait_for_auth_completion(&state).await,
+            AuthResult::Rejected
+        ));
+    }
+
+    #[tokio::test]
+    async fn wait_resolves_on_approval() {
+        let state = interactive_state();
+        let waiter = {
+            let state = state.clone();
+            tokio::spawn(async move { wait_for_auth_completion(&state).await })
+        };
+        tokio::task::yield_now().await;
+        let _ = state.lock().await.add_web_user_approval();
+        assert!(matches!(waiter.await.unwrap(), AuthResult::Accepted { .. }));
+    }
+
+    #[tokio::test]
+    async fn wait_resolves_on_rejection() {
+        let state = interactive_state();
+        let waiter = {
+            let state = state.clone();
+            tokio::spawn(async move { wait_for_auth_completion(&state).await })
+        };
+        tokio::task::yield_now().await;
+        state.lock().await.reject();
+        assert!(matches!(waiter.await.unwrap(), AuthResult::Rejected));
+    }
+
+    #[tokio::test]
+    async fn wait_times_out_to_rejected() {
+        let state = interactive_state();
+        assert!(matches!(
+            wait_for_auth_completion_within(&state, Duration::from_millis(50)).await,
+            AuthResult::Rejected
+        ));
+    }
 
     #[test]
     fn ip_allowed_no_restriction() {
@@ -411,14 +593,42 @@ mod tests {
         assert!(check_ip_allowed(range.as_ref(), Some(ip), "user").is_err());
     }
 
-    fn approval_key(target: &str) -> WebApprovalMatchKey {
+    #[test]
+    fn ip_allowed_helper_matches_auth_path_semantics() {
+        let range = Some(vec![IpNet::from_str("10.0.0.0/8").unwrap().into()]);
+        // In range -> allowed.
+        assert!(ip_allowed(
+            range.as_ref(),
+            Some("10.1.2.3".parse().unwrap())
+        ));
+        // Out of range -> denied.
+        assert!(!ip_allowed(
+            range.as_ref(),
+            Some("192.168.0.1".parse().unwrap())
+        ));
+        // Empty range list is unrestricted.
+        assert!(ip_allowed(
+            Some(&vec![]),
+            Some("192.168.0.1".parse().unwrap())
+        ));
+        // No remote IP is treated as unrestricted.
+        assert!(ip_allowed(range.as_ref(), None));
+        // No restriction configured.
+        assert!(ip_allowed(None, Some("192.168.0.1".parse().unwrap())));
+    }
+
+    fn approval_key(scope: WebApprovalScopeKey) -> WebApprovalMatchKey {
         WebApprovalMatchKey {
             remote_ip: "10.0.0.5".parse().unwrap(),
-            protocol: "ssh".into(),
+            protocol: Protocol::Ssh,
             username: "alice".into(),
-            target_name: target.into(),
-            other_credentials: vec![CredentialKind::Password],
+            scope,
+            other_credentials: vec![AuthCredentialFingerprint::Password { hash: [7u8; 32] }],
         }
+    }
+
+    fn for_target(name: &str) -> WebApprovalMatchKey {
+        approval_key(WebApprovalScopeKey::Target(name.into()))
     }
 
     #[test]
@@ -427,15 +637,70 @@ mod tests {
         let grace = Duration::from_secs(3600);
 
         // No approval recorded yet.
-        assert!(!store.recent_approval_is_fresh(&approval_key("prod"), grace));
+        assert!(!store.recent_approval_is_fresh(&for_target("prod"), grace));
 
-        store.record_web_approval(approval_key("prod"));
+        store.record_web_approval(for_target("prod"));
 
         // Exact match within grace bypasses.
-        assert!(store.recent_approval_is_fresh(&approval_key("prod"), grace));
+        assert!(store.recent_approval_is_fresh(&for_target("prod"), grace));
         // A different target is not a full match.
-        assert!(!store.recent_approval_is_fresh(&approval_key("staging"), grace));
+        assert!(!store.recent_approval_is_fresh(&for_target("staging"), grace));
+        // Different credentials are not a full match.
+        let mut wrong_cred = for_target("prod");
+        wrong_cred.other_credentials =
+            vec![AuthCredentialFingerprint::Password { hash: [9u8; 32] }];
+        assert!(!store.recent_approval_is_fresh(&wrong_cred, grace));
         // A zero grace never counts as fresh, so approval is required again.
-        assert!(!store.recent_approval_is_fresh(&approval_key("prod"), Duration::ZERO));
+        assert!(!store.recent_approval_is_fresh(&for_target("prod"), Duration::ZERO));
+    }
+
+    #[test]
+    fn web_approval_for_all_targets_matches_any_target() {
+        let mut store = AuthStateStore::new();
+        let grace = Duration::from_secs(3600);
+
+        store.record_web_approval(approval_key(WebApprovalScopeKey::AllTargets));
+
+        // An all-targets approval is found via `for_all_targets` for any target.
+        assert!(store.recent_approval_is_fresh(&for_target("prod").for_all_targets(), grace));
+        assert!(store.recent_approval_is_fresh(&for_target("staging").for_all_targets(), grace));
+        // ...but not by an exact-target lookup.
+        assert!(!store.recent_approval_is_fresh(&for_target("prod"), grace));
+    }
+
+    #[test]
+    fn untargeted_approval_is_its_own_bucket() {
+        let mut store = AuthStateStore::new();
+        let grace = Duration::from_secs(3600);
+
+        // An HTTP sign-in / SSH menu login carries no target.
+        store.record_web_approval(approval_key(WebApprovalScopeKey::Untargeted));
+
+        assert!(
+            store.recent_approval_is_fresh(&approval_key(WebApprovalScopeKey::Untargeted), grace)
+        );
+        // It must not stand in for approval of an actual target...
+        assert!(!store.recent_approval_is_fresh(&for_target("prod"), grace));
+        // ...nor be mistaken for an all-targets grant.
+        assert!(!store.recent_approval_is_fresh(&for_target("prod").for_all_targets(), grace));
+    }
+
+    #[test]
+    fn all_targets_approval_covers_an_untargeted_login() {
+        let mut store = AuthStateStore::new();
+        let grace = Duration::from_secs(3600);
+
+        store.record_web_approval(approval_key(WebApprovalScopeKey::AllTargets));
+
+        // Deliberate: approving every target subsumes a portal sign-in, and the
+        // bypass reaches it through the same `for_all_targets` probe.
+        assert!(store.recent_approval_is_fresh(
+            &approval_key(WebApprovalScopeKey::Untargeted).for_all_targets(),
+            grace
+        ));
+        // The untargeted bucket itself stays empty.
+        assert!(
+            !store.recent_approval_is_fresh(&approval_key(WebApprovalScopeKey::Untargeted), grace)
+        );
     }
 }

@@ -24,12 +24,11 @@ use warpgate_common::http_headers::{
 };
 use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
 use warpgate_common_http::logging::{get_client_ip, log_request_result};
-use warpgate_common_http::{
-    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-};
+use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization, SessionKeepalive};
 use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
+use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
 use crate::session::SessionStore;
 
@@ -93,10 +92,13 @@ fn strip_warpgate_internal_query_params(pq: &PathAndQuery) -> Result<PathAndQuer
     };
     let query = form_urlencoded::parse(query.as_bytes())
         .filter(|(key, _)| key != "warpgate-target" && key != "warpgate-ticket")
-        .fold(form_urlencoded::Serializer::new(String::new()), |mut s, (k, v)| {
-            s.append_pair(&k, &v);
-            s
-        })
+        .fold(
+            form_urlencoded::Serializer::new(String::new()),
+            |mut s, (k, v)| {
+                s.append_pair(&k, &v);
+                s
+            },
+        )
         .finish();
     let path = pq.path();
     let rebuilt = if query.is_empty() {
@@ -277,42 +279,15 @@ pub async fn proxy_normal_request(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
     body: Body,
+    target_name: &str,
     options: &TargetHTTPOptions,
+    client_cache: &HttpClientCache,
 ) -> poem::Result<Response> {
     let uri = construct_uri(req, options, false)?;
 
     tracing::debug!("URI: {:?}", uri);
 
-    let mut client = reqwest::Client::builder()
-        .gzip(true)
-        .redirect(reqwest::redirect::Policy::none())
-        .connection_verbose(true);
-
-    if options.tls.mode == TlsMode::Required {
-        client = client.https_only(true);
-    }
-
-    client = client.redirect(reqwest::redirect::Policy::custom({
-        let tls_mode = options.tls.mode;
-        let uri = uri.clone();
-        move |attempt| {
-            if tls_mode == TlsMode::Preferred
-                && uri.scheme() == Some(&Scheme::HTTP)
-                && attempt.url().scheme() == "https"
-            {
-                debug!("Following HTTP->HTTPS redirect");
-                attempt.follow()
-            } else {
-                attempt.stop()
-            }
-        }
-    }));
-
-    if !options.tls.verify {
-        client = client.danger_accept_invalid_certs(true);
-    }
-
-    let client = client.build().context("Could not build request")?;
+    let client = client_cache.client_for(target_name, options).await?;
 
     let (authorization_header, uri) = extract_basic_auth(uri)?;
 
@@ -339,14 +314,19 @@ pub async fn proxy_normal_request(
 
     copy_client_response(&client_response, &mut response);
 
-    let embed_session_menu = {
-        let db = ctx.services().db.lock().await;
-        warpgate_db_entities::Parameters::Entity::get(&db)
+    // The embedded UI can go in if the response is a usable HTML page - we for example
+    // don't want to embed into a 404 page or a JS file - and it has something to show:
+    // the session menu, the login banner, or both.
+    let embed_ui = response.status() == StatusCode::OK
+        && response
+            .content_type()
+            .is_some_and(|content_type| content_type.starts_with("text/html"))
+        && ctx
+            .parameters()
             .await
-            .map(|p| p.show_session_menu)
-            .unwrap_or(true)
-    };
-    copy_client_body(client_response, &mut response, embed_session_menu).await?;
+            .map(|p| p.show_session_menu || p.banner_text().is_some())
+            .unwrap_or(true);
+    copy_client_body(client_response, &mut response, embed_ui).await?;
 
     log_request_result(
         req.method(),
@@ -362,14 +342,9 @@ pub async fn proxy_normal_request(
 async fn copy_client_body(
     client_response: reqwest::Response,
     response: &mut Response,
-    embed_session_menu: bool,
+    embed_ui: bool,
 ) -> Result<()> {
-    if embed_session_menu
-        && response
-            .content_type()
-            .is_some_and(|c| c.starts_with("text/html"))
-        && response.status() == 200
-    {
+    if embed_ui {
         copy_client_body_and_embed(client_response, response).await?;
         return Ok(());
     }
@@ -477,14 +452,11 @@ async fn proxy_ws_inner(
         .clone();
     let session = <&Session>::from_request_without_body(req).await?;
     let mut close_rx = session_middleware.lock().await.close_receiver_for(session);
-    if close_rx.is_none()
-        && matches!(
-            &ctx.auth,
-            RequestAuthorization::Session(SessionAuthorization::User { .. })
-        )
-    {
-        return Err(poem::Error::from_status(StatusCode::UNAUTHORIZED));
-    }
+
+    let keepalive_guard = Data::<&SessionKeepalive>::from_request_without_body(req)
+        .await
+        .ok()
+        .map(|x| x.guard());
 
     let (authorization_header, uri) = extract_basic_auth(uri)?;
     let mut client_request = http::request::Builder::new()
@@ -564,7 +536,7 @@ async fn proxy_ws_inner(
                     result = &mut client_to_server => {
                         (false, Some(result))
                     }
-                    _ = async {
+                    () = async {
                         match close_rx.as_mut() {
                             Some(close_rx) => {
                                 let _ = close_rx.recv().await;
@@ -601,6 +573,9 @@ async fn proxy_ws_inner(
             } {
                 error!(?error, "Websocket stream error");
             }
+
+            drop(keepalive_guard);
+
             Ok::<_, anyhow::Error>(())
         })
         .into_response();

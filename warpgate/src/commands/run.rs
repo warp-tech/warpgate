@@ -14,7 +14,7 @@ use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, WarpgateConfig};
 use warpgate_core::db::cleanup_db;
 use warpgate_core::logging::install_database_logger;
-use warpgate_core::{ConfigProvider, ListenerStatusRegistry, ProtocolServer, Services};
+use warpgate_core::{ListenerStatusRegistry, ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
@@ -82,6 +82,10 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     install_database_logger(services.db.clone());
 
+    // Runs even when the SSH listener is disabled so that the admin UI can
+    // manage the keys and other protocols' features relying on them work.
+    warpgate_protocol_ssh::ensure_client_keys(&services.db, &config, params).await?;
+
     if console::user_attended() {
         info!("--------------------------------------------");
         info!("Warpgate is now running.");
@@ -134,15 +138,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             }
         });
         supervisors.push(
-            spawn_supervisor(
-                "HTTP",
-                true,
-                factory,
-                selector,
-                &config_rx,
-                status_registry,
-            )
-            .await?,
+            spawn_supervisor("HTTP", true, factory, selector, &config_rx, status_registry).await?,
         );
     }
 
@@ -165,15 +161,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 tls: Vec::new(),
             });
         supervisors.push(
-            spawn_supervisor(
-                "SSH",
-                false,
-                factory,
-                selector,
-                &config_rx,
-                status_registry,
-            )
-            .await?,
+            spawn_supervisor("SSH", false, factory, selector, &config_rx, status_registry).await?,
         );
     }
 
@@ -229,7 +217,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 let interval = std::cmp::min(retention, audit_retention) / 10;
                 #[allow(clippy::explicit_auto_deref)]
                 match cleanup_db(
-                    &*services.db.lock().await,
+                    &services.db,
                     &*services.recordings.lock().await,
                     &retention,
                     &audit_retention,
@@ -268,16 +256,15 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         });
     }
 
-    tokio::spawn(watch_config_and_reload(services.clone(), config_rx.clone()));
-
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
+    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
 
     loop {
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                std::process::exit(1);
-            }
             _ = sigint.recv() => {
+                break
+            }
+            _ = sigterm.recv() => {
                 break
             }
             result = supervisors.next() => {
@@ -292,31 +279,19 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         }
     }
 
-    info!("Exiting");
-    Ok(())
-}
-
-pub async fn watch_config_and_reload(
-    services: Services,
-    mut config_rx: watch::Receiver<WarpgateConfig>,
-) -> Result<()> {
-    while config_rx.changed().await.is_ok() {
-        let state = services.state.lock().await;
-        let mut cp = services.config_provider.lock().await;
-        // TODO no longer happens since everything is in the DB
-        for (id, session) in &state.sessions {
-            let mut session = session.lock().await;
-            if let (Some(user_info), Some(target)) =
-                (session.user_info.as_ref(), session.target.as_ref())
-                && !cp
-                    .authorize_target(&user_info.username, &target.name)
-                    .await?
-            {
-                warn!(sesson_id=%id, %user_info.username, target=&target.name, "Session no longer authorized after config reload");
-                session.handle.close();
-            }
+    let cleanup = async {
+        services.recordings.lock().await.shutdown().await;
+        if let Err(error) = services.cluster.shutdown().await {
+            warn!(%error, "Failed to deregister cluster node");
         }
+    };
+
+    tokio::select! {
+        () = cleanup => {}
+        _ = sigint.recv() => std::process::exit(1),
+        _ = sigterm.recv() => std::process::exit(1),
     }
 
+    info!("Exiting");
     Ok(())
 }

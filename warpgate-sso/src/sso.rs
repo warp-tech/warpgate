@@ -26,7 +26,7 @@ use crate::{SsoError, discover_metadata};
 /// and `display` (human-readable name).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub(crate) enum GroupClaimEntry {
+pub enum GroupClaimEntry {
     Str(String),
     Obj {
         #[serde(default)]
@@ -41,7 +41,7 @@ pub(crate) enum GroupClaimEntry {
 /// value as a bare scalar rather than a one-element array; both are accepted.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub(crate) enum GroupClaim {
+pub enum GroupClaim {
     One(GroupClaimEntry),
     Many(Vec<GroupClaimEntry>),
 }
@@ -52,7 +52,7 @@ pub(crate) enum GroupClaim {
 /// so role mappings may be keyed on either the stable group ID or its name.
 /// (A collision between one group's `display` and another's `value` would map
 /// both -- effectively impossible with opaque IDs.)
-pub(crate) fn flatten_group_claim(claim: GroupClaim) -> Vec<String> {
+pub fn flatten_group_claim(claim: GroupClaim) -> Vec<String> {
     let entries = match claim {
         GroupClaim::One(e) => vec![e],
         GroupClaim::Many(v) => v,

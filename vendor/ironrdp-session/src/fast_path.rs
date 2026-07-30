@@ -583,19 +583,39 @@ fn qoi_apply(
     update_rectangle: &mut Option<InclusiveRectangle>,
 ) -> SessionResult<()> {
     let (header, decoded) = qoi::decode_to_vec(data).map_err(|e| reason_err!("QOI decode", "{}", e))?;
-    match header.channels {
-        qoi::Channels::Rgb => {
-            let rectangle = image.apply_rgb24(&decoded, &destination, false)?;
 
-            *update_rectangle = update_rectangle
-                .as_ref()
-                .map(|rect: &InclusiveRectangle| rect.union(&rectangle))
-                .or(Some(rectangle));
-        }
-        qoi::Channels::Rgba => {
-            warn!("Unsupported RGBA QOI data");
-        }
+    // Guard against a decoded buffer that doesn't match the destination
+    // rectangle. `apply_rgb24`/`apply_rgba32` derive the row count from the
+    // decoded length, and the only bounds check downstream (`rect_fits`)
+    // validates the rectangle against the image, not the buffer against the
+    // rectangle. A malformed/oversized QOI payload would otherwise drive the
+    // per-row index past `self.data` and panic (client-side DoS).
+    let channels = match header.channels {
+        qoi::Channels::Rgb => 3,
+        qoi::Channels::Rgba => 4,
+    };
+    let expected = usize::from(destination.width()) * usize::from(destination.height()) * channels;
+    if decoded.len() != expected {
+        return Err(reason_err!(
+            "QOI decode",
+            "decoded {} bytes, expected {} for {}x{} ({} channels)",
+            decoded.len(),
+            expected,
+            destination.width(),
+            destination.height(),
+            channels
+        ));
     }
+
+    let rectangle = match header.channels {
+        qoi::Channels::Rgb => image.apply_rgb24(&decoded, &destination, false)?,
+        qoi::Channels::Rgba => image.apply_rgba32(&decoded, &destination, false)?,
+    };
+
+    *update_rectangle = update_rectangle
+        .as_ref()
+        .map(|rect: &InclusiveRectangle| rect.union(&rectangle))
+        .or(Some(rectangle));
     Ok(())
 }
 
@@ -706,7 +726,7 @@ impl FrameMarkerProcessor {
         match marker.frame_action {
             FrameAction::Begin => Ok(()),
             FrameAction::End => {
-                ironrdp_connector::legacy::encode_share_data(
+                ironrdp_pdu::rdp::headers::encode_share_data(
                     self.user_channel_id,
                     self.io_channel_id,
                     self.share_id,
@@ -715,7 +735,7 @@ impl FrameMarkerProcessor {
                     }),
                     output,
                 )
-                .map_err(crate::legacy::map_error)?;
+                .map_err(SessionError::encode)?;
 
                 Ok(())
             }

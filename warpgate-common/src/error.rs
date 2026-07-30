@@ -76,6 +76,8 @@ pub enum WarpgateError {
     InvalidNetworkAddress(String),
     #[error("session limit reached")]
     SessionLimitReached,
+    #[error("the node ID {0} is gone from the cluster")]
+    NodeGone(Uuid),
 }
 
 impl ResponseError for WarpgateError {

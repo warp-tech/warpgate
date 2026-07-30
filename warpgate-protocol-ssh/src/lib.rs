@@ -12,11 +12,11 @@ pub use common::*;
 use futures::future::BoxFuture;
 pub use keys::*;
 pub use server::bind_server;
-use warpgate_common::{ListenEndpoint, ProtocolName};
+use warpgate_common::{ListenEndpoint, Protocol};
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
-pub static PROTOCOL_NAME: ProtocolName = "SSH";
+pub const PROTOCOL_NAME: Protocol = Protocol::Ssh;
 
 #[derive(Clone)]
 pub struct SSHProtocolServer {
@@ -27,7 +27,7 @@ impl SSHProtocolServer {
     pub async fn new(services: &Services) -> Result<Self> {
         let config = services.config.lock().await;
         generate_keys(&config, &services.global_params, "host")?;
-        generate_keys(&config, &services.global_params, "client")?;
+        ensure_client_keys(&services.db, &config, &services.global_params).await?;
         Ok(Self {
             services: services.clone(),
         })
