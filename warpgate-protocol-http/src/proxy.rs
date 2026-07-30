@@ -165,13 +165,53 @@ fn copy_client_response<R: SomeResponse>(
     server_response.set_status(client_response.status());
 }
 
-fn rewrite_request<B: SomeRequestBuilder>(mut req: B, options: &TargetHTTPOptions) -> Result<B> {
+/// Placeholder for the user's OAuth **access token**.
+///
+/// This is the credential intended for calling downstream APIs, and is what a
+/// target should normally request. It carries the audience and scopes the
+/// authorization server issued it with, so the upstream can make a real
+/// authorization decision rather than inferring one.
+///
+/// Example header value: `Bearer ${WARPGATE_SSO_ACCESS_TOKEN}`
+pub const SSO_ACCESS_TOKEN_PLACEHOLDER: &str = "${WARPGATE_SSO_ACCESS_TOKEN}";
+
+fn rewrite_request<B: SomeRequestBuilder>(
+    mut req: B,
+    options: &TargetHTTPOptions,
+    access_token: Option<&str>,
+) -> Result<B> {
     if let Some(ref headers) = options.headers {
         for (k, v) in headers {
-            req = req.header(HeaderName::try_from(k)?, v);
+            if !v.contains(SSO_ACCESS_TOKEN_PLACEHOLDER) {
+                req = req.header(HeaderName::try_from(k)?, v);
+                continue;
+            }
+            // Drop the header entirely when the session has no access token
+            // (password or ticket auth, or a provider that issued none) rather
+            // than forwarding the literal placeholder, which the upstream would
+            // read as a malformed credential.
+            let Some(token) = access_token else {
+                debug!(
+                    header = %k,
+                    "Skipping header: it requests an SSO access token this session does not have"
+                );
+                continue;
+            };
+            req = req.header(
+                HeaderName::try_from(k)?,
+                v.replace(SSO_ACCESS_TOKEN_PLACEHOLDER, token),
+            );
         }
     }
     Ok(req)
+}
+
+/// The SSO tokens for this browser session, if the user authenticated via SSO.
+/// Kept out of logs deliberately.
+/// The access token from this session's SSO login, if it has one.
+async fn sso_access_token_for(req: &Request) -> Option<String> {
+    let session = <&Session>::from_request_without_body(req).await.ok()?;
+    session.get_sso_login_state()?.access_token
 }
 
 fn rewrite_response(
@@ -296,7 +336,8 @@ pub async fn proxy_normal_request(
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
-    client_request = rewrite_request(client_request, options)?;
+    let access_token = sso_access_token_for(req).await;
+    client_request = rewrite_request(client_request, options, access_token.as_deref())?;
     if let Some(authorization_header) = authorization_header {
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
@@ -484,7 +525,8 @@ async fn proxy_ws_inner(
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
-    client_request = rewrite_request(client_request, options)?;
+    let access_token = sso_access_token_for(req).await;
+    client_request = rewrite_request(client_request, options, access_token.as_deref())?;
 
     let tls_config = configure_tls_connector(!options.tls.verify, false, None)
         .await
@@ -588,6 +630,69 @@ async fn proxy_ws_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Minimal builder that records the headers `rewrite_request` sets, so the
+    /// substitution can be asserted without a live upstream.
+    #[derive(Default)]
+    struct RecordingBuilder {
+        headers: Vec<(String, String)>,
+    }
+
+    impl SomeRequestBuilder for RecordingBuilder {
+        fn header<K: Into<HeaderName>, V>(mut self, k: K, v: V) -> Self
+        where
+            HeaderValue: TryFrom<V>,
+            <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
+        {
+            let name: HeaderName = k.into();
+            if let Ok(value) = HeaderValue::try_from(v) {
+                self.headers.push((
+                    name.as_str().to_owned(),
+                    value.to_str().unwrap_or_default().to_owned(),
+                ));
+            }
+            self
+        }
+    }
+
+    fn options_with_header(value: &str) -> TargetHTTPOptions {
+        let mut o = make_options("https://upstream.invalid");
+        o.headers = Some([("Authorization".to_string(), value.to_string())].into());
+        o
+    }
+
+    fn sent(value: &str, access_token: Option<&str>) -> Vec<(String, String)> {
+        rewrite_request(
+            RecordingBuilder::default(),
+            &options_with_header(value),
+            access_token,
+        )
+        .unwrap()
+        .headers
+    }
+
+    #[test]
+    fn substitutes_the_access_token() {
+        let got = sent("Bearer ${WARPGATE_SSO_ACCESS_TOKEN}", Some("at-abc"));
+        assert_eq!(got, vec![("authorization".into(), "Bearer at-abc".into())]);
+    }
+
+    /// A session may have no access token — password or ticket auth, or a
+    /// provider that issued none. The header must be dropped, never sent with
+    /// the literal placeholder, which the upstream would read as a malformed
+    /// credential.
+    #[test]
+    fn drops_the_header_when_the_session_has_no_access_token() {
+        assert!(sent("Bearer ${WARPGATE_SSO_ACCESS_TOKEN}", None).is_empty());
+    }
+
+    /// Headers without a placeholder must pass through untouched, and must not
+    /// be affected by the absence of a token.
+    #[test]
+    fn leaves_static_headers_alone() {
+        let got = sent("Basic c3RhdGlj", None);
+        assert_eq!(got, vec![("authorization".into(), "Basic c3RhdGlj".into())]);
+    }
 
     fn make_options(url: &str) -> TargetHTTPOptions {
         TargetHTTPOptions {

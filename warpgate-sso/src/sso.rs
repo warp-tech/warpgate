@@ -122,6 +122,10 @@ type WarpgateClient = Client<
 
 pub struct SsoResult {
     pub token: WarpgateIdToken,
+    /// The OAuth access token from the same authorization, when the provider
+    /// issued one. This is the credential intended for calling downstream APIs;
+    /// the ID token is not (see RFC 9068 and OpenID Connect Core §2).
+    pub access_token: Option<String>,
     pub claims: WarpgateIdTokenClaims,
     pub userinfo_claims: Option<UserInfoClaims<WarpgateClaims, CoreGenderClaim>>,
 }
@@ -303,6 +307,7 @@ impl SsoClient {
 
         Ok(SsoResult {
             token: id_token.clone(),
+            access_token: Some(token_response.access_token().secret().to_owned()),
             userinfo_claims,
             claims: claims.clone(),
         })
@@ -362,6 +367,10 @@ impl SsoClient {
 
         Ok(SsoResult {
             token: id_token,
+            // This path verifies a bare ID token with no code exchange, so no
+            // access token exists. A target requesting one has the header
+            // dropped rather than receiving a bogus value.
+            access_token: None,
             claims,
             userinfo_claims: None,
         })
