@@ -165,13 +165,52 @@ fn copy_client_response<R: SomeResponse>(
     server_response.set_status(client_response.status());
 }
 
-fn rewrite_request<B: SomeRequestBuilder>(mut req: B, options: &TargetHTTPOptions) -> Result<B> {
+/// Placeholder that a target's custom header value may contain to receive the
+/// user's OIDC ID token. Opt-in by construction: a target only ever sees the
+/// token if an operator explicitly asks for it, so tokens are never leaked to
+/// unrelated upstreams.
+///
+/// Example header value: `Bearer ${WARPGATE_SSO_ID_TOKEN}`
+pub const SSO_ID_TOKEN_PLACEHOLDER: &str = "${WARPGATE_SSO_ID_TOKEN}";
+
+fn rewrite_request<B: SomeRequestBuilder>(
+    mut req: B,
+    options: &TargetHTTPOptions,
+    sso_id_token: Option<&str>,
+) -> Result<B> {
     if let Some(ref headers) = options.headers {
         for (k, v) in headers {
+            if v.contains(SSO_ID_TOKEN_PLACEHOLDER) {
+                // Drop the header entirely when there is no token (e.g. a
+                // password-authenticated or ticket session) rather than sending
+                // the literal placeholder, which the upstream would treat as a
+                // malformed credential.
+                let Some(token) = sso_id_token else {
+                    debug!(
+                        header = %k,
+                        "Skipping header: it requests the SSO ID token, but this session has none"
+                    );
+                    continue;
+                };
+                req = req.header(
+                    HeaderName::try_from(k)?,
+                    v.replace(SSO_ID_TOKEN_PLACEHOLDER, token),
+                );
+                continue;
+            }
             req = req.header(HeaderName::try_from(k)?, v);
         }
     }
     Ok(req)
+}
+
+/// The raw (compact JWT) OIDC ID token for this browser session, if the user
+/// authenticated via SSO. Kept out of logs deliberately.
+async fn sso_id_token_for(req: &Request) -> Option<String> {
+    let session = <&Session>::from_request_without_body(req).await.ok()?;
+    session
+        .get_sso_login_state()
+        .map(|state| state.token.to_string())
 }
 
 fn rewrite_response(
@@ -296,7 +335,8 @@ pub async fn proxy_normal_request(
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
-    client_request = rewrite_request(client_request, options)?;
+    let sso_id_token = sso_id_token_for(req).await;
+    client_request = rewrite_request(client_request, options, sso_id_token.as_deref())?;
     if let Some(authorization_header) = authorization_header {
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
@@ -484,7 +524,8 @@ async fn proxy_ws_inner(
     client_request = copy_server_request(req, client_request);
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
-    client_request = rewrite_request(client_request, options)?;
+    let sso_id_token = sso_id_token_for(req).await;
+    client_request = rewrite_request(client_request, options, sso_id_token.as_deref())?;
 
     let tls_config = configure_tls_connector(!options.tls.verify, false, None)
         .await
