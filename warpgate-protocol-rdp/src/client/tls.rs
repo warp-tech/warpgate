@@ -12,23 +12,6 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use warpgate_common::RdpTlsSecurity;
 
-#[cfg(feature = "openssl-tls")]
-const OPENSSL_WINDOWS_2012_CIPHER_LIST: &str = concat!(
-    "ECDHE-RSA-AES256-SHA384:",
-    "ECDHE-RSA-AES128-SHA256:",
-    "ECDHE-RSA-AES256-SHA:",
-    "ECDHE-RSA-AES128-SHA:",
-    "AES256-GCM-SHA384:",
-    "AES128-GCM-SHA256:",
-    "AES256-SHA256:",
-    "AES128-SHA256:",
-    "AES256-SHA:",
-    "AES128-SHA:",
-    "!aNULL:!eNULL:!EXPORT:!DES:!3DES:!RC4:!MD5:@SECLEVEL=0"
-);
-#[cfg(feature = "openssl-tls")]
-const OPENSSL_WINDOWS_2008_CIPHER_LIST: &str = "ALL:@SECLEVEL=0";
-
 pub enum TargetTlsStream {
     Rustls(RustlsTlsStream<TcpStream>),
     #[cfg(feature = "openssl-tls")]
@@ -88,11 +71,11 @@ pub async fn upgrade(
     tls_security: RdpTlsSecurity,
 ) -> Result<(TargetTlsStream, Vec<u8>)> {
     match tls_security {
-        RdpTlsSecurity::Windows2016 => upgrade_rustls(stream, server_name, verify).await,
-        RdpTlsSecurity::Windows2012 => {
+        RdpTlsSecurity::Tls12 => upgrade_rustls(stream, server_name, verify).await,
+        RdpTlsSecurity::Tls12WithLegacyCiphers => {
             #[cfg(feature = "openssl-tls")]
             {
-                upgrade_openssl_windows_2012(stream, server_name, verify).await
+                upgrade_openssl_safe(stream, server_name, verify).await
             }
 
             #[cfg(not(feature = "openssl-tls"))]
@@ -103,10 +86,10 @@ pub async fn upgrade(
                 )
             }
         }
-        RdpTlsSecurity::Windows2008 => {
+        RdpTlsSecurity::Tls10Unsafe => {
             #[cfg(feature = "openssl-tls")]
             {
-                upgrade_openssl_windows_2008(stream, server_name, verify).await
+                upgrade_openssl_unsafe(stream, server_name, verify).await
             }
 
             #[cfg(not(feature = "openssl-tls"))]
@@ -132,7 +115,7 @@ async fn upgrade_rustls(
 fn build_rustls_config(verify: bool) -> Result<rustls::client::ClientConfig> {
     let config = if verify {
         let mut roots = rustls::RootCertStore::empty();
-        for cert in rustls_native_certs::load_native_certs().certs {
+        for cert in native_root_certificates() {
             roots.add(cert).ok();
         }
         rustls::client::ClientConfig::builder()
@@ -148,6 +131,14 @@ fn build_rustls_config(verify: bool) -> Result<rustls::client::ClientConfig> {
     };
 
     Ok(config)
+}
+
+fn native_root_certificates() -> Vec<rustls::pki_types::CertificateDer<'static>> {
+    let result = rustls_native_certs::load_native_certs();
+    for error in result.errors {
+        tracing::debug!(%error, "native root CA certificate loading error");
+    }
+    result.certs
 }
 
 async fn upgrade_rustls_with_config(
@@ -176,86 +167,157 @@ async fn upgrade_rustls_with_config(
 }
 
 #[cfg(feature = "openssl-tls")]
-async fn upgrade_openssl_windows_2012(
-    stream: TcpStream,
-    server_name: String,
-    verify: bool,
-) -> Result<(TargetTlsStream, Vec<u8>)> {
-    use openssl::ssl::{SslConnector, SslMethod, SslVersion};
+mod openssl_inner {
+    use std::sync::OnceLock;
 
-    let mut builder =
-        SslConnector::builder(SslMethod::tls_client()).context("OpenSSL connector")?;
-    builder
-        .set_min_proto_version(Some(SslVersion::TLS1_2))
-        .context("setting OpenSSL minimum TLS version")?;
-    builder
-        .set_max_proto_version(Some(SslVersion::TLS1_2))
-        .context("setting OpenSSL maximum TLS version")?;
-    builder
-        .set_cipher_list(OPENSSL_WINDOWS_2012_CIPHER_LIST)
-        .context("setting OpenSSL cipher list")?;
+    use anyhow::Context;
+    use openssl::provider::Provider;
 
-    upgrade_openssl(stream, server_name, verify, builder).await
+    use super::*;
+
+    const OPENSSL_SAFE_CIPHER_LIST: &str = concat!(
+        "ECDHE-RSA-AES256-SHA384:",
+        "ECDHE-RSA-AES128-SHA256:",
+        "ECDHE-RSA-AES256-SHA:",
+        "ECDHE-RSA-AES128-SHA:",
+        "AES256-GCM-SHA384:",
+        "AES128-GCM-SHA256:",
+        "AES256-SHA256:",
+        "AES128-SHA256:",
+        "AES256-SHA:",
+        "AES128-SHA:",
+        "!aNULL:!eNULL:!EXPORT:!DES:!3DES:!RC4:!MD5:@SECLEVEL=3"
+    );
+    const OPENSSL_UNSAFE_CIPHER_LIST: &str = "ALL:@SECLEVEL=0";
+
+    static DEFAULT_PROVIDER: OnceLock<Provider> = OnceLock::new();
+    static LEGACY_PROVIDER: OnceLock<Provider> = OnceLock::new();
+
+    fn load_provider(slot: &'static OnceLock<Provider>, name: &'static str) -> Result<()> {
+        slot.get_or_try_init(|| {
+            Provider::load(None, name).with_context(|| format!("loading OpenSSL provider `{name}`"))
+        })?;
+        Ok(())
+    }
+
+    fn ensure_legacy_provider() -> Result<()> {
+        load_provider(&DEFAULT_PROVIDER, "default")?;
+        load_provider(&LEGACY_PROVIDER, "legacy")
+    }
+
+    pub async fn upgrade_openssl_safe(
+        stream: TcpStream,
+        server_name: String,
+        verify: bool,
+    ) -> Result<(TargetTlsStream, Vec<u8>)> {
+        use openssl::ssl::{SslConnector, SslMethod, SslVersion};
+
+        let mut builder =
+            SslConnector::builder(SslMethod::tls_client()).context("OpenSSL connector")?;
+        builder
+            .set_min_proto_version(Some(SslVersion::TLS1_2))
+            .context("setting OpenSSL minimum TLS version")?;
+        builder
+            .set_max_proto_version(Some(SslVersion::TLS1_2))
+            .context("setting OpenSSL maximum TLS version")?;
+        builder
+            .set_cipher_list(OPENSSL_SAFE_CIPHER_LIST)
+            .context("setting OpenSSL cipher list")?;
+
+        upgrade_openssl(stream, server_name, verify, builder).await
+    }
+
+    #[cfg(feature = "openssl-tls")]
+    pub async fn upgrade_openssl_unsafe(
+        stream: TcpStream,
+        server_name: String,
+        verify: bool,
+    ) -> Result<(TargetTlsStream, Vec<u8>)> {
+        use openssl::ssl::{SslConnector, SslMethod, SslVersion};
+
+        ensure_legacy_provider()?;
+
+        let mut builder =
+            SslConnector::builder(SslMethod::tls_client()).context("OpenSSL connector")?;
+        builder
+            .set_min_proto_version(Some(SslVersion::TLS1))
+            .context("setting OpenSSL minimum TLS version")?;
+        builder
+            .set_cipher_list(OPENSSL_UNSAFE_CIPHER_LIST)
+            .context("setting OpenSSL cipher list")?;
+
+        upgrade_openssl(stream, server_name, verify, builder).await
+    }
+
+    async fn upgrade_openssl(
+        stream: TcpStream,
+        server_name: String,
+        verify: bool,
+        mut builder: openssl::ssl::SslConnectorBuilder,
+    ) -> Result<(TargetTlsStream, Vec<u8>)> {
+        use openssl::ssl::SslVerifyMode;
+
+        if verify {
+            builder.set_cert_store(build_openssl_root_store()?);
+        } else {
+            builder.set_verify(SslVerifyMode::NONE);
+        }
+
+        let connector = builder.build();
+        let mut config = connector.configure().context("OpenSSL connect config")?;
+        if !verify {
+            config.set_verify_hostname(false);
+        }
+
+        let ssl = config
+            .into_ssl(&server_name)
+            .context("OpenSSL server name setup")?;
+        let mut tls_stream =
+            tokio_openssl::SslStream::new(ssl, stream).context("OpenSSL TLS stream")?;
+        Pin::new(&mut tls_stream)
+            .connect()
+            .await
+            .context("OpenSSL TLS handshake")?;
+
+        let cert = tls_stream
+            .ssl()
+            .peer_certificate()
+            .context("missing peer certificate")?;
+        let cert = cert.to_der().context("serializing peer certificate")?;
+        let server_public_key = extract_server_public_key(&cert)?;
+
+        Ok((TargetTlsStream::OpenSsl(tls_stream), server_public_key))
+    }
+
+    pub(crate) fn build_openssl_root_store() -> Result<openssl::x509::store::X509Store> {
+        use openssl::x509::X509;
+        use openssl::x509::store::X509StoreBuilder;
+
+        let mut store = X509StoreBuilder::new().context("OpenSSL root certificate store")?;
+        let mut added = 0_usize;
+        for cert in native_root_certificates() {
+            let cert = match X509::from_der(cert.as_ref()) {
+                Ok(cert) => cert,
+                Err(error) => {
+                    tracing::debug!(%error, "failed to parse native root CA certificate");
+                    continue;
+                }
+            };
+            match store.add_cert(cert) {
+                Ok(()) => added += 1,
+                Err(error) => {
+                    tracing::debug!(%error, "failed to add native root CA certificate");
+                }
+            }
+        }
+        anyhow::ensure!(added > 0, "no native root CA certificates could be loaded");
+
+        Ok(store.build())
+    }
 }
 
 #[cfg(feature = "openssl-tls")]
-async fn upgrade_openssl_windows_2008(
-    stream: TcpStream,
-    server_name: String,
-    verify: bool,
-) -> Result<(TargetTlsStream, Vec<u8>)> {
-    use openssl::ssl::{SslConnector, SslMethod, SslVersion};
-
-    let mut builder =
-        SslConnector::builder(SslMethod::tls_client()).context("OpenSSL connector")?;
-    builder
-        .set_min_proto_version(Some(SslVersion::TLS1))
-        .context("setting OpenSSL minimum TLS version")?;
-    builder
-        .set_cipher_list(OPENSSL_WINDOWS_2008_CIPHER_LIST)
-        .context("setting OpenSSL cipher list")?;
-
-    upgrade_openssl(stream, server_name, verify, builder).await
-}
-
-#[cfg(feature = "openssl-tls")]
-async fn upgrade_openssl(
-    stream: TcpStream,
-    server_name: String,
-    verify: bool,
-    mut builder: openssl::ssl::SslConnectorBuilder,
-) -> Result<(TargetTlsStream, Vec<u8>)> {
-    use openssl::ssl::SslVerifyMode;
-
-    if !verify {
-        builder.set_verify(SslVerifyMode::NONE);
-    }
-
-    let connector = builder.build();
-    let mut config = connector.configure().context("OpenSSL connect config")?;
-    if !verify {
-        config.set_verify_hostname(false);
-    }
-
-    let ssl = config
-        .into_ssl(&server_name)
-        .context("OpenSSL server name setup")?;
-    let mut tls_stream =
-        tokio_openssl::SslStream::new(ssl, stream).context("OpenSSL TLS stream")?;
-    Pin::new(&mut tls_stream)
-        .connect()
-        .await
-        .context("OpenSSL TLS handshake")?;
-
-    let cert = tls_stream
-        .ssl()
-        .peer_certificate()
-        .context("missing peer certificate")?;
-    let cert = cert.to_der().context("serializing peer certificate")?;
-    let server_public_key = extract_server_public_key(&cert)?;
-
-    Ok((TargetTlsStream::OpenSsl(tls_stream), server_public_key))
-}
+use openssl_inner::*;
 
 fn extract_server_public_key(cert: &[u8]) -> Result<Vec<u8>> {
     use x509_cert::der::Decode as _;
@@ -268,6 +330,16 @@ fn extract_server_public_key(cert: &[u8]) -> Result<Vec<u8>> {
         .context("public key not byte-aligned")?
         .to_owned();
     Ok(key)
+}
+
+#[cfg(all(test, feature = "openssl-tls"))]
+mod tests {
+    use super::build_openssl_root_store;
+
+    #[test]
+    fn openssl_root_store_contains_native_certificates() {
+        let _store = build_openssl_root_store().unwrap();
+    }
 }
 
 mod danger {

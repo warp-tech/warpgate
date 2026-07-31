@@ -127,6 +127,32 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 * Web approval
 `,
 
+   [TargetKind.Rdp]: `
+## Warpgate ↔ target
+
+* Authenticates over CredSSP/NLA with a username and password.
+* TLS 1.2 at target is required.
+* \`Verify TLS certificate\` is off by default (RDP servers commonly self-sign)
+
+## Warpgate ↔ client
+
+* The client connects over NLA/CredSSP.
+* Authentication always starts with a password, other credentials (OTP / web approval) are then collected over a visual UI.
+
+## RDP protocol
+
+* CredSSP/NLA logon
+* Legacy Standard RDP Security is not supported
+* Minimum target: Windows 8 / Server 2012+ (or any NLA/CredSSP server over TLS 1.2, e.g. xrdp)
+
+## Supported Warpgate credentials
+
+* Password
+* OTP
+* Web approval
+* Ticket
+`,
+
     [TargetKind.Vnc]: `
 ## Warpgate ↔ target
 

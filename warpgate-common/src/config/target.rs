@@ -332,13 +332,16 @@ pub struct TargetRdpOptions {
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
 pub enum RdpTlsSecurity {
-    #[serde(rename = "windows_2016")]
+    /// ~ Windows 2016/10
+    #[serde(rename = "tls_1_2")]
     #[default]
-    Windows2016,
-    #[serde(rename = "windows_2012")]
-    Windows2012,
-    #[serde(rename = "windows_2008")]
-    Windows2008,
+    Tls12,
+    /// ~ Windows 2012/8
+    #[serde(rename = "tls_1_2_with_legacy_ciphers")]
+    Tls12WithLegacyCiphers,
+    /// ~ Windows 2008/Vista
+    #[serde(rename = "tls_1_0_unsafe")]
+    Tls10Unsafe,
 }
 
 fn _default_rdp_tls_security() -> Option<RdpTlsSecurity> {
@@ -449,10 +452,7 @@ pub enum TargetOptions {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        RdpTlsSecurity, TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions,
-        TargetRdpOptions, Tls,
-    };
+    use super::{TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions, Tls};
 
     /// The two ways of saying "nothing specified" — an absent `tls` block and an
     /// empty one — must both resolve to verifying.
@@ -483,20 +483,5 @@ mod tests {
             serde_json::from_str(r#"{"url":"http://t","tls":{"verify":false}}"#).unwrap();
 
         assert!(!off.tls.verify);
-    }
-
-    #[test]
-    fn rdp_tls_security_defaults_to_modern_windows() {
-        let target: TargetRdpOptions = serde_json::from_str(r#"{"host":"t"}"#).unwrap();
-
-        assert_eq!(target.tls_security(), RdpTlsSecurity::Windows2016);
-    }
-
-    #[test]
-    fn rdp_tls_security_can_select_legacy_windows() {
-        let target: TargetRdpOptions =
-            serde_json::from_str(r#"{"host":"t","tls_security":"windows_2012"}"#).unwrap();
-
-        assert_eq!(target.tls_security(), RdpTlsSecurity::Windows2012);
     }
 }

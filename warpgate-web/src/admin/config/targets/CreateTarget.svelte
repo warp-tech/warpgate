@@ -103,7 +103,7 @@
                         password: '',
                     },
                     verifyTls: false,
-                    tlsSecurity: RdpTlsSecurity.Windows2016,
+                    tlsSecurity: RdpTlsSecurity.Tls12,
                 },
             }[params.kind]
             if (!options) {

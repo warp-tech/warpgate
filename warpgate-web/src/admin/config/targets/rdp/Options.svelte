@@ -60,9 +60,9 @@
 
 <FormGroup floating label="Security level">
     <Input type="select" bind:value={options.tlsSecurity}>
-        <option value="Windows2016">Windows 2016 / 10+ (rustls default)</option>
-        <option value="Windows2012">Windows 2012 / 8+ (OpenSSL TLS 1.2)</option>
-        <option value="Windows2008">Windows 2008 R2 or older (OpenSSL legacy)</option>
+        <option value="Tls12">Windows 2016 / 10+ (TLS 1.2)</option>
+        <option value="Tls12WithLegacyCiphers">Windows 2012 / 8+ (TLS 1.2 with legacy ciphers)</option>
+        <option value="Tls10Unsafe">Windows 2008 R2 or older (TLS 1.0 with unsafe ciphers)</option>
     </Input>
 </FormGroup>
 
