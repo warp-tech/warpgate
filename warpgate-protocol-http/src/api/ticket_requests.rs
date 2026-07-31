@@ -9,7 +9,7 @@ use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_core::ticket_requests::{
     ActivateTicketRequestError, CreateTicketRequestError, CreateTicketRequestParams,
-    activate_ticket_request, create_ticket_request,
+    activate_ticket_request, create_ticket_request, delete_ticket,
 };
 use warpgate_db_entities::{Target, Ticket, TicketRequest};
 
@@ -403,11 +403,7 @@ impl Api {
             return Ok(DeleteMyTicketResponse::NotFound);
         };
 
-        TicketRequest::Entity::delete_many()
-            .filter(TicketRequest::Column::TicketId.eq(Some(ticket.id)))
-            .exec(db)
-            .await?;
-        ticket.delete(db).await?;
+        delete_ticket(db, ticket.id).await?;
         Ok(DeleteMyTicketResponse::Deleted)
     }
 }

@@ -294,13 +294,13 @@ impl DetailApi {
             .exec(db)
             .await?;
 
-        Ticket::Entity::delete_many()
-            .filter(Ticket::Column::TargetId.eq(target.id))
+        TicketRequest::Entity::delete_many()
+            .filter(TicketRequest::Column::TargetId.eq(target.id))
             .exec(db)
             .await?;
 
-        TicketRequest::Entity::delete_many()
-            .filter(TicketRequest::Column::TargetId.eq(target.id))
+        Ticket::Entity::delete_many()
+            .filter(Ticket::Column::TargetId.eq(target.id))
             .exec(db)
             .await?;
 

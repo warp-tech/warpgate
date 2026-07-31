@@ -436,3 +436,20 @@ pub async fn list_ticket_requests(
 
     Ok(query.all(db_conn).await?)
 }
+
+pub async fn delete_ticket(
+    db: &sea_orm::DatabaseConnection,
+    ticket_id: Uuid,
+) -> Result<(), WarpgateError> {
+    let txn = db.begin().await?;
+
+    TicketRequest::Entity::delete_many()
+        .filter(TicketRequest::Column::TicketId.eq(Some(ticket_id)))
+        .exec(&txn)
+        .await?;
+
+    Ticket::Entity::delete_by_id(ticket_id).exec(&txn).await?;
+    txn.commit().await?;
+
+    Ok(())
+}
