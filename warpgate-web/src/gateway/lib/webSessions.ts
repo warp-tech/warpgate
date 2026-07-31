@@ -5,10 +5,13 @@ import { get } from 'svelte/store'
 import { openTargetsInNewTab } from './store'
 
 function maybeOpenInNewTab(url: string) {
+    const absolute = `/@warpgate#${url}`
     if (get(openTargetsInNewTab)) {
-        window.open(`/@warpgate#${url}`, '_blank')
-    } else {
+        window.open(absolute, '_blank')
+    } else if (location.pathname === '/@warpgate') {
         push(url)
+    } else {
+        location.href = absolute
     }
 }
 

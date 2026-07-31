@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.0-beta.3-7-g0bf4adcd-modified"
+    "version": "v0.27.0-beta.5-11-g30fb9eab-modified"
   },
   "servers": [
     {
@@ -6046,6 +6046,14 @@
           }
         }
       },
+      "RdpTlsSecurity": {
+        "type": "string",
+        "enum": [
+          "Tls12",
+          "Tls12WithLegacyCiphers",
+          "Tls10Unsafe"
+        ]
+      },
       "Recording": {
         "type": "object",
         "title": "Recording",
@@ -7093,6 +7101,9 @@
           "verify_tls": {
             "type": "boolean",
             "description": "Verify the RDP server's TLS certificate against the system root store.\nRDP servers commonly use self-signed certificates, so this is off by default."
+          },
+          "tls_security": {
+            "$ref": "#/components/schemas/RdpTlsSecurity"
           }
         }
       },

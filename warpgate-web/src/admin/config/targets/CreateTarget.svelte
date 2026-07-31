@@ -2,6 +2,7 @@
     import { Alert, Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import {
         api,
+        RdpTlsSecurity,
         type TargetGroup,
         type TargetOptions,
         TlsMode,
@@ -102,6 +103,7 @@
                         password: '',
                     },
                     verifyTls: false,
+                    tlsSecurity: RdpTlsSecurity.Tls12,
                 },
             }[params.kind]
             if (!options) {

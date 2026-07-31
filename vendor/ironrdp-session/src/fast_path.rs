@@ -77,6 +77,10 @@ pub struct Processor {
 }
 
 impl Processor {
+    pub fn set_share_id(&mut self, share_id: u32) {
+        self.marker_processor.share_id = share_id;
+    }
+
     pub fn update_mouse_pos(&mut self, x: u16, y: u16) {
         self.mouse_pos_update = Some((x, y));
     }

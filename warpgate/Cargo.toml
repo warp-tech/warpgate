@@ -69,6 +69,7 @@ tokio-console = ["dep:console-subscriber", "tokio/tracing"]
 postgres = ["warpgate-core/postgres"]
 mysql = ["warpgate-core/mysql"]
 sqlite = ["warpgate-core/sqlite"]
+rdp-openssl-tls = ["warpgate-protocol-rdp/openssl-tls"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 sd-notify = { version = "0.5", default-features = false }

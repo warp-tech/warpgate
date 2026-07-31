@@ -115,7 +115,7 @@ allow = [
 ]
 # List of crates to deny
 deny = [
-    "openssl-sys"
+    { crate = "openssl-sys", wrappers = ["openssl", "tokio-openssl"], reason = "RDP legacy TLS compatibility uses vendored OpenSSL for older Windows Schannel targets" }
     #"ansi_term@0.11.0",
     #{ crate = "ansi_term@0.11.0", reason = "you can specify a reason it is banned" },
     # Wrapper crates can optionally be specified to allow the crate when it

@@ -32,6 +32,7 @@ rustls = { version = "0.23", default-features = false, features = [
 ] }
 rustls-native-certs = "0.8"
 rustls-pemfile = "2"
+openssl = { version = "0.10", optional = true, features = ["vendored"] }
 tokio = { workspace = true, features = [
     "io-util",
     "net",
@@ -41,6 +42,13 @@ tokio = { workspace = true, features = [
     "rt",
     "fs",
 ] }
+tokio-openssl = { version = "0.6", optional = true }
 tokio-stream.workspace = true
 tracing.workspace = true
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+
+[features]
+openssl-tls = [
+    "dep:openssl",
+    "dep:tokio-openssl",
+]

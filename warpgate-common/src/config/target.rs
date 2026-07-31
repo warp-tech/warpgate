@@ -322,6 +322,36 @@ pub struct TargetRdpOptions {
     /// RDP servers commonly use self-signed certificates, so this is off by default.
     #[serde(default)]
     pub verify_tls: bool,
+
+    // TLS compatibility/security profile used for the target-facing RDP connection.
+    // Kept as a plain comment so OpenAPI emits a direct enum reference. A field
+    // description wraps the enum in allOf, which typescript-fetch misgenerates.
+    #[serde(default = "_default_rdp_tls_security")]
+    pub tls_security: Option<RdpTlsSecurity>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
+pub enum RdpTlsSecurity {
+    /// ~ Windows 2016/10
+    #[serde(rename = "tls_1_2")]
+    #[default]
+    Tls12,
+    /// ~ Windows 2012/8
+    #[serde(rename = "tls_1_2_with_legacy_ciphers")]
+    Tls12WithLegacyCiphers,
+    /// ~ Windows 2008/Vista
+    #[serde(rename = "tls_1_0_unsafe")]
+    Tls10Unsafe,
+}
+
+fn _default_rdp_tls_security() -> Option<RdpTlsSecurity> {
+    Some(RdpTlsSecurity::default())
+}
+
+impl TargetRdpOptions {
+    pub fn tls_security(&self) -> RdpTlsSecurity {
+        self.tls_security.unwrap_or_default()
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
