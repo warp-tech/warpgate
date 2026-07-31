@@ -223,11 +223,20 @@
         if (!context) {
             throw new Error('Failed to get canvas context')
         }
-        context.font = `10px ${term.options.fontFamily ?? 'monospace'}`
-        const metrics = context.measureText('abcdef')
+        const probeFontSize = 100
+        context.font = `${probeFontSize}px ${term.options.fontFamily ?? 'monospace'}`
+        const metrics = context.measureText('W')
 
-        const fontWidth = containerElement.clientWidth / term.cols
-        term.options.fontSize = (fontWidth / (metrics.width / 6)) * 10
+        const fontWidthRatio = metrics.width / probeFontSize
+        const fontHeightRatio = (
+            metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent
+        ) / probeFontSize
+        const fontMaxWidth = containerElement.clientWidth / term.cols
+        const fontMaxHeight = containerElement.clientHeight / term.rows
+        term.options.fontSize = Math.floor(Math.min(
+            fontMaxWidth / fontWidthRatio,
+            fontMaxHeight / fontHeightRatio / (term.options.lineHeight ?? 1),
+        ))
     }
 
     // Shared latest-wins runner: serializes seeks and coalesces rapid scrubs to the newest
@@ -404,15 +413,27 @@
         contain: content;
         display: flex;
         flex-direction: column;
+        flex: 1 0 0;
+        min-height: 300px;
     }
 
     .container {
         padding: 5px;
         margin: auto;
+        min-height: 0;
+        flex-grow: 1;
+
+        display: flex;
+        align-items: center;
     }
 
     :global(.xterm) {
         cursor: pointer !important;
+        margin:auto;
+    }
+
+    :global(.xterm-viewport) {
+        background: none;
     }
 
     :global(.spinner-border), .pause-overlay {

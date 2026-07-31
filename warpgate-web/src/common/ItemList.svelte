@@ -121,7 +121,7 @@
 {#await $items}
     <DelayedSpinner />
 {:then _items}
-    <div class="d-flex mb-2" hidden={!loaded}>
+    <div class="d-flex align-items-center mb-2" hidden={!loaded}>
         <!-- either filtering or not filtering and there are at least some items at all -->
         {#if showSearch && (filter || !!_items?.length)}
             <Input

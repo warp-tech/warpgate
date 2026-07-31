@@ -10,6 +10,7 @@
         DropdownItem,
         DropdownMenu,
         DropdownToggle,
+        Input,
         Modal,
         ModalBody,
         ModalFooter,
@@ -31,9 +32,10 @@
     } from 'gateway/lib/api'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
+    import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
     import { firstBy } from 'thenby'
-    import { serverInfo } from './lib/store'
+    import { openTargetsInNewTab, serverInfo } from './lib/store'
     import { openWebDesktopSession, openWebSshSession } from './lib/webSessions'
 
     let instructionsTarget: TargetSnapshot | undefined = $state()
@@ -116,7 +118,14 @@
     }
 
     function loadURL(url: string) {
-        location.href = url
+        // Only HTTP targets navigate via loadURL. Honour the opt-in preference
+        // to open them in a new tab (mirrors how SSH/desktop targets already
+        // use window.open) so the target list isn't lost.
+        if (get(openTargetsInNewTab)) {
+            window.open(url, '_blank')
+        } else {
+            location.href = url
+        }
     }
 
     interface GroupInfo {
@@ -151,6 +160,24 @@
     groupObject={groupInfoFromTarget}
     groupKey={group => group.id}
 >
+    {#snippet header()}
+        <Dropdown>
+            <DropdownToggle color="link">
+                <Fa icon={faEllipsisV} fw />
+            </DropdownToggle>
+            <DropdownMenu>
+                <div class="dropdown-header">Preferences</div>
+                <DropdownItem>
+                    <Input
+                        type="switch"
+                        bind:checked={$openTargetsInNewTab}
+                        label="Open targets in a new tab"
+                        onmousedown={e => e.stopPropagation()}
+                    />
+                </DropdownItem>
+            </DropdownMenu>
+        </Dropdown>
+    {/snippet}
     {#snippet empty()}
         <EmptyState title="You don't have access to any targets yet" />
     {/snippet}
@@ -168,6 +195,9 @@
                         ? `${location.protocol}//${target.externalHost}${location.port ? `:${location.port}` : ''}`
                         : `/?warpgate-target=${target.name}`)
                     : '/@warpgate/admin'}
+            target={target.kind === TargetKind.Http && $openTargetsInNewTab
+                ? '_blank'
+                : undefined}
             onclick={e => {
                 if (e.metaKey || e.ctrlKey) {
                     return

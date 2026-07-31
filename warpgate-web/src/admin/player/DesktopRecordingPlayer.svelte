@@ -535,6 +535,8 @@
 </div>
 
 <style lang="scss">
+    $min-height: 300px;
+
     .root {
         border-radius: 5px;
         overflow: hidden;
@@ -544,28 +546,38 @@
         flex-direction: column;
         background: #262626;
         border: 1px solid #ffffff1a;
+        flex: 1 0 0;
+
+        min-height: $min-height;
     }
 
     .stage-container {
         margin: auto;
         max-width: 100%;
         overflow: auto;
+        display: flex;
+        flex-direction: column;
 
         // center in fullscreen
         flex-grow: 1;
         align-content: center;
+
+        align-items: center;
+        justify-content: center;
     }
 
     .stage {
         position: relative;
         display: inline-block;
         max-width: 100%;
-        line-height: 0;
+        max-height: 100%;
+        flex: 1 0 0;
     }
 
     canvas {
         display: block;
         max-width: 100%;
+        max-height: 100%;
         image-rendering: pixelated;
         cursor: pointer;
     }
