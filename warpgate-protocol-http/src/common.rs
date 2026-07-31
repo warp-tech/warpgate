@@ -48,6 +48,9 @@ pub fn host_is_subdomain_of_or_equal(host: &str, base_domain: &str) -> bool {
 #[derive(Serialize, Deserialize)]
 pub struct SsoLoginState {
     pub token: WarpgateIdToken,
+    /// The OAuth access token from the same authorization, when the provider
+    /// issued one. Absent for flows without a code exchange.
+    pub access_token: Option<String>,
     pub provider: String,
     pub supports_single_logout: bool,
 }

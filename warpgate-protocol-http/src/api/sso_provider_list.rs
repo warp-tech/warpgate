@@ -361,6 +361,7 @@ impl Api {
             session.set_sso_login_state(SsoLoginState {
                 provider: context.provider,
                 token: response.id_token.clone(),
+                access_token: response.access_token.clone(),
                 supports_single_logout: context.supports_single_logout,
             });
         }

@@ -108,6 +108,7 @@ pub async fn map_sso_result(
         access_roles: access_groups,
         admin_roles: admin_groups,
         id_token: result.token.clone(),
+        access_token: result.access_token.clone(),
     }
 }
 
