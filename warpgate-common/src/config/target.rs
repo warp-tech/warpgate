@@ -326,8 +326,8 @@ pub struct TargetRdpOptions {
     // TLS compatibility/security profile used for the target-facing RDP connection.
     // Kept as a plain comment so OpenAPI emits a direct enum reference. A field
     // description wraps the enum in allOf, which typescript-fetch misgenerates.
-    #[serde(default)]
-    pub tls_security: RdpTlsSecurity,
+    #[serde(default = "_default_rdp_tls_security")]
+    pub tls_security: Option<RdpTlsSecurity>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
@@ -339,6 +339,16 @@ pub enum RdpTlsSecurity {
     Windows2012,
     #[serde(rename = "windows_2008")]
     Windows2008,
+}
+
+fn _default_rdp_tls_security() -> Option<RdpTlsSecurity> {
+    Some(RdpTlsSecurity::default())
+}
+
+impl TargetRdpOptions {
+    pub fn tls_security(&self) -> RdpTlsSecurity {
+        self.tls_security.unwrap_or_default()
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
@@ -479,7 +489,7 @@ mod tests {
     fn rdp_tls_security_defaults_to_modern_windows() {
         let target: TargetRdpOptions = serde_json::from_str(r#"{"host":"t"}"#).unwrap();
 
-        assert_eq!(target.tls_security, RdpTlsSecurity::Windows2016);
+        assert_eq!(target.tls_security(), RdpTlsSecurity::Windows2016);
     }
 
     #[test]
@@ -487,6 +497,6 @@ mod tests {
         let target: TargetRdpOptions =
             serde_json::from_str(r#"{"host":"t","tls_security":"windows_2012"}"#).unwrap();
 
-        assert_eq!(target.tls_security, RdpTlsSecurity::Windows2012);
+        assert_eq!(target.tls_security(), RdpTlsSecurity::Windows2012);
     }
 }

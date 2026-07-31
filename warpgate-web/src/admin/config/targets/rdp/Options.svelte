@@ -1,6 +1,6 @@
 <script lang="ts">
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
-    import type { TargetOptionsTargetRdpOptions } from 'admin/lib/api'
+    import { RdpTlsSecurity, type TargetOptionsTargetRdpOptions } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
 
     interface Props {
@@ -8,6 +8,10 @@
     }
 
     let { options = $bindable() }: Props = $props()
+
+    $effect(() => {
+        options.tlsSecurity ??= RdpTlsSecurity.Windows2016
+    })
 </script>
 
 <h4 class="mt-4">Connection</h4>

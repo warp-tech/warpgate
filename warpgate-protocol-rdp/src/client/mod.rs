@@ -62,7 +62,7 @@ pub async fn run(
             options.host.clone(),
             options.port,
             options.verify_tls,
-            options.tls_security,
+            options.tls_security(),
         ),
     )
     .await
