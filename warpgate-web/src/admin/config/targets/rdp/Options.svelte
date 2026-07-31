@@ -10,7 +10,7 @@
     let { options = $bindable() }: Props = $props()
 
     $effect(() => {
-        options.tlsSecurity ??= RdpTlsSecurity.Windows2016
+        options.tlsSecurity ??= RdpTlsSecurity.Tls12
     })
 </script>
 
