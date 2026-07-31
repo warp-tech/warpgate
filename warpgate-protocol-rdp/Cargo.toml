@@ -32,7 +32,7 @@ rustls = { version = "0.23", default-features = false, features = [
 ] }
 rustls-native-certs = "0.8"
 rustls-pemfile = "2"
-openssl = { version = "0.10", optional = true }
+openssl = { version = "0.10", optional = true, features = ["vendored"] }
 tokio = { workspace = true, features = [
     "io-util",
     "net",

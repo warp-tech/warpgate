@@ -1,6 +1,6 @@
 <script lang="ts">
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
-    import type { TargetOptionsTargetRdpOptions } from 'admin/lib/api'
+    import { RdpTlsSecurity, type TargetOptionsTargetRdpOptions } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
 
     interface Props {
@@ -8,6 +8,10 @@
     }
 
     let { options = $bindable() }: Props = $props()
+
+    $effect(() => {
+        options.tlsSecurity ??= RdpTlsSecurity.Windows2016
+    })
 </script>
 
 <h4 class="mt-4">Connection</h4>
@@ -54,10 +58,11 @@
 
 <h4 class="mt-4">TLS</h4>
 
-<FormGroup floating label="TLS backend">
-    <Input type="select" bind:value={options.tlsBackend}>
-        <option value="Rustls">rustls</option>
-        <option value="OpenSslLegacy">OpenSSL legacy</option>
+<FormGroup floating label="Security level">
+    <Input type="select" bind:value={options.tlsSecurity}>
+        <option value="Windows2016">Windows 2016 / 10+ (rustls default)</option>
+        <option value="Windows2012">Windows 2012 / 8+ (OpenSSL TLS 1.2)</option>
+        <option value="Windows2008">Windows 2008 R2 or older (OpenSSL legacy)</option>
     </Input>
 </FormGroup>
 
@@ -70,17 +75,3 @@
     Typically, RDP servers use self-signed certificates, so this is off by
     default.
 </HelpText>
-
-{#if options.tlsBackend === 'OpenSslLegacy'}
-    <FormGroup floating label="OpenSSL cipher list">
-        <input
-            class="form-control"
-            bind:value={options.tlsOpensslCipherList}
-            placeholder="Use Warpgate default"
-        >
-    </FormGroup>
-    <HelpText>
-        Leave empty to use the Windows Server 2012 compatibility list. TLS 1.2
-        remains the minimum.
-    </HelpText>
-{/if}
