@@ -229,10 +229,11 @@ impl ActiveStage {
         self.fast_path_processor = processor;
     }
 
-    /// Updates the share_id used by the x224 processor for encoding ShareDataPdu.
+    /// Updates the share_id used when encoding slow-path responses and fast-path frame acknowledgements.
     /// Must be called during Deactivation-Reactivation if the server assigns a new share_id.
     pub fn set_share_id(&mut self, share_id: u32) {
         self.x224_processor.set_share_id(share_id);
+        self.fast_path_processor.set_share_id(share_id);
     }
 
     pub fn set_enable_server_pointer(&mut self, enable_server_pointer: bool) {

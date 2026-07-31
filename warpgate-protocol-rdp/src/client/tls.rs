@@ -233,12 +233,13 @@ mod openssl_inner {
         server_name: String,
         verify: bool,
     ) -> Result<(TargetTlsStream, Vec<u8>)> {
-        use openssl::ssl::{SslConnector, SslMethod, SslVersion};
+        use openssl::ssl::{SslConnector, SslMethod, SslOptions, SslVersion};
 
         ensure_legacy_provider()?;
 
         let mut builder =
             SslConnector::builder(SslMethod::tls_client()).context("OpenSSL connector")?;
+        builder.set_options(SslOptions::DONT_INSERT_EMPTY_FRAGMENTS);
         builder
             .set_min_proto_version(Some(SslVersion::TLS1))
             .context("setting OpenSSL minimum TLS version")?;

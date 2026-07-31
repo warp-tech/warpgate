@@ -11,14 +11,18 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
+use ironrdp::connector::connection_activation::{
+    ConnectionActivationFactory, ConnectionActivationState,
+};
 use ironrdp::connector::{self, ConnectionResult, Credentials};
+use ironrdp::core::WriteBuf;
 use ironrdp::graphics::image_processing::PixelFormat;
 use ironrdp::pdu::gcc::KeyboardType;
 use ironrdp::pdu::geometry::InclusiveRectangle;
 use ironrdp::pdu::rdp::capability_sets::MajorPlatformType;
 use ironrdp::pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
 use ironrdp::session::image::DecodedImage;
-use ironrdp::session::{ActiveStageBuilder, ActiveStageOutput};
+use ironrdp::session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
@@ -102,6 +106,7 @@ async fn active_loop(
     event_tx: &Sender<DesktopEvent>,
     abort_rx: &mut UnboundedReceiver<()>,
 ) -> Result<()> {
+    let activation_factory = connection_result.activation_factory;
     let mut active_stage = ActiveStageBuilder {
         static_channels: connection_result.static_channels,
         user_channel_id: connection_result.user_channel_id,
@@ -117,39 +122,99 @@ async fn active_loop(
 
     loop {
         let outputs = tokio::select! {
-            biased;
-            _ = abort_rx.recv() => return Ok(()),
-            input = input_rx.recv() => {
-                let Some(first) = input else {
-                    return Ok(());
-                };
-                // Coalesce whatever else is already queued so a burst of pointer moves
-                // becomes one fastpath batch rather than one round trip each.
-                let mut ops = Vec::new();
-                input::translate(first, &mut ops);
-                while let Ok(next) = input_rx.try_recv() {
-                    input::translate(next, &mut ops);
+                biased;
+                _ = abort_rx.recv() => return Ok(()),
+                input = input_rx.recv() => {
+                    let Some(first) = input else {
+                        return Ok(());
+                    };
+                    // Coalesce whatever else is already queued so a burst of pointer moves
+                    // becomes one fastpath batch rather than one round trip each.
+                    let mut ops = Vec::new();
+                    input::translate(first, &mut ops);
+                    while let Ok(next) = input_rx.try_recv() {
+                        input::translate(next, &mut ops);
+                    }
+                    if ops.is_empty() {
+                        continue;
+                    }
+                    let events = input_db.apply(ops);
+                    active_stage
+                        .process_fastpath_input(image, &events)
+                        .context("processing input")?
                 }
-                if ops.is_empty() {
-                    continue;
+                pdu = framed.read_pdu() => {
+                    let (action, payload) = pdu.context("reading PDU")?;
+                    active_stage
+                        .process(image, action, &payload)
+                        .context("processing PDU")?
                 }
-                let events = input_db.apply(ops);
-                active_stage
-                    .process_fastpath_input(image, &events)
-                    .context("processing input")?
-            }
-            pdu = framed.read_pdu() => {
-                let (action, payload) = pdu.context("reading PDU")?;
-                active_stage
-                    .process(image, action, &payload)
-                    .context("processing PDU")?
-            }
-        };
+            };
+
+        let should_reactivate = outputs
+            .iter()
+            .any(|output| matches!(output, ActiveStageOutput::DeactivateAll));
 
         match process_outputs(&mut framed, image, outputs, event_tx, abort_rx).await {
             Ok(true) | Err(Aborted) => return Ok(()),
             Ok(false) => {}
         }
+
+        if should_reactivate {
+            reactivate(
+                &mut framed,
+                &mut active_stage,
+                &activation_factory,
+                image,
+                event_tx,
+            )
+            .await
+            .context("RDP deactivation-reactivation sequence")?;
+        }
+    }
+}
+
+async fn reactivate(
+    framed: &mut Framed,
+    active_stage: &mut ActiveStage,
+    activation_factory: &ConnectionActivationFactory,
+    image: &mut DecodedImage,
+    event_tx: &Sender<DesktopEvent>,
+) -> Result<()> {
+    let mut activation = activation_factory.create();
+    let mut output = WriteBuf::new();
+
+    loop {
+        ironrdp_tokio::single_sequence_step(framed, &mut activation, &mut output)
+            .await
+            .context("driving connection reactivation")?;
+
+        let ConnectionActivationState::Finalized {
+            desktop_size,
+            share_id,
+            enable_server_pointer,
+            ..
+        } = activation.connection_activation_state()
+        else {
+            continue;
+        };
+
+        active_stage.set_share_id(share_id);
+        active_stage.set_enable_server_pointer(enable_server_pointer);
+
+        if image.width() != desktop_size.width || image.height() != desktop_size.height {
+            *image =
+                DecodedImage::new(PixelFormat::RgbA32, desktop_size.width, desktop_size.height);
+            event_tx
+                .send(DesktopEvent::Resize {
+                    width: desktop_size.width,
+                    height: desktop_size.height,
+                })
+                .await
+                .context("reporting reactivated desktop size")?;
+        }
+
+        return Ok(());
     }
 }
 
