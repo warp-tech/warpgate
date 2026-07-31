@@ -96,16 +96,16 @@
                     <DropdownMenu>
                         <DropdownItem
                             onclick={() => {
-                        selectedGroup = undefined
-                    }}
+                                selectedGroup = undefined
+                            }}
                         >
                             All groups
                         </DropdownItem>
                         {#each groups as group (group.id)}
                             <DropdownItem
                                 onclick={() => {
-                            selectedGroup = group
-                        }}
+                                    selectedGroup = group
+                                }}
                                 class="d-flex align-items-center gap-2"
                             >
                                 {#if group.color}
