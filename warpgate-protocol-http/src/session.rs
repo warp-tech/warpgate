@@ -28,6 +28,18 @@ pub struct SharedSessionStorage(pub DatabaseConnection);
 
 static POEM_SESSION_ID_SESSION_KEY: &str = "poem_session_id";
 
+/// The stored id of this browser session, once [`SharedSessionStorage::load_session`]
+/// has exposed it.
+///
+/// The session cookie is plaintext (`CookieConfig::default()` is
+/// [`poem::session::CookieSecurity::Plain`]), so this is also the *value* of the
+/// `warpgate-http-session` cookie the browser sent. That lets the HTTP proxy
+/// recognise Warpgate's own cookie by value rather than by name, and so avoid
+/// stripping a same-named cookie belonging to something behind us.
+pub fn poem_session_id(session: &Session) -> Option<String> {
+    session.get::<String>(POEM_SESSION_ID_SESSION_KEY)
+}
+
 impl SharedSessionStorage {
     /// Replaces `session`'s contents with the stored row.
     ///

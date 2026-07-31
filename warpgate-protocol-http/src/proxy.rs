@@ -29,8 +29,8 @@ use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
 use crate::client_cache::HttpClientCache;
-use crate::common::SessionExt;
-use crate::session::SessionStore;
+use crate::common::{SESSION_COOKIE_NAME, SessionExt};
+use crate::session::{SessionStore, poem_session_id};
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
 static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
@@ -227,21 +227,74 @@ fn rewrite_response(
     Ok(())
 }
 
-fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B {
+/// The value of this request's own `warpgate-http-session` cookie, if it has a
+/// loaded session.
+///
+/// `None` for requests with no session — ticket auth, or a cookie that no longer
+/// resolves — in which case nothing is stripped. A cookie that does not resolve
+/// to a session is not one we issued for this request, and is useless to a
+/// target anyway.
+async fn own_session_id_for(req: &Request) -> Option<String> {
+    let session = <&Session>::from_request_without_body(req).await.ok()?;
+    poem_session_id(session)
+}
+
+/// True if `pair` is Warpgate's own session cookie for the session making this
+/// request.
+///
+/// Matched on name *and* value: the value alone is what makes this cookie ours,
+/// and requiring the name too costs nothing. Anything else named
+/// `warpgate-http-session` — most plausibly a second Warpgate behind this one,
+/// which necessarily has a different session id — is left alone.
+fn is_own_session_cookie(pair: &str, own_session_id: Option<&str>) -> bool {
+    let Some(own_session_id) = own_session_id else {
+        return false;
+    };
+    Cookie::parse(pair)
+        .is_ok_and(|c| c.name() == SESSION_COOKIE_NAME && c.value() == own_session_id)
+}
+
+/// Copies the browser's headers onto the request to the target, less the ones
+/// that must not be forwarded.
+///
+/// `own_session_id` is the value of this request's `warpgate-http-session`
+/// cookie, if it has one. That cookie authenticates the browser *to Warpgate*
+/// and means nothing to a target, so forwarding it would hand every target a
+/// bearer token for the gateway itself. Other cookies belong to the target and
+/// are preserved; the header is dropped entirely if ours was the only one.
+fn copy_server_request<B: SomeRequestBuilder>(
+    req: &Request,
+    mut target: B,
+    own_session_id: Option<&str>,
+) -> B {
     for k in req.headers().keys() {
         if !may_forward_header(k) {
             continue;
         }
-        target = target.header(
-            k.clone(),
-            req.headers()
-                .get_all(k)
-                .iter()
-                .map(|v| v.to_str().map(|x| x.to_string()))
-                .filter_map(|x| x.ok())
-                .collect::<Vec<_>>()
-                .join("; "),
-        );
+        let joined = req
+            .headers()
+            .get_all(k)
+            .iter()
+            .map(|v| v.to_str().map(|x| x.to_string()))
+            .filter_map(|x| x.ok())
+            .collect::<Vec<_>>()
+            .join("; ");
+
+        if k == http::header::COOKIE {
+            let kept = joined
+                .split(';')
+                .map(str::trim)
+                .filter(|pair| !pair.is_empty())
+                .filter(|pair| !is_own_session_cookie(pair, own_session_id))
+                .collect::<Vec<_>>();
+            if kept.is_empty() {
+                continue;
+            }
+            target = target.header(k.clone(), kept.join("; "));
+            continue;
+        }
+
+        target = target.header(k.clone(), joined);
     }
     target
 }
@@ -293,7 +346,8 @@ pub async fn proxy_normal_request(
 
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
-    client_request = copy_server_request(req, client_request);
+    let own_session_id = own_session_id_for(req).await;
+    client_request = copy_server_request(req, client_request, own_session_id.as_deref());
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
@@ -481,7 +535,8 @@ async fn proxy_ws_inner(
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
 
-    client_request = copy_server_request(req, client_request);
+    let own_session_id = own_session_id_for(req).await;
+    client_request = copy_server_request(req, client_request, own_session_id.as_deref());
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
@@ -588,6 +643,106 @@ async fn proxy_ws_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Records the headers `copy_server_request` sets, so the forwarding rules
+    /// can be asserted without a live upstream.
+    #[derive(Default)]
+    struct RecordingBuilder {
+        headers: Vec<(String, String)>,
+    }
+
+    impl RecordingBuilder {
+        fn get(&self, name: &str) -> Option<&str> {
+            self.headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.as_str())
+        }
+    }
+
+    impl SomeRequestBuilder for RecordingBuilder {
+        fn header<K: Into<HeaderName>, V>(mut self, k: K, v: V) -> Self
+        where
+            HeaderValue: TryFrom<V>,
+            <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
+        {
+            let name: HeaderName = k.into();
+            if let Ok(value) = HeaderValue::try_from(v)
+                && let Ok(value) = value.to_str()
+            {
+                self.headers
+                    .push((name.as_str().to_string(), value.to_string()));
+            }
+            self
+        }
+    }
+
+    /// Runs `copy_server_request` over a request carrying `cookie`, for a
+    /// session whose id is `own_session_id`.
+    fn forward_cookie(cookie: &str, own_session_id: Option<&str>) -> Option<String> {
+        let req = Request::builder()
+            .header(http::header::COOKIE, cookie)
+            .header("x-unrelated", "keep-me")
+            .finish();
+        let out = copy_server_request(&req, RecordingBuilder::default(), own_session_id);
+        assert_eq!(
+            out.get("x-unrelated"),
+            Some("keep-me"),
+            "unrelated headers must be untouched"
+        );
+        out.get("cookie").map(ToString::to_string)
+    }
+
+    const OURS: &str = "session-id-aaa";
+
+    #[test]
+    fn drops_our_session_cookie_when_it_is_the_only_one() {
+        let out = forward_cookie(&format!("{SESSION_COOKIE_NAME}={OURS}"), Some(OURS));
+        assert_eq!(out, None, "the Cookie header should be dropped entirely");
+    }
+
+    #[test]
+    fn keeps_the_targets_own_cookies() {
+        let out = forward_cookie(
+            &format!("app_session=xyz; {SESSION_COOKIE_NAME}={OURS}; theme=dark"),
+            Some(OURS),
+        );
+        assert_eq!(out.as_deref(), Some("app_session=xyz; theme=dark"));
+    }
+
+    /// A second Warpgate behind this one uses the same cookie *name* with a
+    /// different session id. Stripping by name would break its login.
+    #[test]
+    fn keeps_a_same_named_cookie_belonging_to_something_else() {
+        let out = forward_cookie(
+            &format!("{SESSION_COOKIE_NAME}={OURS}; {SESSION_COOKIE_NAME}=inner-gateway-bbb"),
+            Some(OURS),
+        );
+        assert_eq!(
+            out.as_deref(),
+            Some(&*format!("{SESSION_COOKIE_NAME}=inner-gateway-bbb")),
+            "only the cookie matching OUR session id may be removed"
+        );
+    }
+
+    #[test]
+    fn forwards_everything_when_the_request_has_no_session() {
+        let cookie = format!("{SESSION_COOKIE_NAME}={OURS}; app_session=xyz");
+        let out = forward_cookie(&cookie, None);
+        assert_eq!(out.as_deref(), Some(&*cookie));
+    }
+
+    #[test]
+    fn keeps_a_stale_cookie_that_is_not_this_session() {
+        let out = forward_cookie(
+            &format!("{SESSION_COOKIE_NAME}=some-other-old-value"),
+            Some(OURS),
+        );
+        assert_eq!(
+            out.as_deref(),
+            Some(&*format!("{SESSION_COOKIE_NAME}=some-other-old-value"))
+        );
+    }
 
     fn make_options(url: &str) -> TargetHTTPOptions {
         TargetHTTPOptions {
