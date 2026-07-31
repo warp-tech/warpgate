@@ -29,7 +29,7 @@ use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
 use crate::client_cache::HttpClientCache;
-use crate::common::SessionExt;
+use crate::common::{SESSION_COOKIE_NAME, SessionExt};
 use crate::session::SessionStore;
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
@@ -227,9 +227,30 @@ fn rewrite_response(
     Ok(())
 }
 
-fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B {
+fn cookie_header_for_target(req: &Request) -> Result<Option<String>> {
+    let mut cookies = Vec::new();
+
+    for value in req.headers().get_all(http::header::COOKIE) {
+        for cookie in Cookie::split_parse(value.to_str()?) {
+            let cookie = cookie?;
+            if cookie.name() != SESSION_COOKIE_NAME {
+                cookies.push(cookie.stripped().to_string());
+            }
+        }
+    }
+
+    Ok((!cookies.is_empty()).then(|| cookies.join("; ")))
+}
+
+fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
     for k in req.headers().keys() {
         if !may_forward_header(k) {
+            continue;
+        }
+        if k == http::header::COOKIE {
+            if let Some(value) = cookie_header_for_target(req)? {
+                target = target.header(k.clone(), value);
+            }
             continue;
         }
         target = target.header(
@@ -243,7 +264,7 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
                 .join("; "),
         );
     }
-    target
+    Ok(target)
 }
 
 fn inject_forwarding_headers<B: SomeRequestBuilder>(
@@ -293,7 +314,7 @@ pub async fn proxy_normal_request(
 
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
-    client_request = copy_server_request(req, client_request);
+    client_request = copy_server_request(req, client_request)?;
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
@@ -481,7 +502,7 @@ async fn proxy_ws_inner(
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
 
-    client_request = copy_server_request(req, client_request);
+    client_request = copy_server_request(req, client_request)?;
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
@@ -588,6 +609,46 @@ async fn proxy_ws_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn forwarded_cookie_header(values: &[&str]) -> Option<String> {
+        let mut request = Request::builder();
+        for value in values {
+            request = request.header(http::header::COOKIE, *value);
+        }
+        cookie_header_for_target(&request.finish()).unwrap()
+    }
+
+    #[test]
+    fn request_cookie_header_omits_only_warpgate_session() {
+        assert_eq!(
+            forwarded_cookie_header(&[
+                "target-session=one; warpgate-http-session=secret",
+                "warpgate-http-session-extra=two; Warpgate-Http-Session=three",
+            ]),
+            Some(
+                "target-session=one; warpgate-http-session-extra=two; Warpgate-Http-Session=three"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn request_cookie_header_is_reserialized() {
+        assert_eq!(
+            forwarded_cookie_header(&[
+                " first = value ; warpgate-http-session=secret; token=abc== "
+            ]),
+            Some("first=value; token=abc==".to_string())
+        );
+    }
+
+    #[test]
+    fn request_cookie_header_is_omitted_without_target_cookies() {
+        assert_eq!(
+            forwarded_cookie_header(&["warpgate-http-session=secret"]),
+            None
+        );
+    }
 
     fn make_options(url: &str) -> TargetHTTPOptions {
         TargetHTTPOptions {
