@@ -1,5 +1,7 @@
-# Number of replicas for Warpgate deployment
-# Do NOT increase above 1 when using SQLite as the database!
+# Number of replicas for the Warpgate deployment.
+# For more than one replica, use an external PostgreSQL/MySQL database and
+# shared recording storage. Do not increase above 1 when using SQLite or local
+# disk-only recording storage.
 replicaCount: 1
 
 image:
