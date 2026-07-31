@@ -10,21 +10,24 @@ use ironrdp_server::tokio_rustls::TlsConnector;
 use ironrdp_server::tokio_rustls::client::TlsStream as RustlsTlsStream;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
-use warpgate_common::RdpTlsBackend;
+use warpgate_common::RdpTlsSecurity;
 
 #[cfg(feature = "openssl-tls")]
-const OPENSSL_LEGACY_RDP_CIPHER_LIST: &str = concat!(
-    "ECDHE-RSA-AES128-SHA256:",
+const OPENSSL_WINDOWS_2012_CIPHER_LIST: &str = concat!(
     "ECDHE-RSA-AES256-SHA384:",
-    "ECDHE-RSA-AES128-SHA:",
+    "ECDHE-RSA-AES128-SHA256:",
     "ECDHE-RSA-AES256-SHA:",
-    "AES128-GCM-SHA256:",
+    "ECDHE-RSA-AES128-SHA:",
     "AES256-GCM-SHA384:",
-    "AES128-SHA256:",
+    "AES128-GCM-SHA256:",
     "AES256-SHA256:",
+    "AES128-SHA256:",
+    "AES256-SHA:",
     "AES128-SHA:",
-    "AES256-SHA"
+    "!aNULL:!eNULL:!EXPORT:!DES:!3DES:!RC4:!MD5:@SECLEVEL=0"
 );
+#[cfg(feature = "openssl-tls")]
+const OPENSSL_WINDOWS_2008_CIPHER_LIST: &str = "ALL:@SECLEVEL=0";
 
 pub enum TargetTlsStream {
     Rustls(RustlsTlsStream<TcpStream>),
@@ -82,22 +85,35 @@ pub async fn upgrade(
     stream: TcpStream,
     server_name: String,
     verify: bool,
-    backend: RdpTlsBackend,
-    openssl_cipher_list: Option<&str>,
+    tls_security: RdpTlsSecurity,
 ) -> Result<(TargetTlsStream, Vec<u8>)> {
-    match backend {
-        RdpTlsBackend::Rustls => upgrade_rustls(stream, server_name, verify).await,
-        RdpTlsBackend::OpenSslLegacy => {
+    match tls_security {
+        RdpTlsSecurity::Windows2016 => upgrade_rustls(stream, server_name, verify).await,
+        RdpTlsSecurity::Windows2012 => {
             #[cfg(feature = "openssl-tls")]
             {
-                upgrade_openssl_legacy(stream, server_name, verify, openssl_cipher_list).await
+                upgrade_openssl_windows_2012(stream, server_name, verify).await
             }
 
             #[cfg(not(feature = "openssl-tls"))]
             {
-                let _ = (stream, server_name, verify, openssl_cipher_list);
+                let _ = (stream, server_name, verify);
                 anyhow::bail!(
-                    "RDP TLS backend `openssl_legacy` requires building Warpgate with the `rdp-openssl-tls` feature"
+                    "RDP TLS security profile `{tls_security:?}` requires building Warpgate with the `rdp-openssl-tls` feature"
+                )
+            }
+        }
+        RdpTlsSecurity::Windows2008 => {
+            #[cfg(feature = "openssl-tls")]
+            {
+                upgrade_openssl_windows_2008(stream, server_name, verify).await
+            }
+
+            #[cfg(not(feature = "openssl-tls"))]
+            {
+                let _ = (stream, server_name, verify);
+                anyhow::bail!(
+                    "RDP TLS security profile `{tls_security:?}` requires building Warpgate with the `rdp-openssl-tls` feature"
                 )
             }
         }
@@ -109,7 +125,12 @@ async fn upgrade_rustls(
     server_name: String,
     verify: bool,
 ) -> Result<(TargetTlsStream, Vec<u8>)> {
-    let mut config = if verify {
+    let config = build_rustls_config(verify)?;
+    upgrade_rustls_with_config(stream, server_name, config).await
+}
+
+fn build_rustls_config(verify: bool) -> Result<rustls::client::ClientConfig> {
+    let config = if verify {
         let mut roots = rustls::RootCertStore::empty();
         for cert in rustls_native_certs::load_native_certs().certs {
             roots.add(cert).ok();
@@ -125,6 +146,15 @@ async fn upgrade_rustls(
             .with_custom_certificate_verifier(Arc::new(danger::NoCertificateVerification))
             .with_no_client_auth()
     };
+
+    Ok(config)
+}
+
+async fn upgrade_rustls_with_config(
+    stream: TcpStream,
+    server_name: String,
+    mut config: rustls::client::ClientConfig,
+) -> Result<(TargetTlsStream, Vec<u8>)> {
     config.resumption = rustls::client::Resumption::disabled();
 
     let connector = TlsConnector::from(Arc::new(config));
@@ -146,13 +176,12 @@ async fn upgrade_rustls(
 }
 
 #[cfg(feature = "openssl-tls")]
-async fn upgrade_openssl_legacy(
+async fn upgrade_openssl_windows_2012(
     stream: TcpStream,
     server_name: String,
     verify: bool,
-    cipher_list: Option<&str>,
 ) -> Result<(TargetTlsStream, Vec<u8>)> {
-    use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode, SslVersion};
+    use openssl::ssl::{SslConnector, SslMethod, SslVersion};
 
     let mut builder =
         SslConnector::builder(SslMethod::tls_client()).context("OpenSSL connector")?;
@@ -160,12 +189,43 @@ async fn upgrade_openssl_legacy(
         .set_min_proto_version(Some(SslVersion::TLS1_2))
         .context("setting OpenSSL minimum TLS version")?;
     builder
-        .set_cipher_list(
-            cipher_list
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or(OPENSSL_LEGACY_RDP_CIPHER_LIST),
-        )
+        .set_max_proto_version(Some(SslVersion::TLS1_2))
+        .context("setting OpenSSL maximum TLS version")?;
+    builder
+        .set_cipher_list(OPENSSL_WINDOWS_2012_CIPHER_LIST)
         .context("setting OpenSSL cipher list")?;
+
+    upgrade_openssl(stream, server_name, verify, builder).await
+}
+
+#[cfg(feature = "openssl-tls")]
+async fn upgrade_openssl_windows_2008(
+    stream: TcpStream,
+    server_name: String,
+    verify: bool,
+) -> Result<(TargetTlsStream, Vec<u8>)> {
+    use openssl::ssl::{SslConnector, SslMethod, SslVersion};
+
+    let mut builder =
+        SslConnector::builder(SslMethod::tls_client()).context("OpenSSL connector")?;
+    builder
+        .set_min_proto_version(Some(SslVersion::TLS1))
+        .context("setting OpenSSL minimum TLS version")?;
+    builder
+        .set_cipher_list(OPENSSL_WINDOWS_2008_CIPHER_LIST)
+        .context("setting OpenSSL cipher list")?;
+
+    upgrade_openssl(stream, server_name, verify, builder).await
+}
+
+#[cfg(feature = "openssl-tls")]
+async fn upgrade_openssl(
+    stream: TcpStream,
+    server_name: String,
+    verify: bool,
+    mut builder: openssl::ssl::SslConnectorBuilder,
+) -> Result<(TargetTlsStream, Vec<u8>)> {
+    use openssl::ssl::SslVerifyMode;
 
     if !verify {
         builder.set_verify(SslVerifyMode::NONE);

@@ -62,8 +62,7 @@ pub async fn run(
             options.host.clone(),
             options.port,
             options.verify_tls,
-            options.tls_backend,
-            options.tls_openssl_cipher_list.clone(),
+            options.tls_security,
         ),
     )
     .await
@@ -305,8 +304,7 @@ async fn connect(
     server_name: String,
     port: u16,
     verify_tls: bool,
-    tls_backend: warpgate_common::RdpTlsBackend,
-    tls_openssl_cipher_list: Option<String>,
+    tls_security: warpgate_common::RdpTlsSecurity,
 ) -> Result<(ConnectionResult, Framed)> {
     let tcp_stream = tokio::time::timeout(
         CONNECT_TIMEOUT,
@@ -330,8 +328,7 @@ async fn connect(
         initial_stream,
         server_name.clone(),
         verify_tls,
-        tls_backend,
-        tls_openssl_cipher_list.as_deref(),
+        tls_security,
     )
     .await
     .context("TLS upgrade")?;

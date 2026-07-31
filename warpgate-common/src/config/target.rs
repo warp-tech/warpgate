@@ -323,31 +323,22 @@ pub struct TargetRdpOptions {
     #[serde(default)]
     pub verify_tls: bool,
 
-    /// TLS implementation used for the target-facing RDP connection.
-    ///
-    /// `rustls` is the default. `openssl_legacy` is intended for older NLA/CredSSP
-    /// targets, such as Windows Server 2012, whose Schannel cipher list may only
-    /// overlap with OpenSSL-compatible CBC or static-RSA TLS 1.2 suites.
+    // TLS compatibility/security profile used for the target-facing RDP connection.
+    // Kept as a plain comment so OpenAPI emits a direct enum reference. A field
+    // description wraps the enum in allOf, which typescript-fetch misgenerates.
     #[serde(default)]
-    #[oai(default)]
-    pub tls_backend: RdpTlsBackend,
-
-    /// Optional OpenSSL cipher-list expression used when `tls_backend` is `openssl_legacy`.
-    ///
-    /// When unset, Warpgate uses a conservative RDP compatibility list containing RSA
-    /// AES-GCM and ECDHE-RSA/RSA AES-CBC suites, while excluding RC4, 3DES and DHE.
-    #[serde(default)]
-    #[oai(default)]
-    pub tls_openssl_cipher_list: Option<String>,
+    pub tls_security: RdpTlsSecurity,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
-pub enum RdpTlsBackend {
-    #[serde(rename = "rustls")]
+pub enum RdpTlsSecurity {
+    #[serde(rename = "windows_2016")]
     #[default]
-    Rustls,
-    #[serde(rename = "openssl_legacy")]
-    OpenSslLegacy,
+    Windows2016,
+    #[serde(rename = "windows_2012")]
+    Windows2012,
+    #[serde(rename = "windows_2008")]
+    Windows2008,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
@@ -449,7 +440,7 @@ pub enum TargetOptions {
 #[cfg(test)]
 mod tests {
     use super::{
-        RdpTlsBackend, TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions,
+        RdpTlsSecurity, TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions,
         TargetRdpOptions, Tls,
     };
 
@@ -485,24 +476,17 @@ mod tests {
     }
 
     #[test]
-    fn rdp_tls_backend_defaults_to_rustls() {
+    fn rdp_tls_security_defaults_to_modern_windows() {
         let target: TargetRdpOptions = serde_json::from_str(r#"{"host":"t"}"#).unwrap();
 
-        assert_eq!(target.tls_backend, RdpTlsBackend::Rustls);
-        assert_eq!(target.tls_openssl_cipher_list, None);
+        assert_eq!(target.tls_security, RdpTlsSecurity::Windows2016);
     }
 
     #[test]
-    fn rdp_openssl_legacy_backend_can_be_configured() {
-        let target: TargetRdpOptions = serde_json::from_str(
-            r#"{"host":"t","tls_backend":"openssl_legacy","tls_openssl_cipher_list":"AES128-GCM-SHA256"}"#,
-        )
-        .unwrap();
+    fn rdp_tls_security_can_select_legacy_windows() {
+        let target: TargetRdpOptions =
+            serde_json::from_str(r#"{"host":"t","tls_security":"windows_2012"}"#).unwrap();
 
-        assert_eq!(target.tls_backend, RdpTlsBackend::OpenSslLegacy);
-        assert_eq!(
-            target.tls_openssl_cipher_list.as_deref(),
-            Some("AES128-GCM-SHA256")
-        );
+        assert_eq!(target.tls_security, RdpTlsSecurity::Windows2012);
     }
 }
