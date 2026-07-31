@@ -122,34 +122,34 @@ async fn active_loop(
 
     loop {
         let outputs = tokio::select! {
-                biased;
-                _ = abort_rx.recv() => return Ok(()),
-                input = input_rx.recv() => {
-                    let Some(first) = input else {
-                        return Ok(());
-                    };
-                    // Coalesce whatever else is already queued so a burst of pointer moves
-                    // becomes one fastpath batch rather than one round trip each.
-                    let mut ops = Vec::new();
-                    input::translate(first, &mut ops);
-                    while let Ok(next) = input_rx.try_recv() {
-                        input::translate(next, &mut ops);
-                    }
-                    if ops.is_empty() {
-                        continue;
-                    }
-                    let events = input_db.apply(ops);
-                    active_stage
-                        .process_fastpath_input(image, &events)
-                        .context("processing input")?
+            biased;
+            _ = abort_rx.recv() => return Ok(()),
+            input = input_rx.recv() => {
+                let Some(first) = input else {
+                    return Ok(());
+                };
+                // Coalesce whatever else is already queued so a burst of pointer moves
+                // becomes one fastpath batch rather than one round trip each.
+                let mut ops = Vec::new();
+                input::translate(first, &mut ops);
+                while let Ok(next) = input_rx.try_recv() {
+                    input::translate(next, &mut ops);
                 }
-                pdu = framed.read_pdu() => {
-                    let (action, payload) = pdu.context("reading PDU")?;
-                    active_stage
-                        .process(image, action, &payload)
-                        .context("processing PDU")?
+                if ops.is_empty() {
+                    continue;
                 }
-            };
+                let events = input_db.apply(ops);
+                active_stage
+                    .process_fastpath_input(image, &events)
+                    .context("processing input")?
+            }
+            pdu = framed.read_pdu() => {
+                let (action, payload) = pdu.context("reading PDU")?;
+                active_stage
+                    .process(image, action, &payload)
+                    .context("processing PDU")?
+            }
+        };
 
         let should_reactivate = outputs
             .iter()
