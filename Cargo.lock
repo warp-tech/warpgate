@@ -1052,7 +1052,7 @@ checksum = "4d6867f1565b3aad85681f1015055b087fcfd840d6aeee6eee7f2da317603695"
 dependencies = [
  "autocfg",
  "libm",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-integer",
  "num-traits",
  "serde",
@@ -2060,7 +2060,7 @@ dependencies = [
  "asn1-rs",
  "displaydoc",
  "nom",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-traits",
  "rusticata-macros",
 ]
@@ -3812,7 +3812,7 @@ dependencies = [
  "ironrdp-core",
  "ironrdp-error",
  "md-5 0.10.6",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-derive",
  "num-integer",
  "num-traits",
@@ -4532,7 +4532,7 @@ dependencies = [
  "crc32fast",
  "flate2",
  "getrandom 0.3.4",
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-traits",
  "regex",
  "saturating",
@@ -4650,6 +4650,16 @@ name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-bigint"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93e7820bc0a80a0238e650327316f929ba18d5be054b647490a3a6a339f3e7c0"
 dependencies = [
  "num-integer",
  "num-traits",
@@ -6533,7 +6543,7 @@ dependencies = [
  "md5",
  "ml-kem",
  "module-lattice",
- "num-bigint",
+ "num-bigint 0.4.8",
  "p256 0.14.0",
  "p384 0.14.0",
  "p521",
@@ -7480,7 +7490,7 @@ version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d585997b0ac10be3c5ee635f1bab02d512760d14b7c468801ac8a01d9ae5f1d"
 dependencies = [
- "num-bigint",
+ "num-bigint 0.4.8",
  "num-traits",
  "thiserror 2.0.19",
  "time",
@@ -9549,7 +9559,7 @@ dependencies = [
  "futures",
  "getrandom 0.4.3",
  "md-5 0.11.0",
- "num-bigint",
+ "num-bigint 0.5.1",
  "rustls 0.23.42",
  "thiserror 2.0.19",
  "tokio",
