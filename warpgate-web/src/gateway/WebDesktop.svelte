@@ -311,6 +311,14 @@
         ws.connect()
     })
 
+    const originalTitle = document.title
+    $effect(() => {
+        const targetName = sessionInfo?.targetName
+        if (targetName) {
+            document.title = `${targetName} - ${originalTitle}`
+        }
+    })
+
     onDestroy(() => {
         ws.close()
         if (rafHandle !== null) {
