@@ -112,7 +112,7 @@
                     use:link
                     use:active
                     use:active={{path: /^\/config\//}}
-                    href="/config/targets"
+                    href="/config"
                 >
                     Config
                 </a>
