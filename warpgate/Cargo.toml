@@ -12,6 +12,9 @@ bytes.workspace = true
 clap = { version = "4.0", features = [
     "derive",
     "env",
+    "help",
+    "std",
+    "usage",
 ], default-features = false }
 config = { version = "0.15", features = ["yaml"], default-features = false }
 console = { version = "0.16", default-features = false }
