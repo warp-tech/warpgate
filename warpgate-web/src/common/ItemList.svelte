@@ -38,7 +38,7 @@
         groupObject?: (_: T) => G
         groupKey?: (_: G) => GK
         showSearch?: boolean
-        header?: Snippet<[]>
+        header?: Snippet<[T[] | null]>
         item?: Snippet<[T]>
         footer?: Snippet<[T[]]>
         empty?: Snippet<[]>
@@ -130,7 +130,7 @@
                 class="flex-grow-1"
             />
         {/if}
-        {@render header?.()}
+        {@render header?.(_items)}
     </div>
     {#if _items}
         <div class="list-group list-group-flush mb-3">

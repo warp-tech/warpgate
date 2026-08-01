@@ -160,23 +160,25 @@
     groupObject={groupInfoFromTarget}
     groupKey={group => group.id}
 >
-    {#snippet header()}
-        <Dropdown>
-            <DropdownToggle color="link">
-                <Fa icon={faEllipsisV} fw />
-            </DropdownToggle>
-            <DropdownMenu>
-                <div class="dropdown-header">Preferences</div>
-                <DropdownItem>
-                    <Input
-                        type="switch"
-                        bind:checked={$openTargetsInNewTab}
-                        label="Open targets in a new tab"
-                        onmousedown={e => e.stopPropagation()}
-                    />
-                </DropdownItem>
-            </DropdownMenu>
-        </Dropdown>
+    {#snippet header(items)}
+        {#if items?.length}
+            <Dropdown>
+                <DropdownToggle color="link">
+                    <Fa icon={faEllipsisV} fw />
+                </DropdownToggle>
+                <DropdownMenu>
+                    <div class="dropdown-header">Preferences</div>
+                    <DropdownItem>
+                        <Input
+                            type="switch"
+                            bind:checked={$openTargetsInNewTab}
+                            label="Open targets in a new tab"
+                            onmousedown={e => e.stopPropagation()}
+                        />
+                    </DropdownItem>
+                </DropdownMenu>
+            </Dropdown>
+        {/if}
     {/snippet}
     {#snippet empty()}
         <EmptyState title="You don't have access to any targets yet" />
