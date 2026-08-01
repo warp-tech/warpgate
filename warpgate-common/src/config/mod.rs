@@ -871,7 +871,7 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub sso_providers: Vec<SsoProviderConfig>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recordings: Option<RecordingsConfig>,
 
     #[serde(default)]
@@ -942,5 +942,18 @@ impl WarpgateConfig {
                 "Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options."
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WarpgateConfigStore;
+
+    #[test]
+    fn default_config_store_omits_recordings() {
+        let config = serde_json::to_value(WarpgateConfigStore::default()).unwrap();
+        let config = config.as_object().unwrap();
+
+        assert!(!config.contains_key("recordings"));
     }
 }
