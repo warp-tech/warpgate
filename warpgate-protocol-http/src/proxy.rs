@@ -322,8 +322,13 @@ pub async fn proxy_normal_request(
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
 
-    client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
-
+    if req.headers().contains_key(http::header::CONTENT_LENGTH)
+        || req.headers().contains_key(http::header::TRANSFER_ENCODING)
+    {
+        client_request =
+        client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
+    }
+    
     let client_request = client_request.build().context("Could not build request")?;
     let client_response = client
         .execute(client_request)
