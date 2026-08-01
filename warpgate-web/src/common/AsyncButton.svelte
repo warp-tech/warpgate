@@ -42,7 +42,9 @@
     let lastHeight = $state(0)
     let st = $state(State.Normal)
 
-    async function _click() {
+    async function _click(event: MouseEvent) {
+        event.preventDefault()
+
         if (!button) {
             return
         }
@@ -82,9 +84,9 @@
 </script>
 
 <Button
-    on:click={() => {
+    on:click={event => {
         if (!(st === State.Progress || st === State.ProgressWithSpinner)) {
-            _click()
+            _click(event)
         }
     }}
     bind:inner={button}
