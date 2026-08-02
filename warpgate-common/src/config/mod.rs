@@ -173,6 +173,9 @@ pub struct Role {
     pub name: String,
     pub description: String,
     pub is_default: bool,
+    /// Owned by a static targets file sync rather than the admin API/UI; see
+    /// `warpgate-core::static_targets`.
+    pub static_managed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Object)]
@@ -877,6 +880,14 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub external_host: Option<String>,
 
+    /// Path (relative to this config file) to a YAML file defining targets,
+    /// target groups and roles that Warpgate should keep in sync with the
+    /// database, so they can be managed externally (e.g. generated from a
+    /// CMDB) instead of through the admin API. See
+    /// `warpgate-core::static_targets` for the file format.
+    #[serde(default)]
+    pub targets_file: Option<String>,
+
     #[serde(default = "_default_database_url")]
     #[schemars(with = "String")]
     pub database_url: Secret<String>,
@@ -912,6 +923,7 @@ impl Default for WarpgateConfigStore {
             sso_providers: vec![],
             recordings: <_>::default(),
             external_host: None,
+            targets_file: None,
             database_url: _default_database_url(),
             ssh: <_>::default(),
             http: <_>::default(),

@@ -102,6 +102,14 @@
                 </div>
             </div>
 
+            {#if group.staticManaged}
+                <Alert color="info">
+                    This target group is managed by the static targets file and
+                    cannot be edited or deleted here. Change the source file
+                    instead — it will be resynced automatically.
+                </Alert>
+            {/if}
+
             <form
                 onsubmit={e => {
             e.preventDefault()
@@ -114,7 +122,7 @@
                         id="name"
                         bind:value={name}
                         required
-                        disabled={saving}
+                        disabled={saving || group.staticManaged}
                     />
                 </FormGroup>
 
@@ -124,7 +132,7 @@
                         id="description"
                         type="textarea"
                         bind:value={description}
-                        disabled={saving}
+                        disabled={saving || group.staticManaged}
                     />
                 </FormGroup>
 
@@ -139,7 +147,7 @@
                                 type="button"
                                 class="btn btn-secondary gap-2 d-flex align-items-center"
                                 class:active={color === value}
-                                disabled={saving}
+                                disabled={saving || group.staticManaged}
                                 onclick={(e) => {
                                 e.preventDefault()
                                 color = value
@@ -157,14 +165,16 @@
                     <AsyncButton
                         click={update}
                         color="primary"
-                        disabled={!$adminPermissions.targetsEdit}
+                        disabled={!$adminPermissions.targetsEdit ||
+                            group.staticManaged}
                     >
                         Update
                     </AsyncButton>
                     <Button
                         color="danger"
                         onclick={remove}
-                        disabled={!$adminPermissions.targetsDelete}
+                        disabled={!$adminPermissions.targetsDelete ||
+                            group.staticManaged}
                     >
                         Remove
                     </Button>

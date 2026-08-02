@@ -15,6 +15,9 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub description: String,
     pub is_default: bool,
+    /// Owned by a static targets file sync rather than the admin API/UI; see
+    /// `warpgate-core::static_targets`.
+    pub static_managed: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -71,6 +74,7 @@ impl From<Model> for Role {
             name: model.name,
             description: model.description,
             is_default: model.is_default,
+            static_managed: model.static_managed,
         }
     }
 }

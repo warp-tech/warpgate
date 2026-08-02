@@ -16,6 +16,7 @@ mod protocols;
 pub mod rate_limiting;
 pub mod recordings;
 mod services;
+pub mod static_targets;
 mod state;
 pub mod ticket_requests;
 pub use auth_state_store::*;

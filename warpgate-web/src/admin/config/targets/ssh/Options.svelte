@@ -17,9 +17,10 @@
     interface Props {
         id: string
         options: TargetOptionsTargetSSHOptions
+        disabled?: boolean
     }
 
-    let { id, options }: Props = $props()
+    let { id, options, disabled = false }: Props = $props()
 
     let hostKeyCheckInvalidated = $state(false)
     let sshTargets = $state<Target[]>([])
@@ -87,7 +88,11 @@
     {#if sshTargets.length}
         <div class="col">
             <FormGroup floating label="Jump host">
-                <select class="form-control" bind:value={jumpHostSelectValue}>
+                <select
+                    class="form-control"
+                    bind:value={jumpHostSelectValue}
+                    {disabled}
+                >
                     <option value="">Direct connection</option>
                     {#each sshTargets as target (target.id)}
                         <option value={target.id}>{target.name}</option>
@@ -102,6 +107,7 @@
                 class="form-control"
                 bind:value={options.host}
                 onchange={() => hostKeyCheckInvalidated = true}
+                {disabled}
             >
         </FormGroup>
     </div>
@@ -115,6 +121,7 @@
                 max="65535"
                 step="1"
                 onchange={() => hostKeyCheckInvalidated = true}
+                {disabled}
             >
         </FormGroup>
     </div>
@@ -139,12 +146,13 @@
         class="form-control"
         placeholder="Use the currently logged in user's name"
         bind:value={options.username}
+        {disabled}
     >
 </FormGroup>
 
 <div class="d-flex">
     <FormGroup floating label="Authenticate using" class="w-100">
-        <select bind:value={options.auth.kind} class="form-control">
+        <select bind:value={options.auth.kind} class="form-control" {disabled}>
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
             {#if $serverInfo?.runningOnEc2}
@@ -154,7 +162,11 @@
     </FormGroup>
     {#if options.auth.kind === 'PublicKey'}
         <FormGroup floating label="Key" class="w-100 ms-3">
-            <select class="form-control" bind:value={clientKeySelectValue}>
+            <select
+                class="form-control"
+                bind:value={clientKeySelectValue}
+                {disabled}
+            >
                 <option value="">Use default keys</option>
                 {#each clientKeys as key (key.id)}
                     <option value={key.id}>
@@ -179,6 +191,7 @@
                 type="password"
                 autocomplete="off"
                 bind:value={options.auth.password}
+                {disabled}
             >
         </FormGroup>
     {/if}
@@ -190,5 +203,6 @@
         type="switch"
         label="Allow insecure SSH algorithms (e.g. for older network devices)"
         bind:checked={options.allowInsecureAlgos}
+        {disabled}
     />
 </div>

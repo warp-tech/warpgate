@@ -81,6 +81,7 @@ impl ListApi {
             name: Set(body.name.clone()),
             description: Set(body.description.clone().unwrap_or_default()),
             is_default: Set(body.is_default.unwrap_or(false)),
+            static_managed: Set(false),
         };
 
         let role = values.insert(db).await.map_err(WarpgateError::from)?;
@@ -103,6 +104,8 @@ enum UpdateRoleResponse {
     Ok(Json<RoleConfig>),
     #[oai(status = 404)]
     NotFound,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
 }
 
 #[derive(ApiResponse)]
@@ -111,7 +114,12 @@ enum DeleteRoleResponse {
     Deleted,
     #[oai(status = 404)]
     NotFound,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
 }
+
+const STATIC_MANAGED_MESSAGE: &str =
+    "This role is managed by the static targets file and cannot be edited or deleted via the API";
 
 #[derive(ApiResponse)]
 enum GetRoleTargetsResponse {
@@ -164,6 +172,12 @@ impl DetailApi {
             return Ok(UpdateRoleResponse::NotFound);
         };
 
+        if role.static_managed {
+            return Ok(UpdateRoleResponse::Conflict(Json(
+                STATIC_MANAGED_MESSAGE.into(),
+            )));
+        }
+
         let current_is_default = role.is_default;
         let mut model: Role::ActiveModel = role.into();
         model.name = Set(body.name.clone());
@@ -187,6 +201,12 @@ impl DetailApi {
         let Some(role) = Role::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteRoleResponse::NotFound);
         };
+
+        if role.static_managed {
+            return Ok(DeleteRoleResponse::Conflict(Json(
+                STATIC_MANAGED_MESSAGE.into(),
+            )));
+        }
 
         // Clean up referencing assignments before deleting the role
         UserRoleAssignment::Entity::delete_many()

@@ -429,6 +429,11 @@ pub struct Target {
     pub ticket_requests_disabled: bool,
     pub ticket_require_approval: bool,
     pub ticket_max_uses: Option<i16>,
+    /// Owned by a static targets file sync rather than the admin API/UI; see
+    /// `warpgate-core::static_targets`. Ignored on write — set from the
+    /// database on read.
+    #[serde(default)]
+    pub static_managed: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]

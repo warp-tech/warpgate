@@ -169,7 +169,13 @@
                             >
                         {/if}
                     </div>
-                    <small class="text-muted ms-auto">
+                    {#if target.staticManaged}
+                        <span class="badge bg-info ms-auto">Static</span>
+                    {/if}
+                    <small
+                        class="text-muted"
+                        class:ms-auto={!target.staticManaged}
+                    >
                         {#if target.options.kind === TargetKind.Http}
                             HTTP
                         {/if}

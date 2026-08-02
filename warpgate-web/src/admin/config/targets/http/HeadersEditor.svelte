@@ -7,6 +7,7 @@
 
     interface Props {
         value?: Headers
+        disabled?: boolean
     }
 
     interface HeaderRow {
@@ -15,7 +16,7 @@
         value: string
     }
 
-    let { value = $bindable() }: Props = $props()
+    let { value = $bindable(), disabled = false }: Props = $props()
 
     let nextHeaderId = 1
     let headerRows: HeaderRow[] = $state([])
@@ -96,6 +97,7 @@
                 placeholder="Header name"
                 bind:value={header.name}
                 oninput={syncValueFromRows}
+                {disabled}
             >
             <input
                 class="form-control flex-grow-1"
@@ -103,12 +105,14 @@
                 placeholder="Header value"
                 bind:value={header.value}
                 oninput={syncValueFromRows}
+                {disabled}
             >
             <button
                 type="button"
                 class="btn btn-link px-0"
                 onclick={() => removeHeaderRow(header.id)}
                 title="Remove"
+                {disabled}
             >
                 <Fa icon={faTimes} />
             </button>
@@ -119,6 +123,7 @@
         type="button"
         class="btn btn-secondary btn-sm d-flex align-items-center gap-2"
         onclick={addHeaderRow}
+        {disabled}
     >
         <Fa icon={faPlus} />
         Add custom header
