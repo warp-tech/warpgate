@@ -16,6 +16,9 @@ use ironrdp::connector::connection_activation::{
 };
 use ironrdp::connector::{self, ConnectionResult, Credentials};
 use ironrdp::core::WriteBuf;
+use ironrdp::displaycontrol::client::DisplayControlClient;
+use ironrdp::displaycontrol::pdu::MonitorLayoutEntry;
+use ironrdp::dvc::DrdynvcClient;
 use ironrdp::graphics::image_processing::PixelFormat;
 use ironrdp::pdu::gcc::KeyboardType;
 use ironrdp::pdu::geometry::InclusiveRectangle;
@@ -57,7 +60,15 @@ pub async fn run(
         .ok();
 
     let RdpTargetAuth::Password(auth) = &options.auth;
-    let config = build_config(&options, auth.password.expose_secret(), width, height);
+    // The viewer-supplied size may be odd or out of range; keep the initial desktop within
+    // the same bounds the Display Control resize path enforces.
+    let (width, height) = MonitorLayoutEntry::adjust_display_size(width as u32, height as u32);
+    let config = build_config(
+        &options,
+        auth.password.expose_secret(),
+        width as u16,
+        height as u16,
+    );
 
     let (connection_result, framed) = tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
@@ -119,8 +130,19 @@ async fn active_loop(
     }
     .build();
     let mut input_db = ironrdp::input::Database::new();
+    // The Display Control channel only becomes usable once the target has created it and
+    // sent its capabilities, which happens after the connection is already active. A
+    // resize requested before then (notably the viewer's initial size) is held here and
+    // retried each iteration until `encode_resize` accepts it.
+    let mut pending_resize: Option<(u16, u16)> = None;
 
     loop {
+        if let Some((width, height)) = pending_resize
+            && send_resize(&mut framed, &mut active_stage, width, height).await?
+        {
+            pending_resize = None;
+        }
+
         let outputs = tokio::select! {
             biased;
             _ = abort_rx.recv() => return Ok(()),
@@ -129,11 +151,22 @@ async fn active_loop(
                     return Ok(());
                 };
                 // Coalesce whatever else is already queued so a burst of pointer moves
-                // becomes one fastpath batch rather than one round trip each.
+                // becomes one fastpath batch rather than one round trip each. Resizes are
+                // pulled out and only the latest is kept — each one costs the target a
+                // deactivation-reactivation, so intermediate sizes from a window drag are
+                // wasted work.
                 let mut ops = Vec::new();
-                input::translate(first, &mut ops);
-                while let Ok(next) = input_rx.try_recv() {
-                    input::translate(next, &mut ops);
+                let mut resize = None;
+                for input in std::iter::once(first)
+                    .chain(std::iter::from_fn(|| input_rx.try_recv().ok()))
+                {
+                    match input {
+                        DesktopInput::Resize { width, height } => resize = Some((width, height)),
+                        other => input::translate(other, &mut ops),
+                    }
+                }
+                if resize.is_some() {
+                    pending_resize = resize;
                 }
                 if ops.is_empty() {
                     continue;
@@ -171,6 +204,29 @@ async fn active_loop(
             .await
             .context("RDP deactivation-reactivation sequence")?;
         }
+    }
+}
+
+/// Ask the target to resize its desktop over the Display Control DVC. The target replies
+/// with a deactivation-reactivation, which `active_loop` funnels through [`reactivate`].
+///
+/// Returns `false` when the DVC has not finished negotiating yet; the caller keeps the
+/// request pending and retries.
+async fn send_resize(
+    framed: &mut Framed,
+    active_stage: &mut ActiveStage,
+    width: u16,
+    height: u16,
+) -> Result<bool> {
+    // The layout PDU rejects odd widths and sizes outside 200..=8192.
+    let (width, height) = MonitorLayoutEntry::adjust_display_size(width as u32, height as u32);
+    match active_stage.encode_resize(width, height, None, None) {
+        Some(frame) => {
+            let frame = frame.context("encoding resize request")?;
+            framed.write_all(&frame).await.context("sending resize request")?;
+            Ok(true)
+        }
+        None => Ok(false),
     }
 }
 
@@ -382,7 +438,14 @@ async fn connect(
     let client_addr = tcp_stream.local_addr().context("local addr")?;
 
     let mut framed = TokioFramed::new(tcp_stream);
-    let mut connector = connector::ClientConnector::new(config, client_addr);
+    // Advertise the Display Control DVC so viewer-driven resolution changes can be pushed
+    // to the target mid-session (MS-RDPEDISP). The capabilities callback has nothing to
+    // reply with; `ActiveStage::encode_resize` drives the channel once it is ready.
+    let mut connector = connector::ClientConnector::new(config, client_addr)
+        .with_static_channel(
+            DrdynvcClient::new()
+                .with_dynamic_channel(DisplayControlClient::new(|_caps| Ok(Vec::new()))),
+        );
 
     let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)
         .await

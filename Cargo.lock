@@ -3635,6 +3635,8 @@ checksum = "0f910b8dc8e7b8e001c61fd742be442e8604fb2499ded713cadf911e7645ade4"
 dependencies = [
  "ironrdp-connector",
  "ironrdp-core",
+ "ironrdp-displaycontrol",
+ "ironrdp-dvc",
  "ironrdp-graphics",
  "ironrdp-input",
  "ironrdp-pdu",

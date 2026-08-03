@@ -11,14 +11,17 @@
     import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
     import { loadTheme } from 'theme'
+    import { handleReauthError } from 'common/reauth'
+    import { Subject, debounceTime, distinctUntilChanged } from 'rxjs'
     import { api, ResponseError, type WebDesktopSessionInfo } from './lib/api'
     import {
         ConnectionState,
         ReconnectingWebSocket,
     } from './lib/ReconnectingWebSocket.svelte'
 
+    // Match both routes (start & viewer)
     interface Props {
-        params: { sessionId: string }
+        params: { sessionId?: string; targetId?: string }
     }
     let { params }: Props = $props()
 
@@ -34,9 +37,10 @@
         | { type: 'error'; message: string }
 
     // svelte-ignore state_referenced_locally
-    const { sessionId } = params
+    let sessionId = $state(params.sessionId)
 
     let canvas: HTMLCanvasElement | undefined = $state()
+    let canvasArea: HTMLDivElement | undefined = $state()
     // Gates the fade-in; set on the first painted batch.
     let painted = $state(false)
     // The whole client goes fullscreen, not just the canvas, so the toolbar (and the
@@ -58,19 +62,64 @@
     // than we need to forward); button presses/releases are sent immediately.
     let pendingPointer: { x: number; y: number; buttons: number } | null = null
 
-    const ws = new ReconnectingWebSocket({
-        url: `wss://${location.host}/@warpgate/api/web-desktop/sessions/${sessionId}/stream`,
-        onOpen: () => null,
-        onMessage: onWsMessage,
-    })
+    let ws = $state<ReconnectingWebSocket | undefined>()
+
+    function startStream() {
+        if (!sessionId) {
+            return
+        }
+        ws = new ReconnectingWebSocket({
+            url: `wss://${location.host}/@warpgate/api/web-desktop/sessions/${sessionId}/stream`,
+            onOpen: () => null,
+            onMessage: onWsMessage,
+        })
+        ws.connect()
+    }
 
     function send(msg: unknown) {
-        ws.send(JSON.stringify(msg))
+        ws?.send(JSON.stringify(msg))
     }
+
+    function viewportSize(): { width: number; height: number } | null {
+        const width = Math.floor(canvasArea?.clientWidth ?? window.innerWidth)
+        const height = Math.floor(
+            canvasArea?.clientHeight ?? window.innerHeight,
+        )
+        if (width < 1 || height < 1) {
+            return null
+        }
+        return { width, height }
+    }
+
+    interface ViewportSize {
+        width: number
+        height: number
+    }
+    // Debounce since every resize is an RDP reactivation
+    const resizeRequests = new Subject<ViewportSize>()
+
+    function sendResize(size: ViewportSize) {
+        if (ws?.state !== ConnectionState.Connected) {
+            return
+        }
+        send({ type: 'resize', ...size })
+    }
+
+    const resizeSubscription = resizeRequests
+        .pipe(
+            debounceTime(300),
+            distinctUntilChanged(
+                (a, b) => a.width === b.width && a.height === b.height,
+            ),
+        )
+        .subscribe(sendResize)
 
     // Pixel frames arrive as binary (see the backend's `ws_payload`); control messages
     // (connection state, resize, copy-rect, clipboard, error) arrive as JSON text.
     function onWsMessage(data: string | ArrayBuffer) {
+        if (!ws) {
+            return
+        }
         if (typeof data !== 'string') {
             const frame = decodeBinaryFrame(data)
             if (frame) {
@@ -83,6 +132,10 @@
             case 'connection_state':
                 if (msg.state === 'connected') {
                     ws.state = ConnectionState.Connected
+                    const size = viewportSize()
+                    if (size) {
+                        sendResize(size)
+                    }
                 } else if (msg.state === 'disconnected') {
                     ws.state = ConnectionState.Disconnected
                 }
@@ -284,23 +337,59 @@
     }
 
     async function disconnect() {
-        ws.close()
-        try {
-            await api.deleteWebDesktopSession({ sessionId })
-        } catch {
-            // ignore
+        ws?.close()
+        if (sessionId) {
+            try {
+                await api.deleteWebDesktopSession({ sessionId })
+            } catch {
+                // ignore
+            }
         }
         window.close()
     }
+
+    async function startSession(targetId: string): Promise<void> {
+        const size = viewportSize()
+        const { sessionId: id } = await api.createWebDesktopSession({
+            createWebDesktopSessionBody: {
+                targetId,
+                width: size?.width,
+                height: size?.height,
+            },
+        })
+        sessionId = id
+        history.replaceState(history.state, '', `#/web-desktop/${id}`)
+    }
+
+    let resizeObserver: ResizeObserver | undefined
 
     onMount(async () => {
         if (canvas) {
             ctx = canvas.getContext('2d')
         }
+        if (canvasArea) {
+            resizeObserver = new ResizeObserver(() => {
+                const size = viewportSize()
+                if (size) {
+                    resizeRequests.next(size)
+                }
+            })
+            resizeObserver.observe(canvasArea)
+        }
         rafHandle = requestAnimationFrame(tick)
         try {
+            if (!sessionId && params.targetId) {
+                await startSession(params.targetId)
+            }
+            if (!sessionId) {
+                sessionNotFound = true
+                return
+            }
             sessionInfo = await api.getWebDesktopSession({ sessionId })
         } catch (e) {
+            if (await handleReauthError(e)) {
+                return
+            }
             connectionError =
                 e instanceof Error ? e.message : 'Failed to load session info'
             if (e instanceof ResponseError && e.response.status === 404) {
@@ -308,7 +397,7 @@
             }
             return
         }
-        ws.connect()
+        startStream()
     })
 
     const originalTitle = document.title
@@ -320,7 +409,9 @@
     })
 
     onDestroy(() => {
-        ws.close()
+        ws?.close()
+        resizeObserver?.disconnect()
+        resizeSubscription.unsubscribe()
         if (rafHandle !== null) {
             cancelAnimationFrame(rafHandle)
         }
@@ -343,8 +434,8 @@
         >
         {#if !sessionNotFound}
             <span class="text-muted small me-3">
-                {ws.state}
-                {#if ws.state === ConnectionState.Connecting && ws.attempt > 0}
+                {ws?.state ?? ConnectionState.Connecting}
+                {#if ws?.state === ConnectionState.Connecting && ws.attempt > 0}
                     &nbsp;(attempt {ws.attempt})
                 {/if}
             </span>
@@ -375,6 +466,7 @@
     {/if}
 
     <div
+        bind:this={canvasArea}
         class="canvas-area flex-grow-1 d-flex align-items-center justify-content-center"
     >
         <canvas
