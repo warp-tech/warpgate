@@ -28,15 +28,6 @@ export async function openWebSshSession(targetId: string): Promise<void> {
     }
 }
 
-export async function openWebDesktopSession(targetId: string): Promise<void> {
-    try {
-        const { sessionId } = await api.createWebDesktopSession({
-            createWebDesktopSessionBody: { targetId },
-        })
-        maybeOpenInNewTab(`/web-desktop/${sessionId}`)
-    } catch (err) {
-        if (!(await handleReauthError(err))) {
-            throw err
-        }
-    }
+export function openWebDesktopSession(targetId: string): void {
+    maybeOpenInNewTab(`/web-desktop/start/${targetId}`)
 }

@@ -499,7 +499,9 @@ impl DesktopRecorder {
                 time,
                 text: text.clone(),
             },
-            DesktopInput::Refresh => return Ok(()),
+            // The target's response to a resize arrives as a recorded DesktopEvent::Resize,
+            // so the request itself carries no playback value.
+            DesktopInput::Refresh | DesktopInput::Resize { .. } => return Ok(()),
         };
         let mut st = self.state.lock().await;
         st.duration = st.duration.max(time);

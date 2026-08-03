@@ -44,6 +44,10 @@ pub enum ClientMessage {
         text: String,
     },
     Refresh,
+    Resize {
+        width: u16,
+        height: u16,
+    },
 }
 
 // avoid unbounded memory use from untrusted input
@@ -78,6 +82,7 @@ impl From<ClientMessage> for Option<DesktopInput> {
                 DesktopInput::Clipboard(text)
             }
             ClientMessage::Refresh => DesktopInput::Refresh,
+            ClientMessage::Resize { width, height } => DesktopInput::Resize { width, height },
         })
     }
 }

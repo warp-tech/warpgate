@@ -45,6 +45,7 @@ impl WebDesktopClientManager {
         services: &Services,
         authorization: TargetAuthorization,
         remote_address: Option<SocketAddr>,
+        size: Option<(u16, u16)>,
     ) -> Result<Uuid, WarpgateError> {
         let user_id = authorization.user_info().id;
         if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
@@ -101,10 +102,12 @@ impl WebDesktopClientManager {
                 (h.event_rx, h.input_tx, h.abort_tx, false)
             }
             TargetOptions::Rdp(options) => {
-                // The browser canvas follows whatever size the target reports, so ask for
-                // the helper's default rather than dictating one.
-                let h =
-                    warpgate_protocol_rdp::connect(options, warpgate_protocol_rdp::DEFAULT_SIZE);
+                // Connect at the viewer's measured size when known, so the desktop fits the
+                // browser from the first frame; the DVC resize path handles later changes.
+                let h = warpgate_protocol_rdp::connect(
+                    options,
+                    size.unwrap_or(warpgate_protocol_rdp::DEFAULT_SIZE),
+                );
                 // The RDP helper only ever emits raw RGBA.
                 (h.event_rx, h.input_tx, h.abort_tx, true)
             }

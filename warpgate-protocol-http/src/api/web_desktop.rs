@@ -18,6 +18,10 @@ pub struct Api;
 #[derive(Object)]
 struct CreateWebDesktopSessionBody {
     target_id: Uuid,
+    /// Initial desktop resolution to request from the target, measured by the browser.
+    /// Both must be present to take effect; otherwise a default is used.
+    width: Option<u16>,
+    height: Option<u16>,
 }
 
 #[derive(Object)]
@@ -92,11 +96,13 @@ impl Api {
             }
         };
 
+        let size = body.width.zip(body.height);
         let session_id = manager
             .create_session(
                 ctx.services(),
                 authorization,
                 remote_addr.0.as_socket_addr().copied(),
+                size,
             )
             .await;
 

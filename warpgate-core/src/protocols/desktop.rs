@@ -86,4 +86,7 @@ pub enum DesktopInput {
     Clipboard(String),
     /// Request a full framebuffer refresh.
     Refresh,
+    /// The viewer's available display area changed; request the target resize its
+    /// desktop to `width`×`height`. Backends without dynamic-resize support ignore it.
+    Resize { width: u16, height: u16 },
 }

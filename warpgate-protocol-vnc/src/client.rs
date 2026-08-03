@@ -68,6 +68,8 @@ fn map_input(input: DesktopInput) -> Vec<X11Event> {
         // RFB has no raw-scancode input; native-RDP scancodes are meaningless to a
         // VNC target, so drop them (keysym input is used for VNC instead).
         DesktopInput::Scancode { .. } => vec![],
+        // Dynamic resize toward a VNC target is not supported.
+        DesktopInput::Resize { .. } => vec![],
     }
 }
 

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.27.0-beta.5-11-g30fb9eab-modified"
+    "version": "v0.27.1-4-ge10e4293-modified"
   },
   "servers": [
     {
@@ -1803,6 +1803,15 @@
           "target_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "width": {
+            "type": "integer",
+            "format": "uint16",
+            "description": "Initial desktop resolution to request from the target, measured by the browser.\nBoth must be present to take effect; otherwise a default is used."
+          },
+          "height": {
+            "type": "integer",
+            "format": "uint16"
           }
         }
       },
