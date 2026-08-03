@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use anyhow::{Context, Result};
-use bimap::BiMap;
 use bytes::Bytes;
 use futures::{Future, FutureExt};
 use russh::keys::{PublicKey, PublicKeyBase64};
@@ -29,8 +28,7 @@ use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{
-    self, ConnectionRecorder, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams,
-    TrafficRecorder,
+    self, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams, TrafficRecorder,
 };
 use warpgate_core::{
     AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, WarpgateServerHandle,
@@ -39,6 +37,7 @@ use warpgate_core::{
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 
+use super::channel_registry::{Channel, ChannelRegistry};
 use super::channel_writer::ChannelWriter;
 use super::command_detector::CommandDetector;
 use super::russh_handler::ServerHandlerEvent;
@@ -96,67 +95,17 @@ pub enum TrafficRecorderKey {
     Socket(String),
 }
 
-/// How far a channel has got through its lifecycle. A channel that is gone is
-/// absent from [`ServerSession::channels`] entirely, so there is no "closed"
-/// state to go stale.
-#[derive(Default)]
-enum ChannelState {
-    /// Open initiated on our side, not yet confirmed by the peer. Server-initiated
-    /// channels (forwarded-tcpip, forwarded-streamlocal) accumulate resources here
-    /// while the client's confirmation is in flight.
-    #[default]
-    Opening,
-    /// Confirmed open on both sides. `pty` marks channels that had a PTY
-    /// allocated — those receive service output and drive the interactive
-    /// target-selection menu.
-    Open { pty: bool },
-}
-
-/// All per-channel resources, held in [`ServerSession::channels`]. Living in
-/// one struct per channel (rather than parallel per-resource maps) means they
-/// can't fall out of sync as channels come and go, and a new per-channel
-/// resource only needs a field here.
-#[derive(Default)]
-struct Channel {
-    state: ChannelState,
-    recorder: Option<TerminalRecorder>,
-    command_detector: Option<CommandDetector>,
-    pty_size: Option<PtyRequest>,
-    traffic_recorder: Option<ConnectionRecorder>,
-}
-
-impl Channel {
-    const fn has_pty(&self) -> bool {
-        matches!(self.state, ChannelState::Open { pty: true })
-    }
-
-    /// Carries `pty` across the transition: a channel can be confirmed open
-    /// after its PTY was already recorded, and assigning `Open { pty: false }`
-    /// outright would drop that.
-    const fn mark_open(&mut self) {
-        self.state = ChannelState::Open {
-            pty: self.has_pty(),
-        };
-    }
-}
-
 pub struct ServerSession {
     pub id: SessionId,
     user_info: Option<AuthStateUserInfo>,
     session_handle: Option<russh::server::Handle>,
-    channels: HashMap<Uuid, Channel>,
-    /// Pure id mapping between the user-facing russh channel ids and the
-    /// internal ids used towards the target. Inserted when a channel open is
-    /// *attempted* (events may need mapping while the open is in flight),
-    /// unlike [`ServerSession::channels`] entries which appear on demand.
-    channel_map: BiMap<ServerChannelId, Uuid>,
-    /// Channels whose open has not yet been confirmed to the client. Their
-    /// target-side events are deferred until the open resolves, so no data is
-    /// written before `CHANNEL_OPEN_CONFIRMATION` — covers both server-initiated
-    /// opens ([`ServerSession::open_server_channel_in_background`]) and
-    /// client-initiated direct-tcpip/streamlocal opens (#2328).
-    pending_channel_opens: HashSet<Uuid>,
-    deferred_events: Vec<Event>,
+    channels: ChannelRegistry,
+    /// Client-side events for channel ids no registered channel carries yet.
+    /// They can only refer to a server-initiated open whose
+    /// [`Event::ServerChannelOpenResult`] hasn't been processed — until it is,
+    /// the client id (and thus the owning channel) is unknown, so unlike
+    /// target-side events they can't be held on the channel itself.
+    deferred_server_events: Vec<ServerHandlerEvent>,
     rc_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
     rc_abort_tx: UnboundedSender<()>,
     rc_state: RCState,
@@ -229,10 +178,8 @@ impl ServerSession {
             id,
             user_info: None,
             session_handle: None,
-            channels: HashMap::new(),
-            channel_map: BiMap::new(),
-            pending_channel_opens: HashSet::new(),
-            deferred_events: vec![],
+            channels: ChannelRegistry::new(),
+            deferred_server_events: vec![],
             rc_tx: rc_handles.command_tx.clone(),
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
@@ -425,46 +372,26 @@ impl ServerSession {
     }
 
     fn map_channel(&self, ch: ServerChannelId) -> Result<Uuid, WarpgateError> {
-        self.channel_map
-            .get_by_left(&ch)
-            .copied()
+        self.channels
+            .uuid_for(ch)
             .ok_or(WarpgateError::InconsistentState(
                 "Tried to map unknown channel ID".into(),
             ))
     }
 
     fn map_channel_reverse(&self, ch: &Uuid) -> Result<ServerChannelId> {
-        self.channel_map
-            .get_by_right(ch)
-            .copied()
+        self.channels
+            .get(ch)
+            .and_then(Channel::server_id)
             .ok_or_else(|| anyhow::anyhow!("Channel not known"))
     }
 
-    /// The channel's resources, creating them in [`ChannelState::Opening`] if
-    /// this is the first thing to touch the channel. Inserting, so it is only
-    /// correct where the channel is genuinely being established — anywhere that
-    /// expects an existing channel must go through [`HashMap::get_mut`] and
-    /// handle absence, because a channel can be closed underneath an in-flight
-    /// request.
-    fn channel_entry(&mut self, id: Uuid) -> &mut Channel {
-        self.channels.entry(id).or_default()
-    }
-
-    /// Tear down a closed channel: dropping its [`Channel`] finalizes the
-    /// recorders (their background writers flush on drop, as they do at session
-    /// end) and frees both id maps, so a long-lived session doesn't accumulate
-    /// per-channel state. Idempotent — the SSH close handshake reaches here from
-    /// both the client and the target side.
-    fn close_channel(&mut self, id: Uuid) {
-        self.channels.remove(&id);
-        self.channel_map.remove_by_right(&id);
-    }
-
     /// Opens a server->client channel in the background and delivers the
-    /// resulting channel mapping back into the event loop as an event.
-    /// Awaiting the client's confirmation inline would deadlock: the russh
-    /// session loop might itself be blocked on a handler event that this
-    /// event loop hasn't gotten to yet (#1459).
+    /// resulting channel id back into the event loop as an event. Awaiting
+    /// the client's confirmation inline would deadlock: the russh session
+    /// loop might itself be blocked on a handler event that this event loop
+    /// hasn't gotten to yet (#1459). The registry entry created here is what
+    /// holds the channel's target-side events back until the open resolves.
     fn open_server_channel_in_background(
         &mut self,
         id: Uuid,
@@ -472,7 +399,7 @@ impl ServerSession {
         + Send
         + 'static,
     ) {
-        self.pending_channel_opens.insert(id);
+        self.channels.begin_server_open(id);
         let sender = self.event_sender.clone();
         tokio::spawn(async move {
             let result = open.await.map(|channel| ServerChannelId(channel.id()));
@@ -482,37 +409,14 @@ impl ServerSession {
         });
     }
 
-    /// Events for a channel whose open is still in flight must be held back and
-    /// replayed once the open resolves — for server-initiated channels because
-    /// the mapping isn't known yet, and for client-initiated direct-tcpip opens
-    /// so no target data is written before CHANNEL_OPEN_CONFIRMATION (#2328).
-    fn should_defer_event(&self, event: &Event) -> bool {
-        if self.pending_channel_opens.is_empty() {
-            return false;
-        }
-        match event {
-            Event::Client(e) => e
-                .channel()
-                .is_some_and(|ch| self.pending_channel_opens.contains(&ch)),
-            // A server event for an unmapped channel can only refer to a
-            // pending open: the client learns of such channels no earlier
-            // than from the confirmation that resolves the open.
-            Event::ServerHandler(e) => e
-                .existing_channel()
-                .is_some_and(|ch| !self.channel_map.contains_left(&ch)),
-            _ => false,
-        }
-    }
-
     pub async fn emit_pty_output(&self, data: &[u8]) -> Result<()> {
         let channels = self
             .channels
-            .iter()
-            .filter(|(_, c)| c.has_pty())
-            .map(|(id, _)| *id)
+            .values()
+            .filter(|c| c.has_pty())
+            .filter_map(Channel::server_id)
             .collect::<Vec<_>>();
         for channel in channels {
-            let channel = self.map_channel_reverse(&channel)?;
             if let Some(session) = self.session_handle.clone() {
                 self.channel_writer.write(session, channel.0, data).await?;
             }
@@ -690,17 +594,25 @@ impl ServerSession {
         event: Event,
     ) -> Pin<Box<dyn Future<Output = Result<(), WarpgateError>> + Send + 'a>> {
         async move {
-            if self.should_defer_event(&event) {
-                debug!(?event, "Deferring event until channel opens are confirmed");
-                self.deferred_events.push(event);
-                return Ok(());
-            }
             match event {
                 Event::Client(RCEvent::Done) => Err(WarpgateError::SessionEnd)?,
                 Event::ServerHandler(ServerHandlerEvent::Disconnect) => {
                     Err(WarpgateError::SessionEnd)?;
                 }
                 Event::Client(e) => {
+                    let e = if let Some(ch) = e.channel()
+                        && let Some(channel) = self.channels.get_mut(&ch)
+                    {
+                        match channel.try_defer(e) {
+                            Ok(()) => {
+                                debug!(channel=%ch, "Deferring event until the channel open resolves");
+                                return Ok(());
+                            }
+                            Err(e) => e,
+                        }
+                    } else {
+                        e
+                    };
                     debug!(event=?e, "Event");
                     let span = self.make_logging_span();
                     if let Err(err) = self.handle_remote_event(e).instrument(span).await {
@@ -709,6 +621,19 @@ impl ServerSession {
                     }
                 }
                 Event::ServerHandler(e) => {
+                    // An event for a channel id no registered channel carries can
+                    // only refer to a pending server-initiated open: the client
+                    // learns of such channels no earlier than from the confirmation
+                    // that resolves the open. Without any open in flight an unknown
+                    // id is simply bogus and is left to the handler to reject.
+                    if let Some(ch) = e.existing_channel()
+                        && self.channels.uuid_for(ch).is_none()
+                        && self.channels.has_opening()
+                    {
+                        debug!(channel=%ch.0, event=?e, "Deferring event until the channel open resolves");
+                        self.deferred_server_events.push(e);
+                        return Ok(());
+                    }
                     let span = self.make_logging_span();
                     if let Err(err) = self.handle_server_handler_event(e).instrument(span).await {
                         error!("Server event handler error: {:?}", err);
@@ -731,22 +656,27 @@ impl ServerSession {
                     }
                 }
                 Event::ServerChannelOpenResult(id, result) => {
-                    self.pending_channel_opens.remove(&id);
                     match result {
                         Ok(server_channel_id) => {
-                            self.channel_map.insert(server_channel_id, id);
-                            self.channel_entry(id).mark_open();
+                            if self.channels.assign_server_id(id, server_channel_id) {
+                                self.confirm_channel_open(id).await?;
+                            } else {
+                                debug!(channel=%id, "Open resolved for an already-closed channel");
+                                self.replay_deferred_server_events().await?;
+                            }
                         }
                         Err(error) => {
                             warn!(channel=%id, ?error, "Failed to open a channel to the client");
-                            if let Some(channel) = self.channels.get_mut(&id) {
-                                channel.traffic_recorder = None;
-                            }
+                            // Tear the entry down now — its deferred events die
+                            // with the open they were waiting on, and the
+                            // target's eventual Close reply must find no
+                            // Opening entry to be deferred onto.
+                            self.channels.close(id);
                             let _ =
                                 self.send_command(RCCommand::Channel(id, ChannelOperation::Close));
+                            self.replay_deferred_server_events().await?;
                         }
                     }
-                    self.replay_deferred_events().await?;
                 }
                 Event::MenuRedraw(_, _) | Event::ConsoleInput(_) => (),
             }
@@ -755,13 +685,19 @@ impl ServerSession {
         .boxed()
     }
 
-    /// Re-dispatch events held back while a channel open was in flight. Events
-    /// whose channel is still pending are deferred again by [`Self::handle_event`],
-    /// so this is safe to call whenever any one pending open resolves.
-    async fn replay_deferred_events(&mut self) -> Result<(), WarpgateError> {
-        let deferred = std::mem::take(&mut self.deferred_events);
-        for event in deferred {
-            self.handle_event(event).await?;
+    /// Confirm `channel` as open and re-dispatch everything held back while its
+    /// open was in flight. Events whose channel is still opening are deferred
+    /// again by [`Self::handle_event`], so overlapping opens replay safely.
+    async fn confirm_channel_open(&mut self, channel: Uuid) -> Result<(), WarpgateError> {
+        for event in self.channels.confirm(channel).unwrap_or_default() {
+            self.handle_event(Event::Client(event)).await?;
+        }
+        self.replay_deferred_server_events().await
+    }
+
+    async fn replay_deferred_server_events(&mut self) -> Result<(), WarpgateError> {
+        for event in std::mem::take(&mut self.deferred_server_events) {
+            self.handle_event(Event::ServerHandler(event)).await?;
         }
         Ok(())
     }
@@ -845,29 +781,14 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::ChannelOpenSession(server_channel_id, reply) => {
-                let channel = Uuid::new_v4();
-                self.channel_map.insert(server_channel_id, channel);
-
-                info!(%channel, "Opening session channel");
-                return match self
-                    .send_command_and_wait(RCCommand::Channel(channel, ChannelOperation::OpenShell))
-                    .await
-                {
-                    Ok(()) => {
-                        self.channel_entry(channel).mark_open();
-                        let _ = reply.send(true);
-                        Ok(())
-                    }
-                    Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => {
-                        // The mapping was inserted before the open was attempted;
-                        // drop it so a later request can't resolve a channel that
-                        // was never established.
-                        self.close_channel(channel);
-                        let _ = reply.send(false);
-                        Ok(())
-                    }
-                    Err(x) => Err(x.into()),
-                };
+                info!(channel=%server_channel_id.0, "Opening session channel");
+                self._channel_open(
+                    server_channel_id,
+                    ChannelOperation::OpenShell,
+                    None,
+                    reply.0,
+                )
+                .await?;
             }
 
             ServerHandlerEvent::SubsystemRequest(server_channel_id, name, reply) => {
@@ -917,16 +838,10 @@ impl ServerSession {
                     .channel_success(server_channel_id.0)
                     .await;
                 // Waiting for the target above pumps the event loop, so the
-                // channel may have been closed in the meantime. Recording a PTY
-                // against a resurrected entry would leave a channel that
-                // `emit_pty_output` selects but cannot map back to the client,
-                // silently killing every later service message.
-                if let Some(Channel {
-                    state: ChannelState::Open { pty },
-                    ..
-                }) = self.channels.get_mut(&channel_id)
-                {
-                    *pty = true;
+                // channel may have been closed in the meantime — hence the
+                // re-lookup instead of holding the entry across the await.
+                if let Some(channel_state) = self.channels.get_mut(&channel_id) {
+                    channel_state.mark_pty();
                 }
                 let _ = reply.send(());
             }
@@ -1215,7 +1130,7 @@ impl ServerSession {
                         })
                         .await;
                 }
-                self.close_channel(channel);
+                self.channels.close(channel);
             }
             RCEvent::Eof(channel) => {
                 // Flush any pending writes before sending EOF
@@ -1327,7 +1242,9 @@ impl ServerSession {
                         if let Err(error) = recorder.write_connection_setup().await {
                             error!(channel=%id, ?error, "Failed to record connection setup");
                         }
-                        self.channel_entry(id).traffic_recorder = Some(recorder);
+                        if let Some(channel_state) = self.channels.get_mut(&id) {
+                            channel_state.traffic_recorder = Some(recorder);
+                        }
                     }
                 }
             }
@@ -1356,7 +1273,9 @@ impl ServerSession {
                         if let Err(error) = recorder.write_connection_setup().await {
                             error!(channel=%id, ?error, "Failed to record connection setup");
                         }
-                        self.channel_entry(id).traffic_recorder = Some(recorder);
+                        if let Some(channel_state) = self.channels.get_mut(&id) {
+                            channel_state.traffic_recorder = Some(recorder);
+                        }
                     }
                 }
             }
@@ -1473,74 +1392,30 @@ impl ServerSession {
         params: DirectTCPIPParams,
         open_handle: ChannelOpenHandle,
     ) -> Result<()> {
-        let uuid = Uuid::new_v4();
-        self.channel_map.insert(channel, uuid);
-        // Hold back target output until the open is confirmed to the client, so
-        // server-speaks-first bytes never precede CHANNEL_OPEN_CONFIRMATION (#2328).
-        self.pending_channel_opens.insert(uuid);
-
         info!(%channel, "Opening direct TCP/IP channel from {}:{} to {}:{}", params.originator_address, params.originator_port, params.host_to_connect, params.port_to_connect);
-
-        let _ = self.maybe_connect_remote().await;
-
-        let result = self
-            .send_command_and_wait(RCCommand::Channel(
-                uuid,
-                ChannelOperation::OpenDirectTCPIP(params.clone()),
-            ))
-            .await;
-
-        let outcome = match result {
-            Ok(()) => {
-                self.channel_entry(uuid).mark_open();
-                open_handle.accept().await;
-
-                let recorder = self
-                    .traffic_recorder_for(
-                        TrafficRecorderKey::Tcp(
-                            params.host_to_connect.clone(),
-                            params.port_to_connect,
-                        ),
-                        SshRecordingMetadata::DirectTcpIp {
-                            host: params.host_to_connect,
-                            port: params.port_to_connect as u16,
-                        },
-                    )
-                    .await;
-                if let Some(recorder) = recorder {
-                    #[allow(clippy::unwrap_used)]
-                    let mut recorder = recorder.connection(TrafficConnectionParams::Tcp {
-                        dst_addr: Ipv4Addr::from_str("2.2.2.2").unwrap(),
-                        dst_port: params.port_to_connect as u16,
-                        src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
-                        src_port: params.originator_port as u16,
-                    });
-                    if let Err(error) = recorder.write_connection_setup().await {
-                        error!(%channel, ?error, "Failed to record connection setup");
-                    }
-                    if let Some(channel_state) = self.channels.get_mut(&uuid) {
-                        channel_state.traffic_recorder = Some(recorder);
-                    }
-                }
-
-                Ok(())
-            }
-            Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => {
-                open_handle.reject(ChannelOpenFailure::ConnectFailed).await;
-                self.close_channel(uuid);
-                Ok(())
-            }
-            // Dropping `open_handle` auto-rejects the open, so the client always
-            // gets a reply even on unexpected errors.
-            Err(x) => {
-                self.close_channel(uuid);
-                Err(x.into())
-            }
+        let key = TrafficRecorderKey::Tcp(params.host_to_connect.clone(), params.port_to_connect);
+        let metadata = SshRecordingMetadata::DirectTcpIp {
+            host: params.host_to_connect.clone(),
+            port: params.port_to_connect as u16,
         };
-
-        self.pending_channel_opens.remove(&uuid);
-        self.replay_deferred_events().await?;
-        outcome
+        #[allow(clippy::unwrap_used)]
+        let connection_params = TrafficConnectionParams::Tcp {
+            dst_addr: Ipv4Addr::from_str("2.2.2.2").unwrap(),
+            dst_port: params.port_to_connect as u16,
+            src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
+            src_port: params.originator_port as u16,
+        };
+        // Unlike a session channel — whose later shell/exec/subsystem request
+        // dials the target — a direct channel is the whole interaction, so the
+        // connection must be initiated here.
+        let _ = self.maybe_connect_remote().await;
+        self._channel_open(
+            channel,
+            ChannelOperation::OpenDirectTCPIP(params),
+            Some((key, metadata, connection_params)),
+            open_handle,
+        )
+        .await
     }
 
     async fn _channel_open_direct_streamlocal(
@@ -1549,64 +1424,77 @@ impl ServerSession {
         path: String,
         open_handle: ChannelOpenHandle,
     ) -> Result<()> {
-        let uuid = Uuid::new_v4();
-        self.channel_map.insert(channel, uuid);
-        // Hold back target output until the open is confirmed to the client, so
-        // server-speaks-first bytes never precede CHANNEL_OPEN_CONFIRMATION (#2328).
-        self.pending_channel_opens.insert(uuid);
-
         info!(%channel, "Opening direct streamlocal channel to {}", path);
-
+        let key = TrafficRecorderKey::Socket(path.clone());
+        let metadata = SshRecordingMetadata::DirectSocket { path: path.clone() };
+        let connection_params = TrafficConnectionParams::Socket {
+            socket_path: path.clone(),
+        };
         let _ = self.maybe_connect_remote().await;
+        self._channel_open(
+            channel,
+            ChannelOperation::OpenDirectStreamlocal(path),
+            Some((key, metadata, connection_params)),
+            open_handle,
+        )
+        .await
+    }
 
-        let result = self
-            .send_command_and_wait(RCCommand::Channel(
-                uuid,
-                ChannelOperation::OpenDirectStreamlocal(path.clone()),
-            ))
-            .await;
+    /// Open a client-initiated channel towards the target and send the client
+    /// its open confirmation from here, the session task. The
+    /// [`ChannelState::Opening`] entry holds the target's output back until
+    /// `accept()` has queued the confirmation, so server-speaks-first bytes
+    /// never precede `CHANNEL_OPEN_CONFIRMATION` (#2328).
+    async fn _channel_open(
+        &mut self,
+        channel: ServerChannelId,
+        operation: ChannelOperation,
+        recording: Option<(
+            TrafficRecorderKey,
+            SshRecordingMetadata,
+            TrafficConnectionParams,
+        )>,
+        open_handle: ChannelOpenHandle,
+    ) -> Result<()> {
+        let uuid = self.channels.begin_client_open(channel);
 
-        let outcome = match result {
+        match self
+            .send_command_and_wait(RCCommand::Channel(uuid, operation))
+            .await
+        {
             Ok(()) => {
-                self.channel_entry(uuid).mark_open();
                 open_handle.accept().await;
 
-                let recorder = self
-                    .traffic_recorder_for(
-                        TrafficRecorderKey::Socket(path.clone()),
-                        SshRecordingMetadata::DirectSocket { path: path.clone() },
-                    )
-                    .await;
-                if let Some(recorder) = recorder {
-                    #[allow(clippy::unwrap_used)]
-                    let mut recorder =
-                        recorder.connection(TrafficConnectionParams::Socket { socket_path: path });
-                    if let Err(error) = recorder.write_connection_setup().await {
-                        error!(%channel, ?error, "Failed to record connection setup");
-                    }
-                    if let Some(channel_state) = self.channels.get_mut(&uuid) {
-                        channel_state.traffic_recorder = Some(recorder);
+                // The recorder is attached before the deferred output is
+                // replayed, so the target's first bytes are recorded too.
+                if let Some((key, metadata, connection_params)) = recording {
+                    let recorder = self.traffic_recorder_for(key, metadata).await;
+                    if let Some(recorder) = recorder {
+                        let mut recorder = recorder.connection(connection_params);
+                        if let Err(error) = recorder.write_connection_setup().await {
+                            error!(%channel, ?error, "Failed to record connection setup");
+                        }
+                        if let Some(channel_state) = self.channels.get_mut(&uuid) {
+                            channel_state.traffic_recorder = Some(recorder);
+                        }
                     }
                 }
 
+                self.confirm_channel_open(uuid).await?;
                 Ok(())
             }
             Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => {
                 open_handle.reject(ChannelOpenFailure::ConnectFailed).await;
-                self.close_channel(uuid);
+                self.channels.close(uuid);
                 Ok(())
             }
             // Dropping `open_handle` auto-rejects the open, so the client always
             // gets a reply even on unexpected errors.
             Err(x) => {
-                self.close_channel(uuid);
+                self.channels.close(uuid);
                 Err(x.into())
             }
-        };
-
-        self.pending_channel_opens.remove(&uuid);
-        self.replay_deferred_events().await?;
-        outcome
+        }
     }
 
     async fn _window_change_request(
@@ -2463,7 +2351,7 @@ impl ServerSession {
         debug!(channel=%channel_id, "Closing channel");
         self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Close))
             .await?;
-        self.close_channel(channel_id);
+        self.channels.close(channel_id);
         Ok(())
     }
 
@@ -2552,9 +2440,9 @@ impl ServerSession {
         // `session_handle` is cleared below, so the second pass sends nothing.
         let channels = self
             .channels
-            .iter()
-            .filter(|(_, channel)| matches!(channel.state, ChannelState::Open { .. }))
-            .filter_map(|(id, _)| self.map_channel_reverse(id).ok())
+            .values()
+            .filter(|channel| channel.is_open())
+            .filter_map(Channel::server_id)
             .collect::<Vec<_>>();
 
         let _ = self
