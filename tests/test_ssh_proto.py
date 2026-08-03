@@ -207,7 +207,16 @@ class Test:
             processes, shared_wg, wg_c_ed25519_pubkey
         )
 
-        for attempt in range(8):
+        checked = 0
+        spawns = 0
+        while checked < 8:
+            # An ssh client that dies before the listener is up (sshpass
+            # occasionally garbles the password on this kind of rapid spawn
+            # loop) never opened a channel, so it can't count as a pass —
+            # respawn it, within a budget that still fails on systemic death.
+            spawns += 1
+            assert spawns <= 12, "too many ssh client startup failures"
+
             local_port = alloc_port()
             ssh_client = processes.start_ssh_client(
                 f"{user.username}:{ssh_target.name}@localhost",
@@ -226,16 +235,19 @@ class Test:
                 # succeeds is channel #1.
                 deadline = time.time() + timeout
                 conn = None
-                while time.time() < deadline:
+                while time.time() < deadline and ssh_client.poll() is None:
                     try:
                         conn = socket.create_connection(
                             ("localhost", local_port), timeout=5
                         )
                         break
                     except socket.error:
-                        assert ssh_client.poll() is None, "ssh client exited early"
                         time.sleep(0.1)
-                assert conn is not None, f"attempt {attempt}: forwarded port never came up"
+                if conn is None:
+                    assert ssh_client.poll() is not None, (
+                        f"check {checked}: forwarded port never came up"
+                    )
+                    continue
 
                 conn.settimeout(8)
                 try:
@@ -246,9 +258,10 @@ class Test:
                     conn.close()
 
                 assert banner.startswith(b"SSH-2.0"), (
-                    f"attempt {attempt}: first-channel banner never arrived "
+                    f"check {checked}: first-channel banner never arrived "
                     f"(got {banner!r}) — server-first bytes were dropped"
                 )
+                checked += 1
             finally:
                 ssh_client.kill()
 

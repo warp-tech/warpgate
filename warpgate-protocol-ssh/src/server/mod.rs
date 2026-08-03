@@ -1,3 +1,4 @@
+mod channel_registry;
 mod channel_writer;
 mod command_detector;
 mod russh_handler;

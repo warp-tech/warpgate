@@ -8,7 +8,6 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-bimap = { version = "0.6", default-features = false, features = ["std"] }
 bytes.workspace = true
 curve25519-dalek = { version = "4.0.0", default-features = false } # pin due to build fail on x86
 dialoguer.workspace = true

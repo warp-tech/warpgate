@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use bytes::Bytes;
 use russh::keys::PublicKey;
 use russh::server::{Auth, ChannelOpenHandle, Handle, Msg, Session};
-use russh::{Channel, ChannelId, ChannelOpenFailure, Pty, Sig};
+use russh::{Channel, ChannelId, Pty, Sig};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
@@ -34,7 +34,7 @@ impl Debug for ChannelOpenHandleWrapper {
 #[derive(Debug)]
 pub enum ServerHandlerEvent {
     Authenticated(HandleWrapper),
-    ChannelOpenSession(ServerChannelId, oneshot::Sender<bool>),
+    ChannelOpenSession(ServerChannelId, ChannelOpenHandleWrapper),
     SubsystemRequest(ServerChannelId, String, oneshot::Sender<bool>),
     PtyRequest(ServerChannelId, PtyRequest, oneshot::Sender<()>),
     ShellRequest(ServerChannelId, oneshot::Sender<bool>),
@@ -139,14 +139,10 @@ impl russh::server::Handler for ServerHandler {
         reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let (tx, rx) = oneshot::channel();
-
         self.send_event(ServerHandlerEvent::ChannelOpenSession(
             ServerChannelId(channel.id()),
-            tx,
+            ChannelOpenHandleWrapper(reply),
         ))?;
-
-        reply_channel_open(reply, rx.await.unwrap_or(false)).await;
         Ok(())
     }
 
@@ -606,16 +602,6 @@ impl russh::server::Handler for ServerHandler {
             session.request_failure();
         }
         Ok(allowed)
-    }
-}
-
-async fn reply_channel_open(reply: ChannelOpenHandle, allowed: bool) {
-    if allowed {
-        reply.accept().await;
-    } else {
-        reply
-            .reject(ChannelOpenFailure::AdministrativelyProhibited)
-            .await;
     }
 }
 
