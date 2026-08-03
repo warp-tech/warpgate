@@ -96,8 +96,7 @@
         {
           "type": "null"
         }
-      ],
-      "default": null
+      ]
     },
     "ssh": {
       "$ref": "#/$defs/SshConfig",
