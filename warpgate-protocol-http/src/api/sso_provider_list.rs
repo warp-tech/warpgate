@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use poem::Request;
@@ -13,6 +14,7 @@ use warpgate_common::WarpgateError;
 use warpgate_common::auth::AuthCredential;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::ConfigProvider;
 use warpgate_core::auth::submit_credential;
 use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
@@ -237,6 +239,9 @@ impl Api {
     ) -> Result<Result<String, String>, WarpgateError> {
         // pull services locally for convenience
         let services = ctx.services();
+        let client_ip: Option<IpAddr> = get_client_ip(req, services)
+            .await
+            .and_then(|ip| ip.parse().ok());
         let Some(context) = session.get::<SsoContext>(SSO_CONTEXT_SESSION_KEY) else {
             return Ok(Err("Not in an active SSO process".to_string()));
         };
@@ -312,7 +317,7 @@ impl Api {
             let session_id = session_id_for_request(req, &ctx).await?;
             emit_unknown_authentication_failed_event(
                 session_id,
-                req.remote_addr().as_socket_addr().map(|a| a.ip()),
+                client_ip,
                 email,
                 &cred.safe_description(),
                 "unknown user",
@@ -320,7 +325,6 @@ impl Api {
             return Ok(Err(format!("No user matching {email}")));
         };
 
-        let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
         let state_arc = match get_or_create_auth_state_for_request(req, &username, &ctx, None).await
         {
             Ok(state) => state,
@@ -329,7 +333,7 @@ impl Api {
                     let session_id = session_id_for_request(req, &ctx).await?;
                     emit_unknown_authentication_failed_event(
                         session_id,
-                        remote_ip,
+                        client_ip,
                         &username,
                         &cred.safe_description(),
                         "IP address not allowed",

@@ -420,7 +420,6 @@ async fn serve_login(
     ctx: &UnauthenticatedRequestContext,
     body: &LoginRequest,
 ) -> poem::Result<LoginResponse> {
-    let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
     let services = ctx.services();
     let client_ip: Option<IpAddr> = get_client_ip(req, services)
         .await
@@ -475,7 +474,7 @@ async fn serve_login(
             let session_id = session_id_for_request(req, ctx).await?;
             emit_unknown_authentication_failed_event(
                 session_id,
-                remote_ip,
+                client_ip,
                 &body.username,
                 "password",
                 "unknown user",
@@ -488,7 +487,7 @@ async fn serve_login(
             let session_id = session_id_for_request(req, ctx).await?;
             emit_unknown_authentication_failed_event(
                 session_id,
-                remote_ip,
+                client_ip,
                 &body.username,
                 "password",
                 "IP address not allowed",
