@@ -15,6 +15,11 @@ env:
   CHART_PATH: helm/warpgate
   OCI_REPO: oci://ghcr.io/warp-tech/helm-charts
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A tag push is a release build - let it finish.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   lint:
     runs-on: ubuntu-latest
