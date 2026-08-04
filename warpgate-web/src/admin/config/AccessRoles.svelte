@@ -65,6 +65,9 @@
                         >
                     {/if}
                 </div>
+                {#if role.staticManaged}
+                    <span class="badge bg-info ms-auto">Static</span>
+                {/if}
             </a>
         {/snippet}
     </ItemList>

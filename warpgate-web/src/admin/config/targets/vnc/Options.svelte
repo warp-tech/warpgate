@@ -4,9 +4,10 @@
 
     interface Props {
         options: TargetOptionsTargetVncOptions
+        disabled?: boolean
     }
 
-    let { options = $bindable() }: Props = $props()
+    let { options = $bindable(), disabled = false }: Props = $props()
 
     function setAuthKind(kind: 'None' | 'Password') {
         if (kind === 'Password') {
@@ -22,7 +23,7 @@
 <div class="row">
     <div class="col-8">
         <FormGroup floating label="Target host">
-            <input class="form-control" bind:value={options.host}>
+            <input class="form-control" bind:value={options.host} {disabled}>
         </FormGroup>
     </div>
     <div class="col-4">
@@ -34,6 +35,7 @@
                 min="1"
                 max="65535"
                 step="1"
+                {disabled}
             >
         </FormGroup>
     </div>
@@ -46,6 +48,7 @@
         class="form-control"
         value={options.auth.kind}
         onchange={e => setAuthKind((e.currentTarget as HTMLSelectElement).value as 'None' | 'Password')}
+        {disabled}
     >
         <option value="None">None</option>
         <option value="Password">Password</option>
@@ -58,6 +61,7 @@
             class="form-control"
             type="password"
             bind:value={options.auth.password}
+            {disabled}
         >
     </FormGroup>
 {/if}

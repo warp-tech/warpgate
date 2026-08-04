@@ -54,6 +54,9 @@ pub struct Model {
     pub ticket_requests_disabled: bool,
     pub ticket_require_approval: bool,
     pub ticket_max_uses: Option<i16>,
+    /// Owned by a static targets file sync rather than the admin API/UI; see
+    /// `warpgate-core::static_targets`.
+    pub static_managed: bool,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -101,6 +104,7 @@ impl TryFrom<Model> for Target {
             ticket_requests_disabled: model.ticket_requests_disabled,
             ticket_require_approval: model.ticket_require_approval,
             ticket_max_uses: model.ticket_max_uses,
+            static_managed: model.static_managed,
         })
     }
 }

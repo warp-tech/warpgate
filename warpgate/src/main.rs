@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod listener_supervisor;
 mod logging;
+mod static_targets_watcher;
 
 use std::path::PathBuf;
 

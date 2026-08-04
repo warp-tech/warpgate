@@ -119,6 +119,14 @@
         "$ref": "#/$defs/SsoProviderConfig"
       }
     },
+    "targets_file": {
+      "description": "Path (relative to this config file) to a YAML file defining targets,\ntarget groups and roles that Warpgate should keep in sync with the\ndatabase, so they can be managed externally (e.g. generated from a\nCMDB) instead of through the admin API. See\n`warpgate-core::static_targets` for the file format.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
     "vnc": {
       "$ref": "#/$defs/VncConfig",
       "default": {

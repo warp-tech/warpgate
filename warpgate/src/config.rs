@@ -186,6 +186,19 @@ mod tests {
     }
 
     #[test]
+    fn targets_file_key_is_recognised() {
+        let (store, ignored) = parse("targets_file: targets.yaml\n");
+        assert!(ignored.is_empty(), "unexpected ignored keys: {ignored:?}");
+        assert_eq!(store.targets_file.as_deref(), Some("targets.yaml"));
+    }
+
+    #[test]
+    fn targets_file_defaults_to_none() {
+        let (store, _ignored) = parse("external_host: bastion.example\n");
+        assert_eq!(store.targets_file, None);
+    }
+
+    #[test]
     fn reports_unknown_top_level_key() {
         let (_store, ignored) = parse("external_host: x\nbogus_key: 1\n");
         assert_eq!(ignored, vec!["bogus_key".to_string()]);

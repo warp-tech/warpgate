@@ -87,12 +87,23 @@
                 </div>
             </div>
 
+            {#if role.staticManaged}
+                <Alert color="info">
+                    This role is managed by the static targets file and cannot
+                    be edited or deleted here. Change the source file instead —
+                    it will be resynced automatically.
+                </Alert>
+            {/if}
+
             <FormGroup floating label="Name">
-                <Input bind:value={role.name} />
+                <Input bind:value={role.name} disabled={role.staticManaged} />
             </FormGroup>
 
             <FormGroup floating label="Description">
-                <Input bind:value={role.description} />
+                <Input
+                    bind:value={role.description}
+                    disabled={role.staticManaged}
+                />
             </FormGroup>
 
             <div class="mb-4">
@@ -101,6 +112,7 @@
                         id="isDefault"
                         type="switch"
                         bind:checked={role.isDefault}
+                        disabled={role.staticManaged}
                     />
                     <div>Automatically assign to all new users</div>
                 </label>
@@ -123,7 +135,8 @@
 
         <AsyncButton
             color="primary"
-            disabled={!$adminPermissions.accessRolesEdit}
+            disabled={!$adminPermissions.accessRolesEdit ||
+                !!role?.staticManaged}
             class="ms-auto"
             click={update}
         >
@@ -132,7 +145,8 @@
 
         <AsyncButton
             class="ms-2"
-            disabled={!$adminPermissions.accessRolesDelete}
+            disabled={!$adminPermissions.accessRolesDelete ||
+                !!role?.staticManaged}
             color="danger"
             click={remove}
         >

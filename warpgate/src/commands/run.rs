@@ -99,6 +99,16 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     let base = params.paths_relative_to().clone();
 
+    if let Some(targets_file) = config_rx.borrow().store.targets_file.clone() {
+        let path = base.join(&targets_file);
+        let db = services.db.clone();
+        if let Err(error) =
+            crate::static_targets_watcher::watch_static_targets_file(path, db).await
+        {
+            error!(?error, "Failed to start static targets file watcher");
+        }
+    }
+
     // One supervisor per protocol keeps its listener in sync with the live config,
     // rebinding on endpoint/enable/certificate changes and pausing (rather than
     // killing the process) if a bind fails.

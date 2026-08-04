@@ -202,6 +202,14 @@
                     </div>
                 </div>
 
+                {#if target.staticManaged}
+                    <Alert color="info">
+                        This target is managed by the static targets file and
+                        cannot be edited or deleted here. Change the source file
+                        instead — it will be resynced automatically.
+                    </Alert>
+                {/if}
+
                 <SectionedForm>
                     <Section id="general" title="General">
                         <div class="row">
@@ -213,6 +221,7 @@
                                     <Input
                                         class="form-control"
                                         bind:value={target.name}
+                                        disabled={target.staticManaged}
                                     />
                                 </FormGroup>
                             </div>
@@ -223,6 +232,7 @@
                                         <select
                                             class="form-control"
                                             bind:value={target.groupId}
+                                            disabled={target.staticManaged}
                                         >
                                             <option value={undefined}>
                                                 No group
@@ -239,7 +249,10 @@
                         </div>
 
                         <FormGroup floating label="Description">
-                            <Input bind:value={target.description} />
+                            <Input
+                                bind:value={target.description}
+                                disabled={target.staticManaged}
+                            />
                         </FormGroup>
                     </Section>
 
@@ -248,15 +261,22 @@
                             <TargetSshOptions
                                 id={target.id}
                                 options={target.options}
+                                disabled={target.staticManaged}
                             />
                         {/if}
 
                         {#if target.options.kind === 'Vnc'}
-                            <TargetVncOptions bind:options={target.options} />
+                            <TargetVncOptions
+                                bind:options={target.options}
+                                disabled={target.staticManaged}
+                            />
                         {/if}
 
                         {#if target.options.kind === 'Rdp'}
-                            <TargetRdpOptions bind:options={target.options} />
+                            <TargetRdpOptions
+                                bind:options={target.options}
+                                disabled={target.staticManaged}
+                            />
                         {/if}
 
                         {#if target.options.kind === 'Http'}
@@ -264,10 +284,14 @@
                                 <input
                                     class="form-control"
                                     bind:value={target.options.url}
+                                    disabled={target.staticManaged}
                                 >
                             </FormGroup>
 
-                            <TlsConfiguration bind:value={target.options.tls} />
+                            <TlsConfiguration
+                                bind:value={target.options.tls}
+                                disabled={target.staticManaged}
+                            />
 
                             {#if $serverInfo?.externalHost}
                                 <FormGroup floating label="Bind to a domain">
@@ -275,6 +299,7 @@
                                         type="text"
                                         placeholder={`foo.${$serverInfo.externalHost}`}
                                         bind:value={target.options.externalHost}
+                                        disabled={target.staticManaged}
                                     />
                                 </FormGroup>
                             {/if}
@@ -282,6 +307,7 @@
                             <h4 class="mt-4">Additional headers</h4>
                             <HttpHeadersEditor
                                 bind:value={target.options.headers}
+                                disabled={target.staticManaged}
                             />
                         {/if}
 
@@ -292,6 +318,7 @@
                                         <input
                                             class="form-control"
                                             bind:value={target.options.host}
+                                            disabled={target.staticManaged}
                                         >
                                     </FormGroup>
                                 </div>
@@ -304,6 +331,7 @@
                                             min="1"
                                             max="65535"
                                             step="1"
+                                            disabled={target.staticManaged}
                                         >
                                     </FormGroup>
                                 </div>
@@ -315,6 +343,7 @@
                                         <input
                                             class="form-control"
                                             bind:value={target.options.username}
+                                            disabled={target.staticManaged}
                                         >
                                     </FormGroup>
                                 </div>
@@ -327,6 +356,7 @@
                                             <select
                                                 class="form-control"
                                                 bind:value={target.options.auth.kind}
+                                                disabled={target.staticManaged}
                                             >
                                                 <option value="Password">
                                                     Password
@@ -349,11 +379,15 @@
                                         type="password"
                                         autocomplete="off"
                                         bind:value={target.options.auth.password}
+                                        disabled={target.staticManaged}
                                     >
                                 </FormGroup>
                             {/if}
 
-                            <TlsConfiguration bind:value={target.options.tls} />
+                            <TlsConfiguration
+                                bind:value={target.options.tls}
+                                disabled={target.staticManaged}
+                            />
                         {/if}
 
                         {#if target.options.kind === 'Kubernetes'}
@@ -362,6 +396,7 @@
                                     class="form-control"
                                     bind:value={target.options.clusterUrl}
                                     placeholder="https://kubernetes.example.com:6443"
+                                    disabled={target.staticManaged}
                                 >
                             </FormGroup>
 
@@ -370,6 +405,7 @@
                                 <select
                                     class="form-control"
                                     bind:value={target.options.auth.kind}
+                                    disabled={target.staticManaged}
                                 >
                                     <option value="Certificate">
                                         Certificate
@@ -390,6 +426,7 @@
                                         style="height: 18rem;"
                                         bind:value={target.options.auth.certificate}
                                         placeholder="-----BEGIN CERTIFICATE-----"
+                                        disabled={target.staticManaged}
                                     ></textarea>
                                 </FormGroup>
                                 <FormGroup floating label="Client Private Key">
@@ -398,6 +435,7 @@
                                         style="height: 12rem;"
                                         bind:value={target.options.auth.privateKey}
                                         placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                                        disabled={target.staticManaged}
                                     ></textarea>
                                 </FormGroup>
                             {/if}
@@ -409,11 +447,15 @@
                                         type="password"
                                         autocomplete="off"
                                         bind:value={target.options.auth.token}
+                                        disabled={target.staticManaged}
                                     >
                                 </FormGroup>
                             {/if}
 
-                            <TlsConfiguration bind:value={target.options.tls} />
+                            <TlsConfiguration
+                                bind:value={target.options.tls}
+                                disabled={target.staticManaged}
+                            />
                         {/if}
                     </Section>
 
@@ -434,7 +476,8 @@
                                                 id="role-{role.id}"
                                                 class="mb-0 me-2"
                                                 type="switch"
-                                                disabled={!$adminPermissions.targetsEdit}
+                                                disabled={!$adminPermissions.targetsEdit ||
+                                                    target.staticManaged}
                                                 on:change={() => toggleRole(role)}
                                                 checked={roleIsAllowed[role.id]}
                                             />
@@ -462,6 +505,7 @@
                                     placeholder="10m"
                                     bind:value={target.options.idleTimeout}
                                     title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
+                                    disabled={target.staticManaged}
                                 >
                                 <small class="form-text text-muted">
                                     How long an authenticated session can remain
@@ -482,6 +526,7 @@
                                     type="text"
                                     placeholder="database-name"
                                     bind:value={target.options.defaultDatabaseName}
+                                    disabled={target.staticManaged}
                                 >
                                 <small class="form-text text-muted">
                                     Default database name used in connection
@@ -500,6 +545,7 @@
                             <RateLimitInput
                                 id="rateLimitBytesPerSecond"
                                 bind:value={target.rateLimitBytesPerSecond}
+                                disabled={target.staticManaged}
                             />
                         </FormGroup>
                     </Section>
@@ -511,6 +557,7 @@
                                     <select
                                         class="form-control"
                                         bind:value={target.options.protocolVersion}
+                                        disabled={target.staticManaged}
                                     >
                                         <option value="3.2">3.2</option>
                                         <option value="3.0">3.0</option>
@@ -531,6 +578,7 @@
                                         placeholder="10m"
                                         bind:value={target.options.idleTimeout}
                                         title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
+                                        disabled={target.staticManaged}
                                     >
                                     <small class="form-text text-muted">
                                         How long an authenticated session can
@@ -550,6 +598,7 @@
                                     type="text"
                                     placeholder="database-name"
                                     bind:value={target.options.defaultDatabaseName}
+                                    disabled={target.staticManaged}
                                 >
                                 <small class="form-text text-muted">
                                     Default database name used in connection
@@ -575,6 +624,7 @@
                                     id="ticketRequestsDisabled"
                                     class="mb-0 me-2"
                                     type="switch"
+                                    disabled={target.staticManaged}
                                     on:change={() => {
                                     target.ticketRequestsDisabled = !target.ticketRequestsDisabled
                                     update()
@@ -594,6 +644,7 @@
                                     id="ticketRequireApproval"
                                     class="mb-0 me-2"
                                     type="switch"
+                                    disabled={target.staticManaged}
                                     on:change={() => {
                                     target.ticketRequireApproval = !target.ticketRequireApproval
                                     update()
@@ -612,6 +663,7 @@
                                     type="text"
                                     placeholder="Use global default"
                                     use:humantimeDuration={{ seconds: target.ticketMaxDurationSeconds, onChange: v => { target.ticketMaxDurationSeconds = v; update() } }}
+                                    disabled={target.staticManaged}
                                 >
                                 <small class="form-text text-muted">
                                     Examples: 30m, 8h, 1d. Leave empty to use
@@ -630,6 +682,7 @@
                                     target.ticketMaxUses = Number.isNaN(v) ? undefined : v
                                     update()
                                 }}
+                                    disabled={target.staticManaged}
                                 >
                                 <small class="form-text text-muted">
                                     Leave empty to use the global default.
@@ -671,7 +724,7 @@
     <AsyncButton
         color="primary"
         click={update}
-        disabled={!$adminPermissions.targetsEdit}
+        disabled={!$adminPermissions.targetsEdit || !!target?.staticManaged}
     >
         Update configuration
     </AsyncButton>
@@ -679,7 +732,7 @@
     <AsyncButton
         color="danger"
         click={remove}
-        disabled={!$adminPermissions.targetsDelete}
+        disabled={!$adminPermissions.targetsDelete || !!target?.staticManaged}
     >
         Remove
     </AsyncButton>

@@ -91,6 +91,7 @@ impl ListApi {
             name: Set(body.name.clone()),
             description: Set(body.description.clone().unwrap_or_default()),
             color: Set(body.color.clone()),
+            static_managed: Set(false),
         };
 
         let group = values.insert(db).await?;
@@ -115,6 +116,8 @@ enum UpdateTargetGroupResponse {
     BadRequest,
     #[oai(status = 404)]
     NotFound,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
 }
 
 #[derive(ApiResponse)]
@@ -124,7 +127,12 @@ enum DeleteTargetGroupResponse {
 
     #[oai(status = 404)]
     NotFound,
+
+    #[oai(status = 409)]
+    Conflict(Json<String>),
 }
+
+const STATIC_MANAGED_MESSAGE: &str = "This target group is managed by the static targets file and cannot be edited or deleted via the API";
 
 pub struct DetailApi;
 
@@ -173,6 +181,12 @@ impl DetailApi {
             return Ok(UpdateTargetGroupResponse::NotFound);
         };
 
+        if group.static_managed {
+            return Ok(UpdateTargetGroupResponse::Conflict(Json(
+                STATIC_MANAGED_MESSAGE.into(),
+            )));
+        }
+
         // Check if name is already taken by another group
         let existing = TargetGroup::Entity::find()
             .filter(TargetGroup::Column::Name.eq(body.name.clone()))
@@ -212,6 +226,12 @@ impl DetailApi {
         let Some(group) = group else {
             return Ok(DeleteTargetGroupResponse::NotFound);
         };
+
+        if group.static_managed {
+            return Ok(DeleteTargetGroupResponse::Conflict(Json(
+                STATIC_MANAGED_MESSAGE.into(),
+            )));
+        }
 
         // First, unassign all targets from this group by setting their group_id to NULL
         Target::Entity::update_many()

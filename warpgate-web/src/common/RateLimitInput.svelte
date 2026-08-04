@@ -6,6 +6,7 @@
         value: number | undefined
         placeholder?: string
         allowEmpty?: boolean
+        disabled?: boolean
     } & Input['$$prop_def']
 
     let {
@@ -13,6 +14,7 @@
         change,
         placeholder,
         allowEmpty = true,
+        disabled = false,
         ...rest
     }: Props = $props()
 
@@ -124,6 +126,7 @@
         bind:value={displayValue}
         on:change={handleChange}
         {placeholder}
+        {disabled}
         invalid={!isValid}
     />
     <Input
@@ -133,6 +136,7 @@
         bind:value={selectedUnit}
         onchange={handleChange}
         style="max-width: 100px;"
+        {disabled}
     >
         {#each units as unit (unit.value)}
             <option value={unit}>{unit.label}/s</option>

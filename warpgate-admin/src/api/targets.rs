@@ -146,6 +146,7 @@ impl ListApi {
             ticket_requests_disabled: Set(body.ticket_requests_disabled.unwrap_or(false)),
             ticket_require_approval: Set(body.ticket_require_approval.unwrap_or(false)),
             ticket_max_uses: Set(body.ticket_max_uses),
+            static_managed: Set(false),
         };
 
         let target = values.insert(db).await.map_err(WarpgateError::from)?;
@@ -174,6 +175,8 @@ enum UpdateTargetResponse {
     BadRequest,
     #[oai(status = 404)]
     NotFound,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
 }
 
 #[derive(ApiResponse)]
@@ -183,7 +186,12 @@ enum DeleteTargetResponse {
 
     #[oai(status = 404)]
     NotFound,
+
+    #[oai(status = 409)]
+    Conflict(Json<String>),
 }
+
+const STATIC_MANAGED_MESSAGE: &str = "This target is managed by the static targets file and cannot be edited or deleted via the API";
 
 #[derive(ApiResponse)]
 enum TargetKnownSshHostKeysResponse {
@@ -230,6 +238,12 @@ impl DetailApi {
         let Some(target) = Target::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateTargetResponse::NotFound);
         };
+
+        if target.static_managed {
+            return Ok(UpdateTargetResponse::Conflict(Json(
+                STATIC_MANAGED_MESSAGE.into(),
+            )));
+        }
 
         if target.kind != (&body.options).into() {
             return Ok(UpdateTargetResponse::BadRequest);
@@ -288,6 +302,12 @@ impl DetailApi {
         let Some(target) = Target::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteTargetResponse::NotFound);
         };
+
+        if target.static_managed {
+            return Ok(DeleteTargetResponse::Conflict(Json(
+                STATIC_MANAGED_MESSAGE.into(),
+            )));
+        }
 
         TargetRoleAssignment::Entity::delete_many()
             .filter(TargetRoleAssignment::Column::TargetId.eq(target.id))
