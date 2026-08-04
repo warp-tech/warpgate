@@ -1,5 +1,5 @@
 use std::fmt::Debug;
-use std::net::ToSocketAddrs;
+use std::net::{IpAddr, ToSocketAddrs};
 
 use poem::http::{Method, StatusCode, Uri};
 use poem::web::RemoteAddr;
@@ -39,6 +39,12 @@ pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String>
         raw_remote_ip(req),
         trust_x_forwarded_headers,
     )
+}
+
+pub async fn get_client_ip_addr(req: &Request, services: &Services) -> Option<IpAddr> {
+    get_client_ip(req, services)
+        .await
+        .and_then(|ip| ip.parse().ok())
 }
 
 pub async fn span_for_request(

@@ -18,12 +18,12 @@ use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Protocol, SessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_common_http::logging::get_client_ip;
+use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
     X_WARPGATE_CLUSTER_IDENTITY, is_cluster_peer_request,
 };
-use warpgate_core::ConfigProvider;
+use warpgate_core::{ConfigProvider, vet_credential_bearer};
 use warpgate_db_entities::User;
 use warpgate_sso::WarpgateIdToken;
 
@@ -167,9 +167,7 @@ pub async fn get_or_create_auth_state_for_request(
     ctx: &UnauthenticatedRequestContext,
     rate_limit_credential_type: Option<&str>,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
-    let client_ip = get_client_ip(req, ctx.services())
-        .await
-        .and_then(|ip| ip.parse().ok());
+    let client_ip = get_client_ip_addr(req, ctx.services()).await;
 
     if let Some(state) = get_auth_state_for_request(req, ctx).await? {
         let reusable = {
@@ -309,6 +307,41 @@ async fn cluster_request_authorization(
         }))
 }
 
+/// Resolves an API token to its user, applying the same account-status checks a
+/// login goes through. `None` for an unknown token or for a user who may not
+/// authenticate right now — the caller can't tell the two apart, by design.
+async fn user_for_api_token(
+    req: &Request,
+    ctx: &UnauthenticatedRequestContext,
+    token: &str,
+) -> Result<Option<warpgate_common::User>, WarpgateError> {
+    let services = ctx.services();
+    let remote_ip = get_client_ip_addr(req, services).await;
+
+    // Checked ahead of the lookup so a blocked caller can't use this as a
+    // token-existence oracle.
+    if let Some(ip) = remote_ip
+        && services
+            .login_protection
+            .check_ip_blocked(&ip)
+            .await?
+            .is_some()
+    {
+        tracing::warn!("API token presented from a blocked IP: {ip}");
+        return Ok(None);
+    }
+
+    let Some(user) = services.config_provider.validate_api_token(token).await? else {
+        return Ok(None);
+    };
+
+    if !vet_credential_bearer(&services.login_protection, &user, remote_ip).await? {
+        return Ok(None);
+    }
+
+    Ok(Some(user))
+}
+
 pub async fn inject_request_authorization<E: Endpoint + 'static>(
     ep: Arc<E>,
     req: Request,
@@ -371,12 +404,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
             })
         {
             Some(RequestAuthorization::AdminToken)
-        } else if let Some(user) = ctx
-            .services()
-            .config_provider
-            .validate_api_token(token_from_header)
-            .await?
-        {
+        } else if let Some(user) = user_for_api_token(&req, &ctx, token_from_header).await? {
             Some(RequestAuthorization::UserToken {
                 user_id: user.id,
                 username: user.username,

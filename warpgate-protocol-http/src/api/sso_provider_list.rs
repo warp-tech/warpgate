@@ -1,4 +1,3 @@
-use std::net::IpAddr;
 use std::sync::Arc;
 
 use poem::Request;
@@ -14,7 +13,7 @@ use warpgate_common::WarpgateError;
 use warpgate_common::auth::AuthCredential;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_common_http::logging::get_client_ip;
+use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_core::ConfigProvider;
 use warpgate_core::auth::submit_credential;
 use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
@@ -239,9 +238,7 @@ impl Api {
     ) -> Result<Result<String, String>, WarpgateError> {
         // pull services locally for convenience
         let services = ctx.services();
-        let client_ip: Option<IpAddr> = get_client_ip(req, services)
-            .await
-            .and_then(|ip| ip.parse().ok());
+        let client_ip = get_client_ip_addr(req, services).await;
         let Some(context) = session.get::<SsoContext>(SSO_CONTEXT_SESSION_KEY) else {
             return Ok(Err("Not in an active SSO process".to_string()));
         };

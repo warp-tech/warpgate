@@ -1,4 +1,3 @@
-use std::net::IpAddr;
 use std::sync::Arc;
 
 use anyhow::bail;
@@ -25,7 +24,7 @@ use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKin
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
-use warpgate_common_http::logging::get_client_ip;
+use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization, is_cluster_peer_request};
 use warpgate_core::Services;
 use warpgate_core::auth::submit_credential;
@@ -421,9 +420,7 @@ async fn serve_login(
     body: &LoginRequest,
 ) -> poem::Result<LoginResponse> {
     let services = ctx.services();
-    let client_ip: Option<IpAddr> = get_client_ip(req, services)
-        .await
-        .and_then(|s| s.parse().ok());
+    let client_ip = get_client_ip_addr(req, services).await;
 
     // Check if IP is blocked
     if let Some(ip) = client_ip
@@ -559,9 +556,7 @@ async fn serve_otp_login(
     otp: &str,
 ) -> poem::Result<LoginResponse> {
     let services = ctx.services();
-    let client_ip: Option<IpAddr> = get_client_ip(req, services)
-        .await
-        .and_then(|s| s.parse().ok());
+    let client_ip = get_client_ip_addr(req, services).await;
 
     // Check if IP is blocked
     if let Some(ip) = client_ip

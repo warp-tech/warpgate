@@ -57,7 +57,7 @@ pub(crate) fn ip_allowed(
 
 /// Checks whether the given IP is allowed by the user's `allowed_ip_ranges` setting.
 /// Returns `Ok(())` if access is allowed, or an appropriate `WarpgateError` if denied.
-pub fn check_ip_allowed(
+pub(crate) fn check_ip_allowed(
     allowed_ip_ranges: Option<&Vec<WarpgateIpNet>>,
     remote_ip: Option<IpAddr>,
     username: &str,
@@ -71,6 +71,31 @@ pub fn check_ip_allowed(
         "Access denied for IP '{ip_str}' (not in any allowed range for user '{username}')"
     );
     Err(WarpgateError::IpAddrNotAllowed(ip_str, username.into()))
+}
+
+/// Vets a user resolved from a non-interactive credential — a ticket, an API
+/// token, a Kubernetes transport credential — against the account-status checks
+/// an interactive login goes through: account lockout and the user's IP
+/// allow-list. Callers check the source IP against login protection ahead of
+/// their credential lookup, so that a blocked caller can't use it as an
+/// existence oracle.
+///
+/// `Ok(false)` means denied; callers report that as an invalid credential, so a
+/// denial is indistinguishable from a bad credential.
+pub async fn vet_credential_bearer(
+    login_protection: &LoginProtectionService,
+    user: &User,
+    remote_ip: Option<IpAddr>,
+) -> Result<bool, WarpgateError> {
+    if login_protection
+        .check_user_locked(&user.username)
+        .await?
+        .is_some()
+    {
+        tracing::warn!("Credential presented for a locked user: {}", user.username);
+        return Ok(false);
+    }
+    Ok(check_ip_allowed(user.allowed_ip_ranges.as_ref(), remote_ip, &user.username).is_ok())
 }
 
 /// Record a failed attempt for an unknown username so that username

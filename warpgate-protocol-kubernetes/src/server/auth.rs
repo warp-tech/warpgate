@@ -13,11 +13,11 @@ use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
 use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, User};
-use warpgate_common_http::logging::get_client_ip;
+use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
     AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, authorize_for_target,
-    check_ip_allowed, wait_for_auth_completion,
+    vet_credential_bearer, wait_for_auth_completion,
 };
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation};
 
@@ -73,9 +73,7 @@ pub async fn authenticate_kubernetes_user(
     req: &Request,
     services: &Services,
 ) -> poem::Result<User> {
-    let client_ip: Option<IpAddr> = get_client_ip(req, services)
-        .await
-        .and_then(|ip| ip.parse().ok());
+    let client_ip = get_client_ip_addr(req, services).await;
 
     // Fail closed if login protection currently has this source IP blocked.
     if let Some(ip) = client_ip
@@ -111,16 +109,7 @@ pub async fn authenticate_kubernetes_user(
     };
 
     // Account lockout and the user's IP allow-list, both fail-closed.
-    if services
-        .login_protection
-        .check_user_locked(&user.username)
-        .await?
-        .is_some()
-    {
-        warn!(username = %user.username, "Kubernetes auth for locked user");
-        return Err(unauthorized());
-    }
-    if check_ip_allowed(user.allowed_ip_ranges.as_ref(), client_ip, &user.username).is_err() {
+    if !vet_credential_bearer(&services.login_protection, &user, client_ip).await? {
         return Err(unauthorized());
     }
 
@@ -151,9 +140,7 @@ pub async fn authorize_kubernetes_target(
     session_id: SessionId,
     services: &Services,
 ) -> poem::Result<TargetAuthorization> {
-    let client_ip: Option<IpAddr> = get_client_ip(req, services)
-        .await
-        .and_then(|ip| ip.parse().ok());
+    let client_ip = get_client_ip_addr(req, services).await;
 
     // When the user has a Kubernetes credential policy, enforce its web-approval
     // factor on top of the transport identity; otherwise use the identity directly.

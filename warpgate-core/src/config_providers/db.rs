@@ -933,7 +933,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             .await?
         else {
             return Err(WarpgateError::InconsistentState(
-                "No user matching the ticket username".into(),
+                "No user matching the API token".into(),
             ));
         };
 
