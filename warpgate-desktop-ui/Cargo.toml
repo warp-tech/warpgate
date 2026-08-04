@@ -1,9 +1,12 @@
 [package]
-edition = "2024"
-license = "Apache-2.0"
 name = "warpgate-desktop-ui"
 version = "0.23.4"
+edition = "2024"
+license = "Apache-2.0"
 publish = false
+
+[[example]]
+name = "screens"
 
 [dependencies]
 embedded-graphics = "0.8"
@@ -12,6 +15,3 @@ warpgate-common = { path = "../warpgate-common", default-features = false }
 
 [dev-dependencies]
 minifb = "0.28"
-
-[[example]]
-name = "screens"

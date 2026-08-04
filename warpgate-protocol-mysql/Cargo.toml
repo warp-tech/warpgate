@@ -24,10 +24,10 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true
 tracing.workspace = true
+url.workspace = true
 uuid.workspace = true
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
-url.workspace = true
 warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-database-protocols = { path = "../warpgate-database-protocols", default-features = false }

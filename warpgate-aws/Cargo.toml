@@ -40,10 +40,10 @@ aws-smithy-types = { version = "1", default-features = false, features = [
 ] }
 dashmap = { version = "6.2", default-features = false }
 data-encoding.workspace = true
-poem-openapi.workspace = true
-serde.workspace = true
 http.workspace = true
+poem-openapi.workspace = true
 reqwest.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

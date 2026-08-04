@@ -1,8 +1,8 @@
 [package]
-edition = "2024"
-license = "Apache-2.0"
 name = "warpgate-web-desktop"
 version = "0.23.4"
+edition = "2024"
+license = "Apache-2.0"
 publish = false
 
 [dependencies]
@@ -23,8 +23,8 @@ warpgate-common = { path = "../warpgate-common" }
 warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
-warpgate-protocol-vnc = { path = "../warpgate-protocol-vnc" }
 warpgate-protocol-rdp = { path = "../warpgate-protocol-rdp" }
+warpgate-protocol-vnc = { path = "../warpgate-protocol-vnc" }
 warpgate-web-clients-common = { path = "../warpgate-web-clients-common" }
 
 [dev-dependencies]

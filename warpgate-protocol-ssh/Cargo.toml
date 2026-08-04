@@ -25,13 +25,13 @@ termwiz = { version = "0.23", default-features = false }
 thiserror.workspace = true
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
-vt100 = "0.15"
 tracing.workspace = true
 tui-input = { version = "0.14", default-features = false, features = [
     "ratatui-crossterm",
 ] }
 url.workspace = true
 uuid.workspace = true
+vt100 = "0.15"
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
