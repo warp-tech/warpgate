@@ -18,7 +18,7 @@ use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Protocol, SessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_common_http::logging::get_client_ip;
+use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
     X_WARPGATE_CLUSTER_IDENTITY, is_cluster_peer_request,
@@ -167,9 +167,7 @@ pub async fn get_or_create_auth_state_for_request(
     ctx: &UnauthenticatedRequestContext,
     rate_limit_credential_type: Option<&str>,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
-    let client_ip = get_client_ip(req, ctx.services())
-        .await
-        .and_then(|ip| ip.parse().ok());
+    let client_ip = get_client_ip_addr(req, ctx.services()).await;
 
     if let Some(state) = get_auth_state_for_request(req, ctx).await? {
         let reusable = {
@@ -374,7 +372,10 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         } else if let Some(user) = ctx
             .services()
             .config_provider
-            .validate_api_token(token_from_header)
+            .validate_api_token(
+                token_from_header,
+                get_client_ip_addr(&req, ctx.services()).await,
+            )
             .await?
         {
             Some(RequestAuthorization::UserToken {

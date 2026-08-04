@@ -13,7 +13,7 @@ use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
 use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, User};
-use warpgate_common_http::logging::get_client_ip;
+use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
     AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, authorize_for_target,
@@ -73,9 +73,7 @@ pub async fn authenticate_kubernetes_user(
     req: &Request,
     services: &Services,
 ) -> poem::Result<User> {
-    let client_ip: Option<IpAddr> = get_client_ip(req, services)
-        .await
-        .and_then(|ip| ip.parse().ok());
+    let client_ip = get_client_ip_addr(req, services).await;
 
     // Fail closed if login protection currently has this source IP blocked.
     if let Some(ip) = client_ip
@@ -151,9 +149,7 @@ pub async fn authorize_kubernetes_target(
     session_id: SessionId,
     services: &Services,
 ) -> poem::Result<TargetAuthorization> {
-    let client_ip: Option<IpAddr> = get_client_ip(req, services)
-        .await
-        .and_then(|ip| ip.parse().ok());
+    let client_ip = get_client_ip_addr(req, services).await;
 
     // When the user has a Kubernetes credential policy, enforce its web-approval
     // factor on top of the transport identity; otherwise use the identity directly.
@@ -262,7 +258,11 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
         && let Ok(auth_str) = auth_header.to_str()
         && let Some(token) = auth_str.strip_prefix("Bearer ")
     {
-        if let Ok(Some(user)) = services.config_provider.validate_api_token(token).await {
+        if let Ok(Some(user)) = services
+            .config_provider
+            .validate_api_token(token, get_client_ip_addr(req, services).await)
+            .await
+        {
             return Ok(Some(user));
         }
 

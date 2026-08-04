@@ -90,7 +90,11 @@ pub trait ConfigProvider {
         credential: Option<AuthCredential>,
     ) -> Result<(), WarpgateError>;
 
-    async fn validate_api_token(&self, token: &str) -> Result<Option<User>, WarpgateError>;
+    async fn validate_api_token(
+        &self,
+        token: &str,
+        remote_ip: Option<IpAddr>,
+    ) -> Result<Option<User>, WarpgateError>;
 }
 
 /// Proof that a user authenticated for a given protocol, and so may be handed to
