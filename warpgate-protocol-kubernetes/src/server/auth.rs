@@ -17,7 +17,7 @@ use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
     AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, authorize_for_target,
-    check_ip_allowed, wait_for_auth_completion,
+    vet_credential_bearer, wait_for_auth_completion,
 };
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation};
 
@@ -109,16 +109,7 @@ pub async fn authenticate_kubernetes_user(
     };
 
     // Account lockout and the user's IP allow-list, both fail-closed.
-    if services
-        .login_protection
-        .check_user_locked(&user.username)
-        .await?
-        .is_some()
-    {
-        warn!(username = %user.username, "Kubernetes auth for locked user");
-        return Err(unauthorized());
-    }
-    if check_ip_allowed(user.allowed_ip_ranges.as_ref(), client_ip, &user.username).is_err() {
+    if !vet_credential_bearer(&services.login_protection, &user, client_ip).await? {
         return Err(unauthorized());
     }
 
@@ -258,11 +249,7 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
         && let Ok(auth_str) = auth_header.to_str()
         && let Some(token) = auth_str.strip_prefix("Bearer ")
     {
-        if let Ok(Some(user)) = services
-            .config_provider
-            .validate_api_token(token, get_client_ip_addr(req, services).await)
-            .await
-        {
+        if let Ok(Some(user)) = services.config_provider.validate_api_token(token).await {
             return Ok(Some(user));
         }
 

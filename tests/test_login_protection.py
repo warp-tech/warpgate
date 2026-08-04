@@ -1,4 +1,5 @@
 import requests
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import time
 
@@ -230,6 +231,51 @@ class TestLoginProtection:
         assert _get_with_ticket().status_code // 100 == 2
 
     # ── user lockout ────────────────────────────────────────────────────────
+
+    def test_user_lockout_blocks_api_token_auth(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """An API token is only as good as its user, so a lockout disables it too."""
+        wg = _lp_wg(processes, ip_max=100, user_max=3)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, _ = _create_test_user(api, echo_server_port)
+
+        _, session = _post_login(url, user.username, "correct_password")
+        minted = session.post(
+            f"{url}/@warpgate/api/profile/api-tokens",
+            json={
+                "label": "test",
+                "expiry": (
+                    datetime.now(timezone.utc) + timedelta(hours=1)
+                ).isoformat(),
+            },
+        )
+        minted.raise_for_status()
+        token = minted.json()["secret"]
+
+        def _username_seen_by_token():
+            return requests.get(
+                f"{url}/@warpgate/api/info",
+                headers={"X-Warpgate-Token": token},
+                verify=False,
+            ).json()["username"]
+
+        assert _username_seen_by_token() == user.username
+
+        for _ in range(3):
+            _post_login(url, user.username, "wrong")
+        time.sleep(0.2)
+
+        assert _username_seen_by_token() is None, (
+            "locked user was still able to authenticate with an API token"
+        )
+
+        # Unlocking restores it, proving the refusal came from the lockout alone.
+        with admin_client(url) as api:
+            api.unlock_user(user.username)
+        assert _username_seen_by_token() == user.username
 
     def test_user_lockout_triggers_and_blocks_correct_password(
         self, processes: ProcessManager, echo_server_port, timeout

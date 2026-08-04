@@ -90,11 +90,7 @@ pub trait ConfigProvider {
         credential: Option<AuthCredential>,
     ) -> Result<(), WarpgateError>;
 
-    async fn validate_api_token(
-        &self,
-        token: &str,
-        remote_ip: Option<IpAddr>,
-    ) -> Result<Option<User>, WarpgateError>;
+    async fn validate_api_token(&self, token: &str) -> Result<Option<User>, WarpgateError>;
 }
 
 /// Proof that a user authenticated for a given protocol, and so may be handed to
@@ -259,27 +255,13 @@ pub async fn authorize_ticket(
         };
         let user = User::try_from(ticket_user)?;
 
-        // A ticket is only as good as its user: a locked user's tickets are
-        // locked with them.
-        if login_protection
-            .check_user_locked(&user.username)
-            .await?
-            .is_some()
-        {
-            warn!("Ticket belongs to a locked user: {}", user.username);
-            return Ok(None);
-        }
-
-        // A ticket inherits its user's IP restrictions. This path mints
-        // authorization directly, bypassing the auth state store where
-        // interactive logins are IP-checked, so enforce the same allow-list
-        // here. A denied IP returns the missing-ticket shape, preserving the
+        // A ticket is only as good as its user, and this path mints authorization
+        // directly, bypassing the auth state store where interactive logins are
+        // vetted. A denied user returns the missing-ticket shape, preserving the
         // no-existence-oracle property.
-        if !crate::auth_state_store::ip_allowed(user.allowed_ip_ranges.as_ref(), remote_ip) {
-            warn!(
-                "Ticket presented from an IP outside the allowed ranges for user: {}",
-                user.username
-            );
+        if !crate::auth_state_store::vet_credential_bearer(login_protection, &user, remote_ip)
+            .await?
+        {
             return Ok(None);
         }
 

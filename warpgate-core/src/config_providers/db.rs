@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::net::IpAddr;
 
 use data_encoding::BASE64;
 use sea_orm::sea_query::{Expr, Func, Query};
@@ -914,11 +913,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         Ok(())
     }
 
-    async fn validate_api_token(
-        &self,
-        token: &str,
-        remote_ip: Option<IpAddr>,
-    ) -> Result<Option<User>, WarpgateError> {
+    async fn validate_api_token(&self, token: &str) -> Result<Option<User>, WarpgateError> {
         let db = &self.db;
         let Some(api_token) = entities::ApiToken::Entity::find()
             .filter(
@@ -938,19 +933,10 @@ impl ConfigProvider for DatabaseConfigProvider {
             .await?
         else {
             return Err(WarpgateError::InconsistentState(
-                "No user matching the ticket username".into(),
+                "No user matching the API token".into(),
             ));
         };
-        let user: User = user.try_into()?;
 
-        if !crate::auth_state_store::ip_allowed(user.allowed_ip_ranges.as_ref(), remote_ip) {
-            warn!(
-                "API token presented from an IP outside the allowed ranges for user: {}",
-                user.username
-            );
-            return Ok(None);
-        }
-
-        Ok(Some(user))
+        Ok(Some(user.try_into()?))
     }
 }

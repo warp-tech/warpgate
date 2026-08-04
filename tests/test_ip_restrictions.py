@@ -69,13 +69,15 @@ def test_api_token_is_bound_to_the_users_allowed_ranges(ip_restricted_user):
     # unquestionably valid and only the presenting IP differs between the
     # two assertions below.
     session, _ = _login(url, user.username, DENIED_IP)
-    token = session.post(
+    minted = session.post(
         f"{url}/@warpgate/api/profile/api-tokens",
         json={
             "label": "test",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
         },
-    ).json()["secret"]
+    )
+    minted.raise_for_status()
+    token = minted.json()["secret"]
 
     _restrict(admin, user, [f"{ALLOWED_IP}/32"])
 
