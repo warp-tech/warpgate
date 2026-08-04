@@ -127,7 +127,7 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 * Web approval
 `,
 
-   [TargetKind.Rdp]: `
+    [TargetKind.Rdp]: `
 ## Warpgate ↔ target
 
 * Authenticates over CredSSP/NLA with a username and password.

@@ -50,7 +50,7 @@
 >
     <Form
         {validated}
-            on:submit={e => {
+        on:submit={e => {
             _save()
             e.preventDefault()
         }}

@@ -228,15 +228,19 @@
         const metrics = context.measureText('W')
 
         const fontWidthRatio = metrics.width / probeFontSize
-        const fontHeightRatio = (
-            metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent
-        ) / probeFontSize
+        const fontHeightRatio =
+            (metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent) /
+            probeFontSize
         const fontMaxWidth = containerElement.clientWidth / term.cols
         const fontMaxHeight = containerElement.clientHeight / term.rows
-        term.options.fontSize = Math.floor(Math.min(
-            fontMaxWidth / fontWidthRatio,
-            fontMaxHeight / fontHeightRatio / (term.options.lineHeight ?? 1),
-        ))
+        term.options.fontSize = Math.floor(
+            Math.min(
+                fontMaxWidth / fontWidthRatio,
+                fontMaxHeight /
+                    fontHeightRatio /
+                    (term.options.lineHeight ?? 1),
+            ),
+        )
     }
 
     // Shared latest-wins runner: serializes seeks and coalesces rapid scrubs to the newest
