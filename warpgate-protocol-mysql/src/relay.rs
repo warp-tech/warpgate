@@ -50,7 +50,7 @@ impl ResponseRelay {
 
     /// For responses that end at the first EOF - a single OK/ERR packet, or the
     /// bare column definition list of COM_FIELD_LIST.
-    pub fn single(client: Capabilities, target: Capabilities) -> Self {
+    pub const fn single(client: Capabilities, target: Capabilities) -> Self {
         Self {
             columns_done: true,
             ..Self::result_set(client, target)
@@ -61,17 +61,12 @@ impl ResponseRelay {
     /// response.
     pub fn next(&mut self, packet: &Bytes) -> Result<(Relayed, bool), MySqlError> {
         let header = packet.first().copied();
+        let first = !std::mem::replace(&mut self.seen_first, true);
 
-        if !self.seen_first {
-            self.seen_first = true;
-            // OK or ERR as the first packet means there is no result set;
-            // later packets starting with 0x00 are rows with an empty first
-            // column
-            return match header {
-                Some(0) => Ok((self.rewrite_ok(packet)?, true)),
-                Some(0xff) => Ok((Relayed::Verbatim, true)),
-                _ => Ok((Relayed::Verbatim, false)),
-            };
+        // OK as the first packet means there is no result set; later packets
+        // starting with 0x00 are rows with an empty first column
+        if first && header == Some(0) {
+            return Ok((self.rewrite_ok(packet)?, true));
         }
 
         // 0xff is not a valid length-encoded value prefix, so no row or column
@@ -81,7 +76,10 @@ impl ResponseRelay {
         }
 
         // Rows can also start with 0xfe (a length-encoded value >= 2^24); real
-        // EOF and terminating OK packets are shorter than these thresholds
+        // EOF and terminating OK packets are shorter than these thresholds. A
+        // column count never takes that form, so the first packet of a response
+        // starting with 0xfe is always an EOF too - the empty column list of a
+        // COM_FIELD_LIST.
         if header == Some(0xfe) {
             if self.target.contains(Capabilities::DEPRECATE_EOF) {
                 if packet.len() < 0xff_ffff {
@@ -89,7 +87,6 @@ impl ResponseRelay {
                 }
             } else if packet.len() < 9 {
                 if self.columns_done {
-                    // todo check multiple results
                     return Ok((self.eof_as_ok(packet)?, true));
                 }
                 self.columns_done = true;
@@ -260,6 +257,15 @@ mod tests {
             relayed(&mut relay, b"\x03def"),
             (Some(b"\x03def".to_vec()), false)
         );
+        assert_eq!(
+            relayed(&mut relay, b"\xfe\x00\x00\x02\x00"),
+            (Some(b"\xfe\x00\x00\x02\x00\x00\x00\x00".to_vec()), true)
+        );
+    }
+
+    #[test]
+    fn empty_column_list_ends_at_its_only_packet() {
+        let mut relay = ResponseRelay::single(modern(), legacy());
         assert_eq!(
             relayed(&mut relay, b"\xfe\x00\x00\x02\x00"),
             (Some(b"\xfe\x00\x00\x02\x00\x00\x00\x00".to_vec()), true)
