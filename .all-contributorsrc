@@ -306,6 +306,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "jwillmer",
+      "name": "Jens Willmer",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1503577?v=4",
+      "profile": "https://jwillmer.de",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

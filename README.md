@@ -196,6 +196,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/snkolev18"><img src="https://avatars.githubusercontent.com/u/56872319?v=4?s=100" width="100px;" alt="Stoyan Kolev"/><br /><sub><b>Stoyan Kolev</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=snkolev18" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/britbennett"><img src="https://avatars.githubusercontent.com/u/160669068?v=4?s=100" width="100px;" alt="britbennett"/><br /><sub><b>britbennett</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=britbennett" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/PokAhonTAS911"><img src="https://avatars.githubusercontent.com/u/208599324?v=4?s=100" width="100px;" alt="PokAhonTAS911"/><br /><sub><b>PokAhonTAS911</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=PokAhonTAS911" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://jwillmer.de"><img src="https://avatars.githubusercontent.com/u/1503577?v=4?s=100" width="100px;" alt="Jens Willmer"/><br /><sub><b>Jens Willmer</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=jwillmer" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
