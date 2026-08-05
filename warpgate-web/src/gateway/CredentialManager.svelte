@@ -1,6 +1,7 @@
 <script lang="ts">
     import {
         faCertificate,
+        faFingerprint,
         faIdBadge,
         faKey,
         faKeyboard,
@@ -11,6 +12,7 @@
     import CreateOtpModal from 'admin/CreateOtpModal.svelte'
     import CreatePasswordModal from 'admin/CreatePasswordModal.svelte'
     import PublicKeyCredentialModal from 'admin/PublicKeyCredentialModal.svelte'
+    import WebauthnCredentialModal from 'admin/WebauthnCredentialModal.svelte'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import Loadable from 'common/Loadable.svelte'
     import {
@@ -20,6 +22,7 @@
         type ExistingCertificateCredential,
         type ExistingOtpCredential,
         type ExistingPublicKeyCredential,
+        type ExistingWebauthnCredentialSelf,
         PasswordState,
     } from 'gateway/lib/api'
     import { deleteCertificateKey } from 'gateway/lib/certificateStore'
@@ -32,6 +35,9 @@
     let issuingCertificateCredential = $state(false)
     let creatingOtpCredential = $state(false)
     let changingPassword = $state(false)
+    let registeringWebauthn = $state(false)
+    let webauthnError: string | null = $state(null)
+    let creatingWebauthn = $state(false)
 
     const initPromise = init()
 
@@ -116,6 +122,128 @@
             await api.revokeMyCertificate(credential)
             await deleteCertificateKey(credential.id)
         }
+    }
+
+    async function registerWebauthn(label: string, signal: AbortSignal) {
+        if (!creds) return
+        if (creds.webauthn.some(c => c.label === label)) {
+            throw new Error('A passkey with this name already exists')
+        }
+        webauthnError = null
+        registeringWebauthn = true
+        try {
+            // Start registration ceremony
+            const startResp = await api.startWebauthnRegistration()
+            const challengeOptions = JSON.parse(startResp.challengeJson)
+
+            // Call the browser's WebAuthn API
+            let credential: PublicKeyCredential | null
+            try {
+                credential = (await navigator.credentials.create({
+                    publicKey: {
+                        ...challengeOptions.publicKey,
+                        challenge: base64UrlToBuffer(
+                            challengeOptions.publicKey.challenge,
+                        ),
+                        user: {
+                            ...challengeOptions.publicKey.user,
+                            id: base64UrlToBuffer(
+                                challengeOptions.publicKey.user.id,
+                            ),
+                        },
+                        excludeCredentials: (
+                            challengeOptions.publicKey.excludeCredentials ?? []
+                        ).map((c: { id: string }) => ({
+                            ...c,
+                            id: base64UrlToBuffer(c.id),
+                        })),
+                    },
+                    signal,
+                })) as PublicKeyCredential | null
+            } catch (domErr: unknown) {
+                if (
+                    domErr instanceof DOMException &&
+                    (domErr.name === 'NotAllowedError' ||
+                        domErr.name === 'AbortError')
+                ) {
+                    // User cancelled — no error needed
+                    return
+                }
+                throw domErr
+            }
+
+            if (!credential) {
+                return
+            }
+
+            const response =
+                credential.response as AuthenticatorAttestationResponse
+            const credentialJson = JSON.stringify({
+                id: credential.id,
+                rawId: bufferToBase64Url(credential.rawId),
+                type: credential.type,
+                response: {
+                    attestationObject: bufferToBase64Url(
+                        response.attestationObject,
+                    ),
+                    clientDataJSON: bufferToBase64Url(response.clientDataJSON),
+                    transports: response.getTransports
+                        ? response.getTransports()
+                        : [],
+                },
+            })
+
+            // Complete registration
+            const result = await api.completeWebauthnRegistration({
+                registrationCompleteRequest: {
+                    credentialJson,
+                    label,
+                },
+            })
+
+            creds.webauthn.push({
+                id: result.id,
+                label: result.label,
+                dateAdded: new Date(),
+                lastUsed: undefined,
+            })
+        } catch (e: unknown) {
+            webauthnError =
+                e instanceof Error ? e.message : 'Registration failed'
+        } finally {
+            registeringWebauthn = false
+        }
+    }
+
+    async function deleteWebauthn(credential: ExistingWebauthnCredentialSelf) {
+        if (!creds) return
+        if (!confirm('Delete this passkey? You will need to re-register it.'))
+            return
+        creds.webauthn = creds.webauthn.filter(c => c.id !== credential.id)
+        await api.deleteMyWebauthnCredential(credential)
+    }
+
+    function base64UrlToBuffer(base64url: string): ArrayBuffer {
+        const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
+        const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+        const binary = atob(padded)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i)
+        }
+        return bytes.buffer
+    }
+
+    function bufferToBase64Url(buffer: ArrayBuffer): string {
+        const bytes = new Uint8Array(buffer)
+        let binary = ''
+        for (const byte of bytes) {
+            binary += String.fromCharCode(byte)
+        }
+        return btoa(binary)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '')
     }
 </script>
 
@@ -320,6 +448,64 @@
             </Alert>
         {/if}
 
+        <div class="d-flex align-items-center mt-4 mb-2">
+            <h4 class="m-0">Passkeys</h4>
+            <span class="ms-auto"></span>
+            <Button
+                color="link"
+                disabled={registeringWebauthn}
+                onclick={e => {
+                creatingWebauthn = true
+                e.preventDefault()
+            }}
+            >
+                Add passkey
+            </Button>
+        </div>
+
+        {#if webauthnError}
+            <Alert color="danger">{webauthnError}</Alert>
+        {/if}
+
+        <div class="list-group list-group-flush mb-3">
+            {#each creds.webauthn as credential (credential.id)}
+                <div class="list-group-item credential">
+                    <Fa fw icon={faFingerprint} />
+                    <div class="main ms-3">
+                        <div class="label">{credential.label}</div>
+                        {#if credential.dateAdded}
+                            <small class="d-block text-muted">
+                                Added
+                                {new Date(credential.dateAdded).toLocaleDateString()}
+                                {#if credential.lastUsed}
+                                    · Last used
+                                    {new Date(credential.lastUsed).toLocaleDateString()}
+                                {/if}
+                            </small>
+                        {/if}
+                    </div>
+                    <span class="ms-auto"></span>
+                    <Button
+                        class="ms-2"
+                        color="link"
+                        onclick={e => {
+                    deleteWebauthn(credential)
+                    e.preventDefault()
+                }}
+                    >
+                        Delete
+                    </Button>
+                </div>
+            {/each}
+        </div>
+
+        {#if creds.webauthn.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.includes(CredentialKind.WebAuthn))}
+            <Alert color="warning">
+                Your credential policy requires using a passkey for
+                authentication. Without one, you won't be able to log in.
+            </Alert>
+        {/if}
+
         {#if creds.sso.length > 0}
             <div class="d-flex align-items-center mt-4 mb-2">
                 <h4 class="m-0">Single sign-on</h4>
@@ -372,6 +558,14 @@
         onClose={() => {
         issuingCertificateCredential = false
     }}
+    />
+{/if}
+
+{#if creatingWebauthn}
+    <WebauthnCredentialModal
+        bind:isOpen={creatingWebauthn}
+        userId=""
+        save={registerWebauthn}
     />
 {/if}
 

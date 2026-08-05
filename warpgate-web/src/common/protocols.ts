@@ -164,16 +164,19 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
         CredentialKind.PublicKey,
         CredentialKind.Totp,
         CredentialKind.WebUserApproval,
+        CredentialKind.WebAuthn,
     ]),
     http: new Set([
         CredentialKind.Password,
         CredentialKind.Totp,
         CredentialKind.Sso,
+        CredentialKind.WebAuthn,
     ]),
     mysql: new Set([CredentialKind.Password]),
     postgres: new Set([
         CredentialKind.Password,
         CredentialKind.WebUserApproval,
+        CredentialKind.WebAuthn,
     ]),
     kubernetes: new Set([
         CredentialKind.Certificate,
@@ -183,12 +186,14 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
         CredentialKind.Password,
         CredentialKind.Totp,
         CredentialKind.WebUserApproval,
+        CredentialKind.WebAuthn,
     ]),
     // Password over NLA, then TOTP / web approval gathered on the holding screen.
     rdp: new Set([
         CredentialKind.Password,
         CredentialKind.Totp,
         CredentialKind.WebUserApproval,
+        CredentialKind.WebAuthn,
     ]),
 }
 

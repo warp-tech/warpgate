@@ -76,6 +76,7 @@ mod m00069_ssh_client_keys;
 mod m00070_http_sessions;
 mod m00071_ssh_host_key_verification;
 mod m00072_session_node_id_not_null;
+mod m00073_webauthn_credentials;
 
 pub(crate) mod helpers;
 
@@ -157,6 +158,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00070_http_sessions::Migration),
             Box::new(m00071_ssh_host_key_verification::Migration),
             Box::new(m00072_session_node_id_not_null::Migration),
+            Box::new(m00073_webauthn_credentials::Migration),
         ]
     }
 }

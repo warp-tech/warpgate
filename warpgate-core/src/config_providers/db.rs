@@ -627,6 +627,11 @@ impl ConfigProvider for DatabaseConfigProvider {
                 }
                 Ok(false)
             }
+            AuthCredential::WebAuthn => {
+                // WebAuthn validation happens in the ceremony endpoint, not here.
+                // If we reach this point, the ceremony already succeeded.
+                Ok(true)
+            }
             _ => Err(WarpgateError::InvalidCredentialType),
         }
     }
