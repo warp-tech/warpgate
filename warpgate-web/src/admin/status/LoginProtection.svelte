@@ -9,9 +9,9 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import StatCard from 'common/StatCard.svelte'
     import { onMount } from 'svelte'
-    import RelativeDate from 'common/RelativeDate.svelte'
 
     let loading = $state(true)
     let error: string | undefined = $state()

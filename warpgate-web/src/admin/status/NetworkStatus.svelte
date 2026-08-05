@@ -4,8 +4,8 @@
     import { api, ListenerState } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import Fa from 'svelte-fa'
     import RelativeDate from 'common/RelativeDate.svelte'
+    import Fa from 'svelte-fa'
 
     const stateBadges: Record<ListenerState, string> = {
         [ListenerState.Listening]: 'success',

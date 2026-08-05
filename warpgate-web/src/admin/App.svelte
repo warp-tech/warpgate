@@ -8,6 +8,7 @@
     import Redirect from 'common/Redirect.svelte'
     import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
     import Router, {
         link,
@@ -16,7 +17,6 @@
     } from 'svelte-spa-router'
     import active from 'svelte-spa-router/active'
     import { wrap } from 'svelte-spa-router/wrap'
-    import { get } from 'svelte/store'
     import AnalyticsConsentModal from './AnalyticsConsentModal.svelte'
 
     let showAnalyticsModal = $state(false)

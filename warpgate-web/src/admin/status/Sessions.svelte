@@ -9,6 +9,7 @@
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import { formatDistance } from 'date-fns'
     import { serverInfo } from 'gateway/lib/store'
     import {
@@ -25,7 +26,6 @@
     import { link } from 'svelte-spa-router'
     import PermissionGate from '../lib/PermissionGate.svelte'
     import { adminPermissions } from '../lib/store'
-    import RelativeDate from 'common/RelativeDate.svelte'
 
     let [showActiveOnly, showActiveOnly$] = autosave(
         'sessions-list:show-active-only',

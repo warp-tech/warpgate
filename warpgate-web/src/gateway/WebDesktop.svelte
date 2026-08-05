@@ -9,11 +9,11 @@
     } from 'common/desktopCanvas'
     import { codeToScancode } from 'common/desktopInput'
     import InfoBox from 'common/InfoBox.svelte'
+    import { handleReauthError } from 'common/reauth'
+    import { debounceTime, distinctUntilChanged, Subject } from 'rxjs'
     import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
     import { loadTheme } from 'theme'
-    import { handleReauthError } from 'common/reauth'
-    import { Subject, debounceTime, distinctUntilChanged } from 'rxjs'
     import { api, ResponseError, type WebDesktopSessionInfo } from './lib/api'
     import {
         ConnectionState,

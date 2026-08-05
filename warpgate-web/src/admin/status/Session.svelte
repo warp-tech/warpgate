@@ -19,6 +19,7 @@
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
     import { PROTOCOL_PROPERTIES } from 'common/protocols'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import {
         recordingMetadataToFieldSet,
         recordingTypeLabel,
@@ -28,7 +29,6 @@
     import Fa from 'svelte-fa'
     import { link } from 'svelte-spa-router'
     import LogViewer from '../log-viewer/LogViewer.svelte'
-    import RelativeDate from 'common/RelativeDate.svelte'
 
     interface Props {
         params: { id: string }

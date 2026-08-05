@@ -25,10 +25,10 @@
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import { statusColor, statusIcon } from 'common/ticketRequestStatus'
     import Fa from 'svelte-fa'
     import { link } from 'svelte-spa-router'
-    import RelativeDate from 'common/RelativeDate.svelte'
 
     let error: string | undefined = $state()
     let success: string | undefined = $state()

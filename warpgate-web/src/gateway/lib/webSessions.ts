@@ -1,7 +1,7 @@
 import { handleReauthError } from 'common/reauth'
-import { api } from './api'
-import { push } from 'svelte-spa-router'
 import { get } from 'svelte/store'
+import { push } from 'svelte-spa-router'
+import { api } from './api'
 import { openTargetsInNewTab } from './store'
 
 function maybeOpenInNewTab(url: string) {

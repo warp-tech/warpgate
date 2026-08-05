@@ -8,7 +8,6 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
-    import RelativeDate from 'common/RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import {
@@ -20,6 +19,7 @@
     import { routeQueryParams } from 'common/helpers'
     import InfoBox from 'common/InfoBox.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import { statusColor, statusIcon } from 'common/ticketRequestStatus'
     import {
         api,

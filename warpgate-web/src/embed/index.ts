@@ -1,5 +1,5 @@
-import { mount } from 'svelte'
 import { api } from 'gateway/lib/api'
+import { mount } from 'svelte'
 import EmbeddedUI from './EmbeddedUI.svelte'
 
 // When proxying a non-secure HTTP target through Warpgate, if
