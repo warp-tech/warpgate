@@ -10,7 +10,7 @@ use anyhow::{Result, bail};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_core::{DesktopInput, Services};
+use warpgate_core::{DesktopInput, Scancode, Services};
 use warpgate_desktop_auth::{
     Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter as HoldPainterExt,
     InteractiveAuth, OtpAction, run_hold_screen as run_hold_screen_driver,
@@ -82,7 +82,7 @@ impl HoldInputSource for RdpHoldInput<'_> {
                 scancode,
                 down: true,
             })) => scancode
-                .and_then(|s| scancode_otp_action(s.code))
+                .and_then(scancode_otp_action)
                 .or_else(|| keysym.and_then(key_otp_action))
                 .map_or(HoldEvent::Other, HoldEvent::Otp),
             Some(ServerEvent::Size { width, height }) => {
@@ -218,7 +218,14 @@ impl HoldPainter {
 }
 
 /// Map a PC/AT set-1 scancode (what mstsc/FreeRDP send) to an OTP action.
-fn scancode_otp_action(code: u8) -> Option<OtpAction> {
+fn scancode_otp_action(scancode: Scancode) -> Option<OtpAction> {
+    let Scancode { code, extended } = scancode;
+    // The nav cluster shares its make codes with the keypad and is told apart only by the
+    // E0 prefix, so without this an arrow key would type a digit. Numpad Enter is the one
+    // extended key that still means something here.
+    if extended && code != 0x1c {
+        return None;
+    }
     Some(match code {
         0x02..=0x0a => OtpAction::Digit(char::from(b'1' + (code - 0x02))), // top row 1..9
         0x0b | 0x52 => OtpAction::Digit('0'),                              // keypad 0
@@ -249,7 +256,7 @@ fn key_otp_action(keysym: u32) -> Option<OtpAction> {
 
 #[cfg(test)]
 mod otp_input_tests {
-    use super::{OtpAction, key_otp_action, scancode_otp_action};
+    use super::{OtpAction, Scancode, key_otp_action, scancode_otp_action};
 
     fn digit(action: Option<OtpAction>) -> Option<char> {
         match action {
@@ -258,12 +265,26 @@ mod otp_input_tests {
         }
     }
 
+    fn plain(code: u8) -> Option<OtpAction> {
+        scancode_otp_action(Scancode {
+            code,
+            extended: false,
+        })
+    }
+
+    fn e0(code: u8) -> Option<OtpAction> {
+        scancode_otp_action(Scancode {
+            code,
+            extended: true,
+        })
+    }
+
     #[test]
     fn scancode_number_row() {
         // 0x02..=0x0a is the '1'..'9' row (computed, so guard the ends), 0x0b is '0'.
-        assert_eq!(digit(scancode_otp_action(0x02)), Some('1'));
-        assert_eq!(digit(scancode_otp_action(0x0a)), Some('9'));
-        assert_eq!(digit(scancode_otp_action(0x0b)), Some('0'));
+        assert_eq!(digit(plain(0x02)), Some('1'));
+        assert_eq!(digit(plain(0x0a)), Some('9'));
+        assert_eq!(digit(plain(0x0b)), Some('0'));
     }
 
     #[test]
@@ -280,23 +301,26 @@ mod otp_input_tests {
             (0x48, '8'),
             (0x49, '9'),
         ] {
-            assert_eq!(
-                digit(scancode_otp_action(code)),
-                Some(expected),
-                "scancode {code:#x}"
-            );
+            assert_eq!(digit(plain(code)), Some(expected), "scancode {code:#x}");
         }
+    }
+
+    /// The nav cluster repeats the keypad's make codes under an E0 prefix; pressing an
+    /// arrow must not enter a digit.
+    #[test]
+    fn scancode_nav_cluster_is_not_a_digit() {
+        for code in [0x47u8, 0x48, 0x49, 0x4b, 0x4d, 0x4f, 0x50, 0x51, 0x52] {
+            assert!(e0(code).is_none(), "extended scancode {code:#x}");
+        }
+        assert!(matches!(e0(0x1c), Some(OtpAction::Submit))); // numpad Enter
     }
 
     #[test]
     fn scancode_control_and_unmapped() {
-        assert!(matches!(
-            scancode_otp_action(0x0e),
-            Some(OtpAction::Backspace)
-        ));
-        assert!(matches!(scancode_otp_action(0x1c), Some(OtpAction::Submit)));
-        assert!(scancode_otp_action(0x3b).is_none()); // F1 — not an OTP key
-        assert!(scancode_otp_action(0x00).is_none());
+        assert!(matches!(plain(0x0e), Some(OtpAction::Backspace)));
+        assert!(matches!(plain(0x1c), Some(OtpAction::Submit)));
+        assert!(plain(0x3b).is_none()); // F1 — not an OTP key
+        assert!(plain(0x00).is_none());
     }
 
     #[test]

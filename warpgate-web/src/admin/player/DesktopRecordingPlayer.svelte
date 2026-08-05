@@ -50,7 +50,13 @@
     type Frame = DesktopFrame & { time: number }
     type InputItem =
         | { type: 'key_input'; time: number; keysym: number; down: boolean }
-        | { type: 'scancode_input'; time: number; code: number; down: boolean }
+        | {
+              type: 'scancode_input'
+              time: number
+              code: number
+              extended: boolean
+              down: boolean
+          }
         | {
               type: 'pointer_input'
               time: number
@@ -243,7 +249,10 @@
                 if (item.down) {
                     keyPresses = [
                         ...keyPresses,
-                        { time: item.time, label: scancodeLabel(item.code) },
+                        {
+                            time: item.time,
+                            label: scancodeLabel(item.code, item.extended),
+                        },
                     ]
                 }
                 break

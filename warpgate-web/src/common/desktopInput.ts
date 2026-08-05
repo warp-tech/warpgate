@@ -152,6 +152,29 @@ const SCANCODE_NAMES: Record<number, string> = {
     88: 'F12',
     69: 'NumLock',
     70: 'ScrollLock',
+    71: 'Num 7',
+    72: 'Num 8',
+    73: 'Num 9',
+    74: 'Num -',
+    75: 'Num 4',
+    76: 'Num 5',
+    77: 'Num 6',
+    78: 'Num +',
+    79: 'Num 1',
+    80: 'Num 2',
+    81: 'Num 3',
+    82: 'Num 0',
+    83: 'Num .',
+}
+
+// The nav cluster, the right-hand modifiers and the keypad's Enter and `/` repeat make
+// codes from the table above and are told apart only by the E0 prefix.
+const EXTENDED_SCANCODE_NAMES: Record<number, string> = {
+    28: 'Enter',
+    29: 'Ctrl',
+    53: '/',
+    55: 'PrintScreen',
+    56: 'Alt',
     71: 'Home',
     72: '↑',
     73: 'PgUp',
@@ -162,10 +185,14 @@ const SCANCODE_NAMES: Record<number, string> = {
     81: 'PgDn',
     82: 'Insert',
     83: 'Delete',
+    91: 'Super',
+    92: 'Super',
+    93: 'Menu',
 }
 
-export function scancodeLabel(code: number): string {
-    return SCANCODE_NAMES[code] ?? `0x${code.toString(16)}`
+export function scancodeLabel(code: number, extended: boolean): string {
+    const names = extended ? EXTENDED_SCANCODE_NAMES : SCANCODE_NAMES
+    return names[code] ?? `0x${code.toString(16)}`
 }
 
 // `KeyboardEvent.code` -> PC/AT set-1 make code, with the 0xE000 bit standing in for the
