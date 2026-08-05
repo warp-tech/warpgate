@@ -15,7 +15,7 @@ use sea_orm::EntityTrait;
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
-use tracing::warn;
+use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{
     Owner, ReparseForwardedResponse, fan_out_to_peers, forwarded_error, node_owner,
@@ -61,6 +61,7 @@ enum ApiAuthState {
     OtpNeeded,
     SsoNeeded,
     WebUserApprovalNeeded,
+    WebAuthnNeeded,
     PublicKeyNeeded,
     Success,
     IpBlocked,
@@ -158,6 +159,7 @@ const PREFERRED_NEED_CRED_ORDER: &[CredentialKind] = &[
     CredentialKind::PublicKey,
     CredentialKind::Password,
     CredentialKind::Totp,
+    CredentialKind::WebAuthn,
     CredentialKind::Sso,
     CredentialKind::WebUserApproval,
 ];
@@ -176,6 +178,7 @@ impl From<AuthResult> for ApiAuthState {
                     Some(CredentialKind::Totp) => Self::OtpNeeded,
                     Some(CredentialKind::Sso) => Self::SsoNeeded,
                     Some(CredentialKind::WebUserApproval) => Self::WebUserApprovalNeeded,
+                    Some(CredentialKind::WebAuthn) => Self::WebAuthnNeeded,
                     Some(CredentialKind::PublicKey) => Self::PublicKeyNeeded,
                     Some(CredentialKind::Certificate) => {
                         // Certificate authentication is not supported for HTTP protocol
@@ -410,6 +413,41 @@ impl Api {
             Ok(AuthStateResponse::Ok(Json(
                 serialize_auth_state_inner(state_arc, ctx.services()).await?,
             )))
+        })
+        .await
+    }
+
+    #[oai(
+        path = "/auth/webauthn/authentication/start",
+        method = "post",
+        operation_id = "start_webauthn_authentication"
+    )]
+    async fn api_webauthn_auth_start(
+        &self,
+        req: &Request,
+        session: &Session,
+        ctx: Data<&UnauthenticatedRequestContext>,
+    ) -> poem::Result<super::webauthn::StartAuthenticationResponse> {
+        on_login_owner(req, session, &ctx, None::<&()>, || {
+            serve_webauthn_auth_start(req, session, &ctx)
+        })
+        .await
+    }
+
+    #[oai(
+        path = "/auth/webauthn/authentication/complete",
+        method = "post",
+        operation_id = "complete_webauthn_authentication"
+    )]
+    async fn api_webauthn_auth_complete(
+        &self,
+        req: &Request,
+        session: &Session,
+        ctx: Data<&UnauthenticatedRequestContext>,
+        body: Json<super::webauthn::AuthenticationCompleteRequest>,
+    ) -> poem::Result<super::webauthn::CompleteAuthenticationResponse> {
+        on_login_owner(req, session, &ctx, Some(&body.to_json()), || {
+            serve_webauthn_auth_complete(req, session, &ctx, &body.credential_json)
         })
         .await
     }
@@ -899,4 +937,190 @@ pub async fn api_get_web_auth_requests_stream(
 
         Ok::<(), anyhow::Error>(())
     }))
+}
+
+async fn serve_webauthn_auth_start(
+    req: &Request,
+    session: &Session,
+    ctx: &UnauthenticatedRequestContext,
+) -> poem::Result<super::webauthn::StartAuthenticationResponse> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use warpgate_db_entities::WebauthnCredential;
+
+    use super::webauthn::{
+        AuthenticationStartResponse, SESSION_KEY_AUTH_STATE, StartAuthenticationResponse,
+        build_webauthn,
+    };
+
+    let services = ctx.services();
+
+    let Some(state_arc) = get_auth_state_for_request(req, ctx).await? else {
+        return Ok(StartAuthenticationResponse::NotFound);
+    };
+
+    let username = {
+        let state = state_arc.lock().await;
+        state.user_info().username.clone()
+    };
+
+    let webauthn = match build_webauthn(services).await {
+        Ok(w) => w,
+        Err(e) => {
+            error!("Failed to build WebAuthn instance: {e}");
+            return Ok(StartAuthenticationResponse::InternalError);
+        }
+    };
+
+    let db = &services.db;
+    let user_model = warpgate_db_entities::User::Entity::find()
+        .filter(warpgate_db_entities::User::Entity::username_eq_ci(
+            &username,
+        ))
+        .one(db)
+        .await
+        .map_err(poem::error::InternalServerError)?;
+
+    let Some(user_model) = user_model else {
+        return Ok(StartAuthenticationResponse::NotFound);
+    };
+
+    let cred_models = WebauthnCredential::Entity::find()
+        .filter(WebauthnCredential::Column::UserId.eq(user_model.id))
+        .all(db)
+        .await
+        .map_err(poem::error::InternalServerError)?;
+
+    if cred_models.is_empty() {
+        return Ok(StartAuthenticationResponse::NoCredentials);
+    }
+
+    let security_keys: Vec<webauthn_rs::prelude::SecurityKey> = cred_models
+        .iter()
+        .filter_map(|c| {
+            serde_json::from_str(&c.credential_json)
+                .map_err(|e| {
+                    tracing::warn!(
+                        credential_id = %c.id,
+                        "Failed to deserialize WebAuthn credential, skipping: {e}"
+                    );
+                })
+                .ok()
+        })
+        .collect();
+
+    if security_keys.is_empty() {
+        return Ok(StartAuthenticationResponse::NoCredentials);
+    }
+
+    let (rcr, auth_state) = match webauthn.start_securitykey_authentication(&security_keys) {
+        Ok(result) => result,
+        Err(e) => {
+            error!("WebAuthn authentication start ceremony failed: {e}");
+            return Ok(StartAuthenticationResponse::InternalError);
+        }
+    };
+
+    let state_json =
+        serde_json::to_string(&auth_state).map_err(poem::error::InternalServerError)?;
+    session.set(SESSION_KEY_AUTH_STATE, state_json);
+
+    let challenge_json = serde_json::to_string(&rcr).map_err(poem::error::InternalServerError)?;
+
+    Ok(StartAuthenticationResponse::Ok(Json(
+        AuthenticationStartResponse { challenge_json },
+    )))
+}
+
+async fn serve_webauthn_auth_complete(
+    req: &Request,
+    session: &Session,
+    ctx: &UnauthenticatedRequestContext,
+    credential_json: &str,
+) -> poem::Result<super::webauthn::CompleteAuthenticationResponse> {
+    use super::webauthn::CompleteAuthenticationResponse;
+
+    let services = ctx.services();
+
+    // Resolve the in-progress login this ceremony belongs to up front, so we
+    // can bind the verification to that specific user (defense-in-depth) and
+    // reuse the same state handle for both failure accounting and completion.
+    let Some(state_arc) = get_auth_state_for_request(req, ctx).await? else {
+        return Ok(CompleteAuthenticationResponse::NotFound);
+    };
+    let (expected_user_id, username) = {
+        let state = state_arc.lock().await;
+        (state.user_info().id, state.user_info().username.clone())
+    };
+
+    // Verify the WebAuthn response and update counter/last_used
+    if let Err(e) = super::webauthn::verify_webauthn_authentication(
+        services,
+        session,
+        credential_json,
+        expected_user_id,
+    )
+    .await
+    {
+        error!("WebAuthn authentication failed: {e}");
+
+        // Record the failed attempt for brute-force protection
+        let client_ip = get_client_ip_addr(req, services).await;
+        if let Some(ip) = client_ip {
+            let _ = services
+                .login_protection
+                .record_failed_attempt(FailedAttemptInfo {
+                    username,
+                    remote_ip: ip,
+                    protocol: crate::common::PROTOCOL_NAME,
+                    credential_type: "webauthn".to_string(),
+                })
+                .await;
+        }
+
+        return Ok(CompleteAuthenticationResponse::Unauthorized);
+    }
+
+    let mut state = state_arc.lock().await;
+    let outcome = submit_credential(
+        &mut state,
+        AuthCredential::WebAuthn,
+        services.config_provider.as_ref(),
+        &services.login_protection,
+    )
+    .await
+    .map_err(poem::error::InternalServerError)?;
+
+    if let Ok(user_info) = outcome.into_accepted() {
+        authorize_session(req, ctx, user_info)
+            .await
+            .map_err(poem::error::InternalServerError)?;
+        state.emit_authenticated_event_once();
+    }
+
+    Ok(CompleteAuthenticationResponse::Ok)
+}
+
+impl ReparseForwardedResponse for super::webauthn::StartAuthenticationResponse {
+    async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
+        match response.status() {
+            http::StatusCode::OK => Ok(Self::Ok(Json(parse_forwarded_body(response).await?))),
+            http::StatusCode::BAD_REQUEST => Ok(Self::NoCredentials),
+            http::StatusCode::NOT_FOUND => Ok(Self::NotFound),
+            http::StatusCode::INTERNAL_SERVER_ERROR => Ok(Self::InternalError),
+            _ => Err(forwarded_error(response).await),
+        }
+    }
+}
+
+impl ReparseForwardedResponse for super::webauthn::CompleteAuthenticationResponse {
+    async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
+        match response.status() {
+            http::StatusCode::OK => Ok(Self::Ok),
+            http::StatusCode::BAD_REQUEST => Ok(Self::BadRequest),
+            http::StatusCode::UNAUTHORIZED => Ok(Self::Unauthorized),
+            http::StatusCode::NOT_FOUND => Ok(Self::NotFound),
+            http::StatusCode::INTERNAL_SERVER_ERROR => Ok(Self::InternalError),
+            _ => Err(forwarded_error(response).await),
+        }
+    }
 }

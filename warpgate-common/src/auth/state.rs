@@ -534,4 +534,62 @@ mod tests {
             AuthResult::Accepted { .. }
         ));
     }
+
+    #[tokio::test]
+    async fn webauthn_credential_satisfies_policy() {
+        let mut state = make_state(&[CredentialKind::WebAuthn]);
+        // Initially needs WebAuthn
+        assert!(matches!(
+            state.verify(),
+            AuthResult::Need(kinds) if kinds.contains(&CredentialKind::WebAuthn)
+        ));
+        // After submitting WebAuthn, accepted
+        let outcome = state
+            .submit_credential(AuthCredential::WebAuthn, |_, _| async { Ok(true) })
+            .await
+            .unwrap();
+        assert!(outcome.is_valid());
+        assert!(matches!(outcome.result(), AuthResult::Accepted { .. }));
+    }
+
+    #[tokio::test]
+    async fn password_plus_webauthn_requires_both() {
+        let mut state = make_state(&[CredentialKind::Password, CredentialKind::WebAuthn]);
+        // Needs both
+        assert!(matches!(state.verify(), AuthResult::Need(_)));
+
+        // Submit password
+        let outcome = state
+            .submit_credential(password(), |_, _| async { Ok(true) })
+            .await
+            .unwrap();
+        assert!(outcome.is_valid());
+        // Still needs WebAuthn
+        assert!(matches!(
+            outcome.result(),
+            AuthResult::Need(kinds) if kinds.contains(&CredentialKind::WebAuthn)
+        ));
+
+        // Submit WebAuthn
+        let outcome = state
+            .submit_credential(AuthCredential::WebAuthn, |_, _| async { Ok(true) })
+            .await
+            .unwrap();
+        assert!(outcome.is_valid());
+        assert!(matches!(outcome.result(), AuthResult::Accepted { .. }));
+    }
+
+    #[tokio::test]
+    async fn webauthn_rejection_leaves_state_unchanged() {
+        let mut state = make_state(&[CredentialKind::WebAuthn]);
+        let outcome = state
+            .submit_credential(AuthCredential::WebAuthn, |_, _| async { Ok(false) })
+            .await
+            .unwrap();
+        assert!(!outcome.is_valid());
+        assert!(matches!(
+            state.verify(),
+            AuthResult::Need(kinds) if kinds.contains(&CredentialKind::WebAuthn)
+        ));
+    }
 }

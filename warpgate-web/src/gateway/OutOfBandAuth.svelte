@@ -25,6 +25,9 @@
     let { params }: Props = $props()
 
     let authState: AuthStateResponseInternal | undefined = $state()
+    let webauthnBusy = $state(false)
+    let webauthnError: string | null = $state(null)
+    let webauthnRequired = $state(false)
 
     let cachingGrace = $derived(authState?.webApprovalCachingGraceSeconds ?? 0)
     let cachingEnabled = $derived(cachingGrace > 0)
@@ -32,6 +35,9 @@
 
     async function reload() {
         authState = await api.getAuthState({ id: params.stateId })
+        // If the session state indicates WebAuthn is needed, the approval should
+        // include a WebAuthn ceremony
+        webauthnRequired = authState?.state === ApiAuthState.WebAuthnNeeded
     }
 
     async function init() {
@@ -39,6 +45,11 @@
     }
 
     async function approve(scope: WebApprovalScope) {
+        // If WebAuthn is required for this session, perform the ceremony first
+        if (webauthnRequired) {
+            const success = await performWebauthnCeremony()
+            if (!success) return
+        }
         await api.approveAuth({
             id: params.stateId,
             approveAuthRequest: { scope },
@@ -47,10 +58,93 @@
         window.close()
     }
 
+    async function performWebauthnCeremony(): Promise<boolean> {
+        webauthnBusy = true
+        webauthnError = null
+        try {
+            const startResp = await api.startWebauthnAuthentication()
+            const challengeOptions = JSON.parse(startResp.challengeJson)
+
+            const credential = (await navigator.credentials.get({
+                publicKey: {
+                    ...challengeOptions.publicKey,
+                    challenge: base64UrlToBuffer(
+                        challengeOptions.publicKey.challenge,
+                    ),
+                    allowCredentials: (
+                        challengeOptions.publicKey.allowCredentials ?? []
+                    ).map((c: { id: string }) => ({
+                        ...c,
+                        id: base64UrlToBuffer(c.id),
+                    })),
+                },
+            })) as PublicKeyCredential | null
+
+            if (!credential) {
+                webauthnError = 'Authentication was cancelled'
+                return false
+            }
+
+            const response =
+                credential.response as AuthenticatorAssertionResponse
+            const credentialJson = JSON.stringify({
+                id: credential.id,
+                rawId: bufferToBase64Url(credential.rawId),
+                type: credential.type,
+                response: {
+                    authenticatorData: bufferToBase64Url(
+                        response.authenticatorData,
+                    ),
+                    clientDataJSON: bufferToBase64Url(response.clientDataJSON),
+                    signature: bufferToBase64Url(response.signature),
+                    userHandle: response.userHandle
+                        ? bufferToBase64Url(response.userHandle)
+                        : null,
+                },
+            })
+
+            await api.completeWebauthnAuthentication({
+                authenticationCompleteRequest: { credentialJson },
+            })
+            return true
+        } catch (e: unknown) {
+            webauthnError =
+                e instanceof Error
+                    ? e.message
+                    : 'WebAuthn authentication failed'
+            return false
+        } finally {
+            webauthnBusy = false
+        }
+    }
+
     async function reject() {
         await api.rejectAuth({ id: params.stateId })
         await reload()
         window.close()
+    }
+
+    function base64UrlToBuffer(base64url: string): ArrayBuffer {
+        const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
+        const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+        const binary = atob(padded)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i)
+        }
+        return bytes.buffer
+    }
+
+    function bufferToBase64Url(buffer: ArrayBuffer): string {
+        const bytes = new Uint8Array(buffer)
+        let binary = ''
+        for (const byte of bytes) {
+            binary += String.fromCharCode(byte)
+        }
+        return btoa(binary)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '')
     }
 </script>
 
@@ -101,15 +195,28 @@
         {:else if authState.state === ApiAuthState.Failed}
             <Alert color="danger"> Rejected </Alert>
         {:else}
+            {#if webauthnRequired}
+                <div class="mb-3">
+                    <Alert color="info">
+                        This session requires security key verification. Touch
+                        your key when prompted.
+                    </Alert>
+                </div>
+            {/if}
+            {#if webauthnError}
+                <Alert color="danger">{webauthnError}</Alert>
+            {/if}
             <div class="d-flex">
                 <div class="ms-auto"></div>
                 {#if cachingEnabled}
                     <ButtonGroup>
                         <AsyncButton
                             color="primary"
+                            disabled={webauthnBusy}
                             click={() => approve(WebApprovalScope.Target)}
                         >
-                            Authorize & remember for {graceLabel}
+                            {webauthnRequired ? 'Verify & authorize' : 'Authorize & remember for'}
+                            {cachingEnabled && !webauthnRequired ? graceLabel : ''}
                         </AsyncButton>
                         <Dropdown class="btn-group">
                             <DropdownToggle
@@ -121,13 +228,15 @@
                                 <DropdownItem
                                     onclick={() => approve(WebApprovalScope.AllTargets)}
                                 >
-                                    Authorize for all targets & remember for
-                                    {graceLabel}
+                                    {webauthnRequired ? 'Verify & authorize' : 'Authorize'}
+                                    for all targets
+                                    {cachingEnabled && !webauthnRequired ? `& remember for ${graceLabel}` : ''}
                                 </DropdownItem>
                                 <DropdownItem
                                     onclick={() => approve(WebApprovalScope.Once)}
                                 >
-                                    Authorize this time only
+                                    {webauthnRequired ? 'Verify & authorize' : 'Authorize'}
+                                    this time only
                                 </DropdownItem>
                             </DropdownMenu>
                         </Dropdown>
@@ -135,9 +244,10 @@
                 {:else}
                     <AsyncButton
                         color="primary"
+                        disabled={webauthnBusy}
                         click={() => approve(WebApprovalScope.Once)}
                     >
-                        Authorize
+                        {webauthnRequired ? 'Verify & authorize' : 'Authorize'}
                     </AsyncButton>
                 {/if}
                 <AsyncButton

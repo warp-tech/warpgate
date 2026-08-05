@@ -295,6 +295,64 @@
         "operationId": "reject_auth"
       }
     },
+    "/auth/webauthn/authentication/start": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          }
+        },
+        "operationId": "start_webauthn_authentication"
+      }
+    },
+    "/auth/webauthn/authentication/complete": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthenticationCompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          }
+        },
+        "operationId": "complete_webauthn_authentication"
+      }
+    },
     "/info": {
       "get": {
         "responses": {
@@ -872,6 +930,46 @@
           }
         ],
         "operationId": "revoke_my_certificate"
+      }
+    },
+    "/profile/credentials/webauthn/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_my_webauthn_credential"
       }
     },
     "/profile/api-tokens": {
@@ -1585,6 +1683,90 @@
         ],
         "operationId": "delete_web_desktop_session"
       }
+    },
+    "/auth/webauthn/registration/start": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationStartResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
+          }
+        ],
+        "operationId": "start_webauthn_registration"
+      }
+    },
+    "/auth/webauthn/registration/complete": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationCompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationCompleteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
+          }
+        ],
+        "operationId": "complete_webauthn_registration"
+      }
     }
   },
   "components": {
@@ -1720,6 +1902,7 @@
           "OtpNeeded",
           "SsoNeeded",
           "WebUserApprovalNeeded",
+          "WebAuthnNeeded",
           "PublicKeyNeeded",
           "Success",
           "IpBlocked",
@@ -1773,6 +1956,32 @@
             "type": "integer",
             "format": "int64",
             "description": "When web-approval caching is enabled, the caching window in seconds;\n`None` when caching is disabled."
+          }
+        }
+      },
+      "AuthenticationCompleteRequest": {
+        "type": "object",
+        "title": "AuthenticationCompleteRequest",
+        "required": [
+          "credential_json"
+        ],
+        "properties": {
+          "credential_json": {
+            "type": "string",
+            "description": "JSON-serialized PublicKeyCredential from the browser"
+          }
+        }
+      },
+      "AuthenticationStartResponse": {
+        "type": "object",
+        "title": "AuthenticationStartResponse",
+        "required": [
+          "challenge_json"
+        ],
+        "properties": {
+          "challenge_json": {
+            "type": "string",
+            "description": "JSON-serialized RequestChallengeResponse from webauthn-rs"
           }
         }
       },
@@ -1882,7 +2091,8 @@
           "Certificate",
           "Totp",
           "Sso",
-          "WebUserApproval"
+          "WebUserApproval",
+          "WebAuthn"
         ]
       },
       "CredentialsState": {
@@ -1894,6 +2104,7 @@
           "public_keys",
           "certificates",
           "sso",
+          "webauthn",
           "credential_policy",
           "ldap_linked",
           "password_policy"
@@ -1924,6 +2135,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ExistingSsoCredential"
+            }
+          },
+          "webauthn": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExistingWebauthnCredentialSelf"
             }
           },
           "credential_policy": {
@@ -2052,6 +2269,31 @@
           },
           "email": {
             "type": "string"
+          }
+        }
+      },
+      "ExistingWebauthnCredentialSelf": {
+        "type": "object",
+        "title": "ExistingWebauthnCredentialSelf",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "date_added": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -2478,6 +2720,54 @@
           "rdp": {
             "type": "integer",
             "format": "uint16"
+          }
+        }
+      },
+      "RegistrationCompleteRequest": {
+        "type": "object",
+        "title": "RegistrationCompleteRequest",
+        "required": [
+          "credential_json",
+          "label"
+        ],
+        "properties": {
+          "credential_json": {
+            "type": "string",
+            "description": "JSON-serialized RegisterPublicKeyCredential from the browser"
+          },
+          "label": {
+            "type": "string",
+            "description": "Friendly label for this key (e.g. \"Office Yubikey\", \"Backup key\")"
+          }
+        }
+      },
+      "RegistrationCompleteResponse": {
+        "type": "object",
+        "title": "RegistrationCompleteResponse",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "RegistrationStartResponse": {
+        "type": "object",
+        "title": "RegistrationStartResponse",
+        "required": [
+          "challenge_json"
+        ],
+        "properties": {
+          "challenge_json": {
+            "type": "string",
+            "description": "JSON-serialized CreationChallengeResponse from webauthn-rs"
           }
         }
       },

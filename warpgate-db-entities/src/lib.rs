@@ -36,6 +36,7 @@ macro_rules! with_every_entity {
             UserLockout,
             UserRoleAssignment,
             UserSession,
+            WebauthnCredential,
         ];
     };
 }

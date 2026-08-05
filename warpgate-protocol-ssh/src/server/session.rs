@@ -2143,9 +2143,10 @@ impl ServerSession {
         for cred_kind in kinds {
             let method_kind = match cred_kind {
                 CredentialKind::Password => MethodKind::Password,
-                CredentialKind::Totp | CredentialKind::WebUserApproval | CredentialKind::Sso => {
-                    MethodKind::KeyboardInteractive
-                }
+                CredentialKind::Totp
+                | CredentialKind::WebUserApproval
+                | CredentialKind::Sso
+                | CredentialKind::WebAuthn => MethodKind::KeyboardInteractive,
                 CredentialKind::PublicKey => MethodKind::PublicKey,
                 CredentialKind::Certificate => {
                     // Certificate authentication is not supported for SSH protocol
