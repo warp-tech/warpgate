@@ -31,6 +31,16 @@
     } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
+    import { router } from 'svelte-spa-router'
+
+    // Matches the server-side limit in warpgate-core/src/ticket_requests.rs
+    const DESCRIPTION_MAX_LENGTH = 2000
+
+    // Prefill from #/ticket-requests?target=x&description=y&duration=8h
+    const urlParams = new URLSearchParams(router.querystring ?? '')
+    const paramTarget = urlParams.get('target')
+    const paramDescription = urlParams.get('description')
+    const paramDuration = urlParams.get('duration')
 
     let error: string | undefined = $state()
     let success: string | undefined = $state()
@@ -40,7 +50,7 @@
     let tickets: MyTicketModel[] | undefined = $state()
     let ticketRequestTargets: TicketRequestTarget[] | undefined = $state()
     let targets: TargetSnapshot[] | undefined = $state()
-    let showForm = $state(false)
+    let showForm = $state(!!(paramTarget || paramDescription || paramDuration))
     let showAllRequests = $state(false)
 
     const REQUEST_PAGE_SIZE = 25
@@ -54,12 +64,23 @@
         return requests.slice(0, REQUEST_PAGE_SIZE)
     })
 
-    let selectedTarget = $state('')
-    let description = $state('')
+    let selectedTarget = $state(paramTarget ?? '')
+    let description = $state(
+        [...(paramDescription ?? '')].slice(0, DESCRIPTION_MAX_LENGTH).join(''),
+    )
     let descriptionTouched = $state(false)
-    let durationText = $state('8h')
+    let durationText = $state(paramDuration || '8h')
 
     let maxDurationSeconds = $derived($serverInfo?.ticketMaxDurationSeconds)
+
+    let unavailableTarget = $derived.by(() => {
+        if (!selectedTarget || !ticketRequestTargets) {
+            return undefined
+        }
+        return ticketRequestTargets.some(t => t.name === selectedTarget)
+            ? undefined
+            : selectedTarget
+    })
 
     let durationSeconds = $derived(parseHumantimeDuration(durationText))
 
@@ -83,7 +104,9 @@
         descriptionRequired && !description.trim(),
     )
 
-    let formInvalid = $derived(!!durationError || descriptionMissing)
+    let formInvalid = $derived(
+        !!durationError || descriptionMissing || !!unavailableTarget,
+    )
 
     async function load() {
         const [r, t, trt, tgts] = await Promise.all([
@@ -96,6 +119,7 @@
         tickets = t
         ticketRequestTargets = trt
         targets = tgts
+        // Seeded from the URL above, so a linked target isn't replaced here
         if (ticketRequestTargets[0] && !selectedTarget) {
             selectedTarget = ticketRequestTargets[0].name
         }
@@ -225,6 +249,13 @@
     <Modal isOpen={showForm} toggle={() => showForm = false}>
         <ModalBody>
             <h4 class="mb-3">Request a ticket</h4>
+
+            {#if unavailableTarget}
+                <Alert color="warning" fade={false}>
+                    <strong>{unavailableTarget}</strong>
+                    is not available for ticket requests. Select a target below.
+                </Alert>
+            {/if}
 
             {#if ticketRequestTargets?.length}
                 <form onsubmit={e => e.preventDefault()}>
