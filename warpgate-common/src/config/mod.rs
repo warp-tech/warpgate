@@ -1,5 +1,6 @@
 mod defaults;
 mod target;
+mod warnings;
 
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -16,8 +17,8 @@ use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use target::*;
-use tracing::warn;
 use uuid::Uuid;
+pub use warnings::{clear_config_warnings, config_warnings, emit_config_warning};
 use warpgate_sso::SsoProviderConfig;
 use warpgate_tls::IntoTlsCertificateRelativePaths;
 
@@ -439,7 +440,8 @@ pub struct SshConfig {
     #[schemars(with = "String")]
     pub inactivity_timeout: Duration,
 
-    #[serde(default)]
+    #[serde(default, with = "humantime_serde")]
+    #[schemars(with = "Option<String>")]
     pub keepalive_interval: Option<Duration>,
 }
 
@@ -935,11 +937,8 @@ impl WarpgateConfig {
         if let Some(ref ext) = self.store.external_host
             && ext.contains(':')
         {
-            warn!(
-                "Looks like your `external_host` config option contains a port - it will be ignored."
-            );
-            warn!(
-                "Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options."
+            emit_config_warning(
+                "Your `external_host` config option contains a port - it will be ignored. Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options.".to_owned()
             );
         }
     }
@@ -947,7 +946,20 @@ impl WarpgateConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::WarpgateConfigStore;
+    use std::time::Duration;
+
+    use super::{SshConfig, WarpgateConfigStore};
+
+    #[test]
+    fn keepalive_interval_is_a_humantime_string() {
+        let config = serde_json::from_str::<SshConfig>(r#"{"keepalive_interval": "1m"}"#).unwrap();
+        assert_eq!(config.keepalive_interval, Some(Duration::from_secs(60)));
+        assert!(
+            serde_json::to_string(&config)
+                .unwrap()
+                .contains(r#""keepalive_interval":"1m""#)
+        );
+    }
 
     #[test]
     fn default_config_store_omits_recordings() {

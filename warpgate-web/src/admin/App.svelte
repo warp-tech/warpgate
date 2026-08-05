@@ -1,6 +1,7 @@
 <script lang="ts">
     import { faGithub } from '@fortawesome/free-brands-svg-icons'
     import { faBriefcase } from '@fortawesome/free-solid-svg-icons'
+    import { Alert } from '@sveltestrap/sveltestrap'
     import AuthBar from 'common/AuthBar.svelte'
     import Brand from 'common/Brand.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -124,6 +125,16 @@
             </div>
         </header>
         <main>
+            {#if $serverInfo?.configWarnings?.length}
+                <Alert color="warning" fade={false}>
+                    <strong>Config file issues found:</strong>
+                    <ul class="mb-0 mt-2">
+                        {#each $serverInfo.configWarnings as warning (warning)}
+                            <li>{warning}</li>
+                        {/each}
+                    </ul>
+                </Alert>
+            {/if}
             <Router {routes} />
         </main>
 

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.27.1-4-ge10e4293-modified"
+    "version": "v0.27.3-4-g41e88861-modified"
   },
   "servers": [
     {
@@ -2174,6 +2174,13 @@
           },
           "show_session_menu": {
             "type": "boolean"
+          },
+          "config_warnings": {
+            "type": "array",
+            "description": "Non-fatal problems found while loading the config file of the node\nserving this request. Only populated for admins who can act on them.",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

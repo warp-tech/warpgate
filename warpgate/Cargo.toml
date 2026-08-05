@@ -23,6 +23,7 @@ data-encoding.workspace = true
 dialoguer.workspace = true
 enum_dispatch.workspace = true
 futures.workspace = true
+humantime = { version = "2.1", default-features = false }
 notify = { version = "8.0", default-features = false, features = [
     "fsevent-sys",
 ] }
