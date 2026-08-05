@@ -106,6 +106,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         Self {
             services,
             stream: MySqlStream::new(stream),
+            // Target packets are relayed to the client verbatim, but the target
+            // is only picked (and its capabilities learned) after this handshake
+            // is already on the wire. So the client must not be offered any
+            // capability that changes packet framing - DEPRECATE_EOF turns the
+            // result set terminator from an EOF into an OK packet, SESSION_TRACK
+            // changes the OK packet's trailing `info` string to length-encoded -
+            // or a target lacking it desyncs the client mid-result-set.
             capabilities: Capabilities::PROTOCOL_41
                 | Capabilities::PLUGIN_AUTH
                 | Capabilities::FOUND_ROWS
@@ -113,11 +120,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 | Capabilities::NO_SCHEMA
                 | Capabilities::PLUGIN_AUTH_LENENC_DATA
                 | Capabilities::CONNECT_WITH_DB
-                | Capabilities::SESSION_TRACK
                 | Capabilities::IGNORE_SPACE
                 | Capabilities::INTERACTIVE
                 | Capabilities::TRANSACTIONS
-                | Capabilities::DEPRECATE_EOF
                 | Capabilities::SECURE_CONNECTION
                 | Capabilities::SSL,
             challenge: get_crypto_rng().random(),
@@ -357,20 +362,15 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                     if com == Some(&0xff) {
                         break;
                     }
-                    if com == Some(&0xfe) {
-                        // Rows can also start with 0xfe (a length-encoded
-                        // value >= 2^24); real EOF and terminating OK
-                        // packets are shorter than these thresholds
-                        if client.capabilities.contains(Capabilities::DEPRECATE_EOF) {
-                            if response.len() < 0xff_ffff {
-                                break;
-                            }
-                        } else if response.len() < 9 {
-                            eof_ctr += 1;
-                            if eof_ctr == 2 {
-                                // todo check multiple results
-                                break;
-                            }
+                    // Rows can also start with 0xfe (a length-encoded value
+                    // >= 2^24); a real EOF packet is shorter than that
+                    // prefix. The column definitions and the rows are each
+                    // terminated by one.
+                    if com == Some(&0xfe) && response.len() < 9 {
+                        eof_ctr += 1;
+                        if eof_ctr == 2 {
+                            // todo check multiple results
+                            break;
                         }
                     }
                 }
