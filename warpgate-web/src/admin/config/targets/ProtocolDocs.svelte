@@ -20,19 +20,17 @@
 </script>
 
 {#if html}
-    <!-- svelte-ignore a11y_invalid_attribute -->
-    <!-- svelte-ignore event_directive_deprecated -->
-    <a
-        href="#"
-        class="p-0 d-flex align-items-center gap-2 text-start"
-        on:click={e => {
+    <button
+        type="button"
+        class="p-0 d-flex align-items-center gap-2 text-start btn btn-link"
+        onclick={e => {
             e.preventDefault()
             open.set(!$open)
         }}
     >
         <Fa fw icon={faChevronRight} rotate={$open ? 90 : 0} />
         <span>Protocol requirements &amp; supported features</span>
-    </a>
+    </button>
     {#if $open}
         <div class="protocol-info-body small">{@html html}</div>
     {/if}
