@@ -7,6 +7,7 @@
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Button, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
+    import { routeQueryParams } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
 
     import {
@@ -20,7 +21,7 @@
     } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
-    import { replace, router } from 'svelte-spa-router'
+    import { replace } from 'svelte-spa-router'
 
     let error: string | null = $state(null)
     let username = $state('')
@@ -43,10 +44,9 @@
         passwordLoginMode === PasswordLoginMode.Minimized,
     )
 
-    const nextURL =
-        new URLSearchParams(router.querystring ?? '').get('next') ?? undefined
-    const reauthRequired =
-        new URLSearchParams(router.querystring ?? '').get('reauth') === '1'
+    const urlParams = routeQueryParams()
+    const nextURL = urlParams.get('next') ?? undefined
+    const reauthRequired = urlParams.get('reauth') === '1'
     const serverErrorMessage = new URLSearchParams(location.search).get(
         'login_error',
     )
