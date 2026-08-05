@@ -33,30 +33,25 @@ pub fn translate(input: DesktopInput, ops: &mut Vec<Operation>) {
                 rotation_units: delta.saturating_mul(WHEEL_UNITS_PER_NOTCH),
             }));
         }
-        DesktopInput::Scancode {
-            code,
-            extended,
+        DesktopInput::Key {
+            keysym,
+            scancode,
             down,
         } => {
-            // Native RDP viewers already send PC/AT scancodes; forward them verbatim
-            // (no keysym round-trip) so every key — including layout-dependent ones — is
-            // delivered to the target exactly as typed.
-            let scancode = Scancode::from_u8(extended, code);
-            ops.push(if down {
-                Operation::KeyPressed(scancode)
-            } else {
-                Operation::KeyReleased(scancode)
-            });
-        }
-        DesktopInput::Key { keysym, down } => {
-            if let Some((extended, code)) = keysym_to_scancode(keysym) {
+            // Prefer the physical key position: it is what an RDP client natively sends, so
+            // the target's own keyboard layout decides the character. Translating a keysym
+            // instead would pin the session to the US layout the table below encodes.
+            let position = scancode
+                .map(|s| (s.extended, s.code))
+                .or_else(|| keysym.and_then(keysym_to_scancode));
+            if let Some((extended, code)) = position {
                 let scancode = Scancode::from_u8(extended, code);
                 ops.push(if down {
                     Operation::KeyPressed(scancode)
                 } else {
                     Operation::KeyReleased(scancode)
                 });
-            } else if let Some(c) = char::from_u32(keysym) {
+            } else if let Some(c) = keysym.and_then(char::from_u32) {
                 // Printable key without a known scancode: use Unicode input.
                 ops.push(if down {
                     Operation::UnicodeKeyPressed(c)
@@ -158,4 +153,59 @@ fn keysym_to_scancode(keysym: u32) -> Option<(bool, u8)> {
         _ => return None,
     };
     Some((false, code))
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_core::Scancode as KeyPosition;
+
+    use super::*;
+
+    fn translate_key(keysym: Option<u32>, scancode: Option<KeyPosition>) -> Vec<Operation> {
+        let mut ops = vec![];
+        translate(
+            DesktopInput::Key {
+                keysym,
+                scancode,
+                down: true,
+            },
+            &mut ops,
+        );
+        ops
+    }
+
+    /// An AZERTY viewer typing `a` reports the keysym `a` but the physical `Q` key; the
+    /// position must win, or the target's layout would turn it back into `q`.
+    #[test]
+    fn scancode_wins_over_keysym() {
+        let ops = translate_key(
+            Some(u32::from('a')),
+            Some(KeyPosition {
+                code: 0x10,
+                extended: false,
+            }),
+        );
+        assert!(
+            matches!(*ops.as_slice(), [Operation::KeyPressed(s)] if s.as_u8() == (false, 0x10))
+        );
+    }
+
+    #[test]
+    fn keysym_only_falls_back_to_us_layout_then_unicode() {
+        let ops = translate_key(Some(u32::from('a')), None);
+        assert!(
+            matches!(*ops.as_slice(), [Operation::KeyPressed(s)] if s.as_u8() == (false, 0x1E))
+        );
+
+        let ops = translate_key(Some(u32::from('é')), None);
+        assert!(matches!(
+            *ops.as_slice(),
+            [Operation::UnicodeKeyPressed('é')]
+        ));
+    }
+
+    #[test]
+    fn key_without_either_representation_is_dropped() {
+        assert!(translate_key(None, None).is_empty());
+    }
 }

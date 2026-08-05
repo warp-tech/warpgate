@@ -58,20 +58,28 @@ pub enum DesktopEvent {
     Error(String),
 }
 
+/// A physical key position: a PC/AT set-1 "make" code, with `extended` marking the
+/// `E0` prefix that distinguishes e.g. the nav cluster from the numeric keypad.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Scancode {
+    pub code: u8,
+    pub extended: bool,
+}
+
 /// An input sent to a desktop backend (client -> server direction).
 #[derive(Debug, Clone)]
 pub enum DesktopInput {
     /// Pointer moved / button state changed. `buttons` is a button mask
     /// (bit 0 = left, bit 1 = middle, bit 2 = right, ...).
     Pointer { x: u16, y: u16, buttons: u8 },
-    /// A key was pressed or released, identified by its X11 keysym.
-    Key { keysym: u32, down: bool },
-    /// A key was pressed or released, identified by its raw PC/AT scancode
-    /// (set 1 "make" code). Emitted by native RDP viewers, which send scancodes
-    /// rather than keysyms; protocols without scancode input (e.g. VNC) ignore it.
-    Scancode {
-        code: u8,
-        extended: bool,
+    /// A key was pressed or released. Viewers report the key in whichever forms they
+    /// know: `keysym` is the character the key produces under the *viewer's* keyboard
+    /// layout, `scancode` is the layout-independent physical key position. Backends use
+    /// the form their protocol speaks — RDP the scancode, so the *target's* layout
+    /// decides the character; VNC the keysym, since RFB has no scancode input.
+    Key {
+        keysym: Option<u32>,
+        scancode: Option<Scancode>,
         down: bool,
     },
     /// Mouse wheel scrolled at `(x, y)`. `delta` is a signed notch count

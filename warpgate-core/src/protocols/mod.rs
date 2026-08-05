@@ -11,7 +11,7 @@ pub(crate) mod framebuffer;
 mod handle;
 
 pub use desktop::{
-    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
+    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState, Scancode,
 };
 pub use framebuffer::{Framebuffer, PngEncodeError, Rect, decode_png_rgba};
 pub use handle::{SessionHandle, WarpgateServerHandle};

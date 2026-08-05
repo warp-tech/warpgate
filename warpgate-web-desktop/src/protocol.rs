@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
+use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState, Scancode};
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct WsRect {
@@ -30,8 +30,15 @@ pub enum ClientMessage {
         y: u16,
         buttons: u8,
     },
+    /// The browser reports both forms it can derive from a `KeyboardEvent`: the keysym
+    /// from `event.key` (already mapped through the client's layout) and the scancode
+    /// from `event.code` (the physical key). Older clients send only the keysym.
     KeyEvent {
-        keysym: u32,
+        keysym: Option<u32>,
+        #[serde(default)]
+        scancode: Option<u8>,
+        #[serde(default)]
+        extended: bool,
         down: bool,
     },
     WheelEvent {
@@ -59,7 +66,16 @@ impl From<ClientMessage> for Option<DesktopInput> {
             ClientMessage::PointerEvent { x, y, buttons } => {
                 DesktopInput::Pointer { x, y, buttons }
             }
-            ClientMessage::KeyEvent { keysym, down } => DesktopInput::Key { keysym, down },
+            ClientMessage::KeyEvent {
+                keysym,
+                scancode,
+                extended,
+                down,
+            } => DesktopInput::Key {
+                keysym,
+                scancode: scancode.map(|code| Scancode { code, extended }),
+                down,
+            },
             ClientMessage::WheelEvent {
                 x,
                 y,
