@@ -69,9 +69,29 @@ pub struct CredentialsState {
     public_keys: Vec<ExistingPublicKeyCredential>,
     certificates: Vec<ExistingCertificateCredential>,
     sso: Vec<ExistingSsoCredential>,
+    webauthn: Vec<ExistingWebauthnCredentialSelf>,
     credential_policy: UserRequireCredentialsPolicy,
     ldap_linked: bool,
     password_policy: PasswordPolicy,
+}
+
+#[derive(Object)]
+struct ExistingWebauthnCredentialSelf {
+    id: Uuid,
+    label: String,
+    date_added: Option<OffsetDateTime>,
+    last_used: Option<OffsetDateTime>,
+}
+
+impl From<entities::WebauthnCredential::Model> for ExistingWebauthnCredentialSelf {
+    fn from(credential: entities::WebauthnCredential::Model) -> Self {
+        Self {
+            id: credential.id,
+            label: credential.label,
+            date_added: credential.date_added,
+            last_used: credential.last_used,
+        }
+    }
 }
 
 #[derive(ApiResponse)]
@@ -283,6 +303,11 @@ impl Api {
             .all(db)
             .await?;
 
+        let webauthn_creds = user
+            .find_related(entities::WebauthnCredential::Entity)
+            .all(db)
+            .await?;
+
         let parameters = ctx.parameters().await?;
 
         Ok(CredentialsStateResponse::Ok(Json(CredentialsState {
@@ -295,6 +320,7 @@ impl Api {
             public_keys: pk_creds.into_iter().map(Into::into).collect(),
             certificates: cert_creds.into_iter().map(Into::into).collect(),
             sso: sso_creds.into_iter().map(Into::into).collect(),
+            webauthn: webauthn_creds.into_iter().map(Into::into).collect(),
             credential_policy: user_cfg.credential_policy.unwrap_or_default(),
             ldap_linked: user.ldap_server_id.is_some(),
             password_policy: parameters.password_policy(),
@@ -679,5 +705,51 @@ impl Api {
         .emit();
 
         Ok(DeleteCertificateCredentialResponse::Ok)
+    }
+
+    #[oai(
+        path = "/profile/credentials/webauthn/:id",
+        method = "delete",
+        operation_id = "delete_my_webauthn_credential",
+        transform = "parameters_based_auth"
+    )]
+    async fn api_delete_webauthn(
+        &self,
+        ctx: AuthedSession,
+        id: Path<Uuid>,
+    ) -> Result<DeleteCredentialResponse, WarpgateError> {
+        let auth = &ctx.auth;
+        let db = &ctx.services().db;
+
+        let Some(full) = auth.as_full_user() else {
+            return Ok(DeleteCredentialResponse::Unauthorized);
+        };
+        let Some(user) = get_user(&full, db).await? else {
+            return Ok(DeleteCredentialResponse::Unauthorized);
+        };
+
+        let Some(model) = user
+            .find_related(entities::WebauthnCredential::Entity)
+            .filter(entities::WebauthnCredential::Column::Id.eq(id.0))
+            .one(db)
+            .await?
+        else {
+            return Ok(DeleteCredentialResponse::NotFound);
+        };
+
+        let label = model.label.clone();
+        model.delete(db).await?;
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "webauthn".to_string(),
+            credential_name: Some(label),
+            via: CredentialChangedVia::SelfService,
+            user_id: user.id,
+            username: user.username.clone(),
+            actor_user_id: ctx.auth.user_id(),
+        }
+        .emit();
+
+        Ok(DeleteCredentialResponse::Deleted)
     }
 }

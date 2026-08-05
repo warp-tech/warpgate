@@ -29,3 +29,4 @@ pub mod User;
 pub mod UserAdminRoleAssignment;
 pub mod UserLockout;
 pub mod UserRoleAssignment;
+pub mod WebauthnCredential;

@@ -28,6 +28,7 @@
     let password = $state('')
     let otp = $state('')
     let busy = $state(false)
+    let webauthnBusy = $state(false)
     let credentialRejected = $state(false)
     let otpInput: HTMLInputElement | undefined = $state()
     let authState: ApiAuthState | undefined = $state()
@@ -103,6 +104,10 @@
                 otpInput?.focus()
             })
         }
+        if (authState === ApiAuthState.WebAuthnNeeded) {
+            // Auto-start the WebAuthn ceremony
+            doWebauthn()
+        }
     }
 
     async function login() {
@@ -170,6 +175,116 @@
             error = await stringifyError(err)
             busy = false
         }
+    }
+
+    async function doWebauthn() {
+        webauthnBusy = true
+        error = null
+        try {
+            // Start authentication ceremony (generates a fresh challenge)
+            const startResp = await api.startWebauthnAuthentication()
+            const challengeOptions = JSON.parse(startResp.challengeJson)
+
+            // Call the browser's WebAuthn API
+            let credential: PublicKeyCredential | null
+            try {
+                credential = (await navigator.credentials.get({
+                    publicKey: {
+                        ...challengeOptions.publicKey,
+                        challenge: base64UrlToBuffer(
+                            challengeOptions.publicKey.challenge,
+                        ),
+                        allowCredentials: (
+                            challengeOptions.publicKey.allowCredentials ?? []
+                        ).map((c: { id: string }) => ({
+                            ...c,
+                            id: base64UrlToBuffer(c.id),
+                        })),
+                    },
+                })) as PublicKeyCredential | null
+            } catch (domErr: unknown) {
+                // User cancelled or timed out — allow retry without error
+                if (
+                    domErr instanceof DOMException &&
+                    domErr.name === 'NotAllowedError'
+                ) {
+                    error = null
+                    return
+                }
+                throw domErr
+            }
+
+            if (!credential) {
+                // Cancelled — allow retry
+                return
+            }
+
+            const response =
+                credential.response as AuthenticatorAssertionResponse
+            const credentialJson = JSON.stringify({
+                id: credential.id,
+                rawId: bufferToBase64Url(credential.rawId),
+                type: credential.type,
+                response: {
+                    authenticatorData: bufferToBase64Url(
+                        response.authenticatorData,
+                    ),
+                    clientDataJSON: bufferToBase64Url(response.clientDataJSON),
+                    signature: bufferToBase64Url(response.signature),
+                    userHandle: response.userHandle
+                        ? bufferToBase64Url(response.userHandle)
+                        : null,
+                },
+            })
+
+            await api.completeWebauthnAuthentication({
+                authenticationCompleteRequest: {
+                    credentialJson,
+                },
+            })
+
+            // Check if auth is now complete
+            try {
+                const state = await api.getDefaultAuthState()
+                authState = state.state
+                if (authState === ApiAuthState.Success) {
+                    await reloadServerInfo()
+                    success()
+                } else {
+                    continueWithState()
+                }
+            } catch {
+                await reloadServerInfo()
+                success()
+            }
+        } catch (err) {
+            error = await stringifyError(err)
+        } finally {
+            webauthnBusy = false
+        }
+    }
+
+    function base64UrlToBuffer(base64url: string): ArrayBuffer {
+        const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
+        const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+        const binary = atob(padded)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i)
+        }
+        return bytes.buffer
+    }
+
+    function bufferToBase64Url(buffer: ArrayBuffer): string {
+        const bytes = new Uint8Array(buffer)
+        let binary = ''
+        for (const byte of bytes) {
+            binary += String.fromCharCode(byte)
+        }
+        return btoa(binary)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '')
     }
 </script>
 
@@ -259,6 +374,19 @@
                     <Fa icon={faArrowRight} />
                 </Button>
             </form>
+        {/if}
+        {#if authState === ApiAuthState.WebAuthnNeeded}
+            <div class="text-center py-4">
+                <p class="mb-3">Use your passkey or security key to continue</p>
+                <Button
+                    color="primary"
+                    class="login-view-button"
+                    disabled={webauthnBusy}
+                    on:click={doWebauthn}
+                >
+                    {webauthnBusy ? 'Waiting...' : 'Authenticate'}
+                </Button>
+            </div>
         {/if}
         {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginAllowed && (!passwordLoginMinimized || showPasswordLogin)}
             {@render localLoginForm()}
