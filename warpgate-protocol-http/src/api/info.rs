@@ -7,7 +7,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::{AdminPermission, AdminPermissionSet};
+use warpgate_common::{AdminPermission, AdminPermissionSet, config_warnings};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
@@ -136,6 +136,7 @@ pub struct Info {
     /// Login banner, shown to unauthenticated visitors too. Empty when unset.
     banner: String,
     show_session_menu: bool,
+    config_warnings: Option<Vec<String>>,
 }
 
 #[derive(ApiResponse)]
@@ -261,12 +262,14 @@ impl Api {
             None => None,
         };
 
+        let can_edit_config = admin_permissions.as_ref().is_some_and(|p| p.config_edit);
+
         let should_prompt_analytics = {
             let instance_older_than_a_week = time::OffsetDateTime::now_utc()
                 - parameters.instance_created_at
                 >= time::Duration::weeks(1);
 
-            admin_permissions.as_ref().is_some_and(|p| p.config_edit)
+            can_edit_config
                 && parameters.analytics_consent == Parameters::AnalyticsConsent::Undecided
                 && setup_state.is_none()
                 && instance_older_than_a_week
@@ -355,6 +358,7 @@ impl Api {
             should_prompt_analytics,
             banner: parameters.banner.clone(),
             show_session_menu: parameters.show_session_menu,
+            config_warnings: can_edit_config.then(config_warnings),
         })))
     }
 

@@ -8999,6 +8999,7 @@ dependencies = [
  "dialoguer",
  "enum_dispatch",
  "futures",
+ "humantime",
  "notify",
  "rcgen",
  "reqwest 0.13.4",
