@@ -223,7 +223,10 @@ async fn send_resize(
     match active_stage.encode_resize(width, height, None, None) {
         Some(frame) => {
             let frame = frame.context("encoding resize request")?;
-            framed.write_all(&frame).await.context("sending resize request")?;
+            framed
+                .write_all(&frame)
+                .await
+                .context("sending resize request")?;
             Ok(true)
         }
         None => Ok(false),
@@ -441,11 +444,10 @@ async fn connect(
     // Advertise the Display Control DVC so viewer-driven resolution changes can be pushed
     // to the target mid-session (MS-RDPEDISP). The capabilities callback has nothing to
     // reply with; `ActiveStage::encode_resize` drives the channel once it is ready.
-    let mut connector = connector::ClientConnector::new(config, client_addr)
-        .with_static_channel(
-            DrdynvcClient::new()
-                .with_dynamic_channel(DisplayControlClient::new(|_caps| Ok(Vec::new()))),
-        );
+    let mut connector = connector::ClientConnector::new(config, client_addr).with_static_channel(
+        DrdynvcClient::new()
+            .with_dynamic_channel(DisplayControlClient::new(|_caps| Ok(Vec::new()))),
+    );
 
     let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)
         .await

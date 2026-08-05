@@ -325,10 +325,9 @@ pub async fn proxy_normal_request(
     if req.headers().contains_key(http::header::CONTENT_LENGTH)
         || req.headers().contains_key(http::header::TRANSFER_ENCODING)
     {
-        client_request =
-        client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
+        client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
     }
-    
+
     let client_request = client_request.build().context("Could not build request")?;
     let client_response = client
         .execute(client_request)
