@@ -25,6 +25,7 @@
         white-space: pre-wrap;
         overflow: hidden;
         word-wrap: break-word;
+        overflow-wrap: anywhere;
         height: auto;
 
         padding-top: 35px !important; // clear the copy button
