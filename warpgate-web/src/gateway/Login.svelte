@@ -67,9 +67,21 @@
         await continueWithState()
     }
 
+    function sanitizeRedirect(url: string): string | undefined {
+        try {
+            const resolved = new URL(url, location.origin)
+            return resolved.origin === location.origin
+                ? resolved.href
+                : undefined
+        } catch {
+            return undefined
+        }
+    }
+
     function success() {
-        if (nextURL) {
-            location.assign(nextURL)
+        const target = nextURL ? sanitizeRedirect(nextURL) : undefined
+        if (target) {
+            location.assign(target)
         } else {
             replace('/')
         }
