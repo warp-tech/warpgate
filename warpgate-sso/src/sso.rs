@@ -12,10 +12,11 @@ use openidconnect::{
     EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet, HttpClientError, IdToken,
     IdTokenClaims, IdTokenFields, LogoutRequest, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
     PkceCodeVerifier, PostLogoutRedirectUrl, RedirectUrl, RequestTokenError, Scope,
-    StandardErrorResponse, StandardTokenResponse, TokenResponse, UserInfoClaims, reqwest,
+    StandardErrorResponse, StandardTokenResponse, TokenResponse, UserInfoClaims, UserInfoError,
+    reqwest,
 };
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{debug, warn};
 
 use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
@@ -148,6 +149,17 @@ pub fn unverified_issuer(id_token_str: &str) -> Option<String> {
         .iss
 }
 
+/// `UserInfoError`'s own Display drops the response body and its Debug renders
+/// it as a byte array, both of which hide the provider's actual error message.
+fn describe_userinfo_error(err: &UserInfoError<HttpClientError<reqwest::Error>>) -> String {
+    match err {
+        UserInfoError::Response(status, body, _) => {
+            format!("HTTP {status}: {}", String::from_utf8_lossy(body))
+        }
+        e => format!("{e}"),
+    }
+}
+
 async fn make_client(
     config: &SsoInternalProviderConfig,
     http_client: &reqwest::Client,
@@ -272,7 +284,7 @@ impl SsoClient {
         let user_info_req = client
             .user_info(token_response.access_token().to_owned(), None)
             .map_err(|err| {
-                error!("Failed to fetch userinfo: {err:?}");
+                debug!("Provider has no usable userinfo endpoint: {err}");
                 err
             })
             .ok();
@@ -282,7 +294,10 @@ impl SsoClient {
                 match user_info_req.request_async(&self.http_client).await {
                     Ok(userinfo) => Some(userinfo),
                     Err(err) => {
-                        error!("Failed to fetch userinfo: {err:?}");
+                        warn!(
+                            "Failed to fetch userinfo: {}",
+                            describe_userinfo_error(&err)
+                        );
                         None
                     }
                 }
