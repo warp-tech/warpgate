@@ -21,7 +21,7 @@ use ironrdp_server::{
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tracing::warn;
-use warpgate_core::DesktopInput;
+use warpgate_core::{DesktopInput, Scancode};
 use warpgate_desktop_ui::DEFAULT_SIZE;
 
 use super::protocol::{AuthVerdict, Event, Input};
@@ -353,6 +353,14 @@ impl InputHandler {
         }));
     }
 
+    fn send_key(&self, keysym: Option<u32>, scancode: Option<Scancode>, down: bool) {
+        let _ = self.out.send(Event::Input(DesktopInput::Key {
+            keysym,
+            scancode,
+            down,
+        }));
+    }
+
     fn set_button(&mut self, bit: u8, down: bool) {
         if down {
             self.buttons |= 1 << bit;
@@ -367,30 +375,16 @@ impl RdpServerInputHandler for InputHandler {
     fn keyboard(&mut self, event: KeyboardEvent) {
         match event {
             KeyboardEvent::Pressed { code, extended } => {
-                let _ = self.out.send(Event::Input(DesktopInput::Scancode {
-                    code,
-                    extended,
-                    down: true,
-                }));
+                self.send_key(None, Some(Scancode { code, extended }), true);
             }
             KeyboardEvent::Released { code, extended } => {
-                let _ = self.out.send(Event::Input(DesktopInput::Scancode {
-                    code,
-                    extended,
-                    down: false,
-                }));
+                self.send_key(None, Some(Scancode { code, extended }), false);
             }
             KeyboardEvent::UnicodePressed(unit) => {
-                let _ = self.out.send(Event::Input(DesktopInput::Key {
-                    keysym: u32::from(unit),
-                    down: true,
-                }));
+                self.send_key(Some(u32::from(unit)), None, true);
             }
             KeyboardEvent::UnicodeReleased(unit) => {
-                let _ = self.out.send(Event::Input(DesktopInput::Key {
-                    keysym: u32::from(unit),
-                    down: false,
-                }));
+                self.send_key(Some(u32::from(unit)), None, false);
             }
             // Lock-key (caps/num/scroll) sync state; not propagated to the target.
             KeyboardEvent::Synchronize(_) => {}

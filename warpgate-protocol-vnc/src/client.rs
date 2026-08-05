@@ -38,10 +38,12 @@ fn map_input(input: DesktopInput) -> Vec<X11Event> {
         DesktopInput::Pointer { x, y, buttons } => {
             vec![X11Event::PointerEvent((x, y, buttons).into())]
         }
-        DesktopInput::Key { keysym, down } => vec![X11Event::KeyEvent(ClientKeyEvent {
-            keycode: keysym,
-            down,
-        })],
+        // RFB has no scancode input, so a viewer that only reports key positions
+        // (a native RDP viewer) has nothing a VNC target can use.
+        DesktopInput::Key { keysym, down, .. } => keysym
+            .map(|keycode| X11Event::KeyEvent(ClientKeyEvent { keycode, down }))
+            .into_iter()
+            .collect(),
         DesktopInput::Wheel {
             x,
             y,
@@ -65,9 +67,6 @@ fn map_input(input: DesktopInput) -> Vec<X11Event> {
         }
         DesktopInput::Clipboard(text) => vec![X11Event::CopyText(text)],
         DesktopInput::Refresh => vec![X11Event::FullRefresh],
-        // RFB has no raw-scancode input; native-RDP scancodes are meaningless to a
-        // VNC target, so drop them (keysym input is used for VNC instead).
-        DesktopInput::Scancode { .. } => vec![],
         // Dynamic resize toward a VNC target is not supported.
         DesktopInput::Resize { .. } => vec![],
     }

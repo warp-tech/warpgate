@@ -77,12 +77,14 @@ impl HoldInputSource for RdpHoldInput<'_> {
     async fn next(&mut self) -> HoldEvent {
         match self.events.recv().await {
             None => HoldEvent::Disconnected,
-            Some(ServerEvent::Input(DesktopInput::Scancode {
-                code, down: true, ..
-            })) => scancode_otp_action(code).map_or(HoldEvent::Other, HoldEvent::Otp),
-            Some(ServerEvent::Input(DesktopInput::Key { keysym, down: true })) => {
-                key_otp_action(keysym).map_or(HoldEvent::Other, HoldEvent::Otp)
-            }
+            Some(ServerEvent::Input(DesktopInput::Key {
+                keysym,
+                scancode,
+                down: true,
+            })) => scancode
+                .and_then(|s| scancode_otp_action(s.code))
+                .or_else(|| keysym.and_then(key_otp_action))
+                .map_or(HoldEvent::Other, HoldEvent::Otp),
             Some(ServerEvent::Size { width, height }) => {
                 *self.screen.lock().await = ui::Screen { width, height };
                 HoldEvent::Other
@@ -144,10 +146,7 @@ pub(super) async fn run_banner_screen(
                     return Ok(false);
                 };
                 match event {
-                    ServerEvent::Input(
-                        DesktopInput::Scancode { down: true, .. }
-                        | DesktopInput::Key { down: true, .. },
-                    ) => return Ok(true),
+                    ServerEvent::Input(DesktopInput::Key { down: true, .. }) => return Ok(true),
                     // Any button press
                     ServerEvent::Input(DesktopInput::Pointer { buttons, .. }) if buttons != 0 => {
                         return Ok(true);

@@ -153,7 +153,11 @@ pub(super) async fn run_proxy_session(session: ProxySession) -> Result<()> {
                         render.caps.viewer_supports_tight = tight;
                     }
                     Some(ClientEvent::Key { down, keysym }) => {
-                        let input = DesktopInput::Key { keysym, down };
+                        let input = DesktopInput::Key {
+                            keysym: Some(keysym),
+                            scancode: None,
+                            down,
+                        };
                         record_input(recorder.as_ref(), &input).await;
                         if input_tx.send(input).await.is_err() {
                             break Ok(());

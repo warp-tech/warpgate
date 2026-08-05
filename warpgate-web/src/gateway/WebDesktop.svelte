@@ -7,6 +7,7 @@
         isIncrementalFrame,
         type Rect,
     } from 'common/desktopCanvas'
+    import { codeToScancode } from 'common/desktopInput'
     import InfoBox from 'common/InfoBox.svelte'
     import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
@@ -327,13 +328,21 @@
         return null
     }
 
+    // RDP uses scancodes and VNC uses the keysym since RFB has no scancodes
     function onKey(e: KeyboardEvent, down: boolean) {
         const ks = keysym(e)
-        if (ks === null) {
+        const scancode = codeToScancode(e.code)
+        if (ks === null && !scancode) {
             return
         }
         e.preventDefault()
-        send({ type: 'key_event', keysym: ks, down })
+        send({
+            type: 'key_event',
+            keysym: ks,
+            scancode: scancode?.code ?? null,
+            extended: scancode?.extended ?? false,
+            down,
+        })
     }
 
     async function disconnect() {

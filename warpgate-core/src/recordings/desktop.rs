@@ -462,19 +462,25 @@ impl DesktopRecorder {
     pub async fn write_input(&self, input: &DesktopInput) -> Result<()> {
         let time = self.get_time();
         let item = match input {
-            DesktopInput::Key { keysym, down } => DesktopRecordingItem::KeyInput {
+            // Prefer the keysym: it is what the user actually typed, whereas the scancode
+            // only names a key position that the target's layout reinterprets.
+            DesktopInput::Key {
+                keysym: Some(keysym),
+                down,
+                ..
+            } => DesktopRecordingItem::KeyInput {
                 time,
                 keysym: *keysym,
                 down: *down,
             },
-            DesktopInput::Scancode {
-                code,
-                extended,
+            DesktopInput::Key {
+                scancode: Some(scancode),
                 down,
+                ..
             } => DesktopRecordingItem::ScancodeInput {
                 time,
-                code: *code,
-                extended: *extended,
+                code: scancode.code,
+                extended: scancode.extended,
                 down: *down,
             },
             DesktopInput::Pointer { x, y, buttons } => DesktopRecordingItem::PointerInput {
@@ -502,6 +508,8 @@ impl DesktopRecorder {
             // The target's response to a resize arrives as a recorded DesktopEvent::Resize,
             // so the request itself carries no playback value.
             DesktopInput::Refresh | DesktopInput::Resize { .. } => return Ok(()),
+            // A key with neither representation carries nothing to replay.
+            DesktopInput::Key { .. } => return Ok(()),
         };
         let mut st = self.state.lock().await;
         st.duration = st.duration.max(time);
