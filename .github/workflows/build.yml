@@ -141,12 +141,29 @@ jobs:
           mv target/${{ matrix.target }}/release/warpgate dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
           mv cdx.xml dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
 
+      # Updating a release with generate_release_notes appends a fresh copy of the
+      # generated notes to whatever body is already there, so only ask for them
+      # while the release has none - otherwise every arch of every rerun grows
+      # the notes and buries any hand-written ones.
+      - name: Check for existing release notes
+        id: release_notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)
+          if [ -z "$body" ]; then
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "generate=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
-          generate_release_notes: true
+          generate_release_notes: ${{ steps.release_notes.outputs.generate == 'true' }}
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
 
