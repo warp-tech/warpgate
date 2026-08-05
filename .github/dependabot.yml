@@ -14,7 +14,7 @@ updates:
     schedule:
       interval: "daily"
     groups:
-      version-bumps:
+      rust-updates:
         applies-to: version-updates
         update-types:
           - minor
@@ -28,7 +28,7 @@ updates:
       semver-minor-days: 7
       semver-patch-days: 3
     groups:
-      version-bumps:
+      npm-updates:
         applies-to: version-updates
         update-types:
           - minor
@@ -42,7 +42,7 @@ updates:
     schedule:
       interval: daily
     groups:
-      version-bumps:
+      actions-updates:
         applies-to: version-updates
         update-types:
           - minor
@@ -67,7 +67,7 @@ updates:
     schedule:
       interval: "daily"
     groups:
-      version-bumps:
+      pip-updates:
         applies-to: version-updates
         update-types:
           - patch
