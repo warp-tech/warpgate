@@ -454,45 +454,6 @@
                     </Section>
 
                     <Section id="network" title="Network">
-                        {#if target.options.kind === 'Postgres'}
-                            <FormGroup floating label="Idle timeout">
-                                <input
-                                    class="form-control"
-                                    type="text"
-                                    placeholder="10m"
-                                    bind:value={target.options.idleTimeout}
-                                    title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
-                                >
-                                <small class="form-text text-muted">
-                                    How long an authenticated session can remain
-                                    idle before requiring re-authentication.
-                                    Examples: 30m, 1h, 2h30m. Leave empty for
-                                    default (10m).
-                                </small>
-                            </FormGroup>
-                        {/if}
-
-                        {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
-                            <FormGroup
-                                floating
-                                label="Default database name for connection examples"
-                            >
-                                <input
-                                    class="form-control"
-                                    type="text"
-                                    placeholder="database-name"
-                                    bind:value={target.options.defaultDatabaseName}
-                                >
-                                <small class="form-text text-muted">
-                                    Default database name used in connection
-                                    examples. This is only for display purposes
-                                    and does not restrict which databases users
-                                    can access. Leave empty to use the global
-                                    default.
-                                </small>
-                            </FormGroup>
-                        {/if}
-
                         <FormGroup>
                             <label for="rateLimitBytesPerSecond">
                                 Global bandwidth limit
