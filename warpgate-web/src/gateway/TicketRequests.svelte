@@ -17,6 +17,7 @@
     } from 'common/duration'
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
+    import { routeQueryParams } from 'common/helpers'
     import InfoBox from 'common/InfoBox.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { statusColor, statusIcon } from 'common/ticketRequestStatus'
@@ -31,16 +32,18 @@
     } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
-    import { router } from 'svelte-spa-router'
 
     // Matches the server-side limit in warpgate-core/src/ticket_requests.rs
     const DESCRIPTION_MAX_LENGTH = 2000
 
     // Prefill from #/ticket-requests?target=x&description=y&duration=8h
-    const urlParams = new URLSearchParams(router.querystring ?? '')
+    // `target` is what makes such a link meaningful; the other params are only
+    // honoured alongside it, so a link can't open a plausible-looking prefilled
+    // request against whichever target happens to be first in the dropdown.
+    const urlParams = routeQueryParams()
     const paramTarget = urlParams.get('target')
-    const paramDescription = urlParams.get('description')
-    const paramDuration = urlParams.get('duration')
+    const paramDescription = paramTarget ? urlParams.get('description') : null
+    const paramDuration = paramTarget ? urlParams.get('duration') : null
 
     let error: string | undefined = $state()
     let success: string | undefined = $state()
@@ -50,7 +53,7 @@
     let tickets: MyTicketModel[] | undefined = $state()
     let ticketRequestTargets: TicketRequestTarget[] | undefined = $state()
     let targets: TargetSnapshot[] | undefined = $state()
-    let showForm = $state(!!(paramTarget || paramDescription || paramDuration))
+    let showForm = $state(!!paramTarget)
     let showAllRequests = $state(false)
 
     const REQUEST_PAGE_SIZE = 25
@@ -119,7 +122,7 @@
         tickets = t
         ticketRequestTargets = trt
         targets = tgts
-        // Seeded from the URL above, so a linked target isn't replaced here
+        // Never override an explicit selection
         if (ticketRequestTargets[0] && !selectedTarget) {
             selectedTarget = ticketRequestTargets[0].name
         }
@@ -250,14 +253,15 @@
         <ModalBody>
             <h4 class="mb-3">Request a ticket</h4>
 
-            {#if unavailableTarget}
-                <Alert color="warning" fade={false}>
-                    <strong>{unavailableTarget}</strong>
-                    is not available for ticket requests. Select a target below.
-                </Alert>
-            {/if}
-
             {#if ticketRequestTargets?.length}
+                {#if unavailableTarget}
+                    <Alert color="warning" fade={false}>
+                        <strong>{unavailableTarget}</strong>
+                        is not available for ticket requests. Select a target
+                        below.
+                    </Alert>
+                {/if}
+
                 <form onsubmit={e => e.preventDefault()}>
                     <FormGroup floating label="Target">
                         <select
@@ -316,7 +320,10 @@
                     </FormGroup>
                 </form>
             {:else if ticketRequestTargets}
-                <EmptyState title="No targets available" />
+                <EmptyState
+                    title="No targets available"
+                    hint={unavailableTarget ? `${unavailableTarget} is not available for ticket requests.` : ''}
+                />
             {/if}
         </ModalBody>
         <ModalFooter>
