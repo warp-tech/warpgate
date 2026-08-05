@@ -1,6 +1,7 @@
 mod client;
 mod common;
 mod error;
+mod relay;
 mod session;
 mod session_handle;
 mod stream;

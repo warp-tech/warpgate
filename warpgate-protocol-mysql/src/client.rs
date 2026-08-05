@@ -23,6 +23,9 @@ use crate::stream::MySqlStream;
 
 pub struct MySqlClient {
     pub stream: MySqlStream<TcpStream, ClientTlsStream<TcpStream>>,
+    /// Negotiated with the target, always a subset of what the client
+    /// negotiated with us
+    pub capabilities: Capabilities,
 }
 
 pub struct ConnectionOptions {
@@ -177,7 +180,10 @@ impl MySqlClient {
 
         stream.reset_sequence_id();
 
-        Ok(Self { stream })
+        Ok(Self {
+            stream,
+            capabilities: options.capabilities,
+        })
     }
 }
 

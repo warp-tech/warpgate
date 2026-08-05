@@ -30,6 +30,7 @@ use warpgate_tls::ServerTlsStream;
 
 use crate::client::{ConnectionOptions, MySqlClient};
 use crate::error::MySqlError;
+use crate::relay::{Relayed, ResponseRelay};
 use crate::stream::MySqlStream;
 
 pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
@@ -106,13 +107,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         Self {
             services,
             stream: MySqlStream::new(stream),
-            // Target packets are relayed to the client verbatim, but the target
-            // is only picked (and its capabilities learned) after this handshake
-            // is already on the wire. So the client must not be offered any
-            // capability that changes packet framing - DEPRECATE_EOF turns the
-            // result set terminator from an EOF into an OK packet, SESSION_TRACK
-            // changes the OK packet's trailing `info` string to length-encoded -
-            // or a target lacking it desyncs the client mid-result-set.
+            // The target is only picked after this handshake is already on the
+            // wire, so it can turn out to lack capabilities offered here.
+            // [`ResponseRelay`] rewrites its responses into this framing.
             capabilities: Capabilities::PROTOCOL_41
                 | Capabilities::PLUGIN_AUTH
                 | Capabilities::FOUND_ROWS
@@ -120,9 +117,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 | Capabilities::NO_SCHEMA
                 | Capabilities::PLUGIN_AUTH_LENENC_DATA
                 | Capabilities::CONNECT_WITH_DB
+                | Capabilities::SESSION_TRACK
                 | Capabilities::IGNORE_SPACE
                 | Capabilities::INTERACTIVE
                 | Capabilities::TRANSACTIONS
+                | Capabilities::DEPRECATE_EOF
                 | Capabilities::SECURE_CONNECTION
                 | Capabilities::SSL,
             challenge: get_crypto_rng().random(),
@@ -336,44 +335,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 client.stream.push(&query, ())?;
                 client.stream.flush().await?;
 
-                let mut eof_ctr = 0;
-                let mut first_packet = true;
-                loop {
-                    let Some(response) = client.stream.recv().await? else {
-                        return Err(MySqlError::Eof);
-                    };
-                    trace!(?response, "client got packet");
-                    self.stream.push(&&response[..], ())?;
-                    self.stream.flush().await?;
-
-                    let com = response.first();
-                    if first_packet {
-                        first_packet = false;
-                        // OK or ERR as the first packet means there is no
-                        // result set; later packets starting with 0x00 are
-                        // rows with an empty first column
-                        if com == Some(&0) || com == Some(&0xff) {
-                            break;
-                        }
-                        continue;
-                    }
-                    // 0xff is not a valid length-encoded value prefix, so
-                    // no row or column definition can start with it
-                    if com == Some(&0xff) {
-                        break;
-                    }
-                    // Rows can also start with 0xfe (a length-encoded value
-                    // >= 2^24); a real EOF packet is shorter than that
-                    // prefix. The column definitions and the rows are each
-                    // terminated by one.
-                    if com == Some(&0xfe) && response.len() < 9 {
-                        eof_ctr += 1;
-                        if eof_ctr == 2 {
-                            // todo check multiple results
-                            break;
-                        }
-                    }
-                }
+                let relay = ResponseRelay::result_set(self.capabilities, client.capabilities);
+                self.relay_response(&mut client, relay).await?;
             // COM_QUIT
             } else if com == Some(&0x01) {
                 break;
@@ -386,12 +349,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 info!("Selected database: {db}");
                 client.stream.push(&&payload[..], ())?;
                 client.stream.flush().await?;
-                self.passthrough_until_result(&mut client).await?;
+                let relay = ResponseRelay::single(self.capabilities, client.capabilities);
+                self.relay_response(&mut client, relay).await?;
             // COM_FIELD_LIST, COM_PING, COM_RESET_CONNECTION
             } else if com == Some(&0x04) || com == Some(&0x0e) || com == Some(&0x1f) {
                 client.stream.push(&&payload[..], ())?;
                 client.stream.flush().await?;
-                self.passthrough_until_result(&mut client).await?;
+                let relay = ResponseRelay::single(self.capabilities, client.capabilities);
+                self.relay_response(&mut client, relay).await?;
             } else if let Some(com) = com {
                 warn!("Unknown packet type {com}");
                 self.send_error(1047, "Not implemented").await?;
@@ -403,20 +368,28 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         Ok(())
     }
 
-    async fn passthrough_until_result(
+    /// Forwards one target response to the client, packet by packet, until the
+    /// relay says it's complete.
+    async fn relay_response(
         &mut self,
         client: &mut MySqlClient,
+        mut relay: ResponseRelay,
     ) -> Result<(), MySqlError> {
         loop {
             let Some(response) = client.stream.recv().await? else {
                 return Err(MySqlError::Eof);
             };
             trace!(?response, "client got packet");
-            self.stream.push(&&response[..], ())?;
+
+            let (relayed, complete) = relay.next(&response)?;
+            match relayed {
+                Relayed::Verbatim => self.stream.push(&&response[..], ())?,
+                Relayed::Rewritten(ref packet) => self.stream.push(&&packet[..], ())?,
+                Relayed::Dropped => (),
+            }
             self.stream.flush().await?;
-            if let Some(com) = response.first()
-                && (com == &0 || com == &0xff || com == &0xfe)
-            {
+
+            if complete {
                 break;
             }
         }
