@@ -1,0 +1,54 @@
+# Makefile.freebsd - FreeBSD build and install for Warpgate
+# Usage: make -f Makefile.freebsd [target]
+#
+# Targets:
+#   all       - build frontend and backend (default)
+#   frontend  - build the Svelte admin UI
+#   backend   - build the Rust binary
+#   install   - build and install to PREFIX
+#   clean     - remove build artifacts
+
+PREFIX?=	/usr/local
+BINDIR?=	$(PREFIX)/bin
+RCDIR?=		$(PREFIX)/etc/rc.d
+DATADIR?=	$(PREFIX)/var/warpgate
+
+BINARY=		warpgate
+ADMIN_DIR=	warpgate-web
+RCD_SCRIPT=	rc.d/warpgate
+
+.PHONY: all frontend backend install clean
+
+all: frontend backend
+
+frontend:
+	@echo "==> Building frontend (warpgate-web)..."
+	cd $(ADMIN_DIR) && npm install
+	cd $(ADMIN_DIR) && npm run build
+
+backend:
+	@echo "==> Building backend (Rust)..."
+	cargo build --release
+
+install: all
+	@echo "==> Installing binary to $(BINDIR)/$(BINARY)..."
+	install -m 755 target/release/$(BINARY) $(BINDIR)/$(BINARY)
+
+	@echo "==> Installing rc.d script to $(RCDIR)/$(BINARY)..."
+	install -m 755 $(RCD_SCRIPT) $(RCDIR)/$(BINARY)
+
+	@echo "==> Creating data directory $(DATADIR)..."
+	install -d -m 755 $(DATADIR)
+
+	@echo ""
+	@echo "Installation complete."
+	@echo ""
+	@echo "Next steps:"
+	@echo "  1. Run: warpgate setup"
+	@echo "  2. Add to /etc/rc.conf: warpgate_enable=\"YES\""
+	@echo "  3. Run: service warpgate start"
+
+clean:
+	cargo clean
+	rm -rf $(ADMIN_DIR)/node_modules
+	rm -rf $(ADMIN_DIR)/dist
