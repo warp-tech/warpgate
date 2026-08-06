@@ -23,6 +23,9 @@ use crate::stream::MySqlStream;
 
 pub struct MySqlClient {
     pub stream: MySqlStream<TcpStream, ClientTlsStream<TcpStream>>,
+    /// Negotiated with the target. A subset of what the client negotiated with
+    /// us, except for `SSL`, which is settled per target connection and says
+    /// nothing about the client's.
     pub capabilities: Capabilities,
 }
 
@@ -31,30 +34,6 @@ pub struct ConnectionOptions {
     pub database: Option<String>,
     pub max_packet_size: u32,
     pub capabilities: Capabilities,
-}
-
-impl Default for ConnectionOptions {
-    fn default() -> Self {
-        Self {
-            collation: 33,
-            database: None,
-            max_packet_size: 0xffff_ffff,
-            capabilities: Capabilities::PROTOCOL_41
-                | Capabilities::PLUGIN_AUTH
-                | Capabilities::FOUND_ROWS
-                | Capabilities::LONG_FLAG
-                | Capabilities::NO_SCHEMA
-                | Capabilities::PLUGIN_AUTH_LENENC_DATA
-                | Capabilities::CONNECT_WITH_DB
-                | Capabilities::SESSION_TRACK
-                | Capabilities::IGNORE_SPACE
-                | Capabilities::INTERACTIVE
-                | Capabilities::TRANSACTIONS
-                | Capabilities::DEPRECATE_EOF
-                | Capabilities::SECURE_CONNECTION
-                | Capabilities::SSL,
-        }
-    }
 }
 
 impl MySqlClient {
@@ -132,6 +111,15 @@ impl MySqlClient {
         ]
         .concat();
 
+        // The handshake response only carries a database name under
+        // CONNECT_WITH_DB; against a target without it the selection has to be
+        // repeated as a COM_INIT_DB once authenticated, or the session would
+        // start with no schema and fail every unqualified query.
+        let deferred_database = options
+            .database
+            .clone()
+            .filter(|_| !options.capabilities.contains(Capabilities::CONNECT_WITH_DB));
+
         let response = HandshakeResponse {
             auth_plugin: Some(auth_plugin),
             auth_response: Some(Bytes::from(auth_response(
@@ -201,6 +189,23 @@ impl MySqlClient {
         }
 
         stream.reset_sequence_id();
+
+        if let Some(database) = deferred_database {
+            let mut packet = vec![0x02]; // COM_INIT_DB
+            packet.extend_from_slice(database.as_bytes());
+            stream.push(&&packet[..], ())?;
+            stream.flush().await?;
+
+            let Some(payload) = stream.recv().await? else {
+                return Err(MySqlError::Eof);
+            };
+            if payload.first() == Some(&0xff) {
+                let error = ErrPacket::decode_with(payload, options.capabilities)?;
+                return Err(MySqlError::ProtocolError(format!(
+                    "could not select database {database:?}: {error:?}"
+                )));
+            }
+        }
 
         Ok(Self {
             stream,

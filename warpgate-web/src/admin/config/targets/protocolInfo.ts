@@ -73,6 +73,7 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 
 * Warpgate advertises itself as \`8.0.3-Warpgate\` (configurable).
 * Minimum target: MySQL 5.x+ or MariaDB 10.x+.
+* Warpgate will emulate MySQL protocol capabilities missing at the target: \`DEPRECATE_EOF\`, \`SESSION_TRACK\`, \`CONNECT_WITH_DB\`.
 
 ## Supported Warpgate credentials
 
@@ -96,6 +97,7 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 
 * Wire protocol 3.0 and 3.2 (configurable).
 * Minimum target: PostgreSQL 7.4+
+* Warpgate will translate between protocol versions 3.0 and 3.2 in case of a mismatch.
 
 ## Supported Warpgate credentials
 
