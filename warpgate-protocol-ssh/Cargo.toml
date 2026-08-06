@@ -9,7 +9,7 @@ publish = false
 anyhow.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
-curve25519-dalek = { version = "4.0.0", default-features = false } # pin due to build fail on x86
+curve25519-dalek = { version = "5.0.0", default-features = false } # pin due to build fail on x86
 dialoguer.workspace = true
 ed25519-dalek = { version = "3.0.0", default-features = false } # pin due to build fail on x86 in 2.1
 futures.workspace = true
