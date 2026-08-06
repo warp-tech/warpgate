@@ -23,8 +23,9 @@ use crate::stream::MySqlStream;
 
 pub struct MySqlClient {
     pub stream: MySqlStream<TcpStream, ClientTlsStream<TcpStream>>,
-    /// Negotiated with the target, always a subset of what the client
-    /// negotiated with us
+    /// Negotiated with the target. A subset of what the client negotiated with
+    /// us, except for `SSL`, which is settled per target connection and says
+    /// nothing about the client's.
     pub capabilities: Capabilities,
 }
 
@@ -110,6 +111,15 @@ impl MySqlClient {
         ]
         .concat();
 
+        // The handshake response only carries a database name under
+        // CONNECT_WITH_DB; against a target without it the selection has to be
+        // repeated as a COM_INIT_DB once authenticated, or the session would
+        // start with no schema and fail every unqualified query.
+        let deferred_database = options
+            .database
+            .clone()
+            .filter(|_| !options.capabilities.contains(Capabilities::CONNECT_WITH_DB));
+
         let response = HandshakeResponse {
             auth_plugin: Some(auth_plugin),
             auth_response: Some(Bytes::from(auth_response(
@@ -179,6 +189,23 @@ impl MySqlClient {
         }
 
         stream.reset_sequence_id();
+
+        if let Some(database) = deferred_database {
+            let mut packet = vec![0x02]; // COM_INIT_DB
+            packet.extend_from_slice(database.as_bytes());
+            stream.push(&&packet[..], ())?;
+            stream.flush().await?;
+
+            let Some(payload) = stream.recv().await? else {
+                return Err(MySqlError::Eof);
+            };
+            if payload.first() == Some(&0xff) {
+                let error = ErrPacket::decode_with(payload, options.capabilities)?;
+                return Err(MySqlError::ProtocolError(format!(
+                    "could not select database {database:?}: {error:?}"
+                )));
+            }
+        }
 
         Ok(Self {
             stream,
