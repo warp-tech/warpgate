@@ -7,7 +7,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/warp-tech/warpgate
   pullPolicy: IfNotPresent
-  tag: "0.27.3"
+  tag: "0.27.4"
 
 # References to Kubernetes secrets for pulling images (if using a private registry)
 imagePullSecrets: []
