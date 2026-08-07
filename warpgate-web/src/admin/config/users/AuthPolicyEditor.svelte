@@ -38,6 +38,7 @@
         Totp: 'OTP',
         Sso: 'SSO',
         WebUserApproval: 'In-browser auth',
+        WebAuthn: 'Passkey',
     }
 
     const requirePassword = $derived(
@@ -86,6 +87,8 @@
     })
 
     const validCredentials = $derived.by(() => {
+        // Show credential kinds the user has registered, plus WebUserApproval
+        // which is always available (no registration needed).
         const vc = new SvelteSet(
             existingCredentials.map(x => x.kind as CredentialKind),
         )
