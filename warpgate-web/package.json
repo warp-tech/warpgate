@@ -21,7 +21,7 @@
     "openapi": "npm run openapi:schema:admin && npm run openapi:schema:gateway && npm run openapi:client:admin && npm run openapi:client:gateway"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.6",
+    "@biomejs/biome": "^2.5.7",
     "@fontsource/poppins": "^5.3.0",
     "@fontsource/work-sans": "^5.3.0",
     "@fortawesome/free-brands-svg-icons": "^7.3.1",
@@ -60,7 +60,7 @@
     "tslib": "^2.8.0",
     "typescript": "^5.9.3",
     "ua-parser-js": "^2.0.10",
-    "vite": "^8.1.5",
+    "vite": "^8.2.0",
     "zmodem.js": "^0.1.10"
   },
   "overrides": {
