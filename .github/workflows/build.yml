@@ -118,7 +118,7 @@ jobs:
         run: ./cyclonedx merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
 
       - name: Attest build
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           subject-path: target/${{ matrix.target }}/release/warpgate
