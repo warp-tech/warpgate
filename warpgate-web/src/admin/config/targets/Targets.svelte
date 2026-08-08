@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { faEllipsisV } from '@fortawesome/free-solid-svg-icons'
     import {
         Alert,
         Dropdown,
@@ -7,6 +8,8 @@
         DropdownToggle,
     } from '@sveltestrap/sveltestrap'
     import { api, type Target, type TargetGroup } from 'admin/lib/api'
+    import { autosave } from 'common/autosave'
+    import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
     import GroupColorCircle from 'common/GroupColorCircle.svelte'
@@ -14,10 +17,11 @@
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
-    import { TargetKind } from 'gateway/lib/api'
+    import { BootstrapThemeColor, TargetKind } from 'gateway/lib/api'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
     import { onMount } from 'svelte'
+    import Fa from 'svelte-fa'
     import { link } from 'svelte-spa-router'
     import { firstBy } from 'thenby'
     import { adminPermissions } from '../../lib/store'
@@ -26,13 +30,23 @@
     let groups: TargetGroup[] = $state([])
     let selectedGroup: TargetGroup | undefined = $state()
 
+    const [collapsedGroups] = autosave<string[]>(
+        'admin-target-list:collapsed-groups',
+        [],
+    )
+
+    // The group headers make the group ordering load-bearing, so the target
+    // list has to wait for the groups instead of racing them.
+    const groupsPromise = api.listTargetGroups().then(result => {
+        const natural = naturalCompareFactory()
+        return result.sort((a, b) =>
+            natural(a.name.toLowerCase(), b.name.toLowerCase()),
+        )
+    })
+
     onMount(async () => {
         try {
-            const natural = naturalCompareFactory()
-
-            groups = (await api.listTargetGroups()).sort((a, b) =>
-                natural(a.name.toLowerCase(), b.name.toLowerCase()),
-            )
+            groups = await groupsPromise
         } catch (err) {
             error = await stringifyError(err)
         }
@@ -42,32 +56,29 @@
         options: LoadOptions,
     ): Observable<PaginatedResponse<Target>> {
         return from(
-            api.getTargets({
-                search: options.search,
-                groupId: selectedGroup?.id,
-            }),
+            Promise.all([
+                // Errors are surfaced by the onMount handler above - here we
+                // just fall back to an unresolved grouping.
+                groupsPromise.catch(() => [] as TargetGroup[]),
+                api.getTargets({
+                    search: options.search,
+                    groupId: selectedGroup?.id,
+                }),
+            ]),
         ).pipe(
-            map(targets => {
-                if (options.search) {
-                    return targets
-                }
-
+            map(([targetGroups, targets]) => {
                 const natural = naturalCompareFactory()
+                const groupName = (target: Target) =>
+                    (
+                        targetGroups.find(g => g.id === target.groupId)?.name ??
+                        ''
+                    ).toLowerCase()
 
                 return targets.sort(
                     firstBy((x: Target) => !x.groupId)
                         // Natural sort between groups
                         .thenBy((a: Target, b: Target) =>
-                            natural(
-                                (
-                                    groups.find(g => g.id === a.groupId)
-                                        ?.name ?? ''
-                                ).toLowerCase(),
-                                (
-                                    groups.find(g => g.id === b.groupId)
-                                        ?.name ?? ''
-                                ).toLowerCase(),
-                            ),
+                            natural(groupName(a), groupName(b)),
                         )
                         // Natural sort within a group
                         .thenBy((a, b) =>
@@ -81,6 +92,36 @@
                 total: targets.length,
             })),
         )
+    }
+
+    interface GroupInfo {
+        id: string
+        name: string
+        color: BootstrapThemeColor
+    }
+
+    function groupInfoFromTarget(target: Target): GroupInfo {
+        const group = target.groupId
+            ? groups.find(g => g.id === target.groupId)
+            : undefined
+        if (!group) {
+            return {
+                id: '$ungrouped',
+                name: 'Ungrouped',
+                color: BootstrapThemeColor.Secondary,
+            }
+        }
+        return {
+            id: group.id,
+            name: group.name,
+            color: group.color ?? BootstrapThemeColor.Secondary,
+        }
+    }
+
+    function collapseAllGroups(targets: Target[] | null) {
+        $collapsedGroups = [
+            ...new Set((targets ?? []).map(x => groupInfoFromTarget(x).id)),
+        ]
     }
 </script>
 
@@ -133,11 +174,49 @@
     {/if}
 
     {#key selectedGroup}
-        <ItemList load={getTargets} showSearch={true}>
+        <ItemList
+            load={getTargets}
+            showSearch={true}
+            groupObject={groupInfoFromTarget}
+            groupKey={group => group.id}
+            collapsibleGroups
+            bind:collapsedGroups={$collapsedGroups}
+        >
+            {#snippet header(items)}
+                {#if items?.length}
+                    <Dropdown>
+                        <DropdownToggle color="link">
+                            <Fa icon={faEllipsisV} fw />
+                        </DropdownToggle>
+                        <DropdownMenu end>
+                            <div class="dropdown-header">Groups</div>
+                            <DropdownItem
+                                onclick={() => collapseAllGroups(items)}
+                            >
+                                Collapse all
+                            </DropdownItem>
+                            <DropdownItem
+                                onclick={() => { $collapsedGroups = [] }}
+                            >
+                                Expand all
+                            </DropdownItem>
+                        </DropdownMenu>
+                    </Dropdown>
+                {/if}
+            {/snippet}
             {#snippet empty()}
                 <EmptyState
                     title="No targets yet"
                     hint="Targets are destinations on the internal network that your users will connect to"
+                />
+            {/snippet}
+            {#snippet groupHeader(group, state)}
+                <CollapsibleGroupHeader
+                    name={group.name}
+                    color={group.color}
+                    count={state.count}
+                    collapsed={state.collapsed}
+                    toggle={state.toggle}
                 />
             {/snippet}
             {#snippet item(target)}
@@ -148,17 +227,6 @@
                 >
                     <div class="me-auto">
                         <div class="d-flex align-items-center gap-2">
-                            {#if target.groupId}
-                                {@const group = groups.find(g => g.id === target.groupId)}
-                                {#if group}
-                                    {#if group.color}
-                                        <GroupColorCircle color={group.color} />
-                                    {/if}
-                                    <small class="text-muted"
-                                        >{group.name}</small
-                                    >
-                                {/if}
-                            {/if}
                             <strong>
                                 {target.name}
                             </strong>

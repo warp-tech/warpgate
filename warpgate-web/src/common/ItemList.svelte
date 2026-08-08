@@ -10,6 +10,12 @@
         offset: number
         total: number
     }
+
+    export interface GroupState {
+        collapsed: boolean
+        count: number
+        toggle: () => void
+    }
 </script>
 
 <script lang="ts" generics="T, G = unknown, GK = unknown">
@@ -42,7 +48,9 @@
         item?: Snippet<[T]>
         footer?: Snippet<[T[]]>
         empty?: Snippet<[]>
-        groupHeader?: Snippet<[G]>
+        groupHeader?: Snippet<[G, GroupState]>
+        collapsibleGroups?: boolean
+        collapsedGroups?: GK[]
     }
 
     let {
@@ -57,6 +65,8 @@
         footer,
         empty,
         groupHeader,
+        collapsibleGroups = false,
+        collapsedGroups = $bindable([]),
     }: Props = $props()
 
     let filter = $state('')
@@ -92,6 +102,61 @@
 
     const total = observe<number>(responses.pipe(map(x => x.total)), 0)
     const items = observe<T[] | null>(responses.pipe(map(x => x.items)), null)
+
+    interface Row {
+        item: T
+        group?: G
+        key?: GK
+        groupStart: boolean
+        count: number
+        collapsed: boolean
+    }
+
+    // Groups are detected by adjacency, so the caller is expected to hand us
+    // items already sorted by group.
+    function buildRows(list: T[]): Row[] {
+        const getGroup = groupObject
+        const getKey = groupKey
+
+        if (!getGroup || !getKey) {
+            return list.map(_item => ({
+                item: _item,
+                groupStart: false,
+                count: 0,
+                collapsed: false,
+            }))
+        }
+
+        const entries = list.map(_item => {
+            const group = getGroup(_item)
+            return { item: _item, group, key: getKey(group) }
+        })
+
+        const counts = new Map<GK, number>()
+        for (const entry of entries) {
+            counts.set(entry.key, (counts.get(entry.key) ?? 0) + 1)
+        }
+
+        // An active search expands everything so that matches can't hide
+        // inside a collapsed group - without touching the persisted state.
+        const hidden =
+            collapsibleGroups && !filter
+                ? new Set(collapsedGroups)
+                : new Set<GK>()
+
+        return entries.map((entry, _index) => ({
+            ...entry,
+            groupStart: _index === 0 || entry.key !== entries[_index - 1]?.key,
+            count: counts.get(entry.key) ?? 0,
+            collapsed: hidden.has(entry.key),
+        }))
+    }
+
+    function toggleGroup(key: GK) {
+        collapsedGroups = collapsedGroups.includes(key)
+            ? collapsedGroups.filter(k => k !== key)
+            : [...collapsedGroups, key]
+    }
 
     onMount(() => {
         if (groupHeader && (!groupObject || !groupKey)) {
@@ -133,15 +198,20 @@
         {@render header?.(_items)}
     </div>
     {#if _items}
+        {@const _rows = buildRows(_items)}
         <div class="list-group list-group-flush mb-3">
-            {#each _items as _item, _index (_item)}
-                {#if groupHeader && groupObject && groupKey}
-                    {@const prev = _items[_index - 1]}
-                    {#if _index === 0 || (prev && groupKey(groupObject(_item)) !== groupKey(groupObject(prev)))}
-                        {@render groupHeader(groupObject(_item))}
-                    {/if}
+            {#each _rows as _row (_row.item)}
+                {#if _row.groupStart && groupHeader && _row.group !== undefined && _row.key !== undefined}
+                    {@const _key = _row.key}
+                    {@render groupHeader(_row.group, {
+                        collapsed: _row.collapsed,
+                        count: _row.count,
+                        toggle: () => toggleGroup(_key),
+                    })}
                 {/if}
-                {@render item?.(_item)}
+                {#if !_row.collapsed}
+                    {@render item?.(_row.item)}
+                {/if}
             {/each}
         </div>
         {@render footer?.(_items)}

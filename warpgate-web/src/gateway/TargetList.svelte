@@ -15,10 +15,10 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
+    import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import GettingStarted from 'common/GettingStarted.svelte'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
@@ -35,7 +35,11 @@
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
     import { firstBy } from 'thenby'
-    import { openTargetsInNewTab, serverInfo } from './lib/store'
+    import {
+        collapsedTargetGroups,
+        openTargetsInNewTab,
+        serverInfo,
+    } from './lib/store'
     import { openWebDesktopSession, openWebSshSession } from './lib/webSessions'
 
     let instructionsTarget: TargetSnapshot | undefined = $state()
@@ -148,6 +152,12 @@
             color: target.group.color ?? BootstrapThemeColor.Secondary,
         }
     }
+
+    function collapseAllGroups(targets: TargetSnapshot[] | null) {
+        $collapsedTargetGroups = [
+            ...new Set((targets ?? []).map(x => groupInfoFromTarget(x).id)),
+        ]
+    }
 </script>
 
 {#if $serverInfo?.setupState}
@@ -159,6 +169,8 @@
     showSearch={true}
     groupObject={groupInfoFromTarget}
     groupKey={group => group.id}
+    collapsibleGroups
+    bind:collapsedGroups={$collapsedTargetGroups}
 >
     {#snippet header(items)}
         {#if items?.length}
@@ -166,7 +178,7 @@
                 <DropdownToggle color="link">
                     <Fa icon={faEllipsisV} fw />
                 </DropdownToggle>
-                <DropdownMenu>
+                <DropdownMenu end>
                     <div class="dropdown-header">Preferences</div>
                     <DropdownItem>
                         <Input
@@ -176,6 +188,15 @@
                             onmousedown={e => e.stopPropagation()}
                         />
                     </DropdownItem>
+                    <div class="dropdown-header">Groups</div>
+                    <DropdownItem onclick={() => collapseAllGroups(items)}>
+                        Collapse all
+                    </DropdownItem>
+                    <DropdownItem
+                        onclick={() => { $collapsedTargetGroups = [] }}
+                    >
+                        Expand all
+                    </DropdownItem>
                 </DropdownMenu>
             </Dropdown>
         {/if}
@@ -183,11 +204,14 @@
     {#snippet empty()}
         <EmptyState title="You don't have access to any targets yet" />
     {/snippet}
-    {#snippet groupHeader(group)}
-        <div class="d-flex align-items-center gap-2 mb-2 mt-4">
-            <GroupColorCircle color={group.color} />
-            <div class="h5 mb-0">{group.name}</div>
-        </div>
+    {#snippet groupHeader(group, state)}
+        <CollapsibleGroupHeader
+            name={group.name}
+            color={group.color}
+            count={state.count}
+            collapsed={state.collapsed}
+            toggle={state.toggle}
+        />
     {/snippet}
     {#snippet item(target)}
         <a
