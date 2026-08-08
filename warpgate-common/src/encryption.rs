@@ -282,7 +282,7 @@ pub fn validate_encryption_config(config: &WarpgateConfig) {
         {
             // This is the case where the user should have set up encryption
             emit_config_warning(
-                    "Target credentials are stored unencrypted. Set the `WARPGATE_ENCRYPTION_KEY` environment variable to encrypt them at rest: https://warpgate.null.page/clustering/".to_owned()
+                    "Target credentials are stored unencrypted. Set the `WARPGATE_ENCRYPTION_KEY` environment variable to encrypt them at rest: https://warpgate.null.page/encryption/".to_owned()
                 );
         }
     }
