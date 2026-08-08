@@ -22,7 +22,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::net::detect_port_knock;
+use warpgate_common::helpers::net::accept_client;
 use warpgate_core::{Services, SessionStateInit, State};
 use warpgate_db_entities::Parameters;
 
@@ -75,15 +75,9 @@ async fn _handle_connection(
     mut stream: TcpStream,
     proxy_protocol: bool,
 ) -> Result<()> {
-    stream.set_nodelay(true)?;
-
-    if detect_port_knock(&stream).await {
+    let Some(remote_address) = accept_client(&mut stream, proxy_protocol).await else {
         return Ok(());
-    }
-
-    let remote_address =
-        warpgate_common::helpers::proxy_protocol::remote_address(&mut stream, proxy_protocol)
-            .await?;
+    };
 
     let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
