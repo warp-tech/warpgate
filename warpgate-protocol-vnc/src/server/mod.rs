@@ -21,7 +21,7 @@ use tokio::time::{Instant, timeout_at};
 use tokio_rustls::TlsAcceptor;
 use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
-use warpgate_common::helpers::net::detect_port_knock;
+use warpgate_common::helpers::net::accept_client;
 use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetVncOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
@@ -64,21 +64,8 @@ pub async fn bind_server(
 
     Ok(async move {
         while let Some(mut stream) = listener.next().await {
-            let _ = stream.set_nodelay(true);
-            if detect_port_knock(&stream).await {
+            let Some(remote_address) = accept_client(&mut stream, proxy_protocol).await else {
                 continue;
-            }
-            let remote_address = match warpgate_common::helpers::proxy_protocol::remote_address(
-                &mut stream,
-                proxy_protocol,
-            )
-            .await
-            {
-                Ok(remote_address) => remote_address,
-                Err(error) => {
-                    warn!(%error, "Failed to read PROXY protocol header");
-                    continue;
-                }
             };
 
             let tls_config = tls_config.clone();
