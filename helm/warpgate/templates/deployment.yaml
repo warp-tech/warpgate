@@ -144,6 +144,13 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+          {{- range $key, $val := .Values.envFromSecret }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ (split "/" $val)._0 }}
+                  key: {{ (split "/" $val)._1 }}
+          {{- end }}
           command:
             - warpgate
             - -c

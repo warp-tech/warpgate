@@ -63,9 +63,10 @@ pub async fn run(
     // The viewer-supplied size may be odd or out of range; keep the initial desktop within
     // the same bounds the Display Control resize path enforces.
     let (width, height) = MonitorLayoutEntry::adjust_display_size(width as u32, height as u32);
+    let password = auth.password.reveal()?;
     let config = build_config(
         &options,
-        auth.password.expose_secret(),
+        password.expose_secret(),
         width as u16,
         height as u16,
     );

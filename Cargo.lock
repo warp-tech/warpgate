@@ -9001,6 +9001,7 @@ dependencies = [
  "futures",
  "humantime",
  "notify",
+ "rand 0.10.2",
  "rcgen",
  "reqwest 0.13.4",
  "rustls 0.23.43",
@@ -9127,6 +9128,7 @@ dependencies = [
 name = "warpgate-common"
 version = "0.27.3"
 dependencies = [
+ "aes-gcm 0.11.0",
  "anyhow",
  "argon2 0.5.3",
  "async-trait",

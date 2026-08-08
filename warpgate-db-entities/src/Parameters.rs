@@ -193,6 +193,11 @@ pub struct Model {
     /// the first node to boot; never exposed through the admin API.
     #[sea_orm(column_type = "Text", nullable)]
     pub cluster_token: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub encryption_key_fp: Option<String>,
+    /// Fingerprint of the previous key while a rotation is going on
+    #[sea_orm(column_type = "Text", nullable)]
+    pub retiring_key_fp: Option<String>,
 }
 
 impl Model {
@@ -288,6 +293,8 @@ impl Entity {
                     )
                     .unwrap()),
                     cluster_token: Set(None),
+                    encryption_key_fp: Set(None),
+                    retiring_key_fp: Set(None),
                 }
                 .insert(db)
                 .await

@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use target::*;
 use uuid::Uuid;
-pub use warnings::{clear_config_warnings, config_warnings, emit_config_warning};
+pub use warnings::{clear_config_warnings, emit_config_warning, emit_runtime_warning, warnings};
 use warpgate_sso::SsoProviderConfig;
 use warpgate_tls::IntoTlsCertificateRelativePaths;
 
@@ -940,6 +940,25 @@ impl WarpgateConfig {
             emit_config_warning(
                 "Your `external_host` config option contains a port - it will be ignored. Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options.".to_owned()
             );
+        }
+
+        let keyring = crate::encryption::env_keyring();
+        if keyring.primary().is_none() {
+            if keyring.has_retired() {
+                emit_config_warning(
+                    "`WARPGATE_ENCRYPTION_KEY_OLD` is set without `WARPGATE_ENCRYPTION_KEY`: existing credentials stay readable, but new credentials will be stored unencrypted.".to_owned()
+                );
+            } else if !self
+                .store
+                .database_url
+                .expose_secret()
+                .starts_with("sqlite:")
+            {
+                // This is the case where the user should have set up encryption
+                emit_config_warning(
+                    "Target credentials are stored unencrypted. Set the `WARPGATE_ENCRYPTION_KEY` environment variable to encrypt them at rest: https://warpgate.null.page/clustering/".to_owned()
+                );
+            }
         }
     }
 }

@@ -127,7 +127,7 @@
         <main>
             {#if $serverInfo?.configWarnings?.length}
                 <Alert color="warning" fade={false}>
-                    <strong>Config file issues found:</strong>
+                    <strong>Issues found:</strong>
                     <ul class="mb-0 mt-2">
                         {#each $serverInfo.configWarnings as warning (warning)}
                             <li>{warning}</li>

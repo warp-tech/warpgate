@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures::FutureExt;
@@ -80,11 +81,31 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     let services = Services::new(config.clone(), admin_token, params.clone()).await?;
 
+    // Join the cluster before the credential backfill below
+    services.cluster.start().await?;
+
     install_database_logger(services.db.clone());
 
     // Runs even when the SSH listener is disabled so that the admin UI can
     // manage the keys and other protocols' features relying on them work.
     warpgate_protocol_ssh::ensure_client_keys(&services.db, &config, params).await?;
+
+    // Encrypt before listeners start
+    if warpgate_core::backfill_credential_encryption(&services.db).await?
+        == warpgate_core::BackfillOutcome::AwaitingCluster
+    {
+        let db = services.db.clone();
+        tokio::spawn(async move {
+            loop {
+                match warpgate_core::backfill_credential_encryption(&db).await {
+                    Ok(warpgate_core::BackfillOutcome::Settled) => break,
+                    Ok(warpgate_core::BackfillOutcome::AwaitingCluster) => {}
+                    Err(error) => warn!(%error, "Deferred credential encryption failed"),
+                };
+                tokio::time::sleep(Duration::from_secs(rand::random_range(3..7))).await;
+            }
+        });
+    }
 
     if console::user_attended() {
         info!("--------------------------------------------");
