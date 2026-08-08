@@ -2188,6 +2188,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dotenv"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
+
+[[package]]
 name = "dotenvy"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8997,10 +9003,12 @@ dependencies = [
  "console-subscriber",
  "data-encoding",
  "dialoguer",
+ "dotenv",
  "enum_dispatch",
  "futures",
  "humantime",
  "notify",
+ "rand 0.10.2",
  "rcgen",
  "reqwest 0.13.4",
  "rustls 0.23.43",
@@ -9127,6 +9135,7 @@ dependencies = [
 name = "warpgate-common"
 version = "0.27.4"
 dependencies = [
+ "aes-gcm 0.11.0",
  "anyhow",
  "argon2 0.5.3",
  "async-trait",

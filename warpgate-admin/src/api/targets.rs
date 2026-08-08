@@ -7,15 +7,31 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
+use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions,
-    WarpgateError,
+    WarpgateError, map_target_secrets,
 };
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
 
 use super::AdminContext;
 use crate::api::common::case_insensitive_search;
+
+/// Normalize, encrypt and serialize options
+fn serialize_options_for_storage(
+    mut options: TargetOptions,
+) -> Result<serde_json::Value, WarpgateError> {
+    match &mut options {
+        TargetOptions::MySql(opts) => opts.normalize(),
+        TargetOptions::Postgres(opts) => opts.normalize(),
+        _ => {}
+    }
+
+    let mut value = serde_json::to_value(options).map_err(WarpgateError::from)?;
+    map_target_secrets(&mut value, &mut idempotent_maybe_encrypt_secret)?;
+    Ok(value)
+}
 
 #[derive(Object)]
 struct TargetDataRequest {
@@ -122,24 +138,12 @@ impl ListApi {
             )));
         }
 
-        let mut options = body.options.clone();
-
-        match &mut options {
-            TargetOptions::MySql(opts) => {
-                opts.normalize();
-            }
-            TargetOptions::Postgres(opts) => {
-                opts.normalize();
-            }
-            _ => {}
-        }
-
         let values = Target::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
             description: Set(body.description.clone().unwrap_or_default()),
-            kind: Set((&options).into()),
-            options: Set(serde_json::to_value(options.clone()).map_err(WarpgateError::from)?),
+            kind: Set((&body.options).into()),
+            options: Set(serialize_options_for_storage(body.options.clone())?),
             rate_limit_bytes_per_second: Set(None),
             group_id: Set(body.group_id),
             ticket_max_duration_seconds: Set(body.ticket_max_duration_seconds),
@@ -235,23 +239,11 @@ impl DetailApi {
             return Ok(UpdateTargetResponse::BadRequest);
         }
 
-        let mut options = body.options.clone();
-
-        match &mut options {
-            TargetOptions::MySql(opts) => {
-                opts.normalize();
-            }
-            TargetOptions::Postgres(opts) => {
-                opts.normalize();
-            }
-            _ => {}
-        }
-
         let services = admin.services();
         let mut model: Target::ActiveModel = target.into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
-        model.options = Set(serde_json::to_value(options).map_err(WarpgateError::from)?);
+        model.options = Set(serialize_options_for_storage(body.options.clone())?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
         model.group_id = Set(body.group_id);
         model.ticket_max_duration_seconds = Set(body.ticket_max_duration_seconds);

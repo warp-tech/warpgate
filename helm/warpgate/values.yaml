@@ -75,6 +75,20 @@ overrides_config: ""
 # Example: "FOO BAR" → replaces $FOO and $BAR from pod environment
 config_env_var_replace: ""
 
+# Environment variables for the main Warpgate container, mapped from Secrets.
+# Format: <secret-name>/<key>
+envFromSecret: {
+#   Use this for credential encryption at rest (generate a key with
+#   `openssl rand -base64 32`); the setup container does not need these.
+#
+#   To rotate, point WARPGATE_ENCRYPTION_KEY at the new key, list the previous
+#   key under WARPGATE_ENCRYPTION_KEY_OLD (comma-separated), and upgrade —
+#   re-encryption starts once the rollout completes.
+#
+#   WARPGATE_ENCRYPTION_KEY: "warpgate-secret/encryptionKey"
+#   WARPGATE_ENCRYPTION_KEY_OLD: "warpgate-secret/encryptionKeyOld"
+}
+
 # Additional custom volumes & mounts (advanced use-cases)
 volumes: []
 volume_mounts: []

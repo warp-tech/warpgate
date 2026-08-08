@@ -83,6 +83,9 @@ impl Cluster {
             hostname: Set(self.hostname.clone()),
             last_seen: Set(OffsetDateTime::now_utc()),
             tls_spki_sha256: Set(Some(self.tls_identity.spki_sha256_hex.clone())),
+            encryption_key_fingerprint: Set(warpgate_common::encryption::env_keyring()
+                .primary()
+                .map(|key| key.fingerprint().to_owned())),
         };
         // Upsert: SeaORM emits `ON CONFLICT DO UPDATE` (Postgres/SQLite) or
         // `ON DUPLICATE KEY UPDATE` (MySQL). `exec_without_returning` avoids the
@@ -96,6 +99,7 @@ impl Cluster {
                         Node::Column::Hostname,
                         Node::Column::LastSeen,
                         Node::Column::TlsSpkiSha256,
+                        Node::Column::EncryptionKeyFingerprint,
                     ])
                     .to_owned(),
             )
@@ -133,6 +137,14 @@ async fn mark_sessions_ended(
         .exec(db)
         .await?;
     Ok(())
+}
+
+pub async fn alive_nodes(db: &DatabaseConnection) -> Result<Vec<Node::Model>, WarpgateError> {
+    let cutoff = OffsetDateTime::now_utc() - HEARTBEAT_TIMEOUT;
+    Ok(Node::Entity::find()
+        .filter(Node::Column::LastSeen.gte(cutoff))
+        .all(db)
+        .await?)
 }
 
 /// End the sessions of nodes whose heartbeat has gone stale, then drop their rows.

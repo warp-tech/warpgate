@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use config::{Config, Environment, File, FileFormat};
+use config::{Config, File, FileFormat};
 use notify::{RecursiveMode, Watcher, recommended_watcher};
 use tokio::sync::{Mutex, mpsc, watch};
 use tracing::{error, info};
@@ -21,7 +21,6 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
                 .context("Invalid config path")?,
             FileFormat::Yaml,
         ))
-        .add_source(Environment::with_prefix("WARPGATE"))
         .build()
         .context("Could not load config")?
         .try_deserialize()
@@ -43,7 +42,7 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
     // each ignored key.
     let (store, ignored_keys) =
         deserialize_store_collecting_ignored(store).context("Could not load config")?;
-    for path in &ignored_keys {
+    for path in ignored_keys {
         emit_config_warning(format!(
             "Ignoring unknown config key `{path}` — likely a typo or a misplaced key; it has NO effect"
         ));

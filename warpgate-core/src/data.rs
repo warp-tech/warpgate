@@ -2,7 +2,7 @@ use poem_openapi::Object;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{SessionId, Target};
+use warpgate_common::{SessionId, Target, redact_target_secrets};
 use warpgate_db_entities::Session;
 
 #[derive(Serialize, Deserialize, Object)]
@@ -25,9 +25,12 @@ impl From<Session::Model> for SessionSnapshot {
         Self {
             id: model.id,
             username: model.username,
-            target: model
-                .target_snapshot
-                .and_then(|s| serde_json::from_str(&s).ok()),
+            // Unredacted snapshots can be written by an old node during a rolling upgrade
+            target: model.target_snapshot.and_then(|s| {
+                let mut value = serde_json::from_str(&s).ok()?;
+                redact_target_secrets(&mut value);
+                serde_json::from_value::<Target>(value).ok()
+            }),
             started: model.started,
             ended: model.ended,
             ticket_id: model.ticket_id,
