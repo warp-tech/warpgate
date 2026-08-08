@@ -21,12 +21,14 @@ console = { version = "0.16", default-features = false }
 console-subscriber = { version = "0.5", optional = true, default-features = false }
 data-encoding.workspace = true
 dialoguer.workspace = true
+dotenv = "0.15.0"
 enum_dispatch.workspace = true
 futures.workspace = true
 humantime = { version = "2.1", default-features = false }
 notify = { version = "8.0", default-features = false, features = [
     "fsevent-sys",
 ] }
+rand.workspace = true
 rcgen.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 rustls.workspace = true

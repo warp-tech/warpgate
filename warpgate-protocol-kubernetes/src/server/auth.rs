@@ -417,7 +417,7 @@ pub async fn create_authenticated_client(
                 reqwest::header::AUTHORIZATION,
                 reqwest::header::HeaderValue::from_str(&format!(
                     "Bearer {}",
-                    auth.token.expose_secret()
+                    auth.token.reveal()?.expose_secret()
                 ))
                 .context("setting Authorization header")?,
             );
@@ -427,11 +427,11 @@ pub async fn create_authenticated_client(
             // Expect PEM certificate and PEM private key in the auth config
             // Combine into a single PEM bundle for reqwest::Identity
             let cert_pem = auth.certificate.expose_secret();
-            let key_pem = auth.private_key.expose_secret();
+            let key_pem = auth.private_key.reveal()?;
             let pem_bundle = format!(
                 "{}\n{}\n",
                 cert_pem.trim_end_matches('\n'),
-                key_pem.trim_end_matches('\n')
+                key_pem.expose_secret().trim_end_matches('\n')
             );
 
             let identity = reqwest::Identity::from_pem(pem_bundle.as_bytes())

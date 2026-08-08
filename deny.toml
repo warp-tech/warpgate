@@ -77,6 +77,7 @@ ignore = [
     "RUSTSEC-2026-0173", # proc-macro-error2 is unmaintained - waiting for a sea-orm update
     "RUSTSEC-2026-0195", # quick-xml memory exhaustion - we don't parse untrusted XML
     "RUSTSEC-2026-0194", # quick-xml quadratic time - see above
+    "RUSTSEC-2021-0141", # dotenv is unmaintaned - only used for dev
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.

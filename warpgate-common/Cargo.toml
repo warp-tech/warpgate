@@ -10,6 +10,7 @@ name = "config-schema"
 path = "src/config_schema.rs"
 
 [dependencies]
+aes-gcm.workspace = true
 anyhow.workspace = true
 argon2.workspace = true
 async-trait.workspace = true

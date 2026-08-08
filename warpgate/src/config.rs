@@ -42,7 +42,7 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
     // each ignored key.
     let (store, ignored_keys) =
         deserialize_store_collecting_ignored(store).context("Could not load config")?;
-    for path in &ignored_keys {
+    for path in ignored_keys {
         emit_config_warning(format!(
             "Ignoring unknown config key `{path}` — likely a typo or a misplaced key; it has NO effect"
         ));

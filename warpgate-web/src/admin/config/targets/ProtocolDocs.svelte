@@ -1,6 +1,5 @@
 <script lang="ts">
     import { faChevronRight } from '@fortawesome/free-solid-svg-icons'
-    import { Button } from '@sveltestrap/sveltestrap'
     import { autosave } from 'common/autosave'
     import type { TargetKind } from 'gateway/lib/api'
     import snarkdown from 'snarkdown'

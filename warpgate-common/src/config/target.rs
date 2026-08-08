@@ -10,19 +10,20 @@ use super::defaults::{
     _default_postgres_idle_timeout_str, _default_postgres_port, _default_rdp_port,
     _default_ssh_port, _default_username, _default_vnc_port,
 };
-use crate::Secret;
+use crate::encryption::EncryptionError;
+use crate::{Secret, StoredSecret};
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct KubernetesTargetCertificateAuth {
     pub certificate: Secret<String>,
-    pub private_key: Secret<String>,
+    pub private_key: StoredSecret,
 }
 
 impl Default for KubernetesTargetCertificateAuth {
     fn default() -> Self {
         Self {
             certificate: Secret::new(String::new()),
-            private_key: Secret::new(String::new()),
+            private_key: StoredSecret::default(),
         }
     }
 }
@@ -56,7 +57,7 @@ pub enum SSHTargetAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct SshTargetPasswordAuth {
-    pub password: Secret<String>,
+    pub password: StoredSecret,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
@@ -127,7 +128,7 @@ pub enum DatabaseTargetAuth {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct DatabaseTargetPasswordAuth {
     #[serde(default)]
-    pub password: String,
+    pub password: StoredSecret,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
@@ -136,15 +137,6 @@ pub struct DatabaseTargetIamRoleAuth {}
 impl Default for DatabaseTargetAuth {
     fn default() -> Self {
         Self::Password(DatabaseTargetPasswordAuth::default())
-    }
-}
-
-impl DatabaseTargetAuth {
-    pub const fn password(&self) -> Option<&str> {
-        match self {
-            Self::Password(auth) => Some(auth.password.as_str()),
-            Self::IamRole(_) => None,
-        }
     }
 }
 
@@ -165,7 +157,7 @@ pub struct TargetMySqlOptions {
     /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
     #[serde(default, skip_serializing)]
     #[oai(deprecated)]
-    password: Option<String>,
+    password: Option<StoredSecret>,
 
     #[serde(default)]
     pub tls: Tls,
@@ -192,7 +184,7 @@ impl TargetMySqlOptions {
             }));
         } else if self.auth.is_none() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: String::new(),
+                password: StoredSecret::default(),
             }));
         }
     }
@@ -226,7 +218,7 @@ pub struct TargetPostgresOptions {
     /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
     #[serde(default, skip_serializing)]
     #[oai(deprecated)]
-    password: Option<String>,
+    password: Option<StoredSecret>,
 
     #[serde(default)]
     pub tls: Tls,
@@ -259,7 +251,7 @@ impl TargetPostgresOptions {
             }));
         } else if self.auth.is_none() {
             self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: String::new(),
+                password: StoredSecret::default(),
             }));
         }
     }
@@ -292,7 +284,7 @@ pub struct VncTargetNoneAuth {}
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct VncTargetPasswordAuth {
-    pub password: Secret<String>,
+    pub password: StoredSecret,
 }
 
 impl Default for VncTargetAuth {
@@ -364,13 +356,13 @@ pub enum RdpTargetAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct RdpTargetPasswordAuth {
-    pub password: Secret<String>,
+    pub password: StoredSecret,
 }
 
 impl Default for RdpTargetAuth {
     fn default() -> Self {
         Self::Password(RdpTargetPasswordAuth {
-            password: Secret::new(String::new()),
+            password: StoredSecret::default(),
         })
     }
 }
@@ -401,7 +393,7 @@ pub enum KubernetesTargetAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct KubernetesTargetTokenAuth {
-    pub token: Secret<String>,
+    pub token: StoredSecret,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
@@ -450,6 +442,49 @@ pub enum TargetOptions {
     Rdp(TargetRdpOptions),
 }
 
+/// JSON path towards every possible credential within *serialized* TargetOptions
+/// Update for new protocols
+const SECRET_PATHS: &[&[&str]] = &[
+    &["ssh", "auth", "password"],
+    &["mysql", "auth", "password"],
+    &["mysql", "password"],
+    &["postgres", "auth", "password"],
+    &["postgres", "password"],
+    &["vnc", "auth", "password"],
+    &["rdp", "auth", "password"],
+    &["kubernetes", "auth", "token"],
+    &["kubernetes", "auth", "private_key"],
+];
+
+/// Rewrite every secret in a serialized TargetOptions
+pub fn map_target_secrets(
+    options: &mut serde_json::Value,
+    f: &mut dyn FnMut(&str) -> Result<String, EncryptionError>,
+) -> Result<(), EncryptionError> {
+    fn resolve<'a>(
+        node: &'a mut serde_json::Value,
+        path: &[&str],
+    ) -> Option<&'a mut serde_json::Value> {
+        path.iter().try_fold(node, |node, step| node.get_mut(step))
+    }
+
+    for path in SECRET_PATHS {
+        // Only a string is a credential - a missing path, a `null` auth block or an
+        // unexpected shape is left exactly as it was found.
+        if let Some(serde_json::Value::String(value)) = resolve(options, path) {
+            let replacement = f(value)?;
+            *value = replacement;
+        }
+    }
+    Ok(())
+}
+
+/// Blanks out every secret in a serialized TargetOptions or Target (same JSON paths as options are serde(flatten))
+pub fn redact_target_secrets(value: &mut serde_json::Value) {
+    // The closure is infallible, so the walk is too.
+    let _ = map_target_secrets(value, &mut |_| Ok(String::new()));
+}
+
 #[cfg(test)]
 mod tests {
     use super::{TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions, Tls};
@@ -483,5 +518,125 @@ mod tests {
             serde_json::from_str(r#"{"url":"http://t","tls":{"verify":false}}"#).unwrap();
 
         assert!(!off.tls.verify);
+    }
+
+    fn wrap(v: &mut serde_json::Value, prefix: &str) {
+        super::map_target_secrets(v, &mut |s| Ok(format!("{prefix}{s}"))).unwrap();
+    }
+
+    /// The reason encryption walks the JSON instead of `TargetOptions`: a
+    /// `from_value`/`to_value` round trip drops the `skip_serializing` legacy password
+    /// and anything a newer Warpgate wrote. Encrypting must not be able to lose a
+    /// credential, so everything outside the mapped paths has to survive byte for byte.
+    #[test]
+    fn nothing_outside_the_mapped_paths_is_disturbed() {
+        let original = serde_json::json!({
+            "mysql": {
+                "host": "db",
+                "port": 3306,
+                "auth": { "kind": "password", "password": "current" },
+                "password": "legacy",
+                "tls": { "mode": "preferred", "verify": true },
+                "future_field": 1,
+            }
+        });
+
+        let mut mapped = original.clone();
+        wrap(&mut mapped, "X");
+        assert_eq!(mapped["mysql"]["auth"]["password"], "Xcurrent");
+        assert_eq!(mapped["mysql"]["password"], "Xlegacy");
+
+        super::map_target_secrets(&mut mapped, &mut |s| {
+            Ok(s.strip_prefix('X').unwrap_or(s).to_owned())
+        })
+        .unwrap();
+        assert_eq!(mapped, original);
+    }
+
+    /// Fails when a protocol gains a credential field but not a `SECRET_PATHS` entry.
+    #[test]
+    fn every_credential_path_is_covered() {
+        let cases = [
+            (
+                serde_json::json!({"ssh": {"auth": {"kind": "password", "password": "p"}}}),
+                serde_json::json!({"ssh": {"auth": {"kind": "password", "password": "Xp"}}}),
+            ),
+            (
+                serde_json::json!({"mysql": {"auth": {"kind": "password", "password": "p"}}}),
+                serde_json::json!({"mysql": {"auth": {"kind": "password", "password": "Xp"}}}),
+            ),
+            (
+                serde_json::json!({"postgres": {"auth": {"kind": "password", "password": "p"}}}),
+                serde_json::json!({"postgres": {"auth": {"kind": "password", "password": "Xp"}}}),
+            ),
+            (
+                serde_json::json!({"vnc": {"auth": {"kind": "password", "password": "p"}}}),
+                serde_json::json!({"vnc": {"auth": {"kind": "password", "password": "Xp"}}}),
+            ),
+            (
+                serde_json::json!({"rdp": {"auth": {"kind": "password", "password": "p"}}}),
+                serde_json::json!({"rdp": {"auth": {"kind": "password", "password": "Xp"}}}),
+            ),
+            (
+                serde_json::json!({"kubernetes": {"auth": {"kind": "token", "token": "t"}}}),
+                serde_json::json!({"kubernetes": {"auth": {"kind": "token", "token": "Xt"}}}),
+            ),
+            (
+                serde_json::json!({"kubernetes": {"auth": {
+                    "kind": "certificate", "certificate": "pub", "private_key": "k"
+                }}}),
+                serde_json::json!({"kubernetes": {"auth": {
+                    "kind": "certificate", "certificate": "pub", "private_key": "Xk"
+                }}}),
+            ),
+            // HTTP carries no credential of its own, and `external_host` must stay
+            // readable: `get_target_by_hostname` extracts it with raw SQL.
+            (
+                serde_json::json!({"http": {"url": "http://t", "external_host": "h"}}),
+                serde_json::json!({"http": {"url": "http://t", "external_host": "h"}}),
+            ),
+        ];
+
+        for (mut input, expected) in cases {
+            wrap(&mut input, "X");
+            assert_eq!(input, expected);
+        }
+    }
+
+    /// A missing `auth` block must not make the walk fall through to a same-named
+    /// field one level up.
+    #[test]
+    fn an_absent_auth_block_is_skipped_not_confused_with_its_parent() {
+        let mut absent = serde_json::json!({"mysql": {"host": "db", "auth": null}});
+        wrap(&mut absent, "X");
+        assert_eq!(
+            absent,
+            serde_json::json!({"mysql": {"host": "db", "auth": null}})
+        );
+    }
+
+    /// Session snapshots are stored redacted; everything else about the target has
+    /// to survive, since the snapshot is what the session list displays.
+    #[test]
+    fn redaction_blanks_credentials_and_keeps_the_rest() {
+        let mut snapshot = serde_json::json!({
+            "id": "7c1c0e1e-0000-0000-0000-000000000000",
+            "name": "prod-db",
+            "mysql": {
+                "host": "db",
+                "port": 3306,
+                "username": "root",
+                "auth": {"kind": "password", "password": "hunter2"},
+                "password": "legacy",
+            }
+        });
+
+        super::redact_target_secrets(&mut snapshot);
+
+        assert_eq!(snapshot["mysql"]["auth"]["password"], "");
+        assert_eq!(snapshot["mysql"]["password"], "");
+        assert_eq!(snapshot["mysql"]["host"], "db");
+        assert_eq!(snapshot["mysql"]["username"], "root");
+        assert_eq!(snapshot["name"], "prod-db");
     }
 }

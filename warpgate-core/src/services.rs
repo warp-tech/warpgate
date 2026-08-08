@@ -73,7 +73,6 @@ impl Services {
         let recordings = Arc::new(Mutex::new(recordings));
 
         let cluster = Arc::new(Cluster::new(db.clone(), config.store.http.listen.port()).await?);
-        cluster.start().await?;
 
         let config = Arc::new(Mutex::new(config));
 

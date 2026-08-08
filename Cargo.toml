@@ -50,6 +50,10 @@ picky = { path = "vendor/picky" }
 sspi = { path = "vendor/sspi" }
 
 [workspace.dependencies]
+aes-gcm = { version = "0.11", default-features = false, features = [
+    "aes",
+    "alloc",
+] }
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
 async-trait = { version = "0.1", default-features = false }
 argon2 = { version = "0.5", default-features = false, features = [

@@ -15,6 +15,7 @@ pub struct Model {
     pub last_seen: OffsetDateTime,
     /// Node's peer auth certificate hash
     pub tls_spki_sha256: Option<String>,
+    pub encryption_key_fingerprint: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

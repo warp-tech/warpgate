@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tracing::{Instrument, info_span};
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{SessionId, Target, WarpgateError};
+use warpgate_common::{SessionId, Target, WarpgateError, redact_target_secrets};
 use warpgate_db_entities::Session;
 
 use crate::logging::AuditEvent;
@@ -109,11 +109,12 @@ impl WarpgateServerHandle {
                 WarpgateError::InconsistentState("set_target called before set_user_info".into())
             })?;
 
+            let mut snapshot = serde_json::to_value(target)?;
+            redact_target_secrets(&mut snapshot);
+
             Session::Entity::update_many()
                 .set(Session::ActiveModel {
-                    target_snapshot: Set(Some(
-                        serde_json::to_string(&target).map_err(WarpgateError::other)?,
-                    )),
+                    target_snapshot: Set(Some(snapshot.to_string())),
                     ..Default::default()
                 })
                 .filter(Session::Column::Id.eq(self.id))

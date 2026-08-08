@@ -125,7 +125,12 @@ impl PostgresClient {
 
         // Resolve effective password (may be an IAM-generated token or legacy field)
         let effective_password = match &target.effective_auth() {
-            warpgate_common::DatabaseTargetAuth::Password(auth) => auth.password.clone(),
+            warpgate_common::DatabaseTargetAuth::Password(auth) => auth
+                .password
+                .reveal()
+                .map_err(WarpgateError::from)?
+                .expose_secret()
+                .clone(),
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await

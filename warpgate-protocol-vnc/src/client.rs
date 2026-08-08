@@ -155,7 +155,7 @@ async fn run(
         .context("connecting to VNC target")?;
 
     let password = match &options.auth {
-        VncTargetAuth::Password(auth) => auth.password.expose_secret().clone(),
+        VncTargetAuth::Password(auth) => auth.password.reveal()?.expose_secret().clone(),
         VncTargetAuth::None(_) => String::new(),
     };
 

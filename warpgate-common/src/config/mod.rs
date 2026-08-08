@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use target::*;
 use uuid::Uuid;
-pub use warnings::{clear_config_warnings, config_warnings, emit_config_warning};
+pub use warnings::{clear_config_warnings, emit_config_warning, emit_runtime_warning, warnings};
 use warpgate_sso::SsoProviderConfig;
 use warpgate_tls::IntoTlsCertificateRelativePaths;
 

@@ -6,6 +6,7 @@ use russh::keys::{HashAlg, PrivateKey, decode_secret_key, encode_pkcs8_pem, load
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::encryption::{idempotent_maybe_decrypt, idempotent_maybe_encrypt_secret};
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateError};
@@ -98,7 +99,7 @@ pub async fn import_client_key(
         SshClientKey::ActiveModel {
             id: Set(Uuid::new_v4()),
             label: Set(label.into()),
-            secret_key: Set(secret_key),
+            secret_key: Set(idempotent_maybe_encrypt_secret(&secret_key)?),
             public_key: Set(public_key),
             is_default: Set(is_default),
         }
@@ -187,6 +188,11 @@ pub async fn load_client_keys(
     };
     models
         .iter()
-        .map(|m| Ok(decode_secret_key(&m.secret_key, None)?))
+        .map(|m| {
+            Ok(decode_secret_key(
+                &idempotent_maybe_decrypt(&m.secret_key)?,
+                None,
+            )?)
+        })
         .collect()
 }
