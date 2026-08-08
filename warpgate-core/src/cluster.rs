@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::{Expr, OnConflict};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::sea_query::{Expr, IntoCondition, OnConflict};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use time::OffsetDateTime;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -107,7 +107,7 @@ impl Cluster {
     /// Graceful shutdown: end this node's still-open sessions and drop its row, so
     /// a scale-down deregisters immediately instead of waiting for the reaper.
     pub async fn shutdown(&self) -> Result<(), WarpgateError> {
-        mark_sessions_ended(&self.db, &[self.node_id]).await?;
+        mark_sessions_ended(&self.db, Session::Column::NodeId.eq(self.node_id)).await?;
         Node::Entity::delete_by_id(self.node_id)
             .exec(&self.db)
             .await?;
@@ -115,27 +115,25 @@ impl Cluster {
     }
 }
 
-/// Mark every still-open session owned by any of `node_ids` as ended.
+/// Mark every still-open session whose owner node matches `node_filter` as ended.
 async fn mark_sessions_ended(
     db: &DatabaseConnection,
-    node_ids: &[Uuid],
+    node_filter: impl IntoCondition,
 ) -> Result<(), WarpgateError> {
-    if node_ids.is_empty() {
-        return Ok(());
-    }
     Session::Entity::update_many()
         .col_expr(
             Session::Column::Ended,
             Expr::value(OffsetDateTime::now_utc()),
         )
-        .filter(Session::Column::NodeId.is_in(node_ids.iter().copied()))
+        .filter(node_filter)
         .filter(Session::Column::Ended.is_null())
         .exec(db)
         .await?;
     Ok(())
 }
 
-/// End the sessions of nodes whose heartbeat has gone stale, then drop their rows.
+/// End the sessions of nodes whose heartbeat has gone stale, then drop their rows,
+/// then end any session left without a live owner node.
 async fn reap(db: &DatabaseConnection) -> Result<(), WarpgateError> {
     let cutoff = OffsetDateTime::now_utc() - HEARTBEAT_TIMEOUT;
     let dead: Vec<Uuid> = Node::Entity::find()
@@ -145,15 +143,29 @@ async fn reap(db: &DatabaseConnection) -> Result<(), WarpgateError> {
         .into_iter()
         .map(|n| n.id)
         .collect();
-    if dead.is_empty() {
+    if !dead.is_empty() {
+        warn!(count = dead.len(), "Reaping dead cluster nodes");
+        mark_sessions_ended(db, Session::Column::NodeId.is_in(dead.iter().copied())).await?;
+        Node::Entity::delete_many()
+            .filter(Node::Column::Id.is_in(dead))
+            .exec(db)
+            .await?;
+    }
+
+    // An ungracefully killed (and now cleaned up) node's
+    // sessions never get cleaned up otherwise
+    let live: Vec<Uuid> = Node::Entity::find()
+        .select_only()
+        .column(Node::Column::Id)
+        .into_tuple()
+        .all(db)
+        .await?;
+    // At least the current node should have been present - bail
+    // intead of ending all sessions
+    if live.is_empty() {
         return Ok(());
     }
-    warn!(count = dead.len(), "Reaping dead cluster nodes");
-    mark_sessions_ended(db, &dead).await?;
-    Node::Entity::delete_many()
-        .filter(Node::Column::Id.is_in(dead))
-        .exec(db)
-        .await?;
+    mark_sessions_ended(db, Session::Column::NodeId.is_not_in(live)).await?;
     Ok(())
 }
 
@@ -185,4 +197,87 @@ fn non_empty_env(key: &str) -> Option<String> {
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod tests {
+    use sea_orm::ActiveValue::NotSet;
+    use sea_orm::Database;
+    use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+    use warpgate_db_migrations::migrate_database;
+
+    use super::*;
+
+    async fn migrated_db() -> DatabaseConnection {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        db
+    }
+
+    async fn session(db: &DatabaseConnection, node_id: Uuid, ended: bool) -> Uuid {
+        let id = Uuid::new_v4();
+        Session::Entity::insert(Session::ActiveModel {
+            id: Set(id),
+            target_snapshot: Set(None),
+            username: Set(None),
+            remote_address: Set("127.0.0.1:1".into()),
+            started: Set(OffsetDateTime::now_utc()),
+            ended: Set(ended.then(OffsetDateTime::now_utc)),
+            ticket_id: Set(None),
+            protocol: Set("SSH".into()),
+            node_id: Set(node_id),
+        })
+        .exec_without_returning(db)
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn is_open(db: &DatabaseConnection, id: Uuid) -> bool {
+        Session::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .unwrap()
+            .unwrap()
+            .ended
+            .is_none()
+    }
+
+    #[tokio::test]
+    async fn reap_ends_sessions_without_a_live_owner() {
+        let db = migrated_db().await;
+
+        let live_node = Uuid::new_v4();
+        Node::Entity::insert(Node::ActiveModel {
+            id: Set(live_node),
+            address: Set("127.0.0.1:8888".into()),
+            hostname: Set("live".into()),
+            last_seen: Set(OffsetDateTime::now_utc()),
+            tls_spki_sha256: NotSet,
+        })
+        .exec_without_returning(&db)
+        .await
+        .unwrap();
+
+        let live = session(&db, live_node, false).await;
+        let orphan = session(&db, Uuid::new_v4(), false).await;
+        // What m00072 backfills onto pre-clustering sessions
+        let legacy = session(&db, Uuid::nil(), false).await;
+
+        reap(&db).await.unwrap();
+
+        assert!(is_open(&db, live).await);
+        assert!(!is_open(&db, orphan).await);
+        assert!(!is_open(&db, legacy).await);
+    }
+
+    #[tokio::test]
+    async fn reap_keeps_sessions_when_the_node_list_reads_empty() {
+        let db = migrated_db().await;
+
+        let id = session(&db, Uuid::new_v4(), false).await;
+        reap(&db).await.unwrap();
+        assert!(is_open(&db, id).await);
+    }
 }
