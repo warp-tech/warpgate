@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use config::{Config, Environment, File, FileFormat};
+use config::{Config, File, FileFormat};
 use notify::{RecursiveMode, Watcher, recommended_watcher};
 use tokio::sync::{Mutex, mpsc, watch};
 use tracing::{error, info};
@@ -21,7 +21,6 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
                 .context("Invalid config path")?,
             FileFormat::Yaml,
         ))
-        .add_source(Environment::with_prefix("WARPGATE"))
         .build()
         .context("Could not load config")?
         .try_deserialize()
