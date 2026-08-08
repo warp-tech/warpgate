@@ -1,6 +1,7 @@
 mod client;
 mod common;
 mod error;
+mod relay;
 mod session;
 mod session_handle;
 mod stream;
@@ -14,7 +15,7 @@ use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::net::detect_port_knock;
+use warpgate_common::helpers::net::accept_client;
 use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
@@ -63,21 +64,8 @@ impl ProtocolServer for MySQLProtocolServer {
                     return Ok(());
                 };
 
-                let _ = stream.set_nodelay(true);
-                if detect_port_knock(&stream).await {
+                let Some(remote_address) = accept_client(&mut stream, proxy_protocol).await else {
                     continue;
-                }
-                let remote_address = match warpgate_common::helpers::proxy_protocol::remote_address(
-                    &mut stream,
-                    proxy_protocol,
-                )
-                .await
-                {
-                    Ok(remote_address) => remote_address,
-                    Err(error) => {
-                        warn!(%error, "Failed to read PROXY protocol header");
-                        continue;
-                    }
                 };
 
                 let tls_config = tls_config.clone();

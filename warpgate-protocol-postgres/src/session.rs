@@ -171,23 +171,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     }
 
     pub async fn run(mut self) -> Result<(), PostgresError> {
-        let Some(mut initial_message) = self
-            .stream
-            .recv::<PgWireStartupOrSslRequest>(&self.decode_context)
-            .await?
-        else {
-            return Err(PostgresError::Eof);
-        };
+        let mut tls_established = false;
 
-        if let PgWireStartupOrSslRequest::SslRequest(_) = &initial_message {
-            debug!("Received SslRequest");
-            self.stream
-                .push(pgwire::messages::response::SslResponse::Accept)?;
-            self.stream.flush().await?;
-            self.stream = self.stream.upgrade(self.tls_config.clone()).await?;
-            debug!("TLS setup complete");
-
-            let Some(next_message) = self
+        // libpq negotiates in up to three steps: an optional GSSAPI encryption
+        // request, an optional SSL request, then the StartupMessage.
+        let startup = loop {
+            let Some(message) = self
                 .stream
                 .recv::<PgWireStartupOrSslRequest>(&self.decode_context)
                 .await?
@@ -195,20 +184,40 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 return Err(PostgresError::Eof);
             };
 
-            initial_message = next_message;
-        } else {
-            self.send_error_response(
-                "08P01".into(),
-                "SSL connection required - please enable SSL in your client (e.g., add `sslmode=require` to your connection string)".into(),
-            )
-            .await?;
-            return Ok(());
-        }
-
-        self.decode_context.awaiting_frontend_ssl = false;
-
-        let PgWireStartupOrSslRequest::Startup(startup) = initial_message else {
-            return Err(PostgresError::ProtocolError("expected Startup".into()));
+            match message {
+                PgWireStartupOrSslRequest::GssEncRequest(_) => {
+                    debug!("Received GssEncRequest, refusing");
+                    self.stream
+                        .push(pgwire::messages::response::GssEncResponse::Refuse)?;
+                    self.stream.flush().await?;
+                }
+                PgWireStartupOrSslRequest::SslRequest(_) => {
+                    if tls_established {
+                        return Err(PostgresError::ProtocolError(
+                            "unexpected SslRequest inside a TLS session".into(),
+                        ));
+                    }
+                    debug!("Received SslRequest");
+                    self.stream
+                        .push(pgwire::messages::response::SslResponse::Accept)?;
+                    self.stream.flush().await?;
+                    self.stream = self.stream.upgrade(self.tls_config.clone()).await?;
+                    self.decode_context.awaiting_frontend_ssl = false;
+                    tls_established = true;
+                    debug!("TLS setup complete");
+                }
+                PgWireStartupOrSslRequest::Startup(startup) => {
+                    if !tls_established {
+                        self.send_error_response(
+                            "08P01".into(),
+                            "SSL connection required - please enable SSL in your client (e.g., add `sslmode=require` to your connection string)".into(),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                    break startup;
+                }
+            }
         };
 
         self.decode_context.awaiting_frontend_startup = false;
