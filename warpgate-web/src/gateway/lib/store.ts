@@ -9,6 +9,11 @@ export const [openTargetsInNewTab] = autosave(
     true,
 )
 
+export const [collapsedTargetGroups] = autosave<string[]>(
+    'target-list:collapsed-groups',
+    [],
+)
+
 export async function reloadServerInfo(): Promise<void> {
     serverInfo.set(await api.getInfo())
 }
