@@ -91,7 +91,9 @@
 
     const wideMode = $derived(router.location.startsWith('/log'))
 
-    const warningsHtml = $derived($serverInfo?.configWarnings?.map(x => snarkdown(x)))
+    const warningsHtml = $derived(
+        $serverInfo?.configWarnings?.map(x => snarkdown(x)),
+    )
 </script>
 
 <Loadable promise={initPromise}>
