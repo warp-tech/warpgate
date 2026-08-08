@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use tracing::error;
 
 use crate::helpers::rng::get_crypto_rng;
+use crate::{WarpgateConfig, emit_config_warning};
 
 const ENV_VAR: &str = "WARPGATE_ENCRYPTION_KEY";
 const ENV_VAR_OLD: &str = "WARPGATE_ENCRYPTION_KEY_OLD";
@@ -266,10 +267,26 @@ pub fn env_keyring() -> &'static Keyring {
     })
 }
 
-pub fn master_key() -> Option<&'static MasterKey> {
-    env_keyring().primary()
+pub fn validate_encryption_config(config: &WarpgateConfig) {
+    let keyring = env_keyring();
+    if keyring.primary().is_none() {
+        if keyring.has_retired() {
+            emit_config_warning(
+                    "`WARPGATE_ENCRYPTION_KEY_OLD` is set without `WARPGATE_ENCRYPTION_KEY`: existing credentials stay readable, but new credentials will be stored unencrypted.".to_owned()
+                );
+        } else if !config
+            .store
+            .database_url
+            .expose_secret()
+            .starts_with("sqlite:")
+        {
+            // This is the case where the user should have set up encryption
+            emit_config_warning(
+                    "Target credentials are stored unencrypted. Set the `WARPGATE_ENCRYPTION_KEY` environment variable to encrypt them at rest: https://warpgate.null.page/clustering/".to_owned()
+                );
+        }
+    }
 }
-
 /// parse envelope into fingerprint and bytes
 fn envelope_parts(value: &str) -> Option<(&str, Vec<u8>)> {
     let (fingerprint, payload) = value.strip_prefix(PREFIX)?.split_once(':')?;
@@ -289,7 +306,7 @@ pub fn is_envelope(value: &str) -> bool {
 
 /// Encrypt if encryption is enabled and value is plaintext
 pub fn idempotent_maybe_encrypt_secret(value: &str) -> Result<String, EncryptionError> {
-    match master_key() {
+    match env_keyring().primary() {
         Some(key) if !is_envelope(value) => key.encrypt(value),
         _ => Ok(value.to_owned()),
     }

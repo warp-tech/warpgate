@@ -148,6 +148,9 @@ async fn _main() -> Result<()> {
     let cli = Cli::parse();
     let params = cli.into_global_params()?;
 
+    #[cfg(debug_assertions)]
+    dotenv::dotenv()?;
+
     init_logging(load_config(&params, false).ok().as_ref(), &cli).await?;
 
     #[allow(clippy::unwrap_used)]

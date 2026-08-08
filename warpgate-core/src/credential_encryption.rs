@@ -5,7 +5,7 @@ use sea_orm::{
 };
 use tracing::{error, info};
 use warpgate_common::encryption::{
-    Keyring, env_keyring, idempotent_maybe_decrypt, master_key, maybe_reencrypt_str,
+    Keyring, env_keyring, idempotent_maybe_decrypt, maybe_reencrypt_str,
 };
 use warpgate_common::{WarpgateError, emit_runtime_warning, map_target_secrets};
 use warpgate_db_entities::{Parameters, SshClientKey, Target};

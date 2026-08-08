@@ -11,6 +11,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, error, info, warn};
+use warpgate_common::encryption::validate_encryption_config;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, WarpgateConfig};
 use warpgate_core::db::cleanup_db;
@@ -80,6 +81,8 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     };
 
     let services = Services::new(config.clone(), admin_token, params.clone()).await?;
+
+    validate_encryption_config(&config);
 
     // Join the cluster before the credential backfill below
     services.cluster.start().await?;

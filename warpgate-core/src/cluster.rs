@@ -83,9 +83,9 @@ impl Cluster {
             hostname: Set(self.hostname.clone()),
             last_seen: Set(OffsetDateTime::now_utc()),
             tls_spki_sha256: Set(Some(self.tls_identity.spki_sha256_hex.clone())),
-            encryption_key_fingerprint: Set(
-                warpgate_common::encryption::master_key().map(|key| key.fingerprint().to_owned())
-            ),
+            encryption_key_fingerprint: Set(warpgate_common::encryption::env_keyring()
+                .primary()
+                .map(|key| key.fingerprint().to_owned())),
         };
         // Upsert: SeaORM emits `ON CONFLICT DO UPDATE` (Postgres/SQLite) or
         // `ON DUPLICATE KEY UPDATE` (MySQL). `exec_without_returning` avoids the
