@@ -1,4 +1,6 @@
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::ffi::OsString;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{Context, Result};
 use config::{Config, Environment, File, FileFormat};
@@ -9,6 +11,29 @@ use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{
     GlobalParams, WarpgateConfig, WarpgateConfigStore, clear_config_warnings, emit_config_warning,
 };
+
+/// Lowercased `WARPGATE_*` variable names that map onto a config key, taken
+/// from the schema so they track the struct.
+static CONFIG_ENV_VARS: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    schemars::schema_for!(WarpgateConfigStore)
+        .get("properties")
+        .and_then(|p| p.as_object())
+        .into_iter()
+        .flat_map(|p| p.keys().map(|k| format!("warpgate_{k}")))
+        .collect()
+});
+
+/// Keep only the `WARPGATE_*` variables that name a config key - the rest are
+/// read directly by Warpgate (`WARPGATE_CONFIG`) or injected by the platform
+/// (Kubernetes' `WARPGATE_PORT`, ...) and would land in the store as unknown
+/// keys. Case-insensitive, non-Unicode skipped, as [`Environment`]'s own scan.
+fn config_env_source(
+    vars: impl Iterator<Item = (OsString, OsString)>,
+) -> config::Map<String, String> {
+    vars.filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .filter(|(key, _)| CONFIG_ENV_VARS.contains(&key.to_lowercase()))
+        .collect()
+}
 
 pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig> {
     clear_config_warnings();
@@ -21,7 +46,10 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
                 .context("Invalid config path")?,
             FileFormat::Yaml,
         ))
-        .add_source(Environment::with_prefix("WARPGATE"))
+        .add_source(
+            Environment::with_prefix("WARPGATE")
+                .source(Some(config_env_source(std::env::vars_os()))),
+        )
         .build()
         .context("Could not load config")?
         .try_deserialize()
@@ -229,6 +257,79 @@ mod tests {
 
         let (store, _) = deserialize_store_collecting_ignored(value).unwrap();
         assert_eq!(store.ssh.keepalive_interval, Some(Duration::from_secs(60)));
+    }
+
+    /// #2378: the Docker image sets `WARPGATE_CONFIG`, which used to reach the
+    /// store as an unknown `config` key and warn on every install.
+    #[test]
+    fn docker_config_env_var_produces_no_warning() {
+        let vars = [
+            (
+                OsString::from("WARPGATE_CONFIG"),
+                OsString::from("/data/warpgate.yaml"),
+            ),
+            (
+                OsString::from("WARPGATE_ADMIN_TOKEN"),
+                OsString::from("token"),
+            ),
+        ]
+        .into_iter();
+
+        let value: serde_yaml::Value = Config::builder()
+            .add_source(File::from_str(
+                "external_host: bastion.example\n",
+                FileFormat::Yaml,
+            ))
+            .add_source(Environment::with_prefix("WARPGATE").source(Some(config_env_source(vars))))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap();
+
+        let (store, ignored) = deserialize_store_collecting_ignored(value).unwrap();
+        assert!(ignored.is_empty(), "unexpected ignored keys: {ignored:?}");
+        assert_eq!(store.external_host.as_deref(), Some("bastion.example"));
+    }
+
+    #[test]
+    fn env_source_keeps_only_config_keys() {
+        let vars = [
+            ("WARPGATE_CONFIG", "/data/warpgate.yaml"),
+            ("WARPGATE_ADMIN_TOKEN", "token"),
+            ("WARPGATE_PORT_8888_TCP_ADDR", "10.0.0.1"), // injected by Kubernetes
+            ("PATH", "/usr/bin"),
+            ("WARPGATE_EXTERNAL_HOST", "bastion.example"),
+            ("warpgate_database_url", "sqlite:/data/db"), // matched case-insensitively
+        ]
+        .into_iter()
+        .map(|(k, v)| (OsString::from(k), OsString::from(v)));
+
+        let mut kept: Vec<_> = config_env_source(vars).into_keys().collect();
+        kept.sort();
+        assert_eq!(kept, ["WARPGATE_EXTERNAL_HOST", "warpgate_database_url"]);
+    }
+
+    #[test]
+    fn env_source_skips_non_unicode_vars() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+
+            let vars = [
+                (OsString::from_vec(vec![0xff, 0xfe]), OsString::from("x")),
+                (
+                    OsString::from("WARPGATE_EXTERNAL_HOST"),
+                    OsString::from("b"),
+                ),
+            ]
+            .into_iter();
+
+            let source = config_env_source(vars);
+            assert_eq!(
+                source.keys().collect::<Vec<_>>(),
+                ["WARPGATE_EXTERNAL_HOST"]
+            );
+        }
     }
 
     #[test]
