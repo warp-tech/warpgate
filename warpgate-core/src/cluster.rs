@@ -267,6 +267,7 @@ mod tests {
             hostname: Set("live".into()),
             last_seen: Set(OffsetDateTime::now_utc()),
             tls_spki_sha256: NotSet,
+            encryption_key_fingerprint: NotSet,
         })
         .exec_without_returning(&db)
         .await
