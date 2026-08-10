@@ -35,7 +35,12 @@
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
     import { firstBy } from 'thenby'
-    import { openTargetsInNewTab, serverInfo } from './lib/store'
+    import {
+        openTargetsInNewTab,
+        openTargetsInNewTabForced,
+        serverInfo,
+        setOpenTargetsInNewTab,
+    } from './lib/store'
     import { openWebDesktopSession, openWebSshSession } from './lib/webSessions'
 
     let instructionsTarget: TargetSnapshot | undefined = $state()
@@ -171,8 +176,15 @@
                     <DropdownItem>
                         <Input
                             type="switch"
-                            bind:checked={$openTargetsInNewTab}
-                            label="Open targets in a new tab"
+                            checked={$openTargetsInNewTab}
+                            disabled={$openTargetsInNewTabForced}
+                            label={$openTargetsInNewTabForced
+                                ? 'Open targets in a new tab (managed by administrator)'
+                                : 'Open targets in a new tab'}
+                            onchange={e =>
+                                setOpenTargetsInNewTab(
+                                    (e.currentTarget as HTMLInputElement).checked,
+                                )}
                             onmousedown={e => e.stopPropagation()}
                         />
                     </DropdownItem>

@@ -4,6 +4,7 @@
     import {
         AnalyticsConsent,
         api,
+        type OpenTargetsInNewTabMode,
         type ParameterValues,
         type PasswordLoginMode,
         type SshHostKeyVerificationMode,
@@ -555,6 +556,36 @@
                                         </option>
                                     </select>
                                 </FormGroup>
+
+                                <FormGroup
+                                    floating
+                                    label="Open targets in a new tab"
+                                >
+                                    <select
+                                        id="openTargetsInNewTab"
+                                        class="form-select"
+                                        value={parameters.openTargetsInNewTab ?? 'DefaultOn'}
+                                        onchange={e => parameters.openTargetsInNewTab = e.currentTarget.value as OpenTargetsInNewTabMode}
+                                    >
+                                        <option value="DefaultOn">
+                                            Default on
+                                        </option>
+                                        <option value="DefaultOff">
+                                            Default off
+                                        </option>
+                                        <option value="ForcedOn">
+                                            Forced on
+                                        </option>
+                                        <option value="ForcedOff">
+                                            Forced off
+                                        </option>
+                                    </select>
+                                </FormGroup>
+                                <HelpText>
+                                    Default modes let users override the setting
+                                    in their browser. Forced modes apply to
+                                    everyone and disable the user preference.
+                                </HelpText>
 
                                 <label
                                     for="showSessionMenu"

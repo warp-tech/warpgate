@@ -1,13 +1,40 @@
 import { autosave } from 'common/autosave'
-import { writable } from 'svelte/store'
+import { derived, writable } from 'svelte/store'
 import { api, type Info } from './api'
 
 export const serverInfo = writable<Info | undefined>(undefined)
 
-export const [openTargetsInNewTab] = autosave(
+const [openTargetsInNewTabPreference] = autosave<boolean | null>(
     'target-list:open-in-new-tab',
-    true,
+    null,
 )
+
+export const openTargetsInNewTab = derived(
+    [openTargetsInNewTabPreference, serverInfo],
+    ([$preference, $serverInfo]) => {
+        switch ($serverInfo?.openTargetsInNewTab) {
+            case 'ForcedOn':
+                return true
+            case 'ForcedOff':
+                return false
+            case 'DefaultOff':
+                return $preference ?? false
+            default:
+                return $preference ?? true
+        }
+    },
+)
+
+export const openTargetsInNewTabForced = derived(
+    serverInfo,
+    $serverInfo =>
+        $serverInfo?.openTargetsInNewTab === 'ForcedOn' ||
+        $serverInfo?.openTargetsInNewTab === 'ForcedOff',
+)
+
+export function setOpenTargetsInNewTab(value: boolean): void {
+    openTargetsInNewTabPreference.set(value)
+}
 
 export async function reloadServerInfo(): Promise<void> {
     serverInfo.set(await api.getInfo())
