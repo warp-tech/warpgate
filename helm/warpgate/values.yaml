@@ -148,6 +148,11 @@ setup:
 service:
   annotations: {}
   type: ClusterIP
+  # For LoadBalancer/NodePort services, set to "Local" to preserve the client
+  # source IP - required for accurate audit logging and login protection on the
+  # L4 listeners (SSH/RDP/MySQL/PostgreSQL). Empty uses the cluster default
+  # ("Cluster"), which SNATs the connection and hides the real client IP.
+  externalTrafficPolicy: ""
   ports:
     ssh: 2222
     http: 8888
