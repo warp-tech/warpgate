@@ -1040,8 +1040,12 @@ impl ServerSession {
                             .await;
                     }
                     error => {
+                        tracing::error!(%error, "Target connection failed");
                         let _ = self
-                            .emit_pty_error(&format!("Target connection failed: {error}"))
+                            .emit_pty_error(&format!(
+                                "Target connection failed: {}",
+                                error.client_message()
+                            ))
                             .await;
                     }
                 }

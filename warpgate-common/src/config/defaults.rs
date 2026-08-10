@@ -1,7 +1,32 @@
 use std::net::{Ipv6Addr, SocketAddr};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::{ListenEndpoint, Secret};
+
+pub fn _default_vault_ssh_mount() -> String {
+    "ssh-client-signer".to_owned()
+}
+
+pub const fn _default_vault_timeout() -> Duration {
+    Duration::from_secs(10)
+}
+
+pub fn _default_vault_kubernetes_token_path() -> PathBuf {
+    PathBuf::from("/var/run/secrets/kubernetes.io/serviceaccount/token")
+}
+
+pub fn _default_azure_resource() -> String {
+    "https://management.azure.com/".to_owned()
+}
+
+pub fn _default_azure_imds() -> String {
+    "http://169.254.169.254".to_owned()
+}
+
+pub fn _default_gcp_metadata() -> String {
+    "http://metadata.google.internal".to_owned()
+}
 
 pub const fn _default_true() -> bool {
     true

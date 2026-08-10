@@ -10,6 +10,7 @@ use tracing::warn;
 use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{GlobalParams, Protocol, Secret, SessionId, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Parameters;
+use warpgate_vault::VaultClient;
 
 use crate::cluster::Cluster;
 use crate::db::connect_to_db_and_migrate;
@@ -28,6 +29,8 @@ pub struct Services {
     pub cluster: Arc<Cluster>,
     pub state: Arc<Mutex<State>>,
     pub config_provider: Arc<ConfigProviderEnum>,
+    /// Present only when the config declares a Vault server.
+    pub vault: Option<Arc<VaultClient>>,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Option<Secret<String>>>,
     pub cluster_token: Arc<Secret<String>>,
@@ -73,6 +76,14 @@ impl Services {
         let recordings = Arc::new(Mutex::new(recordings));
 
         let cluster = Arc::new(Cluster::new(db.clone(), config.store.http.listen.port()).await?);
+
+        let vault = config
+            .store
+            .vault
+            .clone()
+            .map(VaultClient::new)
+            .transpose()?
+            .map(Arc::new);
 
         let config = Arc::new(Mutex::new(config));
 
@@ -124,6 +135,7 @@ impl Services {
             cluster,
             rate_limiter_registry,
             config_provider,
+            vault,
             auth_state_store,
             admin_token: Arc::new(admin_token.map(Secret::new)),
             cluster_token: Arc::new(resolve_cluster_token(&db).await?),

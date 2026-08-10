@@ -17,7 +17,8 @@ pub use error::SshClientError;
 use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
-use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
+use russh::keys::ssh_key::certificate::CertType;
+use russh::keys::{Algorithm, Certificate, PrivateKey, PrivateKeyWithHashAlg, PublicKey};
 use russh::{MethodKind, Preferred, Sig, kex, mac};
 use serde::Serialize;
 use tokio::sync::mpsc::{
@@ -28,6 +29,7 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
+use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{SSHTargetAuth, SessionId, TargetOptions, TargetSSHOptions, WarpgateError};
 use warpgate_core::{ConfigProvider, Services};
 
@@ -58,6 +60,9 @@ pub enum ConnectionError {
     #[error("AWS: {0}")]
     Aws(#[from] AwsError),
 
+    #[error("Vault: {0}")]
+    Vault(#[from] warpgate_vault::VaultError),
+
     #[error("Could not resolve address")]
     Resolve,
 
@@ -75,6 +80,41 @@ pub enum ConnectionError {
 
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
+}
+
+impl ConnectionError {
+    pub fn client_message(&self) -> String {
+        match self {
+            ConnectionError::Vault(e) => e.client_message().to_string(),
+            ConnectionError::Aws(e) => e.client_message().to_string(),
+            ConnectionError::Authentication => {
+                "SSH target rejected Warpgate's authentication request".to_string()
+            }
+            ConnectionError::HostKeyMismatch { .. } => "Host key mismatch".to_string(),
+            ConnectionError::Resolve => "Could not resolve target address".to_string(),
+            ConnectionError::Aborted => "Connection aborted".to_string(),
+            ConnectionError::Internal => "Internal connection error".to_string(),
+            ConnectionError::JumpHostTargetNotFound => "Jump host target not found".to_string(),
+            ConnectionError::Io(_) | ConnectionError::Key(_) | ConnectionError::Ssh(_) => {
+                "SSH protocol error".to_string()
+            }
+            ConnectionError::Warpgate(e) => e.to_string(),
+        }
+    }
+}
+
+/// Vault is a second gate, not a trusted party, so what comes back is checked
+/// against what was asked for before it is offered to the target. Neither of
+/// these could authenticate anything anyway — the point is to say so in the
+/// session log rather than let the target's refusal stand in for the reason.
+fn certificate_mismatch(certificate: &Certificate, key: &PublicKey) -> Option<&'static str> {
+    if certificate.cert_type() != CertType::User {
+        return Some("Vault returned a host certificate rather than a user certificate");
+    }
+    if certificate.public_key() != key.key_data() {
+        return Some("Vault signed a key other than the one generated for this session");
+    }
+    None
 }
 
 pub struct ResolvedSshChainHost {
@@ -795,6 +835,35 @@ impl RemoteClient {
         }
     }
 
+    /// Identifies the Warpgate session in the certificate's key ID. The target's
+    /// own sshd logs it verbatim, which is what lets a proxied session be traced
+    /// to a person from the target side alone.
+    async fn certificate_key_id(&self) -> String {
+        let session = self
+            .services
+            .state
+            .lock()
+            .await
+            .sessions
+            .get(&self.id)
+            .cloned();
+
+        let username = match session {
+            Some(session) => session
+                .lock()
+                .await
+                .user_info
+                .as_ref()
+                .map(|user| user.username.clone()),
+            None => None,
+        };
+
+        username.map_or_else(
+            || format!("warpgate:{}", self.id),
+            |username| format!("warpgate:{username}:{}", self.id),
+        )
+    }
+
     async fn authenticate_session(
         &self,
         session: &mut Handle<ClientHandler>,
@@ -873,6 +942,67 @@ impl RemoteClient {
                     }
                     auth_error_msg =
                         Some("Public key authentication was rejected by the SSH target".into());
+                }
+            }
+            SSHTargetAuth::Certificate(auth) => {
+                if let Some(vault) = self.services.vault.clone() {
+                    // The key exists only for this authentication attempt — nothing
+                    // the target will ever trust again outlives this scope.
+                    let key = Arc::new(
+                        PrivateKey::random(&mut get_crypto_rng(), Algorithm::Ed25519)
+                            .map_err(russh::keys::Error::from)?,
+                    );
+                    let public_key = key
+                        .public_key()
+                        .to_openssh()
+                        .map_err(russh::keys::Error::from)?;
+                    let key_id = self.certificate_key_id().await;
+                    let role = auth.role.as_deref().unwrap_or_else(|| vault.default_role());
+
+                    let signed_key = vault
+                        .sign_ssh_key(role, &public_key, username, &key_id)
+                        .await?;
+                    let certificate =
+                        Certificate::from_openssh(&signed_key).map_err(russh::keys::Error::from)?;
+
+                    // The target's sshd enforces critical options, so one of
+                    // these decides what the session actually does — a forced
+                    // command runs instead of whatever the user asked for.
+                    // Warpgate never requests any, so an operator has to be able
+                    // to see that one arrived.
+                    if !certificate.critical_options().is_empty() {
+                        warn!(
+                            options = ?certificate.critical_options().keys().collect::<Vec<_>>(),
+                            key_id,
+                            "Vault issued a certificate carrying critical options"
+                        );
+                    }
+
+                    if let Some(reason) = certificate_mismatch(&certificate, key.public_key()) {
+                        auth_error_msg = Some(reason.into());
+                    } else {
+                        let response = session
+                            .authenticate_openssh_cert(username.to_string(), key, certificate)
+                            .await?;
+
+                        auth_result = self
+                            ._handle_auth_result(session, username.to_string(), response)
+                            .await
+                            .unwrap_or(false);
+
+                        if auth_result {
+                            debug!(
+                                username = username,
+                                key_id, "Authenticated with certificate"
+                            );
+                        } else {
+                            auth_error_msg = Some(
+                                "Certificate authentication was rejected by the SSH target".into(),
+                            );
+                        }
+                    }
+                } else {
+                    auth_error_msg = Some("No Vault server is configured".into());
                 }
             }
             SSHTargetAuth::IamRole(_) => {

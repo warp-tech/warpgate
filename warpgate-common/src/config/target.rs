@@ -51,6 +51,8 @@ pub enum SSHTargetAuth {
     Password(SshTargetPasswordAuth),
     #[serde(rename = "publickey")]
     PublicKey(SshTargetPublicKeyAuth),
+    #[serde(rename = "certificate")]
+    Certificate(SshTargetCertificateAuth),
     #[serde(rename = "iam_role")]
     IamRole(SshTargetIamRoleAuth),
 }
@@ -66,6 +68,15 @@ pub struct SshTargetPublicKeyAuth {
     /// marked default.
     #[serde(default)]
     pub key_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct SshTargetCertificateAuth {
+    /// Vault signing role for this target; `None` uses the configured default
+    /// role. The role is what constrains which principals may be requested, so
+    /// targets of differing privilege belong to differing roles.
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]

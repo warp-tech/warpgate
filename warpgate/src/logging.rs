@@ -32,7 +32,12 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
 
     let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
 
-    let env_filter = Arc::new(EnvFilter::from_default_env());
+    // The AWS SDK logs the credentials it resolved — including the access key ID —
+    // at INFO. That is never worth having in Warpgate's log, so it is filtered out
+    // regardless of what RUST_LOG asks for; a target-specific directive outranks a
+    // broad one like `debug`.
+    let env_filter =
+        Arc::new(EnvFilter::from_default_env().add_directive("aws_config=warn".parse()?));
     let enable_colors = console::user_attended();
 
     // Determine effective log format (CLI overrides config)

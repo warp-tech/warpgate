@@ -7,11 +7,13 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use defaults::{
-    _default_audit_retention, _default_cookie_max_age, _default_database_url, _default_false,
+    _default_audit_retention, _default_azure_imds, _default_azure_resource,
+    _default_cookie_max_age, _default_database_url, _default_false, _default_gcp_metadata,
     _default_http_listen, _default_kubernetes_listen, _default_mysql_advertised_version,
     _default_mysql_listen, _default_postgres_listen, _default_rdp_listen, _default_recordings_path,
     _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
-    _default_ssh_keys_path, _default_ssh_listen, _default_vnc_listen,
+    _default_ssh_keys_path, _default_ssh_listen, _default_vault_kubernetes_token_path,
+    _default_vault_ssh_mount, _default_vault_timeout, _default_vnc_listen,
 };
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
@@ -408,6 +410,96 @@ pub enum LogFormat {
     #[default]
     Text,
     Json,
+}
+
+/// How Warpgate proves its own identity to Vault.
+///
+/// Both methods read their credential from a file rather than from the config,
+/// deliberately: the point of issuing target credentials on demand is that
+/// nothing long-lived sits on the Warpgate host, and a value pasted into the
+/// config would put it straight back. A Kubernetes service account token is
+/// mounted and rotated by the kubelet; an AppRole secret ID is short-lived and
+/// meant to be delivered response-wrapped by whatever provisions the host.
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum VaultAuth {
+    Kubernetes {
+        role: String,
+        #[serde(default = "_default_vault_kubernetes_token_path")]
+        token_path: PathBuf,
+    },
+    AppRole {
+        role_id: String,
+        secret_id_path: PathBuf,
+    },
+    /// Signs an `sts:GetCallerIdentity` call with the default credential chain —
+    /// on EC2 that is the instance role. Access keys in the environment work but
+    /// put back the long-lived secret this exists to avoid.
+    Aws {
+        #[serde(default)]
+        role: Option<String>,
+        /// Bound into the signature so a captured request cannot be replayed
+        /// against a different Vault. Must match the server's `iam_server_id_header_value`.
+        #[serde(default)]
+        server_id: Option<String>,
+        /// Signs against a regional STS endpoint instead of the global one. Set
+        /// this only when Vault is configured with a matching `sts_endpoint`:
+        /// Vault replays the request globally by default, and a region-scoped
+        /// signature is rejected there.
+        #[serde(default)]
+        region: Option<String>,
+    },
+    Azure {
+        role: String,
+        #[serde(default = "_default_azure_resource")]
+        resource: String,
+        #[serde(default = "_default_azure_imds")]
+        metadata_address: String,
+    },
+    Gcp {
+        role: String,
+        #[serde(default = "_default_gcp_metadata")]
+        metadata_address: String,
+    },
+}
+
+impl VaultAuth {
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::Kubernetes { .. } => "kubernetes",
+            Self::AppRole { .. } => "approle",
+            Self::Aws { .. } => "aws",
+            Self::Azure { .. } => "azure",
+            Self::Gcp { .. } => "gcp",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct VaultConfig {
+    /// Base URL of the Vault server, e.g. `https://vault.internal:8200`.
+    pub address: String,
+
+    /// Mount point of the SSH secrets engine in signed-certificates mode.
+    #[serde(default = "_default_vault_ssh_mount")]
+    pub mount: String,
+
+    /// Signing role used by targets that don't name one of their own.
+    pub default_role: String,
+
+    pub auth: VaultAuth,
+
+    /// Lifetime asked for when signing. Vault clamps this to the role's
+    /// `max_ttl`, so it can only shorten what the role already allows — set it
+    /// to hold the window down without editing Vault. Left unset, the role's own
+    /// TTL decides.
+    #[serde(default, with = "humantime_serde::option")]
+    #[schemars(with = "Option<String>")]
+    pub certificate_ttl: Option<Duration>,
+
+    #[serde(default = "_default_vault_timeout", with = "humantime_serde")]
+    #[schemars(with = "String")]
+    pub timeout: Duration,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
@@ -883,6 +975,10 @@ pub struct WarpgateConfigStore {
     #[schemars(with = "String")]
     pub database_url: Secret<String>,
 
+    /// Absent unless the deployment issues target credentials from Vault.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vault: Option<VaultConfig>,
+
     #[serde(default)]
     pub ssh: SshConfig,
 
@@ -915,6 +1011,7 @@ impl Default for WarpgateConfigStore {
             recordings: <_>::default(),
             external_host: None,
             database_url: _default_database_url(),
+            vault: None,
             ssh: <_>::default(),
             http: <_>::default(),
             kubernetes: <_>::default(),

@@ -147,6 +147,9 @@
         <select bind:value={options.auth.kind} class="form-control">
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
+            {#if $serverInfo?.hasVault}
+                <option value="Certificate">Certificate issued by Vault</option>
+            {/if}
             {#if $serverInfo?.runningOnEc2}
                 <option value="IamRole">IAM Role (experimental)</option>
             {/if}
@@ -171,6 +174,15 @@
         >
             <Fa fw icon={faExternalLink} />
         </a>
+    {/if}
+    {#if options.auth.kind === 'Certificate'}
+        <FormGroup floating label="Vault signing role" class="w-100 ms-3">
+            <input
+                class="form-control"
+                placeholder="Use the configured default role"
+                bind:value={options.auth.role}
+            >
+        </FormGroup>
     {/if}
     {#if options.auth.kind === 'Password'}
         <FormGroup floating label="Password" class="w-100 ms-3">

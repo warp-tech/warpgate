@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.0-beta.5-11-g30fb9eab-modified"
+    "version": "v0.27.4-modified"
   },
   "servers": [
     {
@@ -6406,6 +6406,9 @@
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
           },
           {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetCertificateAuth"
+          },
+          {
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         ],
@@ -6414,9 +6417,32 @@
           "mapping": {
             "Password": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth",
             "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth",
+            "Certificate": "#/components/schemas/SSHTargetAuth_SshTargetCertificateAuth",
             "IamRole": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         }
+      },
+      "SSHTargetAuth_SshTargetCertificateAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Certificate"
+                ],
+                "example": "Certificate"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetCertificateAuth"
+          }
+        ]
       },
       "SSHTargetAuth_SshTargetIamRoleAuth": {
         "allOf": [
@@ -6566,6 +6592,16 @@
           "AutoReject",
           "Ignore"
         ]
+      },
+      "SshTargetCertificateAuth": {
+        "type": "object",
+        "title": "SshTargetCertificateAuth",
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "Vault signing role for this target; `None` uses the configured default\nrole. The role is what constrains which principals may be requested, so\ntargets of differing privilege belong to differing roles."
+          }
+        }
       },
       "SshTargetIamRoleAuth": {
         "type": "object",

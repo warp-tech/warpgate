@@ -1,0 +1,1051 @@
+"""Target authentication with short-lived certificates issued by Vault.
+
+Beyond the happy path, the cases here are drawn from two places: the failures
+this feature hit while being built, and the classes of bug Warpgate has actually
+shipped before — a credential accepted without proof of possession
+(GHSA-3cjp-w4cp-m9c8), a new code path skipping a control every other path
+applies (GHSA-qmr2-wp96-h9ff), and an identity taken from the wrong stage of
+authentication (GHSA-c94j-vqr5-3mxr).
+"""
+
+import json
+from pathlib import Path
+from uuid import uuid4
+
+import psutil
+import pytest
+
+from .api_client import admin_client, sdk
+from .conftest import ProcessManager, WarpgateProcess
+from .stub_vault import (
+    SERVICE_ACCOUNT_JWT,
+    Recorder,
+    StubVault,
+    jwt_claims,
+    reject_login,
+)
+from .util import wait_port
+
+USER_PUBLIC_KEY_PATH = Path("ssh-keys/id_ed25519.pub")
+USER_PRIVATE_KEY_PATH = "ssh-keys/id_ed25519"
+
+
+@pytest.fixture(scope="module")
+def stub_vault(ctx):
+    stub = StubVault(ctx.tmpdir / f"stub-vault-{uuid4()}")
+    stub.start()
+    yield stub
+    stub.stop()
+
+
+@pytest.fixture(scope="module")
+def cert_wg(processes: ProcessManager, ctx, stub_vault: StubVault):
+    """Warpgate wired to the stub issuer, with its log kept for assertions."""
+    token_path = ctx.tmpdir / f"sa-token-{uuid4()}"
+    token_path.write_text(SERVICE_ACCOUNT_JWT)
+
+    log_path = ctx.tmpdir / f"cert-wg-{uuid4()}.log"
+    with log_path.open("w") as log:
+        wg = processes.start_wg(
+            config_patch={
+                "vault": {
+                    "address": stub_vault.url,
+                    "default_role": "warpgate",
+                    "auth": {
+                        "kind": "kubernetes",
+                        "role": "warpgate",
+                        "token_path": str(token_path),
+                    },
+                }
+            },
+            stdout=log,
+            stderr=log,
+        )
+        wait_port(wg.http_port, for_process=wg.process, recv=False)
+        wait_port(wg.ssh_port, for_process=wg.process)
+        wg.log_path = log_path
+        yield wg
+
+
+@pytest.fixture(scope="module")
+def cert_ssh_port(processes: ProcessManager, stub_vault: StubVault):
+    """A target that trusts the stub CA and has no authorized_keys at all."""
+    port = processes.start_ssh_server(trusted_ca=[stub_vault.ca_public_key])
+    wait_port(port)
+    return port
+
+
+@pytest.fixture(autouse=True)
+def reset_stub(stub_vault: StubVault):
+    stub_vault.reset()
+    yield
+    stub_vault.reset()
+
+
+def make_user_and_target(api, ssh_port, *, role=None, username="root", assign=True):
+    wg_role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+    user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+    api.create_public_key_credential(
+        user.id,
+        sdk.NewPublicKeyCredential(
+            label="Public Key",
+            openssh_public_key=USER_PUBLIC_KEY_PATH.read_text().strip(),
+        ),
+    )
+    api.add_user_role(user.id, wg_role.id)
+
+    target = api.create_target(
+        sdk.TargetDataRequest(
+            name=f"cert-{uuid4()}",
+            options=sdk.TargetOptions(
+                sdk.TargetOptionsTargetSSHOptions(
+                    kind="Ssh",
+                    host="localhost",
+                    port=ssh_port,
+                    username=username,
+                    auth=sdk.SSHTargetAuth(
+                        sdk.SSHTargetAuthSshTargetCertificateAuth(
+                            kind="Certificate", role=role
+                        )
+                    ),
+                )
+            ),
+        )
+    )
+    if assign:
+        api.add_target_role(target.id, wg_role.id)
+    return user, target
+
+
+def start(processes: ProcessManager, wg: WarpgateProcess, user, target, *extra):
+    return processes.start_ssh_client(
+        f"{user.username}:{target.name}@localhost",
+        "-p",
+        str(wg.ssh_port),
+        "-o",
+        f"IdentityFile={USER_PRIVATE_KEY_PATH}",
+        "-o",
+        "PreferredAuthentications=publickey",
+        *extra,
+        "ls",
+        "/bin/sh",
+    )
+
+
+def connect(processes: ProcessManager, wg: WarpgateProcess, user, target, timeout, *extra):
+    client = start(processes, wg, user, target, *extra)
+    stdout = client.communicate(timeout=timeout)[0]
+    return client.returncode, stdout
+
+
+def log_since(wg: WarpgateProcess, offset: int) -> str:
+    """Only what this test wrote. The gateway is shared by the whole module, so
+    searching the whole log would find another test's line just as happily."""
+    return Path(wg.log_path).read_text(errors="replace")[offset:]
+
+
+@pytest.fixture
+def api(cert_wg: WarpgateProcess):
+    with admin_client(f"https://localhost:{cert_wg.http_port}") as client:
+        yield client
+
+
+class TestHappyPath:
+    def test_connects_with_an_issued_certificate(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        user, target = make_user_and_target(api, cert_ssh_port)
+        code, stdout = connect(processes, cert_wg, user, target, timeout)
+
+        assert code == 0
+        assert stdout == b"/bin/sh\n"
+        assert len(stub_vault.signs) == 1
+        assert stub_vault.signs[0]["valid_principals"] == "root"
+        assert stub_vault.signs[0]["cert_type"] == "user"
+
+    def test_uses_the_default_role_unless_the_target_names_one(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        user, target = make_user_and_target(api, cert_ssh_port)
+        connect(processes, cert_wg, user, target, timeout)
+        assert stub_vault.signs[-1]["role"] == "warpgate"
+
+        user, target = make_user_and_target(api, cert_ssh_port, role="privileged")
+        connect(processes, cert_wg, user, target, timeout)
+        assert stub_vault.signs[-1]["role"] == "privileged"
+
+    def test_each_session_gets_a_fresh_key_and_certificate(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        user, target = make_user_and_target(api, cert_ssh_port)
+        for _ in range(3):
+            assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+
+        offered = [sign["public_key"] for sign in stub_vault.signs]
+        assert len(offered) == 3
+        assert len(set(offered)) == 3, "an ephemeral key was reused between sessions"
+
+    def test_the_token_is_reused_across_sessions(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        user, target = make_user_and_target(api, cert_ssh_port)
+        for _ in range(3):
+            connect(processes, cert_wg, user, target, timeout)
+
+        # The first session may find a token cached by an earlier test, so the
+        # assertion is that three sessions do not each cause a login.
+        assert len(stub_vault.logins) <= 1
+
+    def test_no_ttl_is_requested_unless_one_is_configured(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """Vault reads an absent `ttl` as the role's default. Sending a zero
+        instead would ask for the shortest certificate Vault will issue."""
+        user, target = make_user_and_target(api, cert_ssh_port)
+        connect(processes, cert_wg, user, target, timeout)
+
+        assert "ttl" not in stub_vault.signs[-1]
+
+    def test_a_configured_ttl_is_asked_for(
+        self, processes: ProcessManager, ctx, stub_vault, cert_ssh_port, timeout
+    ):
+        """The TTL can be held down from Warpgate's side without editing the
+        Vault role — Vault clamps it to the role's `max_ttl` regardless."""
+        token_path = ctx.tmpdir / f"sa-token-{uuid4()}"
+        token_path.write_text(SERVICE_ACCOUNT_JWT)
+
+        wg = processes.start_wg(
+            config_patch={
+                "vault": {
+                    "address": stub_vault.url,
+                    "default_role": "warpgate",
+                    "certificate_ttl": "90s",
+                    "auth": {
+                        "kind": "kubernetes",
+                        "role": "warpgate",
+                        "token_path": str(token_path),
+                    },
+                }
+            }
+        )
+        wait_port(wg.http_port, for_process=wg.process, recv=False)
+        wait_port(wg.ssh_port, for_process=wg.process)
+
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+        assert connect(processes, wg, user, target, timeout)[0] == 0
+        assert stub_vault.signs[-1]["ttl"] == "90s"
+
+
+class TestIdentity:
+    """The certificate must name the user Warpgate actually authenticated."""
+
+    def test_key_id_carries_the_authenticated_user_and_session(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        user, target = make_user_and_target(api, cert_ssh_port)
+        connect(processes, cert_wg, user, target, timeout)
+
+        key_id = stub_vault.signs[-1]["key_id"]
+        prefix, username, session = key_id.split(":")
+        assert prefix == "warpgate"
+        assert username == user.username
+        assert session
+
+    def test_the_target_username_is_not_the_warpgate_username(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """`valid_principals` bounds access on the target and must never be
+        taken from the identity the client chose to log into Warpgate with."""
+        user, target = make_user_and_target(api, cert_ssh_port)
+        connect(processes, cert_wg, user, target, timeout)
+
+        assert stub_vault.signs[-1]["valid_principals"] == "root"
+        assert user.username not in stub_vault.signs[-1]["valid_principals"]
+
+    def test_a_comma_in_the_target_username_is_refused(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """Vault reads `valid_principals` as a comma-separated list, so a comma
+        in the target's username would ask for a certificate good for accounts
+        nobody named. No request may leave at all."""
+        user, target = make_user_and_target(api, cert_ssh_port, username="deploy,root")
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+
+        assert stub_vault.signs == []
+
+    def test_a_newline_in_the_target_username_never_reaches_vault(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The principal is written into the certificate and the certificate is
+        written into the target's sshd log, so a newline in a target's username
+        is a way to compose log lines on the target. Nothing may be sent at all
+        — not even the login that would precede it."""
+        user, target = make_user_and_target(api, cert_ssh_port, username="root\nnobody")
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+
+        assert stub_vault.requests == []
+
+    def test_a_ticket_session_is_named_after_its_user_and_not_its_secret(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The key ID must name the user Warpgate authenticated, however it
+        authenticated them. A ticket session logs in as `ticket-<secret>`, so a
+        key ID taken from the login name rather than from the authentication
+        result would name nobody and copy the ticket secret into the target's
+        sshd log — the shape of GHSA-c94j-vqr5-3mxr."""
+        user, target = make_user_and_target(api, cert_ssh_port)
+        secret = api.create_ticket(
+            sdk.CreateTicketRequest(target_name=target.name, username=user.username)
+        ).secret
+
+        client = processes.start_ssh_client(
+            f"ticket-{secret}@localhost",
+            "-p",
+            str(cert_wg.ssh_port),
+            "-o",
+            "PreferredAuthentications=password",
+            "-i",
+            "/dev/null",
+            "ls",
+            "/bin/sh",
+            password="irrelevant",
+        )
+        assert client.communicate(timeout=timeout)[0] == b"/bin/sh\n"
+
+        key_id = stub_vault.signs[-1]["key_id"]
+        assert key_id.startswith(f"warpgate:{user.username}:")
+        assert secret not in key_id
+
+
+class TestRejections:
+    def test_target_that_does_not_trust_the_ca(
+        self, processes, cert_wg, stub_vault, api, timeout
+    ):
+        port = processes.start_ssh_server()
+        wait_port(port)
+
+        user, target = make_user_and_target(api, port)
+        code, stdout = connect(processes, cert_wg, user, target, timeout)
+
+        assert code != 0
+        assert stdout == b""
+        assert len(stub_vault.signs) == 1, "the target rejected it, not Warpgate"
+
+    def test_expired_certificate(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        stub_vault.validity = "-2h:-1h"
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        assert len(stub_vault.signs) == 1
+
+    def test_certificate_that_is_not_yet_valid(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """A target whose clock lags far enough behind Warpgate's sees this."""
+        stub_vault.validity = "+1h:+2h"
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        assert len(stub_vault.signs) == 1
+
+    def test_certificate_for_a_different_principal(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        stub_vault.principals = "nobody"
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        assert len(stub_vault.signs) == 1
+
+    def test_certificate_issued_for_a_key_warpgate_does_not_hold(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """A certificate is a public credential. Signing someone else's key must
+        not authenticate anyone — the class of bug behind GHSA-3cjp-w4cp-m9c8,
+        where an SSH key offer was accepted without a signature."""
+        offset = Path(cert_wg.log_path).stat().st_size
+        stub_vault.sign_public_key = stub_vault.unrelated_public_key()
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        assert len(stub_vault.signs) == 1
+        # The target would refuse it too, but then the log would say only that
+        # the target said no. Warpgate knows which key it generated.
+        assert "signed a key other than" in log_since(cert_wg, offset)
+
+    def test_a_host_certificate_is_not_offered_to_the_target(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """A host certificate can never authenticate a user, so an issuer that
+        returns one is misconfigured or lying. Either way the reason belongs in
+        Warpgate's log rather than arriving as an unexplained rejection."""
+        offset = Path(cert_wg.log_path).stat().st_size
+        stub_vault.cert_type = "host"
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        assert len(stub_vault.signs) == 1
+        assert "host certificate" in log_since(cert_wg, offset)
+
+    def test_malformed_certificate(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        stub_vault.signed_key = "this is not a certificate"
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        assert len(stub_vault.signs) == 1
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param({}, id="no-signed-key"),
+            pytest.param({"signed_key": ""}, id="empty-signed-key"),
+            pytest.param({"signed_key": 42}, id="signed-key-is-not-a-string"),
+        ],
+    )
+    def test_a_success_that_carries_no_certificate(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout, data
+    ):
+        """`200 OK` is not a certificate. Each of these parses as JSON and none
+        of them is a credential, so the session has to end rather than continue
+        with whatever an absent field defaults to."""
+        stub_vault.sign_data = data
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        assert len(stub_vault.signs) == 1
+
+    def test_a_forced_command_from_the_issuer_is_reported(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The target's sshd enforces critical options, so an issuer that
+        attaches `force-command` decides what the session runs — the user's own
+        command never executes, and the recording shows the output of something
+        they did not type. Warpgate asks for no critical options and cannot stop
+        the target honouring one, so the least it can do is say one arrived."""
+        offset = Path(cert_wg.log_path).stat().st_size
+        stub_vault.sign_options = ["force-command=echo chosen-by-the-issuer"]
+        user, target = make_user_and_target(api, cert_ssh_port)
+        code, stdout = connect(processes, cert_wg, user, target, timeout)
+
+        # Not an assumption: this is the mechanism the test exists for.
+        assert (code, stdout) == (0, b"chosen-by-the-issuer\n")
+
+        log = log_since(cert_wg, offset)
+        assert "critical options" in log
+        assert "force-command" in log
+
+
+class TestIssuerFailures:
+    def test_issuer_refuses_to_sign(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        stub_vault.sign_status = 403
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+
+    def test_a_persistent_denial_is_not_retried_forever(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """One re-login distinguishes a stale token from a policy denial. A
+        second failure has to be final, or a denied target becomes a request
+        amplifier against Vault."""
+        stub_vault.sign_status = 403
+        user, target = make_user_and_target(api, cert_ssh_port)
+        connect(processes, cert_wg, user, target, timeout)
+
+        assert len(stub_vault.signs) == 2
+
+    def test_a_stale_token_is_refreshed_once(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """Vault can reject a token long before its lease runs out — after a
+        restart, or a revocation. Warpgate must recover within the session
+        rather than failing until the lease expires."""
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+
+        stub_vault.invalidate_token()
+        assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+        assert len(stub_vault.signs) == 3, "expected one rejected and one retried sign"
+
+    def test_a_redirect_from_the_issuer_is_refused(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """Following a redirect would hand `X-Vault-Token` to whatever host it
+        names — reqwest only knows to strip `Authorization`. The session must
+        fail instead, and the redirect target must never be contacted."""
+        recorder = Recorder()
+        recorder.start()
+        try:
+            stub_vault.sign_redirect_to = f"{recorder.url}/v1/steal"
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+            assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+            assert stub_vault.signs, "the signing request was never made"
+            assert recorder.requests == [], "the redirect was followed"
+        finally:
+            recorder.stop()
+
+    def test_an_oversized_error_body_is_not_relayed_to_the_client(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """An endpoint answering on the Vault address can return any body it
+        likes. It must neither be buffered whole nor shown to the user."""
+        marker = "SENSITIVE-INTERNAL-DETAIL"
+        stub_vault.sign_error_body = (marker + "x" * 64).encode() * 200_000
+
+        user, target = make_user_and_target(api, cert_ssh_port)
+        code, stdout = connect(processes, cert_wg, user, target, timeout)
+
+        assert code != 0
+        assert marker not in stdout.decode(errors="replace")
+
+    def test_an_oversized_signing_response_is_not_buffered_whole(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The failed-response path was bounded; the successful one is the same
+        body with a different status code on it, and it is parsed once per
+        session. Left unbounded it is memory the issuer gets to allocate inside
+        Warpgate, as often as sessions are started."""
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+
+        gateway = psutil.Process(cert_wg.process.pid)
+        before = gateway.memory_info().rss
+        stub_vault.signed_key = "ssh-ed25519-cert-v01@openssh.com " + "A" * 100_000_000
+        assert connect(processes, cert_wg, user, target, timeout * 3)[0] != 0
+        growth = gateway.memory_info().rss - before
+
+        assert growth < 50_000_000, f"the body was buffered whole ({growth / 1e6:.0f} MB)"
+
+        # And the gateway is still there, with the memory it started with.
+        stub_vault.signed_key = None
+        assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+
+    def test_a_revoked_token_costs_one_login_no_matter_how_many_sessions_find_it(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """A Vault restart is discovered by every session in flight at the same
+        moment. If each answered by logging in, ordinary traffic would meet the
+        restart with a login per session — and each of those with a credential
+        read off disk."""
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+
+        stub_vault.invalidate_token()
+        # Wide enough that the sessions are genuinely inside the same login,
+        # rather than politely arriving one after another.
+        stub_vault.login_delay = 1
+        logins = len(stub_vault.logins)
+
+        clients = [start(processes, cert_wg, user, target) for _ in range(6)]
+        for client in clients:
+            client.communicate(timeout=timeout * 3)
+
+        assert [client.returncode for client in clients] == [0] * 6
+        assert len(stub_vault.logins) - logins == 1
+
+    def test_the_client_is_never_shown_the_issuers_own_words(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """What the user sees comes from a fixed list; the issuer's body is
+        written for operators and names mounts, policies and hosts. This asks
+        for a PTY on purpose — without one the message has nowhere to go and the
+        check would pass without anything being shown at all."""
+        stub_vault.sign_error_body = b"1 error occurred: permission denied by policy ssh-signer-7"
+        user, target = make_user_and_target(api, cert_ssh_port)
+        code, stdout = connect(processes, cert_wg, user, target, timeout, "-tt")
+
+        assert code != 0
+        shown = stdout.decode(errors="replace")
+        assert "Vault service error" in shown, "the failure never reached the user"
+        assert "ssh-signer-7" not in shown
+        assert "policy" not in shown
+
+    def test_an_error_body_split_mid_character_does_not_kill_the_session(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """Truncating at a fixed byte count lands inside a multi-byte character
+        for some bodies; slicing a Rust `String` there panics."""
+        stub_vault.sign_error_body = b"a" * 255 + "é".encode() + b"b" * 64
+
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+
+        # The gateway has to still be there afterwards: a panic in the signing
+        # path would take the session task down and leave the next login hanging.
+        stub_vault.sign_error_body = None
+        assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+
+    def test_issuer_unreachable_fails_promptly(
+        self, processes: ProcessManager, ctx, cert_ssh_port, timeout
+    ):
+        """An unreachable Vault must fail the session rather than stall it, so
+        an issuer outage looks like an auth failure and not a hang."""
+        dead = StubVault(ctx.tmpdir / f"dead-vault-{uuid4()}")
+        dead.start()
+        address = dead.url
+        dead.stop()
+
+        token_path = ctx.tmpdir / f"sa-token-{uuid4()}"
+        token_path.write_text(SERVICE_ACCOUNT_JWT)
+
+        wg = processes.start_wg(
+            config_patch={
+                "vault": {
+                    "address": address,
+                    "default_role": "warpgate",
+                    "timeout": "5s",
+                    "auth": {
+                        "kind": "kubernetes",
+                        "role": "warpgate",
+                        "token_path": str(token_path),
+                    },
+                }
+            }
+        )
+        wait_port(wg.http_port, for_process=wg.process, recv=False)
+        wait_port(wg.ssh_port, for_process=wg.process)
+
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+        # The assertion is the absence of a timeout: communicate() raises if the
+        # session is still open when the test's own deadline passes.
+        code, _ = connect(processes, wg, user, target, timeout)
+        assert code != 0
+
+
+class TestAuthMethods:
+    def test_kubernetes_sends_the_service_account_token(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        user, target = make_user_and_target(api, cert_ssh_port)
+        connect(processes, cert_wg, user, target, timeout)
+
+        # An earlier test may have left a usable token cached, so force a login.
+        stub_vault.invalidate_token()
+        connect(processes, cert_wg, user, target, timeout)
+
+        login = stub_vault.logins[-1]
+        assert login["method"] == "kubernetes"
+        assert login["role"] == "warpgate"
+        assert login["jwt"] == SERVICE_ACCOUNT_JWT
+
+    def test_approle_sends_the_secret_id_from_its_file(
+        self, processes: ProcessManager, ctx, stub_vault, cert_ssh_port, timeout
+    ):
+        """The secret ID is read from disk rather than the config so it can be
+        rotated underneath a running Warpgate."""
+        secret_id_path = ctx.tmpdir / f"secret-id-{uuid4()}"
+        secret_id_path.write_text("stub-secret-id\n")
+
+        wg = processes.start_wg(
+            config_patch={
+                "vault": {
+                    "address": stub_vault.url,
+                    "default_role": "warpgate",
+                    "auth": {
+                        "kind": "app_role",
+                        "role_id": "stub-role-id",
+                        "secret_id_path": str(secret_id_path),
+                    },
+                }
+            }
+        )
+        wait_port(wg.http_port, for_process=wg.process, recv=False)
+        wait_port(wg.ssh_port, for_process=wg.process)
+
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+        assert connect(processes, wg, user, target, timeout)[0] == 0
+
+        login = stub_vault.logins[-1]
+        assert login["method"] == "approle"
+        assert login["role_id"] == "stub-role-id"
+        assert login["secret_id"] == "stub-secret-id"
+
+
+class TestCloudAuthMethods:
+    """The cloud methods take their credential from a metadata service, so
+    nothing durable is written to the host at all. Only the request Warpgate
+    builds is under test here; the metadata services themselves need a real VM."""
+
+    def _wg_with_auth(self, processes, stub_vault, auth, env=None):
+        wg = processes.start_wg(
+            config_patch={
+                "vault": {
+                    "address": stub_vault.url,
+                    "default_role": "warpgate",
+                    "auth": auth,
+                }
+            },
+            env=env,
+        )
+        wait_port(wg.http_port, for_process=wg.process, recv=False)
+        wait_port(wg.ssh_port, for_process=wg.process)
+        return wg
+
+    def test_azure_sends_imds_token_and_vm_coordinates(
+        self, processes: ProcessManager, stub_vault, cert_ssh_port, timeout
+    ):
+        wg = self._wg_with_auth(
+            processes,
+            stub_vault,
+            {
+                "kind": "azure",
+                "role": "warpgate",
+                "metadata_address": stub_vault.url,
+            },
+        )
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+        assert connect(processes, wg, user, target, timeout)[0] == 0
+
+        login = stub_vault.logins[-1]
+        assert login["method"] == "azure"
+        assert jwt_claims(login["jwt"])["aud"] == "https://management.azure.com/"
+        assert login["subscription_id"] == "sub-1"
+        assert login["resource_group_name"] == "rg-1"
+        assert login["vm_name"] == "vm-1"
+        assert any("management.azure.com" in r for r in stub_vault.metadata_requests)
+
+    def test_gcp_requests_a_token_bound_to_its_role(
+        self, processes: ProcessManager, stub_vault, cert_ssh_port, timeout
+    ):
+        """The audience ties the token to one Vault role, so a token minted for
+        another role cannot be presented here."""
+        wg = self._wg_with_auth(
+            processes,
+            stub_vault,
+            {
+                "kind": "gcp",
+                "role": "warpgate",
+                "metadata_address": stub_vault.url,
+            },
+        )
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+        assert connect(processes, wg, user, target, timeout)[0] == 0
+
+        login = stub_vault.logins[-1]
+        assert login["method"] == "gcp"
+        assert jwt_claims(login["jwt"])["aud"] == "vault/warpgate"
+        assert any(
+            "audience=vault%2Fwarpgate" in r for r in stub_vault.metadata_requests
+        )
+
+    def test_aws_signs_the_global_endpoint_by_default(
+        self, processes: ProcessManager, stub_vault, cert_ssh_port, timeout
+    ):
+        """Vault replays the request against the global STS endpoint, which only
+        accepts signatures scoped to us-east-1. Signing a regional endpoint by
+        default makes every login fail with SignatureDoesNotMatch."""
+        from base64 import b64decode
+
+        wg = self._wg_with_auth(
+            processes,
+            stub_vault,
+            {"kind": "aws", "role": "warpgate"},
+            env={
+                "AWS_ACCESS_KEY_ID": "ASIA0000000000000000",
+                "AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                "AWS_SESSION_TOKEN": "AQoDYXdzEJr1KEXAMPLEtoken",
+            },
+
+        )
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+        connect(processes, wg, user, target, timeout)
+
+        login = stub_vault.logins[-1]
+        assert b64decode(login["iam_request_url"]) == b"https://sts.amazonaws.com/"
+
+        headers = json.loads(b64decode(login["iam_request_headers"]))
+        authorization = next(
+            value for name, value in headers.items() if name.lower() == "authorization"
+        )
+        assert "/us-east-1/sts/aws4_request" in authorization
+
+    def test_aws_sends_a_signed_sts_request(
+        self, processes: ProcessManager, stub_vault, cert_ssh_port, timeout
+    ):
+        """Vault replays the signed request against STS, so the signature — not a
+        disclosed credential — is what proves identity."""
+        from base64 import b64decode
+
+        wg = self._wg_with_auth(
+            processes,
+            stub_vault,
+            {
+                "kind": "aws",
+                "role": "warpgate",
+                "region": "us-east-1",
+                "server_id": "vault.example.com",
+            },
+            # Supplied here rather than inherited, so the test does not depend on
+            # whatever credentials the developer happens to have. The signature is
+            # verified for shape, never sent to AWS.
+            env={
+                "AWS_ACCESS_KEY_ID": "ASIA0000000000000000",
+                "AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                "AWS_SESSION_TOKEN": "AQoDYXdzEJr1KEXAMPLEtoken",
+            },
+
+        )
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+        connect(processes, wg, user, target, timeout)
+
+        login = stub_vault.logins[-1]
+        assert login["method"] == "aws"
+        assert login["iam_http_request_method"] == "POST"
+        assert b64decode(login["iam_request_url"]) == b"https://sts.us-east-1.amazonaws.com/"
+        assert b64decode(login["iam_request_body"]) == (
+            b"Action=GetCallerIdentity&Version=2011-06-15"
+        )
+
+        headers = json.loads(b64decode(login["iam_request_headers"]))
+        headers = {name.lower(): value for name, value in headers.items()}
+        assert headers["x-vault-aws-iam-server-id"] == "vault.example.com"
+        assert "AWS4-HMAC-SHA256" in headers["authorization"]
+        assert "x-vault-aws-iam-server-id" in headers["authorization"], (
+            "the server ID must be signed, not merely sent"
+        )
+
+    def test_approle_response_wrapping(
+        self, processes, cert_ssh_port, stub_vault, ctx, timeout
+    ):
+        secret_id_path = ctx.tmpdir / f"wrapping-token-{uuid4()}"
+        secret_id_path.write_text("unwrap:stub-wrapping-token")
+
+        wg = self._wg_with_auth(
+            processes,
+            stub_vault,
+            {
+                "kind": "app_role",
+                "role_id": "role-1",
+                "secret_id_path": str(secret_id_path),
+            },
+        )
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+        assert connect(processes, wg, user, target, timeout)[0] == 0
+
+        login = stub_vault.logins[-1]
+        assert login["method"] == "approle"
+        assert login["secret_id"] == "unwrapped-secret-id"
+
+
+
+class TestTheStubItself:
+    """The auth-method tests only mean something if the stub would have noticed a
+    wrong payload. These check the checker, without starting anything."""
+
+    def _aws_payload(self, **overrides):
+        from base64 import b64encode
+
+        payload = {
+            "iam_http_request_method": "POST",
+            "iam_request_url": b64encode(b"https://sts.amazonaws.com/").decode(),
+            "iam_request_body": b64encode(
+                b"Action=GetCallerIdentity&Version=2011-06-15"
+            ).decode(),
+            "iam_request_headers": b64encode(
+                json.dumps({"authorization": "AWS4-HMAC-SHA256 Credential=..."}).encode()
+            ).decode(),
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_a_well_formed_aws_payload_is_accepted(self):
+        assert reject_login("aws", self._aws_payload()) is None
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"iam_http_request_method": "GET"},
+            {"iam_request_url": "aHR0cHM6Ly9ldmlsLmV4YW1wbGUuY29tLw=="},  # not STS
+            {"iam_request_body": "QWN0aW9uPUFzc3VtZVJvbGU="},  # not GetCallerIdentity
+            {"iam_request_headers": "e30="},  # {} — unsigned
+            {"iam_request_url": "not base64 at all"},
+        ],
+    )
+    def test_a_mangled_aws_payload_is_rejected(self, overrides):
+        assert reject_login("aws", self._aws_payload(**overrides)) is not None
+
+    def test_a_non_jwt_identity_token_is_rejected(self):
+        assert reject_login("kubernetes", {"role": "warpgate", "jwt": "a-token"})
+        assert reject_login("kubernetes", {"role": "warpgate", "jwt": SERVICE_ACCOUNT_JWT}) is None
+
+    def test_a_gcp_token_for_another_role_is_rejected(self):
+        from .stub_vault import jwt
+
+        assert reject_login(
+            "gcp", {"role": "warpgate", "jwt": jwt({"aud": "vault/other-role"})}
+        )
+        assert (
+            reject_login("gcp", {"role": "warpgate", "jwt": jwt({"aud": "vault/warpgate"})})
+            is None
+        )
+
+    def test_azure_coordinates_are_all_required(self):
+        from .stub_vault import jwt
+
+        complete = {
+            "role": "warpgate",
+            "jwt": jwt({"aud": "https://management.azure.com/"}),
+            "subscription_id": "sub-1",
+            "resource_group_name": "rg-1",
+            "vm_name": "vm-1",
+        }
+        assert reject_login("azure", complete) is None
+        for field in ("subscription_id", "resource_group_name", "vm_name"):
+            assert reject_login("azure", {**complete, field: ""}), f"{field} not checked"
+
+
+class TestControlsStillApply:
+    """A new authentication path is the classic place for an existing control to
+    go missing — the shape of GHSA-qmr2-wp96-h9ff."""
+
+    def test_an_unauthorized_user_never_reaches_the_issuer(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        user, target = make_user_and_target(api, cert_ssh_port, assign=False)
+        code, _ = connect(processes, cert_wg, user, target, timeout)
+
+        assert code != 0
+        assert stub_vault.signs == [], "a certificate was issued before authorization"
+
+    def test_a_role_that_climbs_out_of_the_mount_never_leaves_the_process(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The role is put into the request path, and a URL is normalised before
+        it is sent: `../../auth/token/create` would arrive at a different Vault
+        API altogether, with the gateway's own token attached to it."""
+        user, target = make_user_and_target(
+            api, cert_ssh_port, role="../../auth/token/create"
+        )
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        assert stub_vault.requests == [], "a request left the process"
+
+        # Which only means something if a target that names a real role does
+        # reach Vault from this same gateway.
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+        assert stub_vault.requests
+
+    def test_no_certificate_is_issued_for_targets_using_other_auth(
+        self, processes, cert_wg, stub_vault, api, timeout, wg_c_ed25519_pubkey
+    ):
+        port = processes.start_ssh_server(
+            trusted_keys=[wg_c_ed25519_pubkey.read_text()]
+        )
+        wait_port(port)
+
+        wg_role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+        user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+        api.create_public_key_credential(
+            user.id,
+            sdk.NewPublicKeyCredential(
+                label="Public Key",
+                openssh_public_key=USER_PUBLIC_KEY_PATH.read_text().strip(),
+            ),
+        )
+        api.add_user_role(user.id, wg_role.id)
+        target = api.create_target(
+            sdk.TargetDataRequest(
+                name=f"pubkey-{uuid4()}",
+                options=sdk.TargetOptions(
+                    sdk.TargetOptionsTargetSSHOptions(
+                        kind="Ssh",
+                        host="localhost",
+                        port=port,
+                        username="root",
+                        auth=sdk.SSHTargetAuth(
+                            sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                        ),
+                    )
+                ),
+            )
+        )
+        api.add_target_role(target.id, wg_role.id)
+
+        connect(processes, cert_wg, user, target, timeout)
+        assert stub_vault.signs == []
+
+
+class TestSecrets:
+    def test_the_vault_token_is_never_logged(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        user, target = make_user_and_target(api, cert_ssh_port)
+        connect(processes, cert_wg, user, target, timeout)
+
+        assert stub_vault.valid_token
+        log = Path(cert_wg.log_path).read_text()
+        # Asserted so the check below cannot pass merely because nothing was logged.
+        assert "Issued an SSH certificate" in log
+        assert stub_vault.valid_token not in log
+
+    def test_no_credential_reaches_the_log_even_at_trace_level(
+        self, processes: ProcessManager, ctx, stub_vault, cert_ssh_port, timeout
+    ):
+        """Trace is where an operator goes when sessions will not connect, so it
+        is the setting most likely to be on while something is going wrong — and
+        the output most likely to be pasted into an issue. Neither the
+        credential Warpgate authenticates with nor the token it gets back may be
+        in it, at any verbosity."""
+        token_path = ctx.tmpdir / f"sa-token-{uuid4()}"
+        token_path.write_text(SERVICE_ACCOUNT_JWT)
+
+        log_path = ctx.tmpdir / f"trace-wg-{uuid4()}.log"
+        with log_path.open("w") as log:
+            wg = processes.start_wg(
+                config_patch={
+                    "vault": {
+                        "address": stub_vault.url,
+                        "default_role": "warpgate",
+                        "auth": {
+                            "kind": "kubernetes",
+                            "role": "warpgate",
+                            "token_path": str(token_path),
+                        },
+                    }
+                },
+                env={"RUST_LOG": "trace"},
+                stdout=log,
+                stderr=log,
+            )
+            wait_port(wg.http_port, for_process=wg.process, recv=False)
+            wait_port(wg.ssh_port, for_process=wg.process)
+
+            with admin_client(f"https://localhost:{wg.http_port}") as api:
+                user, target = make_user_and_target(api, cert_ssh_port)
+            assert connect(processes, wg, user, target, timeout)[0] == 0
+
+        text = Path(log_path).read_text(errors="replace")
+        # Both halves of the exchange happened, so the log had the chance.
+        assert "Issued an SSH certificate" in text
+        assert stub_vault.logins and stub_vault.valid_token
+
+        assert stub_vault.valid_token not in text, "the Vault token is in the log"
+        assert SERVICE_ACCOUNT_JWT not in text, "the service account token is in the log"
+        assert SERVICE_ACCOUNT_JWT.split(".")[1] not in text, "its claims are in the log"
+
+    def test_no_ephemeral_key_is_stored(
+        self, processes, cert_wg, cert_ssh_port, api, timeout
+    ):
+        """The whole point of the feature: nothing the target would trust may
+        outlive the connection."""
+        before = len(api.get_ssh_own_keys())
+
+        user, target = make_user_and_target(api, cert_ssh_port)
+        assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+
+        assert len(api.get_ssh_own_keys()) == before

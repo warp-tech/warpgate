@@ -9253,6 +9253,7 @@ dependencies = [
  "warpgate-ldap",
  "warpgate-sso",
  "warpgate-tls",
+ "warpgate-vault",
  "webpki",
  "zune-jpeg",
 ]
@@ -9550,6 +9551,7 @@ dependencies = [
  "warpgate-core",
  "warpgate-db-entities",
  "warpgate-tls",
+ "warpgate-vault",
  "zeroize",
 ]
 
@@ -9623,6 +9625,27 @@ dependencies = [
  "warpgate-ca",
  "webpki",
  "x509-parser",
+]
+
+[[package]]
+name = "warpgate-vault"
+version = "0.27.4"
+dependencies = [
+ "data-encoding",
+ "rcgen",
+ "reqwest 0.13.4",
+ "rustls 0.23.43",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tracing",
+ "url",
+ "warpgate-aws",
+ "warpgate-common",
+ "zeroize",
 ]
 
 [[package]]

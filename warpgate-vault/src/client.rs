@@ -1,0 +1,1003 @@
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+use data_encoding::BASE64;
+use reqwest::StatusCode;
+use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
+use tracing::{debug, warn};
+use warpgate_common::{VaultAuth, VaultConfig};
+use zeroize::{Zeroize, Zeroizing};
+
+use crate::error::{Result, VaultError};
+use crate::metadata;
+
+/// Re-login this long before the lease actually runs out, so a certificate
+/// request issued just after the check cannot race the expiry.
+const TOKEN_EXPIRY_MARGIN: Duration = Duration::from_secs(30);
+
+/// How much of a failed response is kept for the error message. Anything
+/// answering on the configured address can send an arbitrarily large body, so
+/// this bounds what a bad endpoint can make Warpgate allocate.
+const MAX_ERROR_BODY: usize = 256;
+
+/// The largest response body accepted from a successful call. A signed
+/// certificate is a couple of kilobytes and an auth response smaller still, so
+/// the bound is far above anything Vault sends — but without one, an endpoint
+/// answering on the configured address can make every session in flight buffer
+/// a body of its choosing.
+const MAX_RESPONSE_BODY: usize = 256 * 1024;
+
+static NEXT_TOKEN_ID: AtomicU64 = AtomicU64::new(1);
+
+fn validate_address(address: &str) -> Result<()> {
+    let parsed = url::Url::parse(address).map_err(|e| VaultError::InvalidAddress(e.to_string()))?;
+    if parsed.scheme() != "https" {
+        let host = parsed.host_str().unwrap_or_default();
+        let is_localhost = host == "localhost" || host == "127.0.0.1" || host == "::1";
+        if !is_localhost {
+            return Err(VaultError::InsecureAddress);
+        }
+    }
+    Ok(())
+}
+
+fn validate_segment(name: &str) -> Result<()> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(VaultError::InvalidRole(name.to_string()));
+    }
+    Ok(())
+}
+
+/// Vault reads `valid_principals` as a comma-separated list, so a comma in the
+/// target's username would silently widen the certificate to accounts the
+/// operator never named.
+fn validate_principal(principal: &str) -> Result<()> {
+    if principal.is_empty() || principal.contains(',') || principal.chars().any(char::is_control) {
+        return Err(VaultError::InvalidPrincipal(principal.to_owned()));
+    }
+    Ok(())
+}
+
+/// The key ID is echoed verbatim into the target's own sshd log, so a control
+/// character in it would let a Warpgate username forge log lines there.
+fn validate_key_id(key_id: &str) -> Result<()> {
+    if key_id.chars().any(char::is_control) {
+        return Err(VaultError::InvalidKeyId);
+    }
+    Ok(())
+}
+
+/// Keeps the error message bounded and always a valid string: `from_utf8_lossy`
+/// replaces a multi-byte character cut in half by the byte limit instead of
+/// panicking the way slicing a `String` at a non-boundary would.
+fn render_error_body(bytes: &[u8], truncated: bool) -> String {
+    let mut text = String::from_utf8_lossy(bytes).into_owned();
+    if truncated {
+        text.push_str("... (truncated)");
+    }
+    text
+}
+
+struct CachedToken {
+    id: u64,
+    value: Zeroizing<String>,
+    /// `None` for a token Vault says has no lease. Revocation is still handled:
+    /// a rejected token is dropped when signing comes back `403`.
+    expires_at: Option<Instant>,
+}
+
+fn login_payload<T: Serialize>(value: &T) -> Result<Zeroizing<String>> {
+    Ok(Zeroizing::new(serde_json::to_string(value)?))
+}
+
+#[derive(Serialize)]
+struct JwtLogin<'a> {
+    role: &'a str,
+    jwt: &'a str,
+}
+
+#[derive(Serialize)]
+struct AppRoleLogin<'a> {
+    role_id: &'a str,
+    secret_id: &'a str,
+}
+
+#[derive(Serialize)]
+struct AzureLogin<'a> {
+    role: &'a str,
+    jwt: &'a str,
+    subscription_id: &'a str,
+    resource_group_name: &'a str,
+    vm_name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vmss_name: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct AwsLogin<'a> {
+    role: Option<&'a str>,
+    iam_http_request_method: &'a str,
+    iam_request_url: String,
+    iam_request_body: String,
+    iam_request_headers: String,
+}
+
+#[derive(Serialize)]
+struct SignRequest<'a> {
+    public_key: &'a str,
+    valid_principals: &'a str,
+    cert_type: &'a str,
+    key_id: &'a str,
+    /// Omitted rather than sent as zero when unset: Vault reads a zero TTL as
+    /// "use the role's default", but only if the field is absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ttl: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AuthResponse {
+    auth: AuthData,
+}
+
+#[derive(Deserialize)]
+struct AuthData {
+    client_token: String,
+    lease_duration: u64,
+}
+
+#[derive(Deserialize)]
+struct SignResponse {
+    data: SignData,
+}
+
+#[derive(Deserialize)]
+struct SignData {
+    signed_key: String,
+}
+
+#[derive(Deserialize)]
+struct UnwrapResponse {
+    data: Option<UnwrapData>,
+}
+
+#[derive(Deserialize)]
+struct UnwrapData {
+    secret_id: Option<String>,
+}
+
+pub struct VaultClient {
+    config: VaultConfig,
+    http: reqwest::Client,
+    token: Mutex<Option<CachedToken>>,
+}
+
+impl VaultClient {
+    pub fn new(config: VaultConfig) -> Result<Self> {
+        validate_address(&config.address)?;
+        validate_segment(&config.mount)?;
+        validate_segment(&config.default_role)?;
+
+        if !config.address.starts_with("https://") {
+            // Only reachable for a loopback address, which validation allows so
+            // a development Vault does not need a certificate. Said out loud
+            // because the token crosses this connection in a header.
+            warn!(
+                address = config.address,
+                "The Vault address is not HTTPS; the client token is sent in clear text"
+            );
+        }
+
+        // Redirects are refused rather than followed: reqwest strips
+        // `Authorization` on a cross-origin hop but knows nothing about
+        // `X-Vault-Token`, so a 307 from a hostile or misconfigured endpoint
+        // would replay the token to another host, or downgrade the request to
+        // plain HTTP. The same client fetches cloud metadata, where following a
+        // redirect would be just as wrong.
+        let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(config.timeout)
+            .build()?;
+        Ok(Self {
+            config,
+            http,
+            token: Mutex::new(None),
+        })
+    }
+
+    pub fn default_role(&self) -> &str {
+        &self.config.default_role
+    }
+
+    /// Signs `public_key` into a short-lived OpenSSH user certificate, returned
+    /// in OpenSSH wire format.
+    ///
+    /// `principals` are usernames on the target, not Warpgate usernames. `key_id`
+    /// is echoed into the target's own sshd log, which is what makes a session
+    /// attributable to a person rather than to the gateway.
+    pub async fn sign_ssh_key(
+        &self,
+        role: &str,
+        public_key: &str,
+        principals: &str,
+        key_id: &str,
+    ) -> Result<String> {
+        validate_segment(role)?;
+        validate_principal(principals)?;
+        validate_key_id(key_id)?;
+
+        let (token_id, result) = self.sign_once(role, public_key, principals, key_id).await;
+
+        match result {
+            // A cached token can stop being accepted long before its lease runs
+            // out — it may have been revoked, or Vault resealed or restarted.
+            // Forcing one re-login tells that apart from a real policy denial.
+            // Only invalidate if the token in cache is still the token that failed.
+            Err(VaultError::Api { status, .. }) if status == StatusCode::FORBIDDEN => {
+                let mut guard = self.token.lock().await;
+                if guard.as_ref().map(|t| t.id) == Some(token_id) {
+                    *guard = None;
+                }
+                drop(guard);
+                let (_, second_try) = self.sign_once(role, public_key, principals, key_id).await;
+                second_try
+            }
+            res => res,
+        }
+    }
+
+    async fn sign_once(
+        &self,
+        role: &str,
+        public_key: &str,
+        principals: &str,
+        key_id: &str,
+    ) -> (u64, Result<String>) {
+        let (token_id, token) = match self.token().await {
+            Ok(t) => t,
+            Err(err) => return (0, Err(err)),
+        };
+
+        let response = self
+            .http
+            .post(self.url(&format!("{}/sign/{role}", self.config.mount)))
+            .header("X-Vault-Token", token.as_str())
+            .json(&SignRequest {
+                public_key,
+                valid_principals: principals,
+                cert_type: "user",
+                key_id,
+                ttl: self
+                    .config
+                    .certificate_ttl
+                    .map(|ttl| format!("{}s", ttl.as_secs())),
+            })
+            .send()
+            .await;
+
+        let res = match response {
+            Ok(resp) => match Self::check(resp).await {
+                Ok(resp) => match Self::read_json::<SignResponse>(resp).await {
+                    Ok(parsed) => {
+                        debug!(role, principals, key_id, "Issued an SSH certificate");
+                        Ok(parsed.data.signed_key)
+                    }
+                    Err(e) => Err(e),
+                },
+                Err(e) => Err(e),
+            },
+            Err(e) => Err(VaultError::Request(e)),
+        };
+
+        (token_id, res)
+    }
+
+    /// The cached client token, logging in again once it nears expiry. Plain
+    /// re-login is used instead of Vault's renew API because it behaves the same
+    /// whether or not the token has hit its `max_ttl`.
+    ///
+    /// The lock is deliberately held across the login: one expiring token would
+    /// otherwise send every session in flight to Vault at once, and for the
+    /// cloud methods each of those first fetches an identity token of its own.
+    /// The cost of that choice is that a slow login delays every other session
+    /// by up to `timeout`.
+    async fn token(&self) -> Result<(u64, Zeroizing<String>)> {
+        let mut cached = self.token.lock().await;
+
+        if let Some(token) = cached.as_ref()
+            && token.expires_at.is_none_or(|at| Instant::now() < at)
+        {
+            return Ok((token.id, token.value.clone()));
+        }
+
+        let token = self.login().await?;
+        let id = token.id;
+        let value = token.value.clone();
+        *cached = Some(token);
+        Ok((id, value))
+    }
+
+    async fn login(&self) -> Result<CachedToken> {
+        let (path, body) = self.login_body().await?;
+
+        let response = self
+            .http
+            .post(self.url(path))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.as_bytes().to_vec())
+            .send()
+            .await?;
+        let auth = Self::read_json::<AuthResponse>(Self::check(response).await?)
+            .await?
+            .auth;
+
+        debug!(method = self.config.auth.kind(), "Authenticated to Vault");
+
+        let token_id = NEXT_TOKEN_ID.fetch_add(1, Ordering::Relaxed);
+        Ok(CachedToken {
+            id: token_id,
+            value: Zeroizing::new(auth.client_token),
+            // Vault reports a lease of zero for a token that does not expire.
+            // Reading that as "expired half a minute ago" would turn every
+            // certificate request into a fresh login.
+            expires_at: (auth.lease_duration > 0).then(|| {
+                Instant::now()
+                    + Duration::from_secs(auth.lease_duration).saturating_sub(TOKEN_EXPIRY_MARGIN)
+            }),
+        })
+    }
+
+    /// The endpoint and JSON payload for the configured authentication method.
+    ///
+    /// The payload is built through `serde` straight into a `Zeroizing` buffer
+    /// rather than through a `serde_json::Value`: every intermediate copy of a
+    /// service account token, secret ID or identity token is one more place the
+    /// credential outlives the request in freed memory. The buffer reqwest takes
+    /// to put the body on the wire is the one copy Warpgate cannot reach.
+    async fn login_body(&self) -> Result<(&'static str, Zeroizing<String>)> {
+        Ok(match &self.config.auth {
+            VaultAuth::Kubernetes { role, token_path } => {
+                let jwt = Self::read_credential(token_path).await?;
+                (
+                    "auth/kubernetes/login",
+                    login_payload(&JwtLogin { role, jwt: &jwt })?,
+                )
+            }
+            VaultAuth::AppRole {
+                role_id,
+                secret_id_path,
+            } => {
+                let cred = Self::read_credential(secret_id_path).await?;
+                let secret_id = if cred.starts_with("unwrap:") {
+                    let wrapping_token =
+                        Zeroizing::new(cred.trim_start_matches("unwrap:").trim().to_owned());
+                    self.unwrap_secret_id(&wrapping_token).await?
+                } else {
+                    cred
+                };
+                (
+                    "auth/approle/login",
+                    login_payload(&AppRoleLogin {
+                        role_id,
+                        secret_id: &secret_id,
+                    })?,
+                )
+            }
+            VaultAuth::Aws {
+                role,
+                server_id,
+                region,
+            } => (
+                "auth/aws/login",
+                self.aws_login_body(role.as_deref(), server_id.as_deref(), region.as_deref())
+                    .await?,
+            ),
+            VaultAuth::Azure {
+                role,
+                resource,
+                metadata_address,
+            } => {
+                let (jwt, instance) =
+                    metadata::azure_login_material(&self.http, metadata_address, resource).await?;
+                (
+                    "auth/azure/login",
+                    login_payload(&AzureLogin {
+                        role,
+                        jwt: &jwt,
+                        subscription_id: &instance.subscription_id,
+                        resource_group_name: &instance.resource_group_name,
+                        vm_name: &instance.name,
+                        vmss_name: (!instance.vm_scale_set_name.is_empty())
+                            .then_some(instance.vm_scale_set_name.as_str()),
+                    })?,
+                )
+            }
+            VaultAuth::Gcp {
+                role,
+                metadata_address,
+            } => {
+                let audience = format!("vault/{role}");
+                let jwt =
+                    metadata::gcp_identity_token(&self.http, metadata_address, &audience).await?;
+                (
+                    "auth/gcp/login",
+                    login_payload(&JwtLogin { role, jwt: &jwt })?,
+                )
+            }
+        })
+    }
+
+    async fn unwrap_secret_id(&self, wrapping_token: &str) -> Result<Zeroizing<String>> {
+        let response = self
+            .http
+            .post(self.url("sys/wrapping/unwrap"))
+            .header("X-Vault-Token", wrapping_token)
+            .send()
+            .await?;
+
+        let unwrap_resp = Self::read_json::<UnwrapResponse>(Self::check(response).await?).await?;
+
+        // Moved rather than copied out of the response, so the only allocation
+        // holding the secret ID is the one that gets zeroized on drop.
+        unwrap_resp
+            .data
+            .and_then(|data| data.secret_id)
+            .map_or_else(
+                || {
+                    Err(VaultError::Api {
+                        status: StatusCode::BAD_REQUEST,
+                        body: "failed to unwrap secret_id from Vault response".to_owned(),
+                    })
+                },
+                |secret_id| Ok(Zeroizing::new(secret_id)),
+            )
+    }
+
+    async fn aws_login_body(
+        &self,
+        role: Option<&str>,
+        server_id: Option<&str>,
+        region: Option<&str>,
+    ) -> Result<Zeroizing<String>> {
+        let request = warpgate_aws::sign_sts_identity_request(region, server_id).await?;
+        // Carries the signature and, on an instance role, the session token.
+        let mut headers = serde_json::to_string(&request.headers)?;
+
+        let payload = login_payload(&AwsLogin {
+            role,
+            iam_http_request_method: request.method,
+            iam_request_url: BASE64.encode(request.url.as_bytes()),
+            iam_request_body: BASE64.encode(request.body.as_bytes()),
+            iam_request_headers: BASE64.encode(headers.as_bytes()),
+        });
+        headers.zeroize();
+        payload
+    }
+
+    async fn read_credential(path: &Path) -> Result<Zeroizing<String>> {
+        let raw = Zeroizing::new(tokio::fs::read_to_string(path).await.map_err(|source| {
+            VaultError::CredentialFile {
+                path: path.to_owned(),
+                source,
+            }
+        })?);
+        Ok(Zeroizing::new(raw.trim().to_owned()))
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("{}/v1/{path}", self.config.address.trim_end_matches('/'))
+    }
+
+    /// Parses a successful response, refusing one larger than any Vault answer
+    /// could be. `json()` would buffer whatever arrives before anything got to
+    /// look at its size, so a single endpoint could hold as much of Warpgate's
+    /// memory as it cared to send, once per session in flight.
+    async fn read_json<T: serde::de::DeserializeOwned>(
+        mut response: reqwest::Response,
+    ) -> Result<T> {
+        // A login response carries the client token and an unwrap response the
+        // secret ID, so the buffer they land in is zeroized rather than merely
+        // dropped.
+        let mut buf: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::new());
+        while let Some(chunk) = response.chunk().await? {
+            if buf.len() + chunk.len() > MAX_RESPONSE_BODY {
+                return Err(VaultError::OversizedResponse);
+            }
+            buf.extend_from_slice(&chunk);
+        }
+        Ok(serde_json::from_slice(&buf)?)
+    }
+
+    async fn check(response: reqwest::Response) -> Result<reqwest::Response> {
+        let status = response.status();
+        if status.is_success() {
+            return Ok(response);
+        }
+        Err(VaultError::Api {
+            status,
+            body: Self::error_body(response).await,
+        })
+    }
+
+    /// The first `MAX_ERROR_BODY` bytes of a failed response. Read chunk by
+    /// chunk rather than with `text()`, which would buffer the whole body before
+    /// there was anything to truncate — an endpoint answering on the configured
+    /// address could then make an error message cost arbitrary memory.
+    async fn error_body(mut response: reqwest::Response) -> String {
+        let mut buf: Vec<u8> = Vec::new();
+        let mut truncated = false;
+
+        while buf.len() < MAX_ERROR_BODY {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    let room = MAX_ERROR_BODY.saturating_sub(buf.len());
+                    let taken = chunk.get(..room).unwrap_or(&chunk);
+                    truncated |= taken.len() < chunk.len();
+                    buf.extend_from_slice(taken);
+                }
+                Ok(None) | Err(_) => break,
+            }
+        }
+
+        // The loop can fill the buffer exactly while the body continues; one
+        // more poll is what tells a 256-byte body from a truncated one.
+        if !truncated && buf.len() == MAX_ERROR_BODY {
+            truncated = matches!(response.chunk().await, Ok(Some(chunk)) if !chunk.is_empty());
+        }
+
+        render_error_body(&buf, truncated)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex as StdMutex};
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    use super::*;
+
+    /// A one-shot HTTP server that records the raw request it was sent.
+    ///
+    /// `login` answers the authentication endpoint, `other` everything else, so
+    /// a test can let the client reach the point where it holds a token.
+    async fn spawn_server(
+        login: String,
+        other: String,
+        log: Arc<StdMutex<Vec<String>>>,
+    ) -> Result<String> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let read = socket.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..read]).into_owned();
+                let response = if request.contains("/login") {
+                    login.clone()
+                } else {
+                    other.clone()
+                };
+                log.lock().unwrap().push(request);
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+
+        Ok(address)
+    }
+
+    /// Answers the login endpoint normally and then streams an error body that
+    /// never ends — the shape of a hostile or broken endpoint.
+    async fn spawn_endless_error_server(login: String) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let read = socket.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..read]).into_owned();
+
+                if request.contains("/login") {
+                    let _ = socket.write_all(login.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                    continue;
+                }
+
+                let _ = socket
+                    .write_all(
+                        b"HTTP/1.1 500 Internal Server Error\r\nTransfer-Encoding: chunked\r\n\r\n",
+                    )
+                    .await;
+                // Paced, so a reader that waits for the end cannot finish
+                // before the request timeout no matter how fast the loopback is.
+                let chunk = format!("1000\r\n{}\r\n", "a".repeat(4096));
+                for _ in 0..1000 {
+                    if socket.write_all(chunk.as_bytes()).await.is_err() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+            }
+        });
+
+        address
+    }
+
+    fn json_response(body: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    fn approle_config(address: String, secret_id_path: PathBuf) -> VaultConfig {
+        VaultConfig {
+            address,
+            mount: "ssh-client-signer".to_owned(),
+            default_role: "warpgate".to_owned(),
+            auth: VaultAuth::AppRole {
+                role_id: "role-1".to_owned(),
+                secret_id_path,
+            },
+            certificate_ttl: None,
+            timeout: Duration::from_secs(5),
+        }
+    }
+
+    /// reqwest strips `Authorization` on a cross-origin redirect but has no idea
+    /// `X-Vault-Token` is a credential, so following one would hand the token to
+    /// whichever host the redirect names.
+    #[tokio::test]
+    async fn test_a_redirect_never_carries_the_token_to_another_host() {
+        // The binary does this in `main`; a unit test has to do it itself before
+        // reqwest will build a client at all.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let attacker_log = Arc::new(StdMutex::new(vec![]));
+        let attacker = spawn_server(
+            json_response("{}"),
+            json_response("{}"),
+            attacker_log.clone(),
+        )
+        .await
+        .unwrap();
+
+        let vault_log = Arc::new(StdMutex::new(vec![]));
+        let vault = spawn_server(
+            json_response(r#"{"auth":{"client_token":"s.stub-token","lease_duration":3600}}"#),
+            format!("HTTP/1.1 307 Temporary Redirect\r\nLocation: {attacker}/v1/steal\r\nContent-Length: 0\r\n\r\n"),
+            vault_log.clone(),
+        )
+        .await
+        .unwrap();
+
+        let secret_id_path = std::env::temp_dir().join("warpgate-vault-redirect-test-secret");
+        std::fs::write(&secret_id_path, "secret-id").unwrap();
+
+        let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
+        let error = client
+            .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, VaultError::Api { status, .. } if status == StatusCode::TEMPORARY_REDIRECT),
+            "the redirect should surface as an error, got {error:?}"
+        );
+        assert!(
+            attacker_log.lock().unwrap().is_empty(),
+            "the redirect target was contacted at all"
+        );
+        // Without this the test would also pass if the signing request had never
+        // been made, which is the failure mode it exists to rule out.
+        assert!(
+            vault_log
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|request| request.to_lowercase().contains("x-vault-token")),
+            "no token-bearing request was made, so nothing was under test"
+        );
+    }
+
+    /// `text()` would buffer the whole body before there was anything to
+    /// truncate, so an endpoint that never stops sending holds the session open
+    /// until the request timeout and allocates everything it sent meanwhile.
+    #[tokio::test]
+    async fn test_an_endless_error_body_is_not_buffered() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let vault = spawn_endless_error_server(json_response(
+            r#"{"auth":{"client_token":"s.stub-token","lease_duration":3600}}"#,
+        ))
+        .await;
+
+        let secret_id_path = std::env::temp_dir().join("warpgate-vault-endless-test-secret");
+        std::fs::write(&secret_id_path, "secret-id").unwrap();
+
+        let mut config = approle_config(vault, secret_id_path);
+        config.timeout = Duration::from_secs(10);
+        let client = VaultClient::new(config).unwrap();
+
+        let started = Instant::now();
+        let error = client
+            .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
+            .await
+            .unwrap_err();
+        let elapsed = started.elapsed();
+
+        match error {
+            VaultError::Api { status, body } => {
+                assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert!(body.len() <= MAX_ERROR_BODY + "... (truncated)".len());
+            }
+            other => panic!("expected a bounded API error, got {other:?}"),
+        }
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "reading the error body waited on the whole stream ({elapsed:?})"
+        );
+    }
+
+    /// The error path was bounded in an earlier round; the success path was not.
+    /// A body is a body whatever the status code on it says, and this one is
+    /// parsed for every session that asks for a certificate.
+    #[tokio::test]
+    async fn test_an_oversized_success_body_is_refused_rather_than_buffered() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let oversized = format!(
+            r#"{{"data":{{"signed_key":"{}"}}}}"#,
+            "A".repeat(MAX_RESPONSE_BODY + 1)
+        );
+        let log = Arc::new(StdMutex::new(vec![]));
+        let vault = spawn_server(
+            json_response(r#"{"auth":{"client_token":"s.stub-token","lease_duration":3600}}"#),
+            json_response(&oversized),
+            log.clone(),
+        )
+        .await
+        .unwrap();
+
+        let secret_id_path = std::env::temp_dir().join("warpgate-vault-oversized-test-secret");
+        std::fs::write(&secret_id_path, "secret-id").unwrap();
+
+        let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
+        let error = client
+            .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, VaultError::OversizedResponse),
+            "expected the body to be refused on size, got {error:?}"
+        );
+        // Otherwise this passes just as well when the request was never sent.
+        assert!(
+            log.lock().unwrap().iter().any(|r| r.contains("/sign/")),
+            "no signing request was made, so nothing was under test"
+        );
+    }
+
+    /// Vault reports `lease_duration: 0` for a token with no lease at all — a
+    /// root or otherwise non-expiring token. Treating that as an expiry in the
+    /// past makes every certificate request log in again, which is a login storm
+    /// against Vault sourced from ordinary traffic.
+    #[tokio::test]
+    async fn test_a_token_with_no_lease_is_not_re_fetched_for_every_request() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let log = Arc::new(StdMutex::new(vec![]));
+        let vault = spawn_server(
+            json_response(r#"{"auth":{"client_token":"s.stub-token","lease_duration":0}}"#),
+            json_response(r#"{"data":{"signed_key":"ssh-ed25519-cert-v01@openssh.com AAAA"}}"#),
+            log.clone(),
+        )
+        .await
+        .unwrap();
+
+        let secret_id_path = std::env::temp_dir().join("warpgate-vault-no-lease-test-secret");
+        std::fs::write(&secret_id_path, "secret-id").unwrap();
+
+        let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
+        for _ in 0..3 {
+            client
+                .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
+                .await
+                .unwrap();
+        }
+
+        let logins = log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request.contains("/login"))
+            .count();
+        assert_eq!(
+            logins, 1,
+            "the cached token was thrown away between requests"
+        );
+    }
+
+    /// A `200` is not a certificate. Vault answering with a body that parses but
+    /// carries no key must be an error, not an empty certificate handed to the
+    /// SSH layer to make sense of.
+    #[tokio::test]
+    async fn test_a_success_without_a_signed_key_is_an_error() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let log = Arc::new(StdMutex::new(vec![]));
+        let vault = spawn_server(
+            json_response(r#"{"auth":{"client_token":"s.stub-token","lease_duration":3600}}"#),
+            json_response(r#"{"data":{}}"#),
+            log.clone(),
+        )
+        .await
+        .unwrap();
+
+        let secret_id_path = std::env::temp_dir().join("warpgate-vault-no-key-test-secret");
+        std::fs::write(&secret_id_path, "secret-id").unwrap();
+
+        let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
+        let error = client
+            .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, VaultError::Json(_)),
+            "expected the response to be rejected, got {error:?}"
+        );
+        assert!(
+            log.lock().unwrap().iter().any(|r| r.contains("/sign/")),
+            "no signing request was made, so nothing was under test"
+        );
+    }
+
+    /// Nothing else in the crate would notice if certificate verification were
+    /// turned off — the loopback tests all speak plain HTTP, and Warpgate does
+    /// disable it deliberately elsewhere (`warpgate-protocol-http`'s client
+    /// cache). The token crosses this connection, so it must not happen here.
+    #[tokio::test]
+    async fn test_an_untrusted_vault_certificate_is_refused() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let issued = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
+        let certificate = rustls_pki_types::CertificateDer::from(issued.cert.der().to_vec());
+        let key =
+            rustls_pki_types::PrivateKeyDer::try_from(issued.signing_key.serialize_der()).unwrap();
+
+        let server_config = Arc::new(
+            rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(vec![certificate], key)
+                .unwrap(),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let acceptor = tokio_rustls::TlsAcceptor::from(server_config);
+            while let Ok((socket, _)) = listener.accept().await {
+                // The handshake is expected to fail; accepting is enough to
+                // prove the client got as far as looking at the certificate.
+                let _ = acceptor.accept(socket).await;
+            }
+        });
+
+        let secret_id_path = std::env::temp_dir().join("warpgate-vault-tls-test-secret");
+        std::fs::write(&secret_id_path, "secret-id").unwrap();
+
+        let client = VaultClient::new(approle_config(
+            format!("https://localhost:{port}"),
+            secret_id_path,
+        ))
+        .unwrap();
+        let error = client
+            .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
+            .await
+            .unwrap_err();
+
+        match error {
+            VaultError::Request(e) => {
+                let reported = format!("{e:?}");
+                assert!(
+                    reported.contains("certificate") || reported.contains("UnknownIssuer"),
+                    "expected a certificate error, got {reported}"
+                );
+            }
+            other => panic!("expected the handshake to be refused, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_error_body_truncation_survives_a_split_character() {
+        // 255 ASCII bytes then a two-byte character: cutting at byte 256 lands
+        // inside it, which slicing a `String` would panic on.
+        let mut body = "a".repeat(255).into_bytes();
+        body.extend_from_slice("é".as_bytes());
+
+        let rendered = render_error_body(&body[..MAX_ERROR_BODY], true);
+        assert!(rendered.starts_with(&"a".repeat(255)));
+        assert!(rendered.ends_with("... (truncated)"));
+    }
+
+    #[test]
+    fn test_error_body_is_left_alone_when_it_fits() {
+        assert_eq!(
+            render_error_body(br#"{"errors":["permission denied"]}"#, false),
+            r#"{"errors":["permission denied"]}"#
+        );
+    }
+
+    #[test]
+
+    fn test_address_validation() {
+        assert!(validate_address("https://vault.internal:8200").is_ok());
+        assert!(validate_address("http://localhost:8200").is_ok());
+        assert!(validate_address("http://127.0.0.1:8200").is_ok());
+        assert!(matches!(
+            validate_address("http://vault.internal:8200"),
+            Err(VaultError::InsecureAddress)
+        ));
+    }
+
+    #[test]
+    fn test_segment_validation() {
+        assert!(validate_segment("valid-role_123").is_ok());
+        assert!(matches!(
+            validate_segment("../path-traversal"),
+            Err(VaultError::InvalidRole(_))
+        ));
+        assert!(matches!(
+            validate_segment("role/with/slashes"),
+            Err(VaultError::InvalidRole(_))
+        ));
+    }
+
+    #[test]
+    fn test_principal_validation() {
+        assert!(validate_principal("root").is_ok());
+        // Vault splits `valid_principals` on commas, so this would issue a
+        // certificate valid for root as well.
+        assert!(matches!(
+            validate_principal("deploy,root"),
+            Err(VaultError::InvalidPrincipal(_))
+        ));
+        assert!(matches!(
+            validate_principal(""),
+            Err(VaultError::InvalidPrincipal(_))
+        ));
+        assert!(matches!(
+            validate_principal("deploy\nroot"),
+            Err(VaultError::InvalidPrincipal(_))
+        ));
+    }
+
+    #[test]
+    fn test_key_id_validation() {
+        assert!(validate_key_id("warpgate:alice:6f1a").is_ok());
+        // The target's sshd logs the key ID verbatim.
+        assert!(matches!(
+            validate_key_id("warpgate:alice\nAccepted publickey for root"),
+            Err(VaultError::InvalidKeyId)
+        ));
+    }
+
+    #[test]
+    fn test_token_zeroizing() {
+        let secret = zeroize::Zeroizing::new("s.sensitive-vault-token".to_string());
+        assert_eq!(secret.as_str(), "s.sensitive-vault-token");
+        // Memory zeroized automatically on drop
+    }
+}
