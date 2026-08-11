@@ -420,7 +420,7 @@ pub enum LogFormat {
 /// config would put it straight back. A Kubernetes service account token is
 /// mounted and rotated by the kubelet; an AppRole secret ID is short-lived and
 /// meant to be delivered response-wrapped by whatever provisions the host.
-#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VaultAuth {
     Kubernetes {
@@ -475,7 +475,7 @@ impl VaultAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, JsonSchema)]
 pub struct VaultConfig {
     /// Base URL of the Vault server, e.g. `https://vault.internal:8200`.
     pub address: String,

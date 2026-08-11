@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.27.4-modified"
+    "version": "v0.28.0-beta.1-2-gdd0617267-modified"
   },
   "servers": [
     {
@@ -6583,6 +6583,23 @@
           }
         }
       },
+      "SshCertificateCriticalOption": {
+        "type": "object",
+        "title": "SshCertificateCriticalOption",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Option name as it appears in the certificate, e.g. `force-command`."
+          },
+          "value": {
+            "type": "string",
+            "description": "The exact value required. Unset accepts any value for this name — worth\navoiding for `force-command`, whose value is the command that runs."
+          }
+        }
+      },
       "SshHostKeyVerificationMode": {
         "type": "string",
         "description": "What to do when a target's SSH host key isn't in the known hosts list.",
@@ -6600,6 +6617,14 @@
           "role": {
             "type": "string",
             "description": "Vault signing role for this target; `None` uses the configured default\nrole. The role is what constrains which principals may be requested, so\ntargets of differing privilege belong to differing roles."
+          },
+          "allowed_critical_options": {
+            "type": "array",
+            "description": "Critical options this target's certificates are expected to carry.\nAnything not listed here is refused, because the target's sshd enforces\nwhatever arrives: a `force-command` decides what the session runs, under\nthe connecting user's own principal and key ID.",
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SshCertificateCriticalOption"
+            }
           }
         }
       },

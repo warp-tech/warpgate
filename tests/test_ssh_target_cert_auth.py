@@ -9,11 +9,13 @@ authentication (GHSA-c94j-vqr5-3mxr).
 """
 
 import json
+import time
 from pathlib import Path
 from uuid import uuid4
 
 import psutil
 import pytest
+import yaml
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
@@ -82,7 +84,15 @@ def reset_stub(stub_vault: StubVault):
     stub_vault.reset()
 
 
-def make_user_and_target(api, ssh_port, *, role=None, username="root", assign=True):
+def make_user_and_target(
+    api,
+    ssh_port,
+    *,
+    role=None,
+    username="root",
+    assign=True,
+    allowed_critical_options=None,
+):
     wg_role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
     user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
     api.create_public_key_credential(
@@ -105,7 +115,12 @@ def make_user_and_target(api, ssh_port, *, role=None, username="root", assign=Tr
                     username=username,
                     auth=sdk.SSHTargetAuth(
                         sdk.SSHTargetAuthSshTargetCertificateAuth(
-                            kind="Certificate", role=role
+                            kind="Certificate",
+                            role=role,
+                            allowed_critical_options=[
+                                sdk.SshCertificateCriticalOption(name=name, value=value)
+                                for name, value in (allowed_critical_options or [])
+                            ],
                         )
                     ),
                 )
@@ -413,25 +428,92 @@ class TestRejections:
         assert connect(processes, cert_wg, user, target, timeout)[0] != 0
         assert len(stub_vault.signs) == 1
 
-    def test_a_forced_command_from_the_issuer_is_reported(
+    def test_an_unexpected_forced_command_is_refused(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
     ):
         """The target's sshd enforces critical options, so an issuer that
-        attaches `force-command` decides what the session runs — the user's own
-        command never executes, and the recording shows the output of something
-        they did not type. Warpgate asks for no critical options and cannot stop
-        the target honouring one, so the least it can do is say one arrived."""
-        offset = Path(cert_wg.log_path).stat().st_size
+        attaches `force-command` decides what the session runs — under the
+        user's own principal and key ID, which makes the target's log attribute
+        the issuer's command to them. Planting one needs only write access to a
+        Vault role, not the right to sign or a route to the target, so Warpgate
+        is the only place this can be caught."""
         stub_vault.sign_options = ["force-command=echo chosen-by-the-issuer"]
         user, target = make_user_and_target(api, cert_ssh_port)
         code, stdout = connect(processes, cert_wg, user, target, timeout)
 
-        # Not an assumption: this is the mechanism the test exists for.
-        assert (code, stdout) == (0, b"chosen-by-the-issuer\n")
+        assert code != 0
+        assert b"chosen-by-the-issuer" not in stdout, "the forced command ran"
+        assert stub_vault.signs, "no certificate was issued, so nothing was refused"
 
-        log = log_since(cert_wg, offset)
-        assert "critical options" in log
-        assert "force-command" in log
+    def test_the_refusal_reaches_the_user_not_only_the_log(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """A server-side warning nobody is watching is not a control. Whoever is
+        connecting has to be told, and told that it was Warpgate that refused —
+        "the target rejected you" sends them to the wrong machine."""
+        stub_vault.sign_options = ["force-command=echo chosen-by-the-issuer"]
+        user, target = make_user_and_target(api, cert_ssh_port)
+
+        client = start(processes, cert_wg, user, target, "-tt")
+        stdout = client.communicate(timeout=timeout)[0].decode(errors="replace")
+
+        assert "Warpgate refused the certificate" in stdout
+        assert "force-command" in stdout
+
+    def test_a_critical_option_the_target_expects_is_allowed_through(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """A restricted Vault role may set `default_critical_options` on
+        purpose. Naming it on the target is how an operator says so."""
+        stub_vault.sign_options = ["force-command=echo expected-by-the-operator"]
+        user, target = make_user_and_target(
+            api,
+            cert_ssh_port,
+            allowed_critical_options=[
+                ("force-command", "echo expected-by-the-operator")
+            ],
+        )
+        code, stdout = connect(processes, cert_wg, user, target, timeout)
+
+        assert (code, stdout) == (0, b"expected-by-the-operator\n")
+
+    def test_a_pinned_value_must_match(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """Allowing the name alone would let the issuer choose the command; the
+        point of pinning is that the value is the part that matters."""
+        stub_vault.sign_options = ["force-command=echo something-else-entirely"]
+        user, target = make_user_and_target(
+            api,
+            cert_ssh_port,
+            allowed_critical_options=[("force-command", "echo the-expected-one")],
+        )
+        code, stdout = connect(processes, cert_wg, user, target, timeout)
+
+        assert code != 0
+        assert b"something-else-entirely" not in stdout
+
+    def test_a_certificate_naming_the_wrong_account_is_refused(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """Vault returns the requested principals verbatim or refuses, so a set
+        that omits the account being reached did not come from this request.
+
+        The target's sshd would refuse this certificate too, which is exactly
+        why the assertion is on who did the refusing: without Warpgate's own
+        check the session still fails, just with the wrong explanation and
+        after the certificate has been put on the wire.
+        """
+        stub_vault.principals = "someone-else"
+        user, target = make_user_and_target(api, cert_ssh_port)
+
+        client = start(processes, cert_wg, user, target, "-tt")
+        stdout = client.communicate(timeout=timeout)[0].decode(errors="replace")
+
+        assert client.returncode != 0
+        assert stub_vault.signs, "no certificate was issued, so nothing was refused"
+        assert "Warpgate refused the certificate" in stdout
+        assert "does not name the target account root" in stdout
 
 
 class TestIssuerFailures:
@@ -841,6 +923,179 @@ class TestCloudAuthMethods:
         assert login["method"] == "approle"
         assert login["secret_id"] == "unwrapped-secret-id"
 
+    def test_a_wrapping_token_is_redeemed_once_and_the_secret_id_reused(
+        self, processes, cert_ssh_port, stub_vault, ctx, timeout
+    ):
+        """A wrapping token can be redeemed exactly once, while the secret ID
+        inside it stays usable. Unwrapping per login would leave every session
+        after the first unable to authenticate to Vault at all."""
+        secret_id_path = ctx.tmpdir / f"wrapping-token-{uuid4()}"
+        secret_id_path.write_text("unwrap:stub-wrapping-token")
+
+        wg = self._wg_with_auth(
+            processes,
+            stub_vault,
+            {
+                "kind": "app_role",
+                "role_id": "role-1",
+                "secret_id_path": str(secret_id_path),
+            },
+        )
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+        assert connect(processes, wg, user, target, timeout)[0] == 0
+
+        # Forces a second login rather than waiting out the lease.
+        stub_vault.invalidate_token()
+        assert connect(processes, wg, user, target, timeout)[0] == 0
+
+        assert len(stub_vault.logins) == 2, "the second session did not log in again"
+        assert stub_vault.logins[-1]["secret_id"] == "unwrapped-secret-id"
+        assert len(stub_vault.unwraps) == 1, "the wrapping token was redeemed twice"
+
+    def test_a_freshly_provisioned_wrapping_token_is_picked_up(
+        self, processes, cert_ssh_port, stub_vault, ctx, timeout
+    ):
+        """Caching the unwrapped secret ID must not mean ignoring the file: an
+        operator rotating the credential writes a new wrapping token there."""
+        secret_id_path = ctx.tmpdir / f"wrapping-token-{uuid4()}"
+        secret_id_path.write_text("unwrap:first-wrapping-token")
+
+        wg = self._wg_with_auth(
+            processes,
+            stub_vault,
+            {
+                "kind": "app_role",
+                "role_id": "role-1",
+                "secret_id_path": str(secret_id_path),
+            },
+        )
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+        assert connect(processes, wg, user, target, timeout)[0] == 0
+
+        secret_id_path.write_text("unwrap:second-wrapping-token")
+        stub_vault.invalidate_token()
+        assert connect(processes, wg, user, target, timeout)[0] == 0
+
+        assert stub_vault.unwraps == ["first-wrapping-token", "second-wrapping-token"]
+
+
+class TestConfigReload:
+    def test_a_new_vault_address_takes_effect_without_a_restart(
+        self, processes: ProcessManager, ctx, stub_vault, cert_ssh_port, timeout
+    ):
+        """Every other section of the config is watched and applied live. A
+        `vault:` that quietly needed a restart would be the one exception, and
+        an operator editing it would have no way of knowing."""
+        token_path = ctx.tmpdir / f"sa-token-{uuid4()}"
+        token_path.write_text(SERVICE_ACCOUNT_JWT)
+
+        second = StubVault(ctx.tmpdir / f"stub-vault-reload-{uuid4()}")
+        second.start()
+        try:
+            port = processes.start_ssh_server(trusted_ca=[second.ca_public_key])
+            wait_port(port)
+
+            wg = processes.start_wg(
+                config_patch={
+                    "vault": {
+                        "address": stub_vault.url,
+                        "default_role": "warpgate",
+                        "auth": {
+                            "kind": "kubernetes",
+                            "role": "warpgate",
+                            "token_path": str(token_path),
+                        },
+                    }
+                }
+            )
+            wait_port(wg.http_port, for_process=wg.process, recv=False)
+            wait_port(wg.ssh_port, for_process=wg.process)
+
+            with admin_client(f"https://localhost:{wg.http_port}") as api:
+                user, target = make_user_and_target(api, port)
+
+            # The running config points at the first issuer, whose CA this
+            # target does not trust — so this must fail before the edit.
+            assert connect(processes, wg, user, target, timeout)[0] != 0
+
+            config = yaml.safe_load(wg.config_path.read_text())
+            config["vault"]["address"] = second.url
+            wg.config_path.write_text(yaml.dump(config))
+
+            # The watcher debounces for 500ms before reloading once.
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                if second.signs:
+                    break
+                connect(processes, wg, user, target, timeout)
+                time.sleep(1)
+
+            assert second.signs, "the edited Vault address was never picked up"
+            assert connect(processes, wg, user, target, timeout)[0] == 0
+        finally:
+            second.stop()
+
+
+class TestTheHostKeyCheck:
+    """The admin host-key check reaches the same connection code the SSH path
+    does. It asks for one thing — the target's host key — and must not carry on
+    into authentication behind the operator's back."""
+
+    def test_checking_a_host_key_issues_no_certificate(
+        self, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """Pressing the button on a certificate target would otherwise mint a
+        real certificate and open a real authenticated session that nothing is
+        attached to, holding until the inactivity timeout."""
+        _, target = make_user_and_target(api, cert_ssh_port)
+
+        first = api.check_ssh_host_key(sdk.CheckSshHostKeyRequest(target_id=target.id))
+        assert first.remote_key_base64, "the check did not reach the target at all"
+
+        # The first press leaves the key trusted; it is every press after that
+        # one which used to run on into authentication.
+        api.check_ssh_host_key(sdk.CheckSshHostKeyRequest(target_id=target.id))
+        api.check_ssh_host_key(sdk.CheckSshHostKeyRequest(target_id=target.id))
+
+        # The request returns as soon as the key arrives; a connection that kept
+        # going would reach the issuer a moment afterwards, so the assertion has
+        # to outlast the response rather than race it.
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            assert stub_vault.signs == [], "the host key check issued a certificate"
+            time.sleep(0.25)
+
+    def test_the_check_leaves_no_session_behind(
+        self, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """A session opened by the check is invisible in the UI and outlives the
+        request, so counting what the gateway is still holding is the only way
+        to see it."""
+        _, target = make_user_and_target(api, cert_ssh_port)
+        api.check_ssh_host_key(sdk.CheckSshHostKeyRequest(target_id=target.id))
+
+        # Measured as a delta: the gateway is shared by the whole module, so
+        # earlier tests have left sessions and sockets of their own behind.
+        gateway = psutil.Process(cert_wg.process.pid)
+        target_socket_count = lambda: len(
+            [c for c in gateway.net_connections(kind="tcp") if c.raddr and c.raddr.port == cert_ssh_port]
+        )
+        before_sockets = target_socket_count()
+        before_sessions = api.get_sessions().total
+
+        for _ in range(3):
+            api.check_ssh_host_key(sdk.CheckSshHostKeyRequest(target_id=target.id))
+
+        assert api.get_sessions().total == before_sessions, "the check registered a session"
+        # A connection still open to the target is the observable trace of a
+        # client task that never exited. One-sided on purpose: an earlier test's
+        # socket finishing its close during this window lowers the count, and
+        # that is not what is under test.
+        assert target_socket_count() <= before_sockets
 
 
 class TestTheStubItself:

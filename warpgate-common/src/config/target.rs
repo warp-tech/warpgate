@@ -77,6 +77,25 @@ pub struct SshTargetCertificateAuth {
     /// targets of differing privilege belong to differing roles.
     #[serde(default)]
     pub role: Option<String>,
+
+    /// Critical options this target's certificates are expected to carry.
+    /// Anything not listed here is refused, because the target's sshd enforces
+    /// whatever arrives: a `force-command` decides what the session runs, under
+    /// the connecting user's own principal and key ID.
+    #[serde(default)]
+    #[oai(default)]
+    pub allowed_critical_options: Vec<SshCertificateCriticalOption>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct SshCertificateCriticalOption {
+    /// Option name as it appears in the certificate, e.g. `force-command`.
+    pub name: String,
+
+    /// The exact value required. Unset accepts any value for this name — worth
+    /// avoiding for `force-command`, whose value is the command that runs.
+    #[serde(default)]
+    pub value: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]

@@ -47,6 +47,17 @@ pub enum VaultError {
 
     #[error("Vault response is too large")]
     OversizedResponse,
+
+    #[error("Vault reported an unusable token lease of {0} seconds")]
+    InvalidLease(u64),
+
+    #[error(
+        "cannot unwrap the AppRole secret ID at {path}: {source}. A wrapping token is single-use — whatever provisions this file has to write a fresh one, e.g. `vault write -f -wrap-ttl=<ttl> auth/approle/role/<role>/secret-id`"
+    )]
+    SecretIdUnwrap {
+        path: PathBuf,
+        source: Box<VaultError>,
+    },
 }
 
 impl VaultError {
@@ -59,18 +70,24 @@ impl VaultError {
             VaultError::InvalidPrincipal(_) | VaultError::InvalidKeyId => {
                 "Invalid certificate request parameters"
             }
-            VaultError::Api { status, .. } => {
-                if status.is_client_error() {
+            VaultError::Api { status, body } => {
+                // Named rather than left generic: the role is one setting away
+                // from working, and nothing else in the message would say so.
+                if body.contains("setting key_id is not allowed by role") {
+                    "The Vault role does not permit a key ID; set allow_user_key_ids=true on it"
+                } else if status.is_client_error() {
                     "Vault denied the certificate signing request"
                 } else {
                     "Vault service error"
                 }
             }
             VaultError::CredentialFile { .. } => "Failed to read Vault credentials",
+            VaultError::SecretIdUnwrap { .. } => "Failed to unwrap the Vault AppRole secret ID",
             VaultError::Request(_) => "Vault is currently unavailable",
             VaultError::Json(_)
             | VaultError::MetadataAddress(_)
-            | VaultError::OversizedResponse => "Invalid response from Vault",
+            | VaultError::OversizedResponse
+            | VaultError::InvalidLease(_) => "Invalid response from Vault",
             VaultError::Aws(e) => e.client_message(),
         }
     }

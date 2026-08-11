@@ -9040,6 +9040,7 @@ dependencies = [
  "warpgate-protocol-ssh",
  "warpgate-protocol-vnc",
  "warpgate-tls",
+ "warpgate-vault",
 ]
 
 [[package]]

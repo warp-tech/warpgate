@@ -19,6 +19,7 @@ use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
 use crate::{
     AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry, State,
+    VaultCell,
 };
 
 #[derive(Clone)]
@@ -29,8 +30,9 @@ pub struct Services {
     pub cluster: Arc<Cluster>,
     pub state: Arc<Mutex<State>>,
     pub config_provider: Arc<ConfigProviderEnum>,
-    /// Present only when the config declares a Vault server.
-    pub vault: Option<Arc<VaultClient>>,
+    /// Empty unless the config declares a Vault server. Swappable so that
+    /// editing `vault:` takes effect without a restart.
+    pub vault: VaultCell,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Option<Secret<String>>>,
     pub cluster_token: Arc<Secret<String>>,
@@ -77,13 +79,15 @@ impl Services {
 
         let cluster = Arc::new(Cluster::new(db.clone(), config.store.http.listen.port()).await?);
 
-        let vault = config
-            .store
-            .vault
-            .clone()
-            .map(VaultClient::new)
-            .transpose()?
-            .map(Arc::new);
+        let vault = VaultCell::new(
+            config
+                .store
+                .vault
+                .clone()
+                .map(VaultClient::new)
+                .transpose()?
+                .map(Arc::new),
+        );
 
         let config = Arc::new(Mutex::new(config));
 

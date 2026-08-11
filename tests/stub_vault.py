@@ -215,6 +215,14 @@ class _Handler(BaseHTTPRequestHandler):
             if not token:
                 self._reply(400, {"errors": ["missing wrapping token"]})
                 return
+            stub.unwraps.append(token)
+            # A wrapping token can be redeemed exactly once. Modelling that is
+            # the difference between a test that proves the secret ID survives
+            # more than one login and one that never asks.
+            if token in stub.spent_wrapping_tokens:
+                self._reply(400, {"errors": ["wrapping token is not valid or does not exist"]})
+                return
+            stub.spent_wrapping_tokens.add(token)
             self._reply(200, {"data": {"secret_id": "unwrapped-secret-id"}})
             return
 
@@ -329,6 +337,8 @@ class StubVault:
         self.signs = []
         self.requests = []
         self.metadata_requests = []
+        self.unwraps = []
+        self.spent_wrapping_tokens = set()
         self.valid_token = None
         self.reset()
 
@@ -351,6 +361,8 @@ class StubVault:
         self.signs.clear()
         self.requests.clear()
         self.metadata_requests.clear()
+        self.unwraps.clear()
+        self.spent_wrapping_tokens.clear()
 
     def start(self):
         self._thread.start()

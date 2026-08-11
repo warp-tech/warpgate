@@ -65,6 +65,7 @@ warpgate-protocol-rdp = { path = "../warpgate-protocol-rdp" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-protocol-vnc = { path = "../warpgate-protocol-vnc" }
 warpgate-tls = { path = "../warpgate-tls" }
+warpgate-vault = { path = "../warpgate-vault" }
 
 [dev-dependencies]
 tempfile = "3"

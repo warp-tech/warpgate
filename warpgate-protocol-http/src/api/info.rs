@@ -358,7 +358,9 @@ impl Api {
             } else {
                 None
             },
-            has_vault: auth_ctx.is_some().then(|| ctx.services().vault.is_some()),
+            has_vault: auth_ctx
+                .is_some()
+                .then(|| ctx.services().vault.get().is_some()),
             should_prompt_analytics,
             banner: parameters.banner.clone(),
             show_session_menu: parameters.show_session_menu,

@@ -34,9 +34,16 @@ static NEXT_TOKEN_ID: AtomicU64 = AtomicU64::new(1);
 fn validate_address(address: &str) -> Result<()> {
     let parsed = url::Url::parse(address).map_err(|e| VaultError::InvalidAddress(e.to_string()))?;
     if parsed.scheme() != "https" {
-        let host = parsed.host_str().unwrap_or_default();
-        let is_localhost = host == "localhost" || host == "127.0.0.1" || host == "::1";
-        if !is_localhost {
+        // Matched on the parsed host rather than on `host_str`, which renders an
+        // IPv6 address with its brackets — `[::1]` never equalled `::1`, so a
+        // loopback Vault over IPv6 was refused as though it were remote.
+        let is_loopback = match parsed.host() {
+            Some(url::Host::Domain(domain)) => domain == "localhost",
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        };
+        if !is_loopback {
             return Err(VaultError::InsecureAddress);
         }
     }
@@ -92,6 +99,19 @@ struct CachedToken {
     expires_at: Option<Instant>,
 }
 
+/// A secret ID that was delivered response-wrapped, kept alongside the exact
+/// file content it came from.
+///
+/// A wrapping token can be redeemed once, while the secret ID inside it stays
+/// usable until its own `secret_id_num_uses` or `secret_id_ttl` runs out — so
+/// unwrapping per login would fail every login after the first. Keying on the
+/// file content means a freshly provisioned token is still picked up: the file
+/// is read on every login, only the redemption is skipped.
+struct UnwrappedSecretId {
+    source: Zeroizing<String>,
+    secret_id: Zeroizing<String>,
+}
+
 fn login_payload<T: Serialize>(value: &T) -> Result<Zeroizing<String>> {
     Ok(Zeroizing::new(serde_json::to_string(value)?))
 }
@@ -123,9 +143,9 @@ struct AzureLogin<'a> {
 struct AwsLogin<'a> {
     role: Option<&'a str>,
     iam_http_request_method: &'a str,
-    iam_request_url: String,
-    iam_request_body: String,
-    iam_request_headers: String,
+    iam_request_url: &'a str,
+    iam_request_body: &'a str,
+    iam_request_headers: &'a str,
 }
 
 #[derive(Serialize)]
@@ -174,7 +194,9 @@ struct UnwrapData {
 pub struct VaultClient {
     config: VaultConfig,
     http: reqwest::Client,
+    metadata_http: reqwest::Client,
     token: Mutex<Option<CachedToken>>,
+    unwrapped_secret_id: Mutex<Option<UnwrappedSecretId>>,
 }
 
 impl VaultClient {
@@ -197,16 +219,30 @@ impl VaultClient {
         // `Authorization` on a cross-origin hop but knows nothing about
         // `X-Vault-Token`, so a 307 from a hostile or misconfigured endpoint
         // would replay the token to another host, or downgrade the request to
-        // plain HTTP. The same client fetches cloud metadata, where following a
-        // redirect would be just as wrong.
+        // plain HTTP.
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(config.timeout)
             .build()?;
+
+        // The metadata services are link-local and plain HTTP by definition, and
+        // reqwest honours HTTP_PROXY/HTTPS_PROXY by default — a proxy in the
+        // environment would carry the instance identity token off the host.
+        // GCE's default address is a hostname, so the usual IP-based NO_PROXY
+        // list does not cover it. Vault's own address keeps ambient proxy
+        // support, since reaching it through one is a legitimate deployment.
+        let metadata_http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .timeout(config.timeout)
+            .build()?;
+
         Ok(Self {
             config,
             http,
+            metadata_http,
             token: Mutex::new(None),
+            unwrapped_secret_id: Mutex::new(None),
         })
     }
 
@@ -345,10 +381,20 @@ impl VaultClient {
             // Vault reports a lease of zero for a token that does not expire.
             // Reading that as "expired half a minute ago" would turn every
             // certificate request into a fresh login.
-            expires_at: (auth.lease_duration > 0).then(|| {
-                Instant::now()
-                    + Duration::from_secs(auth.lease_duration).saturating_sub(TOKEN_EXPIRY_MARGIN)
-            }),
+            //
+            // The lease is an unbounded number out of a network response, and
+            // `Instant + Duration` panics on overflow, so an absurd one is
+            // rejected as a bad response rather than taken at its word.
+            expires_at: match auth.lease_duration {
+                0 => None,
+                seconds => Some(
+                    Instant::now()
+                        .checked_add(
+                            Duration::from_secs(seconds).saturating_sub(TOKEN_EXPIRY_MARGIN),
+                        )
+                        .ok_or(VaultError::InvalidLease(seconds))?,
+                ),
+            },
         })
     }
 
@@ -374,9 +420,7 @@ impl VaultClient {
             } => {
                 let cred = Self::read_credential(secret_id_path).await?;
                 let secret_id = if cred.starts_with("unwrap:") {
-                    let wrapping_token =
-                        Zeroizing::new(cred.trim_start_matches("unwrap:").trim().to_owned());
-                    self.unwrap_secret_id(&wrapping_token).await?
+                    self.unwrapped_secret_id(secret_id_path, &cred).await?
                 } else {
                     cred
                 };
@@ -403,7 +447,8 @@ impl VaultClient {
                 metadata_address,
             } => {
                 let (jwt, instance) =
-                    metadata::azure_login_material(&self.http, metadata_address, resource).await?;
+                    metadata::azure_login_material(&self.metadata_http, metadata_address, resource)
+                        .await?;
                 (
                     "auth/azure/login",
                     login_payload(&AzureLogin {
@@ -423,13 +468,44 @@ impl VaultClient {
             } => {
                 let audience = format!("vault/{role}");
                 let jwt =
-                    metadata::gcp_identity_token(&self.http, metadata_address, &audience).await?;
+                    metadata::gcp_identity_token(&self.metadata_http, metadata_address, &audience)
+                        .await?;
                 (
                     "auth/gcp/login",
                     login_payload(&JwtLogin { role, jwt: &jwt })?,
                 )
             }
         })
+    }
+
+    /// The secret ID behind a `unwrap:<token>` file, redeeming the wrapping
+    /// token the first time and on every later change to the file.
+    async fn unwrapped_secret_id(
+        &self,
+        path: &Path,
+        cred: &Zeroizing<String>,
+    ) -> Result<Zeroizing<String>> {
+        let mut cached = self.unwrapped_secret_id.lock().await;
+
+        if let Some(entry) = cached.as_ref()
+            && entry.source.as_str() == cred.as_str()
+        {
+            return Ok(entry.secret_id.clone());
+        }
+
+        let wrapping_token = Zeroizing::new(cred.trim_start_matches("unwrap:").trim().to_owned());
+        let secret_id = self.unwrap_secret_id(&wrapping_token).await.map_err(|e| {
+            VaultError::SecretIdUnwrap {
+                path: path.to_owned(),
+                source: Box::new(e),
+            }
+        })?;
+
+        *cached = Some(UnwrappedSecretId {
+            source: cred.clone(),
+            secret_id: secret_id.clone(),
+        });
+        Ok(secret_id)
     }
 
     async fn unwrap_secret_id(&self, wrapping_token: &str) -> Result<Zeroizing<String>> {
@@ -464,18 +540,27 @@ impl VaultClient {
         server_id: Option<&str>,
         region: Option<&str>,
     ) -> Result<Zeroizing<String>> {
-        let request = warpgate_aws::sign_sts_identity_request(region, server_id).await?;
-        // Carries the signature and, on an instance role, the session token.
-        let mut headers = serde_json::to_string(&request.headers)?;
+        let mut request = warpgate_aws::sign_sts_identity_request(region, server_id).await?;
+
+        // The headers carry the SigV4 signature and, on an instance role, the
+        // session token — the one part of this request worth protecting. The URL
+        // and body are the same public constants on every call. Every buffer
+        // they pass through is zeroized, to match what the other methods do with
+        // their credentials.
+        let headers = Zeroizing::new(serde_json::to_string(&request.headers)?);
+        let encoded_headers = Zeroizing::new(BASE64.encode(headers.as_bytes()));
 
         let payload = login_payload(&AwsLogin {
             role,
             iam_http_request_method: request.method,
-            iam_request_url: BASE64.encode(request.url.as_bytes()),
-            iam_request_body: BASE64.encode(request.body.as_bytes()),
-            iam_request_headers: BASE64.encode(headers.as_bytes()),
+            iam_request_url: &BASE64.encode(request.url.as_bytes()),
+            iam_request_body: &BASE64.encode(request.body.as_bytes()),
+            iam_request_headers: &encoded_headers,
         });
-        headers.zeroize();
+
+        for value in request.headers.values_mut() {
+            value.zeroize();
+        }
         payload
     }
 
@@ -920,6 +1005,40 @@ mod tests {
         }
     }
 
+    /// `lease_duration` is an unbounded number out of a network response, and
+    /// `Instant + Duration` panics on overflow — so a Vault returning a nonsense
+    /// lease would take the process down on the login path.
+    #[tokio::test]
+    async fn test_an_absurd_lease_is_refused_rather_than_panicking() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let log = Arc::new(StdMutex::new(vec![]));
+        let vault = spawn_server(
+            json_response(&format!(
+                r#"{{"auth":{{"client_token":"s.stub","lease_duration":{}}}}}"#,
+                u64::MAX
+            )),
+            json_response("{}"),
+            log,
+        )
+        .await
+        .unwrap();
+
+        let secret_id_path = std::env::temp_dir().join("warpgate-vault-lease-test-secret");
+        std::fs::write(&secret_id_path, "secret-id").unwrap();
+
+        let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
+        let error = client
+            .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, VaultError::InvalidLease(_)),
+            "expected the lease to be refused, got {error:?}"
+        );
+    }
+
     #[test]
     fn test_error_body_truncation_survives_a_split_character() {
         // 255 ASCII bytes then a two-byte character: cutting at byte 256 lands
@@ -948,6 +1067,19 @@ mod tests {
         assert!(validate_address("http://127.0.0.1:8200").is_ok());
         assert!(matches!(
             validate_address("http://vault.internal:8200"),
+            Err(VaultError::InsecureAddress)
+        ));
+    }
+
+    /// `host_str` renders an IPv6 host with its brackets, so a string
+    /// comparison against "::1" never matched and a loopback Vault over IPv6
+    /// was refused as though it were a remote plaintext endpoint.
+    #[test]
+    fn test_ipv6_loopback_is_recognised() {
+        assert!(validate_address("http://[::1]:8200").is_ok());
+        assert!(validate_address("http://[0:0:0:0:0:0:0:1]:8200").is_ok());
+        assert!(matches!(
+            validate_address("http://[2001:db8::1]:8200"),
             Err(VaultError::InsecureAddress)
         ));
     }

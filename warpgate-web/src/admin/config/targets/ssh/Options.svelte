@@ -34,6 +34,25 @@
         hostKeyCheckInvalidated = false
     })
 
+    function addCriticalOption() {
+        if (options.auth.kind !== 'Certificate') {
+            return
+        }
+        options.auth.allowedCriticalOptions = [
+            ...(options.auth.allowedCriticalOptions ?? []),
+            { name: '', value: undefined },
+        ]
+    }
+
+    function removeCriticalOption(index: number) {
+        if (options.auth.kind !== 'Certificate') {
+            return
+        }
+        options.auth.allowedCriticalOptions = (
+            options.auth.allowedCriticalOptions ?? []
+        ).filter((_, i) => i !== index)
+    }
+
     api.getTargets().then(targets => {
         sshTargets = targets.filter(
             t => t.options.kind === TargetKind.Ssh && t.id !== id,
@@ -195,6 +214,48 @@
         </FormGroup>
     {/if}
 </div>
+
+{#if options.auth.kind === 'Certificate'}
+    <div class="mb-3">
+        <div class="d-flex align-items-center mb-2">
+            <span class="me-auto">Allowed certificate critical options</span>
+            <button
+                type="button"
+                class="btn btn-link btn-sm"
+                onclick={addCriticalOption}
+            >
+                Add
+            </button>
+        </div>
+        <small class="text-muted d-block mb-2">
+            A certificate carrying any option not listed here is refused. The
+            target's sshd enforces whatever arrives, so a
+            <code>force-command</code>
+            decides what the session runs — pin its value wherever you can.
+        </small>
+        {#each options.auth.allowedCriticalOptions ?? [] as option, index}
+            <div class="d-flex mb-2">
+                <input
+                    class="form-control me-2"
+                    placeholder="force-command"
+                    bind:value={option.name}
+                >
+                <input
+                    class="form-control me-2"
+                    placeholder="Any value"
+                    bind:value={option.value}
+                >
+                <button
+                    type="button"
+                    class="btn btn-link btn-sm"
+                    onclick={() => removeCriticalOption(index)}
+                >
+                    Remove
+                </button>
+            </div>
+        {/each}
+    </div>
+{/if}
 
 <div class="d-flex">
     <Input

@@ -30,7 +30,10 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{SSHTargetAuth, SessionId, TargetOptions, TargetSSHOptions, WarpgateError};
+use warpgate_common::{
+    SSHTargetAuth, SessionId, SshCertificateCriticalOption, TargetOptions, TargetSSHOptions,
+    WarpgateError,
+};
 use warpgate_core::{ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
@@ -75,6 +78,12 @@ pub enum ConnectionError {
     #[error("Authentication failed")]
     Authentication,
 
+    /// Warpgate refused the credential before offering it, so the target never
+    /// saw anything — saying it was "rejected by the target" would name the
+    /// wrong party and send the operator to the wrong logs.
+    #[error("Certificate refused by Warpgate: {0}")]
+    CertificateRefused(String),
+
     #[error("Jump host target not found")]
     JumpHostTargetNotFound,
 
@@ -90,6 +99,9 @@ impl ConnectionError {
             ConnectionError::Authentication => {
                 "SSH target rejected Warpgate's authentication request".to_string()
             }
+            ConnectionError::CertificateRefused(reason) => {
+                format!("Warpgate refused the certificate issued for this session: {reason}")
+            }
             ConnectionError::HostKeyMismatch { .. } => "Host key mismatch".to_string(),
             ConnectionError::Resolve => "Could not resolve target address".to_string(),
             ConnectionError::Aborted => "Connection aborted".to_string(),
@@ -104,16 +116,60 @@ impl ConnectionError {
 }
 
 /// Vault is a second gate, not a trusted party, so what comes back is checked
-/// against what was asked for before it is offered to the target. Neither of
-/// these could authenticate anything anyway — the point is to say so in the
-/// session log rather than let the target's refusal stand in for the reason.
-fn certificate_mismatch(certificate: &Certificate, key: &PublicKey) -> Option<&'static str> {
+/// against what was asked for before it is offered to the target.
+///
+/// The type and key checks are belt-and-braces — neither could authenticate
+/// anything — but the last two are load-bearing. The target's sshd enforces
+/// whatever critical options arrive, so a `force-command` planted on a role
+/// replaces what the user asked to run while keeping their principal and key ID
+/// on it: the target's own log then attributes the attacker's command to them.
+/// Writing a role is a lower bar than signing with it, so this is the only place
+/// the check can land.
+fn certificate_mismatch(
+    certificate: &Certificate,
+    key: &PublicKey,
+    principal: &str,
+    allowed_options: &[SshCertificateCriticalOption],
+) -> Option<String> {
     if certificate.cert_type() != CertType::User {
-        return Some("Vault returned a host certificate rather than a user certificate");
+        return Some("Vault returned a host certificate rather than a user certificate".to_owned());
     }
     if certificate.public_key() != key.key_data() {
-        return Some("Vault signed a key other than the one generated for this session");
+        return Some("Vault signed a key other than the one generated for this session".to_owned());
     }
+    // Vault returns the requested set verbatim — trimmed, deduped and sorted —
+    // or refuses outright, so a set that no longer contains the account being
+    // reached means the answer did not come from the request that was made.
+    if !certificate
+        .valid_principals()
+        .iter()
+        .any(|candidate| candidate == principal)
+    {
+        return Some(format!(
+            "Vault issued a certificate that does not name the target account {principal}"
+        ));
+    }
+
+    for (name, value) in certificate.critical_options().iter() {
+        let permitted = allowed_options.iter().find(|option| &option.name == name);
+        match permitted {
+            None => {
+                return Some(format!(
+                    "Vault issued a certificate carrying the critical option {name}, which this target does not allow"
+                ));
+            }
+            Some(option) => {
+                if let Some(expected) = &option.value
+                    && expected != value
+                {
+                    return Some(format!(
+                        "Vault issued a certificate whose critical option {name} does not match the value configured for this target"
+                    ));
+                }
+            }
+        }
+    }
+
     None
 }
 
@@ -278,6 +334,14 @@ pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 #[derive(Clone, Debug)]
 pub enum RCCommand {
     Connect(Vec<TargetSSHOptions>),
+    /// Connect only as far as the target's host key, then stop.
+    ///
+    /// A separate command rather than the caller dropping its handle once it has
+    /// what it wants: the connection otherwise runs on into authentication, and
+    /// for a certificate target that means a real certificate issued and a real
+    /// session opened for nobody. Cancelling on a dropped handle is a race the
+    /// caller loses about half the time; refusing to start is not.
+    CheckHostKey(Vec<TargetSSHOptions>),
     Channel(Uuid, ChannelOperation),
     ForwardTCPIP(String, u32),
     CancelTCPIPForward(String, u32),
@@ -578,6 +642,14 @@ impl RemoteClient {
                     return Ok(true);
                 }
             },
+            RCCommand::CheckHostKey(options) => {
+                if let Err(e) = self.check_host_key(options).await {
+                    debug!("Host key check error: {}", e);
+                    let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
+                }
+                self.set_disconnected().await;
+                return Ok(true);
+            }
             RCCommand::Channel(ch, op) => {
                 self.apply_channel_op(ch, op).await?;
             }
@@ -687,11 +759,18 @@ impl RemoteClient {
     /// Connect through a pre-resolved chain of SSH hops, each tunnelled through the previous.
     /// `chain` must be non-empty; the first entry is connected directly, subsequent ones via
     /// `channel_open_direct_tcpip` through the previous session.
+    /// `stop_after_host_key` applies to the final hop only: the intermediate
+    /// ones must authenticate, or there is no tunnel to carry the last one.
+    /// Returns `None` when it stopped at the host key as asked.
     async fn connect_chain(
         &mut self,
         chain: Vec<TargetSSHOptions>,
-    ) -> Result<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>), ConnectionError>
-    {
+        stop_after_host_key: bool,
+    ) -> Result<
+        Option<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>)>,
+        ConnectionError,
+    > {
+        let hop_count = chain.len();
         let mut iter = chain.into_iter();
         let first = iter.next().ok_or(ConnectionError::Resolve)?;
 
@@ -711,12 +790,16 @@ impl RemoteClient {
             session_id: self.id,
         };
         let fut = russh::client::connect(config, address, handler);
-        let (mut session, mut active_rx) = self
-            .wait_for_connection(&first, fut, event_rx, false)
+        let Some((mut session, mut active_rx)) = self
+            .wait_for_connection(&first, fut, event_rx, stop_after_host_key && hop_count == 1)
             .boxed()
-            .await?;
+            .await?
+        else {
+            return Ok(None);
+        };
 
-        for ssh_options in iter {
+        for (index, ssh_options) in iter.enumerate() {
+            let is_last = index + 2 == hop_count;
             let _ = self.tx.send(RCEvent::HopConnected).await;
             info!(
                 host = %ssh_options.host,
@@ -742,19 +825,42 @@ impl RemoteClient {
                 session_id: self.id,
             };
             let fut = russh::client::connect_stream(config, stream, handler);
-            let (new_session, new_rx) = self
-                .wait_for_connection(&ssh_options, fut, event_rx, false)
+            let Some((new_session, new_rx)) = self
+                .wait_for_connection(&ssh_options, fut, event_rx, stop_after_host_key && is_last)
                 .boxed()
-                .await?;
+                .await?
+            else {
+                return Ok(None);
+            };
             session = new_session;
             active_rx = new_rx;
         }
 
-        Ok((session, active_rx))
+        Ok(Some((session, active_rx)))
+    }
+
+    /// Connects as far as the target's host key and stops, for the admin-side
+    /// check. Nothing is authenticated, so nothing is issued.
+    async fn check_host_key(
+        &mut self,
+        chain: Vec<TargetSSHOptions>,
+    ) -> Result<(), ConnectionError> {
+        if let Some((session, _)) = self.connect_chain(chain, true).boxed().await? {
+            // Only reachable if the connection came up without the handler ever
+            // reporting a host key, which should not happen — but an open
+            // session left behind would be exactly the leak this command exists
+            // to close.
+            let _ = session
+                .disconnect(russh::Disconnect::ByApplication, "", "")
+                .await;
+        }
+        Ok(())
     }
 
     async fn connect(&mut self, chain: Vec<TargetSSHOptions>) -> Result<(), ConnectionError> {
-        let (session, mut event_rx) = self.connect_chain(chain).boxed().await?;
+        let Some((session, mut event_rx)) = self.connect_chain(chain, false).boxed().await? else {
+            return Err(ConnectionError::Internal);
+        };
 
         self.session = Some(Arc::new(Mutex::new(session)));
 
@@ -782,8 +888,11 @@ impl RemoteClient {
         ssh_options: &TargetSSHOptions,
         fut_connect: Fut,
         mut event_rx: UnboundedReceiver<ClientHandlerEvent>,
-        _is_jump_host: bool,
-    ) -> Result<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>), ConnectionError>
+        stop_after_host_key: bool,
+    ) -> Result<
+        Option<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>)>,
+        ConnectionError,
+    >
     where
         Fut: Future<Output = Result<Handle<ClientHandler>, ClientHandlerError>>,
     {
@@ -795,14 +904,24 @@ impl RemoteClient {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
                             self.tx.send(RCEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
+                            if stop_after_host_key {
+                                return Ok(None);
+                            }
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
                             self.tx.send(RCEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;
+                            if stop_after_host_key {
+                                return Ok(None);
+                            }
                         }
                         _ => {}
                     }
                 }
-                Some(()) = self.abort_rx.recv() => {
+                // `None` means every sender is gone, so the owner has dropped
+                // without disconnecting. `ServerSession::drop` signals first, so
+                // a live session never arrives here still wanting the
+                // connection — anything else that does is abandoning it.
+                _ = self.abort_rx.recv() => {
                     info!("Abort requested");
                     self.set_disconnected().await;
                     return Err(ConnectionError::Aborted)
@@ -829,7 +948,7 @@ impl RemoteClient {
                         ssh_options.allow_insecure_algos.unwrap_or(false)
                     ).await?;
 
-                    return Ok((session, event_rx));
+                    return Ok(Some((session, event_rx)));
                 }
             }
         }
@@ -945,7 +1064,7 @@ impl RemoteClient {
                 }
             }
             SSHTargetAuth::Certificate(auth) => {
-                if let Some(vault) = self.services.vault.clone() {
+                if let Some(vault) = self.services.vault.get() {
                     // The key exists only for this authentication attempt — nothing
                     // the target will ever trust again outlives this scope.
                     let key = Arc::new(
@@ -965,21 +1084,27 @@ impl RemoteClient {
                     let certificate =
                         Certificate::from_openssh(&signed_key).map_err(russh::keys::Error::from)?;
 
-                    // The target's sshd enforces critical options, so one of
-                    // these decides what the session actually does — a forced
-                    // command runs instead of whatever the user asked for.
-                    // Warpgate never requests any, so an operator has to be able
-                    // to see that one arrived.
-                    if !certificate.critical_options().is_empty() {
-                        warn!(
-                            options = ?certificate.critical_options().keys().collect::<Vec<_>>(),
+                    // Extensions do not change what runs, but an unexpected one
+                    // still says the role is not what the operator thinks.
+                    if !certificate.extensions().is_empty() {
+                        debug!(
+                            extensions = ?certificate.extensions().keys().collect::<Vec<_>>(),
                             key_id,
-                            "Vault issued a certificate carrying critical options"
+                            "Certificate carries extensions"
                         );
                     }
 
-                    if let Some(reason) = certificate_mismatch(&certificate, key.public_key()) {
-                        auth_error_msg = Some(reason.into());
+                    if let Some(reason) = certificate_mismatch(
+                        &certificate,
+                        key.public_key(),
+                        username,
+                        &auth.allowed_critical_options,
+                    ) {
+                        // Surfaced to the user, not only to the log: a session
+                        // that dies with "the target rejected you" sends whoever
+                        // is debugging it to the wrong machine entirely.
+                        warn!(key_id, reason, "Refusing the issued certificate");
+                        return Err(ConnectionError::CertificateRefused(reason));
                     } else {
                         let response = session
                             .authenticate_openssh_cert(username.to_string(), key, certificate)

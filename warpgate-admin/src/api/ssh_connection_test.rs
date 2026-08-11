@@ -49,9 +49,19 @@ impl Api {
             .collect::<Vec<_>>();
 
         let mut handles = RemoteClient::create(Uuid::new_v4(), admin.services().clone())?;
+        // Not `Connect`: that would carry on into authenticating to the target
+        // once the key had been reported, opening a session nothing is attached
+        // to — and, for a certificate target, minting a real certificate to do
+        // it with.
         let _ = handles
             .command_tx
-            .send((RCCommand::Connect(ssh_chain), None));
+            .send((RCCommand::CheckHostKey(ssh_chain), None));
+
+        // Kept out of the future below so the connection can be torn down after
+        // it resolves. `CheckHostKey` already ends the client task on its own;
+        // this is the second lock on the same door, scoped to this caller so
+        // that a real session's graceful disconnect stays untouched.
+        let abort_tx = handles.abort_tx.clone();
 
         let fut = async move {
             let key = loop {
@@ -70,9 +80,12 @@ impl Api {
             anyhow::Ok(key)
         };
 
+        let result = fut.await;
+        let _ = abort_tx.send(());
+
         // Result is matched manually since we need to manually format
         // the error message with :# to included the nested errors here
-        match fut.await {
+        match result {
             Ok(key) => Ok(CheckSshHostKeyResponse::Ok(Json(
                 CheckSshHostKeyResponseBody {
                     remote_key_type: key.algorithm().as_str().into(),

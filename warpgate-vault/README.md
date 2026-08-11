@@ -68,6 +68,11 @@ Two settings deserve attention:
 - **`allow_user_key_ids`** must be `true`. Without it Vault rejects the request
   outright, and every session would be attributed to the Warpgate service
   identity instead of to a person.
+- **A target with no username** asks for a certificate naming the *connecting
+  Warpgate user* instead — the same substitution every other SSH auth method
+  makes. That is not a bypass, since `allowed_users` still bounds what Vault will
+  issue, but it means the role must list every Warpgate username that may reach
+  the target. Setting the username explicitly is almost always what you want.
 
 `default_extensions` grants the minimum. Add `permit-port-forwarding` or
 `permit-agent-forwarding` only if your users need them.
@@ -320,17 +325,32 @@ token cannot send every session in flight to Vault at once. The cost is that a
 login which hangs blocks the others for up to `timeout`. Keep `timeout` at a
 value you are willing to make every concurrent session wait.
 
-**A certificate can come back carrying critical options.** If a Vault role sets
-`default_critical_options`, a `force-command` there replaces whatever the user
-typed — the target runs Vault's command and the session recording shows its
-output. Warpgate does not refuse such a certificate, because a restricted role
-may set one deliberately, but it logs every arrival:
+**Critical options are refused unless the target names them.** If a Vault role
+sets `default_critical_options`, a `force-command` there replaces whatever the
+user typed — the target runs Vault's command, under the user's own principal and
+key ID, and the recording shows its output. Planting one needs write access to a
+role, which is a lower bar than the right to sign with it or a route to the
+target, so Warpgate is the only place this can be caught.
 
-```
-WARN Vault issued a certificate carrying critical options options=["force-command"]
+A target therefore refuses any critical option it was not told to expect. Where a
+role sets one deliberately, name it on the target — and pin the value, since for
+`force-command` the value is the command:
+
+```json
+"auth": {
+  "kind": "Certificate",
+  "role": "warpgate-backup",
+  "allowed_critical_options": [
+    { "name": "force-command", "value": "/usr/local/bin/backup" }
+  ]
+}
 ```
 
-Alert on that line if your roles are not supposed to set any.
+Leaving `value` unset accepts any value for that name. The refusal reaches the
+connecting user, not only the log.
+
+Extensions are not refused — they cannot change what runs — but an unexpected one
+is logged at debug level, since it still says the role is not what you think.
 
 **`address` and `metadata_address` are fetched as given.** Both come from
 `warpgate.yaml`, so anyone who can edit that file can point Warpgate's outbound
