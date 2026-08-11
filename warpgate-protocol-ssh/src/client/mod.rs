@@ -41,6 +41,12 @@ use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
 use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_client_keys};
 
+/// How long a target may take to finish the SSH handshake. Generous for any
+/// real server on any real link, and the only thing standing between a target
+/// that accepts a connection and then goes quiet and a gateway task held for as
+/// long as it likes.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
     #[error("Host key mismatch")]
@@ -74,6 +80,12 @@ pub enum ConnectionError {
 
     #[error("Aborted")]
     Aborted,
+
+    /// The peer accepted the connection and then did not finish the handshake.
+    /// Distinct from a refusal, because nothing was refused — and distinct from
+    /// an ordinary timeout, because it names the stage.
+    #[error("The SSH target did not complete the handshake in time")]
+    HandshakeTimeout,
 
     /// Carries why, because the target's own reason is the only thing that
     /// distinguishes a wrong credential from a clock that disagrees — and a
@@ -109,6 +121,10 @@ impl ConnectionError {
             ConnectionError::HostKeyMismatch { .. } => "Host key mismatch".to_string(),
             ConnectionError::Resolve => "Could not resolve target address".to_string(),
             ConnectionError::Aborted => "Connection aborted".to_string(),
+            ConnectionError::HandshakeTimeout => {
+                "The SSH target accepted the connection but never completed the handshake"
+                    .to_string()
+            }
             ConnectionError::Internal => "Internal connection error".to_string(),
             ConnectionError::JumpHostTargetNotFound => "Jump host target not found".to_string(),
             ConnectionError::Io(_) | ConnectionError::Key(_) | ConnectionError::Ssh(_) => {
@@ -152,15 +168,20 @@ fn certificate_mismatch(
         return Some("Vault signed a key other than the one generated for this session".to_owned());
     }
     // Vault returns the requested set verbatim — trimmed, deduped and sorted —
-    // or refuses outright, so a set that no longer contains the account being
-    // reached means the answer did not come from the request that was made.
-    if !certificate
-        .valid_principals()
-        .iter()
-        .any(|candidate| candidate == principal)
-    {
+    // or refuses outright, so anything other than exactly the account that was
+    // asked for means the answer did not come from this request.
+    //
+    // Exactly, rather than merely containing it. An extra principal is another
+    // account the target will accept this certificate for, chosen by whoever
+    // answered rather than by the operator, and where sshd maps principals
+    // through `AuthorizedPrincipalsFile` it need not resemble a username at all.
+    // It is also the shape of CVE-2026-35414, where a comma inside a principal
+    // splits one name into two for one of sshd's checks and not the other.
+    let principals = certificate.valid_principals();
+    if principals.len() != 1 || principals.first().is_none_or(|only| only != principal) {
         return Some(format!(
-            "Vault issued a certificate that does not name the target account {principal}"
+            "Vault issued a certificate naming {:?} rather than only the target account {principal}",
+            principals
         ));
     }
 
@@ -168,8 +189,12 @@ fn certificate_mismatch(
         let permitted = allowed_options.iter().find(|option| &option.name == name);
         match permitted {
             None => {
+                // Quoted with `{:?}`, which escapes control characters: this
+                // string comes out of the certificate and ends up on the
+                // connecting user's terminal, where a raw escape sequence would
+                // be executed rather than shown.
                 return Some(format!(
-                    "Vault issued a certificate carrying the critical option {name}, which this target does not allow"
+                    "Vault issued a certificate carrying the critical option {name:?}, which this target does not allow"
                 ));
             }
             Some(option) => {
@@ -177,7 +202,7 @@ fn certificate_mismatch(
                     && expected != value
                 {
                     return Some(format!(
-                        "Vault issued a certificate whose critical option {name} does not match the value configured for this target"
+                        "Vault issued a certificate whose critical option {name:?} does not match the value configured for this target"
                     ));
                 }
             }
@@ -912,6 +937,22 @@ impl RemoteClient {
     {
         pin_mut!(fut_connect);
 
+        // Nothing else bounds this. russh limits how long an identification
+        // string may be, but not how long a peer may take to send the rest of
+        // the handshake, and the inactivity timeout only starts once the
+        // session loop is running. A target that completes the TCP connection
+        // and then goes quiet therefore held the session — and its task, and
+        // its slot — for as long as it liked. Reachable by anyone who can start
+        // a session to a target that has been compromised, or merely wedged.
+        //
+        // Its own bound, rather than the inactivity timeout. Measured: with
+        // that timeout at 45s a stalled handshake was held for 55s, so it was
+        // being bounded by the *inbound* session's patience — which governs how
+        // long an idle interactive session may live and is legitimately raised
+        // to hours. Borrowing it here would extend this hold to match.
+        let handshake_deadline = tokio::time::sleep(HANDSHAKE_TIMEOUT);
+        pin_mut!(handshake_deadline);
+
         loop {
             tokio::select! {
                 Some(event) = event_rx.recv() => {
@@ -930,6 +971,11 @@ impl RemoteClient {
                         }
                         _ => {}
                     }
+                }
+                () = &mut handshake_deadline => {
+                    error!(host = %ssh_options.host, "Target did not finish the SSH handshake in time");
+                    self.set_disconnected().await;
+                    return Err(ConnectionError::HandshakeTimeout);
                 }
                 // `None` means every sender is gone, so the owner has dropped
                 // without disconnecting. `ServerSession::drop` signals first, so

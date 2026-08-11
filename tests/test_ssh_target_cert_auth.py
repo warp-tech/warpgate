@@ -513,7 +513,7 @@ class TestRejections:
         assert client.returncode != 0
         assert stub_vault.signs, "no certificate was issued, so nothing was refused"
         assert "Warpgate refused the certificate" in stdout
-        assert "does not name the target account root" in stdout
+        assert "rather than only the target account root" in stdout
 
 
 class TestIssuerFailures:

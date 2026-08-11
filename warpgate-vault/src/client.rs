@@ -843,6 +843,12 @@ mod tests {
             VaultError::Api { status, body } => {
                 assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
                 assert!(body.len() <= MAX_ERROR_BODY + "... (truncated)".len());
+                // Both halves, deliberately. An upper bound alone is satisfied
+                // by a reader that returns nothing at all, and that mutant
+                // survived until `cargo mutants` pointed at it.
+                assert_eq!(body.len(), MAX_ERROR_BODY + "... (truncated)".len());
+                assert!(body.starts_with("aaaa"), "the body was not read: {body:?}");
+                assert!(body.ends_with("... (truncated)"), "no truncation marker");
             }
             other => panic!("expected a bounded API error, got {other:?}"),
         }
@@ -1055,6 +1061,56 @@ mod tests {
             matches!(error, VaultError::InvalidLease(_)),
             "expected the lease to be refused, got {error:?}"
         );
+    }
+
+    /// The truncation marker has to mean something.
+    ///
+    /// `cargo mutants` showed that inverting the "is there more?" poll, or the
+    /// `truncated` accumulation, or the loop condition itself, changed nothing
+    /// any test could see — the assertions were all upper bounds, which an
+    /// empty answer satisfies. These pin the boundary from both sides.
+    #[tokio::test]
+    async fn test_a_body_is_marked_truncated_exactly_when_it_is() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        for (size, expect_marker) in [
+            (MAX_ERROR_BODY - 1, false),
+            (MAX_ERROR_BODY, false),
+            (MAX_ERROR_BODY + 1, true),
+        ] {
+            let payload = "z".repeat(size);
+            let log = Arc::new(StdMutex::new(vec![]));
+            let vault = spawn_server(
+                json_response(r#"{"auth":{"client_token":"s.stub","lease_duration":3600}}"#),
+                format!(
+                    "HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\n\r\n{payload}",
+                    payload.len()
+                ),
+                log,
+            )
+            .await
+            .unwrap();
+
+            let secret_id_path = std::env::temp_dir().join("warpgate-vault-marker-test-secret");
+            std::fs::write(&secret_id_path, "secret-id").unwrap();
+
+            let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
+            let error = client
+                .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
+                .await
+                .unwrap_err();
+
+            let VaultError::Api { body, .. } = error else {
+                panic!("expected an API error for a {size}-byte body");
+            };
+            assert_eq!(
+                body.ends_with("... (truncated)"),
+                expect_marker,
+                "a {size}-byte body was marked wrongly: {body:.40}"
+            );
+            let kept = body.trim_end_matches("... (truncated)");
+            assert_eq!(kept.len(), size.min(MAX_ERROR_BODY), "wrong amount kept");
+        }
     }
 
     #[test]

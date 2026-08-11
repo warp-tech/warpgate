@@ -97,8 +97,8 @@ class TestCertificatesNobodyShouldAccept:
         requested."""
         stub_vault.principals = ",".join([f"user{n}" for n in range(999)] + ["root"])
         code, _ = attempt(processes, cert_wg, api, cert_ssh_port, timeout)
-        assert code == 0 or code != 0  # recorded below, not asserted blindly
         assert stub_vault.signs, "no certificate was issued"
+        assert code != 0, "a certificate naming a thousand accounts was offered"
 
     def test_a_certificate_valid_for_a_century(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
@@ -167,3 +167,51 @@ class TestWhatTheOperatorIsTold:
         # on its own sends someone to check credentials that are perfectly fine.
         assert "check the target's clock" in stdout
         assert "valid from" in stdout
+
+
+class TestPrincipalsThatCrossOtherPeoplesBugs:
+    """A principal is not only ours to interpret — the target's sshd parses it
+    too, and has been wrong about it.
+
+    CVE-2026-35414: a comma inside a certificate principal breaks OpenSSH's
+    access control (8.5p1 through 9.7p1), because one validation function splits
+    on the comma and authenticates the first fragment while the next treats the
+    whole string as one name. A certificate naming `deploy,root` can therefore
+    land a session as root.
+
+    Warpgate already refuses to *request* a principal with a comma in it. The
+    question here is what it does with one that comes *back*.
+    """
+
+    def test_a_certificate_naming_more_than_the_target_account_is_refused(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """`root` is present, so a membership check passes and the session
+        would succeed. The second name is an account the target will also
+        accept this certificate for, chosen by whoever answered rather than by
+        the operator — and under `AuthorizedPrincipalsFile` it need not look
+        like a username at all."""
+        stub_vault.principals = "root,deploy"
+        code, _ = attempt(processes, cert_wg, api, cert_ssh_port, timeout)
+
+        assert stub_vault.signs, "no certificate was issued"
+        assert code != 0, "a certificate naming accounts nobody asked for was offered"
+
+    def test_a_hostile_option_name_cannot_write_to_the_terminal(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The refusal message quotes the option name straight from the
+        certificate and is written to the user's terminal. Escape sequences in
+        it would be executed by the terminal, not displayed — the same class as
+        GHSA-3c3w, one layer down."""
+        from .test_ssh_target_cert_auth import make_user_and_target, start
+
+        stub_vault.sign_options = ["critical:\x1b[2J\x1b[1;31mHACKED=x"]
+        user, target = make_user_and_target(api, cert_ssh_port)
+
+        client = start(processes, cert_wg, user, target, "-tt")
+        stdout = client.communicate(timeout=timeout)[0].decode(errors="replace")
+
+        assert client.returncode != 0
+        assert stub_vault.signs, "no certificate was issued"
+        assert "\x1b[2J" not in stdout, "a certificate wrote escape sequences to the terminal"
