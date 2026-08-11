@@ -22,7 +22,7 @@
         "openapi": "npm run openapi:schema:admin && npm run openapi:schema:gateway && npm run openapi:client:admin && npm run openapi:client:gateway"
     },
     "devDependencies": {
-        "@biomejs/biome": "^2.5.6",
+        "@biomejs/biome": "^2.5.7",
         "@fontsource/poppins": "^5.3.0",
         "@fontsource/work-sans": "^5.3.0",
         "@fortawesome/free-brands-svg-icons": "^7.3.1",
@@ -51,7 +51,7 @@
         "sass": "1.78",
         "snarkdown": "^2.0.0",
         "svelte": "^5.56.8",
-        "svelte-check": "^4.7.4",
+        "svelte-check": "^4.7.5",
         "svelte-fa": "^4.0.4",
         "svelte-intersection-observer": "^1.2.0",
         "svelte-observable": "^0.4.0",
@@ -61,7 +61,7 @@
         "tslib": "^2.8.0",
         "typescript": "^5.9.3",
         "ua-parser-js": "^2.0.10",
-        "vite": "^8.1.5",
+        "vite": "^8.2.0",
         "zmodem.js": "^0.1.10"
     },
     "overrides": {
