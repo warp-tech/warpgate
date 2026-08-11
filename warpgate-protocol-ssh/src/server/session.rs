@@ -1945,6 +1945,9 @@ impl ServerSession {
 
         if !self.allowed_auth_methods.contains(&MethodKind::Password) {
             warn!("Client attempted password auth even though it was not advertised");
+            if let AuthSelector::User { username, .. } = &selector {
+                self.record_failed_login_attempt(username, "password").await;
+            }
             return russh::server::Auth::reject();
         }
 
