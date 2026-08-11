@@ -126,7 +126,7 @@ impl WebSshClientManager {
         let ssh_chain = resolve_ssh_chain(services, target.id, Some(&username))
             .await?
             .into_iter()
-            .map(|x| x.ssh_options)
+            .map(|x| (x.target_id, x.ssh_options))
             .collect::<Vec<_>>();
         rc_handles
             .command_tx
@@ -210,10 +210,10 @@ fn spawn_event_loop(
                                 })
                                 .await;
                         }
-                        RCEvent::HostKeyReceived(key) => {
+                        RCEvent::HostKeyReceived(target_id, key) => {
                             debug!(%session_id, "Host key received: {}", key.algorithm());
                         }
-                        RCEvent::HostKeyUnknown(key, reply) => {
+                        RCEvent::HostKeyUnknown(target_id, key, reply) => {
                             let mode = match Parameters::Entity::get(&services.db).await {
                                 Ok(p) => p.ssh_host_key_verification,
                                 Err(e) => {

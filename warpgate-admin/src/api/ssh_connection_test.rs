@@ -1,6 +1,7 @@
 use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use russh::keys::PublicKeyBase64;
+use russh::keys::{PublicKey, PublicKeyBase64};
+use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient, resolve_ssh_chain};
@@ -45,7 +46,7 @@ impl Api {
         let ssh_chain = resolve_ssh_chain(admin.services(), body.target_id, admin.auth.username())
             .await?
             .into_iter()
-            .map(|x| x.ssh_options)
+            .map(|x| (x.target_id, x.ssh_options))
             .collect::<Vec<_>>();
 
         let mut handles = RemoteClient::create(Uuid::new_v4(), admin.services().clone())?;
@@ -54,12 +55,18 @@ impl Api {
             .send((RCCommand::Connect(ssh_chain), None));
 
         let fut = async move {
-            let key = loop {
+            let key: PublicKey = loop {
                 match handles.event_rx.recv().await {
-                    Some(RCEvent::HostKeyReceived(key)) => break key,
-                    Some(RCEvent::HostKeyUnknown(key, reply)) => {
-                        let _ = reply.send(true);
-                        break key;
+                    Some(RCEvent::HostKeyReceived(target_id, key)) => {
+                        if body.target_id == target_id {
+                            break key;
+                        }
+                    }
+                    Some(RCEvent::HostKeyUnknown(target_id, key, reply)) => {
+                        let _ = reply.send(false);
+                        if body.target_id == target_id {
+                            break key;
+                        }
                     }
                     Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
                     Some(RCEvent::Error(err)) => return Err(err),

@@ -78,6 +78,7 @@ pub enum ConnectionError {
 }
 
 pub struct ResolvedSshChainHost {
+    pub target_id: Uuid,
     pub name: String,
     pub ssh_options: TargetSSHOptions,
 }
@@ -158,6 +159,7 @@ pub async fn resolve_ssh_chain(
         }
 
         jumps.push(ResolvedSshChainHost {
+            target_id: id,
             name: t.name.clone(),
             ssh_options: opts,
         });
@@ -192,8 +194,8 @@ pub enum RCEvent {
     HopConnected,
     // ForwardedTCPIP(Uuid, DirectTCPIPParams),
     Done,
-    HostKeyReceived(PublicKey),
-    HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
+    HostKeyReceived(Uuid, PublicKey),
+    HostKeyUnknown(Uuid, PublicKey, oneshot::Sender<bool>),
     ForwardedTcpIp(Uuid, ForwardedTcpIpParams),
     ForwardedStreamlocal(Uuid, ForwardedStreamlocalParams),
     ForwardedAgent(Uuid),
@@ -223,7 +225,7 @@ impl RCEvent {
             | Self::ConnectionError(_)
             | Self::HopConnected
             | Self::Done
-            | Self::HostKeyReceived(_)
+            | Self::HostKeyReceived(_, _)
             | Self::HostKeyUnknown(..)
             | Self::ForwardedTcpIp(..)
             | Self::ForwardedStreamlocal(..)
@@ -237,7 +239,7 @@ pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 
 #[derive(Clone, Debug)]
 pub enum RCCommand {
-    Connect(Vec<TargetSSHOptions>),
+    Connect(Vec<(Uuid, TargetSSHOptions)>),
     Channel(Uuid, ChannelOperation),
     ForwardTCPIP(String, u32),
     CancelTCPIPForward(String, u32),
@@ -649,11 +651,11 @@ impl RemoteClient {
     /// `channel_open_direct_tcpip` through the previous session.
     async fn connect_chain(
         &mut self,
-        chain: Vec<TargetSSHOptions>,
+        chain: Vec<(Uuid, TargetSSHOptions)>,
     ) -> Result<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>), ConnectionError>
     {
         let mut iter = chain.into_iter();
-        let first = iter.next().ok_or(ConnectionError::Resolve)?;
+        let (first_id, first) = iter.next().ok_or(ConnectionError::Resolve)?;
 
         let config = self.build_ssh_config(&first).await;
         let address_str = format!("{}:{}", first.host, first.port);
@@ -672,11 +674,11 @@ impl RemoteClient {
         };
         let fut = russh::client::connect(config, address, handler);
         let (mut session, mut active_rx) = self
-            .wait_for_connection(&first, fut, event_rx, false)
+            .wait_for_connection(first_id, &first, fut, event_rx, false)
             .boxed()
             .await?;
 
-        for ssh_options in iter {
+        for (target_id, ssh_options) in iter {
             let _ = self.tx.send(RCEvent::HopConnected).await;
             info!(
                 host = %ssh_options.host,
@@ -703,7 +705,7 @@ impl RemoteClient {
             };
             let fut = russh::client::connect_stream(config, stream, handler);
             let (new_session, new_rx) = self
-                .wait_for_connection(&ssh_options, fut, event_rx, false)
+                .wait_for_connection(target_id, &ssh_options, fut, event_rx, false)
                 .boxed()
                 .await?;
             session = new_session;
@@ -713,7 +715,10 @@ impl RemoteClient {
         Ok((session, active_rx))
     }
 
-    async fn connect(&mut self, chain: Vec<TargetSSHOptions>) -> Result<(), ConnectionError> {
+    async fn connect(
+        &mut self,
+        chain: Vec<(Uuid, TargetSSHOptions)>,
+    ) -> Result<(), ConnectionError> {
         let (session, mut event_rx) = self.connect_chain(chain).boxed().await?;
 
         self.session = Some(Arc::new(Mutex::new(session)));
@@ -739,6 +744,7 @@ impl RemoteClient {
 
     async fn wait_for_connection<Fut>(
         &mut self,
+        target_id: Uuid,
         ssh_options: &TargetSSHOptions,
         fut_connect: Fut,
         mut event_rx: UnboundedReceiver<ClientHandlerEvent>,
@@ -754,10 +760,10 @@ impl RemoteClient {
                 Some(event) = event_rx.recv() => {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
-                            self.tx.send(RCEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyReceived(target_id, key)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
-                            self.tx.send(RCEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyUnknown(target_id, key, reply)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         _ => {}
                     }

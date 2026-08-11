@@ -1,9 +1,11 @@
 use russh::Channel;
 use russh::client::{ChannelOpenHandle, Msg, Session};
 use russh::keys::{PublicKey, PublicKeyBase64};
+use sea_orm::sea_query::ExprTrait;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
+use uuid::Uuid;
 use warpgate_common::{SessionId, TargetSSHOptions};
 use warpgate_core::Services;
 use warpgate_db_entities::Parameters;

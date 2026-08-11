@@ -502,7 +502,10 @@ impl ServerSession {
         let visual_chain = self.make_visual_connection_chain(&ssh_chain[..]).await?;
         self.rc_state = RCState::Connecting;
         self.send_command(RCCommand::Connect(
-            ssh_chain.into_iter().map(|x| x.ssh_options).collect(),
+            ssh_chain
+                .into_iter()
+                .map(|x| (authorization.target().id, x.ssh_options))
+                .collect(),
         ))
         .map_err(|_| anyhow::anyhow!("cannot send command"))?;
         self.emit_pty_output(b"\r\n").await?;
@@ -1172,8 +1175,8 @@ impl ServerSession {
                     return self.fail_on_channel_writer_error(error).await;
                 }
             }
-            RCEvent::Done | RCEvent::HostKeyReceived(_) => {}
-            RCEvent::HostKeyUnknown(key, reply) => {
+            RCEvent::Done | RCEvent::HostKeyReceived(_, _) => {}
+            RCEvent::HostKeyUnknown(_, key, reply) => {
                 self.handle_unknown_host_key(key, reply).await?;
             }
             RCEvent::ForwardedTcpIp(id, params) => {
