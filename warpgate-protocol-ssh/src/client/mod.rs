@@ -75,8 +75,12 @@ pub enum ConnectionError {
     #[error("Aborted")]
     Aborted,
 
-    #[error("Authentication failed")]
-    Authentication,
+    /// Carries why, because the target's own reason is the only thing that
+    /// distinguishes a wrong credential from a clock that disagrees — and a
+    /// message that reaches only the server log is not much use to whoever is
+    /// staring at a closed session.
+    #[error("Authentication failed: {0}")]
+    Authentication(String),
 
     /// Warpgate refused the credential before offering it, so the target never
     /// saw anything — saying it was "rejected by the target" would name the
@@ -96,8 +100,8 @@ impl ConnectionError {
         match self {
             ConnectionError::Vault(e) => e.client_message().to_string(),
             ConnectionError::Aws(e) => e.client_message().to_string(),
-            ConnectionError::Authentication => {
-                "SSH target rejected Warpgate's authentication request".to_string()
+            ConnectionError::Authentication(reason) => {
+                format!("SSH target rejected Warpgate's authentication request: {reason}")
             }
             ConnectionError::CertificateRefused(reason) => {
                 format!("Warpgate refused the certificate issued for this session: {reason}")
@@ -129,8 +133,18 @@ fn certificate_mismatch(
     certificate: &Certificate,
     key: &PublicKey,
     principal: &str,
+    key_id: &str,
     allowed_options: &[SshCertificateCriticalOption],
 ) -> Option<String> {
+    // The target's sshd logs this verbatim, and a session being attributable to
+    // a person from the target side alone is the whole claim this feature
+    // makes. An issuer that returns a different one — or a very long one —
+    // breaks the attribution and floods the target's log with it.
+    if certificate.key_id() != key_id {
+        return Some(
+            "Vault issued a certificate under a key ID other than the one requested".to_owned(),
+        );
+    }
     if certificate.cert_type() != CertType::User {
         return Some("Vault returned a host certificate rather than a user certificate".to_owned());
     }
@@ -1094,10 +1108,26 @@ impl RemoteClient {
                         );
                     }
 
+                    // Captured before the certificate is handed to russh, which
+                    // takes ownership of it.
+                    // `None` for the sentinel values meaning "no bound", which
+                    // a certificate this feature issues never carries.
+                    let describe_time = |at: Option<std::time::SystemTime>| {
+                        at.map_or_else(
+                            || "unbounded".to_owned(),
+                            |at| humantime::format_rfc3339_seconds(at).to_string(),
+                        )
+                    };
+                    let validity = (
+                        describe_time(certificate.valid_after_time()),
+                        describe_time(certificate.valid_before_time()),
+                    );
+
                     if let Some(reason) = certificate_mismatch(
                         &certificate,
                         key.public_key(),
                         username,
+                        &key_id,
                         &auth.allowed_critical_options,
                     ) {
                         // Surfaced to the user, not only to the log: a session
@@ -1121,9 +1151,16 @@ impl RemoteClient {
                                 key_id, "Authenticated with certificate"
                             );
                         } else {
-                            auth_error_msg = Some(
-                                "Certificate authentication was rejected by the SSH target".into(),
-                            );
+                            // The window is named because the most common cause
+                            // of a target refusing an otherwise good certificate
+                            // is its own clock: these live minutes, and a target
+                            // that lags rejects them as not yet valid without
+                            // saying so anywhere the operator can see.
+                            auth_error_msg = Some(format!(
+                                "Certificate authentication was rejected by the SSH target \
+                                 (the certificate was valid from {} to {}; check the target's clock)",
+                                validity.0, validity.1
+                            ));
                         }
                     }
                 } else {
@@ -1187,10 +1224,11 @@ impl RemoteClient {
             let reason = auth_error_msg
                 .unwrap_or_else(|| "Authentication was rejected by the SSH target".to_string());
             error!(%reason, "Warpgate could not authenticate with SSH target");
+            let reason = reason.clone();
             let _ = session
                 .disconnect(russh::Disconnect::ByApplication, "", "")
                 .await;
-            return Err(ConnectionError::Authentication);
+            return Err(ConnectionError::Authentication(reason));
         }
 
         Ok(())

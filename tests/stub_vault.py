@@ -298,7 +298,7 @@ class _Handler(BaseHTTPRequestHandler):
             principals=(
                 stub.principals if stub.principals is not None else body["valid_principals"]
             ),
-            key_id=body.get("key_id", ""),
+            key_id=stub.sign_key_id if stub.sign_key_id is not None else body.get("key_id", ""),
         )
         self._reply(200, {"data": {"signed_key": certificate}})
 
@@ -357,6 +357,7 @@ class StubVault:
         self.validity = "-30s:+2m"
         self.cert_type = "user"
         self.sign_options = []
+        self.sign_key_id = None
         self.logins.clear()
         self.signs.clear()
         self.requests.clear()

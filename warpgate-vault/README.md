@@ -291,10 +291,22 @@ Warpgate and the target.
 
 Warpgate's Vault integration is fully compatible with **OpenBao**. The SSH secrets engine API and `/sign/<role>` endpoints are identical.
 
+This is asserted rather than assumed: `tests/test_vault_contract.py` runs the
+same suite against `hashicorp/vault` and `openbao/openbao`, and every claim the
+test stub makes about server behaviour is pinned against both.
+
 Note for OpenBao deployments:
 - AWS, Azure, and GCP auth engines are not bundled in OpenBao's core binary; they are separate plugins (`openbao/openbao-plugins`) that must be registered and mounted before those cloud login paths can be used.
 - Kubernetes and AppRole auth engines are built-in to OpenBao out of the box.
 - For AppRole authentication, Warpgate supports both static Secret IDs and Vault Response Wrapping tokens (specify `unwrap:<wrapping_token>` in the credential file).
+- **Audit devices cannot be enabled over the API** — OpenBao answers `cannot
+  enable audit device via API; use declarative, config-based audit device
+  management instead`. Declare one in the server config, where `type` and `path`
+  are both required and the device's own settings belong under `options`; a
+  `file_path` written at the top level is accepted with only a warning and then
+  ignored, which looks exactly like a working audit device that never writes
+  anything. Worth knowing, because the issuance record on the Vault side is half
+  the point of this feature.
 
 ## Operational notes
 

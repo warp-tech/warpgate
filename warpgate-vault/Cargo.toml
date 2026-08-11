@@ -19,6 +19,7 @@ warpgate-common = { path = "../warpgate-common" }
 zeroize = "1.8"
 
 [dev-dependencies]
+proptest = "1"
 rcgen.workspace = true
 rustls = { workspace = true, features = ["aws_lc_rs"] }
 rustls-pki-types.workspace = true

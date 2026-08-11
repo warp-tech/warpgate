@@ -1034,9 +1034,16 @@ impl ServerSession {
                         )
                         .await?;
                     }
-                    ConnectionError::Authentication => {
+                    ConnectionError::Authentication(ref reason) => {
+                        // The reason is what tells a wrong credential apart from
+                        // a target whose clock disagrees, which is the most
+                        // common cause of a short-lived certificate being
+                        // refused. It used to reach the server log and stop
+                        // there.
                         let _ = self
-                            .emit_pty_error("SSH target rejected Warpgate's authentication request")
+                            .emit_pty_error(&format!(
+                                "SSH target rejected Warpgate's authentication request: {reason}"
+                            ))
                             .await;
                     }
                     error => {

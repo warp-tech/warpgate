@@ -112,8 +112,23 @@ struct UnwrappedSecretId {
     secret_id: Zeroizing<String>,
 }
 
-fn login_payload<T: Serialize>(value: &T) -> Result<Zeroizing<String>> {
-    Ok(Zeroizing::new(serde_json::to_string(value)?))
+/// Room reserved for a login payload before anything is written into it. A
+/// service account token or a signed AWS header set is a few kilobytes; this is
+/// far above that, and the reason it matters is below.
+const LOGIN_PAYLOAD_CAPACITY: usize = 32 * 1024;
+
+/// Serializes a login payload into a buffer that is zeroized on drop.
+///
+/// Written into a buffer reserved up front rather than through
+/// `serde_json::to_string`, because a `String` that grows while being written
+/// frees each smaller buffer without wiping it — leaving a prefix of the
+/// credential-bearing JSON in freed memory on every single login. `Zeroizing`
+/// only ever wipes the buffer that survives to the end. Measured, with the
+/// mechanism narrowed down, in `tests/zeroization.rs`.
+fn login_payload<T: Serialize>(value: &T) -> Result<Zeroizing<Vec<u8>>> {
+    let mut buffer = Zeroizing::new(Vec::with_capacity(LOGIN_PAYLOAD_CAPACITY));
+    serde_json::to_writer(&mut *buffer, value)?;
+    Ok(buffer)
 }
 
 #[derive(Serialize)]
@@ -365,7 +380,7 @@ impl VaultClient {
             .http
             .post(self.url(path))
             .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(body.as_bytes().to_vec())
+            .body(body.to_vec())
             .send()
             .await?;
         let auth = Self::read_json::<AuthResponse>(Self::check(response).await?)
@@ -405,7 +420,7 @@ impl VaultClient {
     /// service account token, secret ID or identity token is one more place the
     /// credential outlives the request in freed memory. The buffer reqwest takes
     /// to put the body on the wire is the one copy Warpgate cannot reach.
-    async fn login_body(&self) -> Result<(&'static str, Zeroizing<String>)> {
+    async fn login_body(&self) -> Result<(&'static str, Zeroizing<Vec<u8>>)> {
         Ok(match &self.config.auth {
             VaultAuth::Kubernetes { role, token_path } => {
                 let jwt = Self::read_credential(token_path).await?;
@@ -539,7 +554,7 @@ impl VaultClient {
         role: Option<&str>,
         server_id: Option<&str>,
         region: Option<&str>,
-    ) -> Result<Zeroizing<String>> {
+    ) -> Result<Zeroizing<Vec<u8>>> {
         let mut request = warpgate_aws::sign_sts_identity_request(region, server_id).await?;
 
         // The headers carry the SigV4 signature and, on an instance role, the
@@ -564,6 +579,9 @@ impl VaultClient {
         payload
     }
 
+    /// `read_to_string` sizes its buffer from the file's own length, so it does
+    /// not grow while reading and leaves nothing behind — measured, rather than
+    /// assumed, in `tests/zeroization.rs`.
     async fn read_credential(path: &Path) -> Result<Zeroizing<String>> {
         let raw = Zeroizing::new(tokio::fs::read_to_string(path).await.map_err(|source| {
             VaultError::CredentialFile {
@@ -1131,5 +1149,87 @@ mod tests {
         let secret = zeroize::Zeroizing::new("s.sensitive-vault-token".to_string());
         assert_eq!(secret.as_str(), "s.sensitive-vault-token");
         // Memory zeroized automatically on drop
+    }
+}
+
+/// The validators and the error renderer take input straight off the network or
+/// out of an operator's config. Example-based tests only ever prove that the
+/// four cases somebody thought of are handled; these say what must hold for
+/// every input, which is the shape of the two defects that got through — a byte
+/// index landing inside a character, and an address form nobody had in mind.
+#[cfg(test)]
+mod properties {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    proptest! {
+        /// The whole purpose of the check: nothing that is accepted may be both
+        /// plaintext and off-host. The earlier string comparison passed this for
+        /// every address anyone tried and still let `http://[::1]:8200` through
+        /// to the wrong branch.
+        #[test]
+        fn an_accepted_address_is_https_or_loopback(address in "\\PC{0,64}") {
+            if validate_address(&address).is_ok() {
+                let parsed = url::Url::parse(&address).unwrap();
+                let loopback = match parsed.host() {
+                    Some(url::Host::Domain(d)) => d == "localhost",
+                    Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+                    Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+                    None => false,
+                };
+                prop_assert!(parsed.scheme() == "https" || loopback);
+            }
+        }
+
+        /// Vault splits `valid_principals` on commas, so an accepted principal
+        /// has to be exactly one entry — and carry nothing that could forge a
+        /// line in the target's sshd log.
+        #[test]
+        fn an_accepted_principal_is_a_single_harmless_entry(principal in "\\PC{0,64}") {
+            if validate_principal(&principal).is_ok() {
+                prop_assert_eq!(principal.split(',').count(), 1);
+                prop_assert!(!principal.is_empty());
+                prop_assert!(!principal.chars().any(char::is_control));
+            }
+        }
+
+        /// An accepted mount or role must stay one path segment. `../` and an
+        /// embedded slash both address a different Vault API entirely.
+        #[test]
+        fn an_accepted_segment_cannot_leave_its_path(segment in "\\PC{0,64}") {
+            if validate_segment(&segment).is_ok() {
+                let url = url::Url::parse(&format!("https://vault.invalid/v1/ssh/sign/{segment}"))
+                    .unwrap();
+                let segments: Vec<_> = url.path_segments().unwrap().collect();
+                prop_assert_eq!(segments, vec!["v1", "ssh", "sign", segment.as_str()]);
+            }
+        }
+
+        /// Rendering an error must not panic and must stay bounded, whatever
+        /// arrived — including bytes that are not UTF-8 at all, and a limit that
+        /// lands in the middle of a character.
+        #[test]
+        fn rendering_an_error_body_is_bounded_and_total(
+            bytes in proptest::collection::vec(any::<u8>(), 0..2048),
+            truncated in any::<bool>(),
+        ) {
+            let kept = bytes.get(..MAX_ERROR_BODY).unwrap_or(&bytes);
+            let rendered = render_error_body(kept, truncated);
+            // Lossy decoding can grow the byte length — one invalid byte becomes
+            // a three-byte replacement character — so the bound that matters is
+            // on characters, not bytes.
+            prop_assert!(rendered.chars().count() <= MAX_ERROR_BODY + "... (truncated)".len());
+        }
+
+        /// `key_id` is echoed verbatim into the target's sshd log.
+        #[test]
+        fn an_accepted_key_id_cannot_forge_a_log_line(key_id in "\\PC{0,128}") {
+            if validate_key_id(&key_id).is_ok() {
+                prop_assert!(!key_id.contains('\n'));
+                prop_assert!(!key_id.contains('\r'));
+                prop_assert!(!key_id.contains('\0'));
+            }
+        }
     }
 }
