@@ -9,7 +9,6 @@ use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, error, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::{TargetOptions, TargetSSHOptions, WarpgateError};
-use warpgate_core::recordings::TerminalRecordingStreamId;
 use warpgate_core::{Services, SessionStateInit, State, TargetAuthorization};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
@@ -168,16 +167,7 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::Output(channel_id, data) => {
-                            {
-                                session.with_recorder(channel_id, async |r| {
-                                    if let Err(e) = r
-                                        .write(TerminalRecordingStreamId::Output, &data)
-                                        .await
-                                    {
-                                        error!(%channel_id, ?e, "Failed to record terminal data");
-                                    }
-                                }).await;
-                            }
+                            session.on_output(channel_id, &data).await;
                             session
                                 .push(ServerMessage::Output {
                                     channel_id,
@@ -196,7 +186,7 @@ fn spawn_event_loop(
                         }
                         RCEvent::Close(channel_id) |
                         RCEvent::ChannelFailure(channel_id) => {
-                            session.stop_recording(channel_id).await;
+                            session.end_channel(channel_id).await;
                             session
                                 .push(ServerMessage::ChannelClosed { channel_id })
                                 .await;

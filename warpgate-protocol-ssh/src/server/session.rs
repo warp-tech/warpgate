@@ -27,9 +27,7 @@ use warpgate_common::{Secret, SessionId, TargetOptions, WarpgateError};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_core::recordings::{
-    self, TerminalRecorder, TerminalRecordingStreamId, TrafficConnectionParams, TrafficRecorder,
-};
+use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
 use warpgate_core::{
     AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, WarpgateServerHandle,
     authorize_for_target, authorize_for_target_by_name, authorize_ticket, consume_ticket,
@@ -39,7 +37,6 @@ use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 
 use super::channel_registry::{Channel, ChannelRegistry};
 use super::channel_writer::ChannelWriter;
-use super::command_detector::CommandDetector;
 use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
@@ -817,14 +814,7 @@ impl ServerSession {
                     .into());
                 };
                 channel_state.pty_size = Some(request.clone());
-                if let Some(recorder) = channel_state.recorder.as_mut()
-                    && let Err(error) = recorder
-                        .write_pty_resize(request.col_width, request.row_height)
-                        .await
-                {
-                    error!(%channel_id, ?error, "Failed to record terminal data");
-                    channel_state.recorder = None;
-                }
+                channel_state.audit.on_resize(&request).await;
 
                 self.send_command_and_wait(RCCommand::Channel(
                     channel_id,
@@ -1063,26 +1053,13 @@ impl ServerSession {
             }
             RCEvent::Output(channel, data) => {
                 if let Some(channel_state) = self.channels.get_mut(&channel) {
-                    if let Some(recorder) = channel_state.recorder.as_mut()
-                        && let Err(error) = recorder
-                            .write(TerminalRecordingStreamId::Output, &data)
-                            .await
-                    {
-                        error!(%channel, ?error, "Failed to record terminal data");
-                        channel_state.recorder = None;
-                    }
+                    channel_state.audit.on_output(&data).await;
 
                     if let Some(recorder) = channel_state.traffic_recorder.as_mut()
                         && let Err(error) = recorder.write_rx(&data).await
                     {
                         error!(%channel, ?error, "Failed to record traffic data");
                         channel_state.traffic_recorder = None;
-                    }
-
-                    if let Some(detector) = channel_state.command_detector.as_mut()
-                        && let Some(command) = detector.on_output(&data)
-                    {
-                        info!(channel_id=%channel, %command, "Shell command");
                     }
                 }
 
@@ -1182,14 +1159,8 @@ impl ServerSession {
                 .await?;
             }
             RCEvent::ExtendedData { channel, data, ext } => {
-                if let Some(channel_state) = self.channels.get_mut(&channel)
-                    && let Some(recorder) = channel_state.recorder.as_mut()
-                    && let Err(error) = recorder
-                        .write(TerminalRecordingStreamId::Error, &data)
-                        .await
-                {
-                    error!(%channel, ?error, "Failed to record session data");
-                    channel_state.recorder = None;
+                if let Some(channel_state) = self.channels.get_mut(&channel) {
+                    channel_state.audit.on_error_output(&data).await;
                 }
                 let server_channel_id = self.map_channel_reverse(&channel)?;
                 if let Some(session) = self.session_handle.clone()
@@ -1510,19 +1481,7 @@ impl ServerSession {
             .into());
         };
         channel_state.pty_size = Some(request.clone());
-        if let Some(recorder) = channel_state.recorder.as_mut()
-            && let Err(error) = recorder
-                .write_pty_resize(request.col_width, request.row_height)
-                .await
-        {
-            error!(%channel_id, ?error, "Failed to record terminal data");
-            channel_state.recorder = None;
-        }
-
-        if let Some(detector) = channel_state.command_detector.as_mut() {
-            let (cols, rows) = request.screen_size();
-            detector.on_resize(cols, rows);
-        }
+        channel_state.audit.on_resize(&request).await;
 
         if matches!(self.target, TargetSelection::Menu) {
             let _ = self
@@ -1620,7 +1579,7 @@ impl ServerSession {
                 // Starting the recording awaits, so the channel can be gone by
                 // now — e.g. target selection failed and tore the session down.
                 if let Some(channel_state) = self.channels.get_mut(&channel_id) {
-                    channel_state.recorder = Some(recorder);
+                    channel_state.audit.set_recorder(recorder);
                 } else {
                     debug!(channel=%channel_id, "Recording started for a channel that is already gone");
                 }
@@ -1643,7 +1602,7 @@ impl ServerSession {
             .pty_size
             .as_ref()
             .map_or((80, 24), PtyRequest::screen_size);
-        channel_state.command_detector = Some(CommandDetector::new(cols, rows));
+        channel_state.audit.start_command_detection(cols, rows);
     }
 
     async fn _channel_x11_request(
@@ -1729,14 +1688,7 @@ impl ServerSession {
         }
 
         if let Some(channel_state) = self.channels.get_mut(&channel_id) {
-            if let Some(recorder) = channel_state.recorder.as_mut()
-                && let Err(error) = recorder
-                    .write(TerminalRecordingStreamId::Input, &data)
-                    .await
-            {
-                error!(channel=%channel_id, ?error, "Failed to record terminal data");
-                channel_state.recorder = None;
-            }
+            channel_state.audit.on_input(&data).await;
 
             if let Some(recorder) = channel_state.traffic_recorder.as_mut()
                 && let Err(error) = recorder.write_tx(&data).await
@@ -1762,14 +1714,6 @@ impl ServerSession {
         // request) must not be dropped (#2065).
         if matches!(self.target, TargetSelection::Menu) {
             return Ok(());
-        }
-
-        if let Some(detector) = self
-            .channels
-            .get_mut(&channel_id)
-            .and_then(|c| c.command_detector.as_mut())
-        {
-            detector.on_input(&data);
         }
 
         let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));

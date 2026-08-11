@@ -1,4 +1,6 @@
+mod channel_audit;
 mod client;
+mod command_detector;
 mod common;
 mod compat;
 mod keys;
@@ -7,6 +9,7 @@ mod server;
 use std::fmt::Debug;
 
 use anyhow::Result;
+pub use channel_audit::ChannelAudit;
 pub use client::*;
 pub use common::*;
 use futures::future::BoxFuture;
