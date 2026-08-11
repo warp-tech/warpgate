@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use uuid::Uuid;
 use warpgate_core::recordings::{ConnectionRecorder, TerminalRecorder};
 
-use super::command_detector::CommandDetector;
 use crate::RCEvent;
+use crate::command_detector::CommandDetector;
 use crate::common::{PtyRequest, ServerChannelId};
 
 /// How far a channel has got through its lifecycle. A channel that is gone is

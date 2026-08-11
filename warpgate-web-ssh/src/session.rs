@@ -11,6 +11,7 @@ use uuid::Uuid;
 use warpgate_core::WarpgateServerHandle;
 use warpgate_core::recordings::{SessionRecordings, TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_db_entities::Target::TargetKind;
+use warpgate_protocol_ssh::command_detector::CommandDetector;
 use warpgate_protocol_ssh::{
     ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError, SshRecordingMetadata,
 };
@@ -44,6 +45,7 @@ pub struct WebSshSession {
     recordings: Arc<Mutex<SessionRecordings>>,
     channel_recorders: Arc<Mutex<HashMap<Uuid, TerminalRecorder>>>,
     pending_host_key: Arc<Mutex<Option<PendingHostKey>>>,
+    command_detectors: Arc<Mutex<HashMap<Uuid, CommandDetector>>>,
 }
 
 impl WebSshSession {
@@ -74,7 +76,26 @@ impl WebSshSession {
             recordings,
             channel_recorders: Arc::new(Mutex::new(HashMap::new())),
             pending_host_key: Arc::new(Mutex::new(None)),
+            command_detectors: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub async fn push(&self, msg: ServerMessage) {
+        if let ServerMessage::Output { channel_id, data } = &msg {
+            self.with_recorder(*channel_id, async |r| {
+                if let Err(e) = r.write(TerminalRecordingStreamId::Output, &data).await {
+                    error!(%channel_id, ?e, "Failed to record terminal data");
+                }
+            })
+            .await;
+            self.with_detector(*channel_id, async |d| {
+                if let Some(command) = d.on_output(&data) {
+                    info!(%channel_id, %command, "Shell command");
+                }
+            })
+            .await
+        }
+        self.core.push(msg).await
     }
 
     pub async fn set_pending_host_key(&self, pending: PendingHostKey) {
@@ -88,6 +109,16 @@ impl WebSshSession {
     pub async fn with_recorder<F: AsyncFnOnce(&TerminalRecorder)>(&self, channel_id: Uuid, f: F) {
         let recorders = self.channel_recorders.lock().await;
         if let Some(r) = recorders.get(&channel_id) {
+            f(r).await;
+        }
+    }
+    pub async fn with_detector<F: AsyncFnOnce(&mut CommandDetector)>(
+        &self,
+        channel_id: Uuid,
+        f: F,
+    ) {
+        let mut detectors = self.command_detectors.lock().await;
+        if let Some(r) = detectors.get_mut(&channel_id) {
             f(r).await;
         }
     }
@@ -124,6 +155,7 @@ impl WebSshSession {
 
     pub async fn stop_recording(&self, channel_id: Uuid) {
         self.channel_recorders.lock().await.remove(&channel_id);
+        self.command_detectors.lock().await.remove(&channel_id);
     }
 
     fn command(&self, cmd: RCCommand) -> Option<oneshot::Receiver<Result<(), SshClientError>>> {
@@ -148,6 +180,10 @@ impl WebSshSession {
             }
         })
         .await;
+        self.command_detectors.lock().await.insert(
+            channel_id,
+            CommandDetector::new(cols.try_into().unwrap_or(80), rows.try_into().unwrap_or(24)),
+        );
 
         self.command(RCCommand::Channel(channel_id, ChannelOperation::OpenShell));
         self.command(RCCommand::Channel(
@@ -168,6 +204,8 @@ impl WebSshSession {
             }
         })
         .await;
+        self.with_detector(channel_id, async |d| d.on_input(&data))
+            .await;
         self.command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));
     }
 
@@ -180,6 +218,10 @@ impl WebSshSession {
             if let Err(e) = r.write_pty_resize(cols, rows).await {
                 error!(%channel_id, ?e, "Failed to record PTY resize");
             }
+        })
+        .await;
+        self.with_detector(channel_id, async move |d: &mut CommandDetector| {
+            d.on_resize(cols.try_into().unwrap_or(80), rows.try_into().unwrap_or(24))
         })
         .await;
     }

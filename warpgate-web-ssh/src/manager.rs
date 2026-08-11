@@ -168,16 +168,6 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::Output(channel_id, data) => {
-                            {
-                                session.with_recorder(channel_id, async |r| {
-                                    if let Err(e) = r
-                                        .write(TerminalRecordingStreamId::Output, &data)
-                                        .await
-                                    {
-                                        error!(%channel_id, ?e, "Failed to record terminal data");
-                                    }
-                                }).await;
-                            }
                             session
                                 .push(ServerMessage::Output {
                                     channel_id,

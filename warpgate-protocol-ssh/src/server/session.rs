@@ -39,10 +39,10 @@ use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 
 use super::channel_registry::{Channel, ChannelRegistry};
 use super::channel_writer::ChannelWriter;
-use super::command_detector::CommandDetector;
 use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
+use crate::command_detector::CommandDetector;
 use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
 use crate::server::service_output::{VisualConnectionChainItem, paint_fg};

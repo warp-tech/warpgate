@@ -1,9 +1,11 @@
 mod client;
+pub mod command_detector;
 mod common;
 mod compat;
 mod keys;
 pub mod known_hosts;
 mod server;
+
 use std::fmt::Debug;
 
 use anyhow::Result;
