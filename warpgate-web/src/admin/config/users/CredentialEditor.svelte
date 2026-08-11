@@ -507,7 +507,7 @@
                 <div class="mb-1">
                     <strong>{protocol.name}</strong>
                 </div>
-                {#if effectiveCredentials.size > 0}
+                {#if effectiveCredentials.size > 0 || credentialPolicy[protocol.id]?.length}
                     <AuthPolicyEditor
                         bind:value={credentialPolicy}
                         existingCredentials={credentials}
