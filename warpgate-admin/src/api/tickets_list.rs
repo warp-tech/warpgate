@@ -6,7 +6,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::helpers::hash::generate_ticket_secret;
+use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::auth::web_reauth_required;
 use warpgate_core::logging::AuditEvent;
@@ -172,7 +172,7 @@ impl Api {
         let secret = generate_ticket_secret();
         let values = Ticket::ActiveModel {
             id: Set(Uuid::new_v4()),
-            secret: Set(secret.expose_secret().clone()),
+            secret_hash: Set(hash_secret(secret.expose_secret())),
             user_id: Set(user.id),
             target_id: Set(target.id),
             created: Set(OffsetDateTime::now_utc()),

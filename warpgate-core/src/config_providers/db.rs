@@ -13,7 +13,7 @@ use warpgate_common::auth::{
     AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialKind,
     CredentialPolicy, PerProtocolCredentialPolicy,
 };
-use warpgate_common::helpers::hash::verify_password_hash;
+use warpgate_common::helpers::hash::{hash_secret, verify_password_hash};
 use warpgate_common::helpers::otp::verify_totp;
 use warpgate_common::{
     Protocol, Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
@@ -917,8 +917,8 @@ impl ConfigProvider for DatabaseConfigProvider {
         let db = &self.db;
         let Some(api_token) = entities::ApiToken::Entity::find()
             .filter(
-                entities::ApiToken::Column::Secret
-                    .eq(token)
+                entities::ApiToken::Column::SecretHash
+                    .eq(hash_secret(token))
                     .and(entities::ApiToken::Column::Expiry.gt(OffsetDateTime::now_utc())),
             )
             .one(db)

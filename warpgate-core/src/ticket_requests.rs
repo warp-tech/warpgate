@@ -9,7 +9,7 @@ use sea_orm::{
 use time::{Duration, OffsetDateTime};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::helpers::hash::generate_ticket_secret;
+use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_db_entities::TicketRequest::TicketRequestStatus;
 use warpgate_db_entities::{Parameters, Target, Ticket, TicketRequest};
@@ -233,7 +233,7 @@ async fn insert_self_service_ticket(
 
     let ticket = Ticket::ActiveModel {
         id: Set(ticket_id),
-        secret: Set(secret.expose_secret().clone()),
+        secret_hash: Set(hash_secret(secret.expose_secret())),
         user_id: Set(user_id),
         target_id: Set(target_id),
         created: Set(OffsetDateTime::now_utc()),
