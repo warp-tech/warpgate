@@ -315,6 +315,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "huguesgr",
+      "name": "Hugues Granger",
+      "avatar_url": "https://avatars.githubusercontent.com/u/6720382?v=4",
+      "profile": "https://github.com/huguesgr",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
