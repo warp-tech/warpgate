@@ -9296,7 +9296,7 @@ version = "0.28.0-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.0",
  "bytes",
  "dashmap",
  "futures",
