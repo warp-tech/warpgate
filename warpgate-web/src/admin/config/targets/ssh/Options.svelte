@@ -243,7 +243,16 @@
                 <input
                     class="form-control me-2"
                     placeholder="Any value"
-                    bind:value={option.value}
+                    value={option.value ?? ''}
+                    oninput={e => {
+                        // An emptied field means "any value", which is what the
+                        // placeholder promises. Binding directly writes back ""
+                        // instead, pinning the value to the empty string — it
+                        // fails closed, but it does the opposite of what the
+                        // operator was told.
+                        const typed = e.currentTarget.value
+                        option.value = typed === '' ? undefined : typed
+                    }}
                 >
                 <button
                     type="button"

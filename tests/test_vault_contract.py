@@ -13,7 +13,9 @@ as the server received it, rather than as our stub chose to remember it.
 """
 
 import shutil
+import subprocess
 import time
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -133,10 +135,14 @@ class TestAgainstARealIssuer:
     def test_the_certificate_carries_the_principals_that_were_asked_for(
         self, processes: ProcessManager, ctx, server, timeout
     ):
-        """Warpgate now refuses a certificate that does not name the account
-        being reached. That check is only safe because the server returns the
-        requested set verbatim rather than widening it — asserted here rather
-        than assumed."""
+        """Warpgate refuses a certificate that names anything other than the
+        account being reached. That rule is only safe because the server returns
+        the requested set verbatim rather than widening it — which has to be read
+        out of what the server *returned*.
+
+        The first version of this test read the request instead, so it re-checked
+        Warpgate's own message and would have passed whatever came back.
+        """
         ssh_port = processes.start_ssh_server(trusted_ca=[server.ca_public_key])
         wait_port(ssh_port)
 
@@ -150,6 +156,18 @@ class TestAgainstARealIssuer:
         connect(processes, wg, user, target, timeout)
 
         assert server.signs[-1]["valid_principals"] == "deploy"
+
+        # And what came back, which is the half that matters.
+        assert server.issued, "the server recorded no certificate"
+        certificate = server.issued[-1]["signed_key"]
+        principals = subprocess.run(
+            ["ssh-keygen", "-L", "-f", "-"],
+            input=certificate.encode(),
+            capture_output=True,
+            check=True,
+        ).stdout.decode()
+        principals = principals.split("Principals:")[1].split("Critical")[0].split()
+        assert principals == ["deploy"], f"the server returned {principals}"
 
     def test_a_restart_does_not_strand_the_gateway(
         self, processes: ProcessManager, ctx, server, timeout
@@ -236,12 +254,30 @@ class TestTheStubMatchesTheServer:
                 "ttl": "2m",
             },
         )
+        # A real key, because a malformed one is rejected at parse time and the
+        # role's policy is never consulted — which is how the first version of
+        # this test passed without exercising the thing it is named for.
+        public_key = Path("ssh-keys/id_ed25519.pub").read_text().strip()
+
+        # The same request against the permissive role must succeed, or a
+        # failure below says nothing about `allow_user_key_ids`.
+        server._api(
+            "POST",
+            "ssh-client-signer/sign/warpgate",
+            {
+                "public_key": public_key,
+                "valid_principals": "root",
+                "cert_type": "user",
+                "key_id": "warpgate:alice:1234",
+            },
+        )
+
         with pytest.raises(Exception):
             server._api(
                 "POST",
                 "ssh-client-signer/sign/no-key-ids",
                 {
-                    "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB",
+                    "public_key": public_key,
                     "valid_principals": "root",
                     "cert_type": "user",
                     "key_id": "warpgate:alice:1234",

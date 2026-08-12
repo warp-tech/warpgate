@@ -523,6 +523,9 @@ class TestIssuerFailures:
         stub_vault.sign_status = 403
         user, target = make_user_and_target(api, cert_ssh_port)
         assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        # Without this the test passes just as well when the certificate
+        # path never ran at all.
+        assert stub_vault.signs, "no certificate was ever requested"
 
     def test_a_persistent_denial_is_not_retried_forever(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
@@ -643,6 +646,10 @@ class TestIssuerFailures:
         assert "ssh-signer-7" not in shown
         assert "policy" not in shown
 
+        # Without this the test passes just as well when the certificate path
+        # never ran at all.
+        assert stub_vault.signs, "no certificate was ever requested"
+
     def test_an_error_body_split_mid_character_does_not_kill_the_session(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
     ):
@@ -652,6 +659,9 @@ class TestIssuerFailures:
 
         user, target = make_user_and_target(api, cert_ssh_port)
         assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        # Without this the test passes just as well when the certificate path
+        # never ran at all.
+        assert stub_vault.signs, "no certificate was ever requested"
 
         # The gateway has to still be there afterwards: a panic in the signing
         # path would take the session task down and leave the next login hanging.
@@ -1304,3 +1314,134 @@ class TestSecrets:
         assert connect(processes, cert_wg, user, target, timeout)[0] == 0
 
         assert len(api.get_ssh_own_keys()) == before
+
+
+class TestAChainWithAJumpHost:
+    """Every other test here uses exactly one hop.
+
+    Composition is where identity gets confused — whose key, whose certificate,
+    whose account — and the code has a chain resolver that reverses its list.
+    Not testing it is how the host-key check came to report the jump host's key
+    as the target's.
+    """
+
+    def _chain(self, api, jump_port, target_port):
+        """A target reached through a jump host, both on certificate auth."""
+        wg_role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+        user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+        api.create_public_key_credential(
+            user.id,
+            sdk.NewPublicKeyCredential(
+                label="Public Key",
+                openssh_public_key=USER_PUBLIC_KEY_PATH.read_text().strip(),
+            ),
+        )
+        api.add_user_role(user.id, wg_role.id)
+
+        def make(name, port, jump=None, host="localhost"):
+            options = sdk.TargetOptionsTargetSSHOptions(
+                kind="Ssh",
+                host=host,
+                port=port,
+                username="root",
+                auth=sdk.SSHTargetAuth(
+                    sdk.SSHTargetAuthSshTargetCertificateAuth(
+                        kind="Certificate", role=None, allowed_critical_options=[]
+                    )
+                ),
+            )
+            if jump is not None:
+                options.jump_host = jump
+            target = api.create_target(
+                sdk.TargetDataRequest(name=name, options=sdk.TargetOptions(options))
+            )
+            api.add_target_role(target.id, wg_role.id)
+            return target
+
+        jump = make(f"jump-{uuid4()}", jump_port)
+        # Dialled from inside the jump host's container, where `localhost` is
+        # the container itself.
+        target = make(
+            f"behind-{uuid4()}",
+            target_port,
+            jump=jump.id,
+            host="host.docker.internal",
+        )
+        return user, jump, target
+
+    def test_the_host_key_check_reports_the_target_and_not_the_jump_host(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """Both hops present a key, and the endpoint used to answer with the
+        first one it saw. An operator pinning what they are told is the target's
+        key was pinning the jump host's, and the target's own key was never
+        looked at."""
+        # Its own host key, or the two hops are indistinguishable to exactly the
+        # thing under test.
+        second = processes.start_ssh_server(
+            trusted_ca=[stub_vault.ca_public_key], distinct_host_key=True
+        )
+        wait_port(second)
+
+        user, jump, target = self._chain(api, cert_ssh_port, second)
+
+        # Trust the jump host the way an operator would: by using it. Until then
+        # traversing it to reach anything else is refused, which is its own
+        # assertion — a chain is only as checkable as its first hop.
+        assert connect(processes, cert_wg, user, jump, timeout)[0] == 0
+
+        jump_key = api.check_ssh_host_key(
+            sdk.CheckSshHostKeyRequest(target_id=jump.id)
+        ).remote_key_base64
+        target_key = api.check_ssh_host_key(
+            sdk.CheckSshHostKeyRequest(target_id=target.id)
+        ).remote_key_base64
+
+        assert jump_key, "the jump host reported no key"
+        assert target_key != jump_key, (
+            "checking the target returned the jump host's key"
+        )
+
+    def test_checking_a_chained_target_authenticates_only_to_the_jump_host(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """Reaching the target's transport means authenticating to the jump
+        host first — there is no tunnel otherwise — so one certificate is
+        minted, for the hop that is traversed. The target itself is stopped at
+        its host key, before anything is offered to it."""
+        second = processes.start_ssh_server(
+            trusted_ca=[stub_vault.ca_public_key], distinct_host_key=True
+        )
+        wait_port(second)
+
+        user, jump, target = self._chain(api, cert_ssh_port, second)
+        assert connect(processes, cert_wg, user, jump, timeout)[0] == 0
+
+        before = len(stub_vault.signs)
+        api.check_ssh_host_key(sdk.CheckSshHostKeyRequest(target_id=target.id))
+        minted = stub_vault.signs[before:]
+
+        assert len(minted) == 1, f"expected one certificate for the jump host, got {len(minted)}"
+
+        # And it has to name a person. There is no session to look up here — a
+        # button press is not a login — so the key ID used to fall back to the
+        # random UUID that stood in for one, and both the jump host's sshd log
+        # and Vault's issuance log recorded a certificate resolving to nobody.
+        key_id = minted[0]["key_id"]
+        assert key_id.startswith("warpgate:admin:"), (
+            f"the certificate names nobody: {key_id}"
+        )
+
+    def test_a_session_through_a_jump_host_works(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The chain still has to work, and each hop gets its own certificate
+        naming its own account."""
+        second = processes.start_ssh_server(trusted_ca=[stub_vault.ca_public_key])
+        wait_port(second)
+
+        user, _, target = self._chain(api, cert_ssh_port, second)
+        assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+
+        assert len(stub_vault.signs) == 2, "each hop needs its own certificate"
+        assert all(sign["valid_principals"] == "root" for sign in stub_vault.signs)

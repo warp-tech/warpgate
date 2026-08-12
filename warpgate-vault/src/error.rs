@@ -51,6 +51,12 @@ pub enum VaultError {
     #[error("Vault reported an unusable token lease of {0} seconds")]
     InvalidLease(u64),
 
+    #[error("the credential at {path} is {size} bytes, which is too large to be one")]
+    CredentialTooLarge { path: PathBuf, size: u64 },
+
+    #[error("certificate_ttl of {0:?} is less than a second, which no issuer accepts")]
+    InvalidCertificateTtl(std::time::Duration),
+
     #[error(
         "cannot unwrap the AppRole secret ID at {path}: {source}. A wrapping token is single-use — whatever provisions this file has to write a fresh one, e.g. `vault write -f -wrap-ttl=<ttl> auth/approle/role/<role>/secret-id`"
     )]
@@ -66,7 +72,9 @@ impl VaultError {
             VaultError::InsecureAddress | VaultError::InvalidAddress(_) => {
                 "Vault endpoint configuration is invalid"
             }
-            VaultError::InvalidRole(_) => "Invalid Vault role or mount configuration",
+            VaultError::InvalidRole(_) | VaultError::InvalidCertificateTtl(_) => {
+                "Invalid Vault role or mount configuration"
+            }
             VaultError::InvalidPrincipal(_) | VaultError::InvalidKeyId => {
                 "Invalid certificate request parameters"
             }
@@ -81,7 +89,9 @@ impl VaultError {
                     "Vault service error"
                 }
             }
-            VaultError::CredentialFile { .. } => "Failed to read Vault credentials",
+            VaultError::CredentialFile { .. } | VaultError::CredentialTooLarge { .. } => {
+                "Failed to read Vault credentials"
+            }
             VaultError::SecretIdUnwrap { .. } => "Failed to unwrap the Vault AppRole secret ID",
             VaultError::Request(_) => "Vault is currently unavailable",
             VaultError::Json(_)

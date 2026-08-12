@@ -3,7 +3,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient, resolve_ssh_chain};
+use warpgate_protocol_ssh::{ConnectionError, RCCommand, RCEvent, RemoteClient, resolve_ssh_chain};
 
 use super::AdminContext;
 
@@ -53,9 +53,17 @@ impl Api {
         // once the key had been reported, opening a session nothing is attached
         // to — and, for a certificate target, minting a real certificate to do
         // it with.
-        let _ = handles
-            .command_tx
-            .send((RCCommand::CheckHostKey(ssh_chain), None));
+        let _ = handles.command_tx.send((
+            RCCommand::CheckHostKey(
+                ssh_chain,
+                admin
+                    .auth
+                    .username()
+                    .cloned()
+                    .unwrap_or_else(|| "admin".to_owned()),
+            ),
+            None,
+        ));
 
         // Kept out of the future below so the connection can be torn down after
         // it resolves. `CheckHostKey` already ends the client task on its own;
@@ -83,8 +91,10 @@ impl Api {
         let result = fut.await;
         let _ = abort_tx.send(());
 
-        // Result is matched manually since we need to manually format
-        // the error message with :# to included the nested errors here
+        // Sanitised, like every other place a connection error is shown to a
+        // person. Reaching a target behind a jump host authenticates that hop,
+        // so a Vault failure is reachable here and used to be rendered with its
+        // whole source chain — mount, policy and all.
         match result {
             Ok(key) => Ok(CheckSshHostKeyResponse::Ok(Json(
                 CheckSshHostKeyResponseBody {
@@ -92,9 +102,10 @@ impl Api {
                     remote_key_base64: key.public_key_base64(),
                 },
             ))),
-            Err(err) => Ok(CheckSshHostKeyResponse::Error(PlainText(format!(
-                "{err:#}"
-            )))),
+            Err(err) => Ok(CheckSshHostKeyResponse::Error(PlainText(
+                err.downcast_ref::<ConnectionError>()
+                    .map_or_else(|| format!("{err:#}"), ConnectionError::client_message),
+            ))),
         }
     }
 }

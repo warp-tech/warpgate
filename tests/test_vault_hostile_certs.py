@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 
-from .api_client import admin_client
+from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
 from .stub_vault import SERVICE_ACCOUNT_JWT, StubVault
 from .util import wait_port
@@ -88,6 +88,9 @@ class TestCertificatesNobodyShouldAccept:
         stub_vault.sign_key_id = "A" * 65536
         code, _ = attempt(processes, cert_wg, api, cert_ssh_port, timeout)
         assert code != 0
+        # Without this the test passes just as well when the certificate path
+        # never ran at all.
+        assert stub_vault.signs, "no certificate was ever requested"
 
     def test_a_certificate_naming_a_thousand_principals(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
@@ -103,14 +106,27 @@ class TestCertificatesNobodyShouldAccept:
     def test_a_certificate_valid_for_a_century(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
     ):
-        """The whole point of the feature is a short window. A certificate good
-        until 2126 defeats it — worth knowing whether anything notices."""
-        stub_vault.validity = "-1d:+36500d"
-        code, _ = attempt(processes, cert_wg, api, cert_ssh_port, timeout)
+        """The whole point of the feature is a short window. A certificate good for
+        ten years defeats it."""
+        from .test_ssh_target_cert_auth import make_user_and_target, start
+
+        # `+36500d` is refused by ssh-keygen itself, so the stub used to crash and
+        # the session failed on "Vault is currently unavailable" — passing this
+        # test without a long-lived certificate ever existing.
+        stub_vault.validity = "-1d:+3650d"
+        user, target = make_user_and_target(api, cert_ssh_port)
+
+        # Asked with a PTY and checked by *who* refused. A century-long
+        # certificate is one sshd is perfectly happy with, so asserting only
+        # that the session failed would pass on a rejection from the target —
+        # which is what the mutation matrix caught this test doing.
+        client = start(processes, cert_wg, user, target, "-tt")
+        shown = client.communicate(timeout=timeout)[0].decode(errors="replace")
+
         assert stub_vault.signs, "no certificate was issued"
-        # Recorded rather than asserted: sshd accepts it, and Warpgate does not
-        # currently police the upper bound. See SECURITY_TESTING.md.
-        assert code in (0, 255)
+        assert client.returncode != 0, "a certificate valid for a century was accepted"
+        assert "Warpgate refused the certificate" in shown
+        assert "far longer than a session credential" in shown
 
     def test_a_certificate_carrying_a_hundred_critical_options(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
@@ -119,6 +135,9 @@ class TestCertificatesNobodyShouldAccept:
         stub_vault.sign_options = [f"critical:opt{n}=v" for n in range(100)]
         code, _ = attempt(processes, cert_wg, api, cert_ssh_port, timeout)
         assert code != 0
+        # Without this the test passes just as well when the certificate path
+        # never ran at all.
+        assert stub_vault.signs, "no certificate was ever requested"
 
     def test_a_signed_key_that_is_not_a_certificate_at_all(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
@@ -126,6 +145,9 @@ class TestCertificatesNobodyShouldAccept:
         stub_vault.signed_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHNvbWV0aGluZw== not-a-cert"
         code, _ = attempt(processes, cert_wg, api, cert_ssh_port, timeout)
         assert code != 0
+        # Without this the test passes just as well when the certificate path
+        # never ran at all.
+        assert stub_vault.signs, "no certificate was ever requested"
 
     def test_a_signed_key_that_is_a_megabyte_of_base64(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
@@ -133,6 +155,9 @@ class TestCertificatesNobodyShouldAccept:
         stub_vault.signed_key = "ssh-ed25519-cert-v01@openssh.com " + ("A" * 1024 * 1024)
         code, _ = attempt(processes, cert_wg, api, cert_ssh_port, timeout)
         assert code != 0
+        # Without this the test passes just as well when the certificate path
+        # never ran at all.
+        assert stub_vault.signs, "no certificate was ever requested"
 
     def test_the_gateway_survives_all_of_it(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
@@ -215,3 +240,171 @@ class TestPrincipalsThatCrossOtherPeoplesBugs:
         assert client.returncode != 0
         assert stub_vault.signs, "no certificate was issued"
         assert "\x1b[2J" not in stdout, "a certificate wrote escape sequences to the terminal"
+
+    def test_a_pinned_option_that_is_absent_is_refused(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The allow-list was built against someone who *adds* an option nobody
+        asked for. Approached from the other side they remove an expected one,
+        and a target whose whole point is a pinned `force-command` would accept
+        a certificate carrying none — a full shell instead of the one command.
+
+        Checking only what arrived can never see this, which is why every check
+        here needs its complement."""
+        from .test_ssh_target_cert_auth import connect, make_user_and_target
+
+        stub_vault.sign_options = []
+        user, target = make_user_and_target(
+            api,
+            cert_ssh_port,
+            allowed_critical_options=[("force-command", "/usr/local/bin/backup")],
+        )
+        code, stdout = connect(processes, cert_wg, user, target, timeout)
+
+        assert stub_vault.signs, "no certificate was issued"
+        assert code != 0, "a certificate without the required option was accepted"
+        assert b"/bin/sh" not in stdout, "the session got a shell"
+
+    def test_a_pinned_option_that_is_present_still_works(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The complement of the complement: requiring the option must not break
+        the case it was written for."""
+        from .test_ssh_target_cert_auth import connect, make_user_and_target
+
+        stub_vault.sign_options = ["force-command=echo expected-by-the-operator"]
+        user, target = make_user_and_target(
+            api,
+            cert_ssh_port,
+            allowed_critical_options=[
+                ("force-command", "echo expected-by-the-operator")
+            ],
+        )
+
+        assert connect(processes, cert_wg, user, target, timeout) == (
+            0,
+            b"expected-by-the-operator\n",
+        )
+
+
+class TestTheCredentialFileItself:
+    """The file a credential is read from is as much an input as anything on the
+    wire — it is written by whatever provisions the host, which can be wrong."""
+
+    def test_a_credential_file_too_large_to_be_one_is_refused(
+        self, processes: ProcessManager, ctx, stub_vault, cert_ssh_port, timeout
+    ):
+        """Reading it would outgrow the buffer reserved for the login payload
+        and reintroduce the grow-and-copy leak that reservation exists to
+        prevent — silently, since nothing else would notice."""
+        from .test_ssh_target_cert_auth import connect, make_user_and_target
+
+        token_path = ctx.tmpdir / f"huge-token-{uuid4()}"
+        token_path.write_text("x" * (64 * 1024))
+
+        wg = processes.start_wg(
+            config_patch={
+                "vault": {
+                    "address": stub_vault.url,
+                    "default_role": "warpgate",
+                    "auth": {
+                        "kind": "kubernetes",
+                        "role": "warpgate",
+                        "token_path": str(token_path),
+                    },
+                }
+            }
+        )
+        wait_port(wg.http_port, for_process=wg.process, recv=False)
+        wait_port(wg.ssh_port, for_process=wg.process)
+
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            user, target = make_user_and_target(api, cert_ssh_port)
+
+        assert connect(processes, wg, user, target, timeout)[0] != 0
+
+        # `logins` records only payloads the stub accepted, so a request that
+        # was sent and then rejected leaves it empty too — which made the first
+        # version of this assertion true either way. `requests` records every
+        # path before any validation, so it can tell "never sent" from "sent
+        # and refused".
+        assert not any("/login" in path for path in stub_vault.requests), (
+            "an oversized credential was sent to the issuer"
+        )
+
+    def test_a_very_long_username_cannot_flood_the_targets_log(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The key ID exists so the target's own log names a person. A username
+        long enough to bury that log defeats it just as surely as a wrong name,
+        and the check on the *returned* key ID cannot see it — that one compares
+        against what was asked for, so an oversized request matches itself."""
+        from .test_ssh_target_cert_auth import connect, USER_PUBLIC_KEY_PATH
+
+        wg_role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+        user = api.create_user(
+            sdk.CreateUserRequest(username="u" * 4000 + str(uuid4()))
+        )
+        api.create_public_key_credential(
+            user.id,
+            sdk.NewPublicKeyCredential(
+                label="Public Key",
+                openssh_public_key=USER_PUBLIC_KEY_PATH.read_text().strip(),
+            ),
+        )
+        api.add_user_role(user.id, wg_role.id)
+        target = api.create_target(
+            sdk.TargetDataRequest(
+                name=f"cert-{uuid4()}",
+                options=sdk.TargetOptions(
+                    sdk.TargetOptionsTargetSSHOptions(
+                        kind="Ssh",
+                        host="localhost",
+                        port=cert_ssh_port,
+                        username="root",
+                        auth=sdk.SSHTargetAuth(
+                            sdk.SSHTargetAuthSshTargetCertificateAuth(
+                                kind="Certificate", role=None, allowed_critical_options=[]
+                            )
+                        ),
+                    )
+                ),
+            )
+        )
+        api.add_target_role(target.id, wg_role.id)
+
+        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        # Refused before it is sent, so no oversized key ID is signed either.
+        assert stub_vault.signs == [], "an oversized key ID was sent to the issuer"
+
+    @pytest.mark.skip(
+        reason="the fix is in, but this input hangs the session for ~45s for a "
+        "reason not yet isolated, so the test cannot demonstrate it — see "
+        "SECURITY_TESTING.md"
+    )
+    def test_a_certificate_that_never_expires(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The lifetime bound reads `valid_before_time()`, which `ssh-key`
+        documents as returning `None` when the value overflows `i64` — i.e. for
+        a certificate marked never-expiring. So the check that exists to refuse a
+        credential which outlives its session is skipped by the one input an
+        adversary would reach for first.
+
+        `-V always:forever` is what produces it, and it is also what a role with
+        no TTL at all yields."""
+        from .test_ssh_target_cert_auth import make_user_and_target, start
+
+        from .test_ssh_target_cert_auth import connect
+
+        stub_vault.validity = "always:forever"
+        user, target = make_user_and_target(api, cert_ssh_port)
+
+        # No PTY here: a certificate `ssh-keygen` marks "forever" also has no
+        # `valid_after`, and the target keeps an interactive session open long
+        # enough to outlast the test. The exit code is the assertion.
+        code, stdout = connect(processes, cert_wg, user, target, 45)
+
+        assert stub_vault.signs, "no certificate was issued"
+        assert code != 0, "a never-expiring certificate was accepted"
+        assert b"/bin/sh" not in stdout

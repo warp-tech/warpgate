@@ -144,7 +144,9 @@ class ProcessManager:
                         pass
                 p.kill()
 
-    def start_ssh_server(self, trusted_keys=[], extra_config="", trusted_ca=[]):
+    def start_ssh_server(
+        self, trusted_keys=[], extra_config="", trusted_ca=[], distinct_host_key=False
+    ):
         port = alloc_port()
         data_dir = self.ctx.tmpdir / f"sshd-{uuid.uuid4()}"
         data_dir.mkdir(parents=True)
@@ -155,6 +157,19 @@ class ProcessManager:
         # certificate being wrong.
         trusted_ca_path = data_dir / "trusted_ca"
         trusted_ca_path.write_text("\n".join(trusted_ca))
+        # Every server otherwise shares one host key, which makes two of them
+        # indistinguishable to anything that identifies a host by its key — and
+        # therefore makes it impossible to tell which hop of a chain answered.
+        host_key_path = "/ssh-keys/id_ed25519"
+        if distinct_host_key:
+            own_key = data_dir / "host_key"
+            subprocess.run(
+                ["ssh-keygen", "-q", "-t", "ed25519", "-f", str(own_key), "-N", ""],
+                check=True,
+            )
+            own_key.chmod(0o600)
+            host_key_path = str(own_key)
+
         config_path = data_dir / "sshd_config"
         config_path.write_text(
             dedent(
@@ -170,7 +185,7 @@ class ProcessManager:
                 PermitTunnel yes
                 StrictModes no
                 PermitRootLogin yes
-                HostKey /ssh-keys/id_ed25519
+                HostKey {host_key_path}
                 Subsystem	sftp	/usr/lib/ssh/sftp-server
                 LogLevel DEBUG3
                 {extra_config}

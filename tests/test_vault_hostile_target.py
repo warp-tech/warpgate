@@ -128,14 +128,16 @@ def test_a_target_that_stalls_the_handshake_is_given_up_on(
     says nothing was previously held forever: russh bounds the length of that
     string but not the time to send what follows, and the inactivity timeout
     only starts once the session loop is running."""
-    from .test_ssh_target_cert_auth import connect
+    from .test_ssh_target_cert_auth import start
 
     server = HostileSSHServer("silent_after_banner")
     server.start()
     try:
         user, target = target_on(api, server.port)
         started = time.time()
-        code, _ = connect(processes, cert_wg, user, target, 90)
+        client = start(processes, cert_wg, user, target, "-tt")
+        shown = client.communicate(timeout=90)[0].decode(errors="replace")
+        code = client.returncode
         elapsed = time.time() - started
 
         assert server.connections > 0, "the stalling server was never reached"

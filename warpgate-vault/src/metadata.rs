@@ -2,6 +2,7 @@ use serde::Deserialize;
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::client::{read_bounded, read_bounded_json};
 use crate::error::{Result, VaultError};
 
 fn with_query(base: &str, path: &str, params: &[(&str, &str)]) -> Result<Url> {
@@ -25,6 +26,12 @@ pub struct AzureInstance {
     pub vm_scale_set_name: String,
 }
 
+/// Reads the same way the Vault client does — bounded, and into a buffer that
+/// is wiped on drop. These responses carry an identity token, and the address
+/// they come from is configuration like any other.
+///
+/// The main client's reader gained this bound and this file did not; mirroring
+/// it here is the point.
 /// The pieces Vault's Azure auth method needs: a token proving the VM's managed
 /// identity, and the ARM coordinates it is checked against.
 ///
@@ -37,7 +44,7 @@ pub async fn azure_login_material(
     base: &str,
     resource: &str,
 ) -> Result<(Zeroizing<String>, AzureInstance)> {
-    let token: AzureAccessToken = http
+    let token = http
         .get(with_query(
             base,
             "/metadata/identity/oauth2/token",
@@ -47,11 +54,10 @@ pub async fn azure_login_material(
         .send()
         .await?
         .error_for_status()
-        .map_err(VaultError::Request)?
-        .json()
-        .await?;
+        .map_err(VaultError::Request)?;
+    let token: AzureAccessToken = read_bounded_json(token).await?;
 
-    let instance: AzureInstance = http
+    let instance = http
         .get(with_query(
             base,
             "/metadata/instance/compute",
@@ -61,9 +67,8 @@ pub async fn azure_login_material(
         .send()
         .await?
         .error_for_status()
-        .map_err(VaultError::Request)?
-        .json()
-        .await?;
+        .map_err(VaultError::Request)?;
+    let instance: AzureInstance = read_bounded_json(instance).await?;
 
     Ok((Zeroizing::new(token.access_token), instance))
 }
@@ -75,8 +80,8 @@ pub async fn gcp_identity_token(
     base: &str,
     audience: &str,
 ) -> Result<Zeroizing<String>> {
-    Ok(Zeroizing::new(
-        http.get(with_query(
+    let response = http
+        .get(with_query(
             base,
             "/computeMetadata/v1/instance/service-accounts/default/identity",
             &[("audience", audience), ("format", "full")],
@@ -85,10 +90,12 @@ pub async fn gcp_identity_token(
         .send()
         .await?
         .error_for_status()
-        .map_err(VaultError::Request)?
-        .text()
-        .await?
-        .trim()
-        .to_owned(),
-    ))
+        .map_err(VaultError::Request)?;
+
+    // Bounded and wiped for the same reasons the Vault client's own reader is:
+    // this is an identity token, and whatever answers on `metadata_address` is
+    // no more trusted than whatever answers on the Vault address.
+    let raw = read_bounded(response).await?;
+    let text = std::str::from_utf8(&raw).map_err(|_| VaultError::OversizedResponse)?;
+    Ok(Zeroizing::new(text.trim().to_owned()))
 }

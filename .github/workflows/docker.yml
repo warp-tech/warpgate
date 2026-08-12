@@ -11,8 +11,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
+  IMAGE_NAME: warp-tech/warpgate
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

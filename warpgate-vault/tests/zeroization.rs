@@ -13,10 +13,22 @@
 //! The control case is what gives this teeth. A plain `String` holding the same
 //! canary must be found on free — if it is not, the detector is broken and the
 //! `Zeroizing` result would mean nothing.
+//!
+//! What this file does *not* do, said plainly so nobody reads more into it:
+//! it demonstrates the class — a buffer that grows leaves copies of what it
+//! held, one reserved up front does not — but it is not a reliable guard on any
+//! single call site. Reverting `login_payload` to the growing form does not
+//! make these assertions fail: whether a freed block is still observable
+//! depends on where the growth boundaries fall relative to the secret and on
+//! what the allocator does with the block afterwards. The tests call the real
+//! function rather than reimplementing it beside itself, which is worth doing,
+//! but a genuine regression guard would need the allocator to record freed
+//! blocks rather than sample them.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+use warpgate_vault::login_payload;
 use zeroize::Zeroizing;
 
 /// Long enough that a match is this test's data and not something the runtime
@@ -160,6 +172,8 @@ fn the_primitives(w: &Watcher) {
     // sizes it outgrew, and for a payload that fits the first allocation there
     // is nothing to outgrow.
     let big_secret = format!("{}{}", "x".repeat(4096), canary);
+    // Enough to force the serialisation buffer to grow several times.
+    let padding = "y".repeat(8192);
     let big_path = std::env::temp_dir().join("warpgate-zeroize-primitives-big");
     std::fs::write(&big_path, &big_secret).unwrap();
 

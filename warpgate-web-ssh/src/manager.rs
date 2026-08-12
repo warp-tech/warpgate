@@ -199,9 +199,14 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::ConnectionError(e) => {
+                            // `client_message()`, not `Display`. The raw form
+                            // carries the issuer's own words — mounts, policies,
+                            // hostnames — which the SSH path has kept away from
+                            // the user since it was reported. This entry point
+                            // renders the same errors and was missed.
                             session
                                 .push(ServerMessage::Error {
-                                    message: e.to_string(),
+                                    message: e.client_message(),
                                 })
                                 .await;
                             session

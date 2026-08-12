@@ -23,7 +23,10 @@ from pathlib import Path
 from .util import alloc_port
 
 VAULT_IMAGE = "hashicorp/vault:1.20"
-OPENBAO_IMAGE = "openbao/openbao:latest"
+# Pinned, not `latest`. This harness is the gate that says the stub tells the
+# truth about a real server; a floating tag means the thing it was checked
+# against is not the thing it checks against tomorrow.
+OPENBAO_IMAGE = "openbao/openbao:2.5.0"
 
 # The versions the contract suite runs against by default: one current release
 # of each server. `WARPGATE_VAULT_MATRIX=full` widens it to the older releases
@@ -75,11 +78,12 @@ class RealVault:
         return f"http://127.0.0.1:{self.port}"
 
     def ensure_image(self):
-        """Skips rather than fails when the image cannot be had.
+        """Fails, rather than skips, when the image cannot be had.
 
-        These tests pull a server image that nothing else in the suite needs, so
-        a CI runner without access to it should say so and move on rather than
-        report a defect in Warpgate.
+        Skipping was the wrong instinct: this suite is the gate that says the
+        stub tells the truth about a real server, so a run where neither real
+        server was reached must not be able to report success. A registry
+        outage should stop the build and say so.
         """
         present = subprocess.run(
             ["docker", "image", "inspect", self.image], capture_output=True, check=False
@@ -90,9 +94,10 @@ class RealVault:
             ["docker", "pull", self.image], capture_output=True, check=False
         )
         if pull.returncode != 0:
-            import pytest
-
-            pytest.skip(f"{self.image} is not available: {pull.stderr.decode()[-200:]}")
+            raise Exception(
+                f"cannot obtain {self.image}, so the contract suite would prove "
+                f"nothing: {pull.stderr.decode()[-300:]}"
+            )
 
     def start(self):
         self.ensure_image()
@@ -280,6 +285,9 @@ class RealVault:
         return entries
 
     def _requests_to(self, suffix: str) -> list[dict]:
+        """What Warpgate *sent*. Useful for asserting the payload it builds —
+        and useless for asserting what the server decided, which is a distinct
+        question that `_responses_from` answers."""
         seen = []
         for entry in self._audit():
             if entry.get("type") != "request":
@@ -289,9 +297,30 @@ class RealVault:
                 seen.append(entry["request"].get("data") or {})
         return seen
 
+    def _responses_from(self, suffix: str) -> list[dict]:
+        """What the server *returned*.
+
+        The distinction is not academic: a test asserting that the certificate
+        names the requested principals was reading the request, so it re-checked
+        Warpgate's own message and would have passed no matter what came back.
+        """
+        seen = []
+        for entry in self._audit():
+            if entry.get("type") != "response":
+                continue
+            path = entry.get("request", {}).get("path", "")
+            if path.endswith(suffix) or suffix in path:
+                seen.append((entry.get("response") or {}).get("data") or {})
+        return seen
+
     @property
     def signs(self) -> list[dict]:
         return self._requests_to(f"{MOUNT}/sign/")
+
+    @property
+    def issued(self) -> list[dict]:
+        """The certificates the server actually handed back."""
+        return self._responses_from(f"{MOUNT}/sign/")
 
     @property
     def logins(self) -> list[dict]:

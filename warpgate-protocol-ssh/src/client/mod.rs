@@ -41,6 +41,49 @@ use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
 use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_client_keys};
 
+/// What a hop in the chain is to the caller.
+///
+/// Every hop presents a host key, so "the host key" is ambiguous the moment a
+/// jump host is involved — and the answer the caller wants is the one from the
+/// hop they named, which is always the last.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum HopRole {
+    /// An ordinary connection: every hop's key is reported, because the user
+    /// may be prompted to trust any of them.
+    Connecting,
+    /// On the way to the hop being asked about. Its key is verified against
+    /// known hosts as usual, but not reported as an answer.
+    TraversedWhileChecking,
+    /// The hop the caller asked about. Report its key and go no further.
+    CheckedHost,
+}
+
+/// Which role a hop plays, given what was asked for and where it sits.
+const fn role(checking_host_key: bool, is_last: bool) -> HopRole {
+    match (checking_host_key, is_last) {
+        (false, _) => HopRole::Connecting,
+        (true, false) => HopRole::TraversedWhileChecking,
+        (true, true) => HopRole::CheckedHost,
+    }
+}
+
+impl HopRole {
+    const fn reports_host_key(self) -> bool {
+        matches!(self, Self::Connecting | Self::CheckedHost)
+    }
+
+    const fn stops_after_host_key(self) -> bool {
+        matches!(self, Self::CheckedHost)
+    }
+}
+
+/// The longest a session certificate may be valid for.
+///
+/// Generous — a role would have to be badly misconfigured to exceed it — but
+/// the point of this feature is a credential that is worthless a few minutes
+/// after it is issued, and nothing else anywhere checks that.
+const MAX_CERTIFICATE_LIFETIME: Duration = Duration::from_secs(24 * 60 * 60);
+
 /// How long a target may take to finish the SSH handshake. Generous for any
 /// real server on any real link, and the only thing standing between a target
 /// that accepts a connection and then goes quiet and a gateway task held for as
@@ -103,6 +146,11 @@ pub enum ConnectionError {
     #[error("Jump host target not found")]
     JumpHostTargetNotFound,
 
+    /// Only reachable while checking a target's host key: the chain leading to
+    /// it goes through a host that is not trusted yet.
+    #[error("A jump host on the way to this target has an untrusted host key")]
+    UntrustedJumpHost,
+
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
 }
@@ -127,6 +175,10 @@ impl ConnectionError {
             }
             ConnectionError::Internal => "Internal connection error".to_string(),
             ConnectionError::JumpHostTargetNotFound => "Jump host target not found".to_string(),
+            ConnectionError::UntrustedJumpHost => {
+                "A jump host on the way to this target has an untrusted host key; check that host first"
+                    .to_string()
+            }
             ConnectionError::Io(_) | ConnectionError::Key(_) | ConnectionError::Ssh(_) => {
                 "SSH protocol error".to_string()
             }
@@ -183,6 +235,60 @@ fn certificate_mismatch(
             "Vault issued a certificate naming {:?} rather than only the target account {principal}",
             principals
         ));
+    }
+
+    // The window is the feature's whole premise: a credential too short-lived
+    // to be worth stealing. Nothing checked it, so a role with a `max_ttl` of
+    // years — or one quietly edited to have one — produced a certificate good
+    // for years, and every layer downstream accepted it.
+    // All three ways this can be wrong, because the first version handled only
+    // the middle one and skipped the other two silently.
+    //
+    // `valid_before_time()` returns `None` when the value overflows `i64` —
+    // which `ssh-key` documents as "effectively never-expiring", and which is
+    // exactly what `ssh-keygen -V always:forever` and a Vault role with no TTL
+    // both produce. Reading that as "nothing to check" let the one input an
+    // adversary would reach for first walk straight past the bound.
+    match certificate
+        .valid_before_time()
+        .map(|at| at.duration_since(std::time::SystemTime::now()))
+    {
+        None => {
+            return Some(
+                "Vault issued a certificate that never expires, which is not a session credential"
+                    .to_owned(),
+            );
+        }
+        Some(Err(_)) => {
+            return Some(
+                "Vault issued a certificate that has already expired; check the clock on this host"
+                    .to_owned(),
+            );
+        }
+        Some(Ok(lifetime)) if lifetime > MAX_CERTIFICATE_LIFETIME => {
+            return Some(format!(
+                "Vault issued a certificate valid for {} hours, far longer than a session credential should be",
+                lifetime.as_secs() / 3600
+            ));
+        }
+        Some(Ok(_)) => {}
+    }
+
+    // Both directions, and the second one is the one that was missing.
+    //
+    // The allow-list was built against someone with write access to a Vault
+    // role but no right to sign with it: they add an option nobody asked for.
+    // Approached from the other side, they *remove* one — and a target whose
+    // whole point is a pinned `force-command` would then accept a certificate
+    // carrying none at all, which is a full shell rather than the one command.
+    // Checking only what arrived can never see that.
+    for expected in allowed_options {
+        if !certificate.critical_options().contains_key(&expected.name) {
+            return Some(format!(
+                "Vault issued a certificate without the critical option {:?} this target requires",
+                expected.name
+            ));
+        }
     }
 
     for (name, value) in certificate.critical_options().iter() {
@@ -373,14 +479,16 @@ pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 #[derive(Clone, Debug)]
 pub enum RCCommand {
     Connect(Vec<TargetSSHOptions>),
-    /// Connect only as far as the target's host key, then stop.
+    /// Connect only as far as the target's host key, then stop. Carries who
+    /// asked, because any jump host on the way is still authenticated and the
+    /// certificate that authenticates it has to name a person.
     ///
     /// A separate command rather than the caller dropping its handle once it has
     /// what it wants: the connection otherwise runs on into authentication, and
     /// for a certificate target that means a real certificate issued and a real
     /// session opened for nobody. Cancelling on a dropped handle is a race the
     /// caller loses about half the time; refusing to start is not.
-    CheckHostKey(Vec<TargetSSHOptions>),
+    CheckHostKey(Vec<TargetSSHOptions>, String),
     Channel(Uuid, ChannelOperation),
     ForwardTCPIP(String, u32),
     CancelTCPIPForward(String, u32),
@@ -417,6 +525,16 @@ pub struct RemoteClient {
     inner_event_tx: UnboundedSender<InnerEvent>,
     child_tasks: Vec<JoinHandle<Result<(), SshClientError>>>,
     services: Services,
+    /// Who to name in a certificate when there is no session to look up.
+    ///
+    /// The admin host-key check has no session — it is a button press, not a
+    /// login — but reaching a target behind a jump host still authenticates
+    /// that hop, and a certificate is minted for it. Without this the key ID
+    /// falls back to naming the random UUID that stood in for a session, so the
+    /// jump host's sshd log and Vault's issuance log both record a certificate
+    /// that resolves to nobody. That is the attribution failure the whole
+    /// feature exists to prevent, in the one caller that has no user to look up.
+    identity_hint: Option<String>,
 }
 
 pub struct RemoteClientHandles {
@@ -446,6 +564,7 @@ impl RemoteClient {
             inner_event_tx: inner_event_tx.clone(),
             child_tasks: vec![],
             services,
+            identity_hint: None,
             abort_rx,
         };
 
@@ -681,7 +800,8 @@ impl RemoteClient {
                     return Ok(true);
                 }
             },
-            RCCommand::CheckHostKey(options) => {
+            RCCommand::CheckHostKey(options, requested_by) => {
+                self.identity_hint = Some(requested_by);
                 if let Err(e) = self.check_host_key(options).await {
                     debug!("Host key check error: {}", e);
                     let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
@@ -798,13 +918,14 @@ impl RemoteClient {
     /// Connect through a pre-resolved chain of SSH hops, each tunnelled through the previous.
     /// `chain` must be non-empty; the first entry is connected directly, subsequent ones via
     /// `channel_open_direct_tcpip` through the previous session.
-    /// `stop_after_host_key` applies to the final hop only: the intermediate
-    /// ones must authenticate, or there is no tunnel to carry the last one.
-    /// Returns `None` when it stopped at the host key as asked.
+    /// `checking_host_key` names the last hop as the one being asked about: the
+    /// intermediate ones must still authenticate, or there is no tunnel to carry
+    /// the last one, and their keys are not the answer to the question.
+    /// Returns `None` when it stopped at that hop's host key as asked.
     async fn connect_chain(
         &mut self,
         chain: Vec<TargetSSHOptions>,
-        stop_after_host_key: bool,
+        checking_host_key: bool,
     ) -> Result<
         Option<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>)>,
         ConnectionError,
@@ -830,7 +951,12 @@ impl RemoteClient {
         };
         let fut = russh::client::connect(config, address, handler);
         let Some((mut session, mut active_rx)) = self
-            .wait_for_connection(&first, fut, event_rx, stop_after_host_key && hop_count == 1)
+            .wait_for_connection(
+                &first,
+                fut,
+                event_rx,
+                role(checking_host_key, hop_count == 1),
+            )
             .boxed()
             .await?
         else {
@@ -865,7 +991,12 @@ impl RemoteClient {
             };
             let fut = russh::client::connect_stream(config, stream, handler);
             let Some((new_session, new_rx)) = self
-                .wait_for_connection(&ssh_options, fut, event_rx, stop_after_host_key && is_last)
+                .wait_for_connection(
+                    &ssh_options,
+                    fut,
+                    event_rx,
+                    role(checking_host_key, is_last),
+                )
                 .boxed()
                 .await?
             else {
@@ -927,7 +1058,7 @@ impl RemoteClient {
         ssh_options: &TargetSSHOptions,
         fut_connect: Fut,
         mut event_rx: UnboundedReceiver<ClientHandlerEvent>,
-        stop_after_host_key: bool,
+        hop: HopRole,
     ) -> Result<
         Option<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>)>,
         ConnectionError,
@@ -958,14 +1089,33 @@ impl RemoteClient {
                 Some(event) = event_rx.recv() => {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
-                            self.tx.send(RCEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
-                            if stop_after_host_key {
+                            // Every hop presents a key, and the caller asked
+                            // about one of them. Reporting an intermediate hop's
+                            // key answers a question nobody asked — and the
+                            // admin endpoint, which takes the first key it sees,
+                            // then shows the jump host's key as the target's.
+                            if hop.reports_host_key() {
+                                self.tx.send(RCEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
+                            }
+                            if hop.stops_after_host_key() {
                                 return Ok(None);
                             }
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
-                            self.tx.send(RCEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;
-                            if stop_after_host_key {
+                            if hop.reports_host_key() {
+                                self.tx.send(RCEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;
+                            } else {
+                                // Nobody is listening for an answer on this hop,
+                                // and the handler is waiting for one. Refusing is
+                                // the honest reply: a jump host whose key is not
+                                // yet trusted has its own check to pass first,
+                                // and silently accepting it here would trust it
+                                // on the strength of a question about something
+                                // else.
+                                let _ = reply.send(false);
+                                return Err(ConnectionError::UntrustedJumpHost);
+                            }
+                            if hop.stops_after_host_key() {
                                 return Ok(None);
                             }
                         }
@@ -974,7 +1124,14 @@ impl RemoteClient {
                 }
                 () = &mut handshake_deadline => {
                     error!(host = %ssh_options.host, "Target did not finish the SSH handshake in time");
-                    self.set_disconnected().await;
+                    // No `set_disconnected()` here: `handle_command` calls it
+                    // immediately after sending the error, so doing it first
+                    // only reorders `Done` ahead of the reason. A review argued
+                    // that ordering discards the message, since both session
+                    // loops treat `Done` as terminal — I could not reproduce
+                    // that, the reason arrives either way, so this is tidiness
+                    // rather than a fix. The test below pins the message
+                    // regardless of which explanation is right.
                     return Err(ConnectionError::HandshakeTimeout);
                 }
                 // `None` means every sender is gone, so the owner has dropped
@@ -1037,7 +1194,7 @@ impl RemoteClient {
             None => None,
         };
 
-        username.map_or_else(
+        username.or_else(|| self.identity_hint.clone()).map_or_else(
             || format!("warpgate:{}", self.id),
             |username| format!("warpgate:{username}:{}", self.id),
         )

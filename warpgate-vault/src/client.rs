@@ -71,10 +71,20 @@ fn validate_principal(principal: &str) -> Result<()> {
     Ok(())
 }
 
-/// The key ID is echoed verbatim into the target's own sshd log, so a control
-/// character in it would let a Warpgate username forge log lines there.
+/// Enough for `warpgate:<username>:<uuid>` with a username nobody would call
+/// unreasonable, and far below anything that would matter in a log line.
+const MAX_KEY_ID: usize = 256;
+
+/// The key ID is echoed verbatim into the target's own sshd log — which is the
+/// point, since that is what makes a proxied session attributable to a person.
+///
+/// Both halves matter, and the second was missing. A control character would
+/// let a Warpgate username forge log lines there; an unbounded length lets it
+/// bury them. A 4 KB username produced a 4 KB key ID, which Vault signed and
+/// the target wrote out on every connection — and the check on the *returned*
+/// key ID could not see it, because it compares against what was asked for.
 fn validate_key_id(key_id: &str) -> Result<()> {
-    if key_id.chars().any(char::is_control) {
+    if key_id.chars().any(char::is_control) || key_id.len() > MAX_KEY_ID {
         return Err(VaultError::InvalidKeyId);
     }
     Ok(())
@@ -117,7 +127,18 @@ struct UnwrappedSecretId {
 /// far above that, and the reason it matters is below.
 const LOGIN_PAYLOAD_CAPACITY: usize = 32 * 1024;
 
+/// The largest credential file that will be read. A service account token or a
+/// wrapped secret ID is a few kilobytes; beyond this the file is not a
+/// credential, and reading it would outgrow the payload buffer reserved above
+/// and reintroduce the grow-and-copy leak that reservation exists to prevent.
+const MAX_CREDENTIAL_FILE: u64 = 16 * 1024;
+
 /// Serializes a login payload into a buffer that is zeroized on drop.
+///
+/// Public so that `tests/zeroization.rs` can exercise *this* function rather
+/// than reimplementing the safe pattern beside it: a test that rebuilds the
+/// pattern inline stays green when the real one is reverted, which is exactly
+/// what it exists to prevent.
 ///
 /// Written into a buffer reserved up front rather than through
 /// `serde_json::to_string`, because a `String` that grows while being written
@@ -125,7 +146,7 @@ const LOGIN_PAYLOAD_CAPACITY: usize = 32 * 1024;
 /// credential-bearing JSON in freed memory on every single login. `Zeroizing`
 /// only ever wipes the buffer that survives to the end. Measured, with the
 /// mechanism narrowed down, in `tests/zeroization.rs`.
-fn login_payload<T: Serialize>(value: &T) -> Result<Zeroizing<Vec<u8>>> {
+pub fn login_payload<T: Serialize>(value: &T) -> Result<Zeroizing<Vec<u8>>> {
     let mut buffer = Zeroizing::new(Vec::with_capacity(LOGIN_PAYLOAD_CAPACITY));
     serde_json::to_writer(&mut *buffer, value)?;
     Ok(buffer)
@@ -206,6 +227,31 @@ struct UnwrapData {
     secret_id: Option<String>,
 }
 
+/// Reads a response into a bounded, zeroized buffer.
+///
+/// At module level and `pub(crate)` because the metadata calls answer to the
+/// same argument as the Vault ones: an endpoint named in the configuration is
+/// not a trusted party, and what it returns is a credential. This bound was
+/// added for the Vault client and not mirrored there, which is the kind of
+/// half-applied fix this file has produced before.
+pub(crate) async fn read_bounded(mut response: reqwest::Response) -> Result<Zeroizing<Vec<u8>>> {
+    let mut buf: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::new());
+    while let Some(chunk) = response.chunk().await? {
+        if buf.len() + chunk.len() > MAX_RESPONSE_BODY {
+            return Err(VaultError::OversizedResponse);
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
+}
+
+pub(crate) async fn read_bounded_json<T: serde::de::DeserializeOwned>(
+    response: reqwest::Response,
+) -> Result<T> {
+    let buf = read_bounded(response).await?;
+    Ok(serde_json::from_slice(&buf)?)
+}
+
 pub struct VaultClient {
     config: VaultConfig,
     http: reqwest::Client,
@@ -219,6 +265,16 @@ impl VaultClient {
         validate_address(&config.address)?;
         validate_segment(&config.mount)?;
         validate_segment(&config.default_role)?;
+
+        // Caught here rather than at connect time. A sub-second TTL truncates to
+        // "0s", which both Vault and OpenBao refuse — so the mistake would
+        // otherwise surface as a failed session for every target at once, with
+        // nothing pointing at the config line that caused it.
+        if let Some(ttl) = config.certificate_ttl
+            && ttl.as_secs() == 0
+        {
+            return Err(VaultError::InvalidCertificateTtl(ttl));
+        }
 
         if !config.address.starts_with("https://") {
             // Only reachable for a loopback address, which validation allows so
@@ -562,8 +618,15 @@ impl VaultClient {
         // and body are the same public constants on every call. Every buffer
         // they pass through is zeroized, to match what the other methods do with
         // their credentials.
-        let headers = Zeroizing::new(serde_json::to_string(&request.headers)?);
-        let encoded_headers = Zeroizing::new(BASE64.encode(headers.as_bytes()));
+        // Through the same sized buffer `login_payload` uses, and for the same
+        // reason: `serde_json::to_string` grows its `String` as it writes and
+        // frees each smaller one unwiped. These headers carry the SigV4
+        // signature and, on an instance role, the session token — so this was
+        // the one call site still doing what the comment on `login_payload`
+        // forbids, one function away from it.
+        let mut headers = Zeroizing::new(Vec::with_capacity(LOGIN_PAYLOAD_CAPACITY));
+        serde_json::to_writer(&mut *headers, &request.headers)?;
+        let encoded_headers = Zeroizing::new(BASE64.encode(&headers));
 
         let payload = login_payload(&AwsLogin {
             role,
@@ -581,14 +644,23 @@ impl VaultClient {
 
     /// `read_to_string` sizes its buffer from the file's own length, so it does
     /// not grow while reading and leaves nothing behind — measured, rather than
-    /// assumed, in `tests/zeroization.rs`.
+    /// assumed, in `tests/zeroization.rs`. That holds only while the file is
+    /// small enough to fit the reserved payload buffer, hence the cap.
     async fn read_credential(path: &Path) -> Result<Zeroizing<String>> {
-        let raw = Zeroizing::new(tokio::fs::read_to_string(path).await.map_err(|source| {
-            VaultError::CredentialFile {
+        let describe = |source| VaultError::CredentialFile {
+            path: path.to_owned(),
+            source,
+        };
+
+        let size = tokio::fs::metadata(path).await.map_err(describe)?.len();
+        if size > MAX_CREDENTIAL_FILE {
+            return Err(VaultError::CredentialTooLarge {
                 path: path.to_owned(),
-                source,
-            }
-        })?);
+                size,
+            });
+        }
+
+        let raw = Zeroizing::new(tokio::fs::read_to_string(path).await.map_err(describe)?);
         Ok(Zeroizing::new(raw.trim().to_owned()))
     }
 
@@ -600,20 +672,8 @@ impl VaultClient {
     /// could be. `json()` would buffer whatever arrives before anything got to
     /// look at its size, so a single endpoint could hold as much of Warpgate's
     /// memory as it cared to send, once per session in flight.
-    async fn read_json<T: serde::de::DeserializeOwned>(
-        mut response: reqwest::Response,
-    ) -> Result<T> {
-        // A login response carries the client token and an unwrap response the
-        // secret ID, so the buffer they land in is zeroized rather than merely
-        // dropped.
-        let mut buf: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::new());
-        while let Some(chunk) = response.chunk().await? {
-            if buf.len() + chunk.len() > MAX_RESPONSE_BODY {
-                return Err(VaultError::OversizedResponse);
-            }
-            buf.extend_from_slice(&chunk);
-        }
-        Ok(serde_json::from_slice(&buf)?)
+    async fn read_json<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> Result<T> {
+        read_bounded_json(response).await
     }
 
     async fn check(response: reqwest::Response) -> Result<reqwest::Response> {
