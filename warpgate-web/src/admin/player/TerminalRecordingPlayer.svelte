@@ -332,9 +332,13 @@
     {/if}
 
     {#if !loading && $mode === 'paused'}
-        <div class="pause-overlay">
+        <button
+            type="button"
+            class="pause-overlay"
+            on:click={() => player.togglePlaying()}
+        >
             <Fa icon={faPlay} size="2x" fw />
-        </div>
+        </button>
     {/if}
 
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
@@ -395,6 +399,11 @@
     }
 
     :global(.spinner-border), .pause-overlay {
+        appearance: none;
+        -webkit-appearance: none;
+        background: none;
+        border: none;
+
         position: absolute;
         left: 50%;
         top: 50%;
