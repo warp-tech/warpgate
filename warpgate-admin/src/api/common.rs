@@ -1,6 +1,6 @@
 use sea_orm::prelude::Expr;
-use sea_orm::sea_query::{Func, IntoCondition};
-use sea_orm::{ColumnTrait, Condition, EntityTrait, ModelTrait, QueryFilter};
+use sea_orm::sea_query::{Alias, Func, IntoCondition, SimpleExpr};
+use sea_orm::{ColumnTrait, Condition, DbBackend, EntityTrait, ModelTrait, QueryFilter};
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
 pub use warpgate_common_http::RequestAuthorization;
 use warpgate_db_entities::{AdminRole, User};
@@ -79,11 +79,32 @@ where
     C: ColumnTrait,
     I: IntoIterator<Item = C>,
 {
+    case_insensitive_search_expr(search, columns.into_iter().map(|c| Expr::col(c).into()))
+}
+
+/// [`case_insensitive_search`] over arbitrary expressions, for columns that need
+/// to be coerced into text first - see [`json_as_text`].
+pub fn case_insensitive_search_expr<I>(search: &str, expressions: I) -> impl IntoCondition
+where
+    I: IntoIterator<Item = SimpleExpr>,
+{
     let search_pattern = format!("%{}%", search.to_lowercase());
 
-    columns
+    expressions
         .into_iter()
-        .fold(Condition::any(), |condition, column| {
-            condition.add(Expr::expr(Func::lower(Expr::col(column))).like(search_pattern.clone()))
+        .fold(Condition::any(), |condition, expression| {
+            condition.add(Expr::expr(Func::lower(expression)).like(search_pattern.clone()))
         })
+}
+
+/// Casts a JSON column to text so that string functions such as `lower()` can be
+/// applied to it.
+///
+/// Postgres has no `lower(json)` overload and won't coerce implicitly, unlike
+/// SQLite and MySQL. MySQL in turn spells the cast target `char`, not `text`.
+pub fn json_as_text<C: ColumnTrait>(backend: DbBackend, column: C) -> SimpleExpr {
+    Expr::col(column).cast_as(match backend {
+        DbBackend::MySql => Alias::new("char"),
+        DbBackend::Postgres | DbBackend::Sqlite => Alias::new("text"),
+    })
 }
