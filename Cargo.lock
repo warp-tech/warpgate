@@ -9142,6 +9142,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "vt100",
  "warpgate-aws",
  "warpgate-ca",
  "warpgate-common",
