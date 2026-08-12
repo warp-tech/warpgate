@@ -276,7 +276,11 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     AdminApiTestCase(
         id="get_logs",
         permission=None,
-        call=lambda api, r: api.get_logs_with_http_info(sdk.GetLogsRequest(search="")),
+        # A non-empty search is what actually exercises the filter - an empty one
+        # is skipped, hiding e.g. Postgres rejecting lower() on the JSON column
+        call=lambda api, r: api.get_logs_with_http_info(
+            sdk.GetLogsRequest(search="test")
+        ),
         expected_statuses={200},
     ),
     AdminApiTestCase(
