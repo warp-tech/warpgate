@@ -204,6 +204,12 @@ class ProcessManager:
                 "--rm",
                 "-p",
                 f"{port}:22",
+                # A jump host has to dial the next hop, which is another
+                # container published on a host port. Docker Desktop invents
+                # this name on its own, so a chain test passes on a laptop and
+                # fails on Linux, where nothing defines it.
+                "--add-host",
+                "host.docker.internal:host-gateway",
                 "-v",
                 f"{data_dir}:{data_dir}",
                 "-v",
