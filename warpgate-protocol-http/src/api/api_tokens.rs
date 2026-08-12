@@ -5,7 +5,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, ModelTrait, QueryFilter, Set};
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
-use warpgate_common::helpers::hash::generate_ticket_secret;
+use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_db_entities::ApiToken;
 
 use super::common::get_user;
@@ -137,7 +137,7 @@ impl Api {
             created: Set(OffsetDateTime::now_utc()),
             expiry: Set(body.expiry),
             label: Set(body.label.clone()),
-            secret: Set(secret.expose_secret().clone()),
+            secret_hash: Set(hash_secret(secret.expose_secret())),
         }
         .insert(db)
         .await
