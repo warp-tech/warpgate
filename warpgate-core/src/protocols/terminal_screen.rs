@@ -33,9 +33,15 @@ impl TerminalScreen {
         self.parser.set_size(rows, cols);
     }
 
-    pub fn snapshot(&self) -> Option<Vec<u8>> {
+    pub fn snapshot(&self) -> Vec<u8> {
         let screen = self.parser.screen();
-        (!screen.alternate_screen()).then(|| screen.state_formatted())
+        let mut out = Vec::new();
+        if screen.alternate_screen() {
+            // state_formatted() output does not include this alt mode switch
+            out.extend_from_slice(b"\x1b[?1049h");
+        }
+        out.extend_from_slice(&screen.state_formatted());
+        out
     }
 }
 
@@ -43,22 +49,23 @@ impl TerminalScreen {
 mod tests {
     use super::*;
 
-    fn restored(snapshot: &[u8], cols: u16, rows: u16) -> String {
+    fn restored(snapshot: &[u8], cols: u16, rows: u16) -> TerminalScreen {
         let mut restored = TerminalScreen::new(cols, rows);
         restored.feed(snapshot);
-        restored.parser.screen().contents()
+        restored
+    }
+
+    fn contents(screen: &TerminalScreen) -> String {
+        screen.parser.screen().contents()
     }
 
     #[test]
     fn snapshot_reproduces_the_screen() {
         let mut screen = TerminalScreen::new(80, 24);
         screen.feed(b"hello\r\n\x1b[31mworld\x1b[0m\r\nthird line");
-        let snapshot = screen.snapshot().expect("restorable");
-        assert_eq!(
-            restored(&snapshot, 80, 24),
-            screen.parser.screen().contents()
-        );
-        assert!(restored(&snapshot, 80, 24).contains("world"));
+        let restored = restored(&screen.snapshot(), 80, 24);
+        assert_eq!(contents(&restored), contents(&screen));
+        assert!(contents(&restored).contains("world"));
     }
 
     #[test]
@@ -67,22 +74,19 @@ mod tests {
         screen.feed(b"before resize\r\n");
         screen.resize(100, 40);
         screen.feed(b"after resize");
-        let snapshot = screen.snapshot().expect("restorable");
-        assert_eq!(
-            restored(&snapshot, 100, 40),
-            screen.parser.screen().contents()
-        );
+        let restored = restored(&screen.snapshot(), 100, 40);
+        assert_eq!(contents(&restored), contents(&screen));
     }
 
     #[test]
-    fn alternate_screen_has_no_restorable_snapshot() {
+    fn alternate_screen_snapshot_restores_into_alternate_mode() {
         let mut screen = TerminalScreen::new(80, 24);
         screen.feed(b"shell output\r\n");
-        assert!(screen.snapshot().is_some());
-        screen.feed(b"\x1b[?1049h");
-        assert!(screen.snapshot().is_none());
-        screen.feed(b"\x1b[?1049l");
-        assert!(screen.snapshot().is_some());
+        screen.feed(b"\x1b[?1049hfullscreen app");
+        let restored = restored(&screen.snapshot(), 80, 24);
+        assert!(restored.parser.screen().alternate_screen());
+        assert_eq!(contents(&restored), contents(&screen));
+        assert!(contents(&restored).contains("fullscreen app"));
     }
 
     #[test]
@@ -90,6 +94,6 @@ mod tests {
         let mut screen = TerminalScreen::new(0, 0);
         screen.feed(b"still fine");
         screen.resize(0, 0);
-        assert!(screen.snapshot().is_some());
+        assert!(!screen.snapshot().is_empty());
     }
 }

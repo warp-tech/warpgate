@@ -160,15 +160,12 @@ impl TerminalRecorder {
         if !st.pty {
             return Ok(());
         }
-        let Some(snapshot) = st.screen.snapshot() else {
-            return Ok(());
-        };
 
         // Index the checkpoint at the offset where this snapshot line will start
         let offset = st.offset;
         let item = TerminalRecordingItem::Snapshot {
             time,
-            snapshot: Bytes::from(snapshot),
+            snapshot: Bytes::from(st.screen.snapshot()),
         };
         self.write_data_item(st, &item).await?;
         st.bytes_since_keyframe = 0;
