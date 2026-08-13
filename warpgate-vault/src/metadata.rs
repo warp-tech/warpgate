@@ -56,6 +56,14 @@ pub async fn azure_login_material(
         .error_for_status()
         .map_err(VaultError::Request)?;
     let token: AzureAccessToken = read_bounded_json(token).await?;
+    // Wrapped here, not at the return.
+    //
+    // It used to be wrapped only once the instance-metadata call below had also
+    // succeeded — and that call is three fallible steps. Any of them returning
+    // early dropped the access token as a plain `String`, unwiped, on exactly
+    // the paths where something has already gone wrong. GCP's equivalent has no
+    // such window: nothing fallible sits between reading and wrapping there.
+    let access_token = Zeroizing::new(token.access_token);
 
     let instance = http
         .get(with_query(
@@ -70,7 +78,7 @@ pub async fn azure_login_material(
         .map_err(VaultError::Request)?;
     let instance: AzureInstance = read_bounded_json(instance).await?;
 
-    Ok((Zeroizing::new(token.access_token), instance))
+    Ok((access_token, instance))
 }
 
 /// A GCE instance identity token, signed by Google for this specific audience.

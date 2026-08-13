@@ -17,13 +17,17 @@
 //! What this file does *not* do, said plainly so nobody reads more into it:
 //! it demonstrates the class — a buffer that grows leaves copies of what it
 //! held, one reserved up front does not — but it is not a reliable guard on any
-//! single call site. Reverting `login_payload` to the growing form does not
-//! make these assertions fail: whether a freed block is still observable
-//! depends on where the growth boundaries fall relative to the secret and on
-//! what the allocator does with the block afterwards. The tests call the real
-//! function rather than reimplementing it beside itself, which is worth doing,
-//! but a genuine regression guard would need the allocator to record freed
-//! blocks rather than sample them.
+//! single call site. Whether a freed block is still observable depends on where
+//! the growth boundaries fall relative to the secret and on what the allocator
+//! does with the block afterwards, so a genuine regression guard would need the
+//! allocator to record freed blocks rather than sample them.
+//!
+//! The measurements do go through `login_payload` itself rather than a copy of
+//! its shape written beside it — a test that rebuilds the safe pattern inline
+//! stays green when the shipped one is reverted. That is worth having and is
+//! why the function is `pub`; it is not the same thing as a guarantee that
+//! reverting it fails here. This paragraph previously claimed the first while
+//! the file did the second, which is the failure it now describes.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -132,22 +136,6 @@ struct AppRoleLogin<'a> {
     secret_id: &'a str,
 }
 
-/// `serde_json::to_string` is not safe for a credential, even wrapped.
-///
-/// The returned `String` grows as it is written, and every intermediate buffer
-/// it outgrows is freed without being wiped — so a prefix of the payload, which
-/// for these shapes contains the whole credential, is left behind. `Zeroizing`
-/// wipes only the buffer that survives to the end. This is what `login_payload`
-
-/// The shape `login_payload` uses now: a credential read into one buffer,
-
-/// Why the typed struct above is not a matter of taste.
-///
-/// Building the same payload through `serde_json::json!` puts the credential in
-/// a `Value`, and that intermediate is an ordinary `String` nothing wipes. This
-/// is the defect that was reported and fixed; the test is here so that anyone
-/// who reaches for `json!` on this path sees the cost immediately rather than
-
 /// Which primitive leaves a copy behind, measured one at a time.
 ///
 /// Every measurement window contains the operation under test and nothing else.
@@ -172,8 +160,6 @@ fn the_primitives(w: &Watcher) {
     // sizes it outgrew, and for a payload that fits the first allocation there
     // is nothing to outgrow.
     let big_secret = format!("{}{}", "x".repeat(4096), canary);
-    // Enough to force the serialisation buffer to grow several times.
-    let padding = "y".repeat(8192);
     let big_path = std::env::temp_dir().join("warpgate-zeroize-primitives-big");
     std::fs::write(&big_path, &big_secret).unwrap();
 
@@ -199,18 +185,19 @@ fn the_primitives(w: &Watcher) {
         drop(secret);
     });
 
+    // The real function, not the pattern rewritten beside it. A test that
+    // rebuilds the safe shape inline stays green when the shipped one is
+    // reverted, which is the regression it exists to catch — and for two
+    // rounds this file did exactly that while its own comments said otherwise.
     let sized_payload = w.sightings_while(|| {
         let secret = Zeroizing::new(String::from_utf8(source.clone()).unwrap());
-        let mut payload = Zeroizing::new(Vec::<u8>::with_capacity(32 * 1024));
-        serde_json::to_writer(
-            &mut *payload,
-            &AppRoleLogin {
+        drop(
+            login_payload(&AppRoleLogin {
                 role_id: "r",
                 secret_id: &secret,
-            },
-        )
-        .unwrap();
-        drop(payload);
+            })
+            .unwrap(),
+        );
         drop(secret);
     });
 
@@ -232,16 +219,13 @@ fn the_primitives(w: &Watcher) {
 
     let big_sized_payload = w.sightings_while(|| {
         let secret = Zeroizing::new(big_secret.clone());
-        let mut payload = Zeroizing::new(Vec::<u8>::with_capacity(32 * 1024));
-        serde_json::to_writer(
-            &mut *payload,
-            &AppRoleLogin {
+        drop(
+            login_payload(&AppRoleLogin {
                 role_id: "r",
                 secret_id: &secret,
-            },
-        )
-        .unwrap();
-        drop(payload);
+            })
+            .unwrap(),
+        );
         drop(secret);
     });
 

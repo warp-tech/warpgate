@@ -105,14 +105,41 @@ vault:
 
 `certificate_ttl` is a request, not a grant: Vault clamps it to the role's
 `max_ttl`, so it can shorten the window but never widen it. It is there so the
-lifetime can be tightened from Warpgate's side without an edit to Vault.
+lifetime can be tightened from Warpgate's side without an edit to Vault. Under a
+second is refused at startup — both issuers reject it, and failing at config
+load names the line instead of failing every session later.
 
-Warpgate refuses a plain-HTTP `address` unless it is loopback, and verifies
-Vault's certificate against the **host's trust store** — there is no CA-bundle
-setting. A Vault behind a private CA therefore needs that CA installed on the
-Warpgate host or in its container image (`/usr/local/share/ca-certificates` +
-`update-ca-certificates` on Debian-based images), which is the same thing every
-other outbound connection in Warpgate expects.
+Whatever the role grants, Warpgate checks the certificate it gets back and
+refuses to use it if the window is wrong. Three cases, because a role's `max_ttl`
+is not something Warpgate can see:
+
+| Returned certificate | What happens |
+|---|---|
+| Valid for more than **24 hours** | Refused. Generous — a role would have to be badly misconfigured to exceed it — but this feature exists to hand the target a credential that is worthless minutes later |
+| Marked never-expiring (`ssh-keygen -V always:forever`, or a role with no TTL) | Refused |
+| Already expired | Refused, with a message naming the clock — the usual cause is skew on this host or the target, not a bad credential |
+
+Set `certificate_ttl` well below the 24-hour ceiling; it is a backstop against a
+misconfigured role, not a target to aim at.
+
+Warpgate refuses a plain-HTTP `address` unless it is loopback. Vault's
+certificate is verified against the host's trust store, plus `ca_bundle` if set:
+
+```yaml
+vault:
+  ca_bundle: /etc/warpgate/vault-ca.pem   # optional
+```
+
+The bundle is *added* to the host's roots rather than replacing them, and an
+unreadable or malformed file fails at startup naming the path. Leave it unset and
+install the CA on the host or in the container image instead
+(`/usr/local/share/ca-certificates` + `update-ca-certificates` on Debian-based
+images) — either works.
+
+There is deliberately no setting to skip verification. The HTTP and Kubernetes
+target paths offer `verify: false` for devices whose certificates cannot be
+fixed; there is no equivalent case for Vault, and the Vault token crosses this
+connection in a header.
 
 ### Kubernetes
 
@@ -148,8 +175,17 @@ vault write auth/aws/role/warpgate auth_type=iam \
 ```
 
 Warpgate signs an `sts:GetCallerIdentity` request; Vault replays it against STS
-to learn who signed it. No credential is disclosed. `server_id` is bound into the
-signature so a captured request cannot be replayed against a different Vault.
+to learn who signed it. No credential is disclosed.
+
+**`server_id` is optional and leaving it out is the insecure choice.** It is
+bound into the signature as `X-Vault-AWS-IAM-Server-ID`, and Vault compares it
+against its own `iam_server_id_header_value`. Without it the signed request
+proves only *this principal signed something* — so anyone who obtains one can
+present it to any other Vault that trusts the same principal. Warpgate logs a
+warning at startup when it is unset rather than refusing: Vault ignores the
+header entirely unless `iam_server_id_header_value` is configured, so demanding
+a value here would mean inventing one for a server that will not look at it.
+Set both, or accept the warning knowingly.
 
 Leave `region` unset. Vault replays against the global endpoint, which rejects a
 signature scoped to any other region. Set it only if Vault has a matching
@@ -275,9 +311,27 @@ the Vault role binds only a subscription and resource group. Add
 `bound_service_principal_ids`, the object ID of the VM's managed identity (the
 `oid` claim of the IMDS token).
 
-**A policy change appears to have no effect** — Warpgate caches the Vault token
-until shortly before its lease expires. A role or policy change does not
-invalidate a token already issued. Restart Warpgate, or wait out `token_ttl`.
+**A policy change appears to have no effect** — narrower than it looks, because
+Warpgate already recovers from most of it. Vault evaluates a policy's rules at
+request time, so editing what a policy *allows* takes effect immediately for a
+token already issued. And when signing comes back `403`, Warpgate drops the
+cached token, logs in once more and retries within the same request — so a
+revoked token, a resealed or restarted Vault, and a token whose lease Vault
+stopped honouring all resolve on their own, and a denial that survives the retry
+is a real one.
+
+What is left: changing which policies the *auth role* attaches applies only to
+tokens issued after the change, and Warpgate keeps its token until shortly
+before the lease runs out. If you have granted new permissions that way and
+signing is not failing outright, restart Warpgate or wait out `token_ttl`.
+
+**`Vault issued a certificate valid for N hours, far longer than a session
+credential should be`** — Warpgate refuses anything over 24 hours, whatever the
+role's `max_ttl` allows, and the certificate was never offered to the target.
+Shorten the role's `max_ttl`, or set `certificate_ttl` to hold the window down
+from Warpgate's side. The companion messages are `never expires`, for a role with
+no TTL at all, and `already expired`, which is almost always clock skew rather
+than a bad credential.
 
 **`Certificate authentication was rejected by the SSH target`** — the certificate
 was issued but the target refused it. Check `sshd -T | grep trustedusercakeys`,
@@ -358,11 +412,37 @@ role sets one deliberately, name it on the target — and pin the value, since f
 }
 ```
 
-Leaving `value` unset accepts any value for that name. The refusal reaches the
-connecting user, not only the log.
+**Pinning a `value` also makes the option mandatory.** A certificate that omits
+`force-command` above is refused, not accepted as unrestricted — otherwise the
+role-write attack works just as well in reverse: remove the option instead of
+adding one, and a target locked to a single command hands out a shell.
 
-Extensions are not refused — they cannot change what runs — but an unexpected one
-is logged at debug level, since it still says the role is not what you think.
+Leaving `value` unset only permits: the option may appear with any value, and a
+certificate without it is fine. That is how you express a role that *sometimes*
+sets an option — `source-address`, say. If every entry were mandatory there
+would be no way to say it: list the option and certificates without it fail,
+omit it and certificates with it fail.
+
+The refusal reaches the connecting user, not only the log.
+
+**Extensions are not checked at all, and `force-command` alone does not confine a
+session.** An unexpected extension is logged at debug level and nothing else.
+
+That is a gap, not a design decision, and it undercuts the example above. A
+`force-command` decides what the *shell or exec* channel runs. It does not touch
+the other channel types, and OpenSSH gates those purely on what the certificate
+carries: `permit-port-forwarding` opens `direct-tcpip`, `permit-agent-forwarding`
+reaches the connecting user's own SSH agent. So a role whose
+`default_extensions` grants either — set deliberately, or written by someone with
+role-write and nothing else — gives a session that forwards and pivots from a
+target the certificate was supposed to lock to one command, and Warpgate accepts
+it without comment.
+
+Until this is closed, the control is on the Vault side only: keep
+`default_extensions` to the minimum the role actually needs, as §1 says, and do
+not read a pinned `force-command` as confinement on its own. Check the target's
+own `sshd_config` too — `AllowTcpForwarding no` and `AllowAgentForwarding no`
+hold regardless of what a certificate permits.
 
 **`address` and `metadata_address` are fetched as given.** Both come from
 `warpgate.yaml`, so anyone who can edit that file can point Warpgate's outbound

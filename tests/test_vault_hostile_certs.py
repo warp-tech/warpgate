@@ -131,13 +131,26 @@ class TestCertificatesNobodyShouldAccept:
     def test_a_certificate_carrying_a_hundred_critical_options(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
     ):
-        """Refusal has to survive the loop over them."""
+        """Refusal has to survive the loop over them.
+
+        Asked with a PTY and checked by *who* refused. These names are ones
+        OpenSSH does not recognise, so a target refuses the certificate on its
+        own — and asserting only a non-zero exit code passes just as well with
+        our own check deleted, which is what the certificate never reaching the
+        target would look like either way.
+        """
+        from .test_ssh_target_cert_auth import make_user_and_target, start
+
         stub_vault.sign_options = [f"critical:opt{n}=v" for n in range(100)]
-        code, _ = attempt(processes, cert_wg, api, cert_ssh_port, timeout)
-        assert code != 0
-        # Without this the test passes just as well when the certificate path
-        # never ran at all.
+        user, target = make_user_and_target(api, cert_ssh_port)
+
+        client = start(processes, cert_wg, user, target, "-tt")
+        shown = client.communicate(timeout=timeout)[0].decode(errors="replace")
+
         assert stub_vault.signs, "no certificate was ever requested"
+        assert client.returncode != 0, "a certificate carrying 100 options was accepted"
+        assert "Warpgate refused the certificate" in shown
+        assert "does not allow" in shown
 
     def test_a_signed_key_that_is_not_a_certificate_at_all(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
@@ -378,9 +391,10 @@ class TestTheCredentialFileItself:
         assert stub_vault.signs == [], "an oversized key ID was sent to the issuer"
 
     @pytest.mark.skip(
-        reason="the fix is in, but this input hangs the session for ~45s for a "
-        "reason not yet isolated, so the test cannot demonstrate it — see "
-        "SECURITY_TESTING.md"
+        reason="the guard is covered by the certificate_lifetime unit tests in "
+        "warpgate-protocol-ssh; end to end, this input holds the session open "
+        "for ~45s for a reason not yet isolated, so it cannot demonstrate the "
+        "refusal here"
     )
     def test_a_certificate_that_never_expires(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout

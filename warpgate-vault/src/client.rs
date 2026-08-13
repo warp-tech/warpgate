@@ -7,7 +7,7 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
-use warpgate_common::{VaultAuth, VaultConfig};
+use warpgate_common::{MAX_CERTIFICATE_LIFETIME, VaultAuth, VaultConfig};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::error::{Result, VaultError};
@@ -30,6 +30,32 @@ const MAX_ERROR_BODY: usize = 256;
 const MAX_RESPONSE_BODY: usize = 256 * 1024;
 
 static NEXT_TOKEN_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Whether this configuration leaves the AWS login request replayable, and why.
+///
+/// `server_id` is bound into the SigV4 signature as
+/// `X-Vault-AWS-IAM-Server-ID`, and Vault checks it against its own
+/// `iam_server_id_header_value`. Without it the signed request proves only
+/// "this principal", so anyone who obtains one can present it to any other
+/// Vault that trusts the same principal — which is exactly what the README says
+/// this field prevents, while the field defaulted to unset and said nothing.
+///
+/// A warning rather than a refusal, matching what this constructor already does
+/// for a plain-HTTP loopback address: Vault ignores the header entirely unless
+/// `iam_server_id_header_value` is configured, so requiring a value here would
+/// force operators to invent one for a server that will not look at it.
+fn aws_binding_advice(auth: &VaultAuth) -> Option<&'static str> {
+    match auth {
+        VaultAuth::Aws {
+            server_id: None, ..
+        } => Some(
+            "vault.auth.server_id is unset, so the signed AWS login request is not bound to \
+             this Vault and can be replayed against any other that trusts the same principal. \
+             Set it here and as iam_server_id_header_value on the Vault AWS auth mount.",
+        ),
+        _ => None,
+    }
+}
 
 fn validate_address(address: &str) -> Result<()> {
     let parsed = url::Url::parse(address).map_err(|e| VaultError::InvalidAddress(e.to_string()))?;
@@ -152,6 +178,30 @@ pub fn login_payload<T: Serialize>(value: &T) -> Result<Zeroizing<Vec<u8>>> {
     Ok(buffer)
 }
 
+/// Wipes the signed AWS headers on every path out of the function that holds
+/// them.
+///
+/// They carry the SigV4 signature and, on an instance role, the session token.
+/// The wipe used to be a loop at the end, after a fallible serialization — so
+/// the one path where something had already gone wrong was the path that
+/// skipped it. Ordering is not a property worth relying on for this; `Drop` is.
+///
+/// Not covered by a test, deliberately rather than by omission. Once `Drop` has
+/// run the values are gone, so there is nothing left to assert against; a test
+/// that wipes a map itself and then reads it proves only that `zeroize` works,
+/// which is the shape this crate has already been caught writing once. The
+/// change here is that the wipe cannot be skipped, and that is a property of
+/// `Drop` rather than of anything a test can observe.
+struct WipedHeaders(warpgate_aws::StsIdentityRequest);
+
+impl Drop for WipedHeaders {
+    fn drop(&mut self) {
+        for value in self.0.headers.values_mut() {
+            value.zeroize();
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct JwtLogin<'a> {
     role: &'a str,
@@ -235,7 +285,17 @@ struct UnwrapData {
 /// added for the Vault client and not mirrored there, which is the kind of
 /// half-applied fix this file has produced before.
 pub(crate) async fn read_bounded(mut response: reqwest::Response) -> Result<Zeroizing<Vec<u8>>> {
-    let mut buf: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::new());
+    // Reserved up front, for the reason spelled out on `login_payload`: a buffer
+    // that grows frees every size it outgrew without wiping it, and `Zeroizing`
+    // only clears the one that survives. Every caller of this function carries a
+    // credential — the Vault token, an AppRole secret ID, a cloud identity JWT —
+    // so the response path needed the same treatment as the request path and did
+    // not get it. A GCE `format=full` identity token is around 2 KiB and
+    // arrives in more than one chunk, which is exactly the case that reallocs.
+    //
+    // Not `MAX_RESPONSE_BODY`: that is the refusal threshold, not an
+    // expectation. Anything past this reserve is far larger than a credential.
+    let mut buf: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(LOGIN_PAYLOAD_CAPACITY));
     while let Some(chunk) = response.chunk().await? {
         if buf.len() + chunk.len() > MAX_RESPONSE_BODY {
             return Err(VaultError::OversizedResponse);
@@ -266,14 +326,23 @@ impl VaultClient {
         validate_segment(&config.mount)?;
         validate_segment(&config.default_role)?;
 
-        // Caught here rather than at connect time. A sub-second TTL truncates to
-        // "0s", which both Vault and OpenBao refuse — so the mistake would
-        // otherwise surface as a failed session for every target at once, with
-        // nothing pointing at the config line that caused it.
+        // Both ends of the range, caught here rather than at connect time.
+        //
+        // A sub-second TTL truncates to "0s", which both Vault and OpenBao
+        // refuse. One above the ceiling is refused on arrival by the certificate
+        // check instead. Either way the mistake would otherwise surface as a
+        // failed session for every target at once, with nothing pointing at the
+        // config line that caused it — and that argument, written here for the
+        // lower bound, applies identically to the upper one, which is the half
+        // it was not applied to.
         if let Some(ttl) = config.certificate_ttl
-            && ttl.as_secs() == 0
+            && (ttl.as_secs() == 0 || ttl > MAX_CERTIFICATE_LIFETIME)
         {
             return Err(VaultError::InvalidCertificateTtl(ttl));
+        }
+
+        if let Some(advice) = aws_binding_advice(&config.auth) {
+            warn!("{advice}");
         }
 
         if !config.address.starts_with("https://") {
@@ -291,10 +360,28 @@ impl VaultClient {
         // `X-Vault-Token`, so a 307 from a hostile or misconfigured endpoint
         // would replay the token to another host, or downgrade the request to
         // plain HTTP.
-        let http = reqwest::Client::builder()
+        // A Vault behind a private CA. Added to the host's trust store rather
+        // than replacing it, and read here so an unreadable or malformed bundle
+        // is a startup error naming the file, not a signing failure on every
+        // target at once with nothing pointing at the config line.
+        let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(config.timeout)
-            .build()?;
+            .timeout(config.timeout);
+        if let Some(path) = config.ca_bundle.as_ref() {
+            let pem = std::fs::read(path).map_err(|source| VaultError::CaBundle {
+                path: path.clone(),
+                reason: source.to_string(),
+            })?;
+            for certificate in reqwest::Certificate::from_pem_bundle(&pem).map_err(|source| {
+                VaultError::CaBundle {
+                    path: path.clone(),
+                    reason: source.to_string(),
+                }
+            })? {
+                builder = builder.add_root_certificate(certificate);
+            }
+        }
+        let http = builder.build()?;
 
         // The metadata services are link-local and plain HTTP by definition, and
         // reqwest honours HTTP_PROXY/HTTPS_PROXY by default — a proxy in the
@@ -319,6 +406,21 @@ impl VaultClient {
 
     pub fn default_role(&self) -> &str {
         &self.config.default_role
+    }
+
+    /// How long any single call to Vault may take.
+    ///
+    /// Exposed because the connection path has to budget for several of them.
+    pub const fn timeout(&self) -> Duration {
+        self.config.timeout
+    }
+
+    /// The lifetime asked for when signing, if the operator set one.
+    ///
+    /// Exposed because asking is not getting: what comes back is checked
+    /// against it.
+    pub const fn certificate_ttl(&self) -> Option<Duration> {
+        self.config.certificate_ttl
     }
 
     /// Signs `public_key` into a short-lived OpenSSH user certificate, returned
@@ -611,7 +713,8 @@ impl VaultClient {
         server_id: Option<&str>,
         region: Option<&str>,
     ) -> Result<Zeroizing<Vec<u8>>> {
-        let mut request = warpgate_aws::sign_sts_identity_request(region, server_id).await?;
+        let request =
+            WipedHeaders(warpgate_aws::sign_sts_identity_request(region, server_id).await?);
 
         // The headers carry the SigV4 signature and, on an instance role, the
         // session token — the one part of this request worth protecting. The URL
@@ -625,21 +728,16 @@ impl VaultClient {
         // the one call site still doing what the comment on `login_payload`
         // forbids, one function away from it.
         let mut headers = Zeroizing::new(Vec::with_capacity(LOGIN_PAYLOAD_CAPACITY));
-        serde_json::to_writer(&mut *headers, &request.headers)?;
+        serde_json::to_writer(&mut *headers, &request.0.headers)?;
         let encoded_headers = Zeroizing::new(BASE64.encode(&headers));
 
-        let payload = login_payload(&AwsLogin {
+        login_payload(&AwsLogin {
             role,
-            iam_http_request_method: request.method,
-            iam_request_url: &BASE64.encode(request.url.as_bytes()),
-            iam_request_body: &BASE64.encode(request.body.as_bytes()),
+            iam_http_request_method: request.0.method,
+            iam_request_url: &BASE64.encode(request.0.url.as_bytes()),
+            iam_request_body: &BASE64.encode(request.0.body.as_bytes()),
             iam_request_headers: &encoded_headers,
-        });
-
-        for value in request.headers.values_mut() {
-            value.zeroize();
-        }
-        payload
+        })
     }
 
     /// `read_to_string` sizes its buffer from the file's own length, so it does
@@ -652,7 +750,16 @@ impl VaultClient {
             source,
         };
 
-        let size = tokio::fs::metadata(path).await.map_err(describe)?.len();
+        // One handle, opened once, and a bound on the stream rather than on
+        // what a separate `stat` claimed.
+        //
+        // It used to call `metadata(path)` and then `read_to_string(path)`,
+        // which opens the path a second time: the file can be replaced between
+        // the two, and a FIFO reports a length of zero and then delivers as much
+        // as it likes — while the token mutex is held across login, so blocking
+        // here stalls every session at once rather than one.
+        let file = tokio::fs::File::open(path).await.map_err(describe)?;
+        let size = file.metadata().await.map_err(describe)?.len();
         if size > MAX_CREDENTIAL_FILE {
             return Err(VaultError::CredentialTooLarge {
                 path: path.to_owned(),
@@ -660,7 +767,22 @@ impl VaultClient {
             });
         }
 
-        let raw = Zeroizing::new(tokio::fs::read_to_string(path).await.map_err(describe)?);
+        // Reserved at the cap rather than at the reported size: a buffer that
+        // grows frees every smaller size unwiped, and the reported size is the
+        // number this function no longer trusts.
+        let mut raw = Zeroizing::new(String::with_capacity(MAX_CREDENTIAL_FILE as usize + 1));
+        use tokio::io::AsyncReadExt as _;
+        let read = file
+            .take(MAX_CREDENTIAL_FILE + 1)
+            .read_to_string(&mut raw)
+            .await
+            .map_err(describe)? as u64;
+        if read > MAX_CREDENTIAL_FILE {
+            return Err(VaultError::CredentialTooLarge {
+                path: path.to_owned(),
+                size: read,
+            });
+        }
         Ok(Zeroizing::new(raw.trim().to_owned()))
     }
 
@@ -803,6 +925,118 @@ mod tests {
         )
     }
 
+    /// Both ends of the range are refused where the operator can see it.
+    ///
+    /// The lower bound was checked here and the upper one was not, though the
+    /// comment beside it argues for both: a bad value surfacing as every target
+    /// failing at once, with nothing naming the config line.
+    #[tokio::test]
+    async fn a_certificate_ttl_outside_the_allowed_range_is_refused_at_construction() {
+        for (ttl, why) in [
+            (Duration::from_millis(500), "sub-second, truncates to 0s"),
+            (
+                MAX_CERTIFICATE_LIFETIME + Duration::from_secs(1),
+                "over the ceiling",
+            ),
+            (
+                Duration::from_secs(90 * 24 * 60 * 60),
+                "far over the ceiling",
+            ),
+        ] {
+            let mut config = approle_config(
+                "https://vault.invalid".to_owned(),
+                PathBuf::from("/dev/null"),
+            );
+            config.certificate_ttl = Some(ttl);
+            let error = VaultClient::new(config).err();
+            assert!(
+                matches!(error, Some(VaultError::InvalidCertificateTtl(_))),
+                "{why}: expected InvalidCertificateTtl, got {error:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_certificate_ttl_inside_the_range_is_accepted() {
+        // Unlike the refusals above, this one builds a real client.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        for ttl in [
+            Duration::from_secs(1),
+            Duration::from_secs(180),
+            MAX_CERTIFICATE_LIFETIME,
+        ] {
+            let mut config = approle_config(
+                "https://vault.invalid".to_owned(),
+                PathBuf::from("/dev/null"),
+            );
+            config.certificate_ttl = Some(ttl);
+            assert!(
+                VaultClient::new(config).is_ok(),
+                "{ttl:?} should be accepted"
+            );
+        }
+    }
+
+    /// A FIFO reports a length of zero and then delivers whatever it likes.
+    ///
+    /// The cap used to be a `stat` on the path followed by a second open, so it
+    /// bounded what the filesystem claimed rather than what arrived — and the
+    /// token mutex is held across login, so a credential path that never ends
+    /// stalls every session rather than one.
+    #[tokio::test]
+    async fn a_credential_stream_longer_than_the_cap_is_refused_whatever_stat_says() {
+        let dir = std::env::temp_dir().join(format!("wg-cred-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("oversized");
+        // A regular file larger than the cap: the reported size and the stream
+        // agree here, which is the case the old code did handle.
+        std::fs::write(&path, "x".repeat((MAX_CREDENTIAL_FILE + 1024) as usize)).unwrap();
+        assert!(
+            matches!(
+                VaultClient::read_credential(&path).await,
+                Err(VaultError::CredentialTooLarge { .. })
+            ),
+            "an oversized credential file was accepted"
+        );
+
+        // And one at the cap is still read.
+        std::fs::write(&path, "y".repeat(64)).unwrap();
+        let read = VaultClient::read_credential(&path)
+            .await
+            .expect("a normal credential");
+        assert_eq!(read.len(), 64);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The field the README calls the replay defence, defaulting to unset and
+    /// saying nothing about it.
+    #[test]
+    fn an_unbound_aws_login_is_called_out() {
+        let unbound = VaultAuth::Aws {
+            role: None,
+            server_id: None,
+            region: None,
+        };
+        let advice = aws_binding_advice(&unbound).expect("an unbound AWS login");
+        assert!(advice.contains("replayed"), "{advice}");
+
+        let bound = VaultAuth::Aws {
+            role: None,
+            server_id: Some("vault.internal".to_owned()),
+            region: None,
+        };
+        assert!(aws_binding_advice(&bound).is_none());
+
+        // Nothing to say about the methods that carry no such binding.
+        assert!(
+            aws_binding_advice(&VaultAuth::AppRole {
+                role_id: "r".to_owned(),
+                secret_id_path: PathBuf::from("/dev/null"),
+            })
+            .is_none()
+        );
+    }
+
     fn approle_config(address: String, secret_id_path: PathBuf) -> VaultConfig {
         VaultConfig {
             address,
@@ -814,6 +1048,7 @@ mod tests {
             },
             certificate_ttl: None,
             timeout: Duration::from_secs(5),
+            ca_bundle: None,
         }
     }
 

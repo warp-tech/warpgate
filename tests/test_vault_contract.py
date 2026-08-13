@@ -121,7 +121,14 @@ class TestAgainstARealIssuer:
         self, processes: ProcessManager, ctx, server, timeout
     ):
         """`allowed_users` is the coarse gate that stands even when Warpgate is
-        wrong about who may reach what. `nobody` is outside it."""
+        wrong about who may reach what. `nobody` is outside it.
+
+        Read from what the server *returned*, not from what it was asked. A
+        failed session and a recorded request are equally true when the role
+        issues the certificate happily and the target rejects an account it does
+        not have — which is the same observable, and the reason the sibling test
+        below carries the same warning.
+        """
         ssh_port = processes.start_ssh_server(trusted_ca=[server.ca_public_key])
         wait_port(ssh_port)
 
@@ -129,8 +136,15 @@ class TestAgainstARealIssuer:
         with admin_client(f"https://localhost:{wg.http_port}") as api:
             user, target = make_user_and_target(api, ssh_port, username="nobody")
 
+        signs_before = len(server.signs)
+        issued_before = len(server.issued)
+
         assert connect(processes, wg, user, target, timeout)[0] != 0
-        assert server.signs, "the request never reached the issuer"
+        assert len(server.signs) > signs_before, "the request never reached the issuer"
+        assert len(server.issued) == issued_before, (
+            "the role issued a certificate for a principal its allowed_users "
+            "does not list — the refusal under test never happened"
+        )
 
     def test_the_certificate_carries_the_principals_that_were_asked_for(
         self, processes: ProcessManager, ctx, server, timeout

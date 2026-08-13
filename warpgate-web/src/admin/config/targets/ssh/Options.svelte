@@ -199,7 +199,23 @@
             <input
                 class="form-control"
                 placeholder="Use the configured default role"
-                bind:value={options.auth.role}
+                value={options.auth.role ?? ''}
+                oninput={e => {
+                    // Emptied means "use the default", which is what the
+                    // placeholder promises. Binding directly writes back `""`,
+                    // and an empty role is not the default — `validate_segment`
+                    // rejects it, so every session to this target then fails
+                    // with "Invalid Vault role or mount configuration", which
+                    // names nothing the operator can act on.
+                    //
+                    // The same bug as the critical-option value field below,
+                    // thirty lines away, fixed in the commit that did not look
+                    // for its siblings.
+                    const typed = (e.currentTarget as HTMLInputElement).value
+                    if (options.auth.kind === 'Certificate') {
+                        options.auth.role = typed === '' ? undefined : typed
+                    }
+                }}
             >
         </FormGroup>
     {/if}
@@ -232,12 +248,25 @@
             target's sshd enforces whatever arrives, so a
             <code>force-command</code>
             decides what the session runs — pin its value wherever you can.
+            <strong>Pinning a value also makes the option mandatory:</strong>
+            a certificate that leaves it out is refused too, so removing the
+            option is not a way around the pin. Leave the value empty to permit
+            the option without requiring it.
         </small>
         {#each options.auth.allowedCriticalOptions ?? [] as option, index}
             <div class="d-flex mb-2">
+                <!--
+                    Required, because a blank name is not "no restriction": it
+                    pins the option named "", which no certificate carries, so
+                    every connection to this target is then refused with a
+                    message naming an empty string. Fails closed, but sends the
+                    operator looking for a bug instead of at their own
+                    half-filled row.
+                -->
                 <input
                     class="form-control me-2"
                     placeholder="force-command"
+                    required
                     bind:value={option.name}
                 >
                 <input

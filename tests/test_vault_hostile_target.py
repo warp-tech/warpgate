@@ -176,3 +176,87 @@ def test_a_hostile_target_never_gets_a_certificate_it_can_keep(
     assert len(stub_vault.signs) == signs_before, (
         "a certificate was issued to a target that never completed a handshake"
     )
+
+
+def test_a_jump_host_that_never_opens_the_tunnel_is_given_up_on(
+    processes, cert_wg, honest_target, stub_vault, api, timeout
+):
+    """The step that had no bound at all.
+
+    A jump host completes its own handshake and authenticates, so every deadline
+    that exists is satisfied — and then the request to open a tunnel to the next
+    hop goes unanswered. The next hop's deadline is armed inside
+    `wait_for_connection`, which does not run until that tunnel exists, so
+    nothing was watching this at all: the hold lasted until the previous hop's
+    inactivity timeout, five minutes by default.
+    """
+    from .stalling_jump_host import PASSWORD, StallingJumpHost
+    from .test_ssh_target_cert_auth import USER_PUBLIC_KEY_PATH, connect, start
+
+    jump = StallingJumpHost().start()
+    try:
+        role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+        user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+        api.create_public_key_credential(
+            user.id,
+            sdk.NewPublicKeyCredential(
+                label="Public Key",
+                openssh_public_key=USER_PUBLIC_KEY_PATH.read_text().strip(),
+            ),
+        )
+        api.add_user_role(user.id, role.id)
+
+        def make(name, port, auth, jump_host=None):
+            options = sdk.TargetOptionsTargetSSHOptions(
+                kind="Ssh",
+                host="localhost",
+                port=port,
+                username="root",
+                auth=auth,
+            )
+            if jump_host is not None:
+                options.jump_host = jump_host
+            target = api.create_target(
+                sdk.TargetDataRequest(name=name, options=sdk.TargetOptions(options))
+            )
+            api.add_target_role(target.id, role.id)
+            return target
+
+        # Password auth for the jump host: the step under test is the tunnel, and
+        # negotiating a certificate here would put paramiko's algorithm support
+        # in the middle of it.
+        stalling = make(
+            f"stalling-{uuid4()}",
+            jump.port,
+            sdk.SSHTargetAuth(
+                sdk.SSHTargetAuthSshTargetPasswordAuth(kind="Password", password=PASSWORD)
+            ),
+        )
+        behind = make(
+            f"behind-{uuid4()}",
+            honest_target,
+            sdk.SSHTargetAuth(
+                sdk.SSHTargetAuthSshTargetCertificateAuth(
+                    kind="Certificate", role=None, allowed_critical_options=[]
+                )
+            ),
+            jump_host=stalling.id,
+        )
+
+        # The bound under test is 30s, longer than the timeout the rest of this
+        # module wants, so the client is given its own.
+        started = time.time()
+        client = start(processes, cert_wg, user, behind, "-tt")
+        client.communicate(timeout=120)
+        code = client.returncode
+        elapsed = time.time() - started
+        assert jump.tunnel_requested.wait(1), "the tunnel was never requested"
+        assert code != 0, "a session completed through a jump host that never answered"
+        # The deadline is 30s. Anything near the inactivity timeout means it was
+        # not the tunnel step that gave up.
+        assert elapsed < 60, f"the jump host held the session for {elapsed:.0f}s"
+    finally:
+        jump.stop()
+
+    user, target = target_on(api, honest_target)
+    assert connect(processes, cert_wg, user, target, timeout)[0] == 0

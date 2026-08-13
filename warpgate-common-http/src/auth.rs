@@ -229,6 +229,25 @@ impl RequestAuthorization {
         }
     }
 
+    /// A name for a log that is not ours, honest for every variant.
+    ///
+    /// `username()` returns `None` for a token, and the one caller that needed
+    /// a name substituted the literal string "admin" — so a certificate minted
+    /// by an API token was recorded, in the target's own sshd log and in
+    /// Vault's issuance log, as though a person called "admin" had opened the
+    /// session. That is the attribution failure the certificate feature exists
+    /// to prevent, reintroduced by the change that was meant to fix it.
+    ///
+    /// A token is not a person and this says so.
+    pub fn attribution(&self) -> &str {
+        match self {
+            Self::Session(auth) => auth.username(),
+            Self::UserToken { username, .. } => username,
+            Self::AdminToken => "admin-token",
+            Self::ClusterToken => "cluster-token",
+        }
+    }
+
     /// Returns a user ID if present in the authorization context or nil UUID
     pub const fn user_id(&self) -> Uuid {
         match self {

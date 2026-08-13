@@ -34,13 +34,39 @@ pub enum VisualConnectionChainItem {
     Link { text: String, url: String },
 }
 
+/// Strips control characters from a string on its way to a terminal.
+///
+/// The chain is drawn from target *names*, and a name is free text an operator
+/// types into the admin UI. Written straight out, a name containing `\x1b[2J`
+/// clears the screen of every user who connects through that target, and one
+/// containing an OSC-8 sequence draws a hyperlink pointing wherever it likes —
+/// in the frame Warpgate itself is printing, which is where a user has most
+/// reason to trust what they see.
+///
+/// This is the same bug class as the certificate-derived text in the client,
+/// found by going back over the other places that write toward a PTY once the
+/// class had been named there. Lower severity: a target name needs
+/// `TargetsEdit`, so this is not a privilege boundary, and the audience is
+/// whoever connects rather than whoever configures. Same fix regardless.
+fn without_control_characters(text: &str) -> Cow<'_, str> {
+    if text.chars().any(char::is_control) {
+        Cow::Owned(text.chars().filter(|c| !c.is_control()).collect())
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 impl VisualConnectionChainItem {
     pub fn ansi(&self) -> Cow<'_, str> {
         match self {
-            Self::Text(s) => Cow::Borrowed(s),
-            Self::Link { text, url } => {
-                Cow::Owned(format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\"))
-            }
+            Self::Text(s) => without_control_characters(s),
+            // The escapes here are Warpgate's own, wrapped around text and a URL
+            // that are not.
+            Self::Link { text, url } => Cow::Owned(format!(
+                "\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\",
+                without_control_characters(url),
+                without_control_characters(text)
+            )),
         }
     }
 }
@@ -257,5 +283,40 @@ impl Drop for ServiceOutput {
     fn drop(&mut self) {
         let signal = std::mem::replace(&mut self.abort_tx, mpsc::channel(1).0);
         tokio::spawn(async move { signal.send(()).await });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VisualConnectionChainItem;
+
+    /// A target name is free text an operator types; it is drawn into the PTY of
+    /// everyone who connects through that target.
+    #[test]
+    fn a_target_name_cannot_write_escape_sequences_to_the_terminal() {
+        let hostile = VisualConnectionChainItem::Text("prod\x1b[2J\x1b[H".to_owned());
+        let rendered = hostile.ansi();
+        assert_eq!(rendered, "prod[2J[H");
+        assert!(!rendered.contains('\x1b'), "{rendered:?}");
+    }
+
+    /// Asserted as a property rather than a literal: the wrapper emits four
+    /// escapes of its own, and the data must contribute none. Writing the
+    /// expected bytes out by hand got this wrong in a way that looked like a
+    /// code bug — the surviving backslash is inert, because the `ESC` that
+    /// would have made it an OSC terminator is gone.
+    #[test]
+    fn a_link_keeps_its_own_escapes_but_not_the_data_s() {
+        let item = VisualConnectionChainItem::Link {
+            text: "Warp\x1bgate".to_owned(),
+            url: "https://example.com/\x1b]8;;evil\x1b\\".to_owned(),
+        };
+        let rendered = item.ansi();
+        assert_eq!(
+            rendered.matches('\x1b').count(),
+            4,
+            "the data contributed an escape: {rendered:?}"
+        );
+        assert!(rendered.contains("Warpgate"), "{rendered:?}");
     }
 }

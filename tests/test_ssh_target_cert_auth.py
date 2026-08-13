@@ -351,27 +351,49 @@ class TestRejections:
     def test_expired_certificate(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
     ):
+        """Warpgate refuses it before offering it, and says so.
+
+        A non-zero exit code proves nothing here: the target's own sshd refuses
+        an expired certificate whether or not Warpgate looked. Deleting the
+        expiry check would leave this test passing for the target's reasons, so
+        it asserts on the one message only that check produces.
+        """
+        offset = Path(cert_wg.log_path).stat().st_size
         stub_vault.validity = "-2h:-1h"
         user, target = make_user_and_target(api, cert_ssh_port)
         assert connect(processes, cert_wg, user, target, timeout)[0] != 0
         assert len(stub_vault.signs) == 1
+        assert "already expired" in log_since(cert_wg, offset)
 
     def test_certificate_that_is_not_yet_valid(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
     ):
-        """A target whose clock lags far enough behind Warpgate's sees this."""
+        """A target whose clock lags far enough behind Warpgate's sees this.
+
+        Warpgate has no `valid_after` check of its own — the refusal is entirely
+        the target's — so what is asserted is Warpgate's contribution: the
+        window it reports and the hint naming the clock. Without that, whoever
+        is debugging goes looking at credentials that are fine.
+        """
+        offset = Path(cert_wg.log_path).stat().st_size
         stub_vault.validity = "+1h:+2h"
         user, target = make_user_and_target(api, cert_ssh_port)
         assert connect(processes, cert_wg, user, target, timeout)[0] != 0
         assert len(stub_vault.signs) == 1
+        assert "check the target's clock" in log_since(cert_wg, offset)
 
     def test_certificate_for_a_different_principal(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
     ):
+        """The target would refuse an account it does not have, so a failed
+        connection says nothing about the principal check. This asserts the
+        refusal Warpgate itself produces, before anything is offered."""
+        offset = Path(cert_wg.log_path).stat().st_size
         stub_vault.principals = "nobody"
         user, target = make_user_and_target(api, cert_ssh_port)
         assert connect(processes, cert_wg, user, target, timeout)[0] != 0
         assert len(stub_vault.signs) == 1
+        assert "rather than only the target account" in log_since(cert_wg, offset)
 
     def test_certificate_issued_for_a_key_warpgate_does_not_hold(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
@@ -579,10 +601,21 @@ class TestIssuerFailures:
         stub_vault.sign_error_body = (marker + "x" * 64).encode() * 200_000
 
         user, target = make_user_and_target(api, cert_ssh_port)
-        code, stdout = connect(processes, cert_wg, user, target, timeout)
+        # With a PTY, or the central assertion is unfalsifiable: without a PTY
+        # channel `emit_pty_output` has nothing to write to, so *no* connection
+        # error reaches the client and "the marker is absent" holds however
+        # badly the body is handled. The sanitiser could be removed entirely and
+        # this would still pass.
+        client = start(processes, cert_wg, user, target, "-tt")
+        shown = client.communicate(timeout=timeout)[0].decode(errors="replace")
 
-        assert code != 0
-        assert marker not in stdout.decode(errors="replace")
+        assert stub_vault.signs, "the signing request was never made"
+        assert client.returncode != 0
+        # Something was shown, and it was not the issuer's own words.
+        assert "Vault" in shown or "certificate" in shown.lower(), (
+            f"no failure reached the client at all: {shown[:200]!r}"
+        )
+        assert marker not in shown
 
     def test_an_oversized_signing_response_is_not_buffered_whole(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
@@ -655,6 +688,7 @@ class TestIssuerFailures:
     ):
         """Truncating at a fixed byte count lands inside a multi-byte character
         for some bodies; slicing a Rust `String` there panics."""
+        offset = Path(cert_wg.log_path).stat().st_size
         stub_vault.sign_error_body = b"a" * 255 + "é".encode() + b"b" * 64
 
         user, target = make_user_and_target(api, cert_ssh_port)
@@ -663,8 +697,21 @@ class TestIssuerFailures:
         # never ran at all.
         assert stub_vault.signs, "no certificate was ever requested"
 
-        # The gateway has to still be there afterwards: a panic in the signing
-        # path would take the session task down and leave the next login hanging.
+        # Everything above is satisfied whether or not the truncation is safe:
+        # the stub's 500 already fails the session, and `tokio::sync::Mutex` does
+        # not poison, so the next login succeeds even if a task panicked.
+        #
+        # Measured with the guard removed: the panic takes the signing task down
+        # and the client hangs until its own timeout, so what discriminates in
+        # practice is the first `connect` never returning. This assertion is the
+        # faster and more legible signal for the case where a panic does not
+        # hang — it is not the one that fires today, and saying so is cheaper
+        # than someone later assuming it is.
+        assert "panicked at" not in log_since(cert_wg, offset), (
+            "slicing the body at a byte boundary panicked the signing task"
+        )
+
+        # The gateway has to still be there afterwards.
         stub_vault.sign_error_body = None
         assert connect(processes, cert_wg, user, target, timeout)[0] == 0
 
@@ -1325,7 +1372,7 @@ class TestAChainWithAJumpHost:
     as the target's.
     """
 
-    def _chain(self, api, jump_port, target_port):
+    def _chain(self, api, jump_port, target_port, extensions=None):
         """A target reached through a jump host, both on certificate auth."""
         wg_role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
         user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
@@ -1338,7 +1385,7 @@ class TestAChainWithAJumpHost:
         )
         api.add_user_role(user.id, wg_role.id)
 
-        def make(name, port, jump=None, host="localhost"):
+        def make(name, port, jump=None, host="localhost", extensions=None):
             options = sdk.TargetOptionsTargetSSHOptions(
                 kind="Ssh",
                 host=host,
@@ -1346,7 +1393,10 @@ class TestAChainWithAJumpHost:
                 username="root",
                 auth=sdk.SSHTargetAuth(
                     sdk.SSHTargetAuthSshTargetCertificateAuth(
-                        kind="Certificate", role=None, allowed_critical_options=[]
+                        kind="Certificate",
+                        role=None,
+                        allowed_critical_options=[],
+                        allowed_extensions=extensions or ["permit-pty"],
                     )
                 ),
             )
@@ -1358,7 +1408,16 @@ class TestAChainWithAJumpHost:
             api.add_target_role(target.id, wg_role.id)
             return target
 
-        jump = make(f"jump-{uuid4()}", jump_port)
+        # A target used as a jump host needs `permit-port-forwarding` on its own
+        # certificate: Warpgate reaches the next hop by opening a direct-tcpip
+        # channel through it, and OpenSSH judges that purely on what the
+        # certificate carries. Naming it here is the point of the allow-list —
+        # before it existed every certificate carried this silently.
+        jump = make(
+            f"jump-{uuid4()}",
+            jump_port,
+            extensions=["permit-pty", "permit-port-forwarding"],
+        )
         # Dialled from inside the jump host's container, where `localhost` is
         # the container itself.
         target = make(
@@ -1366,6 +1425,7 @@ class TestAChainWithAJumpHost:
             target_port,
             jump=jump.id,
             host="host.docker.internal",
+            extensions=extensions,
         )
         return user, jump, target
 
@@ -1378,6 +1438,7 @@ class TestAChainWithAJumpHost:
         looked at."""
         # Its own host key, or the two hops are indistinguishable to exactly the
         # thing under test.
+        stub_vault.sign_options = ["permit-port-forwarding"]
         second = processes.start_ssh_server(
             trusted_ca=[stub_vault.ca_public_key], distinct_host_key=True
         )
@@ -1409,6 +1470,7 @@ class TestAChainWithAJumpHost:
         host first — there is no tunnel otherwise — so one certificate is
         minted, for the hop that is traversed. The target itself is stopped at
         its host key, before anything is offered to it."""
+        stub_vault.sign_options = ["permit-port-forwarding"]
         second = processes.start_ssh_server(
             trusted_ca=[stub_vault.ca_public_key], distinct_host_key=True
         )
@@ -1423,13 +1485,21 @@ class TestAChainWithAJumpHost:
 
         assert len(minted) == 1, f"expected one certificate for the jump host, got {len(minted)}"
 
-        # And it has to name a person. There is no session to look up here — a
-        # button press is not a login — so the key ID used to fall back to the
-        # random UUID that stood in for one, and both the jump host's sshd log
-        # and Vault's issuance log recorded a certificate resolving to nobody.
+        # And it has to name whoever asked. There is no session to look up here
+        # — a button press is not a login — so the key ID used to fall back to
+        # the random UUID that stood in for one, and both the jump host's sshd
+        # log and Vault's issuance log recorded a certificate resolving to
+        # nobody.
+        #
+        # `admin-token`, not `admin`: this suite authenticates with an API
+        # token, which carries no username, and the first version of the fix
+        # substituted the literal string "admin" for it — recording an API call
+        # as though a person by that name had opened the session. That is the
+        # same attribution failure one layer along, so the label says what it
+        # actually was.
         key_id = minted[0]["key_id"]
-        assert key_id.startswith("warpgate:admin:"), (
-            f"the certificate names nobody: {key_id}"
+        assert key_id.startswith("warpgate:admin-token:"), (
+            f"the certificate misnames who asked: {key_id}"
         )
 
     def test_a_session_through_a_jump_host_works(
@@ -1437,10 +1507,17 @@ class TestAChainWithAJumpHost:
     ):
         """The chain still has to work, and each hop gets its own certificate
         naming its own account."""
+        # The stub signs one set of options for every request, where real Vault
+        # would use a role per target. So the leaf has to permit what the jump
+        # host needs; the two tests above are the ones that show the allow-list
+        # doing its work.
+        stub_vault.sign_options = ["permit-port-forwarding"]
         second = processes.start_ssh_server(trusted_ca=[stub_vault.ca_public_key])
         wait_port(second)
 
-        user, _, target = self._chain(api, cert_ssh_port, second)
+        user, _, target = self._chain(
+            api, cert_ssh_port, second, extensions=["permit-pty", "permit-port-forwarding"]
+        )
         assert connect(processes, cert_wg, user, target, timeout)[0] == 0
 
         assert len(stub_vault.signs) == 2, "each hop needs its own certificate"

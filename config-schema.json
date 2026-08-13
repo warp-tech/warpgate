@@ -950,6 +950,14 @@
         "auth": {
           "$ref": "#/$defs/VaultAuth"
         },
+        "ca_bundle": {
+          "description": "PEM file holding the CA that issued Vault's certificate, for a Vault\nbehind a private CA.\n\nAdded to the host's trust store rather than replacing it, so a\nmisconfigured path cannot silently turn verification off — an\nunreadable or malformed file is a startup error. There is deliberately\nno switch to skip verification: the Vault token crosses this connection\nin a header, and unlike the HTTP and Kubernetes target paths, which\noffer `verify: false` for devices whose certificates cannot be fixed,\nthere is no equivalent case here.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "certificate_ttl": {
           "description": "Lifetime asked for when signing. Vault clamps this to the role's\n`max_ttl`, so it can only shorten what the role already allows — set it\nto hold the window down without editing Vault. Left unset, the role's own\nTTL decides.",
           "type": [

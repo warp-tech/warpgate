@@ -31,8 +31,8 @@ use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
-    SSHTargetAuth, SessionId, SshCertificateCriticalOption, TargetOptions, TargetSSHOptions,
-    WarpgateError,
+    MAX_CERTIFICATE_LIFETIME, SSHTargetAuth, SessionId, SshCertificateCriticalOption,
+    TargetOptions, TargetSSHOptions, WarpgateError,
 };
 use warpgate_core::{ConfigProvider, Services};
 
@@ -58,12 +58,17 @@ enum HopRole {
     CheckedHost,
 }
 
-/// Which role a hop plays, given what was asked for and where it sits.
-const fn role(checking_host_key: bool, is_last: bool) -> HopRole {
-    match (checking_host_key, is_last) {
-        (false, _) => HopRole::Connecting,
-        (true, false) => HopRole::TraversedWhileChecking,
-        (true, true) => HopRole::CheckedHost,
+/// Which role a hop plays, given which target was asked about.
+///
+/// By identity, not by position. It used to take "is this the last hop", which
+/// is the same answer for every chain built today and a different question: the
+/// resolver knows which target was named and threw that away, leaving
+/// correctness resting on the chain always happening to terminate there.
+fn role(check_target: Option<Uuid>, hop_id: Uuid) -> HopRole {
+    match check_target {
+        None => HopRole::Connecting,
+        Some(asked_about) if asked_about == hop_id => HopRole::CheckedHost,
+        Some(_) => HopRole::TraversedWhileChecking,
     }
 }
 
@@ -77,18 +82,35 @@ impl HopRole {
     }
 }
 
-/// The longest a session certificate may be valid for.
-///
-/// Generous — a role would have to be badly misconfigured to exceed it — but
-/// the point of this feature is a credential that is worthless a few minutes
-/// after it is issued, and nothing else anywhere checks that.
-const MAX_CERTIFICATE_LIFETIME: Duration = Duration::from_secs(24 * 60 * 60);
-
 /// How long a target may take to finish the SSH handshake. Generous for any
 /// real server on any real link, and the only thing standing between a target
 /// that accepts a connection and then goes quiet and a gateway task held for as
 /// long as it likes.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long authentication may take, when nothing else decides.
+const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The worst case a certificate authentication can spend on Vault: a metadata
+/// fetch, a login and a sign, plus — on a `403` — one re-login and a second
+/// sign.
+const VAULT_CALLS_PER_AUTHENTICATION: u32 = 5;
+
+/// How long authentication may take, as distinct from the transport handshake.
+///
+/// The two shared `HANDSHAKE_TIMEOUT` until now: different phases, different
+/// causes, one constant by accident. A certificate target's authentication is
+/// dominated by the issuer, and five calls at the default 10s `vault.timeout`
+/// is fifty seconds against a thirty-second bound — so a Vault that was slow
+/// but working produced a timeout naming the target, which is not the party
+/// that was slow.
+fn authentication_budget(auth: &SSHTargetAuth, vault_timeout: Option<Duration>) -> Duration {
+    match (auth, vault_timeout) {
+        (SSHTargetAuth::Certificate(_), Some(per_call)) => AUTHENTICATION_TIMEOUT
+            .max(per_call * VAULT_CALLS_PER_AUTHENTICATION + Duration::from_secs(5)),
+        _ => AUTHENTICATION_TIMEOUT,
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -151,6 +173,25 @@ pub enum ConnectionError {
     #[error("A jump host on the way to this target has an untrusted host key")]
     UntrustedJumpHost,
 
+    /// Authentication did not finish in time.
+    ///
+    /// Its own variant rather than `HandshakeTimeout`, and its own budget:
+    /// for a certificate target this phase is dominated by the issuer, not by
+    /// the target, and naming the target sends whoever is debugging to the
+    /// wrong logs.
+    #[error("Authentication to the SSH target did not complete in time")]
+    AuthenticationTimeout,
+
+    /// A jump host connected, authenticated, and then did not answer the
+    /// request to open a tunnel to the next hop.
+    ///
+    /// Its own variant rather than `HandshakeTimeout`, which names the target —
+    /// and the target is not the party that went quiet here. Sending an
+    /// operator to the wrong machine's logs is the mistake `CertificateRefused`
+    /// was added to stop.
+    #[error("A jump host did not open the tunnel to the next hop in time")]
+    TunnelOpenTimeout { host: String },
+
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
 }
@@ -179,10 +220,24 @@ impl ConnectionError {
                 "A jump host on the way to this target has an untrusted host key; check that host first"
                     .to_string()
             }
+            ConnectionError::AuthenticationTimeout => {
+                "Authentication did not complete in time — the target or, for a certificate target, the issuer"
+                    .to_string()
+            }
+            ConnectionError::TunnelOpenTimeout { host } => {
+                format!("The jump host {host} did not open the tunnel to the next hop in time")
+            }
             ConnectionError::Io(_) | ConnectionError::Key(_) | ConnectionError::Ssh(_) => {
                 "SSH protocol error".to_string()
             }
-            ConnectionError::Warpgate(e) => e.to_string(),
+            // Not `to_string()`. This is the sanitiser, and that arm passed
+            // `WarpgateError`'s `Display` through verbatim to a PTY and a
+            // browser — reachable from inside `authenticate_session`, where a
+            // database failure renders as `database error: {DbErr}` carrying SQL
+            // text, and an encryption-key mismatch names the configured key
+            // fingerprints. The one arm of the function that did not do the job
+            // the function exists for.
+            ConnectionError::Warpgate(_) => "Internal connection error".to_string(),
         }
     }
 }
@@ -197,12 +252,37 @@ impl ConnectionError {
 /// on it: the target's own log then attributes the attacker's command to them.
 /// Writing a role is a lower bar than signing with it, so this is the only place
 /// the check can land.
+/// How much longer than the requested TTL a certificate may be valid for
+/// before it is refused.
+///
+/// The window is measured from now, and the certificate was signed a moment
+/// earlier, so an honest issuer always comes back at or under what was asked
+/// for. The slack is for the clocks disagreeing, not for the issuer being
+/// generous.
+const CERTIFICATE_TTL_SLACK: Duration = Duration::from_secs(60);
+
+/// A username as it may appear in a key ID field.
+///
+/// The key ID is `warpgate:<username>:<session>`, three fields split on a
+/// colon, and the target's own sshd log carries it verbatim — a name with a
+/// colon in it shifts every field, so whatever reads that log names the wrong
+/// person. The admin API refuses one now; a name arriving from an IdP never
+/// passes through the admin API, so the structure is held here too.
+///
+/// Substituted rather than refused: a name from a directory is not something
+/// the connecting user can fix mid-session.
+fn key_id_field(username: &str) -> String {
+    username.replace(':', "_")
+}
+
 fn certificate_mismatch(
     certificate: &Certificate,
     key: &PublicKey,
     principal: &str,
     key_id: &str,
     allowed_options: &[SshCertificateCriticalOption],
+    allowed_extensions: &[String],
+    requested_ttl: Option<Duration>,
 ) -> Option<String> {
     // The target's sshd logs this verbatim, and a session being attributable to
     // a person from the target side alone is the whole claim this feature
@@ -241,22 +321,32 @@ fn certificate_mismatch(
     // to be worth stealing. Nothing checked it, so a role with a `max_ttl` of
     // years — or one quietly edited to have one — produced a certificate good
     // for years, and every layer downstream accepted it.
-    // All three ways this can be wrong, because the first version handled only
-    // the middle one and skipped the other two silently.
+    // Every way this can be wrong, because the first version handled only the
+    // ordinary one and let the other three past.
     //
-    // `valid_before_time()` returns `None` when the value overflows `i64` —
-    // which `ssh-key` documents as "effectively never-expiring", and which is
-    // exactly what `ssh-keygen -V always:forever` and a Vault role with no TTL
-    // both produce. Reading that as "nothing to check" let the one input an
-    // adversary would reach for first walk straight past the bound.
+    // `u64::MAX` is OpenSSH's "never expires" sentinel (PROTOCOL.certkeys), and
+    // it is what `ssh-keygen -V always:forever` and a Vault role with no TTL
+    // both write. It is checked on the raw field rather than through
+    // `valid_before_time()`, which reports the sentinel as a real instant
+    // capped at `i64::MAX` — refused either way, but as "valid for
+    // 2562047787518949 hours", which names the wrong problem.
+    //
+    // `valid_before_time()` returns `None` only for a value above `i64::MAX`
+    // that is *not* the sentinel. No tool produces one; an issuer that wants
+    // this certificate not to expire can write one by hand.
+    if certificate.valid_before() == u64::MAX {
+        return Some(
+            "Vault issued a certificate that never expires, which is not a session credential"
+                .to_owned(),
+        );
+    }
     match certificate
         .valid_before_time()
         .map(|at| at.duration_since(std::time::SystemTime::now()))
     {
         None => {
             return Some(
-                "Vault issued a certificate that never expires, which is not a session credential"
-                    .to_owned(),
+                "Vault issued a certificate with an unrepresentable expiry time".to_owned(),
             );
         }
         Some(Err(_)) => {
@@ -271,22 +361,67 @@ fn certificate_mismatch(
                 lifetime.as_secs() / 3600
             ));
         }
+        // The ceiling is a backstop against a misconfigured role. This is the
+        // operator's own number, and it was sent and then never looked at
+        // again: a target configured for ninety seconds accepted a certificate
+        // good for twenty-three hours, because that is still under the ceiling.
+        // Asking is not getting, and every other field Vault returns is checked
+        // against what was asked for.
+        Some(Ok(lifetime))
+            if requested_ttl.is_some_and(|ttl| lifetime > ttl + CERTIFICATE_TTL_SLACK) =>
+        {
+            return Some(format!(
+                "Vault issued a certificate valid for {}s, longer than the {}s this target asked for",
+                lifetime.as_secs(),
+                requested_ttl.map_or(0, |ttl| ttl.as_secs())
+            ));
+        }
         Some(Ok(_)) => {}
     }
 
-    // Both directions, and the second one is the one that was missing.
+    // Both directions, and pinning a value is what decides which.
     //
-    // The allow-list was built against someone with write access to a Vault
-    // role but no right to sign with it: they add an option nobody asked for.
-    // Approached from the other side, they *remove* one — and a target whose
-    // whole point is a pinned `force-command` would then accept a certificate
-    // carrying none at all, which is a full shell rather than the one command.
-    // Checking only what arrived can never see that.
+    // The list is an allow-list: an option that is not on it is refused. That
+    // was built against someone with write access to a Vault role but no right
+    // to sign with it, adding an option nobody asked for. Approached from the
+    // other side they *remove* one instead — a target whose whole point is a
+    // pinned `force-command` accepting a certificate carrying none at all is a
+    // full shell rather than the one command, and checking only what arrived
+    // can never see that.
+    //
+    // So a pinned entry is also mandatory. Pinning a value is the act of saying
+    // what the option must be, which is not something a certificate can satisfy
+    // by leaving it out. A bare name only permits: it is how a role that
+    // *sometimes* sets an option is expressed, which an all-mandatory list
+    // could not express at all — list the option and certificates without it
+    // fail, omit it and certificates with it fail.
     for expected in allowed_options {
-        if !certificate.critical_options().contains_key(&expected.name) {
+        if expected.value.is_some() && !certificate.critical_options().contains_key(&expected.name)
+        {
             return Some(format!(
-                "Vault issued a certificate without the critical option {:?} this target requires",
+                "Vault issued a certificate without the critical option {:?}, which this target pins to a specific value",
                 expected.name
+            ));
+        }
+    }
+
+    // Extensions, which until now were logged and nothing else.
+    //
+    // The argument for checking critical options — writing a Vault role is a
+    // lower bar than signing with it, so this is the only place it can be
+    // caught — applies to extensions unchanged. They are a separate
+    // authorization mechanism, and the one that decides whether a session can
+    // forward ports or reach the connecting user's agent. A `force-command`
+    // covers the shell and exec channels; `direct-tcpip` and agent forwarding
+    // are judged by OpenSSH purely on what the certificate carries.
+    //
+    // No second direction here, unlike critical options: an extension that is
+    // absent grants nothing, so there is nothing to remove that would widen
+    // access.
+    for name in certificate.extensions().keys() {
+        if !allowed_extensions.iter().any(|allowed| allowed == name) {
+            return Some(format!(
+                "Vault issued a certificate carrying the extension {name:?}, which this target does not allow"
             ));
         }
     }
@@ -318,7 +453,15 @@ fn certificate_mismatch(
     None
 }
 
+#[derive(Clone, Debug)]
 pub struct ResolvedSshChainHost {
+    /// Which target this hop is.
+    ///
+    /// Carried past resolution because the connection code needs to know which
+    /// hop was asked about, and used to infer it from position: the last one.
+    /// That is true of every chain built today and is an assumption rather than
+    /// a fact — the identity exists here and was thrown away one line later.
+    pub id: Uuid,
     pub name: String,
     pub ssh_options: TargetSSHOptions,
 }
@@ -399,6 +542,7 @@ pub async fn resolve_ssh_chain(
         }
 
         jumps.push(ResolvedSshChainHost {
+            id: t.id,
             name: t.name.clone(),
             ssh_options: opts,
         });
@@ -478,7 +622,7 @@ pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 
 #[derive(Clone, Debug)]
 pub enum RCCommand {
-    Connect(Vec<TargetSSHOptions>),
+    Connect(Vec<ResolvedSshChainHost>),
     /// Connect only as far as the target's host key, then stop. Carries who
     /// asked, because any jump host on the way is still authenticated and the
     /// certificate that authenticates it has to name a person.
@@ -488,7 +632,12 @@ pub enum RCCommand {
     /// for a certificate target that means a real certificate issued and a real
     /// session opened for nobody. Cancelling on a dropped handle is a race the
     /// caller loses about half the time; refusing to start is not.
-    CheckHostKey(Vec<TargetSSHOptions>, String),
+    CheckHostKey {
+        chain: Vec<ResolvedSshChainHost>,
+        /// The hop the caller asked about, by identity rather than by position.
+        target_id: Uuid,
+        requested_by: String,
+    },
     Channel(Uuid, ChannelOperation),
     ForwardTCPIP(String, u32),
     CancelTCPIPForward(String, u32),
@@ -800,9 +949,13 @@ impl RemoteClient {
                     return Ok(true);
                 }
             },
-            RCCommand::CheckHostKey(options, requested_by) => {
+            RCCommand::CheckHostKey {
+                chain,
+                target_id,
+                requested_by,
+            } => {
                 self.identity_hint = Some(requested_by);
-                if let Err(e) = self.check_host_key(options).await {
+                if let Err(e) = self.check_host_key(chain, target_id).await {
                     debug!("Host key check error: {}", e);
                     let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
                 }
@@ -924,15 +1077,20 @@ impl RemoteClient {
     /// Returns `None` when it stopped at that hop's host key as asked.
     async fn connect_chain(
         &mut self,
-        chain: Vec<TargetSSHOptions>,
-        checking_host_key: bool,
+        chain: Vec<ResolvedSshChainHost>,
+        // `check_target`: the hop being asked about, when this is a host-key
+        // check, by identity. Deciding it by position asserts that the chain
+        // always ends at the target that was named — true of every chain built
+        // today, and an assumption rather than something checked.
+        check_target: Option<Uuid>,
     ) -> Result<
         Option<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>)>,
         ConnectionError,
     > {
-        let hop_count = chain.len();
         let mut iter = chain.into_iter();
-        let first = iter.next().ok_or(ConnectionError::Resolve)?;
+        let first_hop = iter.next().ok_or(ConnectionError::Resolve)?;
+        let first_id = first_hop.id;
+        let first = first_hop.ssh_options;
 
         let config = self.build_ssh_config(&first).await;
         let address_str = format!("{}:{}", first.host, first.port);
@@ -951,35 +1109,49 @@ impl RemoteClient {
         };
         let fut = russh::client::connect(config, address, handler);
         let Some((mut session, mut active_rx)) = self
-            .wait_for_connection(
-                &first,
-                fut,
-                event_rx,
-                role(checking_host_key, hop_count == 1),
-            )
+            .wait_for_connection(&first, fut, event_rx, role(check_target, first_id))
             .boxed()
             .await?
         else {
             return Ok(None);
         };
 
-        for (index, ssh_options) in iter.enumerate() {
-            let is_last = index + 2 == hop_count;
+        for hop in iter {
+            let hop_id = hop.id;
+            let ssh_options = hop.ssh_options;
             let _ = self.tx.send(RCEvent::HopConnected).await;
             info!(
                 host = %ssh_options.host,
                 port = ssh_options.port,
                 "Opening direct-tcpip channel through jump host"
             );
-            let channel = session
-                .channel_open_direct_tcpip(
+            // Bounded, because nothing else bounds it.
+            //
+            // Each hop's own handshake deadline is armed inside
+            // `wait_for_connection`, which runs *after* this — so the step that
+            // asks a jump host to open the tunnel had no limit at all. A jump
+            // host that accepts the request and never replies stalls here for as
+            // long as the previous hop's inactivity timeout allows, which is
+            // five minutes by default and hours wherever an operator has raised
+            // it. Reachable from the admin host-key check too, which adds no
+            // timeout of its own.
+            let channel = tokio::time::timeout(
+                HANDSHAKE_TIMEOUT,
+                session.channel_open_direct_tcpip(
                     ssh_options.host.clone(),
                     u32::from(ssh_options.port),
                     "localhost".to_string(),
                     0,
-                )
-                .await
-                .map_err(ConnectionError::Ssh)?;
+                ),
+            )
+            .await
+            .map_err(|_| {
+                error!(host = %ssh_options.host, "Jump host did not open the tunnel in time");
+                ConnectionError::TunnelOpenTimeout {
+                    host: ssh_options.host.clone(),
+                }
+            })?
+            .map_err(ConnectionError::Ssh)?;
             let stream = channel.into_stream();
             let config = self.build_ssh_config(&ssh_options).await;
             let (event_tx, event_rx) = unbounded_channel();
@@ -991,12 +1163,7 @@ impl RemoteClient {
             };
             let fut = russh::client::connect_stream(config, stream, handler);
             let Some((new_session, new_rx)) = self
-                .wait_for_connection(
-                    &ssh_options,
-                    fut,
-                    event_rx,
-                    role(checking_host_key, is_last),
-                )
+                .wait_for_connection(&ssh_options, fut, event_rx, role(check_target, hop_id))
                 .boxed()
                 .await?
             else {
@@ -1013,9 +1180,10 @@ impl RemoteClient {
     /// check. Nothing is authenticated, so nothing is issued.
     async fn check_host_key(
         &mut self,
-        chain: Vec<TargetSSHOptions>,
+        chain: Vec<ResolvedSshChainHost>,
+        target_id: Uuid,
     ) -> Result<(), ConnectionError> {
-        if let Some((session, _)) = self.connect_chain(chain, true).boxed().await? {
+        if let Some((session, _)) = self.connect_chain(chain, Some(target_id)).boxed().await? {
             // Only reachable if the connection came up without the handler ever
             // reporting a host key, which should not happen — but an open
             // session left behind would be exactly the leak this command exists
@@ -1027,8 +1195,8 @@ impl RemoteClient {
         Ok(())
     }
 
-    async fn connect(&mut self, chain: Vec<TargetSSHOptions>) -> Result<(), ConnectionError> {
-        let Some((session, mut event_rx)) = self.connect_chain(chain, false).boxed().await? else {
+    async fn connect(&mut self, chain: Vec<ResolvedSshChainHost>) -> Result<(), ConnectionError> {
+        let Some((session, mut event_rx)) = self.connect_chain(chain, None).boxed().await? else {
             return Err(ConnectionError::Internal);
         };
 
@@ -1103,6 +1271,32 @@ impl RemoteClient {
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
                             if hop.reports_host_key() {
+                                // The deadline stops here, because from here the
+                                // wait is a person's, not the target's.
+                                //
+                                // `Prompt` is the default verification mode, so
+                                // on a stock install the first connection to any
+                                // target — and any target that has rotated its
+                                // key — reaches this line. Leaving the deadline
+                                // armed gave whoever is comparing a base64
+                                // fingerprint under thirty seconds to do it, and
+                                // then failed the connection with "the target
+                                // never completed the handshake", naming the
+                                // target for a delay that was the user's.
+                                //
+                                // It also could not converge: `known_hosts.trust()`
+                                // runs in `check_server_key` *after* the reply,
+                                // so a fired deadline drops the connection future,
+                                // the reply channel dies, and the key is never
+                                // stored — the next attempt asks again.
+                                //
+                                // Disarmed rather than extended. What this bound
+                                // exists to catch is a target that takes the
+                                // connection and then says nothing; one that has
+                                // sent its host key has already answered that.
+                                handshake_deadline.as_mut().reset(
+                                    tokio::time::Instant::now() + Duration::from_secs(365 * 24 * 60 * 60),
+                                );
                                 self.tx.send(RCEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;
                             } else {
                                 // Nobody is listening for an answer on this hop,
@@ -1157,13 +1351,52 @@ impl RemoteClient {
                         }
                     };
 
-                    self.authenticate_session(
-                        &mut session,
-                        &ssh_options.host,
-                        &ssh_options.username,
+                    // Under the same deadline.
+                    //
+                    // `tokio::select!` stops polling its other branches once it
+                    // commits to one, so awaiting authentication inside this arm
+                    // put it outside the deadline entirely — and authentication
+                    // is where the Vault round trip happens and where a
+                    // certificate is minted. A target that finished the
+                    // transport handshake and then never answered
+                    // `SSH_MSG_USERAUTH_REQUEST` held the task, the session slot,
+                    // the ephemeral key and a live certificate until russh's
+                    // inactivity timeout — five minutes by default and hours
+                    // wherever an operator has raised it for interactive use.
+                    // That is the exact hold this deadline was added to bound,
+                    // one stage further along than the stage it was bounding.
+                    //
+                    // Abort is not polled across this window: `abort_rx` needs
+                    // `&mut self` and `authenticate_session` takes `&self`. It
+                    // was not polled here before either, and the window it
+                    // covers is now bounded, so the cost is up to
+                    // `HANDSHAKE_TIMEOUT` of delay in tearing down a connection
+                    // whose owner has already gone.
+                    // Its own budget, not the transport handshake's.
+                    let budget = authentication_budget(
                         &ssh_options.auth,
-                        ssh_options.allow_insecure_algos.unwrap_or(false)
-                    ).await?;
+                        self.services.vault.get().map(|v| v.timeout()),
+                    );
+                    let authentication_deadline = tokio::time::sleep(budget);
+                    pin_mut!(authentication_deadline);
+
+                    tokio::select! {
+                        () = &mut authentication_deadline => {
+                            error!(
+                                host = %ssh_options.host,
+                                budget = ?budget,
+                                "Authentication did not finish in time"
+                            );
+                            return Err(ConnectionError::AuthenticationTimeout);
+                        }
+                        result = self.authenticate_session(
+                            &mut session,
+                            &ssh_options.host,
+                            &ssh_options.username,
+                            &ssh_options.auth,
+                            ssh_options.allow_insecure_algos.unwrap_or(false)
+                        ) => result?,
+                    }
 
                     return Ok(Some((session, event_rx)));
                 }
@@ -1194,7 +1427,10 @@ impl RemoteClient {
             None => None,
         };
 
-        username.or_else(|| self.identity_hint.clone()).map_or_else(
+        let username = username
+            .or_else(|| self.identity_hint.clone())
+            .map(|name| key_id_field(&name));
+        username.map_or_else(
             || format!("warpgate:{}", self.id),
             |username| format!("warpgate:{username}:{}", self.id),
         )
@@ -1332,6 +1568,8 @@ impl RemoteClient {
                         username,
                         &key_id,
                         &auth.allowed_critical_options,
+                        &auth.allowed_extensions,
+                        vault.certificate_ttl(),
                     ) {
                         // Surfaced to the user, not only to the log: a session
                         // that dies with "the target rejected you" sends whoever
@@ -1343,10 +1581,23 @@ impl RemoteClient {
                             .authenticate_openssh_cert(username.to_string(), key, certificate)
                             .await?;
 
-                        auth_result = self
-                            ._handle_auth_result(session, username.to_string(), response)
-                            .await
-                            .unwrap_or(false);
+                        // No `_handle_auth_result` here, deliberately.
+                        //
+                        // That helper falls through to keyboard-interactive and
+                        // answers every prompt with an empty string. On a target
+                        // whose `TrustedUserCAKeys` was never set, sshd refuses
+                        // the certificate, offers keyboard-interactive, and a
+                        // permissive PAM stack — `pam_permit`, `nullok`, the
+                        // minimal stack in a lot of appliance images — accepts
+                        // it. The session then proceeds, the log says
+                        // "Authenticated with certificate", and the target's own
+                        // sshd log carries no key ID at all: the attribution
+                        // this feature exists to produce is silently absent, and
+                        // the evidence says the opposite.
+                        //
+                        // A certificate target has one credential by design. If
+                        // it is refused, that is the answer.
+                        auth_result = matches!(response, AuthResult::Success);
 
                         if auth_result {
                             debug!(
@@ -1367,7 +1618,16 @@ impl RemoteClient {
                         }
                     }
                 } else {
-                    auth_error_msg = Some("No Vault server is configured".into());
+                    // `CertificateRefused`, not `Authentication`: nothing was
+                    // ever offered to the target, and the other variant renders
+                    // as "SSH target rejected Warpgate's authentication
+                    // request", which sends whoever is debugging this to the
+                    // target's logs to look for a refusal that is not there.
+                    // Reachable whenever a certificate target outlives the
+                    // `vault:` section, or is reached from a node that has none.
+                    return Err(ConnectionError::CertificateRefused(
+                        "no Vault server is configured on this node".to_owned(),
+                    ));
                 }
             }
             SSHTargetAuth::IamRole(_) => {
@@ -1692,5 +1952,468 @@ mod tests {
         // `a` jumps through `b`, but `b` resolves to no SSH target.
         let jumps: HashMap<Uuid, Option<Uuid>> = HashMap::from([(a, Some(b))]);
         assert!(resolve_chain_ids(a, |id| jumps.get(&id).copied()).is_err());
+    }
+
+    mod certificate_lifetime {
+        //! The validity window, at the level where every case can be reached.
+        //!
+        //! The integration test for a never-expiring certificate is skipped —
+        //! that input holds the session open for a reason not yet isolated — and
+        //! for two rounds the guard therefore had no coverage anywhere, while
+        //! the mutation matrix reported it covered because its anchor had gone
+        //! stale. Two independent instruments agreeing on an answer neither one
+        //! had measured. These do not need a session at all.
+
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        use russh::keys::ssh_key::certificate::{Builder, CertType};
+        use russh::keys::{Algorithm, PrivateKey, PublicKey};
+        use warpgate_common::helpers::rng::get_crypto_rng;
+
+        use crate::client::{MAX_CERTIFICATE_LIFETIME, certificate_mismatch};
+
+        const PRINCIPAL: &str = "root";
+        const KEY_ID: &str = "warpgate:alice:0e6d1f4c";
+
+        fn now() -> u64 {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock is before the epoch")
+                .as_secs()
+        }
+
+        /// A certificate over a freshly generated key, signed by a throwaway CA.
+        fn issued(
+            valid_after: u64,
+            valid_before: u64,
+        ) -> (russh::keys::ssh_key::Certificate, PublicKey) {
+            let ca = PrivateKey::random(&mut get_crypto_rng(), Algorithm::Ed25519)
+                .expect("generating a CA key");
+            let subject = PrivateKey::random(&mut get_crypto_rng(), Algorithm::Ed25519)
+                .expect("generating a subject key");
+            let mut builder = Builder::new_with_random_nonce(
+                &mut get_crypto_rng(),
+                subject.public_key(),
+                valid_after,
+                valid_before,
+            )
+            .expect("building the certificate");
+            builder.cert_type(CertType::User).expect("cert type");
+            builder.key_id(KEY_ID).expect("key id");
+            builder.valid_principal(PRINCIPAL).expect("principal");
+            let certificate = builder.sign(&ca).expect("signing");
+            (certificate, subject.public_key().clone())
+        }
+
+        fn verdict(valid_after: u64, valid_before: u64) -> Option<String> {
+            let (certificate, key) = issued(valid_after, valid_before);
+            certificate_mismatch(&certificate, &key, PRINCIPAL, KEY_ID, &[], &[], None)
+        }
+
+        fn verdict_against(valid_before: u64, requested: Option<Duration>) -> Option<String> {
+            let (certificate, key) = issued(now() - 60, valid_before);
+            certificate_mismatch(&certificate, &key, PRINCIPAL, KEY_ID, &[], &[], requested)
+        }
+
+        /// The operator's own number, which was sent and then never looked at.
+        /// Twenty-three hours is under the ceiling, so nothing refused it.
+        #[test]
+        fn a_certificate_longer_than_the_requested_ttl_is_refused() {
+            let reason = verdict_against(now() + 23 * 3600, Some(Duration::from_secs(90)))
+                .expect("a certificate far longer than requested");
+            assert!(
+                reason.contains("longer than the 90s this target asked for"),
+                "refused for the wrong reason: {reason}"
+            );
+        }
+
+        #[test]
+        fn a_certificate_matching_the_requested_ttl_is_accepted() {
+            assert_eq!(
+                verdict_against(now() + 180, Some(Duration::from_secs(180))),
+                None
+            );
+        }
+
+        /// Clocks disagree; the issuer being generous is a different thing.
+        #[test]
+        fn a_certificate_within_the_skew_allowance_is_accepted() {
+            assert_eq!(
+                verdict_against(now() + 180 + 30, Some(Duration::from_secs(180))),
+                None
+            );
+        }
+
+        #[test]
+        fn a_certificate_past_the_skew_allowance_is_refused() {
+            assert!(
+                verdict_against(now() + 180 + 120, Some(Duration::from_secs(180))).is_some(),
+                "two minutes over a three-minute request should be refused"
+            );
+        }
+
+        /// With no TTL configured the role's own decides, and there is nothing
+        /// to compare against — only the ceiling applies.
+        #[test]
+        fn without_a_requested_ttl_only_the_ceiling_applies() {
+            assert_eq!(verdict_against(now() + 23 * 3600, None), None);
+        }
+
+        #[test]
+        fn a_short_lived_certificate_is_accepted() {
+            assert_eq!(verdict(now() - 60, now() + 300), None);
+        }
+
+        /// `u64::MAX` is OpenSSH's "never expires" sentinel — what
+        /// `ssh-keygen -V always:forever` and a Vault role with no TTL write.
+        ///
+        /// Writing this test is what established that the comment beside the
+        /// check was wrong: it claimed the sentinel makes `valid_before_time()`
+        /// return `None`. It does not — `ssh-key` reports it as a real instant
+        /// capped at `i64::MAX`, so the certificate was refused by the
+        /// maximum-lifetime arm, under the message "valid for 2562047787518949
+        /// hours". Refused either way, but naming the wrong problem to whoever
+        /// has to act on it.
+        #[test]
+        fn a_never_expiring_certificate_is_refused() {
+            let reason = verdict(now() - 60, u64::MAX).expect("a never-expiring certificate");
+            assert!(
+                reason.contains("never expires"),
+                "refused for the wrong reason: {reason}"
+            );
+        }
+
+        /// Above `i64::MAX` but not the sentinel: no tool writes this, an
+        /// issuer that wants the certificate not to expire can. This is the
+        /// only input that actually reaches the `None` arm.
+        #[test]
+        fn an_unrepresentable_expiry_is_refused() {
+            let reason = verdict(now() - 60, u64::MAX - 1).expect("an unrepresentable expiry");
+            assert!(
+                reason.contains("unrepresentable"),
+                "refused for the wrong reason: {reason}"
+            );
+        }
+
+        #[test]
+        fn an_already_expired_certificate_is_refused() {
+            let reason = verdict(now() - 600, now() - 300).expect("an expired certificate");
+            assert!(
+                reason.contains("already expired"),
+                "refused for the wrong reason: {reason}"
+            );
+        }
+
+        #[test]
+        fn a_certificate_outliving_the_bound_is_refused() {
+            let over = MAX_CERTIFICATE_LIFETIME + Duration::from_secs(3600);
+            let reason =
+                verdict(now() - 60, now() + over.as_secs()).expect("an overlong certificate");
+            assert!(
+                reason.contains("far longer"),
+                "refused for the wrong reason: {reason}"
+            );
+        }
+
+        /// The boundary itself, so that tightening the bound cannot silently
+        /// start refusing what it is documented to allow.
+        #[test]
+        fn a_certificate_at_the_bound_is_accepted() {
+            assert_eq!(
+                verdict(now() - 60, now() + MAX_CERTIFICATE_LIFETIME.as_secs() - 60),
+                None
+            );
+        }
+    }
+
+    mod critical_options {
+        //! Pinning a value is what makes an option mandatory.
+        //!
+        //! Every case is here rather than end to end because the target's own
+        //! sshd refuses options it does not recognise, so an integration test
+        //! that watches for a failed connection cannot tell our refusal from
+        //! the target's. At this level the target is not in the picture at all.
+
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        use russh::keys::ssh_key::certificate::{Builder, CertType};
+        use russh::keys::{Algorithm, PrivateKey, PublicKey};
+        use warpgate_common::SshCertificateCriticalOption;
+        use warpgate_common::helpers::rng::get_crypto_rng;
+
+        use crate::client::certificate_mismatch;
+
+        const PRINCIPAL: &str = "root";
+        const KEY_ID: &str = "warpgate:alice:0e6d1f4c";
+
+        fn carrying(options: &[(&str, &str)]) -> (russh::keys::ssh_key::Certificate, PublicKey) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock is before the epoch")
+                .as_secs();
+            let ca = PrivateKey::random(&mut get_crypto_rng(), Algorithm::Ed25519)
+                .expect("generating a CA key");
+            let subject = PrivateKey::random(&mut get_crypto_rng(), Algorithm::Ed25519)
+                .expect("generating a subject key");
+            let mut builder = Builder::new_with_random_nonce(
+                &mut get_crypto_rng(),
+                subject.public_key(),
+                now - 60,
+                now + 300,
+            )
+            .expect("building the certificate");
+            builder.cert_type(CertType::User).expect("cert type");
+            builder.key_id(KEY_ID).expect("key id");
+            builder.valid_principal(PRINCIPAL).expect("principal");
+            for (name, value) in options {
+                builder
+                    .critical_option(*name, *value)
+                    .expect("critical option");
+            }
+            let certificate = builder.sign(&ca).expect("signing");
+            (certificate, subject.public_key().clone())
+        }
+
+        fn carrying_extensions(
+            extensions: &[(&str, &str)],
+        ) -> (russh::keys::ssh_key::Certificate, PublicKey) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock is before the epoch")
+                .as_secs();
+            let ca = PrivateKey::random(&mut get_crypto_rng(), Algorithm::Ed25519)
+                .expect("generating a CA key");
+            let subject = PrivateKey::random(&mut get_crypto_rng(), Algorithm::Ed25519)
+                .expect("generating a subject key");
+            let mut builder = Builder::new_with_random_nonce(
+                &mut get_crypto_rng(),
+                subject.public_key(),
+                now - 60,
+                now + 300,
+            )
+            .expect("building the certificate");
+            builder.cert_type(CertType::User).expect("cert type");
+            builder.key_id(KEY_ID).expect("key id");
+            builder.valid_principal(PRINCIPAL).expect("principal");
+            for (name, value) in extensions {
+                builder.extension(*name, *value).expect("extension");
+            }
+            let certificate = builder.sign(&ca).expect("signing");
+            (certificate, subject.public_key().clone())
+        }
+
+        fn pinned(name: &str, value: Option<&str>) -> SshCertificateCriticalOption {
+            SshCertificateCriticalOption {
+                name: name.to_owned(),
+                value: value.map(str::to_owned),
+            }
+        }
+
+        fn verdict(
+            carried: &[(&str, &str)],
+            configured: &[SshCertificateCriticalOption],
+        ) -> Option<String> {
+            let (certificate, key) = carrying(carried);
+            certificate_mismatch(&certificate, &key, PRINCIPAL, KEY_ID, configured, &[], None)
+        }
+
+        /// The removal attack. Someone with role-write but no right to sign does
+        /// not have to add anything — taking the pinned `force-command` out
+        /// turns a target locked to one command into a shell.
+        #[test]
+        fn a_pinned_option_missing_from_the_certificate_is_refused() {
+            let reason = verdict(&[], &[pinned("force-command", Some("/usr/bin/backup"))])
+                .expect("a certificate without the pinned option");
+            assert!(
+                reason.contains("without the critical option") && reason.contains("force-command"),
+                "refused for the wrong reason: {reason}"
+            );
+        }
+
+        #[test]
+        fn a_pinned_option_with_the_wrong_value_is_refused() {
+            let reason = verdict(
+                &[("force-command", "/bin/sh")],
+                &[pinned("force-command", Some("/usr/bin/backup"))],
+            )
+            .expect("a certificate with the wrong value");
+            assert!(
+                reason.contains("does not match the value"),
+                "refused for the wrong reason: {reason}"
+            );
+        }
+
+        #[test]
+        fn a_pinned_option_with_the_configured_value_is_accepted() {
+            assert_eq!(
+                verdict(
+                    &[("force-command", "/usr/bin/backup")],
+                    &[pinned("force-command", Some("/usr/bin/backup"))]
+                ),
+                None
+            );
+        }
+
+        /// A bare name permits without requiring — the configuration an
+        /// all-mandatory list could not express, for a role that sets an option
+        /// only sometimes.
+        #[test]
+        fn an_option_permitted_by_name_may_be_absent() {
+            assert_eq!(verdict(&[], &[pinned("source-address", None)]), None);
+        }
+
+        #[test]
+        fn an_option_permitted_by_name_accepts_any_value() {
+            assert_eq!(
+                verdict(
+                    &[("source-address", "10.0.0.0/8")],
+                    &[pinned("source-address", None)]
+                ),
+                None
+            );
+        }
+
+        /// The key ID is three colon-separated fields, so a colon in the
+        /// username shifts every one of them — and what reads that log then
+        /// names the wrong person, which is the single claim this feature
+        /// makes. The admin API refuses one now; a name from an IdP never
+        /// passes through it, so the structure is held where it is built.
+        #[test]
+        fn a_username_carrying_a_colon_cannot_shift_the_key_id_fields() {
+            // Through the shipped function, not a copy of it written here.
+            let key_id = format!(
+                "warpgate:{}:0e6d1f4c-0000-0000-0000-000000000000",
+                crate::client::key_id_field("root:admin")
+            );
+            let fields: Vec<&str> = key_id.split(':').collect();
+            assert_eq!(
+                fields.len(),
+                3,
+                "the key ID split into {} fields",
+                fields.len()
+            );
+            assert_eq!(fields[1], "root_admin");
+        }
+
+        #[test]
+        fn an_ordinary_username_is_left_alone() {
+            assert_eq!(crate::client::key_id_field("alice"), "alice");
+        }
+
+        /// The budget for authentication is not the budget for the transport
+        /// handshake, and used to be.
+        ///
+        /// Five calls at the default 10s `vault.timeout` is fifty seconds
+        /// against a thirty-second bound, so a Vault that was slow but working
+        /// timed out and the message named the target.
+        #[test]
+        fn a_certificate_target_gets_a_budget_that_fits_its_vault_calls() {
+            use std::time::Duration;
+
+            use warpgate_common::{SSHTargetAuth, SshTargetCertificateAuth, SshTargetPasswordAuth};
+
+            use crate::client::{AUTHENTICATION_TIMEOUT, authentication_budget};
+
+            let certificate = SSHTargetAuth::Certificate(SshTargetCertificateAuth::default());
+
+            // The default: five 10s calls do not fit in 30s, so the budget grows.
+            let budget = authentication_budget(&certificate, Some(Duration::from_secs(10)));
+            assert!(
+                budget >= Duration::from_secs(50),
+                "five 10s calls do not fit in {budget:?}"
+            );
+
+            // A fast Vault does not shrink it below the floor.
+            assert_eq!(
+                authentication_budget(&certificate, Some(Duration::from_secs(1))),
+                AUTHENTICATION_TIMEOUT
+            );
+
+            // Nothing to budget for when the target does not use an issuer.
+            let password = SSHTargetAuth::Password(SshTargetPasswordAuth {
+                password: String::new().into(),
+            });
+            assert_eq!(
+                authentication_budget(&password, Some(Duration::from_secs(10))),
+                AUTHENTICATION_TIMEOUT
+            );
+            assert_eq!(
+                authentication_budget(&certificate, None),
+                AUTHENTICATION_TIMEOUT
+            );
+        }
+
+        /// Extensions decide what a session can *do*, and were logged and
+        /// nothing else. `force-command` governs the shell and exec channels;
+        /// OpenSSH opens `direct-tcpip` and reaches the user's agent on the
+        /// strength of the certificate alone.
+        #[test]
+        fn an_extension_the_target_did_not_name_is_refused() {
+            let (certificate, key) = carrying_extensions(&[("permit-port-forwarding", "")]);
+            let reason = certificate_mismatch(
+                &certificate,
+                &key,
+                PRINCIPAL,
+                KEY_ID,
+                &[],
+                &["permit-pty".to_owned()],
+                None,
+            )
+            .expect("an unexpected extension");
+            assert!(
+                reason.contains("permit-port-forwarding") && reason.contains("does not allow"),
+                "refused for the wrong reason: {reason}"
+            );
+        }
+
+        #[test]
+        fn a_named_extension_is_accepted() {
+            let (certificate, key) = carrying_extensions(&[("permit-pty", "")]);
+            assert_eq!(
+                certificate_mismatch(
+                    &certificate,
+                    &key,
+                    PRINCIPAL,
+                    KEY_ID,
+                    &[],
+                    &["permit-pty".to_owned()],
+                    None,
+                ),
+                None
+            );
+        }
+
+        /// An absent extension grants nothing, so unlike a pinned critical
+        /// option there is nothing to remove that would widen access.
+        #[test]
+        fn a_named_extension_may_be_absent() {
+            let (certificate, key) = carrying_extensions(&[]);
+            assert_eq!(
+                certificate_mismatch(
+                    &certificate,
+                    &key,
+                    PRINCIPAL,
+                    KEY_ID,
+                    &[],
+                    &[
+                        "permit-pty".to_owned(),
+                        "permit-agent-forwarding".to_owned()
+                    ],
+                    None,
+                ),
+                None
+            );
+        }
+
+        /// The other direction, unchanged: nothing unlisted gets through.
+        #[test]
+        fn an_option_the_target_did_not_name_is_refused() {
+            let reason = verdict(&[("force-command", "/bin/sh")], &[])
+                .expect("an unexpected critical option");
+            assert!(
+                reason.contains("does not allow"),
+                "refused for the wrong reason: {reason}"
+            );
+        }
     }
 }

@@ -389,7 +389,17 @@ class StubVault:
             # ssh-keygen decides itself which of `sign_options` are critical
             # options and which are extensions, exactly as a Vault role's
             # default_critical_options and default_extensions end up doing.
-            options = [arg for option in self.sign_options for arg in ("-O", option)]
+            #
+            # `clear` first, then only what the test asked for. Left to itself
+            # ssh-keygen grants all five standard extensions — including
+            # permit-port-forwarding and permit-agent-forwarding — which no
+            # sensible Vault role does: the usual `default_extensions` is
+            # `{"permit-pty": ""}`. The stub was quietly issuing more privilege
+            # than the thing it stands in for, so a target with the default
+            # extension allow-list would have refused every certificate in this
+            # suite, and any test about forwarding would have been meaningless.
+            options = ["-O", "clear", "-O", "permit-pty"]
+            options += [arg for option in self.sign_options for arg in ("-O", option)]
             subprocess.run(
                 [
                     "ssh-keygen", "-q",

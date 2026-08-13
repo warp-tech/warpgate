@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.0-beta.1-2-gdd0617267-modified"
+    "version": "v0.28.0-beta.1-24-g082698860-modified"
   },
   "servers": [
     {
@@ -6620,10 +6620,20 @@
           },
           "allowed_critical_options": {
             "type": "array",
-            "description": "Critical options this target's certificates are expected to carry.\nAnything not listed here is refused, because the target's sshd enforces\nwhatever arrives: a `force-command` decides what the session runs, under\nthe connecting user's own principal and key ID.",
+            "description": "Critical options this target's certificates may carry.\n\nAnything not listed here is refused, because the target's sshd enforces\nwhatever arrives: a `force-command` decides what the session runs, under\nthe connecting user's own principal and key ID.\n\nPinning a `value` also makes the option **mandatory** — a certificate\nwithout it is refused. Otherwise someone who can write the Vault role\nbut not sign with it removes the pinned `force-command` instead of\nadding an option, and a target locked to one command hands out a shell.\nA bare name only permits, which is how a role that sometimes sets an\noption is expressed.",
             "default": [],
             "items": {
               "$ref": "#/components/schemas/SshCertificateCriticalOption"
+            }
+          },
+          "allowed_extensions": {
+            "type": "array",
+            "description": "Certificate extensions this target's certificates may carry.\n\nA separate authorization mechanism from critical options, and the one\nthat decides what a session can *do* rather than what it runs. OpenSSH\nopens `direct-tcpip` only for `permit-port-forwarding` and reaches the\nconnecting user's own SSH agent only for `permit-agent-forwarding`, both\njudged purely on what the certificate carries. So a pinned\n`force-command` does not confine a session on its own: it governs the\nshell and exec channels and nothing else.\n\nDefaults to `permit-pty` alone — enough for an interactive session and\nnothing more. Anything else has to be named here, because the alternative\nis that a Vault role's `default_extensions`, set deliberately or written\nby someone with role-write and no signing right, silently grants\nforwarding on a target that was supposed to be locked down.",
+            "default": [
+              "permit-pty"
+            ],
+            "items": {
+              "type": "string"
             }
           }
         }

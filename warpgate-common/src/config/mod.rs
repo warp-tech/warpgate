@@ -475,6 +475,18 @@ impl VaultAuth {
     }
 }
 
+/// The longest a session certificate may be valid for.
+///
+/// Generous — a role would have to be badly misconfigured to exceed it — but the
+/// point of this feature is a credential that is worthless a few minutes after
+/// it is issued, and nothing else anywhere checks that.
+///
+/// Here rather than beside either user, because it is checked at both ends and
+/// they are in different crates: `certificate_ttl` is refused against it when
+/// the config loads, and a certificate that comes back exceeding it is refused
+/// when it arrives. Two copies of one number is how they drift apart.
+pub const MAX_CERTIFICATE_LIFETIME: Duration = Duration::from_secs(24 * 60 * 60);
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, JsonSchema)]
 pub struct VaultConfig {
     /// Base URL of the Vault server, e.g. `https://vault.internal:8200`.
@@ -500,6 +512,19 @@ pub struct VaultConfig {
     #[serde(default = "_default_vault_timeout", with = "humantime_serde")]
     #[schemars(with = "String")]
     pub timeout: Duration,
+
+    /// PEM file holding the CA that issued Vault's certificate, for a Vault
+    /// behind a private CA.
+    ///
+    /// Added to the host's trust store rather than replacing it, so a
+    /// misconfigured path cannot silently turn verification off — an
+    /// unreadable or malformed file is a startup error. There is deliberately
+    /// no switch to skip verification: the Vault token crosses this connection
+    /// in a header, and unlike the HTTP and Kubernetes target paths, which
+    /// offer `verify: false` for devices whose certificates cannot be fixed,
+    /// there is no equivalent case here.
+    #[serde(default)]
+    pub ca_bundle: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]

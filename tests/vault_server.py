@@ -319,8 +319,20 @@ class RealVault:
 
     @property
     def issued(self) -> list[dict]:
-        """The certificates the server actually handed back."""
-        return self._responses_from(f"{MOUNT}/sign/")
+        """The certificates the server actually handed back.
+
+        Only the ones carrying a `signed_key`. The audit device records a
+        response for a refusal too, so counting every response answered "did the
+        server reply", not "did it issue" — and a test asserting that a role
+        refuses a principal outside its `allowed_users` passed on the refusal
+        being recorded, which is the same shape as the request-versus-response
+        confusion this property was added to fix.
+        """
+        return [
+            data
+            for data in self._responses_from(f"{MOUNT}/sign/")
+            if data.get("signed_key")
+        ]
 
     @property
     def logins(self) -> list[dict]:

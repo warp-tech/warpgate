@@ -57,6 +57,9 @@ pub enum VaultError {
     #[error("certificate_ttl of {0:?} is less than a second, which no issuer accepts")]
     InvalidCertificateTtl(std::time::Duration),
 
+    #[error("cannot use the CA bundle at {path}: {reason}")]
+    CaBundle { path: PathBuf, reason: String },
+
     #[error(
         "cannot unwrap the AppRole secret ID at {path}: {source}. A wrapping token is single-use — whatever provisions this file has to write a fresh one, e.g. `vault write -f -wrap-ttl=<ttl> auth/approle/role/<role>/secret-id`"
     )]
@@ -72,9 +75,9 @@ impl VaultError {
             VaultError::InsecureAddress | VaultError::InvalidAddress(_) => {
                 "Vault endpoint configuration is invalid"
             }
-            VaultError::InvalidRole(_) | VaultError::InvalidCertificateTtl(_) => {
-                "Invalid Vault role or mount configuration"
-            }
+            VaultError::InvalidRole(_)
+            | VaultError::InvalidCertificateTtl(_)
+            | VaultError::CaBundle { .. } => "Invalid Vault role or mount configuration",
             VaultError::InvalidPrincipal(_) | VaultError::InvalidKeyId => {
                 "Invalid certificate request parameters"
             }

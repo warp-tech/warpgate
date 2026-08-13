@@ -42,11 +42,8 @@ impl Api {
     ) -> Result<CheckSshHostKeyResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsEdit)?;
 
-        let ssh_chain = resolve_ssh_chain(admin.services(), body.target_id, admin.auth.username())
-            .await?
-            .into_iter()
-            .map(|x| x.ssh_options)
-            .collect::<Vec<_>>();
+        let ssh_chain =
+            resolve_ssh_chain(admin.services(), body.target_id, admin.auth.username()).await?;
 
         let mut handles = RemoteClient::create(Uuid::new_v4(), admin.services().clone())?;
         // Not `Connect`: that would carry on into authenticating to the target
@@ -54,14 +51,13 @@ impl Api {
         // to — and, for a certificate target, minting a real certificate to do
         // it with.
         let _ = handles.command_tx.send((
-            RCCommand::CheckHostKey(
-                ssh_chain,
-                admin
-                    .auth
-                    .username()
-                    .cloned()
-                    .unwrap_or_else(|| "admin".to_owned()),
-            ),
+            RCCommand::CheckHostKey {
+                chain: ssh_chain,
+                // By identity. Which hop answers is decided by which target was
+                // asked about, not by which happens to be last.
+                target_id: body.target_id,
+                requested_by: admin.auth.attribution().to_owned(),
+            },
             None,
         ));
 

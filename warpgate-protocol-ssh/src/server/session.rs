@@ -501,10 +501,8 @@ impl ServerSession {
 
         let visual_chain = self.make_visual_connection_chain(&ssh_chain[..]).await?;
         self.rc_state = RCState::Connecting;
-        self.send_command(RCCommand::Connect(
-            ssh_chain.into_iter().map(|x| x.ssh_options).collect(),
-        ))
-        .map_err(|_| anyhow::anyhow!("cannot send command"))?;
+        self.send_command(RCCommand::Connect(ssh_chain))
+            .map_err(|_| anyhow::anyhow!("cannot send command"))?;
         self.emit_pty_output(b"\r\n").await?;
         self.service_output.start_progress(visual_chain).await;
         Ok(())

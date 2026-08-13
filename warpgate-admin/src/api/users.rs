@@ -17,6 +17,17 @@ use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserR
 use super::AdminContext;
 use crate::api::common::case_insensitive_search;
 
+/// A username may not contain `:`.
+///
+/// It is echoed into the certificate key ID as `warpgate:<username>:<session>`,
+/// which the target's own sshd log carries and which anything reading that log
+/// splits on the colon. A name with one in it silently shifts every field, so
+/// the person a session is attributed to is not the person who opened it —
+/// which is the single claim the certificate feature makes.
+fn username_is_well_formed(username: &str) -> bool {
+    !username.is_empty() && !username.contains(':')
+}
+
 #[derive(Object)]
 struct CreateUserRequest {
     username: String,
@@ -84,7 +95,7 @@ impl ListApi {
     ) -> Result<CreateUserResponse, WarpgateError> {
         admin.require(AdminPermission::UsersCreate)?;
 
-        if body.username.is_empty() {
+        if !username_is_well_formed(&body.username) {
             return Ok(CreateUserResponse::BadRequest(Json("name".into())));
         }
 
@@ -240,7 +251,7 @@ impl DetailApi {
             return Ok(UpdateUserResponse::NotFound);
         };
 
-        if body.username.is_empty() {
+        if !username_is_well_formed(&body.username) {
             return Ok(UpdateUserResponse::BadRequest(Json("username".into())));
         }
 

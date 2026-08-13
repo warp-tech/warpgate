@@ -123,11 +123,7 @@ impl WebSshClientManager {
 
         self.insert(session.clone()).await;
 
-        let ssh_chain = resolve_ssh_chain(services, target.id, Some(&username))
-            .await?
-            .into_iter()
-            .map(|x| x.ssh_options)
-            .collect::<Vec<_>>();
+        let ssh_chain = resolve_ssh_chain(services, target.id, Some(&username)).await?;
         rc_handles
             .command_tx
             .send((RCCommand::Connect(ssh_chain), None))
