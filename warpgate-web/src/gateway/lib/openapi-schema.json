@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.0-beta.1-24-g082698860-modified"
+    "version": "v0.28.0-beta.1-17-g2e5c9d724-modified"
   },
   "servers": [
     {
