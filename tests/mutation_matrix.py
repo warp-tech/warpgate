@@ -87,8 +87,18 @@ MUTATIONS = [
         # the clock rather than to the credentials.
         "certificate: a target refusal names the validity window",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        '(the certificate was valid from {} to {}; check the target\'s clock)",',
-        '(rejected)",',
+        # Anchored on the whole call, not on the message alone. Replacing just
+        # the string dropped its `{}` while `format!` still passed
+        # `validity.0, validity.1`, so the mutation did not compile — and a
+        # mutation that does not build measures nothing, which is the rule
+        # stated at the top of this file and broken twice now (W-103, W-107).
+        # The placeholders are kept and fed empty strings instead: the window
+        # leaves the message, the code still builds.
+        '''                                "Certificate authentication was rejected by the SSH target \\
+                                 (the certificate was valid from {} to {}; check the target\'s clock)",
+                                validity.0, validity.1''',
+        '''                                "Certificate authentication was rejected by the SSH target{}{}",
+                                "", ""''',
     ),
     (
         "certificate: unexpected extensions refused",
