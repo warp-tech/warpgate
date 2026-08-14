@@ -8,7 +8,6 @@
     import Redirect from 'common/Redirect.svelte'
     import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
-    import snarkdown from 'snarkdown'
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
     import Router, {
@@ -90,10 +89,6 @@
     routes['/status/*'] = routes['/status']!
 
     const wideMode = $derived(router.location.startsWith('/log'))
-
-    const warningsHtml = $derived(
-        $serverInfo?.configWarnings?.map(x => snarkdown(x)),
-    )
 </script>
 
 <Loadable promise={initPromise}>
@@ -130,11 +125,11 @@
             </div>
         </header>
         <main>
-            {#if warningsHtml?.length}
+            {#if $serverInfo?.configWarnings?.length}
                 <Alert color="warning" fade={false}>
                     <strong>Issues found:</strong>
                     <ul class="mb-0 mt-2">
-                        {#each warningsHtml as warning (warning)}
+                        {#each $serverInfo.configWarnings as warning (warning)}
                             <li>{@html warning}</li>
                         {/each}
                     </ul>
