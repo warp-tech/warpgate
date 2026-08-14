@@ -316,3 +316,68 @@ def test_a_target_that_answers_with_a_host_key_and_then_stalls_is_given_up_on(
 
     user, target = target_on(api, honest_target)
     assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+
+
+def test_break_glass_user_creation_does_not_depend_on_vault(
+    processes: ProcessManager, ctx, stub_vault
+):
+    """A Vault outage must not lock the door it is needed to open.
+
+    `create-user` and `recover-access` build their services through
+    `Services::new_without_vault`, so a `vault:` section that cannot even be
+    constructed does not stop an operator making an account. Without that, a
+    misconfigured or unreachable Vault takes down every target *and* the command
+    for getting back in — including the one target you would fix Vault from.
+
+    The mount here contains a slash, which `validate_segment` refuses, so
+    `Services::new` fails outright before any network call. That is deliberate:
+    it fails the same way with Vault up or down, so the test needs no outage and
+    no timeout.
+
+    `recover-access` takes the same path but asserts an interactive terminal
+    first, so it cannot be driven from a harness; `create-user` is the same
+    branch and is the one pinned here.
+    """
+    import subprocess
+
+    import yaml
+
+    from .conftest import binary_path, cargo_root
+
+    wg = processes.start_wg()
+    wait_port(wg.http_port, for_process=wg.process, recv=False)
+    config = yaml.safe_load(wg.config_path.open())
+    wg.process.kill()
+    wg.process.wait()
+
+    config["vault"] = {
+        "address": stub_vault.url,
+        "default_role": "warpgate",
+        # Rejected by `validate_segment`: a mount is one path segment.
+        "mount": "ssh/../../sys",
+        "auth": {"kind": "kubernetes", "role": "warpgate", "token_path": "/dev/null"},
+    }
+    broken = wg.config_path.parent / f"break-glass-{uuid4()}.yaml"
+    with broken.open("w") as f:
+        yaml.safe_dump(config, f)
+
+    username = f"locked-out-{uuid4()}"
+    result = subprocess.run(
+        [
+            str(cargo_root / binary_path),
+            "--config",
+            str(broken),
+            "create-user",
+            username,
+            "--password",
+            "not-a-real-password",
+        ],
+        capture_output=True,
+        timeout=120,
+    )
+    output = (result.stdout + result.stderr).decode(errors="replace")
+
+    # Naming the failure, because "non-zero exit" would also pass if the binary
+    # were missing or the config unparseable — neither of which is this guard.
+    assert "invalid Vault role or mount name" not in output, output[-600:]
+    assert result.returncode == 0, output[-600:]

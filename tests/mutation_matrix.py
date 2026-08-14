@@ -385,6 +385,56 @@ DISCRIMINATES = {
     "connection: the handshake deadline resumes after a host key answer": [
         "test_a_target_that_answers_with_a_host_key_and_then_stalls_is_given_up_on"
     ],
+    # The seventeen that had no entry. Most already had a discriminating test —
+    # it had simply never been written down, which under the criterion in §8 is
+    # the same state as having none: nothing established that the test noticing
+    # was the test named after the guard.
+    "certificate: must be a user certificate": [
+        "test_a_host_certificate_is_not_offered_to_the_target"
+    ],
+    "connection: an untrusted jump host is refused, not traversed": [
+        "test_the_host_key_check_reports_the_target_and_not_the_jump_host"
+    ],
+    "connection: a host-key check stops before authenticating": [
+        "test_checking_a_host_key_issues_no_certificate"
+    ],
+    "connection: the inter-hop tunnel open is bounded": [
+        "test_a_jump_host_that_never_opens_the_tunnel_is_given_up_on"
+    ],
+    "connection: authentication has its own budget": [
+        "a_certificate_target_gets_a_budget_that_fits_its_vault_calls"
+    ],
+    "vault: principal must be one harmless entry": ["test_principal_validation"],
+    "vault: key ID must not carry control characters": ["test_key_id_validation"],
+    # Same source line as the entry above, opposite half. `test_key_id_validation`
+    # had no length case until this round, so a mutation dropping only the bound
+    # was caught by nothing while the line looked covered.
+    "vault: key ID length is bounded": ["test_key_id_validation"],
+    "vault: mount and role stay one path segment": ["test_segment_validation"],
+    "commands: break-glass does not depend on Vault": [
+        "test_break_glass_user_creation_does_not_depend_on_vault"
+    ],
+    "vault: an unbound AWS login is called out": ["an_unbound_aws_login_is_called_out"],
+    "vault: address must be HTTPS or loopback": ["test_address_validation"],
+    "vault: redirects are refused": [
+        "test_a_redirect_never_carries_the_token_to_another_host"
+    ],
+    "vault: response bodies are bounded": [
+        "test_an_oversized_success_body_is_refused_rather_than_buffered"
+    ],
+    "vault: absurd lease refused rather than panicking": [
+        "test_an_absurd_lease_is_refused_rather_than_panicking"
+    ],
+    # Registered with a caveat recorded rather than hidden: the review of round I
+    # observed that this test writes an ordinary oversized file rather than a
+    # source that lies about its size, so it cannot separate the stream bound
+    # from the `stat` bound. It does discriminate the line the guard names.
+    "vault: the credential stream itself is bounded": [
+        "a_credential_stream_longer_than_the_cap_is_refused_whatever_stat_says"
+    ],
+    "vault: wrapping token redeemed once": [
+        "test_a_wrapping_token_is_redeemed_once_and_the_secret_id_reused"
+    ],
     "users: a username cannot contain the key ID separator": [
         "a_username_with_a_colon_would_shift_every_field_of_the_key_id"
     ],
@@ -470,6 +520,136 @@ def run(command, **kwargs):
     return subprocess.run(command, cwd=REPO, capture_output=True, text=True, **kwargs)
 
 
+def run_named_only(tests: list[str]) -> tuple[set[str], set[str]]:
+    """Run only the given tests. Returns (passed, failed), by name.
+
+    The whole suite is not run. That is the point: `run_one` runs everything
+    because it asks "which tests notice", and the answer to that question is
+    worth an hour only while the guard has no named discriminator. Once it has
+    one, the question in §8 is narrower — does *this* test notice — and one test
+    answers it.
+
+    It is also the way past W-25b. Two full runs ended on the canary with five
+    unrelated failures that passed again in isolation, so the suite is not
+    stable under the load a full sweep creates. Running one test creates no such
+    load, and the A/B below is decisive on its own: the named test must pass
+    before the mutation and fail after it. A test that was already failing
+    cannot be mistaken for a guard being caught, because the "before" half
+    catches that first.
+    """
+    passed: set[str] = set()
+    failed: set[str] = set()
+
+    rust = [t for t in tests if not t.startswith("test_") or _is_rust(t)]
+    python = [t for t in tests if t not in rust]
+
+    for crate in RUST_CRATES:
+        wanted = [t for t in rust if t in _crate_tests(crate)]
+        if not wanted:
+            continue
+        for name in wanted:
+            result = run(["cargo", "test", "-p", crate, "--", "--exact", *_paths(crate, name)])
+            (failed if result.returncode != 0 else passed).add(name)
+
+    if python:
+        result = subprocess.run(
+            ["poetry", "run", "pytest", *SUITES, "-q", "--tb=no", "-p", "no:randomly",
+             "-k", " or ".join(python)],
+            cwd=REPO / "tests",
+            capture_output=True,
+            text=True,
+        )
+        reported = {
+            line.split("::")[-1].split()[0]
+            for line in result.stdout.splitlines()
+            if line.startswith("FAILED")
+        }
+        for name in python:
+            (failed if name in reported else passed).add(name)
+
+    return passed, failed
+
+
+_RUST_TEST_CACHE: dict[str, dict[str, str]] = {}
+
+
+def _crate_tests(crate: str) -> dict[str, str]:
+    """Test name to its full `module::path::name`, for `--exact`."""
+    if crate not in _RUST_TEST_CACHE:
+        listed = run(["cargo", "test", "-p", crate, "--", "--list"])
+        paths = {}
+        for line in listed.stdout.splitlines():
+            if line.endswith(": test"):
+                path = line.rsplit(":", 1)[0].strip()
+                paths.setdefault(path.split("::")[-1], path)
+        _RUST_TEST_CACHE[crate] = paths
+    return _RUST_TEST_CACHE[crate]
+
+
+def _paths(crate: str, name: str) -> list[str]:
+    path = _crate_tests(crate).get(name)
+    return [path] if path else [name]
+
+
+def _is_rust(name: str) -> bool:
+    return any(name in _crate_tests(crate) for crate in RUST_CRATES)
+
+
+def verify_named(mutations):
+    """A/B every guard against the test named after it, one at a time.
+
+    Reports per guard: `discriminates`, `does not discriminate` (the named test
+    passed with the guard disabled, so it is not evidence for it), `already
+    failing` (the baseline was red, so nothing could be concluded), or `did not
+    compile`.
+    """
+    results = []
+    for name, path, old, new in mutations:
+        expected = DISCRIMINATES.get(name)
+        if not expected:
+            results.append({"guard": name, "status": "no discriminating test named"})
+            continue
+
+        before_pass, before_fail = run_named_only(expected)
+        if before_fail:
+            results.append({
+                "guard": name,
+                "status": "already failing",
+                "tests": sorted(before_fail),
+            })
+            continue
+
+        source = REPO / path
+        original = source.read_text()
+        IN_FLIGHT[str(source)] = original
+        source.write_text(original.replace(old, new, 1))
+        try:
+            build = run(["cargo", "build", "--bin", "warpgate"])
+            if build.returncode != 0:
+                results.append({"guard": name, "status": "did not compile"})
+                continue
+            after_pass, after_fail = run_named_only(expected)
+            # `all`, per A2: every test the entry names has to notice.
+            status = (
+                "discriminates"
+                if set(expected) <= after_fail
+                else "does not discriminate"
+            )
+            results.append({
+                "guard": name,
+                "status": status,
+                "expected": expected,
+                "failed_with_guard_off": sorted(after_fail),
+                "passed_with_guard_off": sorted(after_pass),
+            })
+        finally:
+            source.write_text(original)
+            IN_FLIGHT.pop(str(source), None)
+
+    run(["cargo", "build", "--bin", "warpgate"])
+    return results
+
+
 def failing_tests() -> tuple[set[str], str]:
     """Which tests fail right now.
 
@@ -517,7 +697,7 @@ def check_anchors(mutations):
         )
 
 
-def write_artifact(*, partial: bool, results: list, refused: str | None):
+def write_artifact(*, partial: bool, results: list, refused: str | None, mode: str = "full"):
     """The run's own record, so a claim about coverage can be checked later.
 
     Required by protocol amendment A2. It carries the guards, their named
@@ -531,6 +711,7 @@ def write_artifact(*, partial: bool, results: list, refused: str | None):
             {
                 "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "head": run(["git", "rev-parse", "HEAD"]).stdout.strip(),
+                "mode": mode,
                 "partial": partial,
                 "guards_total": len(MUTATIONS),
                 "guards_with_a_named_discriminator": len(DISCRIMINATES),
@@ -731,7 +912,10 @@ def main():
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, lambda *_: sys.exit(130))
 
-    only = sys.argv[1] if len(sys.argv) > 1 else ""
+    args = sys.argv[1:]
+    named_mode = "--named" in args
+    args = [a for a in args if a != "--named"]
+    only = args[0] if args else ""
     rust_unit = run(["cargo", "test", "-p", "warpgate-vault", "-q"])
     if rust_unit.returncode != 0:
         sys.exit("the tree does not pass before mutating; fix that first")
@@ -740,7 +924,21 @@ def main():
     if not selected:
         sys.exit(f"no guard matches {only!r}")
     check_anchors(selected + [CANARY])
+    check_no_duplicate_entries()
     check_discriminators(selected)
+
+    if named_mode:
+        results = verify_named(selected)
+        for r in results:
+            print(f"{r['status']:>26}  {r['guard']}")
+        write_artifact(partial=bool(only), results=results, refused=None, mode="named")
+        good = [r for r in results if r["status"] == "discriminates"]
+        print(
+            f"\n{len(good)}/{len(results)} guards discriminate: the test named "
+            f"after the guard fails when the guard is disabled, and passes when "
+            f"it is not"
+        )
+        raise SystemExit(0 if len(good) == len(results) else 1)
 
     # Before measuring anything, measure the instrument.
     canary = run_one(*CANARY)

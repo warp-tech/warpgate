@@ -266,6 +266,12 @@ impl ConnectionError {
 /// generous.
 const CERTIFICATE_TTL_SLACK: Duration = Duration::from_secs(60);
 
+/// Stands in the username field when the session has no user info recorded.
+///
+/// `key_id_field` rejects a colon, so no real username can collide with this
+/// one, and the field count stays at three whatever happened.
+const UNATTRIBUTED: &str = "unattributed";
+
 /// A username as it may appear in a key ID field.
 ///
 /// The key ID is `warpgate:<username>:<session>`, three fields split on a
@@ -1473,8 +1479,15 @@ impl RemoteClient {
         let username = username
             .or_else(|| self.identity_hint.clone())
             .map(|name| key_id_field(&name));
+        // Three fields either way. Dropping the middle one shifted the session
+        // UUID into the position a reader takes for the username — so a log
+        // line naming nobody was indistinguishable from one naming a user
+        // called `0e5f…`, and the field this whole feature exists to fill was
+        // silently wrong rather than visibly absent. Reachable whenever the
+        // session's user info has not been recorded, e.g. a transient database
+        // failure in `set_user_info`.
         username.map_or_else(
-            || format!("warpgate:{}", self.id),
+            || format!("warpgate:{}:{}", UNATTRIBUTED, self.id),
             |username| format!("warpgate:{username}:{}", self.id),
         )
     }

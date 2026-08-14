@@ -1502,6 +1502,15 @@ mod tests {
             validate_key_id("warpgate:alice\nAccepted publickey for root"),
             Err(VaultError::InvalidKeyId)
         ));
+        // The length half of the same check. It had no case at all, so a
+        // mutation dropping only the bound was caught by nothing — the two
+        // halves are separate guards in the matrix and needed separate
+        // evidence.
+        assert!(validate_key_id(&"a".repeat(MAX_KEY_ID)).is_ok());
+        assert!(matches!(
+            validate_key_id(&"a".repeat(MAX_KEY_ID + 1)),
+            Err(VaultError::InvalidKeyId)
+        ));
     }
 
     #[test]
