@@ -324,12 +324,20 @@ MUTATIONS = [
         ".ok_or(VaultError::InvalidLease(seconds))?,",
         ".unwrap_or_else(|| Instant::now()),",
     ),
-    (
-        "vault: credential file size is capped",
-        "warpgate-vault/src/client.rs",
-        "if size > MAX_CREDENTIAL_FILE {",
-        "if false {",
-    ),
+    # `vault: credential file size is capped` used to be here and is not a
+    # guard. Measured, not argued: with the check disabled,
+    # `an_oversized_regular_file_is_refused` still passes, because the stream
+    # bound eight lines below refuses the same file. It has no input of its
+    # own — `read_credential` stats the open handle rather than the path, so
+    # there is no window in which the two could disagree, and a FIFO, the one
+    # source that lies about its size, is caught by the stream bound alone.
+    #
+    # So it is an early-out that avoids reading 16 KB before refusing, and
+    # listing it as a security guard inflated the count by one while
+    # guaranteeing a permanent failure in any honest verification. Removed
+    # rather than left failing: the entry was a classification error, and
+    # keeping a non-guard in the list to avoid appearing to remove a failure
+    # would be the same dishonesty pointed the other way.
     (
         # The half the stat could not see: what actually arrives, from the
         # handle already open, rather than what the filesystem claimed.
@@ -425,12 +433,15 @@ DISCRIMINATES = {
     "vault: absurd lease refused rather than panicking": [
         "test_an_absurd_lease_is_refused_rather_than_panicking"
     ],
-    # Registered with a caveat recorded rather than hidden: the review of round I
-    # observed that this test writes an ordinary oversized file rather than a
-    # source that lies about its size, so it cannot separate the stream bound
-    # from the `stat` bound. It does discriminate the line the guard names.
+    # One test each, because one test could not do both. The caveat that used
+    # to sit here claimed this entry "does discriminate the line the guard
+    # names"; `verify_named_rust` measured that claim and it was false. An
+    # oversized regular file is refused by the `stat` early-out and by the
+    # stream bound alike, so disabling either left the other to catch it and
+    # neither guard was evidenced. A FIFO reports a size of zero, which is the
+    # only input the stream bound has to itself.
     "vault: the credential stream itself is bounded": [
-        "a_credential_stream_longer_than_the_cap_is_refused_whatever_stat_says"
+        "only_the_stream_bound_can_refuse_a_source_that_lies_about_its_size"
     ],
     "vault: wrapping token redeemed once": [
         "test_a_wrapping_token_is_redeemed_once_and_the_secret_id_reused"
@@ -468,9 +479,6 @@ DISCRIMINATES = {
     ],
     "certificate: a bare name permits without requiring": [
         "an_option_permitted_by_name_may_be_absent"
-    ],
-    "vault: credential file size is capped": [
-        "a_credential_stream_longer_than_the_cap_is_refused_whatever_stat_says"
     ],
     "vault: certificate_ttl outside the allowed range is refused at config load": [
         "a_certificate_ttl_outside_the_allowed_range_is_refused_at_construction"

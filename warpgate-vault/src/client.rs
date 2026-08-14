@@ -992,13 +992,70 @@ mod tests {
     /// bounded what the filesystem claimed rather than what arrived — and the
     /// token mutex is held across login, so a credential path that never ends
     /// stalls every session rather than one.
+    ///
+    /// A real FIFO, because an oversized *regular* file is refused by either
+    /// half on its own: the `stat` early-out and the stream bound both see it,
+    /// so a test using one cannot say which is doing the work. Measured rather
+    /// than argued — the earlier version of this test used a regular file, and
+    /// `verify_named_rust` reported both guards as undiscriminated because
+    /// disabling either left the other to refuse it. The reviewer had said so
+    /// in prose a round earlier and it was registered with a comment claiming
+    /// otherwise.
+    ///
+    /// A FIFO separates them: `stat` reports zero, so the early-out passes it
+    /// through, and only the bound on what actually arrives can refuse it.
     #[tokio::test]
-    async fn a_credential_stream_longer_than_the_cap_is_refused_whatever_stat_says() {
+    async fn only_the_stream_bound_can_refuse_a_source_that_lies_about_its_size() {
+        let dir = std::env::temp_dir().join(format!("wg-fifo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("lying");
+        // The `mkfifo` command rather than the libc call: std has no API for
+        // this file type, and shelling out costs a process where the
+        // alternative costs a dependency and an `unsafe` block in a crate that
+        // denies both.
+        let made = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .expect("mkfifo is not available");
+        assert!(made.success(), "could not create the FIFO");
+
+        // `stat` on a FIFO reports zero regardless of what is coming, which is
+        // the lie. Written from another thread because opening a FIFO for
+        // writing blocks until a reader arrives.
+        let writer_path = path.clone();
+        let writer = std::thread::spawn(move || {
+            use std::io::Write as _;
+            if let Ok(mut fifo) = std::fs::OpenOptions::new().write(true).open(&writer_path) {
+                // More than the cap, in chunks, ignoring the broken pipe that
+                // arrives when the reader gives up — which is the pass case.
+                let chunk = "z".repeat(4096);
+                for _ in 0..((MAX_CREDENTIAL_FILE / 4096) + 4) {
+                    if fifo.write_all(chunk.as_bytes()).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        let reported = std::fs::metadata(&path).unwrap().len();
+        assert_eq!(reported, 0, "a FIFO that reports a size is not the case here");
+
+        let outcome = VaultClient::read_credential(&path).await;
+        assert!(
+            matches!(outcome, Err(VaultError::CredentialTooLarge { .. })),
+            "a source that under-reports its size was accepted: {outcome:?}"
+        );
+
+        let _ = writer.join();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The `stat` early-out, on the only input that reaches it first.
+    #[tokio::test]
+    async fn an_oversized_regular_file_is_refused() {
         let dir = std::env::temp_dir().join(format!("wg-cred-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("oversized");
-        // A regular file larger than the cap: the reported size and the stream
-        // agree here, which is the case the old code did handle.
         std::fs::write(&path, "x".repeat((MAX_CREDENTIAL_FILE + 1024) as usize)).unwrap();
         assert!(
             matches!(

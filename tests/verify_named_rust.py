@@ -38,6 +38,10 @@ def restore_everything():
     LOCK.unlink(missing_ok=True)
 
 
+class CouldNotRun(Exception):
+    """A named test could not be executed, so no verdict is available for it."""
+
+
 _INDEX: dict[str, tuple[str, str]] = {}
 
 
@@ -88,10 +92,15 @@ def run_test(crate: str, test: str) -> bool:
         text=True,
     )
     if "running 1 test" not in result.stdout:
-        raise SystemExit(
-            f"{test} did not run: filter {path!r} matched "
-            f"{'nothing' if 'running 0 tests' in result.stdout else 'the wrong set'}. "
-            "Refusing rather than reporting a verdict from a test that never ran."
+        # Refusing to answer, rather than answering wrongly. Raised per guard
+        # and caught by the caller: aborting the whole sweep here cost the
+        # thirteen guards after it on a run where the first nine had all come
+        # back clean, and the cause turned out to be transient. A verdict this
+        # script cannot reach is one guard's worth of missing information, not a
+        # reason to discard the rest.
+        raise CouldNotRun(
+            f"filter {path!r} matched "
+            f"{'nothing' if 'running 0 tests' in result.stdout else 'the wrong set'}"
         )
     return result.returncode == 0 and " 0 failed" in result.stdout
 
@@ -112,7 +121,12 @@ def main():
         if any(c is None for c in crates.values()):
             continue  # not a Rust discriminator; the integration suite owns it
 
-        before = {t: run_test(c, t) for t, c in crates.items()}
+        try:
+            before = {t: run_test(c, t) for t, c in crates.items()}
+        except CouldNotRun as why:
+            results.append({"guard": name, "status": "could not run", "why": str(why)})
+            print(f"{'could not run':>22}  {name}", flush=True)
+            continue
         if not all(before.values()):
             results.append({
                 "guard": name,
@@ -127,7 +141,12 @@ def main():
         IN_FLIGHT[str(source)] = original
         source.write_text(original.replace(old, new, 1))
         try:
-            after = {t: run_test(c, t) for t, c in crates.items()}
+            try:
+                after = {t: run_test(c, t) for t, c in crates.items()}
+            except CouldNotRun as why:
+                results.append({"guard": name, "status": "could not run", "why": str(why)})
+                print(f"{'could not run':>22}  {name}", flush=True)
+                continue
             # Every named test must notice, per amendment A2.
             status = (
                 "discriminates" if not any(after.values()) else "does not discriminate"
