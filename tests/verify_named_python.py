@@ -23,6 +23,7 @@ Every file is restored on any exit path, including a kill.
 import atexit
 import json
 import pathlib
+import re
 import signal
 import subprocess
 import sys
@@ -85,12 +86,27 @@ def run_test(test: str) -> bool:
         capture_output=True,
         text=True,
     )
+    # Parsed from pytest's own counts rather than matched as substrings. The
+    # first version asked whether `" 1 passed"` — with a leading space — was in
+    # the output, and pytest's summary line *starts* with the count, so every
+    # passing test read as a failure and every guard came back "already
+    # failing". That is the W-25b answer this experiment exists to test,
+    # manufactured by the instrument measuring it. It survived only because the
+    # ruling on this experiment required the failure logs to be read before
+    # "already failing" could be believed.
     out = result.stdout
-    if " passed" not in out and " failed" not in out:
-        raise CouldNotRun(f"pytest reported neither pass nor fail: {out.strip()[-200:]}")
-    if "1 passed" not in out and "1 failed" not in out:
-        raise CouldNotRun(f"the filter {test!r} did not select exactly one test: {out.strip()[-200:]}")
-    return " 1 passed" in out or out.strip().startswith("1 passed")
+    counts = {
+        word: int(number)
+        for number, word in re.findall(
+            r"(\d+) (passed|failed|error|errors|skipped|deselected)", out
+        )
+    }
+    ran = counts.get("passed", 0) + counts.get("failed", 0) + counts.get("error", 0)
+    if ran == 0:
+        raise CouldNotRun(f"the filter {test!r} selected no test: {out.strip()[-200:]}")
+    if ran != 1:
+        raise CouldNotRun(f"the filter {test!r} selected {ran} tests: {out.strip()[-200:]}")
+    return counts.get("passed", 0) == 1
 
 
 def main():
