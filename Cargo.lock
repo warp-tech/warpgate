@@ -8975,6 +8975,7 @@ dependencies = [
  "warpgate-core",
  "warpgate-db-entities",
  "warpgate-ldap",
+ "warpgate-protocol-kubernetes",
  "warpgate-protocol-ssh",
  "warpgate-tls",
 ]
