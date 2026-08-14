@@ -21,7 +21,6 @@ reqwest = { workspace = true, features = ["json"] }
 reqwest-websocket.workspace = true
 rustls.workspace = true
 sea-orm.workspace = true
-secrecy = { version = "0.10", default-features = false }
 serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json.workspace = true
 thiserror.workspace = true

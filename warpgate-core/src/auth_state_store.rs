@@ -16,10 +16,10 @@ use crate::login_protection::{FailedAttemptInfo, LoginProtectionService};
 use crate::{ConfigProvider, ConfigProviderEnum};
 
 #[allow(clippy::unwrap_used)]
-pub static TIMEOUT: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs(60 * 10));
+pub static TIMEOUT: LazyLock<Duration> = LazyLock::new(|| Duration::from_mins(10));
 
 // Absolute maximum cache duration for cleanup
-const RECENT_APPROVAL_RETENTION: Duration = Duration::from_secs(60 * 60 * 24 * 30);
+const RECENT_APPROVAL_RETENTION: Duration = Duration::from_hours(24 * 30);
 
 /// If the address is an IPv4-mapped IPv6 address (e.g. `::ffff:192.168.1.1`),
 /// extract the inner IPv4 address. Otherwise return as-is.
@@ -38,7 +38,7 @@ const fn normalize_ip(ip: IpAddr) -> IpAddr {
 /// An unset or empty range list, or an unknown remote IP, counts as
 /// unrestricted. Both the interactive auth path and the ticket path decide IP
 /// access through this, so the two can't drift.
-pub(crate) fn ip_allowed(
+pub fn ip_allowed(
     allowed_ip_ranges: Option<&Vec<WarpgateIpNet>>,
     remote_ip: Option<IpAddr>,
 ) -> bool {
@@ -57,7 +57,7 @@ pub(crate) fn ip_allowed(
 
 /// Checks whether the given IP is allowed by the user's `allowed_ip_ranges` setting.
 /// Returns `Ok(())` if access is allowed, or an appropriate `WarpgateError` if denied.
-pub(crate) fn check_ip_allowed(
+pub fn check_ip_allowed(
     allowed_ip_ranges: Option<&Vec<WarpgateIpNet>>,
     remote_ip: Option<IpAddr>,
     username: &str,

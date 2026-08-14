@@ -178,7 +178,7 @@ impl SessionRecordings {
     /// Signal every in-flight writer to finalize, then wait (bounded)
     pub async fn shutdown(&self) {
         self.shutdown.cancel();
-        if self.shutdown_tracker.len() > 0 {
+        if !self.shutdown_tracker.is_empty() {
             info!(
                 count = self.shutdown_tracker.len(),
                 "Waiting for session recording uploads to finish..."

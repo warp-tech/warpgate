@@ -38,6 +38,5 @@ warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-ldap = { path = "../warpgate-ldap" }
-warpgate-protocol-kubernetes = { path = "../warpgate-protocol-kubernetes" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-tls = { path = "../warpgate-tls" }

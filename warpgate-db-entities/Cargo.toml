@@ -10,7 +10,6 @@ bytes = { version = "1.4", default-features = false }
 ipnet.workspace = true
 poem-openapi.workspace = true
 sea-orm = { workspace = true, features = ["macros", "with-uuid", "with-json"] }
-secrecy = { version = "0.10", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

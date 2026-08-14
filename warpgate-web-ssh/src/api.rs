@@ -103,7 +103,7 @@ pub async fn ws_handler(
 
         session.start_disconnect_timer(manager.clone()).await;
 
-        drop(session_keepalive)
+        drop(session_keepalive);
     }))
 }
 

@@ -12,7 +12,6 @@ poem-openapi.workspace = true
 rustls.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pki-types.workspace = true
-sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

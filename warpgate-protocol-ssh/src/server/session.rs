@@ -1528,8 +1528,7 @@ impl ServerSession {
             let db = &self.services.db;
             let should_record = Parameters::Entity::get(db)
                 .await
-                .map(|p| p.record_scp)
-                .unwrap_or(true);
+                .map_or(true, |p| p.record_scp);
 
             if !should_record {
                 info!(channel=%channel_id, "Not recording SCP exec session, command was '{command}'");
