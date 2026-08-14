@@ -42,12 +42,14 @@ use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
-use crate::server::service_output::{VisualConnectionChainItem, paint_fg};
+use crate::server::service_output::{
+    VisualConnectionChainItem, paint_fg, without_control_characters_except_newline,
+};
 use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
-    SshRecordingMetadata, X11Request, resolve_ssh_chain,
+    SshRecordingMetadata, X11Request, client_error_message, resolve_ssh_chain,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
@@ -421,6 +423,15 @@ impl ServerSession {
         Ok(())
     }
 
+    /// Escaping happens here, at the sink, and not in the callers.
+    ///
+    /// It used to happen in the callers. Every round of review since found
+    /// another one that had been missed — a target name in one message, a
+    /// certificate's principals in another — because a fix applied at the point
+    /// of use only ever covers the points somebody went looking at. Both PTY
+    /// sinks now escape unconditionally, so a new call site cannot reopen the
+    /// hole by forgetting, and Warpgate's own colour codes are added after the
+    /// text has been through it.
     pub async fn emit_service_message(&self, msg: &str) -> Result<()> {
         debug!("Service message: {}", msg);
 
@@ -430,7 +441,7 @@ impl ServerSession {
         let output = format!(
             "{} {}\r\n",
             paint_fg(Color::Blue, false, "● Warpgate:"),
-            msg.replace('\n', "\r\n")
+            without_control_characters_except_newline(msg).replace('\n', "\r\n")
         );
         self.emit_pty_output(output.as_bytes()).await
     }
@@ -442,6 +453,7 @@ impl ServerSession {
                 .emit_pty_output(self.service_output.erase_display().as_bytes())
                 .await;
         }
+        let msg = without_control_characters_except_newline(msg).replace('\n', "\r\n");
         let output = format!("{} {msg}\r\n", paint_fg(Color::Red, false, "● Warpgate:"));
         self.emit_pty_output(output.as_bytes()).await
     }
@@ -1057,7 +1069,13 @@ impl ServerSession {
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_pty_error(&format!("Error: {e}")).await;
+                // The full error to the log, a constant to the terminal. The
+                // detail is what an operator needs and what a connected user
+                // must not be handed; printing `{e}` gave it to the user and
+                // was the one path to this sink that no round of hardening had
+                // touched.
+                error!(error=%e, "Client session error");
+                let _ = self.emit_pty_error(client_error_message(&e)).await;
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {

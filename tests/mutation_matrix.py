@@ -16,6 +16,7 @@ Not a pytest module: it rebuilds the gateway between runs, so it is a script.
     poetry run python -m tests.mutation_matrix principal # ones matching a name
 """
 
+import ast
 import atexit
 import json
 import pathlib
@@ -26,6 +27,11 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+
+# Crates whose unit tests can discriminate a guard. Named in one place: the
+# collector and the failure reader used to carry their own copies, so a test
+# in a crate only one of them knew about was invisible to the other.
+RUST_CRATES = ("warpgate-vault", "warpgate-protocol-ssh", "warpgate-admin")
 
 # Files currently rewritten in place, and their originals. A marker beside them
 # so anything else touching this tree can tell — the pre-commit hook refuses to
@@ -63,8 +69,8 @@ MUTATIONS = [
     (
         "certificate: pinned critical options must be present",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        "if expected.value.is_some() && !certificate.critical_options().contains_key(&expected.name) {",
-        "if false {",
+        "if expected.value.is_some() && !certificate.critical_options().contains_key(&expected.name)\n        {",
+        "if false\n        {",
     ),
     (
         # The complement of the entry above: pinning must not become mandatory
@@ -72,8 +78,8 @@ MUTATIONS = [
         # cannot be configured at all.
         "certificate: a bare name permits without requiring",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        "if expected.value.is_some() && !certificate.critical_options().contains_key(&expected.name) {",
-        "if !certificate.critical_options().contains_key(&expected.name) {",
+        "if expected.value.is_some() && !certificate.critical_options().contains_key(&expected.name)\n        {",
+        "if !certificate.critical_options().contains_key(&expected.name)\n        {",
     ),
     (
         # Warpgate has no `valid_after` check — the refusal is the target's —
@@ -197,6 +203,26 @@ MUTATIONS = [
         "let handshake_deadline = tokio::time::sleep(Duration::from_secs(86400));",
     ),
     (
+        # The other half of the attribution claim. `key_id_field` sanitises a
+        # username on its way into the certificate; this refuses to create one
+        # that would need sanitising. It shipped with no test in either language
+        # and no entry here — the only check in this feature with neither.
+        "users: a username cannot contain the key ID separator",
+        "warpgate-admin/src/api/users.rs",
+        "    !username.is_empty() && !username.contains(':')",
+        "    !username.is_empty()",
+    ),
+    (
+        # The deadline is paused while a host key is being decided on. This is
+        # the line that ends the pause. Only the arming line above was guarded,
+        # so the pause could be — and for a week was — permanent, and the matrix
+        # reported the deadline as covered.
+        "connection: the handshake deadline resumes after a host key answer",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        "tokio::time::Instant::now() + HANDSHAKE_TIMEOUT,",
+        "tokio::time::Instant::now() + Duration::from_secs(86400),",
+    ),
+    (
         "certificate: a username cannot shift the key ID fields",
         "warpgate-protocol-ssh/src/client/mod.rs",
         '    username.replace(\':\', "_")',
@@ -271,8 +297,8 @@ MUTATIONS = [
     (
         "vault: an unbound AWS login is called out",
         "warpgate-vault/src/client.rs",
-        "        VaultAuth::Aws { server_id: None, .. } => Some(",
-        "        VaultAuth::Aws { server_id: None, .. } if false => Some(",
+        "        VaultAuth::Aws {\n            server_id: None, ..\n        } => Some(",
+        "        VaultAuth::Aws {\n            server_id: None, ..\n        } if false => Some(",
     ),
     (
         "vault: address must be HTTPS or loopback",
@@ -356,6 +382,15 @@ CANARY = (
 # discriminates a guard is the same state as not having one.
 DISCRIMINATES = {
     "certificate: key ID must match": ["test_a_certificate_with_a_different_key_id_is_refused"],
+    "connection: the handshake deadline resumes after a host key answer": [
+        "test_a_target_that_answers_with_a_host_key_and_then_stalls_is_given_up_on"
+    ],
+    "users: a username cannot contain the key ID separator": [
+        "a_username_with_a_colon_would_shift_every_field_of_the_key_id"
+    ],
+    "connection: handshake deadline": [
+        "test_a_target_that_stalls_the_handshake_is_given_up_on"
+    ],
     "certificate: must certify our ephemeral key": [
         "test_certificate_issued_for_a_key_warpgate_does_not_hold"
     ],
@@ -482,6 +517,129 @@ def check_anchors(mutations):
         )
 
 
+def write_artifact(*, partial: bool, results: list, refused: str | None):
+    """The run's own record, so a claim about coverage can be checked later.
+
+    Required by protocol amendment A2. It carries the guards, their named
+    discriminators, the per-guard verdict, and — the part that was missing — the
+    reason when the run refused to produce a number at all. A refusal used to
+    leave nothing behind, so "the matrix says 40/40" and "the matrix refused to
+    run" were indistinguishable a day later.
+    """
+    (REPO / "tests" / "mutation-matrix.json").write_text(
+        json.dumps(
+            {
+                "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "head": run(["git", "rev-parse", "HEAD"]).stdout.strip(),
+                "partial": partial,
+                "guards_total": len(MUTATIONS),
+                "guards_with_a_named_discriminator": len(DISCRIMINATES),
+                "refused": refused,
+                "results": results,
+            },
+            indent=2,
+        )
+    )
+
+
+def existing_tests() -> set[str]:
+    """Every test name this repository actually has, Python and Rust.
+
+    Collected rather than assumed. `DISCRIMINATES` is a hand-written list of
+    names, and nothing checked that any of them existed — so an entry could
+    claim a guard was pinned by a test that had never been written. One was:
+    `test_a_certificate_with_a_different_key_id_is_refused` appeared nowhere in
+    the repository while the matrix reported on that guard for a week.
+
+    An instrument built because we do not trust our tests was taking its own
+    list of test names on faith.
+    """
+    names: set[str] = set()
+
+    collected = subprocess.run(
+        ["poetry", "run", "pytest", *SUITES, "--collect-only", "-q"],
+        cwd=REPO / "tests",
+        capture_output=True,
+        text=True,
+    )
+    for line in collected.stdout.splitlines():
+        if "::" in line:
+            names.add(line.split("::")[-1].split("[")[0].strip())
+
+    for crate in RUST_CRATES:
+        listed = run(["cargo", "test", "-p", crate, "--", "--list"])
+        for line in listed.stdout.splitlines():
+            if line.endswith(": test"):
+                names.add(line.rsplit(":", 1)[0].split("::")[-1].strip())
+
+    return names
+
+
+def check_no_duplicate_entries():
+    """`DISCRIMINATES` is a dict literal, and a repeated key wins silently.
+
+    Not hypothetical: adding an entry for a guard that already had one produced
+    two keys spelled identically, naming two different tests, and Python kept
+    the second. The first entry simply stopped existing — no error, no warning,
+    and the count of covered guards did not move, which is the only reason it
+    was noticed.
+
+    Reads this file's own source, because by the time the dict is built the
+    evidence is gone.
+    """
+    tree = ast.parse(pathlib.Path(__file__).read_text())
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        target = node.targets[0]
+        if not (isinstance(target, ast.Name) and target.id == "DISCRIMINATES"):
+            continue
+        keys = [k.value for k in node.value.keys if isinstance(k, ast.Constant)]
+        repeated = sorted({k for k in keys if keys.count(k) > 1})
+        if repeated:
+            listed = "\n".join(f"  {k}" for k in repeated)
+            raise SystemExit(
+                f"{len(repeated)} guard(s) have more than one entry in "
+                f"DISCRIMINATES, and only the last one counts:\n{listed}"
+            )
+
+    names = [m[0] for m in MUTATIONS]
+    repeated = sorted({n for n in names if names.count(n) > 1})
+    if repeated:
+        listed = "\n".join(f"  {n}" for n in repeated)
+        raise SystemExit(f"{len(repeated)} guard name(s) are used twice:\n{listed}")
+
+
+def check_discriminators(mutations):
+    """Every named discriminator must resolve to a test that exists.
+
+    Added by protocol amendment A2. The check runs before anything is mutated,
+    for the same reason `check_anchors` does: a name that resolves to nothing
+    cannot fail, so a guard listing one can never be reported as caught, and the
+    run would spend an hour arriving at that.
+    """
+    have = existing_tests()
+    if not have:
+        raise SystemExit(
+            "could not collect any test names, so the discriminator check "
+            "cannot run. Refusing rather than skipping it."
+        )
+
+    missing = [
+        (name, test)
+        for name, *_ in mutations
+        for test in DISCRIMINATES.get(name, [])
+        if test not in have
+    ]
+    if missing:
+        lines = "\n".join(f"  {test}\n    named by {name}" for name, test in missing)
+        raise SystemExit(
+            f"{len(missing)} named discriminator(s) do not exist:\n{lines}\n\n"
+            "Write the test or repoint the entry. A name that resolves to "
+            "nothing is not weaker evidence than a real test — it is none."
+        )
+
+
 def failing_rust_tests(crate: str) -> set[str]:
     """Which Rust tests fail, by name.
 
@@ -533,7 +691,7 @@ def run_one(name, path, old, new):
         # only as a yes/no — so the discriminating unit tests in
         # `warpgate-protocol-ssh` were invisible to this script, and a Rust
         # failure could not be attributed to a test.
-        for crate in ("warpgate-vault", "warpgate-protocol-ssh"):
+        for crate in RUST_CRATES:
             caught_by |= failing_rust_tests(crate)
 
         expected = DISCRIMINATES.get(name)
@@ -541,7 +699,12 @@ def run_one(name, path, old, new):
             status = "SURVIVED"
         elif expected is None:
             status = "no discriminating test named"
-        elif any(test in caught_by for test in expected):
+        elif all(test in caught_by for test in expected):
+            # `all`, not `any` — protocol amendment A2. With `any`, an entry
+            # naming a Rust unit test and a Python integration test was
+            # satisfied by the unit test alone, and the integration test's
+            # discrimination was never established while the entry implied it
+            # had been. Every test an entry names now has to notice.
             status = "caught"
         else:
             # Something failed, but not the test whose name claims this guard.
@@ -577,17 +740,23 @@ def main():
     if not selected:
         sys.exit(f"no guard matches {only!r}")
     check_anchors(selected + [CANARY])
+    check_discriminators(selected)
 
     # Before measuring anything, measure the instrument.
     canary = run_one(*CANARY)
     if canary["status"] != "SURVIVED":
-        sys.exit(
+        refused = (
             "the canary was reported as caught, which cannot be true: it only "
             "changes the text of a log line.\n"
             f"Tests that failed: {', '.join(canary.get('caught_by', []))}\n"
             "The suite is failing for reasons unrelated to the guards, so no "
             "verdict from this run means anything. Fix that first."
         )
+        # A refusal is a result and gets written out like one. Amendment A2:
+        # every coverage number this project published was checkable only by
+        # repeating the run, and two of them were wrong.
+        write_artifact(partial=bool(only), results=[], refused=refused)
+        sys.exit(refused)
     print(f"{'ok':>9}  canary survived, so a 'caught' verdict means something\n")
 
     results = []
@@ -601,9 +770,7 @@ def main():
             print(f"           last output: {result['tail']}")
 
     run(["cargo", "build", "--bin", "warpgate"])
-    (REPO / "tests" / "mutation-matrix.json").write_text(
-        json.dumps({"partial": bool(only), "results": results}, indent=2)
-    )
+    write_artifact(partial=bool(only), results=results, refused=None)
 
     caught = [r for r in results if r["status"] == "caught"]
     print(

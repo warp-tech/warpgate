@@ -14,7 +14,9 @@ use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::known_hosts::KnownHosts;
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient, resolve_ssh_chain};
+use warpgate_protocol_ssh::{
+    RCCommand, RCEvent, RCState, RemoteClient, client_error_message, resolve_ssh_chain,
+};
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
 use crate::protocol::ServerMessage;
@@ -188,9 +190,15 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::Error(e) => {
+                            // Same boundary as the SSH path, for the same
+                            // reason. Disclosure only here rather than terminal
+                            // injection — this lands in a Svelte alert, which
+                            // escapes — but the text is the one `client_message`
+                            // exists to keep away from a user.
+                            tracing::error!(error=%e, "Client session error");
                             session
                                 .push(ServerMessage::Error {
-                                    message: e.to_string(),
+                                    message: client_error_message(&e).to_owned(),
                                 })
                                 .await;
                         }

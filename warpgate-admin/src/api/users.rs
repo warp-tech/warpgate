@@ -880,3 +880,34 @@ impl RolesApi {
         Ok(DeleteUserAdminRoleResponse::Deleted)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::username_is_well_formed;
+
+    /// The `:` rejection had no test in either language, and no matrix guard —
+    /// the only check in this feature with neither. It protects the one claim
+    /// the certificate path makes: that `warpgate:<username>:<session>` in the
+    /// target's sshd log names the person who opened the session.
+    #[test]
+    fn a_username_with_a_colon_would_shift_every_field_of_the_key_id() {
+        // What the target's sshd log carries, and what reads it back.
+        let key_id = |username: &str| format!("warpgate:{username}:0e5f");
+        let field = |id: &str, n: usize| {
+            id.split(':').nth(n).unwrap_or_default().to_owned()
+        };
+
+        assert!(username_is_well_formed("alice"));
+        assert_eq!(field(&key_id("alice"), 1), "alice");
+
+        // Without the check: the reader attributes the session to `root`, and
+        // an operator auditing the target's logs sees a name that was chosen
+        // rather than authenticated.
+        assert_eq!(field(&key_id("root:admin"), 1), "root");
+        assert!(!username_is_well_formed("root:admin"));
+
+        assert!(!username_is_well_formed(":"));
+        assert!(!username_is_well_formed("trailing:"));
+        assert!(!username_is_well_formed(""));
+    }
+}

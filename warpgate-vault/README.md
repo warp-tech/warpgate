@@ -116,6 +116,7 @@ is not something Warpgate can see:
 | Returned certificate | What happens |
 |---|---|
 | Valid for more than **24 hours** | Refused. Generous — a role would have to be badly misconfigured to exceed it — but this feature exists to hand the target a credential that is worthless minutes later |
+| Valid for longer than the `certificate_ttl` that was asked for | Refused. Vault may shorten a request and never widen one, so a longer window back means the role is not the one intended. A few seconds of slack is allowed for the round trip |
 | Marked never-expiring (`ssh-keygen -V always:forever`, or a role with no TTL) | Refused |
 | Already expired | Refused, with a message naming the clock — the usual cause is skew on this host or the target, not a bad credential |
 

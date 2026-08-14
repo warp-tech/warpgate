@@ -92,6 +92,34 @@ class TestCertificatesNobodyShouldAccept:
         # never ran at all.
         assert stub_vault.signs, "no certificate was ever requested"
 
+    def test_a_certificate_with_a_different_key_id_is_refused(
+        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+    ):
+        """The key ID is the attribution, so a substituted one has to be caught.
+
+        A plausible substitution rather than an absurd one: `sshd` accepts any
+        key ID at all and writes it to its log, so a target refuses nothing here
+        and a test asserting only a non-zero exit code proves nothing about our
+        check. The assertion is on Warpgate's own words.
+
+        This test is the reason the matrix now verifies that a named
+        discriminator exists. The entry for this guard named exactly this
+        function for a week; it had never been written, and the guard was
+        reported on regardless.
+        """
+        from .test_ssh_target_cert_auth import make_user_and_target, start
+
+        stub_vault.sign_key_id = "warpgate:someone-else:00000000"
+        user, target = make_user_and_target(api, cert_ssh_port)
+
+        client = start(processes, cert_wg, user, target, "-tt")
+        shown = client.communicate(timeout=timeout)[0].decode(errors="replace")
+
+        assert stub_vault.signs, "no certificate was ever requested"
+        assert client.returncode != 0, "a certificate naming another user was offered"
+        assert "Warpgate refused the certificate" in shown
+        assert "key ID other than the one requested" in shown
+
     def test_a_certificate_naming_a_thousand_principals(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
     ):

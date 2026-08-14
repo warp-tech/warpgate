@@ -524,7 +524,16 @@ impl VaultClient {
             return Ok((token.id, token.value.clone()));
         }
 
-        let token = self.login().await?;
+        // Bounded here rather than inside `login()`, because the bound has to
+        // cover assembling the request as well as sending it. `reqwest` times
+        // out the POST; `login_body()` reads a credential — a file for the
+        // Kubernetes and AppRole methods, the whole SDK credential chain for
+        // AWS — and nothing bounded that. Since this lock is held across the
+        // login on purpose, an unbounded read here is not one stalled session
+        // but all of them.
+        let token = tokio::time::timeout(self.config.timeout, self.login())
+            .await
+            .map_err(|_| VaultError::LoginTimeout)??;
         let id = token.id;
         let value = token.value.clone();
         *cached = Some(token);
@@ -1537,7 +1546,13 @@ mod properties {
         /// has to be exactly one entry — and carry nothing that could forge a
         /// line in the target's sshd log.
         #[test]
-        fn an_accepted_principal_is_a_single_harmless_entry(principal in "\\PC{0,64}") {
+        //
+        // The generator is `(?s).` and not `\PC`: `\PC` is the *negation* of
+        // Unicode category C, so it produced only strings with no control
+        // characters — and the third assertion below then held for every input
+        // whether or not `validate_principal` looked at all. A property that
+        // cannot fail is not evidence, and this one carried a matrix entry.
+        fn an_accepted_principal_is_a_single_harmless_entry(principal in "(?s).{0,64}") {
             if validate_principal(&principal).is_ok() {
                 prop_assert_eq!(principal.split(',').count(), 1);
                 prop_assert!(!principal.is_empty());
@@ -1575,7 +1590,9 @@ mod properties {
 
         /// `key_id` is echoed verbatim into the target's sshd log.
         #[test]
-        fn an_accepted_key_id_cannot_forge_a_log_line(key_id in "\\PC{0,128}") {
+        // Same generator defect as above, and here it made the property vacuous
+        // outright: every assertion in it is about a control character.
+        fn an_accepted_key_id_cannot_forge_a_log_line(key_id in "(?s).{0,128}") {
             if validate_key_id(&key_id).is_ok() {
                 prop_assert!(!key_id.contains('\n'));
                 prop_assert!(!key_id.contains('\r'));

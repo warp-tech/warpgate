@@ -56,6 +56,24 @@ fn without_control_characters(text: &str) -> Cow<'_, str> {
     }
 }
 
+/// The same, but a line break survives.
+///
+/// This is the form the PTY sinks use. `emit_service_message` turns `\n` into
+/// `\r\n` itself, so stripping every control character there would silently
+/// join the lines of any multi-line message instead of escaping anything.
+///
+/// Separate from `without_control_characters` rather than a flag on it: the
+/// chain renderer must not keep newlines — a name with one in it would break the
+/// drawing — and a shared function with a boolean would eventually be called
+/// with the wrong one.
+pub(super) fn without_control_characters_except_newline(text: &str) -> Cow<'_, str> {
+    if text.chars().any(|c| c.is_control() && c != '\n') {
+        Cow::Owned(text.chars().filter(|c| !c.is_control() || *c == '\n').collect())
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 impl VisualConnectionChainItem {
     pub fn ansi(&self) -> Cow<'_, str> {
         match self {

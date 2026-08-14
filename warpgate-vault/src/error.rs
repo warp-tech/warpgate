@@ -67,6 +67,16 @@ pub enum VaultError {
         path: PathBuf,
         source: Box<VaultError>,
     },
+
+    /// Logging in took longer than `vault.timeout`.
+    ///
+    /// The HTTP call was always bounded by `reqwest`; assembling the request was
+    /// not, and that is where the credential is read. A FIFO at `token_path`, a
+    /// hung mount, or a stalled cloud credential chain therefore had no bound at
+    /// all — while the token mutex is held across the login, so one blocked read
+    /// stalls every session rather than one.
+    #[error("authenticating to Vault took longer than the configured timeout")]
+    LoginTimeout,
 }
 
 impl VaultError {
@@ -96,7 +106,7 @@ impl VaultError {
                 "Failed to read Vault credentials"
             }
             VaultError::SecretIdUnwrap { .. } => "Failed to unwrap the Vault AppRole secret ID",
-            VaultError::Request(_) => "Vault is currently unavailable",
+            VaultError::Request(_) | VaultError::LoginTimeout => "Vault is currently unavailable",
             VaultError::Json(_)
             | VaultError::MetadataAddress(_)
             | VaultError::OversizedResponse

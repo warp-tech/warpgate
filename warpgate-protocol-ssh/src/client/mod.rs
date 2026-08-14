@@ -13,7 +13,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
-pub use error::SshClientError;
+pub use error::{SshClientError, client_error_message};
 use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
@@ -225,7 +225,12 @@ impl ConnectionError {
                     .to_string()
             }
             ConnectionError::TunnelOpenTimeout { host } => {
-                format!("The jump host {host} did not open the tunnel to the next hop in time")
+                // `{:?}`, as the other arms that carry a configured string do.
+                // The host comes from a target's configuration, so it reaches a
+                // terminal belonging to whoever connects rather than to whoever
+                // set it — the same class as the target names already fixed, and
+                // missed here because this variant was added by a later fix.
+                format!("The jump host {host:?} did not open the tunnel to the next hop in time")
             }
             ConnectionError::Io(_) | ConnectionError::Key(_) | ConnectionError::Ssh(_) => {
                 "SSH protocol error".to_string()
@@ -1252,6 +1257,23 @@ impl RemoteClient {
         let handshake_deadline = tokio::time::sleep(HANDSHAKE_TIMEOUT);
         pin_mut!(handshake_deadline);
 
+        // The deadline pauses while a host key is outstanding and resumes the
+        // moment it is answered, which requires seeing the answer. The reply
+        // channel goes to the session, so it is intercepted: the session is
+        // handed a substitute sender, and the real one is held here until the
+        // answer arrives on `host_key_answers`.
+        //
+        // The first version disarmed the deadline unconditionally and never
+        // re-armed it, on the reasoning that "from here the wait is a person's".
+        // That reasoning is not available at this point in the code: the
+        // verification mode is read in `handle_unknown_host_key`, which answers
+        // instantly under `AutoAccept` and `AutoReject`. A target could present
+        // an unknown host key under auto-accept, cancel the deadline for good,
+        // and then go silent — the exact hold this bound exists to catch,
+        // reintroduced by the fix for a different problem.
+        let (host_key_answer_tx, mut host_key_answers) = tokio::sync::mpsc::channel::<bool>(1);
+        let mut outstanding_host_key: Option<oneshot::Sender<bool>> = None;
+
         loop {
             tokio::select! {
                 Some(event) = event_rx.recv() => {
@@ -1271,8 +1293,8 @@ impl RemoteClient {
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
                             if hop.reports_host_key() {
-                                // The deadline stops here, because from here the
-                                // wait is a person's, not the target's.
+                                // Paused, not disarmed, and only for as long as
+                                // the answer is outstanding.
                                 //
                                 // `Prompt` is the default verification mode, so
                                 // on a stock install the first connection to any
@@ -1290,14 +1312,22 @@ impl RemoteClient {
                                 // the reply channel dies, and the key is never
                                 // stored — the next attempt asks again.
                                 //
-                                // Disarmed rather than extended. What this bound
-                                // exists to catch is a target that takes the
-                                // connection and then says nothing; one that has
-                                // sent its host key has already answered that.
+                                // Under the automatic modes the answer comes back
+                                // in microseconds and the pause is not observable,
+                                // which is the point: this arm no longer needs to
+                                // know which mode is configured to stay bounded.
                                 handshake_deadline.as_mut().reset(
                                     tokio::time::Instant::now() + Duration::from_secs(365 * 24 * 60 * 60),
                                 );
-                                self.tx.send(RCEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;
+                                let (intercept_tx, intercept_rx) = oneshot::channel();
+                                outstanding_host_key = Some(reply);
+                                let answer_tx = host_key_answer_tx.clone();
+                                tokio::spawn(async move {
+                                    if let Ok(answer) = intercept_rx.await {
+                                        let _ = answer_tx.send(answer).await;
+                                    }
+                                });
+                                self.tx.send(RCEvent::HostKeyUnknown(key, intercept_tx)).await.map_err(|_| ConnectionError::Internal)?;
                             } else {
                                 // Nobody is listening for an answer on this hop,
                                 // and the handler is waiting for one. Refusing is
@@ -1314,6 +1344,19 @@ impl RemoteClient {
                             }
                         }
                         _ => {}
+                    }
+                }
+                // The answer to a host key question, on its way back to
+                // `check_server_key`. The remaining handshake is the target's
+                // again from here, so the bound comes back with it.
+                Some(answer) = host_key_answers.recv() => {
+                    handshake_deadline.as_mut().reset(
+                        tokio::time::Instant::now() + HANDSHAKE_TIMEOUT,
+                    );
+                    if let Some(reply) = outstanding_host_key.take() {
+                        // A closed receiver means the connection future is
+                        // already gone; there is nothing left to answer.
+                        let _ = reply.send(answer);
                     }
                 }
                 () = &mut handshake_deadline => {

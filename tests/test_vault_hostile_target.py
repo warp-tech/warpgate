@@ -260,3 +260,59 @@ def test_a_jump_host_that_never_opens_the_tunnel_is_given_up_on(
 
     user, target = target_on(api, honest_target)
     assert connect(processes, cert_wg, user, target, timeout)[0] == 0
+
+
+def test_a_target_that_answers_with_a_host_key_and_then_stalls_is_given_up_on(
+    processes, cert_wg, honest_target, stub_vault, api, timeout
+):
+    """The handshake deadline pauses for a host key decision. It must resume.
+
+    Warpgate stops its own 30s handshake bound while an unknown host key is
+    outstanding, because under `Prompt` that wait belongs to a person reading a
+    fingerprint rather than to the target. The first version of that pause never
+    ended: the deadline was pushed a year out and nothing brought it back. The
+    verification mode is not even known at that point in the code — it is read
+    later — so `AutoAccept`, which answers in microseconds with nobody waiting,
+    cancelled the bound just as thoroughly.
+
+    This server sends the key exchange reply carrying its host key and then
+    nothing at all, so the transport never completes. The key is unknown (it is
+    generated per instance), the fixture accepts it automatically, and the
+    remaining handshake is then the target's again — which is the moment the
+    bound has to come back. Without that it is held until the inactivity
+    timeout, five minutes by default.
+    """
+    from .stalling_host_key_server import StallingHostKeyServer
+    from .test_ssh_target_cert_auth import connect, start
+
+    server = StallingHostKeyServer()
+    server.start()
+    try:
+        user, target = target_on(api, server.port)
+        started = time.time()
+        client = start(processes, cert_wg, user, target, "-tt")
+        shown = client.communicate(timeout=180)[0].decode(errors="replace")
+        elapsed = time.time() - started
+
+        assert server.connections > 0, "the stalling server was never reached"
+        assert server.key_delivered.wait(1), (
+            "the server never got as far as sending its host key, so the pause "
+            "under test was never entered"
+        )
+        assert client.returncode != 0
+
+        # Warpgate's own message, not merely a dropped connection: the target is
+        # unreachable for several reasons here and only one of them is the one
+        # being measured.
+        assert "never completed the handshake" in shown, shown[-400:]
+
+        # The bound is 30s, and the inactivity timeout it must not fall through
+        # to is 300s. Anything past 90s means the pause never ended.
+        assert elapsed < 90, (
+            f"the gateway waited {elapsed:.0f}s after the host key was accepted"
+        )
+    finally:
+        server.stop()
+
+    user, target = target_on(api, honest_target)
+    assert connect(processes, cert_wg, user, target, timeout)[0] == 0
