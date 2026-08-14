@@ -117,6 +117,10 @@ def main():
         signal.signal(sig, lambda *_: sys.exit(130))
 
     collect()
+    # The tree may have moved since the binary was last built — by an edit, by a
+    # killed run, by a checkout. Nothing records what a binary was built from,
+    # so it is rebuilt rather than trusted.
+    subprocess.run(["cargo", "build", "--bin", "warpgate"], cwd=REPO, capture_output=True)
     results = []
     for name, path, old, new in MUTATIONS:
         expected = DISCRIMINATES.get(name, [])
@@ -175,6 +179,16 @@ def main():
         finally:
             source.write_text(original)
             IN_FLIGHT.pop(str(source), None)
+            # Rebuilt here, not only after mutating. The integration suite runs
+            # the binary, and restoring the source does not restore the
+            # executable — so the next guard's baseline ran against *this*
+            # guard's mutation and failed, and the run recorded "already
+            # failing", which is the W-25b verdict this experiment exists to
+            # test. Every one of the three in the first run followed a
+            # `discriminates`, which is exactly when the binary is left mutated.
+            subprocess.run(
+                ["cargo", "build", "--bin", "warpgate"], cwd=REPO, capture_output=True
+            )
 
     subprocess.run(["cargo", "build", "--bin", "warpgate"], cwd=REPO, capture_output=True)
     good = [r for r in results if r["status"] == "discriminates"]
