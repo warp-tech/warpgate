@@ -228,7 +228,7 @@ clusters:
   name: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
 contexts:
 - context:
-    cluster: ${JSON.stringify(`warpgate-${opt.targetName}` ?? 'target')}
+    cluster: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
     namespace: ${JSON.stringify(namespace)}
     user: ${JSON.stringify(context)}
   name: ${JSON.stringify(context)}
