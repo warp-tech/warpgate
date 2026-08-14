@@ -9,11 +9,14 @@ use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
+use url::form_urlencoded;
+use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common::auth::AuthCredential;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::get_client_ip_addr;
+use warpgate_common_http::warpgate_csp_with_script_nonce;
 use warpgate_core::ConfigProvider;
 use warpgate_core::auth::submit_credential;
 use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
@@ -104,7 +107,10 @@ enum GetSsoKubernetesConfigsResponse {
 
 fn make_redirect_url(err: &str) -> String {
     error!("SSO error: {err}");
-    format!("/@warpgate?login_error={err}")
+    let query = form_urlencoded::Serializer::new(String::new())
+        .append_pair("login_error", err)
+        .finish();
+    format!("/@warpgate?{query}")
 }
 
 /// Only site-relative paths are accepted as post-login redirect targets. An
@@ -198,7 +204,7 @@ impl Api {
         ctx: Data<&UnauthenticatedRequestContext>,
         data: Form<ReturnToSsoFormData>,
         state: Query<Option<String>>,
-    ) -> Result<ReturnToSsoPostResponse, WarpgateError> {
+    ) -> Result<Response<ReturnToSsoPostResponse>, WarpgateError> {
         let url = self
             .api_return_to_sso_get_common(
                 req,
@@ -209,22 +215,26 @@ impl Api {
             )
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
-        let serialized_url = serde_json::to_string(&url)?;
+
+        let csp_nonce = Uuid::new_v4().simple().to_string();
+        let serialized_url = html_escape::encode_script(&serde_json::to_string(&url)?).to_string();
         let attr_url = html_escape::encode_double_quoted_attribute(&url);
         let text_url = html_escape::encode_text(&url);
-        Ok(ReturnToSsoPostResponse::Redirect(
+        Ok(Response::new(ReturnToSsoPostResponse::Redirect(
             poem_openapi::payload::Html(format!(
                 "<!doctype html>\n
                 <html>
-                    <script>
-                        location.href = {serialized_url};
-                    </script>
+                    <script nonce=\"{csp_nonce}\">location.href = {serialized_url};</script>
                     <body>
                         Redirecting to <a href=\"{attr_url}\">{text_url}</a>...
                     </body>
                 </html>
             "
             )),
+        ))
+        .header(
+            "content-security-policy",
+            warpgate_csp_with_script_nonce(&csp_nonce),
         ))
     }
 
@@ -458,7 +468,15 @@ impl Api {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_safe_redirect_target, post_login_redirect};
+    use super::{is_safe_redirect_target, make_redirect_url, post_login_redirect};
+
+    #[test]
+    fn error_redirect_is_site_relative_and_escaped() {
+        assert_eq!(
+            make_redirect_url("No user matching a&b@example.com"),
+            "/@warpgate?login_error=No+user+matching+a%26b%40example.com"
+        );
+    }
 
     #[test]
     fn accepts_relative_paths() {
