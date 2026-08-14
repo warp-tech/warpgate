@@ -1145,7 +1145,7 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path = std::env::temp_dir().join("warpgate-vault-redirect-test-secret");
+        let secret_id_path = std::env::temp_dir().join(format!("wg-redirect-{}", std::process::id()));
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1186,7 +1186,7 @@ mod tests {
         ))
         .await;
 
-        let secret_id_path = std::env::temp_dir().join("warpgate-vault-endless-test-secret");
+        let secret_id_path = std::env::temp_dir().join(format!("wg-endless-{}", std::process::id()));
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let mut config = approle_config(vault, secret_id_path);
@@ -1239,7 +1239,7 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path = std::env::temp_dir().join("warpgate-vault-oversized-test-secret");
+        let secret_id_path = std::env::temp_dir().join(format!("wg-oversized-{}", std::process::id()));
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1276,7 +1276,7 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path = std::env::temp_dir().join("warpgate-vault-no-lease-test-secret");
+        let secret_id_path = std::env::temp_dir().join(format!("wg-no-lease-{}", std::process::id()));
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1315,7 +1315,7 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path = std::env::temp_dir().join("warpgate-vault-no-key-test-secret");
+        let secret_id_path = std::env::temp_dir().join(format!("wg-no-key-{}", std::process::id()));
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1365,7 +1365,7 @@ mod tests {
             }
         });
 
-        let secret_id_path = std::env::temp_dir().join("warpgate-vault-tls-test-secret");
+        let secret_id_path = std::env::temp_dir().join(format!("wg-tls-{}", std::process::id()));
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(
@@ -1409,7 +1409,7 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path = std::env::temp_dir().join("warpgate-vault-lease-test-secret");
+        let secret_id_path = std::env::temp_dir().join(format!("wg-lease-{}", std::process::id()));
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1452,7 +1452,7 @@ mod tests {
             .await
             .unwrap();
 
-            let secret_id_path = std::env::temp_dir().join("warpgate-vault-marker-test-secret");
+            let secret_id_path = std::env::temp_dir().join(format!("wg-marker-{}", std::process::id()));
             std::fs::write(&secret_id_path, "secret-id").unwrap();
 
             let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();

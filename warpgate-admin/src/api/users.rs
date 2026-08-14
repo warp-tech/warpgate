@@ -11,6 +11,7 @@ use warpgate_common::{
     AdminPermission, AdminRole as AdminRoleConfig, User as UserConfig,
     UserRequireCredentialsPolicy, WarpgateError,
 };
+use warpgate_common_http::auth::TOKEN_ATTRIBUTIONS;
 use warpgate_core::logging::{AuditEvent, format_related_ids};
 use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
@@ -24,8 +25,16 @@ use crate::api::common::case_insensitive_search;
 /// splits on the colon. A name with one in it silently shifts every field, so
 /// the person a session is attributed to is not the person who opened it —
 /// which is the single claim the certificate feature makes.
+/// The names the API tokens are attributed under are also refused, for the
+/// same reason one field further along: `attribution()` puts `admin-token` into
+/// the key ID when the admin API token drives a session, and nothing stopped an
+/// admin creating a user by that name. Two sessions with different actors then
+/// read identically in the target's log and in Vault's, which is the pair of
+/// records this feature exists to make trustworthy.
 fn username_is_well_formed(username: &str) -> bool {
-    !username.is_empty() && !username.contains(':')
+    !username.is_empty()
+        && !username.contains(':')
+        && !TOKEN_ATTRIBUTIONS.contains(&username)
 }
 
 #[derive(Object)]
@@ -905,6 +914,10 @@ mod tests {
         // rather than authenticated.
         assert_eq!(field(&key_id("root:admin"), 1), "root");
         assert!(!username_is_well_formed("root:admin"));
+
+        // A token is not a person, and a person may not take a token's name.
+        assert!(!username_is_well_formed("admin-token"));
+        assert!(!username_is_well_formed("cluster-token"));
 
         assert!(!username_is_well_formed(":"));
         assert!(!username_is_well_formed("trailing:"));

@@ -219,6 +219,17 @@ impl FullUserAuthorization {
     }
 }
 
+/// The names `attribution()` gives to the two tokens, and the names no user may
+/// have.
+///
+/// Exported so the admin API can refuse them: `attribution()` returns these
+/// into the certificate key ID, which the target's sshd log carries verbatim,
+/// and nothing stopped an admin creating a user called `admin-token`. A session
+/// opened by that person and one opened by the admin API token then read
+/// identically in the target's log and in Vault's audit log — the two records
+/// this feature exists to make trustworthy.
+pub const TOKEN_ATTRIBUTIONS: [&str; 2] = ["admin-token", "cluster-token"];
+
 impl RequestAuthorization {
     /// Returns a username if one is present (admin token has none)
     pub const fn username(&self) -> Option<&String> {
@@ -243,8 +254,8 @@ impl RequestAuthorization {
         match self {
             Self::Session(auth) => auth.username(),
             Self::UserToken { username, .. } => username,
-            Self::AdminToken => "admin-token",
-            Self::ClusterToken => "cluster-token",
+            Self::AdminToken => TOKEN_ATTRIBUTIONS[0],
+            Self::ClusterToken => TOKEN_ATTRIBUTIONS[1],
         }
     }
 

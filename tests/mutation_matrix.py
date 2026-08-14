@@ -99,8 +99,8 @@ MUTATIONS = [
     (
         "certificate: unexpected critical options refused",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        "let permitted = allowed_options.iter().find(|option| &option.name == name);",
-        "let permitted = Some(&SshCertificateCriticalOption { name: name.clone(), value: None });",
+        "        if named.peek().is_none() {",
+        "        if false {",
     ),
     # Three arms, three guards. This was one entry anchored on an `&&` chain
     # that no longer exists — the code became a match, the anchor stopped
@@ -193,8 +193,17 @@ MUTATIONS = [
         # exceed 30s then reads as the target failing to finish a handshake.
         "connection: authentication has its own budget",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        "        (SSHTargetAuth::Certificate(_), Some(per_call)) => AUTHENTICATION_TIMEOUT",
-        "        (SSHTargetAuth::Certificate(_), Some(_per_call)) if false => AUTHENTICATION_TIMEOUT",
+        # Disabled by neutralising the arithmetic, not by guarding the arm.
+        # The previous replacement renamed the binding to `_per_call` while the
+        # arm body still used `per_call`, so it did not compile — and a mutation
+        # that does not build measures nothing, which is this file's own rule.
+        # `cargo test` then produced no test output at all, and the verifier
+        # reported "could not run" for three runs before anyone read the build
+        # error. The matrix's `run_one` would have called it "did not compile",
+        # which is also not "caught"; two full runs had ended on the canary
+        # before reaching it, so nobody saw either.
+        "        (SSHTargetAuth::Certificate(_), Some(per_call)) => AUTHENTICATION_TIMEOUT\n            .max(per_call * VAULT_CALLS_PER_AUTHENTICATION + Duration::from_secs(5)),",
+        "        (SSHTargetAuth::Certificate(_), Some(per_call)) => AUTHENTICATION_TIMEOUT\n            .max(per_call * 0 + Duration::from_secs(0)),",
     ),
     (
         "connection: handshake deadline",
@@ -203,14 +212,30 @@ MUTATIONS = [
         "let handshake_deadline = tokio::time::sleep(Duration::from_secs(86400));",
     ),
     (
+        # The pin must survive a duplicate name. `.find()` took whichever entry
+        # the operator typed first, so a bare row beside a pinned one cancelled
+        # the pin silently while the admin UI still showed it.
+        "certificate: every matching pin is enforced, not the first",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        "        for option in named {",
+        "        for option in named.take(1) {",
+    ),
+    (
+        # A token is not a person, and a person may not take a token's name.
+        "users: a token attribution cannot be claimed as a username",
+        "warpgate-admin/src/api/users.rs",
+        "        && !TOKEN_ATTRIBUTIONS.contains(&username)",
+        "        && !TOKEN_ATTRIBUTIONS.contains(&\"nobody-has-this-name\")",
+    ),
+    (
         # The other half of the attribution claim. `key_id_field` sanitises a
         # username on its way into the certificate; this refuses to create one
         # that would need sanitising. It shipped with no test in either language
         # and no entry here — the only check in this feature with neither.
         "users: a username cannot contain the key ID separator",
         "warpgate-admin/src/api/users.rs",
-        "    !username.is_empty() && !username.contains(':')",
-        "    !username.is_empty()",
+        "        && !username.contains(':')",
+        "        && !username.is_empty()",
     ),
     (
         # The deadline is paused while a host key is being decided on. This is
@@ -239,8 +264,8 @@ MUTATIONS = [
         # recorded one as though it were.
         "auth: a token is not attributed as a person",
         "warpgate-common-http/src/auth.rs",
-        'Self::AdminToken => "admin-token",',
-        'Self::AdminToken => "admin",',
+        'pub const TOKEN_ATTRIBUTIONS: [&str; 2] = ["admin-token", "cluster-token"];',
+        'pub const TOKEN_ATTRIBUTIONS: [&str; 2] = ["admin", "cluster"];',
     ),
     (
         # The identity half. Reverting `role` to "is this the last hop" is the
@@ -445,6 +470,13 @@ DISCRIMINATES = {
     ],
     "vault: wrapping token redeemed once": [
         "test_a_wrapping_token_is_redeemed_once_and_the_secret_id_reused"
+    ],
+    "certificate: every matching pin is enforced, not the first": [
+        "a_bare_duplicate_does_not_cancel_a_pinned_value",
+        "conflicting_pins_refuse_everything_rather_than_picking_one",
+    ],
+    "users: a token attribution cannot be claimed as a username": [
+        "a_username_with_a_colon_would_shift_every_field_of_the_key_id"
     ],
     "users: a username cannot contain the key ID separator": [
         "a_username_with_a_colon_would_shift_every_field_of_the_key_id"

@@ -438,25 +438,40 @@ fn certificate_mismatch(
     }
 
     for (name, value) in certificate.critical_options().iter() {
-        let permitted = allowed_options.iter().find(|option| &option.name == name);
-        match permitted {
-            None => {
-                // Quoted with `{:?}`, which escapes control characters: this
-                // string comes out of the certificate and ends up on the
-                // connecting user's terminal, where a raw escape sequence would
-                // be executed rather than shown.
+        // The *strictest* matching entry, not the first one.
+        //
+        // `.find()` returned whichever the operator happened to type first. A
+        // config naming `force-command` twice — once bare, once pinned to a
+        // value — passed the mandatory-presence loop above on the pinned entry
+        // and then matched the bare one here, so any command at all was
+        // accepted while the admin UI showed a pin. Fails open, silently, and
+        // an operator with two rows on screen has no way to see which one is
+        // deciding.
+        //
+        // Duplicates are a configuration mistake rather than a feature, and
+        // every pin is enforced rather than one of them being picked. That also
+        // settles two pins that disagree: no value satisfies both, so the
+        // certificate is refused instead of one entry winning by position.
+        let mut named = allowed_options
+            .iter()
+            .filter(|option| &option.name == name)
+            .peekable();
+        if named.peek().is_none() {
+            // Quoted with `{:?}`, which escapes control characters: this string
+            // comes out of the certificate and ends up on the connecting user's
+            // terminal, where a raw escape sequence would be executed rather
+            // than shown.
+            return Some(format!(
+                "Vault issued a certificate carrying the critical option {name:?}, which this target does not allow"
+            ));
+        }
+        for option in named {
+            if let Some(expected) = &option.value
+                && expected != value
+            {
                 return Some(format!(
-                    "Vault issued a certificate carrying the critical option {name:?}, which this target does not allow"
+                    "Vault issued a certificate whose critical option {name:?} does not match the value configured for this target"
                 ));
-            }
-            Some(option) => {
-                if let Some(expected) = &option.value
-                    && expected != value
-                {
-                    return Some(format!(
-                        "Vault issued a certificate whose critical option {name:?} does not match the value configured for this target"
-                    ));
-                }
             }
         }
     }
@@ -2271,6 +2286,51 @@ mod tests {
         ) -> Option<String> {
             let (certificate, key) = carrying(carried);
             certificate_mismatch(&certificate, &key, PRINCIPAL, KEY_ID, configured, &[], None)
+        }
+
+        /// A duplicate name must not disable the pin.
+        ///
+        /// `.find()` took whichever entry the operator typed first, so a config
+        /// naming an option twice — once bare, once pinned — passed the
+        /// mandatory-presence check on the pinned entry and then matched the
+        /// bare one, accepting any value at all while the admin UI showed a
+        /// pin. The order of the two rows decided whether the target was
+        /// confined, and nothing on screen said so.
+        #[test]
+        fn a_bare_duplicate_does_not_cancel_a_pinned_value() {
+            for configured in [
+                vec![
+                    pinned("force-command", None),
+                    pinned("force-command", Some("/usr/bin/backup")),
+                ],
+                // Both orders, because the defect was entirely about order.
+                vec![
+                    pinned("force-command", Some("/usr/bin/backup")),
+                    pinned("force-command", None),
+                ],
+            ] {
+                let reason = verdict(&[("force-command", "/bin/sh")], &configured)
+                    .expect("a certificate whose command is not the pinned one");
+                assert!(
+                    reason.contains("does not match the value"),
+                    "refused for the wrong reason: {reason}"
+                );
+            }
+        }
+
+        /// Two pins that disagree cannot both be satisfied, so nothing may be.
+        #[test]
+        fn conflicting_pins_refuse_everything_rather_than_picking_one() {
+            let configured = [
+                pinned("force-command", Some("/usr/bin/backup")),
+                pinned("force-command", Some("/usr/bin/restore")),
+            ];
+            for offered in ["/usr/bin/backup", "/usr/bin/restore", "/bin/sh"] {
+                assert!(
+                    verdict(&[("force-command", offered)], &configured).is_some(),
+                    "{offered} satisfied a pair of pins that disagree"
+                );
+            }
         }
 
         /// The removal attack. Someone with role-write but no right to sign does
