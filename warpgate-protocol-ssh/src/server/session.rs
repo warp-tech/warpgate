@@ -1202,7 +1202,7 @@ impl ServerSession {
                 }
             }
             RCEvent::Done | RCEvent::HostKeyReceived(_) => {}
-            RCEvent::HostKeyUnknown(key, reply) => {
+            RCEvent::HostKeyUnknown(key, _, _, reply) => {
                 self.handle_unknown_host_key(key, reply).await?;
             }
             RCEvent::ForwardedTcpIp(id, params) => {
