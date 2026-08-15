@@ -68,6 +68,16 @@ pub fn warpgate_csp_with_connect_src(extra_origin: Option<&str>) -> String {
     }
 }
 
+/// [`WARPGATE_CSP`] with a single-use nonce added to `script-src`, for a page
+/// that must run one inline script under the strict policy (the SSO POST
+/// redirect interstitial). The same nonce must appear on the `<script>` tag.
+pub fn warpgate_csp_with_script_nonce(nonce: &str) -> String {
+    WARPGATE_CSP.replace(
+        "script-src 'self';",
+        &format!("script-src 'self' 'nonce-{nonce}';"),
+    )
+}
+
 pub const WARPGATE_PLAYGROUND_CSP: &str = "default-src 'self'; \
 script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; \
 style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; \

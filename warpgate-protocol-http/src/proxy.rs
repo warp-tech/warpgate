@@ -349,8 +349,7 @@ pub async fn proxy_normal_request(
         && ctx
             .parameters()
             .await
-            .map(|p| p.show_session_menu || p.banner_text().is_some())
-            .unwrap_or(true);
+            .map_or(true, |p| p.show_session_menu || p.banner_text().is_some());
     copy_client_body(client_response, &mut response, embed_ui).await?;
 
     log_request_result(

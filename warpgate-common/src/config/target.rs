@@ -397,6 +397,7 @@ pub enum RdpTlsSecurity {
     Tls10Unsafe,
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn _default_rdp_tls_security() -> Option<RdpTlsSecurity> {
     Some(RdpTlsSecurity::default())
 }

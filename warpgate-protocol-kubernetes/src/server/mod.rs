@@ -17,7 +17,7 @@ use crate::correlator::RequestCorrelator;
 use crate::server::client_certs::{AcceptAnyClientCert, CertificateCapturingAcceptor};
 use crate::server::handlers::handle_api_request;
 
-pub(crate) mod auth;
+pub mod auth;
 mod client_certs;
 mod handlers;
 

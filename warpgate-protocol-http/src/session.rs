@@ -165,7 +165,7 @@ pub struct SessionStore {
     this: Weak<Mutex<Self>>,
 }
 
-pub(crate) const SESSION_ID_SESSION_KEY: &str = "session_id";
+pub const SESSION_ID_SESSION_KEY: &str = "session_id";
 const SESSION_TOUCH_SESSION_KEY: &str = "touched_at";
 const SESSION_TOUCH_DEBOUNCE_SECONDS: i64 = 60;
 

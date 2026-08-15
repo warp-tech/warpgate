@@ -508,7 +508,7 @@ impl DesktopRecorder {
             },
             // The target's response to a resize arrives as a recorded DesktopEvent::Resize,
             // so the request itself carries no playback value.
-            DesktopInput::Refresh | DesktopInput::Resize { .. } => return Ok(()),
+            DesktopInput::Refresh | DesktopInput::Resize { .. } |
             // A key with neither representation carries nothing to replay.
             DesktopInput::Key { .. } => return Ok(()),
         };

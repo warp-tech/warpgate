@@ -62,7 +62,7 @@ pub async fn run(
     let RdpTargetAuth::Password(auth) = &options.auth;
     // The viewer-supplied size may be odd or out of range; keep the initial desktop within
     // the same bounds the Display Control resize path enforces.
-    let (width, height) = MonitorLayoutEntry::adjust_display_size(width as u32, height as u32);
+    let (width, height) = MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
     let password = auth.password.reveal()?;
     let config = build_config(
         &options,
@@ -220,7 +220,7 @@ async fn send_resize(
     height: u16,
 ) -> Result<bool> {
     // The layout PDU rejects odd widths and sizes outside 200..=8192.
-    let (width, height) = MonitorLayoutEntry::adjust_display_size(width as u32, height as u32);
+    let (width, height) = MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
     match active_stage.encode_resize(width, height, None, None) {
         Some(frame) => {
             let frame = frame.context("encoding resize request")?;
@@ -306,11 +306,10 @@ async fn process_outputs(
     }
 
     for out in outputs {
-        if let ActiveStageOutput::GraphicsUpdate(region) = out {
-            if let Some(event) = encode_region(image, &region) {
+        if let ActiveStageOutput::GraphicsUpdate(region) = out
+            && let Some(event) = encode_region(image, &region) {
                 send_event(event_tx, abort_rx, event).await?;
             }
-        }
     }
     Ok(terminate)
 }
@@ -360,7 +359,7 @@ fn encode_region(image: &DecodedImage, region: &InclusiveRectangle) -> Option<De
     for row in 0..h {
         let src_start = ((top + row) * img_w + left) * 4;
         let src_row = &src[src_start..src_start + w * 4];
-        for s in src_row.chunks_exact(4) {
+        for s in src_row.as_chunks::<4>().0 {
             data.push(s[2]);
             data.push(s[1]);
             data.push(s[0]);

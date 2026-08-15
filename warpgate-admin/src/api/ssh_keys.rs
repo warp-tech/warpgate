@@ -50,8 +50,8 @@ enum SSHClientKeyKind {
 impl From<SSHClientKeyKind> for Algorithm {
     fn from(kind: SSHClientKeyKind) -> Self {
         match kind {
-            SSHClientKeyKind::Ed25519 => Algorithm::Ed25519,
-            SSHClientKeyKind::Rsa => Algorithm::Rsa {
+            SSHClientKeyKind::Ed25519 => Self::Ed25519,
+            SSHClientKeyKind::Rsa => Self::Rsa {
                 hash: Some(HashAlg::Sha512),
             },
         }
@@ -153,7 +153,7 @@ impl Api {
             }
         };
 
-        Ok(store_new_key(&admin, &body.label, &key, body.is_default).await?)
+        store_new_key(&admin, &body.label, &key, body.is_default).await
     }
 
     #[oai(
@@ -172,7 +172,7 @@ impl Api {
         let key = PrivateKey::random(&mut get_crypto_rng(), kind.into())
             .map_err(russh::keys::Error::from)?;
 
-        Ok(store_new_key(&admin, &label, &key, false).await?)
+        store_new_key(&admin, &label, &key, false).await
     }
 
     #[oai(

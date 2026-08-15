@@ -71,7 +71,7 @@ impl Api {
             let key = loop {
                 match handles.event_rx.recv().await {
                     Some(RCEvent::HostKeyReceived(key)) => break key,
-                    Some(RCEvent::HostKeyUnknown(key, reply)) => {
+                    Some(RCEvent::HostKeyUnknown(key, _, _, reply)) => {
                         let _ = reply.send(true);
                         break key;
                     }

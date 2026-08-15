@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use warpgate_common::TargetHTTPOptions;
 use warpgate_tls::TlsMode;
 
-pub const HTTP_CLIENT_IDLE_TTL: Duration = Duration::from_secs(10 * 60);
+pub const HTTP_CLIENT_IDLE_TTL: Duration = Duration::from_mins(10);
 pub const HTTP_CLIENT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 pub const HTTP_CLIENT_CACHE_VACUUM_INTERVAL: Duration = Duration::from_secs(60);
 

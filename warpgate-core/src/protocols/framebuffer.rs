@@ -141,7 +141,12 @@ impl Framebuffer {
             let Some(dst_row) = self.rgba.get_mut(dst_off..dst_off + cols * 4) else {
                 break;
             };
-            for (dst, src) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(SRC)) {
+            for (dst, src) in dst_row
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(src_row.as_chunks::<SRC>().0.iter())
+            {
                 dst.copy_from_slice(&convert(src));
             }
         }

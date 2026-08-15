@@ -194,7 +194,7 @@ fn advertised_peer_address(http_port: u16) -> std::io::Result<String> {
     }
 
     let ip = local_ip()?;
-    return Ok(format!("{ip}:{http_port}"));
+    Ok(format!("{ip}:{http_port}"))
 }
 
 fn local_ip() -> std::io::Result<IpAddr> {
