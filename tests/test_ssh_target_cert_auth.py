@@ -1446,9 +1446,19 @@ class TestAChainWithAJumpHost:
 
         user, jump, target = self._chain(api, cert_ssh_port, second)
 
-        # Trust the jump host the way an operator would: by using it. Until then
-        # traversing it to reach anything else is refused, which is its own
-        # assertion — a chain is only as checkable as its first hop.
+        # Asserted, not asserted-in-prose. This comment used to say the refusal
+        # "is its own assertion" and then not make one, and the verifier
+        # measured the consequence: the guard that refuses an untrusted jump
+        # host was credited to this test and passed with the guard disabled.
+        #
+        # Checking the target traverses the jump host, whose key nothing has
+        # trusted yet. Silently accepting it there would trust a host on the
+        # strength of a question about a different one.
+        with pytest.raises(sdk.ApiException) as refused:
+            api.check_ssh_host_key(sdk.CheckSshHostKeyRequest(target_id=target.id))
+        assert "untrusted host key" in str(refused.value.body), refused.value.body
+
+        # Now trust it the way an operator would: by using it.
         assert connect(processes, cert_wg, user, jump, timeout)[0] == 0
 
         jump_key = api.check_ssh_host_key(

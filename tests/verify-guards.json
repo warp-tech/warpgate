@@ -1,16 +1,16 @@
 {
-  "generated": "2026-08-15T04:44:49Z",
-  "head": "03cdec7fbb44d2ef4d7ce24aa1b36d900228467d",
+  "generated": "2026-08-15T06:43:05Z",
+  "head": "7e7437d70bfd68bb5bcceaea0e38232b72ee2c4d",
   "partial": true,
   "guards_total": 43,
   "measured": 1,
   "discriminating": 1,
   "results": [
     {
-      "guard": "connection: the handshake deadline resumes after a host key answer",
+      "guard": "connection: an untrusted jump host is refused, not traversed",
       "status": "discriminates",
       "tests": [
-        "test_a_target_that_answers_with_a_host_key_and_then_stalls_is_given_up_on"
+        "test_the_host_key_check_reports_the_target_and_not_the_jump_host"
       ],
       "passed_with_guard_off": []
     }
