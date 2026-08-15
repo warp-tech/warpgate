@@ -28,10 +28,22 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
-# Crates whose unit tests can discriminate a guard. Named in one place: the
-# collector and the failure reader used to carry their own copies, so a test
-# in a crate only one of them knew about was invisible to the other.
-RUST_CRATES = ("warpgate-vault", "warpgate-protocol-ssh", "warpgate-admin")
+# Crates whose unit tests can discriminate a guard — derived from the guards
+# themselves rather than typed out.
+#
+# It was a hand-written tuple twice over: first two copies that drifted apart,
+# then one copy that was simply incomplete. A guard was moved into
+# `warpgate-web-ssh`, its test went with it, and the verifier could not see the
+# test because nobody thought to extend the list. It refused rather than
+# guessing, which is the only reason this is a footnote and not another false
+# verdict — but a list that has to be remembered will be forgotten again.
+#
+# Every mutation names a file, and the crate is its first path segment. A guard
+# in a crate therefore brings that crate with it.
+def _crates_from_mutations() -> tuple[str, ...]:
+    seen = {path.split("/")[0] for _, path, _, _ in MUTATIONS}
+    # `warpgate` is the binary; its unit tests are not where guards are pinned.
+    return tuple(sorted(seen - {"warpgate"}))
 
 # Files currently rewritten in place, and their originals. A marker beside them
 # so anything else touching this tree can tell — the pre-commit hook refuses to
@@ -167,14 +179,23 @@ MUTATIONS = [
     (
         "connection: a host-key check stops before authenticating",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        "                            if hop.stops_after_host_key() {",
-        "                            if false {",
+        # Anchored on the predicate, not on the call site, so a unit test can
+        # decide it. The call-site mutation was pinned by an integration test
+        # asking a different question entirely, and measured as not
+        # discriminating — a real sshd refuses on its own, so "stopped after the
+        # key" and "carried on and got refused" look identical end to end.
+        "        matches!(self, Self::CheckedHost)",
+        "        false",
     ),
     (
         "web-ssh: connection errors are sanitised before the user sees them",
         "warpgate-web-ssh/src/manager.rs",
-        "                                    message: e.client_message(),",
-        "                                    message: e.to_string(),",
+        # Anchored on the named boundary rather than on a call inside the event
+        # loop. A test cannot stand at that call without driving a browser
+        # session, and the integration test credited with covering this guard
+        # turned out to exercise the SSH path instead — measured, not suspected.
+        "    error.client_message()",
+        "    error.to_string()",
     ),
     (
         "vault: certificate_ttl outside the allowed range is refused at config load",
@@ -421,6 +442,8 @@ CANARY = (
 # message, which needs a PTY — a test that only checks a non-zero exit code
 # cannot tell our refusal from the target's.
 #
+RUST_CRATES = _crates_from_mutations()
+
 # A guard with no entry here is reported, not skipped. Not knowing which test
 # discriminates a guard is the same state as not having one.
 DISCRIMINATES = {
@@ -439,7 +462,8 @@ DISCRIMINATES = {
         "test_the_host_key_check_reports_the_target_and_not_the_jump_host"
     ],
     "connection: a host-key check stops before authenticating": [
-        "test_checking_a_host_key_issues_no_certificate"
+        "a_host_key_check_stops_at_the_hop_it_asked_about",
+        "each_role_reports_and_stops_as_its_name_says",
     ],
     "connection: the inter-hop tunnel open is bounded": [
         "test_a_jump_host_that_never_opens_the_tunnel_is_given_up_on"
@@ -551,7 +575,7 @@ DISCRIMINATES = {
         "test_the_host_key_check_reports_the_target_and_not_the_jump_host"
     ],
     "web-ssh: connection errors are sanitised before the user sees them": [
-        "test_the_client_is_never_shown_the_issuers_own_words"
+        "a_browser_never_sees_the_error_s_own_words"
     ],
 }
 

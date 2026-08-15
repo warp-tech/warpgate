@@ -2001,6 +2001,56 @@ mod tests {
 
     use super::resolve_chain_ids;
 
+    use super::{HopRole, role};
+
+    /// A host key check must go no further than the hop it was asked about.
+    ///
+    /// Moved here from the integration suite on §8's terms, and the terms were
+    /// met rather than assumed: the guard was pinned by
+    /// `test_the_host_key_check_reports_the_target_and_not_the_jump_host`,
+    /// which asks *whose key is reported* — a different question — and the
+    /// verifier measured that it passes with the guard disabled. An
+    /// end-to-end run cannot separate "stopped after the key" from "carried on
+    /// and the target refused us anyway", because a real sshd refuses on its
+    /// own. Here there is no target to do the refusing.
+    ///
+    /// What the guard prevents is a *check* becoming a session: the admin
+    /// endpoint asks for a host key, and answering it must not leave Warpgate
+    /// authenticated to the target.
+    #[test]
+    fn a_host_key_check_stops_at_the_hop_it_asked_about() {
+        assert!(HopRole::CheckedHost.stops_after_host_key());
+
+        // Everything else carries on. A hop merely traversed on the way has
+        // more chain behind it, and an ordinary connection is not a check at
+        // all.
+        assert!(!HopRole::TraversedWhileChecking.stops_after_host_key());
+        assert!(!HopRole::Connecting.stops_after_host_key());
+    }
+
+    /// The role is decided by identity, and the two predicates follow from it.
+    ///
+    /// Pinned together because they are one decision read two ways: the hop the
+    /// caller named reports its key and stops; a hop on the way reports
+    /// nothing and continues; a plain connection reports every key and never
+    /// stops.
+    #[test]
+    fn each_role_reports_and_stops_as_its_name_says() {
+        let (asked_about, other) = (Uuid::new_v4(), Uuid::new_v4());
+
+        let checked = role(Some(asked_about), asked_about);
+        assert_eq!(checked, HopRole::CheckedHost);
+        assert!(checked.reports_host_key() && checked.stops_after_host_key());
+
+        let traversed = role(Some(asked_about), other);
+        assert_eq!(traversed, HopRole::TraversedWhileChecking);
+        assert!(!traversed.reports_host_key() && !traversed.stops_after_host_key());
+
+        let connecting = role(None, other);
+        assert_eq!(connecting, HopRole::Connecting);
+        assert!(connecting.reports_host_key() && !connecting.stops_after_host_key());
+    }
+
     #[test]
     fn resolve_chain_ids_returns_ordered_chain() {
         let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
