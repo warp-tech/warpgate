@@ -276,14 +276,31 @@ def test_a_target_that_answers_with_a_host_key_and_then_stalls_is_given_up_on(
     cancelled the bound just as thoroughly.
 
     This server sends the key exchange reply carrying its host key and then
-    nothing at all, so the transport never completes. The key is unknown (it is
-    generated per instance), the fixture accepts it automatically, and the
-    remaining handshake is then the target's again — which is the moment the
-    bound has to come back. Without that it is held until the inactivity
-    timeout, five minutes by default.
+    nothing at all, so the transport never completes. The key is unknown — it is
+    generated per instance — and the mode is set to `AutoAccept` below so the
+    answer comes straight back: that is what lifts the pause, and the remaining
+    handshake is the target's again from there, which is the moment the bound
+    has to come back.
+
+    Measured, not assumed. With the resume disabled and the mode left at its
+    default the test still passed, because under `Prompt` the answer never
+    arrives, the pause is never lifted, and the line under test never executes.
+    The verifier reported the guard as undiscriminated for exactly that reason.
     """
     from .stalling_host_key_server import StallingHostKeyServer
     from .test_ssh_target_cert_auth import connect, start
+
+    # Set explicitly, and this is the whole reason the test was worthless before.
+    # The default is `Prompt`, which waits for a human on a stdin the harness has
+    # closed — so the answer never came back, the pause was never lifted, and the
+    # line under test never ran at all. The mutation was inert and the test
+    # passed either way. The docstring said "the fixture accepts it
+    # automatically"; nothing in the fixture did.
+    api.update_parameters(
+        sdk.ParameterUpdate(
+            ssh_host_key_verification=sdk.SshHostKeyVerificationMode.AUTOACCEPT
+        )
+    )
 
     server = StallingHostKeyServer()
     server.start()

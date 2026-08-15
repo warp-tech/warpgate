@@ -1,16 +1,16 @@
 {
-  "generated": "2026-08-15T02:35:32Z",
-  "head": "f6ed35530b86b0a7c09f8ff2f316cb70904fa85c",
+  "generated": "2026-08-15T04:44:49Z",
+  "head": "03cdec7fbb44d2ef4d7ce24aa1b36d900228467d",
   "partial": true,
   "guards_total": 43,
   "measured": 1,
   "discriminating": 1,
   "results": [
     {
-      "guard": "web-ssh: connection errors are sanitised before the user sees them",
+      "guard": "connection: the handshake deadline resumes after a host key answer",
       "status": "discriminates",
       "tests": [
-        "a_browser_never_sees_the_error_s_own_words"
+        "test_a_target_that_answers_with_a_host_key_and_then_stalls_is_given_up_on"
       ],
       "passed_with_guard_off": []
     }
