@@ -298,11 +298,23 @@ const UNATTRIBUTED: &str = "unattributed";
 ///
 /// Substituted rather than refused: a name from a directory is not something
 /// the connecting user can fix mid-session.
-fn key_id_field(username: &str) -> String {
-    let field = username.replace(':', "_");
-    // A user can still collide with another user here, exactly as they already
-    // can through the colon. What they cannot do is produce the gateway's own
-    // attribution — the string a reader trusts to mean that no person did this.
+fn key_id_field(name: &str) -> String {
+    name.replace(':', "_")
+}
+
+/// A name that came from a person, as it may appear in a key ID field.
+///
+/// Everything `key_id_field` does, and one thing more: a name equal to an
+/// attribution is moved aside, because `attribution()` puts those in this very
+/// field when a token drives a session. A user of that name would otherwise be
+/// indistinguishable from the gateway in the target's sshd log and in Vault's.
+///
+/// Only for names that came from a person. The gateway's own attribution goes
+/// through `key_id_field` untouched — substituting it renames the thing it
+/// identifies, which is exactly what the first version of this did: two guards
+/// failed their baseline because `admin-token` had become `admin-token_`.
+fn user_key_id_field(name: &str) -> String {
+    let field = key_id_field(name);
     if TOKEN_ATTRIBUTIONS.contains(&field.as_str()) {
         return format!("{field}_");
     }
@@ -707,6 +719,22 @@ impl RCEvent {
 
 pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 
+/// Who asked, when no session user can be named.
+///
+/// Two kinds of name arrive here and they are indistinguishable as strings,
+/// which is the whole of the defect this exists to close. Carried as data
+/// instead of guessed from the text.
+#[derive(Clone, Debug)]
+pub enum IdentityHint {
+    /// The gateway's own attribution — `admin-token`, `cluster-token`. Kept
+    /// verbatim: it is the string a reader trusts to mean that no person did
+    /// this.
+    Gateway(String),
+    /// A person, named by whatever authenticated them. Sanitised like any
+    /// other name a person chose.
+    Person(String),
+}
+
 #[derive(Clone, Debug)]
 pub enum RCCommand {
     Connect(Vec<ResolvedSshChainHost>),
@@ -723,7 +751,7 @@ pub enum RCCommand {
         chain: Vec<ResolvedSshChainHost>,
         /// The hop the caller asked about, by identity rather than by position.
         target_id: Uuid,
-        requested_by: String,
+        requested_by: IdentityHint,
     },
     Channel(Uuid, ChannelOperation),
     ForwardTCPIP(String, u32),
@@ -770,7 +798,7 @@ pub struct RemoteClient {
     /// jump host's sshd log and Vault's issuance log both record a certificate
     /// that resolves to nobody. That is the attribution failure the whole
     /// feature exists to prevent, in the one caller that has no user to look up.
-    identity_hint: Option<String>,
+    identity_hint: Option<IdentityHint>,
 }
 
 pub struct RemoteClientHandles {
@@ -1560,9 +1588,13 @@ impl RemoteClient {
             None => None,
         };
 
-        let username = username
-            .or_else(|| self.identity_hint.clone())
-            .map(|name| key_id_field(&name));
+        let username = match username {
+            Some(name) => Some(user_key_id_field(&name)),
+            None => self.identity_hint.as_ref().map(|hint| match hint {
+                IdentityHint::Gateway(name) => key_id_field(name),
+                IdentityHint::Person(name) => user_key_id_field(name),
+            }),
+        };
         // Three fields either way. Dropping the middle one shifted the session
         // UUID into the position a reader takes for the username — so a log
         // line naming nobody was indistinguishable from one naming a user
@@ -2603,9 +2635,25 @@ mod tests {
         fn a_username_cannot_impersonate_the_gateways_own_attribution() {
             for reserved in warpgate_common_http::auth::TOKEN_ATTRIBUTIONS {
                 assert_ne!(
-                    crate::client::key_id_field(reserved),
+                    crate::client::user_key_id_field(reserved),
                     reserved,
                     "a user named {reserved} produces the attribution's own key ID"
+                );
+            }
+        }
+
+        /// And the other direction, which the first version of this fix did not
+        /// have. The gateway's own attribution must pass through unchanged:
+        /// substituting it renames the thing it identifies, and two guards
+        /// caught that by failing their baseline — the key ID had become
+        /// `warpgate:admin-token_:<session>`.
+        #[test]
+        fn the_gateways_own_attribution_is_left_alone() {
+            for reserved in warpgate_common_http::auth::TOKEN_ATTRIBUTIONS {
+                assert_eq!(
+                    crate::client::key_id_field(reserved),
+                    reserved,
+                    "the gateway's own attribution was renamed on its way to the key ID"
                 );
             }
         }

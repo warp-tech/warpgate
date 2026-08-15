@@ -3,7 +3,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_protocol_ssh::{ConnectionError, RCCommand, RCEvent, RemoteClient, resolve_ssh_chain};
+use warpgate_protocol_ssh::{IdentityHint, ConnectionError, RCCommand, RCEvent, RemoteClient, resolve_ssh_chain};
 
 use super::AdminContext;
 
@@ -56,7 +56,11 @@ impl Api {
                 // By identity. Which hop answers is decided by which target was
                 // asked about, not by which happens to be last.
                 target_id: body.target_id,
-                requested_by: admin.auth.attribution().to_owned(),
+                requested_by: if admin.auth.attribution_is_gateway() {
+                    IdentityHint::Gateway(admin.auth.attribution().to_owned())
+                } else {
+                    IdentityHint::Person(admin.auth.attribution().to_owned())
+                },
             },
             None,
         ));

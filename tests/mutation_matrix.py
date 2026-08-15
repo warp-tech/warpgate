@@ -282,16 +282,19 @@ MUTATIONS = [
     (
         "certificate: a username cannot shift the key ID fields",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        # Repointed when the attribution substitution joined this function: the
-        # colon replacement stopped being the whole body and became a binding.
-        '    let field = username.replace(\':\', "_");',
-        "    let field = username.to_owned();",
+        # Repointed twice: once when the attribution substitution joined this
+        # function, and again when it left for `user_key_id_field` because it
+        # was renaming the gateway itself.
+        "    name.replace(':', \"_\")",
+        "    name.to_owned()",
     ),
     (
         "certificate: a host-key check names the admin who asked",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        ".or_else(|| self.identity_hint.clone())",
-        ".or_else(|| None)",
+        # Repointed when the hint stopped being a bare string: the gateway's own
+        # attribution and a person's name are now carried apart.
+        "            None => self.identity_hint.as_ref().map(|hint| match hint {",
+        "            None => None.map(|hint: &IdentityHint| match hint {",
     ),
     (
         # And names it honestly: a token is not a person, and the first fix
@@ -846,16 +849,47 @@ def check_replacements_build(mutations, in_flight):
     whose mutation does not build has not been measured, whatever the tally
     says.
 
-    Checked in one pass, not one per guard: every selected replacement is
-    applied at once and the packages they touch are checked together, so the
-    whole matrix costs a single `cargo check` rather than forty-three. The
-    binary crate is included here even though it holds no discriminating tests,
-    because "it compiles" is a claim about all of the code, not the tested part.
+    Checked in as few passes as the matrix allows, not one per guard: the
+    replacements are applied together and the packages they touch are checked
+    in one `cargo check`, so the whole matrix costs two builds rather than
+    forty-seven. The binary crate is included even though it holds no
+    discriminating tests, because "it compiles" is a claim about all of the
+    code, not the tested part.
 
-    Applying them together also catches a pair that cannot coexist: once the
-    first has been applied the second's anchor is gone, and two mutations that
-    overlap in the same span cannot both be measured.
+    More than one pass is needed because some guards deliberately share an
+    anchor. `certificate: pinned critical options must be present` and
+    `certificate: a bare name permits without requiring` disable the same line
+    in opposite directions — one drops the requirement, the other makes it
+    unconditional — and neither is redundant. Two mutations over one span
+    cannot be applied at once, so they go in different rounds. The first
+    version of this check applied everything in one pass and refused the whole
+    matrix on exactly that, calling a deliberate pair a collision.
+
+    An anchor that vanishes *within* a round is still a refusal: that is an
+    overlap nobody declared, and two guards that quietly rewrite each other
+    cannot both be measured.
     """
+    # Guards sharing an anchor go in separate rounds; everything else rides
+    # along in the first.
+    rounds: list[list] = []
+    seen: dict[tuple[str, str], int] = {}
+    for mutation in mutations:
+        _, path, old, _ = mutation
+        turn = seen.get((path, old), 0)
+        seen[(path, old)] = turn + 1
+        while len(rounds) <= turn:
+            rounds.append([])
+        rounds[turn].append(mutation)
+
+    packages = []
+    for crate in sorted({path.split("/")[0] for _, path, _, _ in mutations}):
+        packages += ["-p", _package_of(crate)]
+
+    for round_number, batch in enumerate(rounds, start=1):
+        _check_one_round(batch, packages, in_flight, round_number, len(rounds))
+
+
+def _check_one_round(mutations, packages, in_flight, round_number, rounds):
     touched: dict[Path, str] = {}
     collided = []
     try:
@@ -873,22 +907,20 @@ def check_replacements_build(mutations, in_flight):
         if collided:
             lines = "\n".join(f"  {name}\n    in {path}" for name, path in collided)
             raise SystemExit(
-                f"{len(collided)} anchor(s) vanished once their neighbours were "
-                f"applied, so those guards overlap and cannot both be "
-                f"measured:\n{lines}"
+                f"{len(collided)} anchor(s) vanished once their neighbours in "
+                f"the same round were applied, so those guards overlap without "
+                f"saying so and cannot both be measured:\n{lines}"
             )
 
-        packages = []
-        for crate in sorted({path.split("/")[0] for _, path, _, _ in mutations}):
-            packages += ["-p", _package_of(crate)]
         built = run(["cargo", "check", "--all-targets", *packages])
         if built.returncode != 0:
             errors = [
                 line for line in built.stderr.splitlines() if line.startswith("error")
             ]
             raise SystemExit(
-                "a replacement does not compile, so the guard it belongs to "
-                "cannot be measured:\n"
+                f"a replacement does not compile (round {round_number} of "
+                f"{rounds}), so the guard it belongs to cannot be "
+                f"measured:\n"
                 + "\n".join(f"  {line}" for line in errors[:10])
                 + "\n\nRepoint it at something that builds before trusting any "
                 "number from this script."

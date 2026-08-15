@@ -258,6 +258,16 @@ impl RequestAuthorization {
         }
     }
 
+    /// Whether `attribution()` names the gateway rather than a person.
+    ///
+    /// `username()` already draws this line — it is `None` for exactly the two
+    /// token variants. This asks a different question with the same answer: not
+    /// "who is the user" but "is this string ours, to be kept verbatim".
+    #[must_use]
+    pub const fn attribution_is_gateway(&self) -> bool {
+        matches!(self, Self::AdminToken | Self::ClusterToken)
+    }
+
     /// Returns a user ID if present in the authorization context or nil UUID
     pub const fn user_id(&self) -> Uuid {
         match self {
