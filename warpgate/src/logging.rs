@@ -46,11 +46,16 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
     // operator turns on precisely when a session will not connect, and the output
     // most likely to be pasted into an issue.
     let env_filter = Arc::new(
-        ["aws_config", "aws_smithy_runtime", "aws_smithy_runtime_api", "aws_credential_types"]
-            .into_iter()
-            .try_fold(EnvFilter::from_default_env(), |filter, crate_name| {
-                Ok::<_, anyhow::Error>(filter.add_directive(format!("{crate_name}=warn").parse()?))
-            })?,
+        [
+            "aws_config",
+            "aws_smithy_runtime",
+            "aws_smithy_runtime_api",
+            "aws_credential_types",
+        ]
+        .into_iter()
+        .try_fold(EnvFilter::from_default_env(), |filter, crate_name| {
+            Ok::<_, anyhow::Error>(filter.add_directive(format!("{crate_name}=warn").parse()?))
+        })?,
     );
     let enable_colors = console::user_attended();
 

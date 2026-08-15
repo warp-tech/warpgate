@@ -77,11 +77,10 @@ fn validate_address(address: &str) -> Result<()> {
 }
 
 fn validate_segment(name: &str) -> Result<()> {
-    if name.is_empty()
-        || !name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    {
+    // The rule itself lives in `warpgate-common`, so the admin API can refuse a
+    // name at save time by the same test the signing path applies at connect
+    // time. Two copies of a rule are two rules eventually.
+    if !warpgate_common::vault_name_is_well_formed(name) {
         return Err(VaultError::InvalidRole(name.to_string()));
     }
     Ok(())
@@ -465,6 +464,15 @@ impl VaultClient {
     /// against it.
     pub const fn certificate_ttl(&self) -> Option<Duration> {
         self.config.certificate_ttl
+    }
+
+    /// The signing CA the operator pinned, if any.
+    ///
+    /// Exposed for the same reason as the TTL, one step further: the crate
+    /// speaks Vault and returns an OpenSSH string, so the party that parses
+    /// certificates is the one that compares them.
+    pub fn pinned_ca_public_key(&self) -> Option<&str> {
+        self.config.ca_public_key.as_deref()
     }
 
     /// Signs `public_key` into a short-lived OpenSSH user certificate, returned
@@ -1152,6 +1160,7 @@ mod tests {
             address,
             mount: "ssh-client-signer".to_owned(),
             default_role: "warpgate".to_owned(),
+            ca_public_key: None,
             auth: VaultAuth::AppRole {
                 role_id: "role-1".to_owned(),
                 secret_id_path,

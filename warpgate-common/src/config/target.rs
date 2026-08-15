@@ -70,6 +70,21 @@ pub struct SshTargetPublicKeyAuth {
     pub key_id: Option<Uuid>,
 }
 
+/// Whether a Vault mount or role name is one Vault can address.
+///
+/// The rule lives here rather than in `warpgate-vault` because two crates need
+/// it and only one of them can hold a Vault client: the admin API accepts a
+/// role at save time, and used to accept one the signing path would reject at
+/// connect time — an operator learning of the typo from a broken session
+/// rather than from the form that took it.
+#[must_use]
+pub fn vault_name_is_well_formed(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct SshTargetCertificateAuth {
     /// Vault signing role for this target; `None` uses the configured default

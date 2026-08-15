@@ -68,7 +68,11 @@ fn without_control_characters(text: &str) -> Cow<'_, str> {
 /// with the wrong one.
 pub(super) fn without_control_characters_except_newline(text: &str) -> Cow<'_, str> {
     if text.chars().any(|c| c.is_control() && c != '\n') {
-        Cow::Owned(text.chars().filter(|c| !c.is_control() || *c == '\n').collect())
+        Cow::Owned(
+            text.chars()
+                .filter(|c| !c.is_control() || *c == '\n')
+                .collect(),
+        )
     } else {
         Cow::Borrowed(text)
     }

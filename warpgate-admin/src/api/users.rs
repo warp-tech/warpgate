@@ -32,9 +32,7 @@ use crate::api::common::case_insensitive_search;
 /// read identically in the target's log and in Vault's, which is the pair of
 /// records this feature exists to make trustworthy.
 fn username_is_well_formed(username: &str) -> bool {
-    !username.is_empty()
-        && !username.contains(':')
-        && !TOKEN_ATTRIBUTIONS.contains(&username)
+    !username.is_empty() && !username.contains(':') && !TOKEN_ATTRIBUTIONS.contains(&username)
 }
 
 #[derive(Object)]
@@ -902,9 +900,7 @@ mod tests {
     fn a_username_with_a_colon_would_shift_every_field_of_the_key_id() {
         // What the target's sshd log carries, and what reads it back.
         let key_id = |username: &str| format!("warpgate:{username}:0e5f");
-        let field = |id: &str, n: usize| {
-            id.split(':').nth(n).unwrap_or_default().to_owned()
-        };
+        let field = |id: &str, n: usize| id.split(':').nth(n).unwrap_or_default().to_owned();
 
         assert!(username_is_well_formed("alice"));
         assert_eq!(field(&key_id("alice"), 1), "alice");

@@ -525,6 +525,22 @@ pub struct VaultConfig {
     /// there is no equivalent case here.
     #[serde(default)]
     pub ca_bundle: Option<PathBuf>,
+
+    /// The signing CA the target trusts, in OpenSSH public-key format
+    /// (`ssh-ed25519 AAAA…`), pinned so a certificate signed by anything else
+    /// is refused before it is offered.
+    ///
+    /// Every other check on Vault's response asks whether the certificate is
+    /// what was requested. This is the only one that asks *who signed it*. The
+    /// target's `TrustedUserCAKeys` is the real enforcement and would refuse
+    /// such a certificate anyway — but it does so after Warpgate has offered
+    /// it, and the refusal that comes back names the target rather than the
+    /// issuer that mis-signed. Pinning turns a confusing rejection into a
+    /// precise one, and detects a role rebound to a different CA.
+    ///
+    /// Left unset, nothing is checked here.
+    #[serde(default)]
+    pub ca_public_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]

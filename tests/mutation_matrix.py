@@ -255,8 +255,9 @@ MUTATIONS = [
         # A token is not a person, and a person may not take a token's name.
         "users: a token attribution cannot be claimed as a username",
         "warpgate-admin/src/api/users.rs",
-        "        && !TOKEN_ATTRIBUTIONS.contains(&username)",
-        "        && !TOKEN_ATTRIBUTIONS.contains(&\"nobody-has-this-name\")",
+        # Repointed after rustfmt folded the three conditions onto one line.
+        "&& !TOKEN_ATTRIBUTIONS.contains(&username)",
+        "&& !TOKEN_ATTRIBUTIONS.contains(&\"nobody-has-this-name\")",
     ),
     (
         # The other half of the attribution claim. `key_id_field` sanitises a
@@ -265,8 +266,8 @@ MUTATIONS = [
         # and no entry here — the only check in this feature with neither.
         "users: a username cannot contain the key ID separator",
         "warpgate-admin/src/api/users.rs",
-        "        && !username.contains(':')",
-        "        && !username.is_empty()",
+        "&& !username.contains(':')",
+        "&& !username.is_empty()",
     ),
     (
         # The deadline is paused while a host key is being decided on. This is
@@ -281,8 +282,10 @@ MUTATIONS = [
     (
         "certificate: a username cannot shift the key ID fields",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        '    username.replace(\':\', "_")',
-        "    username.to_owned()",
+        # Repointed when the attribution substitution joined this function: the
+        # colon replacement stopped being the whole body and became a binding.
+        '    let field = username.replace(\':\', "_");',
+        "    let field = username.to_owned();",
     ),
     (
         "certificate: a host-key check names the admin who asked",
@@ -332,10 +335,12 @@ MUTATIONS = [
         "if key_id.chars().any(char::is_control) {",
     ),
     (
+        # Repointed when the rule moved to `warpgate-common`, so the admin API
+        # could refuse at save time by the same test the signing path applies.
         "vault: mount and role stay one path segment",
-        "warpgate-vault/src/client.rs",
-        "|| !name\n            .chars()\n            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')",
-        "|| false",
+        "warpgate-common/src/config/target.rs",
+        "        && name\n            .chars()\n            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')",
+        "        && true",
     ),
     (
         # No discriminating test yet, and the matrix says so rather than the
@@ -407,6 +412,38 @@ MUTATIONS = [
         "warpgate-vault/src/client.rs",
         "if let Some(entry) = cached.as_ref()\n            && entry.source.as_str() == cred.as_str()",
         "if let Some(entry) = cached.as_ref()\n            && false",
+    ),
+    (
+        # The gateway's own attribution is reachable as a username through five
+        # of the six paths that create one. Held where the key ID is built, so
+        # which path created the user stops mattering.
+        "certificate: a username cannot impersonate the gateway's attribution",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        'if TOKEN_ATTRIBUTIONS.contains(&field.as_str()) {\n        return format!("{field}_");\n    }',
+        'if false {\n        return format!("{field}_");\n    }',
+    ),
+    (
+        # Validated at connect time already; the guard is that the admin API
+        # refuses the same name at save time, where the operator can fix it.
+        "admin: a Vault role the signing path would refuse is refused on save",
+        "warpgate-admin/src/api/targets.rs",
+        "        .is_none_or(|role| warpgate_common::vault_name_is_well_formed(role))",
+        "        .is_none_or(|_| true)",
+    ),
+    (
+        # The one response-side property that had no check at all: every other
+        # asks whether the certificate matches the request, none asked who
+        # signed it.
+        "certificate: the signing CA must be the pinned one",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        "    if certificate.signature_key() == expected.key_data() {\n        return None;\n    }",
+        "    if true {\n        return None;\n    }",
+    ),
+    (
+        "connection: a chain missing the host asked about is refused",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        "    check_target.is_none_or(|asked_about| hops.contains(&asked_about))",
+        "    check_target.is_none_or(|asked_about| asked_about == asked_about)",
     ),
 ]
 
@@ -531,6 +568,21 @@ DISCRIMINATES = {
     ],
     "certificate: a target refusal names the validity window": [
         "test_certificate_that_is_not_yet_valid"
+    ],
+    "certificate: a username cannot impersonate the gateway's attribution": [
+        "a_username_cannot_impersonate_the_gateways_own_attribution"
+    ],
+    "admin: a Vault role the signing path would refuse is refused on save": [
+        "a_role_the_signing_path_would_refuse_is_refused_at_save_time"
+    ],
+    "admin: a Vault role the signing path would refuse is refused on save": [
+        "a_role_the_signing_path_would_refuse_is_refused_at_save_time"
+    ],
+    "certificate: the signing CA must be the pinned one": [
+        "a_certificate_from_an_unpinned_ca_is_refused"
+    ],
+    "connection: a chain missing the host asked about is refused": [
+        "a_chain_without_the_host_asked_about_cannot_answer"
     ],
     "certificate: lifetime is bounded": ["a_certificate_outliving_the_bound_is_refused"],
     "certificate: the returned window must match what was asked for": [
@@ -771,6 +823,82 @@ def check_anchors(mutations):
         )
 
 
+def _package_of(crate_dir: str) -> str:
+    """The Cargo package name for a directory, read rather than assumed.
+
+    They match in this workspace today. Reading it costs one line and removes a
+    convention from the set of things a future rename can quietly break.
+    """
+    manifest = (REPO / crate_dir / "Cargo.toml").read_text()
+    for line in manifest.splitlines():
+        if line.startswith("name"):
+            return line.split("=", 1)[1].strip().strip('"')
+    raise SystemExit(f"{crate_dir}/Cargo.toml names no package")
+
+
+def check_replacements_build(mutations, in_flight):
+    """Every replacement must compile, before anything is measured.
+
+    The rule is stated at the top of this file and has been broken twice. W-103
+    renamed a binding the arm body still used; W-107 dropped the `{}` from a
+    format string that still passed two arguments. Both were found hours into a
+    run, when the guard's turn finally came and the build failed — and a guard
+    whose mutation does not build has not been measured, whatever the tally
+    says.
+
+    Checked in one pass, not one per guard: every selected replacement is
+    applied at once and the packages they touch are checked together, so the
+    whole matrix costs a single `cargo check` rather than forty-three. The
+    binary crate is included here even though it holds no discriminating tests,
+    because "it compiles" is a claim about all of the code, not the tested part.
+
+    Applying them together also catches a pair that cannot coexist: once the
+    first has been applied the second's anchor is gone, and two mutations that
+    overlap in the same span cannot both be measured.
+    """
+    touched: dict[Path, str] = {}
+    collided = []
+    try:
+        for name, path, old, new in mutations:
+            source = REPO / path
+            if source not in touched:
+                touched[source] = source.read_text()
+                in_flight[str(source)] = touched[source]
+            current = source.read_text()
+            if old not in current:
+                collided.append((name, path))
+                continue
+            source.write_text(current.replace(old, new, 1))
+
+        if collided:
+            lines = "\n".join(f"  {name}\n    in {path}" for name, path in collided)
+            raise SystemExit(
+                f"{len(collided)} anchor(s) vanished once their neighbours were "
+                f"applied, so those guards overlap and cannot both be "
+                f"measured:\n{lines}"
+            )
+
+        packages = []
+        for crate in sorted({path.split("/")[0] for _, path, _, _ in mutations}):
+            packages += ["-p", _package_of(crate)]
+        built = run(["cargo", "check", "--all-targets", *packages])
+        if built.returncode != 0:
+            errors = [
+                line for line in built.stderr.splitlines() if line.startswith("error")
+            ]
+            raise SystemExit(
+                "a replacement does not compile, so the guard it belongs to "
+                "cannot be measured:\n"
+                + "\n".join(f"  {line}" for line in errors[:10])
+                + "\n\nRepoint it at something that builds before trusting any "
+                "number from this script."
+            )
+    finally:
+        for source, original in touched.items():
+            source.write_text(original)
+            in_flight.pop(str(source), None)
+
+
 def write_artifact(*, partial: bool, results: list, refused: str | None, mode: str = "full"):
     """The run's own record, so a claim about coverage can be checked later.
 
@@ -1000,6 +1128,7 @@ def main():
     check_anchors(selected + [CANARY])
     check_no_duplicate_entries()
     check_discriminators(selected)
+    check_replacements_build(selected + [CANARY], IN_FLIGHT)
 
     if named_mode:
         results = verify_named(selected)

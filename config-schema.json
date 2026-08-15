@@ -958,6 +958,14 @@
           ],
           "default": null
         },
+        "ca_public_key": {
+          "description": "The signing CA the target trusts, in OpenSSH public-key format\n(`ssh-ed25519 AAAA…`), pinned so a certificate signed by anything else\nis refused before it is offered.\n\nEvery other check on Vault's response asks whether the certificate is\nwhat was requested. This is the only one that asks *who signed it*. The\ntarget's `TrustedUserCAKeys` is the real enforcement and would refuse\nsuch a certificate anyway — but it does so after Warpgate has offered\nit, and the refusal that comes back names the target rather than the\nissuer that mis-signed. Pinning turns a confusing rejection into a\nprecise one, and detects a role rebound to a different CA.\n\nLeft unset, nothing is checked here.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "certificate_ttl": {
           "description": "Lifetime asked for when signing. Vault clamps this to the role's\n`max_ttl`, so it can only shorten what the role already allows — set it\nto hold the window down without editing Vault. Left unset, the role's own\nTTL decides.",
           "type": [

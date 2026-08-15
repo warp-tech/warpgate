@@ -34,6 +34,7 @@ use warpgate_common::{
     MAX_CERTIFICATE_LIFETIME, SSHTargetAuth, SessionId, SshCertificateCriticalOption,
     TargetOptions, TargetSSHOptions, WarpgateError,
 };
+use warpgate_common_http::auth::TOKEN_ATTRIBUTIONS;
 use warpgate_core::{ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
@@ -91,9 +92,16 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long authentication may take, when nothing else decides.
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The worst case a certificate authentication can spend on Vault: a metadata
-/// fetch, a login and a sign, plus — on a `403` — one re-login and a second
-/// sign.
+/// The worst case a certificate authentication can spend on Vault, counted in
+/// operations the client bounds rather than in HTTP requests: a token, a sign,
+/// then — on a `403` — a second token and a second sign. Four, with one for
+/// margin.
+///
+/// A metadata fetch does not add to this. It happens inside `login_body()`,
+/// which `token()` wraps in a single `config.timeout` together with the login
+/// itself, so a method fetching twice still spends one bounded operation
+/// getting a token. Counting requests instead of bounds is what made this
+/// constant look wrong when it was not.
 const VAULT_CALLS_PER_AUTHENTICATION: u32 = 5;
 
 /// How long authentication may take, as distinct from the transport handshake.
@@ -280,10 +288,63 @@ const UNATTRIBUTED: &str = "unattributed";
 /// person. The admin API refuses one now; a name arriving from an IdP never
 /// passes through the admin API, so the structure is held here too.
 ///
+/// A name equal to an attribution is held here for the same reason and by the
+/// same argument. `attribution()` puts `admin-token` in this field when the
+/// admin API token drives a session, so a user of that name reads in the
+/// target's log exactly as the token does. The admin API refuses it — and is
+/// one of six paths that create a user. SSO auto-provisioning inserts the
+/// IdP's `preferred_username` directly, and the two CLI commands insert what
+/// the operator typed, so the refusal is not on the path that matters.
+///
 /// Substituted rather than refused: a name from a directory is not something
 /// the connecting user can fix mid-session.
 fn key_id_field(username: &str) -> String {
-    username.replace(':', "_")
+    let field = username.replace(':', "_");
+    // A user can still collide with another user here, exactly as they already
+    // can through the colon. What they cannot do is produce the gateway's own
+    // attribution — the string a reader trusts to mean that no person did this.
+    if TOKEN_ATTRIBUTIONS.contains(&field.as_str()) {
+        return format!("{field}_");
+    }
+    field
+}
+
+/// Whether a host-key check can be answered by this chain at all.
+///
+/// The walk decides each hop's role by identity, so a `check_target` naming no
+/// hop leaves every one of them `TraversedWhileChecking`: none reports its key,
+/// none stops the walk, and the caller is handed a live session and no answer.
+/// Checked before the first connection rather than after the last, because a
+/// question this chain cannot answer is not worth opening a socket for.
+///
+/// Unreachable while the chain is built from the target being asked about,
+/// which is exactly the assumption deciding roles by identity exists to stop
+/// depending on.
+fn chain_can_answer(check_target: Option<Uuid>, hops: &[Uuid]) -> bool {
+    check_target.is_none_or(|asked_about| hops.contains(&asked_about))
+}
+
+/// Whether the certificate was signed by the CA the operator pinned.
+///
+/// Separate from `certificate_mismatch` because it asks a different question.
+/// Every check there compares the response against the request — is this the
+/// key ID we asked for, the principal, the window. This one asks who signed it,
+/// which the request cannot answer.
+///
+/// A pinned key that will not parse is a refusal, not a warning skipped over: a
+/// typo in the config would otherwise turn the check off silently, which is the
+/// failure mode a pin exists to prevent.
+fn certificate_signer_mismatch(certificate: &Certificate, pinned: Option<&str>) -> Option<String> {
+    let pinned = pinned?;
+    let Ok(expected) = PublicKey::from_openssh(pinned) else {
+        return Some(
+            "The pinned Vault CA public key in the configuration could not be parsed".to_owned(),
+        );
+    };
+    if certificate.signature_key() == expected.key_data() {
+        return None;
+    }
+    Some("Vault issued a certificate signed by a CA other than the pinned one".to_owned())
 }
 
 fn certificate_mismatch(
@@ -959,8 +1020,7 @@ impl RemoteClient {
                         self.tcpip_forward(address, port).await?;
                     }
 
-                    let forwards = std::mem::take(&mut self
-                        .pending_streamlocal_forwards);
+                    let forwards = std::mem::take(&mut self.pending_streamlocal_forwards);
                     for socket_path in forwards {
                         self.streamlocal_forward(socket_path).await?;
                     }
@@ -1111,6 +1171,17 @@ impl RemoteClient {
         Option<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>)>,
         ConnectionError,
     > {
+        if !chain_can_answer(
+            check_target,
+            &chain.iter().map(|hop| hop.id).collect::<Vec<_>>(),
+        ) {
+            error!(
+                ?check_target,
+                "The chain does not contain the host that was asked about"
+            );
+            return Err(ConnectionError::Resolve);
+        }
+
         let mut iter = chain.into_iter();
         let first_hop = iter.next().ok_or(ConnectionError::Resolve)?;
         let first_id = first_hop.id;
@@ -1631,15 +1702,20 @@ impl RemoteClient {
                         describe_time(certificate.valid_before_time()),
                     );
 
-                    if let Some(reason) = certificate_mismatch(
-                        &certificate,
-                        key.public_key(),
-                        username,
-                        &key_id,
-                        &auth.allowed_critical_options,
-                        &auth.allowed_extensions,
-                        vault.certificate_ttl(),
-                    ) {
+                    if let Some(reason) =
+                        certificate_signer_mismatch(&certificate, vault.pinned_ca_public_key())
+                            .or_else(|| {
+                                certificate_mismatch(
+                                    &certificate,
+                                    key.public_key(),
+                                    username,
+                                    &key_id,
+                                    &auth.allowed_critical_options,
+                                    &auth.allowed_extensions,
+                                    vault.certificate_ttl(),
+                                )
+                            })
+                    {
                         // Surfaced to the user, not only to the log: a session
                         // that dies with "the target rejected you" sends whoever
                         // is debugging it to the wrong machine entirely.
@@ -1997,9 +2073,7 @@ mod tests {
 
     use uuid::Uuid;
 
-    use super::resolve_chain_ids;
-
-    use super::{HopRole, role};
+    use super::{HopRole, resolve_chain_ids, role};
 
     /// A host key check must go no further than the hop it was asked about.
     ///
@@ -2127,6 +2201,61 @@ mod tests {
         fn verdict(valid_after: u64, valid_before: u64) -> Option<String> {
             let (certificate, key) = issued(valid_after, valid_before);
             certificate_mismatch(&certificate, &key, PRINCIPAL, KEY_ID, &[], &[], None)
+        }
+
+        /// The one response-side property with no check at all until now: every
+        /// other asks whether the certificate matches the request, and none
+        /// asked who signed it. The CA here is generated per call, so a pin
+        /// naming any other key must refuse — and an unparseable pin must refuse
+        /// too, rather than quietly checking nothing.
+        #[test]
+        fn a_certificate_from_an_unpinned_ca_is_refused() {
+            let ca = PrivateKey::random(&mut get_crypto_rng(), Algorithm::Ed25519)
+                .expect("generating a CA key");
+            let subject = PrivateKey::random(&mut get_crypto_rng(), Algorithm::Ed25519)
+                .expect("generating a subject key");
+            let mut builder = Builder::new_with_random_nonce(
+                &mut get_crypto_rng(),
+                subject.public_key(),
+                now() - 60,
+                now() + 600,
+            )
+            .expect("building the certificate");
+            builder.cert_type(CertType::User).expect("cert type");
+            builder.key_id(KEY_ID).expect("key id");
+            builder.valid_principal(PRINCIPAL).expect("principal");
+            let certificate = builder.sign(&ca).expect("signing");
+
+            let signer = ca
+                .public_key()
+                .to_openssh()
+                .expect("serialising the signing CA");
+            let elsewhere = PrivateKey::random(&mut get_crypto_rng(), Algorithm::Ed25519)
+                .expect("generating another CA key")
+                .public_key()
+                .to_openssh()
+                .expect("serialising the other CA key");
+
+            assert!(
+                crate::client::certificate_signer_mismatch(&certificate, None).is_none(),
+                "no pin was configured, so nothing should have been refused"
+            );
+            // Both directions. A check that refuses everything passes the
+            // negative case alone, and would break every session.
+            assert!(
+                crate::client::certificate_signer_mismatch(&certificate, Some(&signer)).is_none(),
+                "the certificate's own signing CA was refused as unpinned"
+            );
+            assert!(
+                crate::client::certificate_signer_mismatch(&certificate, Some(&elsewhere))
+                    .is_some(),
+                "a certificate signed by a CA other than the pinned one was accepted"
+            );
+            assert!(
+                crate::client::certificate_signer_mismatch(&certificate, Some("not-a-key"))
+                    .is_some(),
+                "an unparseable pin silently checked nothing"
+            );
         }
 
         fn verdict_against(valid_before: u64, requested: Option<Duration>) -> Option<String> {
@@ -2462,6 +2591,42 @@ mod tests {
         #[test]
         fn an_ordinary_username_is_left_alone() {
             assert_eq!(crate::client::key_id_field("alice"), "alice");
+        }
+
+        /// `attribution()` puts `admin-token` in this field when the admin API
+        /// token drives a session. A user of that name produced the same three
+        /// fields, in the target's sshd log and in Vault's audit log — the two
+        /// records this feature exists to make trustworthy. The admin API
+        /// refuses the name; SSO auto-provisioning inserts the IdP's claim
+        /// without asking it.
+        #[test]
+        fn a_username_cannot_impersonate_the_gateways_own_attribution() {
+            for reserved in warpgate_common_http::auth::TOKEN_ATTRIBUTIONS {
+                assert_ne!(
+                    crate::client::key_id_field(reserved),
+                    reserved,
+                    "a user named {reserved} produces the attribution's own key ID"
+                );
+            }
+        }
+
+        /// A chain that does not contain the host being asked about cannot
+        /// answer the question, and used to be walked to the end anyway —
+        /// every hop traversed, no key reported, a live session handed back.
+        #[test]
+        fn a_chain_without_the_host_asked_about_cannot_answer() {
+            let asked_about = uuid::Uuid::new_v4();
+            let other = uuid::Uuid::new_v4();
+
+            assert!(crate::client::chain_can_answer(None, &[other]));
+            assert!(crate::client::chain_can_answer(
+                Some(asked_about),
+                &[other, asked_about]
+            ));
+            assert!(
+                !crate::client::chain_can_answer(Some(asked_about), &[other]),
+                "a chain missing the host asked about reported that it could answer"
+            );
         }
 
         /// The budget for authentication is not the budget for the transport
