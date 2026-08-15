@@ -32,7 +32,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use warpgate_vault::login_payload;
+use warpgate_vault::{grown_without_leaving_a_copy, login_payload};
 use zeroize::Zeroizing;
 
 /// Long enough that a match is this test's data and not something the runtime
@@ -145,6 +145,70 @@ struct AppRoleLogin<'a> {
 #[test]
 fn the_primitives_that_leak_are_the_ones_that_grow_a_buffer() {
     watched(|w| the_primitives(w));
+}
+
+/// Does the response reader leave copies behind when a body outgrows its
+/// reservation?
+///
+/// `read_bounded` reserves 32 KiB and refuses only past 256 KiB, so anything
+/// between the two grows the buffer. Every caller of it carries a credential:
+/// the Vault token, an AppRole secret ID, a cloud identity JWT.
+///
+/// The review said so. It was disputed on the grounds that the reservation was
+/// a deliberate trade, and upheld on the same grounds. Neither side measured
+/// it, which is the failure this project spent a week finding in its own tests
+/// and then committed while judging someone else's finding.
+///
+/// Measured now, through the function the reader actually calls rather than a
+/// copy of its shape — that distinction is the whole reason `login_payload` is
+/// public, and the mistake the first draft of this test repeated by growing a
+/// bare `Vec` and reporting on it.
+#[test]
+fn growing_the_response_buffer_leaves_nothing_in_freed_memory() {
+    const RESERVE: usize = 32 * 1024;
+
+    let (control, measured) = watched(|w| {
+        // Prepared outside both windows: only the growth is under measurement.
+        let chunk = {
+            let mut c = vec![b'x'; 8192];
+            c[..CANARY.len()].copy_from_slice(CANARY);
+            c
+        };
+
+        // The control. A plain `Vec` doing what `read_bounded` used to do, so a
+        // clean result below means the fix works and not that the detector is
+        // blind. Without this the whole test could pass by measuring nothing.
+        let control = w.sightings_while(|| {
+            let mut buf = Zeroizing::new(Vec::<u8>::with_capacity(RESERVE));
+            while buf.len() < RESERVE * 2 {
+                buf.extend_from_slice(&chunk);
+            }
+            drop(buf);
+        });
+
+        // The shipped path.
+        let measured = w.sightings_while(|| {
+            let mut buf = Zeroizing::new(Vec::<u8>::with_capacity(RESERVE));
+            while buf.len() < RESERVE * 2 {
+                buf = grown_without_leaving_a_copy(buf, chunk.len());
+                buf.extend_from_slice(&chunk);
+            }
+            drop(buf);
+        });
+
+        (control, measured)
+    });
+
+    println!("growing a bare Vec left {control}; growing through the reader left {measured}");
+    assert!(
+        control > 0,
+        "the detector saw nothing even from an unwiped buffer, so a clean \
+         result here would mean nothing"
+    );
+    assert_eq!(
+        measured, 0,
+        "the reader left {measured} copies of a credential in freed memory"
+    );
 }
 
 fn the_primitives(w: &Watcher) {

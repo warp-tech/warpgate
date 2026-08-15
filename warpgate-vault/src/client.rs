@@ -284,6 +284,38 @@ struct UnwrapData {
 /// not a trusted party, and what it returns is a credential. This bound was
 /// added for the Vault client and not mirrored there, which is the kind of
 /// half-applied fix this file has produced before.
+/// Makes room for `incoming` more bytes without leaving the old buffer behind.
+///
+/// `Vec` grows by allocating, copying and freeing, and it frees the old block
+/// itself — `Zeroizing` only ever wipes the one that survives to be dropped. So
+/// a buffer reserved at 32 KiB and grown past it leaves a credential-bearing
+/// copy in freed memory, which reserving up front was supposed to prevent and
+/// only made less likely.
+///
+/// That was raised in review, disputed on the grounds that the reservation was
+/// a deliberate trade, and upheld on the same grounds. Neither side measured it.
+/// `zeroization.rs` does, and finds the canary in a freed block.
+///
+/// Moving to a new buffer by hand keeps the old one ours until it is dropped,
+/// so its own `Zeroizing` wipes it before the allocator takes it back.
+///
+/// Public so the test exercises this function rather than a copy of its shape
+/// written beside it — the same reason `login_payload` is public, and the
+/// mistake the first version of that test made.
+#[must_use]
+pub fn grown_without_leaving_a_copy(
+    buf: Zeroizing<Vec<u8>>,
+    incoming: usize,
+) -> Zeroizing<Vec<u8>> {
+    if buf.len() + incoming <= buf.capacity() {
+        return buf;
+    }
+    let wanted = (buf.capacity() * 2).max(buf.len() + incoming);
+    let mut grown: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(wanted));
+    grown.extend_from_slice(&buf);
+    grown
+}
+
 pub(crate) async fn read_bounded(mut response: reqwest::Response) -> Result<Zeroizing<Vec<u8>>> {
     // Reserved up front, for the reason spelled out on `login_payload`: a buffer
     // that grows frees every size it outgrew without wiping it, and `Zeroizing`
@@ -300,6 +332,18 @@ pub(crate) async fn read_bounded(mut response: reqwest::Response) -> Result<Zero
         if buf.len() + chunk.len() > MAX_RESPONSE_BODY {
             return Err(VaultError::OversizedResponse);
         }
+        // Grown by hand, because `Vec` frees the old allocation itself and
+        // `Zeroizing` only ever sees the one that survives. Reserving up front
+        // was supposed to make growth impossible; it only made it unlikely, and
+        // a response between the reserve and the refusal threshold reallocated
+        // with a credential in it. Measured, after being argued about twice and
+        // dismissed both times: `zeroization.rs` finds the canary in a freed
+        // block for a 64 KiB body.
+        //
+        // Moving to a new buffer explicitly means the old one is dropped while
+        // it is still ours, so its own `Zeroizing` wipes it before the allocator
+        // gets it back.
+        buf = grown_without_leaving_a_copy(buf, chunk.len());
         buf.extend_from_slice(&chunk);
     }
     Ok(buf)
