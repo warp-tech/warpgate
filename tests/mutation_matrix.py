@@ -504,8 +504,12 @@ DISCRIMINATES = {
     "certificate: must be a user certificate": [
         "test_a_host_certificate_is_not_offered_to_the_target"
     ],
+    # Its own test since W-119. It shared one with the two host-key guards
+    # below, which need the opposite starting condition — a jump host that *is*
+    # trusted — so one test was setting up both worlds and the refusal it
+    # asserted was only ever the first half of a longer story.
     "connection: an untrusted jump host is refused, not traversed": [
-        "test_the_host_key_check_reports_the_target_and_not_the_jump_host"
+        "test_an_untrusted_jump_host_is_refused_rather_than_traversed"
     ],
     "connection: a host-key check stops before authenticating": [
         "a_host_key_check_stops_at_the_hop_it_asked_about",
@@ -629,6 +633,14 @@ DISCRIMINATES = {
     "certificate: a host-key check names the admin who asked": [
         "test_checking_a_chained_target_authenticates_only_to_the_jump_host"
     ],
+    # These two do share a discriminator, and it was looked at rather than left
+    # alone (W-119). They are one decision read two ways — which hop is the
+    # answer, and which hops may speak — and on a chain of two every mutation of
+    # either ends in the same observation: the endpoint answers with the jump
+    # host's key. Separating them end to end would take an observation neither
+    # the endpoint nor the target makes; the unit test that pins the decision
+    # itself, `each_role_reports_and_stops_as_its_name_says`, is equally unable
+    # to tell them apart, and for the same reason.
     "host key: the hop is chosen by identity, not by position": [
         "test_the_host_key_check_reports_the_target_and_not_the_jump_host"
     ],

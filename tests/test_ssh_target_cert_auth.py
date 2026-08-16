@@ -1439,61 +1439,101 @@ class TestAChainWithAJumpHost:
         )
         return user, jump, target
 
+    def _two_fresh_hops(self, processes, api, stub_vault):
+        """A chain whose two hops have never been seen by anything.
+
+        Freshly started, so neither key is trusted whatever ran before — the
+        jump host used to be the file's shared fixture server, which earlier
+        tests connect to, and a test whose subject is *whether a key is trusted*
+        cannot borrow a server whose key another test has already trusted.
+
+        Each hop gets a key of its own too: two servers sharing one are
+        indistinguishable to exactly the thing under test.
+        """
+        stub_vault.sign_options = ["permit-port-forwarding"]
+        jump_port = processes.start_ssh_server(
+            trusted_ca=[stub_vault.ca_public_key], distinct_host_key=True
+        )
+        target_port = processes.start_ssh_server(
+            trusted_ca=[stub_vault.ca_public_key], distinct_host_key=True
+        )
+        wait_port(jump_port)
+        wait_port(target_port)
+        assert processes.host_keys[jump_port] != processes.host_keys[target_port], (
+            "the two hops were started with the same key, so nothing below "
+            "distinguishes them"
+        )
+        return (jump_port, target_port, *self._chain(api, jump_port, target_port))
+
+    def test_an_untrusted_jump_host_is_refused_rather_than_traversed(
+        self, processes, stub_vault, api
+    ):
+        """Checking the target's host key goes through the jump host, whose own
+        key nothing has trusted yet. Accepting it there would trust a host on
+        the strength of a question asked about a different one."""
+        jump_port, _, _, _, target = self._two_fresh_hops(processes, api, stub_vault)
+        before = len(stub_vault.signs)
+
+        with pytest.raises(sdk.ApiException) as refused:
+            api.check_ssh_host_key(sdk.CheckSshHostKeyRequest(target_id=target.id))
+        # The message, not just the failure. Without the refusal the hop's key
+        # is declined at the transport instead and the endpoint answers "SSH
+        # protocol error" — a failure either way, which is why asserting only
+        # that this raises would be evidence for nothing.
+        assert "untrusted host key" in str(refused.value.body), refused.value.body
+
+        # Refused, and refused early: nothing was authenticated on the way, so
+        # no certificate was minted for anyone.
+        assert len(stub_vault.signs) == before, "a certificate was issued anyway"
+        # And the hop was not quietly trusted in passing, which is the failure
+        # this refusal exists to prevent.
+        assert not [
+            host for host in api.get_ssh_known_hosts() if host.port == jump_port
+        ], "the jump host's key was trusted on the way through"
+
     def test_the_host_key_check_reports_the_target_and_not_the_jump_host(
-        self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
+        self, processes, stub_vault, api
     ):
         """Both hops present a key, and the endpoint used to answer with the
         first one it saw. An operator pinning what they are told is the target's
         key was pinning the jump host's, and the target's own key was never
         looked at."""
-        # Each hop its own host key, or the two are indistinguishable to exactly
-        # the thing under test — and each hop its own server, which is the part
-        # this test got wrong until CI ran it.
-        #
-        # The jump host used to be the shared fixture server. Earlier tests in
-        # this file connect to it, so by the time this one runs its key is
-        # already trusted — and the refusal asserted below only happens for a
-        # key nothing has trusted yet. Run alone the test passed; run in the
-        # suite it did not. A test that depends on what ran before it is not
-        # evidence for the guard it names, whichever way it happens to come out.
-        stub_vault.sign_options = ["permit-port-forwarding"]
-        first = processes.start_ssh_server(
-            trusted_ca=[stub_vault.ca_public_key], distinct_host_key=True
+        jump_port, target_port, _, _, target = self._two_fresh_hops(
+            processes, api, stub_vault
         )
-        second = processes.start_ssh_server(
-            trusted_ca=[stub_vault.ca_public_key], distinct_host_key=True
+
+        # The jump host is trusted here the way the admin UI trusts one — by
+        # recording its key — rather than by opening a session to it. Trusting
+        # it by connecting would make this test depend on the host-key
+        # verification mode, a single global parameter that any test sharing
+        # this gateway can change, and the point of this one is to depend on
+        # nothing but its own two servers.
+        jump_key = processes.host_keys[jump_port]
+        api.add_ssh_known_host(
+            sdk.AddSshKnownHostRequest(
+                host="localhost",
+                port=jump_port,
+                key_type=jump_key.key_type,
+                key_base64=jump_key.base64,
+            )
         )
-        wait_port(first)
-        wait_port(second)
 
-        user, jump, target = self._chain(api, first, second)
-
-        # Asserted, not asserted-in-prose. This comment used to say the refusal
-        # "is its own assertion" and then not make one, and the verifier
-        # measured the consequence: the guard that refuses an untrusted jump
-        # host was credited to this test and passed with the guard disabled.
-        #
-        # Checking the target traverses the jump host, whose key nothing has
-        # trusted yet. Silently accepting it there would trust a host on the
-        # strength of a question about a different one.
-        with pytest.raises(sdk.ApiException) as refused:
-            api.check_ssh_host_key(sdk.CheckSshHostKeyRequest(target_id=target.id))
-        assert "untrusted host key" in str(refused.value.body), refused.value.body
-
-        # Now trust it the way an operator would: by using it.
-        assert connect(processes, cert_wg, user, jump, timeout)[0] == 0
-
-        jump_key = api.check_ssh_host_key(
-            sdk.CheckSshHostKeyRequest(target_id=jump.id)
-        ).remote_key_base64
-        target_key = api.check_ssh_host_key(
+        reported = api.check_ssh_host_key(
             sdk.CheckSshHostKeyRequest(target_id=target.id)
-        ).remote_key_base64
-
-        assert jump_key, "the jump host reported no key"
-        assert target_key != jump_key, (
-            "checking the target returned the jump host's key"
         )
+
+        # By identity, not by elimination. "Not the jump host's key" and "the
+        # target's key" are the same claim for a chain of two and stop being the
+        # same for a chain of three, and the weaker one is what this test made
+        # until an outside verifier read it (W-119).
+        target_key = processes.host_keys[target_port]
+        assert reported.remote_key_base64 != jump_key.base64, (
+            "checking the target answered with the jump host's key"
+        )
+        assert (reported.remote_key_type, reported.remote_key_base64) == (
+            target_key.key_type,
+            target_key.base64,
+        ), "the reported key is not the one the target was started with"
 
     def test_checking_a_chained_target_authenticates_only_to_the_jump_host(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
@@ -1541,8 +1581,8 @@ class TestAChainWithAJumpHost:
         naming its own account."""
         # The stub signs one set of options for every request, where real Vault
         # would use a role per target. So the leaf has to permit what the jump
-        # host needs; the two tests above are the ones that show the allow-list
-        # doing its work.
+        # host needs; the two host-key checks above, which traverse the jump
+        # host on the leaf's own allow-list, are where it does its work.
         stub_vault.sign_options = ["permit-port-forwarding"]
         second = processes.start_ssh_server(trusted_ca=[stub_vault.ca_public_key])
         wait_port(second)

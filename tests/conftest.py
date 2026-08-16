@@ -86,6 +86,15 @@ RDP_BACKEND_SIZE = (1280, 800)
 
 
 @dataclass
+class SshHostKey:
+    """The key an `sshd` fixture was started with, in the two fields the admin
+    API names it by."""
+
+    key_type: str
+    base64: str
+
+
+@dataclass
 class WarpgateProcess:
     config_path: Path
     process: subprocess.Popen
@@ -106,6 +115,9 @@ class ProcessManager:
         self.ctx = ctx
         self.timeout = timeout
         self._k3s_containers: List[str] = []
+        # Port to the host key that server was started with, for the servers
+        # that were given one of their own.
+        self.host_keys: dict[int, SshHostKey] = {}
 
     def _remove_k3s_containers(self):
         """Force-remove every k3s container we've started so far. Idempotent —
@@ -169,6 +181,12 @@ class ProcessManager:
             )
             own_key.chmod(0o600)
             host_key_path = str(own_key)
+            # Recorded so a test can assert which host answered, rather than
+            # only that it was not some other one. With two hops those are the
+            # same claim; with three they are not, and the weaker one is what
+            # the host-key tests were making.
+            key_type, key_base64 = own_key.with_suffix(".pub").read_text().split()[:2]
+            self.host_keys[port] = SshHostKey(key_type=key_type, base64=key_base64)
 
         config_path = data_dir / "sshd_config"
         config_path.write_text(
