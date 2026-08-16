@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { faWarning } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Input, Tooltip } from '@sveltestrap/sveltestrap'
     import {
         CredentialKind,
@@ -6,9 +7,8 @@
     } from 'admin/lib/api'
     import InfoBox from 'common/InfoBox.svelte'
     import { SvelteSet } from 'svelte/reactivity'
-    import type { ExistingCredential } from './CredentialEditor.svelte'
     import Fa from 'svelte-fa'
-    import { faWarning } from '@fortawesome/free-solid-svg-icons'
+    import type { ExistingCredential } from './CredentialEditor.svelte'
 
     type ProtocolID =
         | 'http'
@@ -179,10 +179,7 @@
                     on:change={() => toggle(type)}
                 />
                 {#if enabled && !isAvailable(type)}
-                    <Fa
-                        icon={faWarning}
-                        class="text-warning"
-                    />
+                    <Fa icon={faWarning} class="text-warning" />
                 {/if}
             </div>
             {#if disabled}
