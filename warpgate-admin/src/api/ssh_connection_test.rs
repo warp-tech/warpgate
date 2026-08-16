@@ -42,8 +42,17 @@ impl Api {
     ) -> Result<CheckSshHostKeyResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsEdit)?;
 
-        let ssh_chain = resolve_ssh_chain(admin.services(), body.target_id, admin.auth.username())
-            .await?
+        let ssh_chain =
+            resolve_ssh_chain(admin.services(), body.target_id, admin.auth.username()).await?;
+
+        let Some(target) = ssh_chain.last() else {
+            return Err(WarpgateError::InconsistentState(
+                "Did not resolve SSH chain".into(),
+            ));
+        };
+        let (target_host, target_port) = (target.ssh_options.host.clone(), target.ssh_options.port);
+
+        let ssh_chain = ssh_chain
             .into_iter()
             .map(|x| x.ssh_options)
             .collect::<Vec<_>>();
@@ -56,10 +65,15 @@ impl Api {
         let fut = async move {
             let key = loop {
                 match handles.event_rx.recv().await {
-                    Some(RCEvent::HostKeyReceived(key)) => break key,
-                    Some(RCEvent::HostKeyUnknown(key, _, _, reply)) => {
-                        let _ = reply.send(true);
+                    Some(RCEvent::HostKeyReceived(key, host, port))
+                        if host == target_host && port == target_port =>
+                    {
                         break key;
+                    }
+                    Some(RCEvent::HostKeyUnknown(_, host, port, reply)) => {
+                        // this is a jump host, target key would hit  HostKeyReceived
+                        let _ = reply.send(false);
+                        anyhow::bail!("Jump host {host}:{port} has an untrusted host key");
                     }
                     Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
                     Some(RCEvent::Error(err)) => return Err(err),

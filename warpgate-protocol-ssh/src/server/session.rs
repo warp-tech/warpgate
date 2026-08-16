@@ -1172,7 +1172,7 @@ impl ServerSession {
                     return self.fail_on_channel_writer_error(error).await;
                 }
             }
-            RCEvent::Done | RCEvent::HostKeyReceived(_) => {}
+            RCEvent::Done | RCEvent::HostKeyReceived(..) => {}
             RCEvent::HostKeyUnknown(key, _, _, reply) => {
                 self.handle_unknown_host_key(key, reply).await?;
             }
