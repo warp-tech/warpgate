@@ -12,7 +12,7 @@
         "check": "svelte-check --compiler-warnings 'a11y-no-noninteractive-element-interactions:ignore,a11y-click-events-have-key-events:ignore,a11y-no-static-element-interactions:ignore' --tsconfig ./tsconfig.json",
         "lint": "npm run biome && svelte-check",
         "biome": "biome",
-        "format": "biome format --fix",
+        "format": "biome check --fix && biome format --fix",
         "postinstall": "npm run openapi:client:gateway && npm run openapi:client:admin",
         "openapi:schema:gateway": "cargo run -p warpgate-protocol-http > src/gateway/lib/openapi-schema.json",
         "openapi:schema:admin": "cargo run -p warpgate-admin > src/admin/lib/openapi-schema.json",
