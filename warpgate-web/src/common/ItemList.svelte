@@ -13,8 +13,19 @@
 
     export interface GroupState {
         collapsed: boolean
-        count: number
+        // False while a search is active, where every group is force-expanded:
+        // a toggle would rewrite the persisted state without visible effect.
+        collapsible: boolean
         toggle: () => void
+    }
+
+    export interface GroupControls {
+        // False when there is nothing to collapse: either the list renders no
+        // group headers, or a search is active, where the loaded items are only
+        // a subset and "collapse all" would silently skip the rest.
+        available: boolean
+        collapseAll: () => void
+        expandAll: () => void
     }
 </script>
 
@@ -44,12 +55,11 @@
         groupObject?: (_: T) => G
         groupKey?: (_: G) => GK
         showSearch?: boolean
-        header?: Snippet<[T[] | null]>
+        header?: Snippet<[T[] | null, GroupControls]>
         item?: Snippet<[T]>
         footer?: Snippet<[T[]]>
         empty?: Snippet<[]>
         groupHeader?: Snippet<[G, GroupState]>
-        collapsibleGroups?: boolean
         collapsedGroups?: GK[]
     }
 
@@ -65,7 +75,6 @@
         footer,
         empty,
         groupHeader,
-        collapsibleGroups = false,
         collapsedGroups = $bindable([]),
     }: Props = $props()
 
@@ -108,23 +117,34 @@
         group?: G
         key?: GK
         groupStart: boolean
-        count: number
         collapsed: boolean
+    }
+
+    interface Rows {
+        rows: Row[]
+        keys: GK[]
+        // A single group spans the whole list, so its header would say nothing
+        // the list doesn't already say - and with no header there is nothing
+        // left to expand it with, so it can't be collapsed either.
+        grouped: boolean
     }
 
     // Groups are detected by adjacency, so the caller is expected to hand us
     // items already sorted by group.
-    function buildRows(list: T[]): Row[] {
+    function buildRows(list: T[]): Rows {
         const getGroup = groupObject
         const getKey = groupKey
 
         if (!getGroup || !getKey) {
-            return list.map(_item => ({
-                item: _item,
-                groupStart: false,
-                count: 0,
-                collapsed: false,
-            }))
+            return {
+                rows: list.map(_item => ({
+                    item: _item,
+                    groupStart: false,
+                    collapsed: false,
+                })),
+                keys: [],
+                grouped: false,
+            }
         }
 
         const entries = list.map(_item => {
@@ -132,30 +152,34 @@
             return { item: _item, group, key: getKey(group) }
         })
 
-        const counts = new Map<GK, number>()
-        for (const entry of entries) {
-            counts.set(entry.key, (counts.get(entry.key) ?? 0) + 1)
-        }
+        const keys = [...new Set(entries.map(entry => entry.key))]
+        const grouped = keys.length > 1
 
-        // An active search expands everything so that matches can't hide
+        // An active search expands everything, so that matches can't hide
         // inside a collapsed group - without touching the persisted state.
         const hidden =
-            collapsibleGroups && !filter
-                ? new Set(collapsedGroups)
-                : new Set<GK>()
+            grouped && !filter ? new Set(collapsedGroups) : new Set<GK>()
 
-        return entries.map((entry, _index) => ({
-            ...entry,
-            groupStart: _index === 0 || entry.key !== entries[_index - 1]?.key,
-            count: counts.get(entry.key) ?? 0,
-            collapsed: hidden.has(entry.key),
-        }))
+        return {
+            keys,
+            grouped,
+            rows: entries.map((entry, _index) => ({
+                ...entry,
+                groupStart:
+                    grouped &&
+                    (_index === 0 || entry.key !== entries[_index - 1]?.key),
+                collapsed: hidden.has(entry.key),
+            })),
+        }
     }
 
-    function toggleGroup(key: GK) {
-        collapsedGroups = collapsedGroups.includes(key)
+    // Keys of groups that no longer exist are dropped on every write, so the
+    // persisted set can't accumulate them as groups come and go.
+    function toggleGroup(key: GK, present: GK[]) {
+        const next = collapsedGroups.includes(key)
             ? collapsedGroups.filter(k => k !== key)
             : [...collapsedGroups, key]
+        collapsedGroups = next.filter(k => present.includes(k))
     }
 
     onMount(() => {
@@ -186,6 +210,7 @@
 {#await $items}
     <DelayedSpinner />
 {:then _items}
+    {@const _built = buildRows(_items ?? [])}
     <div class="d-flex align-items-center mb-2" hidden={!loaded}>
         <!-- either filtering or not filtering and there are at least some items at all -->
         {#if showSearch && (filter || !!_items?.length)}
@@ -195,18 +220,25 @@
                 class="flex-grow-1"
             />
         {/if}
-        {@render header?.(_items)}
+        {@render header?.(_items, {
+            available: _built.grouped && !filter,
+            collapseAll: () => {
+                collapsedGroups = _built.keys
+            },
+            expandAll: () => {
+                collapsedGroups = []
+            },
+        })}
     </div>
     {#if _items}
-        {@const _rows = buildRows(_items)}
         <div class="list-group list-group-flush mb-3">
-            {#each _rows as _row (_row.item)}
+            {#each _built.rows as _row (_row.item)}
                 {#if _row.groupStart && groupHeader && _row.group !== undefined && _row.key !== undefined}
                     {@const _key = _row.key}
                     {@render groupHeader(_row.group, {
                         collapsed: _row.collapsed,
-                        count: _row.count,
-                        toggle: () => toggleGroup(_key),
+                        collapsible: !filter,
+                        toggle: () => toggleGroup(_key, _built.keys),
                     })}
                 {/if}
                 {#if !_row.collapsed}

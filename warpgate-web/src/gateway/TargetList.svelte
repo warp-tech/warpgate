@@ -19,13 +19,14 @@
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import GettingStarted from 'common/GettingStarted.svelte'
+    import { resolveGroup } from 'common/groups'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
+    import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
     import {
         api,
-        BootstrapThemeColor,
         TargetClickAction,
         TargetKind,
         type TargetSnapshot,
@@ -132,31 +133,8 @@
         }
     }
 
-    interface GroupInfo {
-        id: string
-        name: string
-        color: BootstrapThemeColor
-    }
-
-    function groupInfoFromTarget(target: TargetSnapshot): GroupInfo {
-        if (!target.group) {
-            return {
-                id: '$ungrouped',
-                name: 'Ungrouped',
-                color: BootstrapThemeColor.Secondary,
-            }
-        }
-        return {
-            id: target.group.id,
-            name: target.group.name,
-            color: target.group.color ?? BootstrapThemeColor.Secondary,
-        }
-    }
-
-    function collapseAllGroups(targets: TargetSnapshot[] | null) {
-        $collapsedTargetGroups = [
-            ...new Set((targets ?? []).map(x => groupInfoFromTarget(x).id)),
-        ]
+    function groupInfoFromTarget(target: TargetSnapshot) {
+        return resolveGroup(target.group)
     }
 </script>
 
@@ -169,49 +147,28 @@
     showSearch={true}
     groupObject={groupInfoFromTarget}
     groupKey={group => group.id}
-    collapsibleGroups
     bind:collapsedGroups={$collapsedTargetGroups}
 >
-    {#snippet header(items)}
+    {#snippet header(items, groupControls)}
         {#if items?.length}
-            <Dropdown>
-                <DropdownToggle color="link">
-                    <Fa icon={faEllipsisV} fw />
-                </DropdownToggle>
-                <DropdownMenu end>
-                    <div class="dropdown-header">Preferences</div>
-                    <DropdownItem>
-                        <Input
-                            type="switch"
-                            bind:checked={$openTargetsInNewTab}
-                            label="Open targets in a new tab"
-                            onmousedown={e => e.stopPropagation()}
-                        />
-                    </DropdownItem>
-                    <div class="dropdown-header">Groups</div>
-                    <DropdownItem onclick={() => collapseAllGroups(items)}>
-                        Collapse all
-                    </DropdownItem>
-                    <DropdownItem
-                        onclick={() => { $collapsedTargetGroups = [] }}
-                    >
-                        Expand all
-                    </DropdownItem>
-                </DropdownMenu>
-            </Dropdown>
+            <ListOverflowMenu {groupControls}>
+                <div class="dropdown-header">Preferences</div>
+                <DropdownItem>
+                    <Input
+                        type="switch"
+                        bind:checked={$openTargetsInNewTab}
+                        label="Open targets in a new tab"
+                        onmousedown={e => e.stopPropagation()}
+                    />
+                </DropdownItem>
+            </ListOverflowMenu>
         {/if}
     {/snippet}
     {#snippet empty()}
         <EmptyState title="You don't have access to any targets yet" />
     {/snippet}
     {#snippet groupHeader(group, state)}
-        <CollapsibleGroupHeader
-            name={group.name}
-            color={group.color}
-            count={state.count}
-            collapsed={state.collapsed}
-            toggle={state.toggle}
-        />
+        <CollapsibleGroupHeader {group} {state} />
     {/snippet}
     {#snippet item(target)}
         <a

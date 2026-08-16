@@ -1,43 +1,36 @@
 <script lang="ts">
-    import { faChevronRight } from '@fortawesome/free-solid-svg-icons'
-    import type { BootstrapThemeColor } from 'gateway/lib/api'
-    import Fa from 'svelte-fa'
-    import GroupColorCircle from './GroupColorCircle.svelte'
+    import { faChevronRight, faCircle } from '@fortawesome/free-solid-svg-icons'
+    import GroupColorIcon from './GroupColorIcon.svelte'
+    import type { ResolvedGroup } from './groups'
+    import type { GroupState } from './ItemList.svelte'
 
     interface Props {
-        name: string
-        color: BootstrapThemeColor | ''
-        count: number
-        collapsed: boolean
-        toggle: () => void
+        group: ResolvedGroup
+        state: GroupState
     }
 
-    const { name, color, count, collapsed, toggle }: Props = $props()
+    const { group, state }: Props = $props()
 </script>
 
-<button
-    type="button"
-    class="group-header btn btn-link d-flex align-items-center gap-2 p-0 text-start mb-2 mt-4"
-    aria-expanded={!collapsed}
-    onclick={e => {
-        e.preventDefault()
-        toggle()
-    }}
->
-    <Fa fw icon={faChevronRight} rotate={collapsed ? 0 : 90} />
-    <GroupColorCircle {color} />
-    <span class="h5 mb-0">{name}</span>
-    <small class="text-muted">{count}</small>
-</button>
+{#snippet label()}
+    <GroupColorIcon
+        color={group.color}
+        collapsed={state.collapsed}
+    />
+    <span class="h5 mb-0">{group.name}</span>
+{/snippet}
 
-<style lang="scss">
-    .group-header {
-        color: inherit;
-        text-decoration: none;
-
-        &:hover,
-        &:focus-visible {
-            color: var(--bs-primary);
-        }
-    }
-</style>
+{#if state.collapsible}
+    <button
+        type="button"
+        class="btn btn-link text-decoration-none d-flex align-items-center gap-2 p-0 text-start mb-2 mt-4"
+        aria-expanded={!state.collapsed}
+        onclick={state.toggle}
+    >
+        {@render label()}
+    </button>
+{:else}
+    <div class="d-flex align-items-center gap-2 mb-2 mt-4">
+        {@render label()}
+    </div>
+{/if}
