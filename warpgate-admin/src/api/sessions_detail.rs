@@ -38,18 +38,14 @@ enum CloseSessionResponse {
 }
 
 impl ReparseForwardedResponse for CloseSessionResponse {
-    fn reparse_forwarded_response(
-        response: poem::Response,
-    ) -> impl std::future::Future<Output = poem::Result<Self>> + Send {
-        async move {
-            match response.status() {
-                StatusCode::CREATED => Ok(CloseSessionResponse::Ok),
-                StatusCode::NOT_FOUND => Ok(CloseSessionResponse::NotFound),
-                status => Err(poem::Error::from_string(
-                    format!("Unexpected response from the owner node: {status}"),
-                    StatusCode::BAD_GATEWAY,
-                )),
-            }
+    async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
+        match response.status() {
+            StatusCode::CREATED => Ok(Self::Ok),
+            StatusCode::NOT_FOUND => Ok(Self::NotFound),
+            status => Err(poem::Error::from_string(
+                format!("Unexpected response from the owner node: {status}"),
+                StatusCode::BAD_GATEWAY,
+            )),
         }
     }
 }

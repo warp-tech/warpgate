@@ -94,8 +94,7 @@ impl OtpEntry {
             services.config_provider.as_ref(),
         )
         .await
-        .map(|outcome| outcome.is_valid())
-        .unwrap_or(false);
+        .is_ok_and(|outcome| outcome.is_valid());
         if valid {
             return OtpActionApplyOutcome::AcceptedAndValidated;
         }

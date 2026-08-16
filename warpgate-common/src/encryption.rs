@@ -23,7 +23,7 @@ const TAG_LEN: usize = 16;
 /// Hex characters of the key digest carried in the envelope.
 const FINGERPRINT_LEN: usize = 8;
 
-/// Envelope format: PREFIX:KEY-FINGERPRINT:ENCRYPTED-DATA
+// Envelope format: PREFIX:KEY-FINGERPRINT:ENCRYPTED-DATA
 
 type GcmNonce = Nonce<<Aes256Gcm as AeadCore>::NonceSize>;
 
@@ -139,11 +139,11 @@ impl Keyring {
         self.keys().any(|k| k.fingerprint() == fingerprint)
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.primary.is_none() && self.retired.is_empty()
     }
 
-    pub fn has_retired(&self) -> bool {
+    pub const fn has_retired(&self) -> bool {
         !self.retired.is_empty()
     }
 

@@ -223,18 +223,18 @@ export function makeKubeconfig(opt: ConnectionOptions): string {
 kind: Config
 clusters:
 - cluster:
-    server: ${clusterUrl}
+    server: ${JSON.stringify(clusterUrl)}
     insecure-skip-tls-verify: true
-  name: warpgate-${opt.targetName ?? 'target'}
+  name: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
 contexts:
 - context:
-    cluster: warpgate-${opt.targetName ?? 'target'}
-    namespace: ${namespace}
-    user: ${context}
-  name: ${context}
-current-context: ${context}
+    cluster: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
+    namespace: ${JSON.stringify(namespace)}
+    user: ${JSON.stringify(context)}
+  name: ${JSON.stringify(context)}
+current-context: ${JSON.stringify(context)}
 users:
-- name: ${context}
+- name: ${JSON.stringify(context)}
   user:
     token: ${opt.ticketSecret}
 `
@@ -244,18 +244,18 @@ users:
 kind: Config
 clusters:
 - cluster:
-    server: ${clusterUrl}
+    server: ${JSON.stringify(clusterUrl)}
     insecure-skip-tls-verify: true
-  name: warpgate-${opt.targetName ?? 'target'}
+  name: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
 contexts:
 - context:
-    cluster: warpgate-${opt.targetName ?? 'target'}
-    namespace: ${namespace}
-    user: ${context}
-  name: ${context}
-current-context: ${context}
+    cluster: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
+    namespace: ${JSON.stringify(namespace)}
+    user: ${JSON.stringify(context)}
+  name: ${JSON.stringify(context)}
+current-context: ${JSON.stringify(context)}
 users:
-- name: ${context}
+- name: ${JSON.stringify(context)}
   user:
     client-certificate-data: ${opt.clientCertificatePem ? btoa(opt.clientCertificatePem) : '<your-client-certificate-base64>'}
     client-key-data: ${opt.clientPrivateKeyPem ? btoa(opt.clientPrivateKeyPem) : '<your-private-key-base64>'}
@@ -289,18 +289,18 @@ export function makeOidcKubeconfig(opt: ConnectionOptions): string {
 kind: Config
 clusters:
 - cluster:
-    server: ${clusterUrl}
+    server: ${JSON.stringify(clusterUrl)}
     insecure-skip-tls-verify: true
-  name: warpgate-${opt.targetName ?? 'target'}
+  name: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
 contexts:
 - context:
-    cluster: warpgate-${opt.targetName ?? 'target'}
+    cluster: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
     namespace: ${namespace}
-    user: ${context}
-  name: ${context}
-current-context: ${context}
+    user: ${JSON.stringify(context)}
+  name: ${JSON.stringify(context)}
+current-context: ${JSON.stringify(context)}
 users:
-- name: ${context}
+- name: ${JSON.stringify(context)}
   user:
     exec:
       apiVersion: client.authentication.k8s.io/v1beta1

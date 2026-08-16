@@ -1,8 +1,8 @@
 <script lang="ts">
     import { faChevronRight } from '@fortawesome/free-solid-svg-icons'
+    import { autosave } from 'common/autosave'
     import type { Snippet } from 'svelte'
     import Fa from 'svelte-fa'
-    import { autosave } from 'common/autosave'
 
     interface Props {
         label: string

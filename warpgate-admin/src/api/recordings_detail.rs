@@ -300,7 +300,7 @@ async fn serve_live_stream(
                             end - sent
                         );
                         sent = end;
-                    } else if !replay_scratch_span_awaiting(&mut sink, &path, &mut sent, end, LAG_REPLAY_TIMEOUT).await? {
+                    } else if !replay_scratch_span_awaiting(&mut sink, path, &mut sent, end, LAG_REPLAY_TIMEOUT).await? {
                         return Ok(());
                     }
                     chunk
