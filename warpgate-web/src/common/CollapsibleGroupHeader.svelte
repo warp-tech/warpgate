@@ -13,10 +13,7 @@
 </script>
 
 {#snippet label()}
-    <GroupColorIcon
-        color={group.color}
-        collapsed={state.collapsed}
-    />
+    <GroupColorIcon color={group.color} collapsed={state.collapsed} />
     <span class="h5 mb-0">{group.name}</span>
 {/snippet}
 

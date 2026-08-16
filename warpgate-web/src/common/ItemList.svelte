@@ -123,10 +123,6 @@
     interface Rows {
         rows: Row[]
         keys: GK[]
-        // A single group spans the whole list, so its header would say nothing
-        // the list doesn't already say - and with no header there is nothing
-        // left to expand it with, so it can't be collapsed either.
-        grouped: boolean
     }
 
     // Groups are detected by adjacency, so the caller is expected to hand us
@@ -143,7 +139,6 @@
                     collapsed: false,
                 })),
                 keys: [],
-                grouped: false,
             }
         }
 
@@ -152,22 +147,16 @@
             return { item: _item, group, key: getKey(group) }
         })
 
-        const keys = [...new Set(entries.map(entry => entry.key))]
-        const grouped = keys.length > 1
-
         // An active search expands everything, so that matches can't hide
         // inside a collapsed group - without touching the persisted state.
-        const hidden =
-            grouped && !filter ? new Set(collapsedGroups) : new Set<GK>()
+        const hidden = filter ? new Set<GK>() : new Set(collapsedGroups)
 
         return {
-            keys,
-            grouped,
+            keys: [...new Set(entries.map(entry => entry.key))],
             rows: entries.map((entry, _index) => ({
                 ...entry,
                 groupStart:
-                    grouped &&
-                    (_index === 0 || entry.key !== entries[_index - 1]?.key),
+                    _index === 0 || entry.key !== entries[_index - 1]?.key,
                 collapsed: hidden.has(entry.key),
             })),
         }
@@ -221,7 +210,7 @@
             />
         {/if}
         {@render header?.(_items, {
-            available: _built.grouped && !filter,
+            available: _built.keys.length > 0 && !filter,
             collapseAll: () => {
                 collapsedGroups = _built.keys
             },
