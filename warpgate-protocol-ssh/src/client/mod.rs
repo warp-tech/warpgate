@@ -89,6 +89,28 @@ impl HopRole {
 /// long as it likes.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How far out the handshake bound is pushed while a host-key question is
+/// outstanding.
+///
+/// Not disarmed — pushed out — so that nothing has to remember to arm it again.
+/// A year is "not while a person is reading a fingerprint" expressed as a
+/// number.
+const fn while_a_host_key_answer_is_outstanding() -> Duration {
+    Duration::from_secs(365 * 24 * 60 * 60)
+}
+
+/// And what it comes back to once the answer arrives: the remaining handshake
+/// is the target's again, so it gets the target's bound.
+///
+/// A separate function from the constant because this is the thing that can be
+/// got wrong. The first version of this pause never ended — the deadline was
+/// pushed out and nothing brought it back — and a target that answered with a
+/// host key and then went quiet held the session, the ephemeral key and a live
+/// certificate until russh's inactivity timeout.
+const fn once_the_host_key_is_answered() -> Duration {
+    HANDSHAKE_TIMEOUT
+}
+
 /// How long authentication may take, when nothing else decides.
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -1435,7 +1457,8 @@ impl RemoteClient {
                                 // which is the point: this arm no longer needs to
                                 // know which mode is configured to stay bounded.
                                 handshake_deadline.as_mut().reset(
-                                    tokio::time::Instant::now() + Duration::from_secs(365 * 24 * 60 * 60),
+                                    tokio::time::Instant::now()
+                                        + while_a_host_key_answer_is_outstanding(),
                                 );
                                 let (intercept_tx, intercept_rx) = oneshot::channel();
                                 outstanding_host_key = Some(reply);
@@ -1469,7 +1492,7 @@ impl RemoteClient {
                 // again from here, so the bound comes back with it.
                 Some(answer) = host_key_answers.recv() => {
                     handshake_deadline.as_mut().reset(
-                        tokio::time::Instant::now() + HANDSHAKE_TIMEOUT,
+                        tokio::time::Instant::now() + once_the_host_key_is_answered(),
                     );
                     if let Some(reply) = outstanding_host_key.take() {
                         // A closed receiver means the connection future is
@@ -2661,6 +2684,34 @@ mod tests {
         /// A chain that does not contain the host being asked about cannot
         /// answer the question, and used to be walked to the end anyway —
         /// every hop traversed, no key reported, a live session handed back.
+        /// The property the integration test was believed to hold and does
+        /// not: measured twice, the stalling fixture never reaches this code.
+        /// It delivers the host key on the wire, but russh does not call
+        /// `check_server_key` until the key exchange completes, and the fixture
+        /// mutes before `NEWKEYS`. Letting `NEWKEYS` through instead trips
+        /// strict-kex and the client disconnects in three seconds. So what that
+        /// test measures is the plain handshake bound, which has its own guard.
+        ///
+        /// What is left to state is the property itself: whatever the pause is,
+        /// the answer has to bring the bound back to the target's own, and not
+        /// to something a stalled target can sit inside. Pushing the resume out
+        /// instead of back is the exact regression this exists to catch, and it
+        /// is what the previous version of this fix did.
+        #[test]
+        fn answering_a_host_key_question_puts_the_targets_own_bound_back() {
+            assert_eq!(
+                crate::client::once_the_host_key_is_answered(),
+                super::super::HANDSHAKE_TIMEOUT,
+                "the answer left the connection on a bound other than the target's"
+            );
+            assert!(
+                crate::client::once_the_host_key_is_answered()
+                    < crate::client::while_a_host_key_answer_is_outstanding(),
+                "the bound after the answer is no shorter than the pause, so the \
+                 pause is never lifted in any way a stalled target would notice"
+            );
+        }
+
         #[test]
         fn a_chain_without_the_host_asked_about_cannot_answer() {
             let asked_about = uuid::Uuid::new_v4();

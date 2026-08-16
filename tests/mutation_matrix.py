@@ -274,10 +274,16 @@ MUTATIONS = [
         # the line that ends the pause. Only the arming line above was guarded,
         # so the pause could be — and for a week was — permanent, and the matrix
         # reported the deadline as covered.
+        # Repointed at the policy rather than at the line that applies it.
+        # The integration test that used to be named here never reached the
+        # line: the stalling fixture mutes before `NEWKEYS`, and russh does not
+        # call `check_server_key` until the exchange completes, so the pause and
+        # the resume were both dead code in that test. Measured twice — see
+        # W-116 — rather than argued.
         "connection: the handshake deadline resumes after a host key answer",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        "tokio::time::Instant::now() + HANDSHAKE_TIMEOUT,",
-        "tokio::time::Instant::now() + Duration::from_secs(86400),",
+        "const fn once_the_host_key_is_answered() -> Duration {\n    HANDSHAKE_TIMEOUT\n}",
+        "const fn once_the_host_key_is_answered() -> Duration {\n    Duration::from_secs(86400)\n}",
     ),
     (
         "certificate: a username cannot shift the key ID fields",
@@ -489,7 +495,7 @@ RUST_CRATES = _crates_from_mutations()
 DISCRIMINATES = {
     "certificate: key ID must match": ["test_a_certificate_with_a_different_key_id_is_refused"],
     "connection: the handshake deadline resumes after a host key answer": [
-        "test_a_target_that_answers_with_a_host_key_and_then_stalls_is_given_up_on"
+        "answering_a_host_key_question_puts_the_targets_own_bound_back"
     ],
     # The seventeen that had no entry. Most already had a discriminating test —
     # it had simply never been written down, which under the criterion in §8 is

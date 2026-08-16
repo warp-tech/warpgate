@@ -1090,7 +1090,10 @@ mod tests {
         });
 
         let reported = std::fs::metadata(&path).unwrap().len();
-        assert_eq!(reported, 0, "a FIFO that reports a size is not the case here");
+        assert_eq!(
+            reported, 0,
+            "a FIFO that reports a size is not the case here"
+        );
 
         let outcome = VaultClient::read_credential(&path).await;
         assert!(
@@ -1198,7 +1201,8 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path = std::env::temp_dir().join(format!("wg-redirect-{}", std::process::id()));
+        let secret_id_path =
+            std::env::temp_dir().join(format!("wg-redirect-{}", std::process::id()));
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1239,7 +1243,8 @@ mod tests {
         ))
         .await;
 
-        let secret_id_path = std::env::temp_dir().join(format!("wg-endless-{}", std::process::id()));
+        let secret_id_path =
+            std::env::temp_dir().join(format!("wg-endless-{}", std::process::id()));
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let mut config = approle_config(vault, secret_id_path);
@@ -1292,7 +1297,8 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path = std::env::temp_dir().join(format!("wg-oversized-{}", std::process::id()));
+        let secret_id_path =
+            std::env::temp_dir().join(format!("wg-oversized-{}", std::process::id()));
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1329,7 +1335,8 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path = std::env::temp_dir().join(format!("wg-no-lease-{}", std::process::id()));
+        let secret_id_path =
+            std::env::temp_dir().join(format!("wg-no-lease-{}", std::process::id()));
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1505,7 +1512,8 @@ mod tests {
             .await
             .unwrap();
 
-            let secret_id_path = std::env::temp_dir().join(format!("wg-marker-{}", std::process::id()));
+            let secret_id_path =
+                std::env::temp_dir().join(format!("wg-marker-{}", std::process::id()));
             std::fs::write(&secret_id_path, "secret-id").unwrap();
 
             let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1570,6 +1578,49 @@ mod tests {
             validate_address("http://[2001:db8::1]:8200"),
             Err(VaultError::InsecureAddress)
         ));
+    }
+
+    /// `test_segment_validation` proves the rule; this proves someone applies
+    /// it before the socket is opened.
+    ///
+    /// The integration test that used to prove this composition end to end is
+    /// gone: validating the role when a target is saved means the admin API
+    /// refuses to create such a target at all, so the connect path can no
+    /// longer be reached with one (W-118). Reading the code and seeing
+    /// `validate_segment` at the top of `sign_ssh_key` is not the same as
+    /// watching nothing leave the process, so this watches.
+    #[tokio::test]
+    async fn a_role_that_climbs_out_of_the_mount_sends_nothing() {
+        let log = Arc::new(StdMutex::new(vec![]));
+        let vault = spawn_server(
+            json_response(r#"{"auth":{"client_token":"s.stub-token","lease_duration":3600}}"#),
+            json_response(r#"{"data":{"signed_key":"ssh-ed25519-cert-v01@openssh.com AAAA"}}"#),
+            log.clone(),
+        )
+        .await
+        .unwrap();
+
+        let secret_id_path =
+            std::env::temp_dir().join(format!("wg-traversal-{}", std::process::id()));
+        std::fs::write(&secret_id_path, "secret-id").unwrap();
+
+        let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
+        let error = client
+            .sign_ssh_key(
+                "../../auth/token/create",
+                "ssh-ed25519 AAAA",
+                "root",
+                "warpgate:alice",
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, VaultError::InvalidRole(_)), "{error:?}");
+        assert!(
+            log.lock().unwrap().is_empty(),
+            "a request left the process carrying the gateway's own token: {:?}",
+            log.lock().unwrap()
+        );
     }
 
     #[test]

@@ -1239,11 +1239,21 @@ class TestControlsStillApply:
     ):
         """The role is put into the request path, and a URL is normalised before
         it is sent: `../../auth/token/create` would arrive at a different Vault
-        API altogether, with the gateway's own token attached to it."""
-        user, target = make_user_and_target(
-            api, cert_ssh_port, role="../../auth/token/create"
-        )
-        assert connect(processes, cert_wg, user, target, timeout)[0] != 0
+        API altogether, with the gateway's own token attached to it.
+
+        Refused when the target is saved, which is the first moment anyone can
+        be told. It used to be refused only when a session tried to use it, so
+        the admin learned of it from a broken connection hours later.
+
+        The signing path still refuses it — `validate_segment` in
+        `warpgate-vault`, held by `test_segment_validation` — and that layer is
+        now unreachable through the API, which is the point of refusing early.
+        Both layers read the same rule from `warpgate_common`, so they cannot
+        drift into disagreeing about what a role may be called.
+        """
+        with pytest.raises(sdk.ApiException) as refused:
+            make_user_and_target(api, cert_ssh_port, role="../../auth/token/create")
+        assert refused.value.status == 400, refused.value.status
         assert stub_vault.requests == [], "a request left the process"
 
         # Which only means something if a target that names a real role does
@@ -1436,15 +1446,27 @@ class TestAChainWithAJumpHost:
         first one it saw. An operator pinning what they are told is the target's
         key was pinning the jump host's, and the target's own key was never
         looked at."""
-        # Its own host key, or the two hops are indistinguishable to exactly the
-        # thing under test.
+        # Each hop its own host key, or the two are indistinguishable to exactly
+        # the thing under test — and each hop its own server, which is the part
+        # this test got wrong until CI ran it.
+        #
+        # The jump host used to be the shared fixture server. Earlier tests in
+        # this file connect to it, so by the time this one runs its key is
+        # already trusted — and the refusal asserted below only happens for a
+        # key nothing has trusted yet. Run alone the test passed; run in the
+        # suite it did not. A test that depends on what ran before it is not
+        # evidence for the guard it names, whichever way it happens to come out.
         stub_vault.sign_options = ["permit-port-forwarding"]
+        first = processes.start_ssh_server(
+            trusted_ca=[stub_vault.ca_public_key], distinct_host_key=True
+        )
         second = processes.start_ssh_server(
             trusted_ca=[stub_vault.ca_public_key], distinct_host_key=True
         )
+        wait_port(first)
         wait_port(second)
 
-        user, jump, target = self._chain(api, cert_ssh_port, second)
+        user, jump, target = self._chain(api, first, second)
 
         # Asserted, not asserted-in-prose. This comment used to say the refusal
         # "is its own assertion" and then not make one, and the verifier
