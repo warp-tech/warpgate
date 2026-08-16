@@ -304,13 +304,13 @@ impl AdminPermissionSet {
     }
 
     #[must_use]
-    pub const fn contains(&self, perm: AdminPermission) -> bool {
+    pub const fn contains(self, perm: AdminPermission) -> bool {
         self.0 & perm.bit() != 0
     }
 
     /// Holding any permission at all makes the principal an administrator.
     #[must_use]
-    pub const fn is_admin(&self) -> bool {
+    pub const fn is_admin(self) -> bool {
         self.0 != 0
     }
 }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub struct SessionKeepalive(Arc<()>);
 
 impl SessionKeepalive {
-    pub fn new(token: Arc<()>) -> Self {
+    pub const fn new(token: Arc<()>) -> Self {
         Self(token)
     }
 

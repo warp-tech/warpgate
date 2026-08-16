@@ -32,6 +32,8 @@ pub use writer::{LiveChunk, NDJsonRecordingWriter, RawRecordingWriter};
 /// (just under kubernetes default)
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(25);
 
+const RECORDING_GENERATION: i32 = 3;
+
 /// The live-broadcast channel for a recording's primary data stream, keyed by
 /// recording id. Each item carries its end byte offset so a viewer can splice
 /// the live tail onto a history snapshot without gaps (see [`LiveChunk`]).
@@ -176,7 +178,7 @@ impl SessionRecordings {
     /// Signal every in-flight writer to finalize, then wait (bounded)
     pub async fn shutdown(&self) {
         self.shutdown.cancel();
-        if self.shutdown_tracker.len() > 0 {
+        if !self.shutdown_tracker.is_empty() {
             info!(
                 count = self.shutdown_tracker.len(),
                 "Waiting for session recording uploads to finish..."
@@ -212,8 +214,8 @@ impl SessionRecordings {
         }
 
         let name = name.unwrap_or_else(|| Uuid::new_v4().to_string());
-        // Gen-2 recordings are folders holding fixed-name files (`data.ndjson`, and a
-        // desktop `index.json`), so the recording path is a directory we create here.
+        // Gen 2+ recordings are folders holding fixed-name files (`data.ndjson`, and an
+        // index `index.json`), so the recording path is a directory we create here.
         // On S3 this folder is a scratch copy, live-readable while the session runs and
         // dropped once each file finishes uploading.
         let folder = storage.recording_folder(id, &name);
@@ -245,7 +247,7 @@ impl SessionRecordings {
                     name: Set(name.clone()),
                     kind: Set(T::kind()),
                     metadata: Set(serde_json::to_string(&metadata)?),
-                    generation: Set(2),
+                    generation: Set(RECORDING_GENERATION),
                     ..Default::default()
                 };
                 values.insert(db).await.map_err(Error::Database)?

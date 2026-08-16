@@ -22,7 +22,7 @@ pub struct AcceptAnyClientCert {
 }
 
 impl AcceptAnyClientCert {
-    pub fn new(provider: Arc<CryptoProvider>) -> Self {
+    pub const fn new(provider: Arc<CryptoProvider>) -> Self {
         Self { provider }
     }
 }

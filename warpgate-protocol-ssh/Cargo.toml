@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-protocol-ssh"
-version = "0.28.0-beta.1"
+version = "0.28.0-beta.2"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -26,7 +26,7 @@ thiserror.workspace = true
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tracing.workspace = true
-tui-input = { version = "0.14", default-features = false, features = [
+tui-input = { version = "0.15", default-features = false, features = [
     "ratatui-crossterm",
 ] }
 url.workspace = true

@@ -413,6 +413,24 @@ impl Api {
     }
 }
 
+async fn record_failed_login_attempt(
+    services: &Services,
+    client_ip: Option<std::net::IpAddr>,
+    username: &str,
+    credential_type: &str,
+) {
+    let Some(ip) = client_ip else { return };
+    let _ = services
+        .login_protection
+        .record_failed_attempt(FailedAttemptInfo {
+            username: username.to_string(),
+            remote_ip: ip,
+            protocol: crate::common::PROTOCOL_NAME,
+            credential_type: credential_type.to_string(),
+        })
+        .await;
+}
+
 /// The password step of a login, on the node that owns the browser session.
 async fn serve_login(
     req: &Request,
@@ -439,6 +457,7 @@ async fn serve_login(
     // Password login can be disabled globally (e.g. SSO-only deployments).
     if ctx.parameters().await?.password_login_mode == Parameters::PasswordLoginMode::Disabled {
         warn!(username = %body.username, "Password login attempt while disabled");
+        record_failed_login_attempt(services, client_ip, &body.username, "password").await;
         return Ok(LoginResponse::Failure(Json(LoginFailureResponse::state(
             ApiAuthState::Failed,
         ))));
@@ -523,17 +542,13 @@ async fn serve_login(
             // password that merely needs a second factor is not a failure.
             if rejection.credential_rejected {
                 error!("Password authentication failed");
-                if let Some(ip) = client_ip {
-                    let _ = services
-                        .login_protection
-                        .record_failed_attempt(FailedAttemptInfo {
-                            username: state.user_info().username.clone(),
-                            remote_ip: ip,
-                            protocol: crate::common::PROTOCOL_NAME,
-                            credential_type: "password".to_string(),
-                        })
-                        .await;
-                }
+                record_failed_login_attempt(
+                    services,
+                    client_ip,
+                    &state.user_info().username,
+                    "password",
+                )
+                .await;
             }
             Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                 // An invalid extra credential can leave the overall state
@@ -618,18 +633,14 @@ async fn serve_otp_login(
         }
         Err(rejection) => {
             // Only an invalid OTP counts as a failed attempt.
-            if rejection.credential_rejected
-                && let Some(ip) = client_ip
-            {
-                let _ = services
-                    .login_protection
-                    .record_failed_attempt(FailedAttemptInfo {
-                        username: state.user_info().username.clone(),
-                        remote_ip: ip,
-                        protocol: crate::common::PROTOCOL_NAME,
-                        credential_type: "otp".to_string(),
-                    })
-                    .await;
+            if rejection.credential_rejected {
+                record_failed_login_attempt(
+                    services,
+                    client_ip,
+                    &state.user_info().username,
+                    "otp",
+                )
+                .await;
             }
             Ok(LoginResponse::Failure(Json(LoginFailureResponse {
                 // An invalid extra credential can leave the overall state
@@ -707,8 +718,8 @@ where
 impl ReparseForwardedResponse for LoginResponse {
     async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
         match response.status() {
-            http::StatusCode::CREATED => Ok(LoginResponse::Success),
-            http::StatusCode::UNAUTHORIZED => Ok(LoginResponse::Failure(Json(
+            http::StatusCode::CREATED => Ok(Self::Success),
+            http::StatusCode::UNAUTHORIZED => Ok(Self::Failure(Json(
                 parse_forwarded_body(response).await?,
             ))),
             _ => Err(forwarded_error(response).await),
@@ -719,8 +730,8 @@ impl ReparseForwardedResponse for LoginResponse {
 impl ReparseForwardedResponse for AuthStateResponse {
     async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
         match response.status() {
-            http::StatusCode::NOT_FOUND => Ok(AuthStateResponse::NotFound),
-            http::StatusCode::OK => Ok(AuthStateResponse::Ok(Json(
+            http::StatusCode::NOT_FOUND => Ok(Self::NotFound),
+            http::StatusCode::OK => Ok(Self::Ok(Json(
                 parse_forwarded_body(response).await?,
             ))),
             _ => Err(forwarded_error(response).await),

@@ -3,6 +3,7 @@ use poem_openapi::SecurityScheme;
 use poem_openapi::auth::ApiKey;
 use warpgate_common_http::AuthenticatedRequestContext;
 
+#[allow(clippy::unused_async)]
 async fn authenticated_context(req: &Request, _key: ApiKey) -> Option<AuthenticatedRequestContext> {
     req.data::<AuthenticatedRequestContext>().cloned()
 }
@@ -15,7 +16,7 @@ async fn authenticated_context(req: &Request, _key: ApiKey) -> Option<Authentica
     key_in = "header",
     checker = "authenticated_context"
 )]
-pub(crate) struct TokenAuth(AuthenticatedRequestContext);
+pub struct TokenAuth(AuthenticatedRequestContext);
 
 #[derive(SecurityScheme)]
 #[oai(
@@ -25,7 +26,7 @@ pub(crate) struct TokenAuth(AuthenticatedRequestContext);
     key_in = "cookie",
     checker = "authenticated_context"
 )]
-pub(crate) struct CookieAuth(AuthenticatedRequestContext);
+pub struct CookieAuth(AuthenticatedRequestContext);
 
 /// Requests forwarded by a cluster peer authenticate with the cluster token
 /// (plus the forwarded user identity resolved into the request authorization —
@@ -40,18 +41,18 @@ pub(crate) struct CookieAuth(AuthenticatedRequestContext);
     key_in = "header",
     checker = "authenticated_context"
 )]
-pub(crate) struct ClusterAuth(AuthenticatedRequestContext);
+pub struct ClusterAuth(AuthenticatedRequestContext);
 
 /// Auth gate - both a check and a AuthenticatedRequestContext extractor at once
 #[derive(SecurityScheme)]
-pub(crate) enum AuthedSession {
+pub enum AuthedSession {
     Token(TokenAuth),
     Cookie(CookieAuth),
     Cluster(ClusterAuth),
 }
 
 impl AuthedSession {
-    pub fn ctx(&self) -> &AuthenticatedRequestContext {
+    pub const fn ctx(&self) -> &AuthenticatedRequestContext {
         match self {
             Self::Token(t) => &t.0,
             Self::Cookie(c) => &c.0,
