@@ -74,6 +74,7 @@ ignore = [
     "RUSTSEC-2026-0104", # an older pinned version of rustls-webpki used by AWS SDK
     "RUSTSEC-2026-0173", # proc-macro-error2 is unmaintained - waiting for a sea-orm update
     "RUSTSEC-2026-0195", # quick-xml memory exhaustion - we don't parse untrusted XML
+    "RUSTSEC-2026-0253", # lru: unsound LruCache::pop - an old version pinned by aws-sdk-s3
     "RUSTSEC-2026-0194", # quick-xml quadratic time - see above
     "RUSTSEC-2021-0141", # dotenv is unmaintaned - only used for dev
 ]

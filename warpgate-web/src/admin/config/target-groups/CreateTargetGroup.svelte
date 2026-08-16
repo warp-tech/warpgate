@@ -3,7 +3,7 @@
     import { api, type BootstrapThemeColor } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import GroupColorIcon from 'common/GroupColorIcon.svelte'
     import { link, replace } from 'svelte-spa-router'
     import { VALID_CHOICES } from './common'
 
@@ -79,7 +79,7 @@
                         }}
                         title={value || 'None'}
                     >
-                        <GroupColorCircle color={value} />
+                        <GroupColorIcon color={value} />
                         <span>{value || 'None'}</span>
                     </button>
                 {/each}
