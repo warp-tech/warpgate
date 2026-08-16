@@ -104,7 +104,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                     Ok(warpgate_core::BackfillOutcome::Settled) => break,
                     Ok(warpgate_core::BackfillOutcome::AwaitingCluster) => {}
                     Err(error) => warn!(%error, "Deferred credential encryption failed"),
-                };
+                }
                 tokio::time::sleep(Duration::from_secs(rand::random_range(3..7))).await;
             }
         });

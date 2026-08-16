@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-sso"
-version = "0.28.0-beta.1"
+version = "0.28.0-beta.2"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -8,7 +8,6 @@ publish = false
 [dependencies]
 bytes.workspace = true
 data-encoding.workspace = true
-futures.workspace = true
 jsonwebtoken = { version = "10", default-features = false, features = [
     "use_pem",
     "aws_lc_rs",

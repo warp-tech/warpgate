@@ -7,14 +7,16 @@ use warpgate_common::ListenEndpoint;
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
 mod desktop;
-pub(crate) mod framebuffer;
+pub mod framebuffer;
 mod handle;
+mod terminal_screen;
 
 pub use desktop::{
     DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState, Scancode,
 };
 pub use framebuffer::{Framebuffer, PngEncodeError, Rect, decode_png_rgba};
 pub use handle::{SessionHandle, WarpgateServerHandle};
+pub use terminal_screen::{TerminalScreen, sane_terminal_size};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TargetTestError {

@@ -524,7 +524,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     }
 }
 
-const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 10);
+const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_mins(10);
 
 enum IdlePolicy {
     /// No idle timeout: the proxy never closes an idle session.

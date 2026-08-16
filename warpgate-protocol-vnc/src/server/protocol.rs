@@ -106,10 +106,9 @@ impl PixelFormat {
 pub fn pack_rgb(pixel_format: &PixelFormat, rgb: &[u8]) -> Vec<u8> {
     let bytes_per_pixel = usize::from(pixel_format.bits_per_pixel) / 8;
     let mut out = Vec::with_capacity(rgb.len() / 3 * bytes_per_pixel);
-    for px in rgb.chunks_exact(3) {
-        if let [r, g, b] = *px {
-            pixel_format.pack(r, g, b, &mut out);
-        }
+    for px in rgb.as_chunks::<3>().0 {
+        let [r, g, b] = *px;
+        pixel_format.pack(r, g, b, &mut out);
     }
     out
 }
@@ -125,10 +124,9 @@ pub fn pack_bgra(pixel_format: &PixelFormat, bgra: &[u8]) -> Vec<u8> {
     }
     let bytes_per_pixel = usize::from(pixel_format.bits_per_pixel) / 8;
     let mut out = Vec::with_capacity(bgra.len() / 4 * bytes_per_pixel);
-    for px in bgra.chunks_exact(4) {
-        if let [b, g, r, _a] = *px {
-            pixel_format.pack(r, g, b, &mut out);
-        }
+    for px in bgra.as_chunks::<4>().0 {
+        let [b, g, r, _a] = *px;
+        pixel_format.pack(r, g, b, &mut out);
     }
     out
 }
@@ -320,13 +318,11 @@ where
                 reader.read_exact(&mut body).await?;
                 let mut desktop_size = false;
                 let mut tight = false;
-                for chunk in body.chunks_exact(4) {
-                    if let Ok(arr) = <[u8; 4]>::try_from(chunk) {
-                        match i32::from_be_bytes(arr) {
-                            ENCODING_DESKTOP_SIZE => desktop_size = true,
-                            ENCODING_TIGHT => tight = true,
-                            _ => {}
-                        }
+                for arr in body.as_chunks::<4>().0 {
+                    match i32::from_be_bytes(*arr) {
+                        ENCODING_DESKTOP_SIZE => desktop_size = true,
+                        ENCODING_TIGHT => tight = true,
+                        _ => {}
                     }
                 }
                 debug!(count, desktop_size, tight, "viewer SetEncodings");

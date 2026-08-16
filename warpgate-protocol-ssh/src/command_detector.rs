@@ -19,6 +19,8 @@
 //! - Multi-command paste in a single burst captures only the first command.
 //! - A command that wraps past the bottom of the screen may be skipped.
 
+use warpgate_core::sane_terminal_size as sane_size;
+
 const CR: u8 = 0x0d;
 const LF: u8 = 0x0a;
 const ETX: u8 = 0x03; // Ctrl-C
@@ -27,13 +29,6 @@ const ETX: u8 = 0x03; // Ctrl-C
 /// this many output bytes, so a shell that never echoes one cannot wedge the
 /// detector on a single line forever.
 const MAX_PENDING_OUTPUT: usize = 2048;
-
-const fn sane_size(cols: u16, rows: u16) -> (u16, u16) {
-    (
-        if cols < 2 { 80 } else { cols },
-        if rows < 2 { 24 } else { rows },
-    )
-}
 
 #[derive(Clone, Copy)]
 enum State {

@@ -23,7 +23,7 @@ use warpgate_db_entities::{CertificateCredential, CertificateRevocation};
 
 use crate::server::client_certs::RequestCertificateExt;
 
-pub(crate) fn unauthorized() -> poem::Error {
+pub fn unauthorized() -> poem::Error {
     poem::Error::from_string(
         "Unauthorized: provide a valid Bearer token or client certificate",
         poem::http::StatusCode::UNAUTHORIZED,
