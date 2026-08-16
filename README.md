@@ -201,6 +201,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
     </tr>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/sravan-blitz"><img src="https://avatars.githubusercontent.com/u/279685696?v=4?s=100" width="100px;" alt="sravan-blitz"/><br /><sub><b>sravan-blitz</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=sravan-blitz" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/infrastructure"><img src="https://avatars.githubusercontent.com/u/4209337?v=4?s=100" width="100px;" alt="infrastructure"/><br /><sub><b>infrastructure</b></sub></a><br /><a href="#infra-infrastructure" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a></td>
     </tr>
   </tbody>
 </table>
