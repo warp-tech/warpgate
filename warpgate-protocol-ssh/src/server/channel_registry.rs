@@ -8,10 +8,10 @@
 use std::collections::HashMap;
 
 use uuid::Uuid;
-use warpgate_core::recordings::{ConnectionRecorder, TerminalRecorder};
+use warpgate_core::recordings::ConnectionRecorder;
 
-use super::command_detector::CommandDetector;
 use crate::RCEvent;
+use crate::channel_audit::ChannelAudit;
 use crate::common::{PtyRequest, ServerChannelId};
 
 /// How far a channel has got through its lifecycle. A channel that is gone is
@@ -39,20 +39,28 @@ impl Default for ChannelState {
 /// All per-channel resources. Living in one struct per channel (rather than
 /// parallel per-resource maps) means they can't fall out of sync as channels
 /// come and go, and a new per-channel resource only needs a field here.
-#[derive(Default)]
 pub struct Channel {
     /// The client-facing russh channel id. `None` exactly while a
     /// server-initiated open awaits the client's confirmation — the id is
     /// assigned by the confirmation that resolves the open.
     server_id: Option<ServerChannelId>,
     state: ChannelState,
-    pub recorder: Option<TerminalRecorder>,
-    pub command_detector: Option<CommandDetector>,
+    pub audit: ChannelAudit,
     pub pty_size: Option<PtyRequest>,
     pub traffic_recorder: Option<ConnectionRecorder>,
 }
 
 impl Channel {
+    fn new(id: Uuid, server_id: Option<ServerChannelId>) -> Self {
+        Self {
+            server_id,
+            state: ChannelState::default(),
+            audit: ChannelAudit::new(id),
+            pty_size: None,
+            traffic_recorder: None,
+        }
+    }
+
     pub const fn server_id(&self) -> Option<ServerChannelId> {
         self.server_id
     }
@@ -116,13 +124,8 @@ impl ChannelRegistry {
     /// the client id is known upfront, the target-side id is minted here.
     pub fn begin_client_open(&mut self, server_id: ServerChannelId) -> Uuid {
         let uuid = Uuid::new_v4();
-        self.channels.insert(
-            uuid,
-            Channel {
-                server_id: Some(server_id),
-                ..Default::default()
-            },
-        );
+        self.channels
+            .insert(uuid, Channel::new(uuid, Some(server_id)));
         uuid
     }
 
@@ -130,7 +133,9 @@ impl ChannelRegistry {
     /// target side already named the channel, the client id arrives with the
     /// confirmation ([`Self::assign_server_id`]).
     pub fn begin_server_open(&mut self, id: Uuid) {
-        self.channels.entry(id).or_default();
+        self.channels
+            .entry(id)
+            .or_insert_with(|| Channel::new(id, None));
     }
 
     /// Attach the client id the confirmation resolved to. `false` means the

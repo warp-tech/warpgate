@@ -8,13 +8,11 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, error, info_span, warn};
 use uuid::Uuid;
-use warpgate_common::{TargetOptions, TargetSSHOptions, WarpgateError};
-use warpgate_core::recordings::TerminalRecordingStreamId;
+use warpgate_common::{TargetOptions, WarpgateError};
 use warpgate_core::{Services, SessionStateInit, State, TargetAuthorization};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_protocol_ssh::known_hosts::KnownHosts;
 use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient, resolve_ssh_chain};
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
@@ -58,13 +56,9 @@ impl WebSshClientManager {
         let (user_info, target) = authorization.into_parts();
         let username = user_info.username.clone();
 
-        let TargetOptions::Ssh(mut ssh_options) = target.options.clone() else {
+        let TargetOptions::Ssh(_) = &target.options else {
             return Err(WarpgateError::InvalidTarget);
         };
-
-        if ssh_options.username.is_empty() {
-            ssh_options.username = username.clone();
-        }
 
         let (abort_tx, mut abort_rx) = mpsc::unbounded_channel::<()>();
         let session_handle = WebSessionHandle::new(abort_tx);
@@ -139,7 +133,6 @@ impl WebSshClientManager {
             rc_handles.event_rx,
             self.sessions(),
             services.clone(),
-            ssh_options,
         );
 
         debug!(session=%session_id, user=%username, target=%target.name, "Web-SSH session created");
@@ -153,7 +146,6 @@ fn spawn_event_loop(
     mut event_rx: Receiver<RCEvent>,
     sessions: Arc<Mutex<HashMap<Uuid, Arc<WebSshSession>>>>,
     services: Services,
-    ssh_options: TargetSSHOptions,
 ) {
     let session_id = session.id();
     let span = info_span!("WebSSH", session=%session_id);
@@ -168,16 +160,7 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::Output(channel_id, data) => {
-                            {
-                                session.with_recorder(channel_id, async |r| {
-                                    if let Err(e) = r
-                                        .write(TerminalRecordingStreamId::Output, &data)
-                                        .await
-                                    {
-                                        error!(%channel_id, ?e, "Failed to record terminal data");
-                                    }
-                                }).await;
-                            }
+                            session.on_output(channel_id, &data).await;
                             session
                                 .push(ServerMessage::Output {
                                     channel_id,
@@ -196,7 +179,7 @@ fn spawn_event_loop(
                         }
                         RCEvent::Close(channel_id) |
                         RCEvent::ChannelFailure(channel_id) => {
-                            session.stop_recording(channel_id).await;
+                            session.end_channel(channel_id).await;
                             session
                                 .push(ServerMessage::ChannelClosed { channel_id })
                                 .await;
@@ -220,10 +203,10 @@ fn spawn_event_loop(
                                 })
                                 .await;
                         }
-                        RCEvent::HostKeyReceived(key) => {
-                            debug!(%session_id, "Host key received: {}", key.algorithm());
+                        RCEvent::HostKeyReceived(key, host, port) => {
+                            debug!(%session_id, "Host key received for {host}:{port}: {}", key.algorithm());
                         }
-                        RCEvent::HostKeyUnknown(key, reply) => {
+                        RCEvent::HostKeyUnknown(key, host, port, reply) => {
                             let mode = match Parameters::Entity::get(&services.db).await {
                                 Ok(p) => p.ssh_host_key_verification,
                                 Err(e) => {
@@ -233,30 +216,15 @@ fn spawn_event_loop(
                                 }
                             };
                             match mode {
-                                // `Ignore` never gets here - the key is accepted
-                                // without a lookup - but don't store it either.
-                                SshHostKeyVerificationMode::Ignore => {
-                                    let _ = reply.send(true);
-                                }
-                                SshHostKeyVerificationMode::AutoAccept => {
-                                    let known_hosts = KnownHosts::new(&services.db);
-                                    if let Err(e) = known_hosts
-                                        .trust(
-                                            &ssh_options.host,
-                                            ssh_options.port,
-                                            &key,
-                                        )
-                                        .await
-                                    {
-                                        error!(%session_id, ?e, "Failed to save host key");
-                                    }
+                                SshHostKeyVerificationMode::Ignore
+                                | SshHostKeyVerificationMode::AutoAccept => {
                                     let _ = reply.send(true);
                                 }
                                 SshHostKeyVerificationMode::Prompt => {
                                     session
                                         .push(ServerMessage::HostKeyUnknown {
-                                            host: ssh_options.host.clone(),
-                                            port: ssh_options.port,
+                                            host,
+                                            port,
                                             key_type: key.algorithm().to_string(),
                                             key_base64: key.public_key_base64(),
                                         })
@@ -264,9 +232,6 @@ fn spawn_event_loop(
                                     session
                                         .set_pending_host_key(crate::session::PendingHostKey {
                                             reply,
-                                            key,
-                                            host: ssh_options.host.clone(),
-                                            port: ssh_options.port,
                                         })
                                         .await;
                                 }

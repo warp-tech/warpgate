@@ -15,6 +15,7 @@ use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialKind, CredentialPolicy,
 };
+use warpgate_common::helpers::hash::hash_secret;
 use warpgate_common::{Protocol, Secret, Target, User, WarpgateError};
 use warpgate_db_entities as e;
 use warpgate_sso::SsoProviderConfig;
@@ -233,7 +234,7 @@ pub async fn authorize_ticket(
 
     let ticket = {
         e::Ticket::Entity::find()
-            .filter(e::Ticket::Column::Secret.eq(&secret.expose_secret()[..]))
+            .filter(e::Ticket::Column::SecretHash.eq(hash_secret(secret.expose_secret())))
             .one(db)
             .await?
     };

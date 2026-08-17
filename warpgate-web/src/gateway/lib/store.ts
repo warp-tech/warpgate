@@ -9,6 +9,11 @@ const [openTargetsInNewTabPreference] = autosave<boolean | null>(
     null,
 )
 
+export const [collapsedTargetGroups] = autosave<string[]>(
+    'target-list:collapsed-groups',
+    [],
+)
+
 export const openTargetsInNewTab = derived(
     [openTargetsInNewTabPreference, serverInfo],
     ([$preference, $serverInfo]) => {

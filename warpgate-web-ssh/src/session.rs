@@ -3,16 +3,16 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
 use bytes::Bytes;
-use russh::keys::PublicKey;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info};
 use uuid::Uuid;
 use warpgate_core::WarpgateServerHandle;
-use warpgate_core::recordings::{SessionRecordings, TerminalRecorder, TerminalRecordingStreamId};
+use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
-    ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError, SshRecordingMetadata,
+    ChannelAudit, ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError,
+    SshRecordingMetadata,
 };
 use warpgate_web_clients_common::{ManagedSession, Sheddable, WebSession};
 
@@ -30,9 +30,6 @@ impl Sheddable for ServerMessage {
 
 pub struct PendingHostKey {
     pub reply: oneshot::Sender<bool>,
-    pub key: PublicKey,
-    pub host: String,
-    pub port: u16,
 }
 
 pub struct WebSshSession {
@@ -42,7 +39,7 @@ pub struct WebSshSession {
 
     channel_counter: Arc<AtomicUsize>,
     recordings: Arc<Mutex<SessionRecordings>>,
-    channel_recorders: Arc<Mutex<HashMap<Uuid, TerminalRecorder>>>,
+    channel_audits: Arc<Mutex<HashMap<Uuid, ChannelAudit>>>,
     pending_host_key: Arc<Mutex<Option<PendingHostKey>>>,
 }
 
@@ -72,7 +69,7 @@ impl WebSshSession {
             command_tx,
             channel_counter: Arc::new(AtomicUsize::new(0)),
             recordings,
-            channel_recorders: Arc::new(Mutex::new(HashMap::new())),
+            channel_audits: Arc::new(Mutex::new(HashMap::new())),
             pending_host_key: Arc::new(Mutex::new(None)),
         }
     }
@@ -85,14 +82,7 @@ impl WebSshSession {
         self.pending_host_key.lock().await.take()
     }
 
-    pub async fn with_recorder<F: AsyncFnOnce(&TerminalRecorder)>(&self, channel_id: Uuid, f: F) {
-        let recorders = self.channel_recorders.lock().await;
-        if let Some(r) = recorders.get(&channel_id) {
-            f(r).await;
-        }
-    }
-
-    pub async fn start_recording(&self, channel_id: Uuid) {
+    async fn start_recording(&self, channel_id: Uuid) -> Option<TerminalRecorder> {
         let channel_number = self
             .channel_counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -109,21 +99,17 @@ impl WebSshSession {
             )
             .await
         {
-            Ok(recorder) => {
-                self.channel_recorders
-                    .lock()
-                    .await
-                    .insert(channel_id, recorder);
-            }
-            Err(warpgate_core::recordings::Error::Disabled) => {}
+            Ok(recorder) => Some(recorder),
+            Err(warpgate_core::recordings::Error::Disabled) => None,
             Err(e) => {
                 error!(%channel_id, ?e, "Failed to start terminal recording");
+                None
             }
         }
     }
 
-    pub async fn stop_recording(&self, channel_id: Uuid) {
-        self.channel_recorders.lock().await.remove(&channel_id);
+    pub async fn end_channel(&self, channel_id: Uuid) {
+        self.channel_audits.lock().await.remove(&channel_id);
     }
 
     fn command(&self, cmd: RCCommand) -> Option<oneshot::Receiver<Result<(), SshClientError>>> {
@@ -141,18 +127,21 @@ impl WebSshSession {
 
         info!(session=%self.id(), channel=%channel_id, "Opening session channel");
 
-        self.start_recording(channel_id).await;
-        self.with_recorder(channel_id, async move |r: &TerminalRecorder| {
-            if let Err(e) = r.write_pty_resize(cols, rows).await {
-                error!(%channel_id, ?e, "Failed to write initial PTY size to recording");
-            }
-        })
-        .await;
+        let pty_request = make_pty_request(cols, rows);
+        let mut audit = ChannelAudit::new(channel_id);
+        let (cols, rows) = pty_request.screen_size();
+        audit.start_command_detection(cols, rows);
+        if let Some(recorder) = self.start_recording(channel_id).await {
+            audit.set_recorder(recorder);
+        }
+        // seeds the recording with the initial screen size
+        audit.on_resize(&pty_request).await;
+        self.channel_audits.lock().await.insert(channel_id, audit);
 
         self.command(RCCommand::Channel(channel_id, ChannelOperation::OpenShell));
         self.command(RCCommand::Channel(
             channel_id,
-            ChannelOperation::RequestPty(make_pty_request(cols, rows)),
+            ChannelOperation::RequestPty(pty_request),
         ));
         self.command(RCCommand::Channel(
             channel_id,
@@ -162,26 +151,27 @@ impl WebSshSession {
     }
 
     pub async fn send_input(&self, channel_id: Uuid, data: Bytes) {
-        self.with_recorder(channel_id, async |r| {
-            if let Err(e) = r.write(TerminalRecordingStreamId::Input, &data).await {
-                error!(%channel_id, ?e, "Failed to record terminal input");
-            }
-        })
-        .await;
+        if let Some(audit) = self.channel_audits.lock().await.get_mut(&channel_id) {
+            audit.on_input(&data).await;
+        }
         self.command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));
     }
 
+    pub async fn on_output(&self, channel_id: Uuid, data: &[u8]) {
+        if let Some(audit) = self.channel_audits.lock().await.get_mut(&channel_id) {
+            audit.on_output(data).await;
+        }
+    }
+
     pub async fn resize_channel(&self, channel_id: Uuid, cols: u32, rows: u32) {
+        let pty_request = make_pty_request(cols, rows);
+        if let Some(audit) = self.channel_audits.lock().await.get_mut(&channel_id) {
+            audit.on_resize(&pty_request).await;
+        }
         self.command(RCCommand::Channel(
             channel_id,
-            ChannelOperation::ResizePty(make_pty_request(cols, rows)),
+            ChannelOperation::ResizePty(pty_request),
         ));
-        self.with_recorder(channel_id, async move |r| {
-            if let Err(e) = r.write_pty_resize(cols, rows).await {
-                error!(%channel_id, ?e, "Failed to record PTY resize");
-            }
-        })
-        .await;
     }
 
     pub fn close_channel(&self, channel_id: Uuid) {

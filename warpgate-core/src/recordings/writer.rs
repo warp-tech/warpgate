@@ -16,7 +16,7 @@ use warpgate_db_entities::Recording;
 use super::storage::RecordingSink;
 use super::{Error, LiveMap, Result};
 
-pub(crate) struct WriterShutdown {
+pub struct WriterShutdown {
     pub token: CancellationToken,
     pub tracker: TaskTracker,
 }

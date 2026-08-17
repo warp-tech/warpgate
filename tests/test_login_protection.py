@@ -230,6 +230,35 @@ class TestLoginProtection:
             api.unblock_ip(sdk.UnblockIpRequest(ip="::1"))
         assert _get_with_ticket().status_code // 100 == 2
 
+    def test_ip_blocking_with_password_login_disabled(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """Password attempts against the disabled method still trigger IP blocking."""
+        wg = _lp_wg(processes, ip_max=3, user_max=100)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, _ = _create_test_user(api, echo_server_port)
+            api.update_parameters(
+                sdk.ParameterUpdate(
+                    password_login_mode=sdk.PasswordLoginMode.DISABLED
+                )
+            )
+
+        for _ in range(3):
+            resp, _ = _post_login(url, user.username, "wrong")
+            assert resp.status_code // 100 != 2
+        time.sleep(0.2)
+
+        resp, _ = _post_login(url, user.username, "wrong")
+        body = resp.json()
+        assert body.get("state") == "IpBlocked", f"Expected IpBlocked, got {body}"
+
+        with admin_client(url) as api:
+            assert any(
+                b.ip_address == "::1" for b in api.list_blocked_ips()
+            ), "IP was not blocked despite repeated attempts on the disabled method"
+
     # ── user lockout ────────────────────────────────────────────────────────
 
     def test_user_lockout_blocks_api_token_auth(

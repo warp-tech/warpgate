@@ -290,7 +290,7 @@ mod openssl_inner {
         Ok((TargetTlsStream::OpenSsl(tls_stream), server_public_key))
     }
 
-    pub(crate) fn build_openssl_root_store() -> Result<openssl::x509::store::X509Store> {
+    pub fn build_openssl_root_store() -> Result<openssl::x509::store::X509Store> {
         use openssl::x509::X509;
         use openssl::x509::store::X509StoreBuilder;
 

@@ -175,11 +175,10 @@ async fn route_input(
                 height,
                 data,
             } => {
-                if let Some(update) = frame_to_update(x, y, width, height, data) {
-                    if frame_tx.send(update).await.is_err() {
+                if let Some(update) = frame_to_update(x, y, width, height, data)
+                    && frame_tx.send(update).await.is_err() {
                         break;
                     }
-                }
             }
             Input::Resize { width, height } => {
                 let new = DesktopSize { width, height };

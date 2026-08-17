@@ -4,6 +4,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
+use tracing::error;
 use warpgate_db_entities::Recording::RecordingKind;
 
 use super::{Error, Recorder, Result};
@@ -507,7 +508,7 @@ impl DesktopRecorder {
             },
             // The target's response to a resize arrives as a recorded DesktopEvent::Resize,
             // so the request itself carries no playback value.
-            DesktopInput::Refresh | DesktopInput::Resize { .. } => return Ok(()),
+            DesktopInput::Refresh | DesktopInput::Resize { .. } |
             // A key with neither representation carries nothing to replay.
             DesktopInput::Key { .. } => return Ok(()),
         };
@@ -554,8 +555,9 @@ impl Drop for DesktopRecorder {
             let entry = IndexEntry::End {
                 time: state.duration,
             };
-            index_writer.write_json_line(&entry).await?;
-            Result::Ok(())
+            if let Err(error) = index_writer.write_json_line(&entry).await {
+                error!(%error, "Failed to write the recording index footer");
+            }
         });
     }
 }

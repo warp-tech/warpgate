@@ -2,7 +2,7 @@
     import { api, type TargetGroup } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
     import EmptyState from 'common/EmptyState.svelte'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import GroupColorIcon from 'common/GroupColorIcon.svelte'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
@@ -57,7 +57,7 @@
                 <div class="me-auto">
                     <div class="d-flex align-items-center gap-2">
                         {#if group.color}
-                            <GroupColorCircle color={group.color} />
+                            <GroupColorIcon color={group.color} />
                         {/if}
                         <strong>{group.name}</strong>
                     </div>

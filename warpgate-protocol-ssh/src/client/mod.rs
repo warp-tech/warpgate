@@ -192,8 +192,8 @@ pub enum RCEvent {
     HopConnected,
     // ForwardedTCPIP(Uuid, DirectTCPIPParams),
     Done,
-    HostKeyReceived(PublicKey),
-    HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
+    HostKeyReceived(PublicKey, String, u16),
+    HostKeyUnknown(PublicKey, String, u16, oneshot::Sender<bool>),
     ForwardedTcpIp(Uuid, ForwardedTcpIpParams),
     ForwardedStreamlocal(Uuid, ForwardedStreamlocalParams),
     ForwardedAgent(Uuid),
@@ -223,7 +223,7 @@ impl RCEvent {
             | Self::ConnectionError(_)
             | Self::HopConnected
             | Self::Done
-            | Self::HostKeyReceived(_)
+            | Self::HostKeyReceived(..)
             | Self::HostKeyUnknown(..)
             | Self::ForwardedTcpIp(..)
             | Self::ForwardedStreamlocal(..)
@@ -512,20 +512,18 @@ impl RemoteClient {
                     self.set_state(RCState::Connected)
                         .await
                         .map_err(SshClientError::other)?;
-                    let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
+                    let ops = std::mem::take(&mut self.pending_ops);
                     for (id, op) in ops {
                         self.apply_channel_op(id, op).await?;
                     }
 
-                    let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
+                    let forwards = std::mem::take(&mut self.pending_forwards);
                     for (address, port) in forwards {
                         self.tcpip_forward(address, port).await?;
                     }
 
-                    let forwards = self
-                        .pending_streamlocal_forwards
-                        .drain(..)
-                        .collect::<Vec<_>>();
+                    let forwards = std::mem::take(&mut self
+                        .pending_streamlocal_forwards);
                     for socket_path in forwards {
                         self.streamlocal_forward(socket_path).await?;
                     }
@@ -754,10 +752,10 @@ impl RemoteClient {
                 Some(event) = event_rx.recv() => {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
-                            self.tx.send(RCEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyReceived(key, ssh_options.host.clone(), ssh_options.port)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
-                            self.tx.send(RCEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyUnknown(key, ssh_options.host.clone(), ssh_options.port, reply)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         _ => {}
                     }

@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-db-entities"
-version = "0.28.0-beta.1"
+version = "0.28.0-beta.2"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -10,7 +10,6 @@ bytes = { version = "1.4", default-features = false }
 ipnet.workspace = true
 poem-openapi.workspace = true
 sea-orm = { workspace = true, features = ["macros", "with-uuid", "with-json"] }
-secrecy = { version = "0.10", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

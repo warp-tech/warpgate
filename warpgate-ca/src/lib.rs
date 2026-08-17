@@ -66,7 +66,7 @@ pub fn issue_ca_root_certificate() -> Result<(String, String), CaError> {
 
     params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
     params.not_before = SystemTime::now().into();
-    params.not_after = (SystemTime::now() + Duration::from_secs(99 * 365 * 24 * 60 * 60)).into();
+    params.not_after = (SystemTime::now() + Duration::from_hours(867_240)).into();
 
     // Generate the certificate
     let cert = params.self_signed(&key_pair)?;
@@ -144,12 +144,12 @@ impl ClusterTlsIdentity {
 
         // Backdated in case of clock skew
         // long-lived cause it's never rotated until the process dies
-        params.not_before = (SystemTime::now() - Duration::from_secs(5 * 60)).into();
+        params.not_before = (SystemTime::now() - Duration::from_mins(5)).into();
         params.not_after =
-            (SystemTime::now() + Duration::from_secs(10 * 365 * 24 * 60 * 60)).into();
+            (SystemTime::now() + Duration::from_hours(87600)).into();
 
         let certificate = params.signed_by(&key_pair, &issuer)?;
-        Ok(ClusterTlsIdentity {
+        Ok(Self {
             spki_sha256_hex: certificate_der_spki_sha256_hex(certificate.der())?,
             certificate_pem: certificate.pem(),
             private_key_pem: key_pair.serialize_pem(),
@@ -200,7 +200,7 @@ pub fn issue_client_certificate(
         EcdsaKeyPair::from_pkcs8(&ECDSA_P384_SHA3_384_ASN1_SIGNING, &ca.private_key_der)?;
 
     let validity = {
-        let validity = Duration::from_secs(365 * 24 * 60 * 60);
+        let validity = Duration::from_hours(8760);
         let now = SystemTime::now();
         Validity {
             not_before: now.try_into()?,
