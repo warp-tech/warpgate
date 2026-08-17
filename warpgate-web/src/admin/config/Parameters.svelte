@@ -559,7 +559,7 @@
 
                                 <FormGroup
                                     floating
-                                    label="Open targets in a new tab"
+                                    label="Open targets in"
                                 >
                                     <select
                                         id="openTargetsInNewTab"
@@ -568,24 +568,19 @@
                                         onchange={e => parameters.openTargetsInNewTab = e.currentTarget.value as OpenTargetsInNewTabMode}
                                     >
                                         <option value="DefaultOn">
-                                            Default on
+                                            New tab by default
                                         </option>
                                         <option value="DefaultOff">
-                                            Default off
+                                            Same tab by default
                                         </option>
                                         <option value="ForcedOn">
-                                            Forced on
+                                            Always a new tab
                                         </option>
                                         <option value="ForcedOff">
-                                            Forced off
+                                            Always the same tab
                                         </option>
                                     </select>
                                 </FormGroup>
-                                <HelpText>
-                                    Default modes let users override the setting
-                                    in their browser. Forced modes apply to
-                                    everyone and disable the user preference.
-                                </HelpText>
 
                                 <label
                                     for="showSessionMenu"
