@@ -14,6 +14,7 @@
         Modal,
         ModalBody,
         ModalFooter,
+        Tooltip,
     } from '@sveltestrap/sveltestrap'
     import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
@@ -39,7 +40,9 @@
     import {
         collapsedTargetGroups,
         openTargetsInNewTab,
+        openTargetsInNewTabForced,
         serverInfo,
+        setOpenTargetsInNewTab,
     } from './lib/store'
     import { openWebDesktopSession, openWebSshSession } from './lib/webSessions'
 
@@ -154,12 +157,30 @@
             <ListOverflowMenu {groupControls}>
                 <div class="dropdown-header">Preferences</div>
                 <DropdownItem>
-                    <Input
-                        type="switch"
-                        bind:checked={$openTargetsInNewTab}
-                        label="Open targets in a new tab"
-                        onmousedown={e => e.stopPropagation()}
-                    />
+                    <!-- A disabled input doesn't emit the pointer events the
+                    tooltip needs, so the wrapper carries the target id. -->
+                    <div id="openTargetsInNewTabSwitch">
+                        <Input
+                            type="switch"
+                            checked={$openTargetsInNewTab}
+                            disabled={$openTargetsInNewTabForced}
+                            label="Open targets in a new tab"
+                            onchange={e =>
+                                setOpenTargetsInNewTab(
+                                    (e.currentTarget as HTMLInputElement).checked,
+                                )}
+                            onmousedown={e => e.stopPropagation()}
+                        />
+                    </div>
+                    {#if $openTargetsInNewTabForced}
+                        <Tooltip
+                            delay="250"
+                            target="openTargetsInNewTabSwitch"
+                            animation
+                        >
+                            Managed by the administrator
+                        </Tooltip>
+                    {/if}
                 </DropdownItem>
             </ListOverflowMenu>
         {/if}
