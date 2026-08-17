@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use dialoguer::theme::ColorfulTheme;
 use rcgen::generate_simple_self_signed;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{error, info};
 use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
@@ -419,26 +419,30 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
 
     #[allow(clippy::expect_used)]
     let user = User::Entity::find()
+        .filter(User::Entity::username_eq_ci(BUILTIN_ADMIN_USERNAME))
         .one(&db)
         .await?
         .expect("Admin user should exist");
 
-    let access_role = Role::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
-        description: Set("".to_string()),
-        is_default: Set(false),
-    }
-    .insert(&db)
-    .await?;
+    let access_role = match Role::Entity::find()
+        .filter(Role::Column::Name.eq(BUILTIN_ADMIN_USERNAME))
+        .one(&db)
+        .await?
+    {
+        Some(role) => role,
+        None => {
+            Role::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
+                description: Set("".to_string()),
+                is_default: Set(false),
+            }
+            .insert(&db)
+            .await?
+        }
+    };
 
-    UserRoleAssignment::ActiveModel {
-        user_id: Set(user.id),
-        role_id: Set(access_role.id),
-        ..Default::default()
-    }
-    .insert(&db)
-    .await?;
+    UserRoleAssignment::Entity::idempotent_grant(&db, user.id, access_role.id, None).await?;
 
     {
         info!("Generating a TLS certificate");
