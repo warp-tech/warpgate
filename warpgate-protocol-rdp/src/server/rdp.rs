@@ -24,6 +24,7 @@ use tracing::warn;
 use warpgate_core::{DesktopInput, Scancode};
 use warpgate_desktop_ui::DEFAULT_SIZE;
 
+use super::clipboard::ViewerClipboard;
 use super::protocol::{AuthVerdict, Event, Input};
 
 /// Upper bound on a single framebuffer update, and so on the desktop size we will accept
@@ -95,7 +96,14 @@ where
         height: size.1,
     }));
 
-    let router = tokio::spawn(route_input(in_rx, frame_tx, Arc::clone(&size)));
+    let clipboard = ViewerClipboard::new(out_tx.clone());
+
+    let router = tokio::spawn(route_input(
+        in_rx,
+        frame_tx,
+        Arc::clone(&size),
+        clipboard.clone(),
+    ));
 
     let display = DisplayHandler {
         size,
@@ -124,6 +132,7 @@ where
         // viewer's requested resolution and pins the session to `size()`'s seed.
         .with_honor_client_desktop_size(true)
         .with_credential_validator(Some(validator))
+        .with_cliprdr_factory(Some(Box::new(clipboard)))
         .build();
 
     if let Err(error) = server.run_connection(stream).await {
@@ -165,6 +174,7 @@ async fn route_input(
     mut rx: mpsc::Receiver<Input>,
     frame_tx: mpsc::Sender<DisplayUpdate>,
     size: Arc<Mutex<DesktopSize>>,
+    clipboard: ViewerClipboard,
 ) {
     while let Some(msg) = rx.recv().await {
         match msg {
@@ -176,9 +186,10 @@ async fn route_input(
                 data,
             } => {
                 if let Some(update) = frame_to_update(x, y, width, height, data)
-                    && frame_tx.send(update).await.is_err() {
-                        break;
-                    }
+                    && frame_tx.send(update).await.is_err()
+                {
+                    break;
+                }
             }
             Input::Resize { width, height } => {
                 let new = DesktopSize { width, height };
@@ -193,6 +204,7 @@ async fn route_input(
                     break;
                 }
             }
+            Input::Clipboard(text) => clipboard.offer(text),
             Input::Shutdown => break,
         }
     }

@@ -8,6 +8,25 @@ use bytes::Bytes;
 
 pub const DESKTOP_INPUT_CHANNEL_CAPACITY: usize = 256;
 
+pub const MAX_CLIPBOARD_BYTES: usize = 10 * 1024 * 1024;
+
+/// The longest prefix of `text` that fits in `max` bytes, cut on a char boundary.
+pub fn truncate_clipboard_contents(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.get(..end).unwrap_or("")
+}
+
+pub fn truncate_clipboard_contents_in_place(text: &mut String, max: usize) {
+    let end = truncate_clipboard_contents(text, max).len();
+    text.truncate(end);
+}
+
 /// A rectangular region of the remote framebuffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopRect {
