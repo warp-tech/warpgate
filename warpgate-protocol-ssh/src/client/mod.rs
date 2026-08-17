@@ -522,8 +522,7 @@ impl RemoteClient {
                         self.tcpip_forward(address, port).await?;
                     }
 
-                    let forwards = std::mem::take(&mut self
-                        .pending_streamlocal_forwards);
+                    let forwards = std::mem::take(&mut self.pending_streamlocal_forwards);
                     for socket_path in forwards {
                         self.streamlocal_forward(socket_path).await?;
                     }

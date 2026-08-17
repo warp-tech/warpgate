@@ -7,6 +7,7 @@
         isIncrementalFrame,
         type Rect,
     } from 'common/desktopCanvas'
+    import { DesktopClipboard } from 'common/desktopClipboard'
     import { codeToScancode } from 'common/desktopInput'
     import InfoBox from 'common/InfoBox.svelte'
     import { handleReauthError } from 'common/reauth'
@@ -81,6 +82,11 @@
         ws?.send(JSON.stringify(msg))
     }
 
+    const clipboard = new DesktopClipboard(
+        text => send({ type: 'clipboard', text }),
+        (key, down) => send({ type: 'key_event', ...key, down }),
+    )
+
     function viewportSize(): { width: number; height: number } | null {
         const width = Math.floor(canvasArea?.clientWidth ?? window.innerWidth)
         const height = Math.floor(
@@ -142,7 +148,7 @@
                 }
                 break
             case 'clipboard':
-                navigator.clipboard?.writeText(msg.text).catch(() => {})
+                clipboard.onRemoteCopy(msg.text)
                 break
             case 'bell':
                 break
@@ -257,6 +263,7 @@
 
     // Button transitions must not be delayed or coalesced away, so send them immediately.
     function onPointerButton(e: MouseEvent) {
+        clipboard.flush()
         const { x, y } = canvasCoords(e)
         pendingPointer = null
         send({ type: 'pointer_event', x, y, buttons: rfbButtons(e) })
@@ -330,6 +337,13 @@
 
     // RDP uses scancodes and VNC uses the keysym since RFB has no scancodes
     function onKey(e: KeyboardEvent, down: boolean) {
+        clipboard.onKey(e, down)
+        // The paste combo is left alone so the browser still fires its own `paste`,
+        // which is the only way to read the clipboard without a permission prompt.
+        // `onPaste` replays the keystroke.
+        if (clipboard.isPasteCombo(e)) {
+            return
+        }
         const ks = keysym(e)
         const scancode = codeToScancode(e.code)
         if (ks === null && !scancode) {
@@ -343,6 +357,13 @@
             extended: scancode?.extended ?? false,
             down,
         })
+    }
+
+    function onPaste(e: ClipboardEvent) {
+        if (ws?.state !== ConnectionState.Connected) {
+            return
+        }
+        clipboard.onPaste(e)
     }
 
     async function disconnect() {
@@ -429,7 +450,12 @@
     loadTheme('dark')
 </script>
 
-<svelte:window onkeydown={e => onKey(e, true)} onkeyup={e => onKey(e, false)} />
+<svelte:window
+    onkeydown={e => onKey(e, true)}
+    onkeyup={e => onKey(e, false)}
+    onpaste={onPaste}
+    onblur={() => clipboard.onBlur()}
+/>
 <!-- Tracked via the event rather than a local toggle, so leaving fullscreen with Esc
      (which fires no click) still updates the button. -->
 <svelte:document

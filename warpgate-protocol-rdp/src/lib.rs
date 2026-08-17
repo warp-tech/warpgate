@@ -7,6 +7,7 @@
 //! and browser canvas renderer work against either front end unchanged.
 
 mod client;
+mod clipboard;
 mod server;
 mod session_handle;
 

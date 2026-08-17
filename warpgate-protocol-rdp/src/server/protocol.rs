@@ -29,6 +29,7 @@ pub enum Input {
         width: u16,
         height: u16,
     },
+    Clipboard(String),
     Shutdown,
 }
 

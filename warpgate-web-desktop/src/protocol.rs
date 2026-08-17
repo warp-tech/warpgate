@@ -1,6 +1,9 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState, Scancode};
+use warpgate_core::{
+    DesktopEvent, DesktopInput, DesktopRect, DesktopState, MAX_CLIPBOARD_BYTES, Scancode,
+    truncate_clipboard_contents_in_place,
+};
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct WsRect {
@@ -57,9 +60,6 @@ pub enum ClientMessage {
     },
 }
 
-// avoid unbounded memory use from untrusted input
-const MAX_CLIPBOARD_BYTES: usize = 10 * 1024 * 1024;
-
 impl From<ClientMessage> for Option<DesktopInput> {
     fn from(msg: ClientMessage) -> Self {
         Some(match msg {
@@ -88,13 +88,7 @@ impl From<ClientMessage> for Option<DesktopInput> {
                 delta,
             },
             ClientMessage::Clipboard { mut text } => {
-                if text.len() > MAX_CLIPBOARD_BYTES {
-                    let mut end = MAX_CLIPBOARD_BYTES;
-                    while end > 0 && !text.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    text.truncate(end);
-                }
+                truncate_clipboard_contents_in_place(&mut text, MAX_CLIPBOARD_BYTES);
                 DesktopInput::Clipboard(text)
             }
             ClientMessage::Refresh => DesktopInput::Refresh,
