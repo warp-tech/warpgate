@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
 use bytes::Bytes;
-use russh::keys::PublicKey;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info};
@@ -31,9 +30,6 @@ impl Sheddable for ServerMessage {
 
 pub struct PendingHostKey {
     pub reply: oneshot::Sender<bool>,
-    pub key: PublicKey,
-    pub host: String,
-    pub port: u16,
 }
 
 pub struct WebSshSession {

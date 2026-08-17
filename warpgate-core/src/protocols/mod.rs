@@ -7,7 +7,7 @@ use warpgate_common::ListenEndpoint;
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
 mod desktop;
-pub(crate) mod framebuffer;
+pub mod framebuffer;
 mod handle;
 mod terminal_screen;
 

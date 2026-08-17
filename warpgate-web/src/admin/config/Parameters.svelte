@@ -4,6 +4,7 @@
     import {
         AnalyticsConsent,
         api,
+        type OpenTargetsInNewTabMode,
         type ParameterValues,
         type PasswordLoginMode,
         type SshHostKeyVerificationMode,
@@ -552,6 +553,28 @@
                                         </option>
                                         <option value="ShowInstructions">
                                             Show connection instructions
+                                        </option>
+                                    </select>
+                                </FormGroup>
+
+                                <FormGroup floating label="Open targets in">
+                                    <select
+                                        id="openTargetsInNewTab"
+                                        class="form-select"
+                                        value={parameters.openTargetsInNewTab ?? 'DefaultOn'}
+                                        onchange={e => parameters.openTargetsInNewTab = e.currentTarget.value as OpenTargetsInNewTabMode}
+                                    >
+                                        <option value="DefaultOn">
+                                            New tab by default
+                                        </option>
+                                        <option value="DefaultOff">
+                                            Same tab by default
+                                        </option>
+                                        <option value="ForcedOn">
+                                            Always a new tab
+                                        </option>
+                                        <option value="ForcedOff">
+                                            Always the same tab
                                         </option>
                                     </select>
                                 </FormGroup>

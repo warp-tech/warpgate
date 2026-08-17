@@ -16,6 +16,24 @@ pub enum TargetClickAction {
     ShowInstructions,
 }
 
+/// How the portal decides whether targets open in a new browser tab.
+#[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
+pub enum OpenTargetsInNewTabMode {
+    /// Use a new tab by default, but allow each browser to override it.
+    #[sea_orm(string_value = "DefaultOn")]
+    DefaultOn,
+    /// Use the current tab by default, but allow each browser to override it.
+    #[sea_orm(string_value = "DefaultOff")]
+    DefaultOff,
+    /// Always use a new tab and don't allow browser overrides.
+    #[sea_orm(string_value = "ForcedOn")]
+    ForcedOn,
+    /// Always use the current tab and don't allow browser overrides.
+    #[sea_orm(string_value = "ForcedOff")]
+    ForcedOff,
+}
+
 /// How the password login form is presented on the gateway login page.
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
@@ -154,6 +172,7 @@ pub struct Model {
     pub ticket_require_description: bool,
     pub ticket_request_show_all_targets: bool,
     pub target_click_action: TargetClickAction,
+    pub open_targets_in_new_tab: OpenTargetsInNewTabMode,
     pub show_session_menu: bool,
     pub password_policy_min_length: i32,
     pub password_policy_require_uppercase: bool,
@@ -257,6 +276,7 @@ impl Entity {
                     ticket_require_description: Set(false),
                     ticket_request_show_all_targets: Set(false),
                     target_click_action: Set(TargetClickAction::Connect),
+                    open_targets_in_new_tab: Set(OpenTargetsInNewTabMode::DefaultOn),
                     show_session_menu: Set(true),
                     password_policy_min_length: Set(0),
                     password_policy_require_uppercase: Set(false),

@@ -79,6 +79,7 @@ mod m00072_session_node_id_not_null;
 mod m00073_redact_session_target_snapshots;
 mod m00074_encryption_key_rotation;
 mod m00075_hash_ticket_and_api_token_secrets;
+mod m00076_open_targets_in_new_tab;
 
 pub(crate) mod helpers;
 
@@ -163,6 +164,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00073_redact_session_target_snapshots::Migration),
             Box::new(m00074_encryption_key_rotation::Migration),
             Box::new(m00075_hash_ticket_and_api_token_secrets::Migration),
+            Box::new(m00076_open_targets_in_new_tab::Migration),
         ]
     }
 }

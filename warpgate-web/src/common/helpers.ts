@@ -1,4 +1,3 @@
-import type { BootstrapThemeColor } from 'gateway/lib/api'
 import { router } from 'svelte-spa-router'
 
 /**
@@ -8,12 +7,6 @@ import { router } from 'svelte-spa-router'
  */
 export function routeQueryParams(): URLSearchParams {
     return new URLSearchParams(router.querystring ?? '')
-}
-
-export function getCSSColorFromThemeColor(color?: BootstrapThemeColor): string {
-    // Handle capitalized color names from API (e.g., "Primary" -> "primary")
-    const colorLower = (color ?? 'Secondary').toLowerCase()
-    return `var(--bs-${colorLower});`
 }
 
 /**

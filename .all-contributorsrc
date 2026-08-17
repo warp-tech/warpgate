@@ -324,6 +324,24 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "sravan-blitz",
+      "name": "sravan-blitz",
+      "avatar_url": "https://avatars.githubusercontent.com/u/279685696?v=4",
+      "profile": "https://github.com/sravan-blitz",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "EdMcBane",
+      "name": "Francesco Degrassi",
+      "avatar_url": "https://avatars.githubusercontent.com/u/8511142?v=4",
+      "profile": "https://github.com/EdMcBane",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

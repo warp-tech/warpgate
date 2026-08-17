@@ -199,6 +199,10 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://jwillmer.de"><img src="https://avatars.githubusercontent.com/u/1503577?v=4?s=100" width="100px;" alt="Jens Willmer"/><br /><sub><b>Jens Willmer</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=jwillmer" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/huguesgr"><img src="https://avatars.githubusercontent.com/u/6720382?v=4?s=100" width="100px;" alt="Hugues Granger"/><br /><sub><b>Hugues Granger</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=huguesgr" title="Code">💻</a></td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/sravan-blitz"><img src="https://avatars.githubusercontent.com/u/279685696?v=4?s=100" width="100px;" alt="sravan-blitz"/><br /><sub><b>sravan-blitz</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=sravan-blitz" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/EdMcBane"><img src="https://avatars.githubusercontent.com/u/8511142?v=4?s=100" width="100px;" alt="Francesco Degrassi"/><br /><sub><b>Francesco Degrassi</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=EdMcBane" title="Code">💻</a></td>
+    </tr>
   </tbody>
 </table>
 

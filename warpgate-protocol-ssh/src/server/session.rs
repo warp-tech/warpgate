@@ -1172,8 +1172,8 @@ impl ServerSession {
                     return self.fail_on_channel_writer_error(error).await;
                 }
             }
-            RCEvent::Done | RCEvent::HostKeyReceived(_) => {}
-            RCEvent::HostKeyUnknown(key, reply) => {
+            RCEvent::Done | RCEvent::HostKeyReceived(..) => {}
+            RCEvent::HostKeyUnknown(key, _, _, reply) => {
                 self.handle_unknown_host_key(key, reply).await?;
             }
             RCEvent::ForwardedTcpIp(id, params) => {
@@ -1528,8 +1528,7 @@ impl ServerSession {
             let db = &self.services.db;
             let should_record = Parameters::Entity::get(db)
                 .await
-                .map(|p| p.record_scp)
-                .unwrap_or(true);
+                .map_or(true, |p| p.record_scp);
 
             if !should_record {
                 info!(channel=%channel_id, "Not recording SCP exec session, command was '{command}'");

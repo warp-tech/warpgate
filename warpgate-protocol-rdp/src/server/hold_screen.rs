@@ -180,7 +180,7 @@ impl HoldPainter {
         Self { tick: 0, screen }
     }
 
-    fn set_screen(&mut self, screen: ui::Screen) {
+    const fn set_screen(&mut self, screen: ui::Screen) {
         self.screen = screen;
     }
 
@@ -195,7 +195,7 @@ impl HoldPainter {
         self.tick = self.tick.wrapping_add(1);
 
         let mut bgra = Vec::with_capacity(rgb.len() / 3 * 4);
-        for px in rgb.chunks_exact(3) {
+        for px in rgb.as_chunks::<3>().0 {
             if let Some(&[r, g, b]) = px.first_chunk::<3>() {
                 bgra.extend_from_slice(&[b, g, r, 255]);
             }

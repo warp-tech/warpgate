@@ -14,18 +14,20 @@
         Modal,
         ModalBody,
         ModalFooter,
+        Tooltip,
     } from '@sveltestrap/sveltestrap'
+    import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import GettingStarted from 'common/GettingStarted.svelte'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import { resolveGroup } from 'common/groups'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
+    import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
     import {
         api,
-        BootstrapThemeColor,
         TargetClickAction,
         TargetKind,
         type TargetSnapshot,
@@ -35,7 +37,13 @@
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
     import { firstBy } from 'thenby'
-    import { openTargetsInNewTab, serverInfo } from './lib/store'
+    import {
+        collapsedTargetGroups,
+        openTargetsInNewTab,
+        openTargetsInNewTabForced,
+        serverInfo,
+        setOpenTargetsInNewTab,
+    } from './lib/store'
     import { openWebDesktopSession, openWebSshSession } from './lib/webSessions'
 
     let instructionsTarget: TargetSnapshot | undefined = $state()
@@ -128,25 +136,8 @@
         }
     }
 
-    interface GroupInfo {
-        id: string
-        name: string
-        color: BootstrapThemeColor
-    }
-
-    function groupInfoFromTarget(target: TargetSnapshot): GroupInfo {
-        if (!target.group) {
-            return {
-                id: '$ungrouped',
-                name: 'Ungrouped',
-                color: BootstrapThemeColor.Secondary,
-            }
-        }
-        return {
-            id: target.group.id,
-            name: target.group.name,
-            color: target.group.color ?? BootstrapThemeColor.Secondary,
-        }
+    function groupInfoFromTarget(target: TargetSnapshot) {
+        return resolveGroup(target.group)
     }
 </script>
 
@@ -159,35 +150,46 @@
     showSearch={true}
     groupObject={groupInfoFromTarget}
     groupKey={group => group.id}
+    bind:collapsedGroups={$collapsedTargetGroups}
 >
-    {#snippet header(items)}
+    {#snippet header(items, groupControls)}
         {#if items?.length}
-            <Dropdown>
-                <DropdownToggle color="link">
-                    <Fa icon={faEllipsisV} fw />
-                </DropdownToggle>
-                <DropdownMenu>
-                    <div class="dropdown-header">Preferences</div>
-                    <DropdownItem>
+            <ListOverflowMenu {groupControls}>
+                <div class="dropdown-header">Preferences</div>
+                <DropdownItem>
+                    <!-- A disabled input doesn't emit the pointer events the
+                    tooltip needs, so the wrapper carries the target id. -->
+                    <div id="openTargetsInNewTabSwitch">
                         <Input
                             type="switch"
-                            bind:checked={$openTargetsInNewTab}
+                            checked={$openTargetsInNewTab}
+                            disabled={$openTargetsInNewTabForced}
                             label="Open targets in a new tab"
+                            onchange={e =>
+                                setOpenTargetsInNewTab(
+                                    (e.currentTarget as HTMLInputElement).checked,
+                                )}
                             onmousedown={e => e.stopPropagation()}
                         />
-                    </DropdownItem>
-                </DropdownMenu>
-            </Dropdown>
+                    </div>
+                    {#if $openTargetsInNewTabForced}
+                        <Tooltip
+                            delay="250"
+                            target="openTargetsInNewTabSwitch"
+                            animation
+                        >
+                            Managed by the administrator
+                        </Tooltip>
+                    {/if}
+                </DropdownItem>
+            </ListOverflowMenu>
         {/if}
     {/snippet}
     {#snippet empty()}
         <EmptyState title="You don't have access to any targets yet" />
     {/snippet}
-    {#snippet groupHeader(group)}
-        <div class="d-flex align-items-center gap-2 mb-2 mt-4">
-            <GroupColorCircle color={group.color} />
-            <div class="h5 mb-0">{group.name}</div>
-        </div>
+    {#snippet groupHeader(group, state)}
+        <CollapsibleGroupHeader {group} {state} />
     {/snippet}
     {#snippet item(target)}
         <a

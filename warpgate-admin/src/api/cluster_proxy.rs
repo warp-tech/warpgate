@@ -66,7 +66,7 @@ impl From<Node::Model> for RemoteNode {
 }
 
 impl Owner {
-    pub fn local() -> Self {
+    pub const fn local() -> Self {
         Self::Local
     }
 
@@ -119,7 +119,7 @@ impl ForwardIdentity<'_> {
         }
     }
 
-    fn forwards_cookie(&self) -> bool {
+    const fn forwards_cookie(&self) -> bool {
         matches!(self, Self::PendingLogin)
     }
 }
@@ -312,8 +312,7 @@ async fn peer_connection(
         return Err(poem::error::BadGateway(std::io::Error::other(format!(
             "cannot resolve peer address {}",
             owner.address
-        )))
-        .into());
+        ))));
     }
     Ok((tls, addrs))
 }
@@ -323,7 +322,7 @@ fn peer_port(addrs: &[SocketAddr]) -> poem::Result<u16> {
     addrs
         .first()
         .map(SocketAddr::port)
-        .ok_or_else(|| poem::error::BadGateway(std::io::Error::other("no peer address")).into())
+        .ok_or_else(|| poem::error::BadGateway(std::io::Error::other("no peer address")))
 }
 
 /// Connect to the first reachable resolved address.
@@ -337,8 +336,7 @@ async fn connect_any(addrs: &[SocketAddr]) -> poem::Result<tokio::net::TcpStream
     }
     Err(poem::error::BadGateway(
         last_error.unwrap_or_else(|| std::io::Error::other("no peer address")),
-    )
-    .into())
+    ))
 }
 
 /// Forwards `req` to `path` on the peer rather than the request's own path - for
