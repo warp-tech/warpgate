@@ -211,7 +211,10 @@
         label="Example SSH command"
         value={makeExampleSSHCommand(opts)}
     />
-    <CollapsibleBlock label="Advanced" persistKey="connectionInstructionsAdvancedOpen">
+    <CollapsibleBlock
+        label="Advanced"
+        persistKey="connectionInstructionsAdvancedOpen"
+    >
         <div class="mt-3">
             <CopyableTextArea
                 label="Example SCP command"
@@ -247,7 +250,10 @@
         label="Example MySQL command"
         value={makeExampleMySQLCommand(opts)}
     />
-    <CollapsibleBlock label="Advanced" persistKey="connectionInstructionsAdvancedOpen">
+    <CollapsibleBlock
+        label="Advanced"
+        persistKey="connectionInstructionsAdvancedOpen"
+    >
         <div class="mt-3">
             <CopyableTextArea
                 label="Example database URL"
@@ -275,7 +281,10 @@
         label="Example PostgreSQL command"
         value={makeExamplePostgreSQLCommand(opts)}
     />
-    <CollapsibleBlock label="Advanced" persistKey="connectionInstructionsAdvancedOpen">
+    <CollapsibleBlock
+        label="Advanced"
+        persistKey="connectionInstructionsAdvancedOpen"
+    >
         <div class="mt-3">
             <CopyableTextArea
                 label="Example database URL"
