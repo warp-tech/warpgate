@@ -557,10 +557,7 @@
                                     </select>
                                 </FormGroup>
 
-                                <FormGroup
-                                    floating
-                                    label="Open targets in"
-                                >
+                                <FormGroup floating label="Open targets in">
                                     <select
                                         id="openTargetsInNewTab"
                                         class="form-select"
