@@ -698,7 +698,7 @@ pub enum RCEvent {
     HopConnected,
     // ForwardedTCPIP(Uuid, DirectTCPIPParams),
     Done,
-    HostKeyReceived(PublicKey),
+    HostKeyReceived(PublicKey, String, u16),
     HostKeyUnknown(PublicKey, String, u16, oneshot::Sender<bool>),
     ForwardedTcpIp(Uuid, ForwardedTcpIpParams),
     ForwardedStreamlocal(Uuid, ForwardedStreamlocalParams),
@@ -729,7 +729,7 @@ impl RCEvent {
             | Self::ConnectionError(_)
             | Self::HopConnected
             | Self::Done
-            | Self::HostKeyReceived(_)
+            | Self::HostKeyReceived(..)
             | Self::HostKeyUnknown(..)
             | Self::ForwardedTcpIp(..)
             | Self::ForwardedStreamlocal(..)
@@ -1421,11 +1421,16 @@ impl RemoteClient {
                         ClientHandlerEvent::HostKeyReceived(key) => {
                             // Every hop presents a key, and the caller asked
                             // about one of them. Reporting an intermediate hop's
-                            // key answers a question nobody asked — and the
-                            // admin endpoint, which takes the first key it sees,
-                            // then shows the jump host's key as the target's.
+                            // key answers a question nobody asked.
+                            //
+                            // Both sides of #2437 are kept. The hop's address
+                            // now travels with the key, so the admin endpoint
+                            // can say which host it is looking at; and which hop
+                            // answers is still decided here, by identity. Two
+                            // hops can share an address, and only the identity
+                            // says which one the caller named.
                             if hop.reports_host_key() {
-                                self.tx.send(RCEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
+                                self.tx.send(RCEvent::HostKeyReceived(key, ssh_options.host.clone(), ssh_options.port)).await.map_err(|_| ConnectionError::Internal)?;
                             }
                             if hop.stops_after_host_key() {
                                 return Ok(None);

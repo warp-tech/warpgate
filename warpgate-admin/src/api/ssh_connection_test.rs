@@ -3,7 +3,9 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_protocol_ssh::{IdentityHint, ConnectionError, RCCommand, RCEvent, RemoteClient, resolve_ssh_chain};
+use warpgate_protocol_ssh::{
+    ConnectionError, IdentityHint, RCCommand, RCEvent, RemoteClient, resolve_ssh_chain,
+};
 
 use super::AdminContext;
 
@@ -74,11 +76,20 @@ impl Api {
         let fut = async move {
             let key = loop {
                 match handles.event_rx.recv().await {
-                    Some(RCEvent::HostKeyReceived(key)) => break key,
-                    Some(RCEvent::HostKeyUnknown(key, _, _, reply)) => {
-                        let _ = reply.send(true);
-                        break key;
-                    }
+                    // The address rides along with the key since #2437, and is
+                    // deliberately not matched on here. Upstream needed it
+                    // because their walk reported every hop; ours reports only
+                    // the hop the caller named, decided by identity in
+                    // `connect_chain`. Filtering by address on top of that is
+                    // not a second opinion — both values come off the same
+                    // resolved hop — and it made two integration tests pass
+                    // with that identity gate disabled, which is the one thing
+                    // they exist to notice.
+                    //
+                    // An untrusted jump host never reaches this loop as
+                    // `HostKeyUnknown` either: the walk refuses it at the hop
+                    // and arrives here as `ConnectionError::UntrustedJumpHost`.
+                    Some(RCEvent::HostKeyReceived(key, _, _)) => break key,
                     Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
                     Some(RCEvent::Error(err)) => return Err(err),
                     None => anyhow::bail!("Failed to connect to target"),

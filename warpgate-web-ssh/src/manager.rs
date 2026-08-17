@@ -225,8 +225,8 @@ fn spawn_event_loop(
                                 })
                                 .await;
                         }
-                        RCEvent::HostKeyReceived(key) => {
-                            debug!(%session_id, "Host key received: {}", key.algorithm());
+                        RCEvent::HostKeyReceived(key, host, port) => {
+                            debug!(%session_id, "Host key received for {host}:{port}: {}", key.algorithm());
                         }
                         RCEvent::HostKeyUnknown(key, host, port, reply) => {
                             let mode = match Parameters::Entity::get(&services.db).await {
