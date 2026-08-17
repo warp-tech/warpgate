@@ -58,7 +58,7 @@
         "svelte-spa-router": "^5",
         "thenby": "^1.4.1",
         "tslib": "^2.8.0",
-        "typescript": "^5.9.3",
+        "typescript": "^7.0.2",
         "ua-parser-js": "^2.0.10",
         "vite": "^8.2.1",
         "zmodem.js": "^0.1.10"
