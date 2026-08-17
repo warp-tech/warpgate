@@ -192,7 +192,7 @@ pub enum RCEvent {
     HopConnected,
     // ForwardedTCPIP(Uuid, DirectTCPIPParams),
     Done,
-    HostKeyReceived(PublicKey),
+    HostKeyReceived(PublicKey, String, u16),
     HostKeyUnknown(PublicKey, String, u16, oneshot::Sender<bool>),
     ForwardedTcpIp(Uuid, ForwardedTcpIpParams),
     ForwardedStreamlocal(Uuid, ForwardedStreamlocalParams),
@@ -223,7 +223,7 @@ impl RCEvent {
             | Self::ConnectionError(_)
             | Self::HopConnected
             | Self::Done
-            | Self::HostKeyReceived(_)
+            | Self::HostKeyReceived(..)
             | Self::HostKeyUnknown(..)
             | Self::ForwardedTcpIp(..)
             | Self::ForwardedStreamlocal(..)
@@ -752,7 +752,7 @@ impl RemoteClient {
                 Some(event) = event_rx.recv() => {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
-                            self.tx.send(RCEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyReceived(key, ssh_options.host.clone(), ssh_options.port)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
                             self.tx.send(RCEvent::HostKeyUnknown(key, ssh_options.host.clone(), ssh_options.port, reply)).await.map_err(|_| ConnectionError::Internal)?;
