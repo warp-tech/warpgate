@@ -910,6 +910,17 @@ mod tests {
 
     use super::*;
 
+    /// A directory that goes away when the test does.
+    ///
+    /// These paths used to be `wg-<label>-<pid>` under the system temp
+    /// directory: one name per test, reused by every run of that test, and
+    /// several of them holding real credential material. Two runs at once
+    /// clobber each other, a crashed run leaves the file behind, and on a
+    /// shared machine the name is guessable by anyone who read this file.
+    fn scratch() -> tempfile::TempDir {
+        tempfile::tempdir().expect("could not create a temporary directory")
+    }
+
     /// A one-shot HTTP server that records the raw request it was sent.
     ///
     /// `login` answers the authentication endpoint, `other` everything else, so
@@ -1058,8 +1069,8 @@ mod tests {
     /// through, and only the bound on what actually arrives can refuse it.
     #[tokio::test]
     async fn only_the_stream_bound_can_refuse_a_source_that_lies_about_its_size() {
-        let dir = std::env::temp_dir().join(format!("wg-fifo-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = scratch();
+        let dir = tmp.path();
         let path = dir.join("lying");
         // The `mkfifo` command rather than the libc call: std has no API for
         // this file type, and shelling out costs a process where the
@@ -1108,8 +1119,8 @@ mod tests {
     /// The `stat` early-out, on the only input that reaches it first.
     #[tokio::test]
     async fn an_oversized_regular_file_is_refused() {
-        let dir = std::env::temp_dir().join(format!("wg-cred-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = scratch();
+        let dir = tmp.path();
         let path = dir.join("oversized");
         std::fs::write(&path, "x".repeat((MAX_CREDENTIAL_FILE + 1024) as usize)).unwrap();
         assert!(
@@ -1201,8 +1212,8 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path =
-            std::env::temp_dir().join(format!("wg-redirect-{}", std::process::id()));
+        let tmp = scratch();
+        let secret_id_path = tmp.path().join("secret-id");
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1243,8 +1254,8 @@ mod tests {
         ))
         .await;
 
-        let secret_id_path =
-            std::env::temp_dir().join(format!("wg-endless-{}", std::process::id()));
+        let tmp = scratch();
+        let secret_id_path = tmp.path().join("secret-id");
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let mut config = approle_config(vault, secret_id_path);
@@ -1297,8 +1308,8 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path =
-            std::env::temp_dir().join(format!("wg-oversized-{}", std::process::id()));
+        let tmp = scratch();
+        let secret_id_path = tmp.path().join("secret-id");
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1335,8 +1346,8 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path =
-            std::env::temp_dir().join(format!("wg-no-lease-{}", std::process::id()));
+        let tmp = scratch();
+        let secret_id_path = tmp.path().join("secret-id");
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1375,7 +1386,8 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path = std::env::temp_dir().join(format!("wg-no-key-{}", std::process::id()));
+        let tmp = scratch();
+        let secret_id_path = tmp.path().join("secret-id");
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1425,7 +1437,8 @@ mod tests {
             }
         });
 
-        let secret_id_path = std::env::temp_dir().join(format!("wg-tls-{}", std::process::id()));
+        let tmp = scratch();
+        let secret_id_path = tmp.path().join("secret-id");
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(
@@ -1469,7 +1482,8 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path = std::env::temp_dir().join(format!("wg-lease-{}", std::process::id()));
+        let tmp = scratch();
+        let secret_id_path = tmp.path().join("secret-id");
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1512,8 +1526,8 @@ mod tests {
             .await
             .unwrap();
 
-            let secret_id_path =
-                std::env::temp_dir().join(format!("wg-marker-{}", std::process::id()));
+            let tmp = scratch();
+            let secret_id_path = tmp.path().join("secret-id");
             std::fs::write(&secret_id_path, "secret-id").unwrap();
 
             let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
@@ -1600,8 +1614,8 @@ mod tests {
         .await
         .unwrap();
 
-        let secret_id_path =
-            std::env::temp_dir().join(format!("wg-traversal-{}", std::process::id()));
+        let tmp = scratch();
+        let secret_id_path = tmp.path().join("secret-id");
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();

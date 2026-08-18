@@ -214,7 +214,12 @@ fn growing_the_response_buffer_leaves_nothing_in_freed_memory() {
 fn the_primitives(w: &Watcher) {
     let canary = std::str::from_utf8(CANARY).unwrap();
     let contents = format!("{canary}\n");
-    let path = std::env::temp_dir().join(format!("wg-zeroize-{}", std::process::id()));
+    // Removed when `tmp` drops at the end of this function. These were
+    // `wg-zeroize-<pid>` in the system temp directory: one name per run of the
+    // test, left behind by a crash, and holding the canary this file exists to
+    // hunt for in memory.
+    let tmp = tempfile::tempdir().expect("could not create a temporary directory");
+    let path = tmp.path().join("credential");
     std::fs::write(&path, &contents).unwrap();
     let size = std::fs::metadata(&path).unwrap().len() as usize;
     let source = CANARY.to_vec();
@@ -224,7 +229,7 @@ fn the_primitives(w: &Watcher) {
     // sizes it outgrew, and for a payload that fits the first allocation there
     // is nothing to outgrow.
     let big_secret = format!("{}{}", "x".repeat(4096), canary);
-    let big_path = std::env::temp_dir().join(format!("wg-zeroize-big-{}", std::process::id()));
+    let big_path = tmp.path().join("credential-big");
     std::fs::write(&big_path, &big_secret).unwrap();
 
     let read_to_string = w.sightings_while(|| {
