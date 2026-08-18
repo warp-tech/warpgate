@@ -129,8 +129,16 @@ fn render_error_body(bytes: &[u8], truncated: bool) -> String {
 struct CachedToken {
     id: u64,
     value: Zeroizing<String>,
-    /// `None` for a token Vault says has no lease. Revocation is still handled:
-    /// a rejected token is dropped when signing comes back `403`.
+    /// `None` for a token Vault says has no lease.
+    ///
+    /// Nothing here revokes anything. What a `403` on signing does is drop this
+    /// entry so the next call authenticates again — cache invalidation, not
+    /// revocation, and the earlier wording said the second. Warpgate never
+    /// calls `auth/token/revoke-self`, and the reason it does not is that the
+    /// one moment it would want to is exactly when the token has just been
+    /// refused: a token Vault rejects for signing would as likely be rejected
+    /// for revoking, so the call would fail and the token is already useless.
+    /// Vault expires it at the end of its lease either way.
     expires_at: Option<Instant>,
 }
 
@@ -661,7 +669,7 @@ impl VaultClient {
                 (
                     "auth/approle/login",
                     login_payload(&AppRoleLogin {
-                        role_id,
+                        role_id: role_id.expose_secret(),
                         secret_id: &secret_id,
                     })?,
                 )
@@ -875,7 +883,13 @@ impl VaultClient {
     /// there was anything to truncate — an endpoint answering on the configured
     /// address could then make an error message cost arbitrary memory.
     async fn error_body(mut response: reqwest::Response) -> String {
-        let mut buf: Vec<u8> = Vec::new();
+        // Wiped and reserved up front, like the credential path beside it.
+        // Vault's error bodies are its own words rather than a secret, but they
+        // are read off the same connection as the token and this is the last
+        // buffer on that path without the treatment. The reserve is what makes
+        // the wipe complete: a `Vec` that grows frees every size it outgrew
+        // without wiping it, and `Zeroizing` only ever sees the one that lives.
+        let mut buf: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(MAX_ERROR_BODY));
         let mut truncated = false;
 
         while buf.len() < MAX_ERROR_BODY {
@@ -1162,7 +1176,7 @@ mod tests {
         // Nothing to say about the methods that carry no such binding.
         assert!(
             aws_binding_advice(&VaultAuth::AppRole {
-                role_id: "r".to_owned(),
+                role_id: "r".to_owned().into(),
                 secret_id_path: PathBuf::from("/dev/null"),
             })
             .is_none()
@@ -1176,7 +1190,7 @@ mod tests {
             default_role: "warpgate".to_owned(),
             ca_public_key: None,
             auth: VaultAuth::AppRole {
-                role_id: "role-1".to_owned(),
+                role_id: "role-1".to_owned().into(),
                 secret_id_path,
             },
             certificate_ttl: None,
@@ -1688,12 +1702,12 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_token_zeroizing() {
-        let secret = zeroize::Zeroizing::new("s.sensitive-vault-token".to_string());
-        assert_eq!(secret.as_str(), "s.sensitive-vault-token");
-        // Memory zeroized automatically on drop
-    }
+    // `test_token_zeroizing` was here. It built a `Zeroizing<String>` and
+    // asserted that `as_str()` returned what was put in — the `zeroize` crate's
+    // own `Deref`, with no Warpgate code in it, under a name that read as
+    // coverage of the token cache. Deleted rather than repaired: the property
+    // it claimed is measured for real in `tests/zeroization.rs`, against the
+    // paths that actually hold a credential.
 }
 
 /// The validators and the error renderer take input straight off the network or

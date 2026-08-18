@@ -980,7 +980,15 @@ impl RemoteClient {
                                     break
                                 }
                             }
-                            Some(()) = self.abort_rx.recv() => {
+                            // `_` rather than `Some(())`, matching the connect
+                            // loop. The two are not two spellings of one thing:
+                            // under `Some(())` a closed `abort_rx` disables this
+                            // branch instead of firing it, and with the event
+                            // branch disabled too there is nothing left for
+                            // `select!` to wait on. Every sender being gone is
+                            // an owner that dropped without disconnecting, which
+                            // is what this branch is for.
+                            _ = self.abort_rx.recv() => {
                                 debug!("Abort requested");
                                 self.disconnect().await;
                                 break
@@ -1552,7 +1560,13 @@ impl RemoteClient {
                 // connection — anything else that does is abandoning it.
                 _ = self.abort_rx.recv() => {
                     info!("Abort requested");
-                    self.set_disconnected().await;
+                    // No `set_disconnected()` here, for the reason the
+                    // `HandshakeTimeout` branch above gives: it sends `Done`,
+                    // and `handle_command` calls it anyway immediately after
+                    // sending the error. Doing it here only puts `Done` ahead
+                    // of the reason on the same channel. This branch was
+                    // reported as fixed while still holding that ordering — the
+                    // pattern was corrected and the ordering was not.
                     return Err(ConnectionError::Aborted)
                 }
                 session = &mut fut_connect => {

@@ -429,7 +429,14 @@ pub enum VaultAuth {
         token_path: PathBuf,
     },
     AppRole {
-        role_id: String,
+        // Vault treats this as public — half a credential, useless without the
+        // secret ID. Wrapped anyway, so that every field here that is part of
+        // an authentication is redacted by one rule rather than by a judgement
+        // about which halves matter. A `///` comment would put this rationale
+        // in `config-schema.json` as operator-facing documentation, which it is
+        // not.
+        #[schemars(with = "String")]
+        role_id: Secret<String>,
         secret_id_path: PathBuf,
     },
     /// Signs an `sts:GetCallerIdentity` call with the default credential chain —

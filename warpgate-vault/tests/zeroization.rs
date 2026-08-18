@@ -163,6 +163,20 @@ fn the_primitives_that_leak_are_the_ones_that_grow_a_buffer() {
 /// copy of its shape — that distinction is the whole reason `login_payload` is
 /// public, and the mistake the first draft of this test repeated by growing a
 /// bare `Vec` and reporting on it.
+///
+/// **What this does not cover, named rather than implied.** It drives
+/// `grown_without_leaving_a_copy`, which is the helper. It does not drive
+/// `read_bounded`, which is the call site — so a `read_bounded` that stopped
+/// calling the helper, or called it on the wrong branch, would leave this test
+/// green. Raised externally, and the reviewer offered two ways out: exercise
+/// `read_bounded` here, or say plainly which one is covered.
+///
+/// This is the second. Driving `read_bounded` needs a `reqwest::Response`, so
+/// an HTTP server, hyper's own buffering and reqwest's own copies — all of them
+/// inside the window this file's allocator watcher is measuring. The canary
+/// would then be counted in somebody else's freed buffers as readily as in
+/// ours, and the test would fail for a cause we cannot fix, which is worse than
+/// a test that says what it does not check.
 #[test]
 fn growing_the_response_buffer_leaves_nothing_in_freed_memory() {
     const RESERVE: usize = 32 * 1024;
