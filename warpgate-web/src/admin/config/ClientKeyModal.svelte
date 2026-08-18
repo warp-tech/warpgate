@@ -10,6 +10,7 @@
     } from '@sveltestrap/sveltestrap'
 
     import type { SSHClientKey } from 'admin/lib/api'
+    import SecretRefInput from 'common/SecretRefInput.svelte'
 
     interface Props {
         isOpen: boolean
@@ -24,6 +25,12 @@
     let secretKey = $state('')
     let isDefault = $state(false)
     let validated = $state(false)
+    let keySource = $state<'paste' | 'reference'>('paste')
+
+    function changeKeySource (source: string) {
+        keySource = source === 'reference' ? 'reference' : 'paste'
+        secretKey = keySource === 'reference' ? 'vault://' : ''
+    }
 
     function _save() {
         if (!label || (!instance && !secretKey)) {
@@ -45,6 +52,7 @@
         label = instance?.label ?? ''
         secretKey = ''
         isDefault = instance?.isDefault ?? false
+        keySource = 'paste'
         field?.focus()
     }}
 >
@@ -65,19 +73,38 @@
                 />
             </FormGroup>
             {#if !instance}
-                <FormGroup
-                    floating
-                    label="Private key (OpenSSH or PKCS#8 PEM, no passphrase)"
-                    spacing="0"
-                >
+                <FormGroup floating label="Add a key by">
                     <Input
-                        style="font-family: monospace; height: 15rem"
-                        type="textarea"
-                        required
-                        placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                        bind:value={secretKey}
-                    />
+                        type="select"
+                        value={keySource}
+                        onchange={(e) => changeKeySource((e.target as HTMLSelectElement).value)}
+                    >
+                        <option value="paste">Pasting a private key</option>
+                        <option value="reference">
+                            Referencing a secret in Vault / OpenBao
+                        </option>
+                    </Input>
                 </FormGroup>
+
+                {#if keySource === 'paste'}
+                    <FormGroup
+                        floating
+                        label="Private key (OpenSSH or PKCS#8 PEM, no passphrase)"
+                        spacing="0"
+                    >
+                        <Input
+                            style="font-family: monospace; height: 15rem"
+                            type="textarea"
+                            required
+                            placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                            bind:value={secretKey}
+                        />
+                    </FormGroup>
+                {:else}
+                    <div class="mb-3">
+                        <SecretRefInput bind:value={secretKey} />
+                    </div>
+                {/if}
             {/if}
             <Input
                 type="switch"

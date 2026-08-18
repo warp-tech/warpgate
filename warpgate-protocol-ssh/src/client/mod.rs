@@ -826,7 +826,12 @@ impl RemoteClient {
             }
             SSHTargetAuth::PublicKey(auth) => {
                 let best_hash = session.best_supported_rsa_hash().await?.flatten();
-                let keys = load_client_keys(&self.services.db, auth.key_id).await?;
+                let keys = load_client_keys(
+                    &self.services.db,
+                    auth.key_id,
+                    &*self.services.secret_backend,
+                )
+                .await?;
                 if keys.is_empty() {
                     auth_error_msg = Some("No SSH client keys are configured".into());
                 }
@@ -880,7 +885,7 @@ impl RemoteClient {
             SSHTargetAuth::IamRole(_) => {
                 let instance_info = warpgate_aws::find_instance_by_ip(host).await?;
 
-                let key = load_client_keys(&self.services.db, None)
+                let key = load_client_keys(&self.services.db, None, &*self.services.secret_backend)
                     .await?
                     .into_iter()
                     .next()

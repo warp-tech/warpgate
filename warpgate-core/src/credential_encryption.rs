@@ -228,6 +228,9 @@ async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
     }
 
     for key in SshClientKey::Entity::find().all(db).await? {
+        if is_secret_reference(&key.secret_key) {
+            continue;
+        }
         let Ok(secret_key) = maybe_reencrypt_str(&key.secret_key) else {
             continue;
         };

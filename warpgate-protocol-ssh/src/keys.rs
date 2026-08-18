@@ -11,6 +11,7 @@ use uuid::Uuid;
 use warpgate_common::encryption::{idempotent_maybe_decrypt, idempotent_maybe_encrypt_secret};
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::helpers::rng::get_crypto_rng;
+use warpgate_common::secrets::is_secret_reference;
 use warpgate_common::{
     GlobalParams, SecretBackend, SecretError, SecretRef, SecretValue, SshKeysBackend,
     SshKeysSource, WarpgateConfig, WarpgateError,
@@ -207,26 +208,30 @@ pub async fn load_preferred_key(
 // to targets by public key. DB-backed and admin-managed (see `ssh_client_keys`
 // / warpgate-admin's `ssh_keys` API), independent of the host key source above. ---
 
-/// Stores the key in the DB unless one with the same public key already
-/// exists. `is_default` seeds the default flag; bootstrap keys are stored as
-/// default, admin-added keys are not (the admin toggles them afterwards).
-pub async fn import_client_key(
-    db: &DatabaseConnection,
-    label: &str,
-    key: &PrivateKey,
-    is_default: bool,
-) -> Result<Option<SshClientKey::Model>, WarpgateError> {
-    // `<algo> <base64>` only — the OpenSSH comment is dropped so that the
-    // same key always serializes identically for de-duplication.
-    let public_key = key
+/// `<algo> <base64>` only — the OpenSSH comment is dropped so that the same
+/// key always serializes identically for de-duplication.
+fn public_key_line(key: &PrivateKey) -> Result<String, WarpgateError> {
+    Ok(key
         .public_key()
         .to_openssh()
         .map_err(russh::keys::Error::from)?
         .split_whitespace()
         .take(2)
         .collect::<Vec<_>>()
-        .join(" ");
+        .join(" "))
+}
 
+/// Inserts a row for `public_key`/`stored_secret_key` unless a key with the
+/// same public key already exists. `stored_secret_key` is whatever belongs in
+/// the `secret_key` column verbatim — already-encrypted PEM for an inline key,
+/// or a `vault://`/`openbao://` reference URI.
+async fn insert_client_key(
+    db: &DatabaseConnection,
+    label: &str,
+    public_key: String,
+    stored_secret_key: String,
+    is_default: bool,
+) -> Result<Option<SshClientKey::Model>, WarpgateError> {
     if SshClientKey::Entity::find()
         .filter(SshClientKey::Column::PublicKey.eq(&public_key))
         .one(db)
@@ -236,19 +241,58 @@ pub async fn import_client_key(
         return Ok(None);
     }
 
-    let secret_key = encode_pkcs8_pem_string(key)?;
-
     Ok(Some(
         SshClientKey::ActiveModel {
             id: Set(Uuid::new_v4()),
             label: Set(label.into()),
-            secret_key: Set(idempotent_maybe_encrypt_secret(&secret_key)?),
+            secret_key: Set(stored_secret_key),
             public_key: Set(public_key),
             is_default: Set(is_default),
         }
         .insert(db)
         .await?,
     ))
+}
+
+/// Stores the key in the DB unless one with the same public key already
+/// exists. `is_default` seeds the default flag; bootstrap keys are stored as
+/// default, admin-added keys are not (the admin toggles them afterwards).
+pub async fn import_client_key(
+    db: &DatabaseConnection,
+    label: &str,
+    key: &PrivateKey,
+    is_default: bool,
+) -> Result<Option<SshClientKey::Model>, WarpgateError> {
+    let public_key = public_key_line(key)?;
+    let secret_key = encode_pkcs8_pem_string(key)?;
+    insert_client_key(
+        db,
+        label,
+        public_key,
+        idempotent_maybe_encrypt_secret(&secret_key)?,
+        is_default,
+    )
+    .await
+}
+
+/// Registers a key whose material lives in a secret backend rather than in
+/// Warpgate's own storage: resolves `reference` once (to validate it decodes
+/// as a private key and to compute the public key for de-duplication and
+/// display), then stores the reference URI itself in the `secret_key` column —
+/// the same "inline value or backend reference in one field" scheme target
+/// credentials use (see [`warpgate_common::secrets::MaybeSecretRef`]).
+pub async fn import_client_key_reference(
+    db: &DatabaseConnection,
+    label: &str,
+    reference: &SecretRef,
+    backend: &dyn SecretBackend,
+    is_default: bool,
+) -> Result<Option<SshClientKey::Model>, WarpgateError> {
+    let value = backend.resolve(reference).await?;
+    let key = decode_secret_key(value.expose(), None)?;
+    let public_key = public_key_line(&key)?;
+
+    insert_client_key(db, label, public_key, reference.to_string(), is_default).await
 }
 
 /// One-time migration of the on-disk SSH client keys into the DB, generating
@@ -324,6 +368,7 @@ async fn default_client_keys(
 pub async fn load_client_keys(
     db: &DatabaseConnection,
     key_id: Option<Uuid>,
+    secret_backend: &dyn SecretBackend,
 ) -> Result<Vec<PrivateKey>, WarpgateError> {
     let models = match key_id {
         Some(id) => if let Some(model) = SshClientKey::Entity::find_by_id(id).one(db).await? { vec![model] } else {
@@ -332,13 +377,18 @@ pub async fn load_client_keys(
         },
         None => default_client_keys(db).await?,
     };
-    models
-        .iter()
-        .map(|m| {
-            Ok(decode_secret_key(
+    let mut keys = Vec::with_capacity(models.len());
+    for m in &models {
+        if is_secret_reference(&m.secret_key) {
+            let reference = m.secret_key.parse::<SecretRef>()?;
+            let value = secret_backend.resolve(&reference).await?;
+            keys.push(decode_secret_key(value.expose(), None)?);
+        } else {
+            keys.push(decode_secret_key(
                 &idempotent_maybe_decrypt(&m.secret_key)?,
                 None,
-            )?)
-        })
-        .collect()
+            )?);
+        }
+    }
+    Ok(keys)
 }

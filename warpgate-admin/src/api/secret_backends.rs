@@ -196,8 +196,8 @@ impl Api {
         require_admin_permission(&ctx, None).await?;
 
         let targets = {
-            let db = ctx.services().db.lock().await;
-            Target::Entity::find().all(&*db).await?
+            let db = &ctx.services().db;
+            Target::Entity::find().all(db).await?
         };
 
         let mut usage: HashMap<String, SecretReferenceUsage> = HashMap::new();

@@ -922,7 +922,7 @@ class TestSecretBackendVault:
         wait_port(wg1.ssh_port, for_process=wg1.process)
 
         data, _version = vault.kv_get("secret", "warpgate-keys")
-        for field in ["host-ed25519", "host-rsa", "client-ed25519", "client-rsa"]:
+        for field in ["host-ed25519", "host-rsa"]:
             assert field in data, f"{field} was not generated into Vault"
             assert "PRIVATE KEY" in data[field]
 
@@ -936,7 +936,7 @@ class TestSecretBackendVault:
         wait_port(wg2.ssh_port, for_process=wg2.process)
 
         data_after, _version_after = vault.kv_get("secret", "warpgate-keys")
-        for field in ["host-ed25519", "host-rsa", "client-ed25519", "client-rsa"]:
+        for field in ["host-ed25519", "host-rsa"]:
             assert data_after[field] == data[field], f"{field} was regenerated across restart"
 
     # ── AppRole auth method (not just static Token) ──────────────────────────

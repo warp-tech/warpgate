@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.26.1-39-gcba71c5a-modified"
+    "version": "v0.28.0-beta.3-8-g61d6e75a-modified"
   },
   "servers": [
     {
@@ -1292,6 +1292,61 @@
           }
         ],
         "operationId": "generate_ssh_own_key"
+      }
+    },
+    "/ssh/own-keys/reference": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSSHClientKeyReferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "import_ssh_own_key_reference"
       }
     },
     "/ssh/own-keys/{id}": {
@@ -5280,6 +5335,27 @@
           }
         }
       },
+      "ImportSSHClientKeyReferenceRequest": {
+        "type": "object",
+        "title": "ImportSSHClientKeyReferenceRequest",
+        "required": [
+          "label",
+          "reference",
+          "is_default"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string",
+            "description": "A `vault://backend/path#field` or `openbao://backend/path#field` reference;\nthe field must resolve to a private key in OpenSSH or PKCS#8 PEM format."
+          },
+          "is_default": {
+            "type": "boolean"
+          }
+        }
+      },
       "ImportSSHClientKeyRequest": {
         "type": "object",
         "title": "ImportSSHClientKeyRequest",
@@ -6530,6 +6606,10 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "backend": {
+            "type": "string",
+            "description": "The secret backend this key's material is read from, e.g. `\"vault-prod\"` —\n`None` when the key material is stored directly in Warpgate's database."
           }
         }
       },
