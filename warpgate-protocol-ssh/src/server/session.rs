@@ -81,6 +81,18 @@ struct PendingKeyboardInteractiveAuth {
     web_approval_retry_count: Option<u8>,
 }
 
+enum ProbeState {
+    /// New session
+    NoAttempt,
+    /// Charged with suspicious probing
+    Probe {
+        username: String,
+        method: &'static str,
+    },
+    /// Vindicated by a successful auth or guilty as charged with a failed login
+    Settled,
+}
+
 struct CachedSuccessfulTicketAuth {
     ticket: Secret<String>,
     user_info: AuthStateUserInfo,
@@ -123,11 +135,8 @@ pub struct ServerSession {
     keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
-    /// Username of the latest public-key attempt that failed validation.
-    /// Per-key failures are benign — clients try each agent key in turn — so
-    /// they are recorded as a single failed login, and only if the session
-    /// ends unauthenticated (see [`Self::record_pending_pubkey_failure`]).
-    failed_pubkey_username: Option<String>,
+    /// Track the state of a client snooping around pre-auth
+    probe: ProbeState,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -199,7 +208,7 @@ impl ServerSession {
             keyboard_interactive_state: None,
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
-            failed_pubkey_username: None,
+            probe: ProbeState::NoAttempt,
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -282,7 +291,7 @@ impl ServerSession {
                 }
             };
             debug!("No more events");
-            this.record_pending_pubkey_failure().await;
+            this.settle_failed_probe().await;
             result?;
             Ok::<_, anyhow::Error>(())
         })
@@ -358,7 +367,8 @@ impl ServerSession {
         }
     }
 
-    async fn record_failed_login_attempt(&self, username: &str, credential_type: &str) {
+    async fn record_failed_login_attempt(&mut self, username: &str, credential_type: &str) {
+        self.probe = ProbeState::Settled;
         let _ = self
             .services
             .login_protection
@@ -371,21 +381,26 @@ impl ServerSession {
             .await;
     }
 
-    fn note_pubkey_failure(&mut self, selector: &AuthSelector) {
-        if let AuthSelector::User { username, .. } = selector {
-            self.failed_pubkey_username = Some(username.clone());
+    fn note_probe(&mut self, selector: &AuthSelector, method: &'static str) {
+        if let AuthSelector::User { username, .. } = selector
+            && !matches!(self.probe, ProbeState::Settled)
+        {
+            self.probe = ProbeState::Probe {
+                username: username.clone(),
+                method,
+            };
         }
     }
 
-    /// Records at most one "public_key" failed login per connection: a client
-    /// probing keys and disconnecting is counted, while a client that cycles
-    /// through its agent keys before authenticating isn't penalised per key.
-    async fn record_pending_pubkey_failure(&self) {
-        if self.user_info.is_none()
-            && let Some(username) = &self.failed_pubkey_username
-        {
-            self.record_failed_login_attempt(username, "public_key")
-                .await;
+    /// At session end, record a failure if session only did
+    /// unsuccessful probes
+    async fn settle_failed_probe(&mut self) {
+        if self.user_info.is_some() {
+            return;
+        }
+        if let ProbeState::Probe { username, method } = &self.probe {
+            let (username, method) = (username.clone(), *method);
+            self.record_failed_login_attempt(&username, method).await;
         }
     }
 
@@ -1816,10 +1831,10 @@ impl ServerSession {
             "Client offers public key auth as {selector:?} with key {}",
             key.public_key_base64()
         );
+        self.note_probe(&selector, "public_key");
 
         if !self.allowed_auth_methods.contains(&MethodKind::PublicKey) {
             warn!("Client attempted public key auth even though it was not advertised");
-            self.note_pubkey_failure(&selector);
             return russh::server::Auth::reject();
         }
 
@@ -1845,8 +1860,6 @@ impl ServerSession {
             return russh::server::Auth::Accept;
         }
 
-        self.note_pubkey_failure(&selector);
-
         match self.try_auth_lazy(&selector, None).await {
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
@@ -1867,10 +1880,10 @@ impl ServerSession {
             "Public key auth as {selector:?} with key {}",
             key.public_key_base64()
         );
+        self.note_probe(&selector, "public_key");
 
         if !self.allowed_auth_methods.contains(&MethodKind::PublicKey) {
             warn!("Client attempted public key auth even though it was not advertised");
-            self.note_pubkey_failure(&selector);
             return russh::server::Auth::reject();
         }
 
@@ -1919,6 +1932,7 @@ impl ServerSession {
     ) -> russh::server::Auth {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Password auth as {selector:?}");
+        self.note_probe(&selector, "password");
 
         if !self.allowed_auth_methods.contains(&MethodKind::Password) {
             warn!("Client attempted password auth even though it was not advertised");
@@ -1956,6 +1970,7 @@ impl ServerSession {
     ) -> Result<russh::server::Auth> {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Keyboard-interactive auth as {:?}", selector);
+        self.note_probe(&selector, "keyboard_interactive");
 
         if !self
             .allowed_auth_methods
@@ -2194,7 +2209,6 @@ impl ServerSession {
 
                 if let Some(credential) = credential {
                     let credential_type = Self::rate_limited_credential_type(&credential);
-                    let is_public_key = matches!(&credential, AuthCredential::PublicKey { .. });
                     let outcome = submit_credential(
                         &mut state,
                         credential,
@@ -2202,18 +2216,11 @@ impl ServerSession {
                     )
                     .await?;
 
-                    if !outcome.is_valid() {
-                        if let Some(credential_type) = credential_type {
-                            self.record_failed_login_attempt(username, credential_type)
-                                .await;
-                        } else if is_public_key {
-                            self.note_pubkey_failure(selector);
-                        }
-                    } else if is_public_key {
-                        // A valid key means this wasn't a guessing attempt,
-                        // even if the session later ends without completing
-                        // the remaining factors.
-                        self.failed_pubkey_username = None;
+                    if outcome.is_valid() {
+                        self.probe = ProbeState::Settled;
+                    } else if let Some(credential_type) = credential_type {
+                        self.record_failed_login_attempt(username, credential_type)
+                            .await;
                     }
                 }
 
