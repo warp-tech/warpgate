@@ -365,6 +365,33 @@ fn resume_after_host_key_answer(deadline: Pin<&mut tokio::time::Sleep>) {
     deadline.reset(tokio::time::Instant::now() + once_the_host_key_is_answered());
 }
 
+/// One end of a certificate's validity window, for a message a person reads.
+///
+/// `None` is the sentinel meaning "no bound", which a certificate this feature
+/// issues never carries.
+///
+/// The formatting is fallible and that is handled, which is not fussiness.
+/// `humantime`'s `Display` returns `Err` rather than truncating for any time at
+/// or after the year 9999, and `to_string()` **panics** when a `Display`
+/// errors. A certificate marked never-expiring lands exactly there — so
+/// building this diagnostic killed the session's task before
+/// `certificate_mismatch` could run the check that refuses such a certificate,
+/// and the client was left holding a connection nobody would ever answer.
+/// Found by unskipping the integration test that had been parked on "holds the
+/// session open for a reason not yet isolated". This was the reason.
+fn describe_certificate_time(at: Option<std::time::SystemTime>) -> String {
+    use std::fmt::Write as _;
+
+    let Some(at) = at else {
+        return "unbounded".to_owned();
+    };
+    let mut rendered = String::new();
+    if write!(rendered, "{}", humantime::format_rfc3339_seconds(at)).is_err() {
+        return "a date beyond any this can render".to_owned();
+    }
+    rendered
+}
+
 /// Why a connection could not be opened, in a fixed set of words.
 ///
 /// Deliberately not `io::Error`'s own `Display`. This feeds the sanitiser, and
@@ -1893,17 +1920,9 @@ impl RemoteClient {
 
                     // Captured before the certificate is handed to russh, which
                     // takes ownership of it.
-                    // `None` for the sentinel values meaning "no bound", which
-                    // a certificate this feature issues never carries.
-                    let describe_time = |at: Option<std::time::SystemTime>| {
-                        at.map_or_else(
-                            || "unbounded".to_owned(),
-                            |at| humantime::format_rfc3339_seconds(at).to_string(),
-                        )
-                    };
                     let validity = (
-                        describe_time(certificate.valid_after_time()),
-                        describe_time(certificate.valid_before_time()),
+                        describe_certificate_time(certificate.valid_after_time()),
+                        describe_certificate_time(certificate.valid_before_time()),
                     );
 
                     if let Some(reason) =
@@ -2940,6 +2959,38 @@ mod tests {
         /// handshake, and used to be.
         ///
         /// Five calls at the default 10s `vault.timeout` is fifty seconds
+        /// A certificate marked never-expiring reports a `valid_before` beyond
+        /// the year 9999, and `humantime`'s `Display` returns `Err` there
+        /// rather than truncating — so `to_string()` panicked, in a tokio
+        /// worker, while building the message that describes the window. The
+        /// check that refuses such a certificate sits *after* that line and
+        /// never ran; the client was left holding a connection nobody would
+        /// answer, which is what the integration test had been parked on for a
+        /// week as "holds the session open for a reason not yet isolated".
+        #[test]
+        fn a_far_future_expiry_is_described_rather_than_panicked_on() {
+            use std::time::{Duration, UNIX_EPOCH};
+
+            use crate::client::describe_certificate_time;
+
+            // The first second of the year 9999, where `humantime` gives up.
+            let past_rendering = UNIX_EPOCH + Duration::from_secs(253_402_300_800);
+
+            let described = describe_certificate_time(Some(past_rendering));
+            assert!(
+                !described.is_empty(),
+                "a time past what can be rendered produced nothing"
+            );
+            assert_eq!(describe_certificate_time(None), "unbounded");
+            // And the ordinary case still renders as a date, or this would pass
+            // by describing everything as unrenderable.
+            assert!(
+                describe_certificate_time(Some(UNIX_EPOCH + Duration::from_secs(1_700_000_000)))
+                    .starts_with("2023-"),
+                "an ordinary expiry stopped rendering as a date"
+            );
+        }
+
         /// The sanitiser had no test of its own, and the nearest one that
         /// looked like coverage asserts a string that also appears in an
         /// unrelated variant's `Display` — so it passes identically with the

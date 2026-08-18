@@ -466,6 +466,19 @@ MUTATIONS = [
         'if false {\n        return format!("{field}_");\n    }',
     ),
     (
+        # Ours, found by unskipping the integration test in round J. Rendering
+        # the validity window for the diagnostic panicked on a never-expiring
+        # certificate, in a tokio worker, before the check that refuses one.
+        "certificate: describing a far-future expiry cannot panic",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        """    let mut rendered = String::new();
+    if write!(rendered, "{}", humantime::format_rfc3339_seconds(at)).is_err() {
+        return "a date beyond any this can render".to_owned();
+    }
+    rendered""",
+        """    humantime::format_rfc3339_seconds(at).to_string()""",
+    ),
+    (
         # Raised externally, round J: an operator checking a host key saw
         # `SSH protocol error` both for a host that could not be reached and for
         # one whose key is not trusted — one sentence for two different jobs.
@@ -674,6 +687,9 @@ DISCRIMINATES = {
     ],
     "certificate: a username cannot impersonate the gateway's attribution": [
         "a_username_cannot_impersonate_the_gateways_own_attribution"
+    ],
+    "certificate: describing a far-future expiry cannot panic": [
+        "a_far_future_expiry_is_described_rather_than_panicked_on"
     ],
     "connection: unreachable and untrusted do not read alike": [
         "an_unreachable_target_does_not_read_like_an_untrusted_key"

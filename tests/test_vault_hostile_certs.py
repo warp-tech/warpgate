@@ -427,12 +427,6 @@ class TestTheCredentialFileItself:
         # Refused before it is sent, so no oversized key ID is signed either.
         assert stub_vault.signs == [], "an oversized key ID was sent to the issuer"
 
-    @pytest.mark.skip(
-        reason="the guard is covered by the certificate_lifetime unit tests in "
-        "warpgate-protocol-ssh; end to end, this input holds the session open "
-        "for ~45s for a reason not yet isolated, so it cannot demonstrate the "
-        "refusal here"
-    )
     def test_a_certificate_that_never_expires(
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
     ):
@@ -446,16 +440,24 @@ class TestTheCredentialFileItself:
         no TTL at all yields."""
         from .test_ssh_target_cert_auth import make_user_and_target, start
 
-        from .test_ssh_target_cert_auth import connect
-
         stub_vault.validity = "always:forever"
         user, target = make_user_and_target(api, cert_ssh_port)
 
-        # No PTY here: a certificate `ssh-keygen` marks "forever" also has no
-        # `valid_after`, and the target keeps an interactive session open long
-        # enough to outlast the test. The exit code is the assertion.
-        code, stdout = connect(processes, cert_wg, user, target, 45)
+        # `-tt`, like every sibling in this file. This was skipped on the
+        # reasoning that the target holds an interactive session open past the
+        # timeout — but the target never sees this certificate at all: Warpgate
+        # refuses it before offering it, and without a PTY there is no channel
+        # for `emit_pty_output` to write the refusal to, so the client waits on
+        # a session that will never open. The forty-five seconds were the
+        # client's own timeout, not the target's.
+        client = start(processes, cert_wg, user, target, "-tt")
+        shown = client.communicate(timeout=timeout)[0].decode(errors="replace")
 
         assert stub_vault.signs, "no certificate was issued"
-        assert code != 0, "a never-expiring certificate was accepted"
-        assert b"/bin/sh" not in stdout
+        assert client.returncode != 0, "a never-expiring certificate was accepted"
+        assert "Warpgate refused the certificate" in shown
+        # The specific refusal, not just any. The exit code and the absence of a
+        # shell are satisfied by every other way this connection can fail, so on
+        # their own they would have passed with the guard deleted.
+        assert "never expires" in shown
+        assert "/bin/sh" not in shown
