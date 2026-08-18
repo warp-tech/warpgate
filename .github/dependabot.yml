@@ -3,7 +3,7 @@
 
 version: 2
 updates:
-  - package-ecosystem: "cargo"
+  - package-ecosystem: cargo
     directory: "/"
     labels: ["type/deps"]
     cooldown:
@@ -12,14 +12,14 @@ updates:
       semver-minor-days: 7
       semver-patch-days: 3
     schedule:
-      interval: "daily"
+      interval: weekly
     groups:
       rust-updates:
         applies-to: version-updates
         update-types:
           - minor
           - patch
-  - package-ecosystem: "npm"
+  - package-ecosystem: npm
     directory: "/warpgate-web"
     labels: ["type/deps"]
     cooldown:
@@ -34,13 +34,13 @@ updates:
           - minor
           - patch
     schedule:
-      interval: "daily"
+      interval: weekly
 
   - package-ecosystem: github-actions
     directory: /
     labels: ["type/deps"]
     schedule:
-      interval: daily
+      interval: weekly
     groups:
       actions-updates:
         applies-to: version-updates
@@ -52,7 +52,7 @@ updates:
     directory: /docker
     labels: ["type/deps"]
     schedule:
-      interval: daily
+      interval: weekly
 
   - package-ecosystem: pip
     directory: /tests
@@ -65,7 +65,7 @@ updates:
       semver-minor-days: 7
       semver-patch-days: 3
     schedule:
-      interval: "daily"
+      interval: weekly
     groups:
       pip-updates:
         applies-to: version-updates
