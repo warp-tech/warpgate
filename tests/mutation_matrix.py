@@ -304,8 +304,16 @@ MUTATIONS = [
         # W-116 — rather than argued.
         "connection: the handshake deadline resumes after a host key answer",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        "const fn once_the_host_key_is_answered() -> Duration {\n    HANDSHAKE_TIMEOUT\n}",
-        "const fn once_the_host_key_is_answered() -> Duration {\n    Duration::from_secs(86400)\n}",
+        # Anchored on the call, not on the constant. The constant was the anchor
+        # while the test that discriminated it compared two constants, so the
+        # pair agreed with each other and nothing established that either was
+        # ever called.
+        """fn resume_after_host_key_answer(deadline: Pin<&mut tokio::time::Sleep>) {
+    deadline.reset(tokio::time::Instant::now() + once_the_host_key_is_answered());
+}""",
+        """fn resume_after_host_key_answer(deadline: Pin<&mut tokio::time::Sleep>) {
+    deadline.reset(tokio::time::Instant::now() + while_a_host_key_answer_is_outstanding());
+}""",
     ),
     (
         "certificate: a username cannot shift the key ID fields",

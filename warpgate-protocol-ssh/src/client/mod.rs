@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::io;
 use std::net::ToSocketAddrs;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -345,6 +346,23 @@ impl ConnectionError {
             ConnectionError::Warpgate(_) => "Internal connection error".to_string(),
         }
     }
+}
+
+/// Push the handshake bound out while a person is being asked about a host key.
+///
+/// A named operation rather than a `reset` written out at the call site, so the
+/// pair below can be driven by a test. The test that guarded this compared
+/// `once_the_host_key_is_answered()` against `HANDSHAKE_TIMEOUT` and never
+/// called either function — it would have passed with a call site deleted, or
+/// with the two durations swapped between them.
+fn pause_for_host_key_question(deadline: Pin<&mut tokio::time::Sleep>) {
+    deadline.reset(tokio::time::Instant::now() + while_a_host_key_answer_is_outstanding());
+}
+
+/// And bring it back once the answer arrives: the rest of the handshake is the
+/// target's again, so it gets the target's bound.
+fn resume_after_host_key_answer(deadline: Pin<&mut tokio::time::Sleep>) {
+    deadline.reset(tokio::time::Instant::now() + once_the_host_key_is_answered());
 }
 
 /// Why a connection could not be opened, in a fixed set of words.
@@ -1587,10 +1605,7 @@ impl RemoteClient {
                                 // in microseconds and the pause is not observable,
                                 // which is the point: this arm no longer needs to
                                 // know which mode is configured to stay bounded.
-                                handshake_deadline.as_mut().reset(
-                                    tokio::time::Instant::now()
-                                        + while_a_host_key_answer_is_outstanding(),
-                                );
+                                pause_for_host_key_question(handshake_deadline.as_mut());
                                 let (intercept_tx, intercept_rx) = oneshot::channel();
                                 outstanding_host_key = Some(reply);
                                 let answer_tx = host_key_answer_tx.clone();
@@ -1622,9 +1637,7 @@ impl RemoteClient {
                 // `check_server_key`. The remaining handshake is the target's
                 // again from here, so the bound comes back with it.
                 Some(answer) = host_key_answers.recv() => {
-                    handshake_deadline.as_mut().reset(
-                        tokio::time::Instant::now() + once_the_host_key_is_answered(),
-                    );
+                    resume_after_host_key_answer(handshake_deadline.as_mut());
                     if let Some(reply) = outstanding_host_key.take() {
                         // A closed receiver means the connection future is
                         // already gone; there is nothing left to answer.
@@ -2868,18 +2881,42 @@ mod tests {
         /// to something a stalled target can sit inside. Pushing the resume out
         /// instead of back is the exact regression this exists to catch, and it
         /// is what the previous version of this fix did.
-        #[test]
-        fn answering_a_host_key_question_puts_the_targets_own_bound_back() {
-            assert_eq!(
-                crate::client::once_the_host_key_is_answered(),
-                super::super::HANDSHAKE_TIMEOUT,
-                "the answer left the connection on a bound other than the target's"
+        #[tokio::test]
+        async fn answering_a_host_key_question_puts_the_targets_own_bound_back() {
+            use std::time::Duration;
+
+            use crate::client::{
+                HANDSHAKE_TIMEOUT, pause_for_host_key_question, resume_after_host_key_answer,
+            };
+
+            // The real `Sleep` the connect loop holds, moved by the real
+            // functions the connect loop calls. The previous version of this
+            // test compared two constants and called neither — it would have
+            // passed with a call site deleted, or with the two durations
+            // swapped between them, which is the regression it exists to catch.
+            let deadline = tokio::time::sleep(HANDSHAKE_TIMEOUT);
+            tokio::pin!(deadline);
+            let armed = deadline.deadline();
+
+            pause_for_host_key_question(deadline.as_mut());
+            let paused = deadline.deadline();
+            assert!(
+                paused > armed + Duration::from_secs(24 * 60 * 60),
+                "the pause did not put the bound beyond any time a person spends \
+                 reading a fingerprint"
+            );
+
+            resume_after_host_key_answer(deadline.as_mut());
+            let resumed = deadline.deadline();
+            assert!(
+                resumed < paused,
+                "the answer left the connection on the pause, so a target that \
+                 goes quiet after offering a host key is never given up on"
             );
             assert!(
-                crate::client::once_the_host_key_is_answered()
-                    < crate::client::while_a_host_key_answer_is_outstanding(),
-                "the bound after the answer is no shorter than the pause, so the \
-                 pause is never lifted in any way a stalled target would notice"
+                resumed <= tokio::time::Instant::now() + HANDSHAKE_TIMEOUT,
+                "the answer left the connection on a bound longer than the \
+                 target's own"
             );
         }
 
