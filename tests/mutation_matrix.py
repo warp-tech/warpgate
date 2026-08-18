@@ -1355,6 +1355,28 @@ def run_one(name, path, old, new):
 
 
 def main():
+    # Refused rather than joined. The lock was written unconditionally, so a
+    # second run started happily beside a first and both rewrote the same source
+    # files — two mutations live at once, and every verdict either produces is
+    # about a tree neither of them describes. That happened, and it was noticed
+    # only by counting processes.
+    #
+    # A lock left by a killed run blocks this too, which is the right way round:
+    # a stale lock costs one command to clear, and a contaminated sweep costs a
+    # number that looks like evidence.
+    if LOCK.exists():
+        sys.exit(
+            f"{LOCK} exists, so a run is in progress or one was killed before it "
+            "could clean up.\n"
+            "Two runs at once rewrite the same files and neither result means "
+            "anything.\n\n"
+            "If nothing is running — check with `pgrep -f mutation_matrix` — then "
+            "confirm no source was left mutated before clearing it:\n"
+            "  python3 -c \"import sys; sys.path.insert(0,'.'); "
+            "import tests.mutation_matrix as m; "
+            "m.check_anchors(m.MUTATIONS + [m.CANARY])\"\n"
+            f"  rm {LOCK}"
+        )
     LOCK.write_text("mutation_matrix is rewriting source files in place\n")
     atexit.register(restore_everything)
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
@@ -1410,10 +1432,20 @@ def main():
         selected = [m for m in MUTATIONS if not only or only in m[0]]
         if not selected:
             sys.exit(f"no guard matches {only!r}")
+    # Each phase says it is starting. Together these can run for over an hour on
+    # a full sweep — the discriminator check builds a test binary per crate, and
+    # the replacement check runs two workspace-wide `cargo check` passes — and
+    # they used to do it in complete silence. A run that cannot be told apart
+    # from a hung one gets killed; that happened three times in one day.
+    print(f"checking {len(selected)} guard(s) before measuring anything", flush=True)
+    print("  anchors...", flush=True)
     check_anchors(selected + [CANARY])
     check_no_duplicate_entries()
+    print("  named discriminators exist (builds a test binary per crate)...", flush=True)
     check_discriminators(selected)
+    print("  replacements compile (two workspace passes)...", flush=True)
     check_replacements_build(selected + [CANARY], IN_FLIGHT)
+    print("  ready\n", flush=True)
 
     if named_mode:
         results = verify_named(selected)
