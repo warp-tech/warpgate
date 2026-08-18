@@ -110,7 +110,7 @@ second is refused at startup — both issuers reject it, and failing at config
 load names the line instead of failing every session later.
 
 Whatever the role grants, Warpgate checks the certificate it gets back and
-refuses to use it if the window is wrong. Three cases, because a role's `max_ttl`
+refuses to use it if the window is wrong. Four cases, because a role's `max_ttl`
 is not something Warpgate can see:
 
 | Returned certificate | What happens |

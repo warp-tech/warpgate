@@ -12,10 +12,18 @@ proof that it is useless, but the place to look next.
 
 Not a pytest module: it rebuilds the gateway between runs, so it is a script.
 
-Two modes, and the routine one is `--named`:
+Two modes, and the routine one is `--named`. From the repository root:
 
-    poetry run python -m tests.mutation_matrix --named            # every guard
-    poetry run python -m tests.mutation_matrix --named principal  # matching a name
+    PYTHONPATH=$PWD poetry -C tests run python -m tests.mutation_matrix --named
+    PYTHONPATH=$PWD poetry -C tests run python -m tests.mutation_matrix --named principal
+
+`PYTHONPATH` is not decoration. The virtualenv lives in `tests/`, so poetry has
+to be pointed there, and `poetry -C tests run` executes with the working
+directory *already changed* to `tests/` — at which point the `tests` package
+this module belongs to is no longer importable and `-m` fails outright. A
+relative `PYTHONPATH=.` resolves against that changed directory and fails the
+same way. This docstring documented the shorter command for two rounds and
+nobody ran it.
 
 `--named` is the A/B the coverage number comes from: for each guard it runs only
 the test named after that guard, twice — once with the guard disabled, once with
@@ -986,7 +994,31 @@ def write_artifact(*, partial: bool, results: list, refused: str | None, mode: s
     )
 
 
-def existing_tests() -> set[str]:
+def _python_test_names() -> set[str]:
+    names: set[str] = set()
+    collected = subprocess.run(
+        ["poetry", "run", "pytest", *SUITES, "--collect-only", "-q"],
+        cwd=REPO / "tests",
+        capture_output=True,
+        text=True,
+    )
+    for line in collected.stdout.splitlines():
+        if "::" in line:
+            names.add(line.split("::")[-1].split("[")[0].strip())
+    return names
+
+
+def _rust_test_names(crates) -> set[str]:
+    names: set[str] = set()
+    for crate in crates:
+        listed = run(["cargo", "test", "-p", crate, "--", "--list"])
+        for line in listed.stdout.splitlines():
+            if line.endswith(": test"):
+                names.add(line.rsplit(":", 1)[0].split("::")[-1].strip())
+    return names
+
+
+def existing_tests(mutations=None) -> set[str]:
     """Every test name this repository actually has, Python and Rust.
 
     Collected rather than assumed. `DISCRIMINATES` is a hand-written list of
@@ -997,25 +1029,35 @@ def existing_tests() -> set[str]:
 
     An instrument built because we do not trust our tests was taking its own
     list of test names on faith.
+
+    Scoped to what is being checked, when a selection is given. Collecting
+    everything costs a full pytest collection plus one `cargo test --list` per
+    crate — eight of them, each building that crate's test binary — and that
+    fixed cost was paid identically for one guard and for forty-seven. A
+    reviewer ran a single guard and waited twenty-five minutes before the first
+    A/B, which is most of why the instrument reads as too expensive to run.
+
+    The guarantee is not weakened: a discriminator missing from the narrow set
+    is looked for across the whole repository before it is called missing, so
+    the answer never depends on the guess that a guard's test lives in the same
+    crate as the guard.
     """
-    names: set[str] = set()
+    if mutations is None:
+        return _python_test_names() | _rust_test_names(RUST_CRATES)
 
-    collected = subprocess.run(
-        ["poetry", "run", "pytest", *SUITES, "--collect-only", "-q"],
-        cwd=REPO / "tests",
-        capture_output=True,
-        text=True,
-    )
-    for line in collected.stdout.splitlines():
-        if "::" in line:
-            names.add(line.split("::")[-1].split("[")[0].strip())
+    wanted = {t for name, *_ in mutations for t in DISCRIMINATES.get(name, [])}
+    # A leading `test_` is pytest's own convention and is what `run_named_only`
+    # already uses to route a name to one runner or the other.
+    want_python = any(t.startswith("test_") for t in wanted)
+    near = {path.split("/")[0] for _, path, _, _ in mutations} & set(RUST_CRATES)
 
-    for crate in RUST_CRATES:
-        listed = run(["cargo", "test", "-p", crate, "--", "--list"])
-        for line in listed.stdout.splitlines():
-            if line.endswith(": test"):
-                names.add(line.rsplit(":", 1)[0].split("::")[-1].strip())
-
+    names = _rust_test_names(sorted(near))
+    if want_python:
+        names |= _python_test_names()
+    if wanted - names:
+        names |= _rust_test_names(sorted(set(RUST_CRATES) - near))
+        if not want_python:
+            names |= _python_test_names()
     return names
 
 
@@ -1062,7 +1104,7 @@ def check_discriminators(mutations):
     cannot fail, so a guard listing one can never be reported as caught, and the
     run would spend an hour arriving at that.
     """
-    have = existing_tests()
+    have = existing_tests(mutations)
     if not have:
         raise SystemExit(
             "could not collect any test names, so the discriminator check "

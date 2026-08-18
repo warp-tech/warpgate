@@ -280,6 +280,15 @@ class TestPrincipalsThatCrossOtherPeoplesBugs:
 
         assert client.returncode != 0
         assert stub_vault.signs, "no certificate was issued"
+        # The negative assertion alone is satisfied by the message never
+        # arriving — a connection that dies before writing anything contains no
+        # escape sequences either. Every sibling in this file anchors on the
+        # refusal first; this one did not, and so proved only that *something*
+        # went wrong. The option name's printable tail pins the third case
+        # apart: the message reached the terminal, it named the option, and the
+        # escape was neutralised rather than the name being dropped.
+        assert "Warpgate refused the certificate" in stdout
+        assert "HACKED=x" in stdout, "the refusal did not name the option at all"
         assert "\x1b[2J" not in stdout, "a certificate wrote escape sequences to the terminal"
 
     def test_a_pinned_option_that_is_absent_is_refused(

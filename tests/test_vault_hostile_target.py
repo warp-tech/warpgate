@@ -18,7 +18,7 @@ import psutil
 import pytest
 
 from .api_client import admin_client, sdk
-from .conftest import ProcessManager
+from .conftest import TARGET_HOST, ProcessManager
 from .hostile_ssh_server import MODES, HostileSSHServer
 from .stub_vault import SERVICE_ACCOUNT_JWT, StubVault
 from .util import wait_port
@@ -209,7 +209,7 @@ def test_a_jump_host_that_never_opens_the_tunnel_is_given_up_on(
         def make(name, port, auth, jump_host=None):
             options = sdk.TargetOptionsTargetSSHOptions(
                 kind="Ssh",
-                host="localhost",
+                host=TARGET_HOST,
                 port=port,
                 username="root",
                 auth=auth,

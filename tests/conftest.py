@@ -26,6 +26,24 @@ from typing import List, Optional
 from deepmerge import always_merger
 
 from .util import _wait_timeout, alloc_port, wait_port
+
+# Anchored on this file rather than on the working directory. The rest of the
+# suite reaches its keys as `ssh-keys/...` and gets away with it because pytest
+# runs from `tests/`; a path handed to `docker -v` does not get away with it,
+# because Docker resolves it against a different root and fails quietly.
+SUITE_SSH_KEYS = Path(__file__).parent / "ssh-keys"
+
+# The address a target is configured with, and therefore the one Warpgate dials
+# outbound. Not `localhost`: Warpgate resolves a hostname and connects to the
+# first address it gets, which on a dual-stack host is `::1`, while the Docker
+# containers these tests start publish on v4 only. The connection is then
+# refused, the test fails for a reason that has nothing to do with what it
+# asserts, and — worse — a guard-disabled run fails identically, which reads as
+# the guard being caught. The Python fake servers in this suite were made
+# dual-stack for the same underlying reason; that fixed the instances we owned
+# and not the class, because nothing can make a published Docker port answer on
+# `::1`.
+TARGET_HOST = "127.0.0.1"
 from .test_http_common import echo_server_port  # noqa
 
 
@@ -172,21 +190,32 @@ class ProcessManager:
         # Every server otherwise shares one host key, which makes two of them
         # indistinguishable to anything that identifies a host by its key — and
         # therefore makes it impossible to tell which hop of a chain answered.
-        host_key_path = "/ssh-keys/id_ed25519"
+        #
+        # Either way the key ends up inside `data_dir`, which is already bind
+        # mounted. The shared one used to be reached by mounting the source tree
+        # itself, `-v {os.getcwd()}/ssh-keys:/ssh-keys` — a host path assembled
+        # from wherever pytest happened to start. A Docker setup that
+        # allow-lists which host directories may be shared mounts that as empty
+        # rather than refusing, so sshd came up with no host key and every
+        # target container died before the test it was started for could say
+        # why. Eleven guards were reported as not discriminating for this and
+        # one other cause, none of them application defects.
+        own_key = data_dir / "host_key"
         if distinct_host_key:
-            own_key = data_dir / "host_key"
             subprocess.run(
                 ["ssh-keygen", "-q", "-t", "ed25519", "-f", str(own_key), "-N", ""],
                 check=True,
             )
-            own_key.chmod(0o600)
-            host_key_path = str(own_key)
             # Recorded so a test can assert which host answered, rather than
             # only that it was not some other one. With two hops those are the
             # same claim; with three they are not, and the weaker one is what
             # the host-key tests were making.
             key_type, key_base64 = own_key.with_suffix(".pub").read_text().split()[:2]
             self.host_keys[port] = SshHostKey(key_type=key_type, base64=key_base64)
+        else:
+            shutil.copy(SUITE_SSH_KEYS / "id_ed25519", own_key)
+        own_key.chmod(0o600)
+        host_key_path = str(own_key)
 
         config_path = data_dir / "sshd_config"
         config_path.write_text(
@@ -230,8 +259,6 @@ class ProcessManager:
                 "host.docker.internal:host-gateway",
                 "-v",
                 f"{data_dir}:{data_dir}",
-                "-v",
-                f"{os.getcwd()}/ssh-keys:/ssh-keys",
                 "warpgate-e2e-ssh-server",
                 "-f",
                 str(config_path),

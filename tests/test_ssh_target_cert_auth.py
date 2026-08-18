@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 from .api_client import admin_client, sdk
-from .conftest import ProcessManager, WarpgateProcess
+from .conftest import TARGET_HOST, ProcessManager, WarpgateProcess
 from .stub_vault import (
     SERVICE_ACCOUNT_JWT,
     Recorder,
@@ -110,7 +110,7 @@ def make_user_and_target(
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetSSHOptions(
                     kind="Ssh",
-                    host="localhost",
+                    host=TARGET_HOST,
                     port=ssh_port,
                     username=username,
                     auth=sdk.SSHTargetAuth(
@@ -1286,7 +1286,7 @@ class TestControlsStillApply:
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
-                        host="localhost",
+                        host=TARGET_HOST,
                         port=port,
                         username="root",
                         auth=sdk.SSHTargetAuth(
@@ -1395,7 +1395,7 @@ class TestAChainWithAJumpHost:
         )
         api.add_user_role(user.id, wg_role.id)
 
-        def make(name, port, jump=None, host="localhost", extensions=None):
+        def make(name, port, jump=None, host=TARGET_HOST, extensions=None):
             options = sdk.TargetOptionsTargetSSHOptions(
                 kind="Ssh",
                 host=host,
@@ -1511,7 +1511,7 @@ class TestAChainWithAJumpHost:
         jump_key = processes.host_keys[jump_port]
         api.add_ssh_known_host(
             sdk.AddSshKnownHostRequest(
-                host="localhost",
+                host=TARGET_HOST,
                 port=jump_port,
                 key_type=jump_key.key_type,
                 key_base64=jump_key.base64,
