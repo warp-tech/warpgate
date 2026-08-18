@@ -310,11 +310,15 @@ MUTATIONS = [
     (
         "certificate: a username cannot shift the key ID fields",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        # Repointed twice: once when the attribution substitution joined this
-        # function, and again when it left for `user_key_id_field` because it
-        # was renaming the gateway itself.
-        "    name.replace(':', \"_\")",
-        "    name.to_owned()",
+        # Repointed three times: when the attribution substitution joined this
+        # function, when it left for `user_key_id_field` because it was renaming
+        # the gateway itself, and when the substitution became a percent
+        # encoding because `root:admin` and `root_admin` collided under it.
+        # Each move was caught by `check_anchors` and by nothing else — a guard
+        # whose anchor has gone stale is reported as measured while never once
+        # being disabled, which is the failure this whole file exists to stop.
+        """    name.replace('%', "%25").replace(':', "%3A")""",
+        """    name.to_owned()""",
     ),
     (
         "certificate: a host-key check names the admin who asked",
@@ -452,6 +456,44 @@ MUTATIONS = [
         "warpgate-protocol-ssh/src/client/mod.rs",
         'if is_reserved_key_id_field(&field) {\n        return format!("{field}_");\n    }',
         'if false {\n        return format!("{field}_");\n    }',
+    ),
+    (
+        # Raised externally, round J: an operator checking a host key saw
+        # `SSH protocol error` both for a host that could not be reached and for
+        # one whose key is not trusted — one sentence for two different jobs.
+        "connection: unreachable and untrusted do not read alike",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        """            ConnectionError::Io(e) | ConnectionError::Ssh(russh::Error::IO(e)) => {
+                format!(
+                    "Could not open an SSH connection to the target: {}",
+                    unreachable_reason(e.kind())
+                )
+            }""",
+        """            ConnectionError::Io(_) | ConnectionError::Ssh(russh::Error::IO(_)) => {
+                "SSH protocol error".to_string()
+            }""",
+    ),
+    (
+        # Raised externally, round J: the sanitiser had no test at all, and the
+        # nearest one asserts a string that appears in an unrelated variant's
+        # `Display` too, so it passes with the sanitising removed.
+        "error surfacing: internal error text never reaches a client message",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        """            ConnectionError::Warpgate(_) => "Internal connection error".to_string(),""",
+        """            ConnectionError::Warpgate(e) => e.to_string(),""",
+    ),
+    (
+        # Raised externally, round J: the whole authentication step was bounded
+        # by a budget that grows with `vault.timeout`, so a target that went
+        # quiet after receiving its certificate was waited on for as long as
+        # Vault was allowed to be slow.
+        "connection: the target's own USERAUTH answer is bounded",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        """    tokio::time::timeout(bound, what)
+        .await
+        .map_err(|_| ConnectionError::TargetAuthenticationTimeout)?
+        .map_err(ConnectionError::from)""",
+        """    what.await.map_err(ConnectionError::from)""",
     ),
     (
         # Raised externally, round J: the substitution mapped `root:admin` and
@@ -624,6 +666,15 @@ DISCRIMINATES = {
     ],
     "certificate: a username cannot impersonate the gateway's attribution": [
         "a_username_cannot_impersonate_the_gateways_own_attribution"
+    ],
+    "connection: unreachable and untrusted do not read alike": [
+        "an_unreachable_target_does_not_read_like_an_untrusted_key"
+    ],
+    "error surfacing: internal error text never reaches a client message": [
+        "no_internal_error_text_reaches_a_client_message"
+    ],
+    "connection: the target's own USERAUTH answer is bounded": [
+        "a_target_that_never_answers_userauth_is_given_up_on"
     ],
     "certificate: two usernames cannot produce one key ID": [
         "two_usernames_cannot_collide_in_a_key_id"

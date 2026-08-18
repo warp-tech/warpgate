@@ -4,6 +4,7 @@ mod error;
 mod handler;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::io;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -114,6 +115,42 @@ const fn once_the_host_key_is_answered() -> Duration {
 /// How long authentication may take, when nothing else decides.
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long the target itself may take to answer one USERAUTH request.
+///
+/// Deliberately not derived from `authentication_budget`: that budget has to
+/// cover the issuer as well, and for a certificate target it scales with
+/// `vault.timeout`, which nothing clamps. The target's own answer is not slower
+/// because Vault is, so it does not get Vault's allowance.
+const TARGET_USERAUTH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Bounds one USERAUTH round trip to the target.
+///
+/// Every credential type goes through this, so a new authentication method
+/// cannot arrive unbounded by forgetting — which is how this gap opened in the
+/// first place.
+async fn bounded_userauth<T>(
+    what: impl Future<Output = Result<T, russh::Error>>,
+) -> Result<T, ConnectionError> {
+    bounded_userauth_within(TARGET_USERAUTH_TIMEOUT, what).await
+}
+
+/// The bound above, with the duration passed in so a test can assert it fires
+/// without waiting thirty seconds for it.
+///
+/// The alternative was tokio's pausable clock, which needs its `test-util`
+/// feature. Turning that on changes feature unification for every crate sharing
+/// the build and forces a full rebuild — measured here at minutes, paid by every
+/// CI run and every first build after a checkout. A parameter costs one line.
+async fn bounded_userauth_within<T>(
+    bound: Duration,
+    what: impl Future<Output = Result<T, russh::Error>>,
+) -> Result<T, ConnectionError> {
+    tokio::time::timeout(bound, what)
+        .await
+        .map_err(|_| ConnectionError::TargetAuthenticationTimeout)?
+        .map_err(ConnectionError::from)
+}
+
 /// The worst case a certificate authentication can spend on Vault, counted in
 /// operations the client bounds rather than in HTTP requests: a token, a sign,
 /// then — on a `403` — a second token and a second sign. Four, with one for
@@ -212,6 +249,18 @@ pub enum ConnectionError {
     #[error("Authentication to the SSH target did not complete in time")]
     AuthenticationTimeout,
 
+    /// The target received a USERAUTH request and never answered it.
+    ///
+    /// Its own variant and its own bound, separate from `AuthenticationTimeout`.
+    /// That one sizes the whole step, and for a certificate target it grows with
+    /// `vault.timeout` — a value config does not clamp from above. Sharing it
+    /// meant a target that went quiet the moment it received its certificate
+    /// held the session, the ephemeral private key and a live certificate for a
+    /// window measured in the issuer's slowness rather than its own: 55 seconds
+    /// by default, and unbounded above.
+    #[error("The SSH target did not answer the authentication request in time")]
+    TargetAuthenticationTimeout,
+
     /// A jump host connected, authenticated, and then did not answer the
     /// request to open a tunnel to the next hop.
     ///
@@ -244,6 +293,10 @@ impl ConnectionError {
                 "The SSH target accepted the connection but never completed the handshake"
                     .to_string()
             }
+            ConnectionError::TargetAuthenticationTimeout => {
+                "The SSH target accepted Warpgate's authentication request and never answered it"
+                    .to_string()
+            }
             ConnectionError::Internal => "Internal connection error".to_string(),
             ConnectionError::JumpHostTargetNotFound => "Jump host target not found".to_string(),
             ConnectionError::UntrustedJumpHost => {
@@ -262,7 +315,24 @@ impl ConnectionError {
                 // missed here because this variant was added by a later fix.
                 format!("The jump host {host:?} did not open the tunnel to the next hop in time")
             }
-            ConnectionError::Io(_) | ConnectionError::Key(_) | ConnectionError::Ssh(_) => {
+            // Split out from the protocol errors below, for the admin
+            // host-key-check endpoint. Everywhere else this function's caller is
+            // an unauthenticated party and one flat category is right; there the
+            // caller is an authenticated operator, and "I cannot reach this host
+            // at all" and "this host's key is not trusted" are the same sentence
+            // today while being two entirely different jobs. Nothing is
+            // disclosed by separating them — the operator supplied the address.
+            //
+            // The kind, not the operating system's own string: this is the
+            // sanitiser, and a fixed set of phrases cannot carry anything
+            // through it.
+            ConnectionError::Io(e) | ConnectionError::Ssh(russh::Error::IO(e)) => {
+                format!(
+                    "Could not open an SSH connection to the target: {}",
+                    unreachable_reason(e.kind())
+                )
+            }
+            ConnectionError::Key(_) | ConnectionError::Ssh(_) => {
                 "SSH protocol error".to_string()
             }
             // Not `to_string()`. This is the sanitiser, and that arm passed
@@ -274,6 +344,25 @@ impl ConnectionError {
             // the function exists for.
             ConnectionError::Warpgate(_) => "Internal connection error".to_string(),
         }
+    }
+}
+
+/// Why a connection could not be opened, in a fixed set of words.
+///
+/// Deliberately not `io::Error`'s own `Display`. This feeds the sanitiser, and
+/// the whole point of that function is that nothing reaches a caller except
+/// text this file chose.
+const fn unreachable_reason(kind: std::io::ErrorKind) -> &'static str {
+    match kind {
+        std::io::ErrorKind::ConnectionRefused => "it refused the connection",
+        std::io::ErrorKind::TimedOut => "it did not answer in time",
+        std::io::ErrorKind::HostUnreachable | std::io::ErrorKind::NetworkUnreachable => {
+            "there is no route to it"
+        }
+        std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted => {
+            "it closed the connection"
+        }
+        _ => "the connection could not be established",
     }
 }
 
@@ -1303,7 +1392,7 @@ impl RemoteClient {
             let ssh_options = hop.ssh_options;
             let _ = self.tx.send(RCEvent::HopConnected).await;
             info!(
-                host = %ssh_options.host,
+                host = ?ssh_options.host,
                 port = ssh_options.port,
                 "Opening direct-tcpip channel through jump host"
             );
@@ -1615,7 +1704,7 @@ impl RemoteClient {
                     tokio::select! {
                         () = &mut authentication_deadline => {
                             error!(
-                                host = %ssh_options.host,
+                                host = ?ssh_options.host,
                                 budget = ?budget,
                                 "Authentication did not finish in time"
                             );
@@ -1692,9 +1781,10 @@ impl RemoteClient {
         match auth {
             SSHTargetAuth::Password(auth) => {
                 let password = auth.password.reveal().map_err(WarpgateError::from)?;
-                let response = session
-                    .authenticate_password(username.to_string(), password.expose_secret())
-                    .await?;
+                let response = bounded_userauth(
+                    session.authenticate_password(username.to_string(), password.expose_secret()),
+                )
+                .await?;
                 auth_result = self
                     ._handle_auth_result(session, username.to_string(), response)
                     .await
@@ -1721,12 +1811,11 @@ impl RemoteClient {
                         continue;
                     }
                     let key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
-                    let mut response = session
-                        .authenticate_publickey(
-                            username.to_string(),
-                            PrivateKeyWithHashAlg::new(key.clone(), best_hash),
-                        )
-                        .await?;
+                    let mut response = bounded_userauth(session.authenticate_publickey(
+                        username.to_string(),
+                        PrivateKeyWithHashAlg::new(key.clone(), best_hash),
+                    ))
+                    .await?;
 
                     auth_result = self
                         ._handle_auth_result(session, username.to_string(), response)
@@ -1738,12 +1827,11 @@ impl RemoteClient {
                         && best_hash.is_some()
                         && allow_insecure_algos
                     {
-                        response = session
-                            .authenticate_publickey(
-                                username.to_string(),
-                                PrivateKeyWithHashAlg::new(key.clone(), None),
-                            )
-                            .await?;
+                        response = bounded_userauth(session.authenticate_publickey(
+                            username.to_string(),
+                            PrivateKeyWithHashAlg::new(key.clone(), None),
+                        ))
+                        .await?;
 
                         auth_result = self
                             ._handle_auth_result(session, username.to_string(), response)
@@ -1825,9 +1913,12 @@ impl RemoteClient {
                         warn!(key_id, reason, "Refusing the issued certificate");
                         return Err(ConnectionError::CertificateRefused(reason));
                     } else {
-                        let response = session
-                            .authenticate_openssh_cert(username.to_string(), key, certificate)
-                            .await?;
+                        let response = bounded_userauth(session.authenticate_openssh_cert(
+                            username.to_string(),
+                            key,
+                            certificate,
+                        ))
+                        .await?;
 
                         // No `_handle_auth_result` here, deliberately.
                         //
@@ -1904,12 +1995,11 @@ impl RemoteClient {
                 // Now authenticate with this key (key is valid for 60 seconds)
                 let key = Arc::new(key.clone());
                 let best_hash = session.best_supported_rsa_hash().await?.flatten();
-                let response = session
-                    .authenticate_publickey(
-                        username.to_string(),
-                        PrivateKeyWithHashAlg::new(key.clone(), best_hash),
-                    )
-                    .await?;
+                let response = bounded_userauth(session.authenticate_publickey(
+                    username.to_string(),
+                    PrivateKeyWithHashAlg::new(key.clone(), best_hash),
+                ))
+                .await?;
 
                 auth_result = self
                     ._handle_auth_result(session, username.to_string(), response)
@@ -2813,6 +2903,91 @@ mod tests {
         /// handshake, and used to be.
         ///
         /// Five calls at the default 10s `vault.timeout` is fifty seconds
+        /// The sanitiser had no test of its own, and the nearest one that
+        /// looked like coverage asserts a string that also appears in an
+        /// unrelated variant's `Display` — so it passes identically with the
+        /// sanitising removed. Raised externally.
+        #[test]
+        fn no_internal_error_text_reaches_a_client_message() {
+            use warpgate_common::WarpgateError;
+
+            use crate::ConnectionError;
+
+            let internals = "relation warpgate_user column password_hash";
+            let shown = ConnectionError::Warpgate(WarpgateError::other(std::io::Error::other(
+                internals,
+            )))
+            .client_message();
+
+            assert!(
+                !shown.contains(internals),
+                "internal error text reached a client message: {shown}"
+            );
+        }
+
+        /// An operator checking a host key gets one screen for two entirely
+        /// different jobs: "I cannot reach this host" and "this host's key is
+        /// not trusted" both rendered as `SSH protocol error`. Raised
+        /// externally, out of chasing a sandbox failure that read as the second
+        /// while being the first.
+        #[test]
+        fn an_unreachable_target_does_not_read_like_an_untrusted_key() {
+            use crate::ConnectionError;
+
+            let unreachable = ConnectionError::Ssh(russh::Error::IO(std::io::Error::from(
+                std::io::ErrorKind::ConnectionRefused,
+            )))
+            .client_message();
+
+            assert_ne!(
+                unreachable,
+                ConnectionError::UntrustedJumpHost.client_message(),
+                "unreachable and untrusted render identically"
+            );
+            assert!(
+                !unreachable.contains("protocol error"),
+                "an unreachable target still reads as a protocol error: {unreachable}"
+            );
+            // The refusal is named, not just the category — an operator who
+            // cannot tell "refused" from "no route" has to go and find out.
+            assert!(
+                unreachable.contains("refused"),
+                "the reason was flattened away: {unreachable}"
+            );
+        }
+
+        /// A target that takes the certificate and then says nothing is given up
+        /// on for its own reasons.
+        ///
+        /// The budget above has to cover the issuer as well, and for a
+        /// certificate target it grows with `vault.timeout`, which config does
+        /// not clamp from above. Sharing it meant a silent target held the
+        /// session, the ephemeral private key and a live certificate for a
+        /// window measured in Vault's slowness — 55 seconds by default and
+        /// unbounded in principle. Driven on a paused clock, so it costs no
+        /// wall time and cannot go flaky on a loaded machine.
+        #[tokio::test]
+        async fn a_target_that_never_answers_userauth_is_given_up_on() {
+            use std::time::Duration;
+
+            use crate::ConnectionError;
+            use crate::client::bounded_userauth_within;
+
+            let bound = Duration::from_millis(50);
+            let slower_than_its_own_bound = async {
+                tokio::time::sleep(bound * 4).await;
+                Ok(())
+            };
+
+            assert!(
+                matches!(
+                    bounded_userauth_within(bound, slower_than_its_own_bound).await,
+                    Err(ConnectionError::TargetAuthenticationTimeout)
+                ),
+                "a target that never answered was waited on past its own bound"
+            );
+        }
+
         /// against a thirty-second bound, so a Vault that was slow but working
         /// timed out and the message named the target.
         #[test]
