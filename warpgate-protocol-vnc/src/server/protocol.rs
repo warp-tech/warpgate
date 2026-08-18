@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::debug;
+use warpgate_core::truncate_clipboard_contents;
 
 /// Max clipboard payload (either direction). Clipboard sync is a convenience, not a bulk
 /// transfer channel — cap it so a giant paste isn't mirrored wholesale.
@@ -239,12 +240,7 @@ pub async fn write_server_cut_text<S>(stream: &mut S, text: &str) -> Result<()>
 where
     S: AsyncWrite + Unpin,
 {
-    // Cap the payload mirrored to the viewer, truncating on a char boundary.
-    let mut end = text.len().min(MAX_CLIPBOARD_LEN);
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    let bytes = text.get(..end).unwrap_or(text).as_bytes();
+    let bytes = truncate_clipboard_contents(text, MAX_CLIPBOARD_LEN).as_bytes();
     let mut msg = Vec::with_capacity(8 + bytes.len());
     msg.push(3); // ServerCutText
     msg.extend_from_slice(&[0, 0, 0]); // padding

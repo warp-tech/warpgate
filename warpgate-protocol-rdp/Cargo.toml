@@ -11,6 +11,7 @@ async-trait.workspace = true
 bytes.workspace = true
 futures.workspace = true
 ironrdp = { version = "0.17", features = [
+    "cliprdr",
     "connector",
     "session",
     "graphics",

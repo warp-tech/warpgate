@@ -112,7 +112,7 @@ mod tests {
         let backend = db.get_database_backend();
 
         // Migrate up to just before this migration, then seed raw-secret rows.
-        let steps = (Migrator::migrations().len() - 1) as u32;
+        let steps = 74;
         Migrator::up(&db, Some(steps)).await.unwrap();
 
         db.execute_unprepared("PRAGMA foreign_keys = OFF")

@@ -11,6 +11,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
+use ironrdp::cliprdr::CliprdrClient;
+use ironrdp::cliprdr::backend::ClipboardMessage;
 use ironrdp::connector::connection_activation::{
     ConnectionActivationFactory, ConnectionActivationState,
 };
@@ -29,10 +31,12 @@ use ironrdp::session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::warn;
 use warpgate_common::{RdpTargetAuth, TargetRdpOptions};
 use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
+
+use crate::clipboard::{Clipboard, ClipboardSink, TextClipboard};
 
 /// Deadline for the TCP connect to the target.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -45,6 +49,26 @@ type Framed = TokioFramed<tls::TargetTlsStream>;
 
 /// Signals that the session was aborted from the Warpgate side.
 struct Aborted;
+
+/// cliprdr passes this to active_loop which owns transport and events
+#[derive(Debug)]
+enum ClipboardOut {
+    Request(ClipboardMessage),
+    Text(String),
+}
+
+#[derive(Debug, Clone)]
+struct ClientClipboardSink(UnboundedSender<ClipboardOut>);
+
+impl ClipboardSink for ClientClipboardSink {
+    fn request(&self, message: ClipboardMessage) {
+        let _ = self.0.send(ClipboardOut::Request(message));
+    }
+
+    fn text_received(&self, text: String) {
+        let _ = self.0.send(ClipboardOut::Text(text));
+    }
+}
 
 /// Connect to `options` and pump the session until it ends or is aborted.
 pub async fn run(
@@ -62,7 +86,8 @@ pub async fn run(
     let RdpTargetAuth::Password(auth) = &options.auth;
     // The viewer-supplied size may be odd or out of range; keep the initial desktop within
     // the same bounds the Display Control resize path enforces.
-    let (width, height) = MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
+    let (width, height) =
+        MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
     let password = auth.password.reveal()?;
     let config = build_config(
         &options,
@@ -70,6 +95,9 @@ pub async fn run(
         width as u16,
         height as u16,
     );
+
+    let (clipboard_tx, clipboard_rx) = unbounded_channel();
+    let clipboard = Clipboard::new(ClientClipboardSink(clipboard_tx));
 
     let (connection_result, framed) = tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
@@ -79,6 +107,7 @@ pub async fn run(
             options.port,
             options.verify_tls,
             options.tls_security(),
+            clipboard.backend(),
         ),
     )
     .await
@@ -106,10 +135,13 @@ pub async fn run(
         input_rx,
         &event_tx,
         &mut abort_rx,
+        &clipboard,
+        clipboard_rx,
     )
     .await
 }
 
+#[expect(clippy::too_many_arguments)]
 async fn active_loop(
     connection_result: ConnectionResult,
     mut framed: Framed,
@@ -117,6 +149,8 @@ async fn active_loop(
     mut input_rx: Receiver<DesktopInput>,
     event_tx: &Sender<DesktopEvent>,
     abort_rx: &mut UnboundedReceiver<()>,
+    clipboard: &Clipboard<ClientClipboardSink>,
+    mut clipboard_rx: UnboundedReceiver<ClipboardOut>,
 ) -> Result<()> {
     let activation_factory = connection_result.activation_factory;
     let mut active_stage = ActiveStageBuilder {
@@ -163,7 +197,19 @@ async fn active_loop(
                 {
                     match input {
                         DesktopInput::Resize { width, height } => resize = Some((width, height)),
+                        DesktopInput::Clipboard(text) => clipboard.offer(text),
                         other => input::translate(other, &mut ops),
+                    }
+                }
+
+                // flush cliprdr offers enqueued in the loop above
+                // flushed before the the fastpath messages below
+                // so that clipboard is written before ctrl-v arrives
+                while let Ok(out) = clipboard_rx.try_recv() {
+                    if !handle_clipboard_out(out, &mut framed, &mut active_stage, event_tx, abort_rx)
+                        .await?
+                    {
+                        return Ok(());
                     }
                 }
                 if resize.is_some() {
@@ -176,6 +222,19 @@ async fn active_loop(
                 active_stage
                     .process_fastpath_input(image, &events)
                     .context("processing input")?
+            }
+            out = clipboard_rx.recv() => {
+                // The sender is held by `clipboard`, which outlives this loop, so `None`
+                // is unreachable; end the session rather than spin if that ever changes.
+                let Some(out) = out else {
+                    return Ok(());
+                };
+                if !handle_clipboard_out(out, &mut framed, &mut active_stage, event_tx, abort_rx)
+                    .await?
+                {
+                    return Ok(());
+                }
+                continue;
             }
             pdu = framed.read_pdu() => {
                 let (action, payload) = pdu.context("reading PDU")?;
@@ -220,7 +279,8 @@ async fn send_resize(
     height: u16,
 ) -> Result<bool> {
     // The layout PDU rejects odd widths and sizes outside 200..=8192.
-    let (width, height) = MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
+    let (width, height) =
+        MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
     match active_stage.encode_resize(width, height, None, None) {
         Some(frame) => {
             let frame = frame.context("encoding resize request")?;
@@ -232,6 +292,67 @@ async fn send_resize(
         }
         None => Ok(false),
     }
+}
+
+async fn handle_clipboard_out(
+    out: ClipboardOut,
+    framed: &mut Framed,
+    active_stage: &mut ActiveStage,
+    event_tx: &Sender<DesktopEvent>,
+    abort_rx: &mut UnboundedReceiver<()>,
+) -> Result<bool> {
+    match out {
+        ClipboardOut::Request(message) => {
+            send_clipboard(framed, active_stage, message).await?;
+            Ok(true)
+        }
+        ClipboardOut::Text(text) => {
+            Ok(
+                // false = receiver gone
+                send_event(event_tx, abort_rx, DesktopEvent::Clipboard(text))
+                    .await
+                    .is_ok(),
+            )
+        }
+    }
+}
+
+async fn send_clipboard(
+    framed: &mut Framed,
+    active_stage: &mut ActiveStage,
+    message: ClipboardMessage,
+) -> Result<()> {
+    let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() else {
+        return Ok(());
+    };
+    let encoded = match message {
+        ClipboardMessage::SendInitiateCopy(formats) => cliprdr.initiate_copy(&formats),
+        ClipboardMessage::SendInitiatePaste(format) => cliprdr.initiate_paste(format),
+        ClipboardMessage::SendFormatData(data) => cliprdr.submit_format_data(data),
+        // file transfer not supported
+        other => {
+            warn!(?other, "unsupported clipboard operation");
+            return Ok(());
+        }
+    };
+    let messages = match encoded {
+        Ok(messages) => messages,
+        Err(error) => {
+            warn!(%error, "failed to encode clipboard message");
+            return Ok(());
+        }
+    };
+    let frame = match active_stage.process_svc_processor_messages(messages) {
+        Ok(frame) => frame,
+        Err(error) => {
+            warn!(%error, "failed to frame clipboard message");
+            return Ok(());
+        }
+    };
+    framed
+        .write_all(&frame)
+        .await
+        .context("sending clipboard message")
 }
 
 async fn reactivate(
@@ -307,9 +428,10 @@ async fn process_outputs(
 
     for out in outputs {
         if let ActiveStageOutput::GraphicsUpdate(region) = out
-            && let Some(event) = encode_region(image, &region) {
-                send_event(event_tx, abort_rx, event).await?;
-            }
+            && let Some(event) = encode_region(image, &region)
+        {
+            send_event(event_tx, abort_rx, event).await?;
+        }
     }
     Ok(terminate)
 }
@@ -429,6 +551,7 @@ async fn connect(
     port: u16,
     verify_tls: bool,
     tls_security: warpgate_common::RdpTlsSecurity,
+    clipboard: TextClipboard<ClientClipboardSink>,
 ) -> Result<(ConnectionResult, Framed)> {
     let tcp_stream = tokio::time::timeout(
         CONNECT_TIMEOUT,
@@ -444,10 +567,12 @@ async fn connect(
     // Advertise the Display Control DVC so viewer-driven resolution changes can be pushed
     // to the target mid-session (MS-RDPEDISP). The capabilities callback has nothing to
     // reply with; `ActiveStage::encode_resize` drives the channel once it is ready.
-    let mut connector = connector::ClientConnector::new(config, client_addr).with_static_channel(
-        DrdynvcClient::new()
-            .with_dynamic_channel(DisplayControlClient::new(|_caps| Ok(Vec::new()))),
-    );
+    let mut connector = connector::ClientConnector::new(config, client_addr)
+        .with_static_channel(
+            DrdynvcClient::new()
+                .with_dynamic_channel(DisplayControlClient::new(|_caps| Ok(Vec::new()))),
+        )
+        .with_static_channel(CliprdrClient::new(Box::new(clipboard)));
 
     let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)
         .await

@@ -12,7 +12,9 @@ mod handle;
 mod terminal_screen;
 
 pub use desktop::{
-    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState, Scancode,
+    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
+    MAX_CLIPBOARD_BYTES, Scancode, truncate_clipboard_contents,
+    truncate_clipboard_contents_in_place,
 };
 pub use framebuffer::{Framebuffer, PngEncodeError, Rect, decode_png_rgba};
 pub use handle::{SessionHandle, WarpgateServerHandle};

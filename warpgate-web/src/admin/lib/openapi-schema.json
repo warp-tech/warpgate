@@ -5592,6 +5592,16 @@
           }
         }
       },
+      "OpenTargetsInNewTabMode": {
+        "type": "string",
+        "description": "How the portal decides whether targets open in a new browser tab.",
+        "enum": [
+          "DefaultOn",
+          "DefaultOff",
+          "ForcedOn",
+          "ForcedOff"
+        ]
+      },
       "PaginatedResponse_SessionSnapshot": {
         "type": "object",
         "title": "PaginatedResponse_SessionSnapshot",
@@ -5665,6 +5675,9 @@
           },
           "target_click_action": {
             "$ref": "#/components/schemas/TargetClickAction"
+          },
+          "open_targets_in_new_tab": {
+            "$ref": "#/components/schemas/OpenTargetsInNewTabMode"
           },
           "show_session_menu": {
             "type": "boolean"
@@ -5772,6 +5785,7 @@
           "ticket_require_description",
           "ticket_request_show_all_targets",
           "target_click_action",
+          "open_targets_in_new_tab",
           "show_session_menu",
           "password_policy",
           "record_scp",
@@ -5845,6 +5859,9 @@
           },
           "target_click_action": {
             "$ref": "#/components/schemas/TargetClickAction"
+          },
+          "open_targets_in_new_tab": {
+            "$ref": "#/components/schemas/OpenTargetsInNewTabMode"
           },
           "show_session_menu": {
             "type": "boolean"

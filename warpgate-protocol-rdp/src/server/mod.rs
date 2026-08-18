@@ -41,6 +41,7 @@ use crate::PROTOCOL_NAME;
 use crate::session_handle::RdpSessionHandle;
 
 mod bridge;
+mod clipboard;
 mod hold_screen;
 mod protocol;
 mod rdp;

@@ -59,6 +59,7 @@ async fn frame_bridge(
                 // `data` is ref-counted `Bytes` — moved into the frame, no framebuffer copy.
                 data,
             },
+            DesktopEvent::Clipboard(text) => ServerInput::Clipboard(text),
             DesktopEvent::State(DesktopState::Disconnected) => {
                 let _ = server_in.send(ServerInput::Shutdown).await;
                 return;
@@ -71,8 +72,7 @@ async fn frame_bridge(
                 info!(?state, "RDP target");
                 continue;
             }
-            // The client only emits Connecting/Connected/Resize/RawImage/Error/Disconnected;
-            // the remaining framebuffer variants never occur on this path.
+            // The client never emits the remaining framebuffer variants
             _ => continue,
         };
 
