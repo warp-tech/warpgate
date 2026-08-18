@@ -450,8 +450,26 @@ MUTATIONS = [
         # which path created the user stops mattering.
         "certificate: a username cannot impersonate the gateway's attribution",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        'if TOKEN_ATTRIBUTIONS.contains(&field.as_str()) {\n        return format!("{field}_");\n    }',
+        'if is_reserved_key_id_field(&field) {\n        return format!("{field}_");\n    }',
         'if false {\n        return format!("{field}_");\n    }',
+    ),
+    (
+        # Raised externally, round J: the substitution mapped `root:admin` and
+        # `root_admin` onto one field, so the log line this feature exists to
+        # produce could name a person who did not connect.
+        "certificate: two usernames cannot produce one key ID",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        """    name.replace('%', "%25").replace(':', "%3A")""",
+        """    name.replace(':', "_")""",
+    ),
+    (
+        # The reserved names lived in two places and only one was consulted.
+        # `UNATTRIBUTED` goes into the same field, written by the same code, and
+        # a user of that name read as a session with no user recorded at all.
+        "certificate: the unattributed placeholder cannot be claimed by a user",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        """    TOKEN_ATTRIBUTIONS.contains(&field) || field == UNATTRIBUTED""",
+        """    TOKEN_ATTRIBUTIONS.contains(&field)""",
     ),
     (
         # Validated at connect time already; the guard is that the admin API
@@ -607,6 +625,12 @@ DISCRIMINATES = {
     "certificate: a username cannot impersonate the gateway's attribution": [
         "a_username_cannot_impersonate_the_gateways_own_attribution"
     ],
+    "certificate: two usernames cannot produce one key ID": [
+        "two_usernames_cannot_collide_in_a_key_id"
+    ],
+    "certificate: the unattributed placeholder cannot be claimed by a user": [
+        "a_username_cannot_impersonate_the_unattributed_placeholder"
+    ],
     "admin: a Vault role the signing path would refuse is refused on save": [
         "a_role_the_signing_path_would_refuse_is_refused_at_save_time"
     ],
@@ -686,7 +710,7 @@ def run(command, **kwargs):
     return subprocess.run(command, cwd=REPO, capture_output=True, text=True, **kwargs)
 
 
-def run_named_only(tests: list[str]) -> tuple[set[str], set[str]]:
+def run_named_only(tests: list[str], crates=None) -> tuple[set[str], set[str]]:
     """Run only the given tests. Returns (passed, failed), by name.
 
     The whole suite is not run. That is the point: `run_one` runs everything
@@ -706,13 +730,22 @@ def run_named_only(tests: list[str]) -> tuple[set[str], set[str]]:
     passed: set[str] = set()
     failed: set[str] = set()
 
-    rust = [t for t in tests if not t.startswith("test_") or _is_rust(t)]
+    crates = crates or list(RUST_CRATES)
+    rust = [t for t in tests if not t.startswith("test_") or _is_rust(t, crates)]
     python = [t for t in tests if t not in rust]
 
-    for crate in RUST_CRATES:
-        wanted = [t for t in rust if t in _crate_tests(crate)]
+    # Stops as soon as every wanted test has been located. Without this, a guard
+    # whose one discriminator lives in the first crate still built the test
+    # binary of every other crate, to ask each whether it also owned a name that
+    # had already been found.
+    outstanding = set(rust)
+    for crate in crates:
+        if not outstanding:
+            break
+        wanted = [t for t in outstanding if t in _crate_tests(crate)]
         if not wanted:
             continue
+        outstanding -= set(wanted)
         for name in wanted:
             result = run(["cargo", "test", "-p", crate, "--", "--exact", *_paths(crate, name)])
             (failed if result.returncode != 0 else passed).add(name)
@@ -757,8 +790,23 @@ def _paths(crate: str, name: str) -> list[str]:
     return [path] if path else [name]
 
 
-def _is_rust(name: str) -> bool:
-    return any(name in _crate_tests(crate) for crate in RUST_CRATES)
+def _crates_nearest(path: str) -> list[str]:
+    """`RUST_CRATES`, with the crate a guard lives in tried first.
+
+    Listing a crate's tests builds that crate's test binary, so the order these
+    are consulted in is most of the cost of a small run. A guard's discriminator
+    is usually — not always — in the guard's own crate, so trying that one first
+    turns six builds into one in the common case while leaving the uncommon one
+    correct.
+    """
+    own = path.split("/")[0]
+    if own not in RUST_CRATES:
+        return list(RUST_CRATES)
+    return [own] + [c for c in RUST_CRATES if c != own]
+
+
+def _is_rust(name: str, crates=None) -> bool:
+    return any(name in _crate_tests(crate) for crate in (crates or RUST_CRATES))
 
 
 def verify_named(mutations):
@@ -776,7 +824,8 @@ def verify_named(mutations):
             results.append({"guard": name, "status": "no discriminating test named"})
             continue
 
-        before_pass, before_fail = run_named_only(expected)
+        nearest = _crates_nearest(path)
+        before_pass, before_fail = run_named_only(expected, nearest)
         if before_fail:
             results.append({
                 "guard": name,
@@ -794,7 +843,7 @@ def verify_named(mutations):
             if build.returncode != 0:
                 results.append({"guard": name, "status": "did not compile"})
                 continue
-            after_pass, after_fail = run_named_only(expected)
+            after_pass, after_fail = run_named_only(expected, nearest)
             # `all`, per A2: every test the entry names has to notice.
             status = (
                 "discriminates"

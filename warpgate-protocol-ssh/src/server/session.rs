@@ -433,7 +433,10 @@ impl ServerSession {
     /// hole by forgetting, and Warpgate's own colour codes are added after the
     /// text has been through it.
     pub async fn emit_service_message(&self, msg: &str) -> Result<()> {
-        debug!("Service message: {}", msg);
+        // Before the escaping below, not after: this logs the raw message,
+        // so a `\n` in a certificate's option name or a Vault error body forges
+        // a log record even though the same text reaches the terminal escaped.
+        debug!("Service message: {msg:?}");
 
         let _ = self
             .emit_pty_output(self.service_output.erase_display().as_bytes())

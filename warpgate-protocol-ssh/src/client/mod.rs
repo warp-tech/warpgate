@@ -298,8 +298,14 @@ const CERTIFICATE_TTL_SLACK: Duration = Duration::from_secs(60);
 
 /// Stands in the username field when the session has no user info recorded.
 ///
-/// `key_id_field` rejects a colon, so no real username can collide with this
-/// one, and the field count stays at three whatever happened.
+/// A user of this name is moved aside by `user_key_id_field`, for the same
+/// reason an attribution is: otherwise a session driven by a real person reads
+/// in the target's log exactly like one with no user recorded at all.
+///
+/// The comment here used to say `key_id_field` rejected a colon, so nothing
+/// could collide. It rejected nothing — it substituted — and the collision that
+/// threatens this constant is a username equal to it, which colons have no part
+/// in. Two wrong statements holding each other up.
 const UNATTRIBUTED: &str = "unattributed";
 
 /// A username as it may appear in a key ID field.
@@ -320,8 +326,14 @@ const UNATTRIBUTED: &str = "unattributed";
 ///
 /// Substituted rather than refused: a name from a directory is not something
 /// the connecting user can fix mid-session.
+///
+/// Percent-encoded rather than replaced. `.replace(':', "_")` mapped
+/// `root:admin` and `root_admin` onto the same field, so the log line this
+/// whole feature exists to produce could name a person who did not connect —
+/// the one claim the feature makes, lost to a one-character substitution. `%`
+/// is encoded first, or a literal `%3A` in a name would read back as a colon.
 fn key_id_field(name: &str) -> String {
-    name.replace(':', "_")
+    name.replace('%', "%25").replace(':', "%3A")
 }
 
 /// A name that came from a person, as it may appear in a key ID field.
@@ -337,10 +349,19 @@ fn key_id_field(name: &str) -> String {
 /// failed their baseline because `admin-token` had become `admin-token_`.
 fn user_key_id_field(name: &str) -> String {
     let field = key_id_field(name);
-    if TOKEN_ATTRIBUTIONS.contains(&field.as_str()) {
+    if is_reserved_key_id_field(&field) {
         return format!("{field}_");
     }
     field
+}
+
+/// A field the gateway itself puts in a key ID, which a person must not occupy.
+///
+/// One list, because there were two and only one of them was consulted:
+/// `attribution()`'s token names were held, and `UNATTRIBUTED` — written into
+/// the same field by the same code — was not.
+fn is_reserved_key_id_field(field: &str) -> bool {
+    TOKEN_ATTRIBUTIONS.contains(&field) || field == UNATTRIBUTED
 }
 
 /// Whether a host-key check can be answered by this chain at all.
@@ -1076,7 +1097,15 @@ impl RemoteClient {
                     }
                 }
                 Err(e) => {
-                    debug!("Connect error: {}", e);
+                    // `{:?}` rather than `{}` throughout this file for
+                    // anything carrying a remote party's words. A newline in a
+                    // Vault error body or an unresolved host name forges a
+                    // whole record in the default text format — a log line the
+                    // reader has no way to tell from one Warpgate wrote. Debug
+                    // escapes it; Display does not, and `emit_pty_output`'s
+                    // escaping does not reach here because no `tracing` call
+                    // routes through it.
+                    debug!("Connect error: {e:?}");
                     let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
                     self.set_disconnected().await;
 
@@ -1090,7 +1119,7 @@ impl RemoteClient {
             } => {
                 self.identity_hint = Some(requested_by);
                 if let Err(e) = self.check_host_key(chain, target_id).await {
-                    debug!("Host key check error: {}", e);
+                    debug!("Host key check error: {e:?}");
                     let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
                 }
                 self.set_disconnected().await;
@@ -1243,8 +1272,8 @@ impl RemoteClient {
             .to_socket_addrs()
             .map_err(ConnectionError::Io)
             .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
-            .inspect_err(|e| error!(?e, address=%address_str, "Cannot resolve address"))?;
-        info!(?address, username = %first.username, "Connecting");
+            .inspect_err(|e| error!(?e, address = ?address_str, "Cannot resolve address"))?;
+        info!(?address, username = ?first.username, "Connecting");
         let (event_tx, event_rx) = unbounded_channel();
         let handler = ClientHandler {
             ssh_options: first.clone(),
@@ -1291,7 +1320,7 @@ impl RemoteClient {
             )
             .await
             .map_err(|_| {
-                error!(host = %ssh_options.host, "Jump host did not open the tunnel in time");
+                error!(host = ?ssh_options.host, "Jump host did not open the tunnel in time");
                 ConnectionError::TunnelOpenTimeout {
                     host: ssh_options.host.clone(),
                 }
@@ -1506,7 +1535,7 @@ impl RemoteClient {
                     }
                 }
                 () = &mut handshake_deadline => {
-                    error!(host = %ssh_options.host, "Target did not finish the SSH handshake in time");
+                    error!(host = ?ssh_options.host, "Target did not finish the SSH handshake in time");
                     // No `set_disconnected()` here: `handle_command` calls it
                     // immediately after sending the error, so doing it first
                     // only reorders `Done` ahead of the reason. A review argued
@@ -1709,7 +1738,7 @@ impl RemoteClient {
                     }
 
                     if auth_result {
-                        debug!(username=username, key=%key_str, "Authenticated with key");
+                        debug!(username = ?username, key = %key_str, "Authenticated with key");
                         break;
                     }
                     auth_error_msg =
@@ -1891,7 +1920,7 @@ impl RemoteClient {
         if !auth_result {
             let reason = auth_error_msg
                 .unwrap_or_else(|| "Authentication was rejected by the SSH target".to_string());
-            error!(%reason, "Warpgate could not authenticate with SSH target");
+            error!(?reason, "Warpgate could not authenticate with SSH target");
             let reason = reason.clone();
             let _ = session
                 .disconnect(russh::Disconnect::ByApplication, "", "")
@@ -2645,7 +2674,40 @@ mod tests {
                 "the key ID split into {} fields",
                 fields.len()
             );
-            assert_eq!(fields[1], "root_admin");
+            assert_eq!(fields[1], "root%3Aadmin");
+        }
+
+        /// The field count was the only thing checked, and it is satisfied by a
+        /// substitution that maps two different people onto one name. Raised
+        /// externally: `root:admin` and `root_admin` both used to read as
+        /// `root_admin` in the target's sshd log and in Vault's audit log.
+        #[test]
+        fn two_usernames_cannot_collide_in_a_key_id() {
+            assert_ne!(
+                crate::client::key_id_field("root:admin"),
+                crate::client::key_id_field("root_admin"),
+                "two different usernames produced one key ID field"
+            );
+            // The encoding has to survive a name that already looks encoded,
+            // or it is a substitution again one level up.
+            assert_ne!(
+                crate::client::key_id_field("root:admin"),
+                crate::client::key_id_field("root%3Aadmin"),
+                "an encoded name and a literal one produced one key ID field"
+            );
+        }
+
+        /// `UNATTRIBUTED` stands in this field when no user is recorded. A user
+        /// of that name read identically, which is the same defect as the
+        /// attribution one beside it and was missed because the reserved names
+        /// lived in two places.
+        #[test]
+        fn a_username_cannot_impersonate_the_unattributed_placeholder() {
+            assert_ne!(
+                crate::client::user_key_id_field(crate::client::UNATTRIBUTED),
+                crate::client::UNATTRIBUTED,
+                "a user named after the placeholder was left as the placeholder"
+            );
         }
 
         #[test]
