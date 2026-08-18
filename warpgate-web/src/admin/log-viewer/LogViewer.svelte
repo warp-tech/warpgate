@@ -780,7 +780,7 @@
 
     .table-wrapper {
         flex: 1 0 0;
-        min-height: 300px;
+        min-height: 500px;
         max-width: 100%;
         overflow-x: auto;
         position: relative;

@@ -92,7 +92,7 @@ impl WebSshSession {
             .await
             .start::<TerminalRecorder, _>(
                 &self.id(),
-                Some(channel_id.to_string()),
+                None,
                 SshRecordingMetadata::Shell {
                     channel: channel_number,
                 },
