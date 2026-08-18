@@ -123,6 +123,11 @@ pub struct ServerSession {
     keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
+    /// Username of the latest public-key attempt that failed validation.
+    /// Per-key failures are benign — clients try each agent key in turn — so
+    /// they are recorded as a single failed login, and only if the session
+    /// ends unauthenticated (see [`Self::record_pending_pubkey_failure`]).
+    failed_pubkey_username: Option<String>,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -194,6 +199,7 @@ impl ServerSession {
             keyboard_interactive_state: None,
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
+            failed_pubkey_username: None,
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -255,11 +261,15 @@ impl ServerSession {
         let inactivity_timeout = services.config.lock().await.store.ssh.inactivity_timeout;
 
         Ok(async move {
-            loop {
+            let result = loop {
                 let next_event_fut = this.get_next_event();
                 match tokio::time::timeout(inactivity_timeout, next_event_fut).await {
-                    Ok(Some(event)) => this.handle_event(event).await?,
-                    Ok(None) => break,
+                    Ok(Some(event)) => {
+                        if let Err(error) = this.handle_event(event).await {
+                            break Err(error);
+                        }
+                    }
+                    Ok(None) => break Ok(()),
                     Err(_) => {
                         info!("Closing the session due to inactivity");
                         let _ = this
@@ -267,11 +277,13 @@ impl ServerSession {
                             .await;
                         this.request_disconnect();
                         this.disconnect_server().await;
-                        break;
+                        break Ok(());
                     }
                 }
-            }
+            };
             debug!("No more events");
+            this.record_pending_pubkey_failure().await;
+            result?;
             Ok::<_, anyhow::Error>(())
         })
     }
@@ -357,6 +369,24 @@ impl ServerSession {
                 credential_type: credential_type.to_string(),
             })
             .await;
+    }
+
+    fn note_pubkey_failure(&mut self, selector: &AuthSelector) {
+        if let AuthSelector::User { username, .. } = selector {
+            self.failed_pubkey_username = Some(username.clone());
+        }
+    }
+
+    /// Records at most one "public_key" failed login per connection: a client
+    /// probing keys and disconnecting is counted, while a client that cycles
+    /// through its agent keys before authenticating isn't penalised per key.
+    async fn record_pending_pubkey_failure(&self) {
+        if self.user_info.is_none()
+            && let Some(username) = &self.failed_pubkey_username
+        {
+            self.record_failed_login_attempt(username, "public_key")
+                .await;
+        }
     }
 
     pub fn make_logging_span(&self) -> tracing::Span {
@@ -1789,6 +1819,7 @@ impl ServerSession {
 
         if !self.allowed_auth_methods.contains(&MethodKind::PublicKey) {
             warn!("Client attempted public key auth even though it was not advertised");
+            self.note_pubkey_failure(&selector);
             return russh::server::Auth::reject();
         }
 
@@ -1814,6 +1845,8 @@ impl ServerSession {
             return russh::server::Auth::Accept;
         }
 
+        self.note_pubkey_failure(&selector);
+
         match self.try_auth_lazy(&selector, None).await {
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
@@ -1837,6 +1870,7 @@ impl ServerSession {
 
         if !self.allowed_auth_methods.contains(&MethodKind::PublicKey) {
             warn!("Client attempted public key auth even though it was not advertised");
+            self.note_pubkey_failure(&selector);
             return russh::server::Auth::reject();
         }
 
@@ -2160,6 +2194,7 @@ impl ServerSession {
 
                 if let Some(credential) = credential {
                     let credential_type = Self::rate_limited_credential_type(&credential);
+                    let is_public_key = matches!(&credential, AuthCredential::PublicKey { .. });
                     let outcome = submit_credential(
                         &mut state,
                         credential,
@@ -2167,11 +2202,18 @@ impl ServerSession {
                     )
                     .await?;
 
-                    if !outcome.is_valid()
-                        && let Some(credential_type) = credential_type
-                    {
-                        self.record_failed_login_attempt(username, credential_type)
-                            .await;
+                    if !outcome.is_valid() {
+                        if let Some(credential_type) = credential_type {
+                            self.record_failed_login_attempt(username, credential_type)
+                                .await;
+                        } else if is_public_key {
+                            self.note_pubkey_failure(selector);
+                        }
+                    } else if is_public_key {
+                        // A valid key means this wasn't a guessing attempt,
+                        // even if the session later ends without completing
+                        // the remaining factors.
+                        self.failed_pubkey_username = None;
                     }
                 }
 
