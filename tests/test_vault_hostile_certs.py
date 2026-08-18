@@ -288,7 +288,14 @@ class TestPrincipalsThatCrossOtherPeoplesBugs:
         # apart: the message reached the terminal, it named the option, and the
         # escape was neutralised rather than the name being dropped.
         assert "Warpgate refused the certificate" in stdout
-        assert "HACKED=x" in stdout, "the refusal did not name the option at all"
+        # `HACKED`, not `HACKED=x`: `ssh-keygen` splits `critical:NAME=VALUE` on
+        # the first `=`, so the value is not part of the name the message
+        # quotes. Asserted wrongly once, and the run said so.
+        assert "HACKED" in stdout, "the refusal did not name the option at all"
+        # Neutralised rather than dropped. The escape has to be *present* in its
+        # inert form, or a fix that silently strips the option name would pass
+        # the two assertions above and the one below.
+        assert "\\u{1b}[2J" in stdout, "the escape was removed rather than escaped"
         assert "\x1b[2J" not in stdout, "a certificate wrote escape sequences to the terminal"
 
     def test_a_pinned_option_that_is_absent_is_refused(
