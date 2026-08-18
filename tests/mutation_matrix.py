@@ -12,8 +12,22 @@ proof that it is useless, but the place to look next.
 
 Not a pytest module: it rebuilds the gateway between runs, so it is a script.
 
-    poetry run python -m tests.mutation_matrix           # every guard
-    poetry run python -m tests.mutation_matrix principal # ones matching a name
+Two modes, and the routine one is `--named`:
+
+    poetry run python -m tests.mutation_matrix --named            # every guard
+    poetry run python -m tests.mutation_matrix --named principal  # matching a name
+
+`--named` is the A/B the coverage number comes from: for each guard it runs only
+the test named after that guard, twice — once with the guard disabled, once with
+it restored — and the guard discriminates when the test fails in the first run
+and passes in the second. Two runs of one test per guard.
+
+Without the flag it asks a broader and far more expensive question — which of
+*all* the tests notice the mutation — by rerunning the whole integration suite
+and every crate's unit tests once per guard. That is hours, and it is the mode to
+reach for when a guard has no named discriminator yet and you want to find out
+what does catch it. It is not the routine invocation, and reviewers have run it
+by mistake because this docstring used to name it first.
 """
 
 import ast
@@ -584,9 +598,6 @@ DISCRIMINATES = {
     ],
     "certificate: a username cannot impersonate the gateway's attribution": [
         "a_username_cannot_impersonate_the_gateways_own_attribution"
-    ],
-    "admin: a Vault role the signing path would refuse is refused on save": [
-        "a_role_the_signing_path_would_refuse_is_refused_at_save_time"
     ],
     "admin: a Vault role the signing path would refuse is refused on save": [
         "a_role_the_signing_path_would_refuse_is_refused_at_save_time"
