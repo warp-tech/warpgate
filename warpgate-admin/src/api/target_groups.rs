@@ -1,4 +1,3 @@
-use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -8,12 +7,10 @@ use sea_orm::{
 };
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_db_entities::TargetGroup;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 #[derive(Object)]
 struct TargetGroupDataRequest {
@@ -51,15 +48,12 @@ impl ListApi {
     )]
     async fn api_list_target_groups(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        admin: AdminContext,
     ) -> Result<GetTargetGroupsResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
-
-        let db = ctx.services().db.lock().await;
+        let db = &admin.services().db;
         let groups = TargetGroup::Entity::find()
             .order_by_asc(TargetGroup::Column::Name)
-            .all(&*db)
+            .all(db)
             .await?;
 
         Ok(GetTargetGroupsResponse::Ok(Json(groups)))
@@ -72,20 +66,19 @@ impl ListApi {
     )]
     async fn api_create_target_group(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<TargetGroupDataRequest>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateTargetGroupResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::TargetsCreate)).await?;
+        admin.require(AdminPermission::TargetsCreate)?;
 
         if body.name.is_empty() {
             return Ok(CreateTargetGroupResponse::BadRequest(Json("name".into())));
         }
 
-        let db = ctx.services().db.lock().await;
+        let db = &admin.services().db;
         let existing = TargetGroup::Entity::find()
             .filter(TargetGroup::Column::Name.eq(body.name.clone()))
-            .one(&*db)
+            .one(db)
             .await?;
         if existing.is_some() {
             return Ok(CreateTargetGroupResponse::Conflict(Json(
@@ -100,7 +93,7 @@ impl ListApi {
             color: Set(body.color.clone()),
         };
 
-        let group = values.insert(&*db).await?;
+        let group = values.insert(db).await?;
 
         Ok(CreateTargetGroupResponse::Created(Json(group)))
     }
@@ -144,14 +137,11 @@ impl DetailApi {
     )]
     async fn api_get_target_group(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetGroupResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
-
-        let db = ctx.services().db.lock().await;
-        let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
+        let db = &admin.services().db;
+        let group = TargetGroup::Entity::find_by_id(id.0).one(db).await?;
 
         match group {
             Some(group) => Ok(GetTargetGroupResponse::Ok(Json(group))),
@@ -166,19 +156,18 @@ impl DetailApi {
     )]
     async fn api_update_target_group(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         id: Path<Uuid>,
         body: Json<TargetGroupDataRequest>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateTargetGroupResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
+        admin.require(AdminPermission::TargetsEdit)?;
 
         if body.name.is_empty() {
             return Ok(UpdateTargetGroupResponse::BadRequest);
         }
 
-        let db = ctx.services().db.lock().await;
-        let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
+        let db = &admin.services().db;
+        let group = TargetGroup::Entity::find_by_id(id.0).one(db).await?;
 
         let Some(group) = group else {
             return Ok(UpdateTargetGroupResponse::NotFound);
@@ -188,7 +177,7 @@ impl DetailApi {
         let existing = TargetGroup::Entity::find()
             .filter(TargetGroup::Column::Name.eq(body.name.clone()))
             .filter(TargetGroup::Column::Id.ne(id.0))
-            .one(&*db)
+            .one(db)
             .await?;
         if existing.is_some() {
             return Ok(UpdateTargetGroupResponse::BadRequest);
@@ -199,7 +188,7 @@ impl DetailApi {
         group.description = Set(body.description.clone().unwrap_or_default());
         group.color = Set(body.color.clone());
 
-        let group = group.update(&*db).await?;
+        let group = group.update(db).await?;
         Ok(UpdateTargetGroupResponse::Ok(Json(group)))
     }
 
@@ -210,16 +199,15 @@ impl DetailApi {
     )]
     async fn api_delete_target_group(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteTargetGroupResponse, WarpgateError> {
         use warpgate_db_entities::Target;
 
-        require_admin_permission(&ctx, Some(AdminPermission::TargetsDelete)).await?;
+        admin.require(AdminPermission::TargetsDelete)?;
 
-        let db = ctx.services().db.lock().await;
-        let group = TargetGroup::Entity::find_by_id(id.0).one(&*db).await?;
+        let db = &admin.services().db;
+        let group = TargetGroup::Entity::find_by_id(id.0).one(db).await?;
 
         let Some(group) = group else {
             return Ok(DeleteTargetGroupResponse::NotFound);
@@ -229,11 +217,11 @@ impl DetailApi {
         Target::Entity::update_many()
             .col_expr(Target::Column::GroupId, Expr::value(Option::<Uuid>::None))
             .filter(Target::Column::GroupId.eq(id.0))
-            .exec(&*db)
+            .exec(db)
             .await?;
 
         // Then delete the group
-        group.delete(&*db).await?;
+        group.delete(db).await?;
         Ok(DeleteTargetGroupResponse::Deleted)
     }
 }

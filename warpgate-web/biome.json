@@ -1,5 +1,5 @@
 {
-    "$schema": "https://biomejs.dev/schemas/2.5.2/schema.json",
+    "$schema": "https://biomejs.dev/schemas/2.5.8/schema.json",
     "vcs": {
         "enabled": true,
         "clientKind": "git",
@@ -11,6 +11,7 @@
             "!!**/dist",
             "!**/openapitools.json",
             "!**/package.json",
+            "!**/openapi-schema.json",
             "!**/*.svg"
         ],
         "ignoreUnknown": false

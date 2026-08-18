@@ -1,11 +1,13 @@
-# Number of replicas for Warpgate deployment
-# Do NOT increase above 1 when using SQLite as the database!
+# Number of replicas for the Warpgate deployment.
+# For more than one replica, use an external PostgreSQL/MySQL database and
+# shared recording storage. Do not increase above 1 when using SQLite or local
+# disk-only recording storage.
 replicaCount: 1
 
 image:
   repository: ghcr.io/warp-tech/warpgate
   pullPolicy: IfNotPresent
-  tag: "0.26.1"
+  tag: "0.28.0-beta.3"
 
 # References to Kubernetes secrets for pulling images (if using a private registry)
 imagePullSecrets: []
@@ -19,6 +21,17 @@ podLabels: {}
 # Override chart name if desired
 nameOverride: ""
 fullnameOverride: ""
+
+# ServiceAccount the pods run under. Annotate it to grant cloud IAM roles to
+# the pod, e.g. for the S3 recording storage "Auto" credentials mode via
+# EKS IRSA (eks.amazonaws.com/role-arn) or GKE Workload Identity.
+serviceAccount:
+  create: true
+  # Name override; with create: false, an existing ServiceAccount to use
+  # (empty = the namespace default one)
+  name: ""
+  annotations: {}
+    # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/warpgate-recordings
 
 # Pod-level security context (applies to all containers)
 podSecurityContext: {}
@@ -61,6 +74,20 @@ overrides_config: ""
 # Space-separated list of environment variable names to substitute in the config
 # Example: "FOO BAR" → replaces $FOO and $BAR from pod environment
 config_env_var_replace: ""
+
+# Environment variables for the main Warpgate container, mapped from Secrets.
+# Format: <secret-name>/<key>
+envFromSecret: {
+#   Use this for credential encryption at rest (generate a key with
+#   `openssl rand -base64 32`); the setup container does not need these.
+#
+#   To rotate, point WARPGATE_ENCRYPTION_KEY at the new key, list the previous
+#   key under WARPGATE_ENCRYPTION_KEY_OLD (comma-separated), and upgrade —
+#   re-encryption starts once the rollout completes.
+#
+#   WARPGATE_ENCRYPTION_KEY: "warpgate-secret/encryptionKey"
+#   WARPGATE_ENCRYPTION_KEY_OLD: "warpgate-secret/encryptionKeyOld"
+}
 
 # Additional custom volumes & mounts (advanced use-cases)
 volumes: []

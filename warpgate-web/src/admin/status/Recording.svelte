@@ -1,0 +1,62 @@
+<script lang="ts">
+    import { Alert } from '@sveltestrap/sveltestrap'
+    import { api, type Recording, RecordingKind } from 'admin/lib/api'
+    import DesktopRecordingPlayer from 'admin/player/DesktopRecordingPlayer.svelte'
+    import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
+    import DelayedSpinner from 'common/DelayedSpinner.svelte'
+    import { stringifyError } from 'common/errors'
+    import KubernetesRecording from './KubernetesRecording.svelte'
+
+    interface Props {
+        params: { id: string }
+    }
+
+    let { params = { id: '' } }: Props = $props()
+
+    let error: string | null = $state(null)
+
+    import { adminPermissions } from '../lib/store'
+
+    let recording: Recording | null = $state(null)
+
+    async function load() {
+        if (!$adminPermissions.recordingsView) {
+            error = 'You do not have permission to view recordings.'
+            return
+        }
+        recording = await api.getRecording(params)
+    }
+
+    function getTCPDumpURL() {
+        return `/@warpgate/admin/api/recordings/${recording?.id}/tcpdump`
+    }
+
+    load().catch(async e => {
+        error = await stringifyError(e)
+    })
+</script>
+
+<div class="page-summary-bar">
+    <h1>session recording</h1>
+</div>
+
+{#if !recording && !error}
+    <DelayedSpinner />
+{/if}
+
+{#if error}
+    <Alert color="danger">{error}</Alert>
+{/if}
+
+{#if recording?.kind === RecordingKind.Traffic}
+    <a href={getTCPDumpURL()}>Download tcpdump file</a>
+{/if}
+{#if recording?.kind === RecordingKind.Terminal}
+    <TerminalRecordingPlayer {recording} />
+{/if}
+{#if recording?.kind === RecordingKind.Desktop}
+    <DesktopRecordingPlayer {recording} />
+{/if}
+{#if recording?.kind === RecordingKind.Kubernetes}
+    <KubernetesRecording {recording} />
+{/if}

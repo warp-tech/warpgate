@@ -14,7 +14,7 @@
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import GroupColorIcon from 'common/GroupColorIcon.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { replace } from 'svelte-spa-router'
     import { VALID_CHOICES } from './common'
@@ -146,7 +146,7 @@
                             }}
                                 title={value || 'None'}
                             >
-                                <GroupColorCircle color={value} />
+                                <GroupColorIcon color={value} />
                                 <span>{value || 'None'}</span>
                             </button>
                         {/each}
@@ -158,14 +158,16 @@
                         click={update}
                         color="primary"
                         disabled={!$adminPermissions.targetsEdit}
-                        >Update</AsyncButton
                     >
+                        Update
+                    </AsyncButton>
                     <Button
                         color="danger"
                         onclick={remove}
                         disabled={!$adminPermissions.targetsDelete}
-                        >Remove</Button
                     >
+                        Remove
+                    </Button>
                 </div>
             </form>
         </div>

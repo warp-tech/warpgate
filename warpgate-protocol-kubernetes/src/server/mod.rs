@@ -17,7 +17,7 @@ use crate::correlator::RequestCorrelator;
 use crate::server::client_certs::{AcceptAnyClientCert, CertificateCapturingAcceptor};
 use crate::server::handlers::handle_api_request;
 
-mod auth;
+pub mod auth;
 mod client_certs;
 mod handlers;
 
@@ -45,16 +45,17 @@ pub async fn bind_server(
         .next()
         .context("Kubernetes requires a TLS certificate and key")?;
 
-    // Create TLS configuration with client certificate verification
-    let tls_config = ServerConfig::builder_with_provider(Arc::new(
-        rustls::crypto::aws_lc_rs::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()
-    .map_err(|e| anyhow::anyhow!("Failed to configure TLS protocol versions: {e}"))?
-    .with_client_cert_verifier(Arc::new(AcceptAnyClientCert))
-    .with_cert_resolver(Arc::new(SingleCertResolver::new(
-        certificate_and_key.clone(),
-    )));
+    // Create TLS configuration with client certificate verification. The
+    // verifier shares this provider so it validates handshake signatures with
+    // the same algorithms the server negotiates.
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let tls_config = ServerConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()
+        .map_err(|e| anyhow::anyhow!("Failed to configure TLS protocol versions: {e}"))?
+        .with_client_cert_verifier(Arc::new(AcceptAnyClientCert::new(provider)))
+        .with_cert_resolver(Arc::new(SingleCertResolver::new(
+            certificate_and_key.clone(),
+        )));
 
     let tcp_acceptor = address.poem_listener()?.into_acceptor().await?;
     let tcp_acceptor = ProxyProtocolAcceptor::new(tcp_acceptor, proxy_protocol);

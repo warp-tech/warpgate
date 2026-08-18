@@ -35,13 +35,13 @@
     import Loadable from 'common/Loadable.svelte'
     import PageSummaryBar from 'common/PageSummaryBar.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
     import { formatDistanceToNow } from 'date-fns'
     import { serverInfo } from 'gateway/lib/store'
     import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
     import { link, replace } from 'svelte-spa-router'
-    import RelativeDate from '../../RelativeDate.svelte'
     import AdminRolePermissionsBadge from '../AdminRolePermissionsBadge.svelte'
     import AllowedIpRangesEditor from './AllowedIpRangesEditor.svelte'
     import CredentialEditor from './CredentialEditor.svelte'
@@ -443,8 +443,9 @@
                                                 <small class="text-danger">
                                                     <span
                                                         class="badge bg-danger bg-opacity-10 text-danger"
-                                                        >Expired</span
                                                     >
+                                                        Expired
+                                                    </span>
                                                 </small>
                                                 {#if expiredAssignment.expiresAt}
                                                     <small class="text-muted">
@@ -516,9 +517,9 @@
 
                 <Section id="traffic" title="Network">
                     <FormGroup class="mb-3">
-                        <label for="rateLimitBytesPerSecond"
-                            >Global bandwidth limit</label
-                        >
+                        <label for="rateLimitBytesPerSecond">
+                            Global bandwidth limit
+                        </label>
                         <RateLimitInput
                             id="rateLimitBytesPerSecond"
                             bind:value={user.rateLimitBytesPerSecond}
@@ -544,15 +545,17 @@
                     color="primary"
                     click={update}
                     disabled={!$adminPermissions.usersEdit}
-                    >Update</AsyncButton
                 >
+                    Update
+                </AsyncButton>
 
                 <AsyncButton
                     color="danger"
                     click={remove}
                     disabled={!$adminPermissions.usersDelete}
-                    >Remove</AsyncButton
                 >
+                    Remove
+                </AsyncButton>
             </StickyActionBar>
         {/if}
     </Loadable>

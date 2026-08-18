@@ -3,6 +3,7 @@ import base64
 import hashlib
 import html
 import re
+import asyncio
 import secrets
 import time
 import uuid
@@ -422,6 +423,148 @@ class TestKubernetesIntegration:
         bad_cert_cmd[bad_cert_cmd.index(str(key_file))] = str(wrong_key)
         p = run_kubectl(bad_cert_cmd)
         assert p.returncode != 0, "should not accept an unknown certificate"
+
+    @pytest.mark.asyncio
+    async def test_kubectl_web_approval_policy(
+        self, processes, shared_wg: WarpgateProcess, timeout
+    ):
+        """A ``kubernetes: [WebUserApproval]`` policy holds a kubectl request
+        until the user approves it out of band, then lets it through.
+
+        Covers the policy-enforced branch of ``authorize_kubernetes_identity``:
+        transport auth (the API token) is the identity, and the credential policy
+        layers web approval on top — the request must block, surface in the
+        pending-approvals list, and only succeed once approved."""
+        k3s = processes.start_k3s()
+        k3s_port = k3s.port
+        k3s_token = k3s.token
+
+        url = f"https://localhost:{shared_wg.http_port}"
+
+        with admin_client(url) as api:
+            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
+            user = api.create_user(
+                sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}")
+            )
+            api.create_password_credential(
+                user.id, sdk.NewPasswordCredential(password="123")
+            )
+            api.update_user(
+                user.id,
+                sdk.UserDataRequest(
+                    username=user.username,
+                    credential_policy=sdk.UserRequireCredentialsPolicy(
+                        kubernetes=[sdk.CredentialKind.WEBUSERAPPROVAL],
+                    ),
+                ),
+            )
+            api.add_user_role(user.id, role.id)
+
+            target_name = f"k8s-approval-{uuid.uuid4()}"
+            target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=target_name,
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetKubernetesOptions(
+                            kind="Kubernetes",
+                            cluster_url=f"https://127.0.0.1:{k3s_port}",
+                            tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
+                            auth=sdk.KubernetesTargetAuth(
+                                sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
+                                    kind="Token", token=k3s_token
+                                )
+                            ),
+                        )
+                    ),
+                )
+            )
+            api.add_target_role(target.id, role.id)
+
+        headers = {"Host": f"localhost:{shared_wg.http_port}"}
+        async with aiohttp.ClientSession() as session:
+            # This session both mints the kubectl API token and, as the same
+            # user, approves the pending Kubernetes request.
+            resp = await session.post(
+                f"{url}/@warpgate/api/auth/login",
+                json={"username": user.username, "password": "123"},
+                headers=headers,
+                ssl=False,
+            )
+            resp.raise_for_status()
+            resp = await session.post(
+                f"{url}/@warpgate/api/profile/api-tokens",
+                json={
+                    "label": "test-token",
+                    "expiry": (
+                        datetime.now(timezone.utc) + timedelta(days=1)
+                    ).isoformat(),
+                },
+                ssl=False,
+            )
+            resp.raise_for_status()
+            user_token = (await resp.json())["secret"]
+
+            server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+            kubectl = subprocess.Popen(
+                [
+                    "kubectl",
+                    "get",
+                    "pods",
+                    "--server",
+                    server,
+                    "--insecure-skip-tls-verify",
+                    "--token",
+                    user_token,
+                    "-n",
+                    "default",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                # The request must block on web approval; poll the user's pending
+                # requests until the Kubernetes one appears.
+                auth_id = None
+                deadline = time.monotonic() + (timeout - 5)
+                while time.monotonic() < deadline:
+                    r = await session.get(
+                        f"{url}/@warpgate/api/auth/web-auth-requests", ssl=False
+                    )
+                    r.raise_for_status()
+                    pending = [
+                        s
+                        for s in await r.json()
+                        if s["protocol"] == "Kubernetes"
+                    ]
+                    if pending:
+                        assert pending[0]["state"] == "WebUserApprovalNeeded"
+                        auth_id = pending[0]["id"]
+                        break
+                    await asyncio.sleep(0.25)
+
+                assert (
+                    auth_id is not None
+                ), "Kubernetes request never became a pending web approval"
+                # Enforcement: the request is held, not already through.
+                assert (
+                    kubectl.poll() is None
+                ), "kubectl was let through without web approval"
+
+                r = await session.post(
+                    f"{url}/@warpgate/api/auth/state/{auth_id}/approve",
+                    json={"scope": "Once"},
+                    ssl=False,
+                )
+                assert r.status == 200
+
+                out, err = kubectl.communicate(timeout=timeout)
+                assert kubectl.returncode == 0, (
+                    f"kubectl should succeed after approval: {err!r}"
+                )
+            finally:
+                if kubectl.poll() is None:
+                    kubectl.kill()
+                    kubectl.communicate()
 
     @pytest.mark.asyncio
     async def test_kubectl_run(self, processes, shared_wg: WarpgateProcess):

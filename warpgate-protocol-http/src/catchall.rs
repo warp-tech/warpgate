@@ -7,12 +7,16 @@ use poem::{Body, IntoResponse, Request, Response, handler};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{Instrument, debug, info_span};
+use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
-use warpgate_core::{ConfigProvider, WarpgateServerHandle};
+use warpgate_core::{
+    AuthorizedIdentity, ConfigProvider, WarpgateServerHandle, authorize_for_target,
+};
 
+use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
 
@@ -33,6 +37,7 @@ pub async fn catchall_endpoint(
     session: &Session,
     body: Body,
     ctx: Data<&AuthenticatedRequestContext>,
+    http_client_cache: Data<&HttpClientCache>,
     server_handle: Option<Data<&Arc<Mutex<WarpgateServerHandle>>>>,
 ) -> poem::Result<Response> {
     let target_and_options = get_target_for_request(req, &ctx).await?;
@@ -53,38 +58,59 @@ pub async fn catchall_endpoint(
             .instrument(span)
             .await?
             .into_response(),
-        None => proxy_normal_request(req, *ctx, body, &options)
+        None => proxy_normal_request(req, *ctx, body, &target.name, &options, *http_client_cache)
             .instrument(span)
             .await?
             .into_response(),
     })
 }
 
+/// Pairs a target with its HTTP options, discarding targets of other protocols.
+fn as_http_target(target: Target) -> Option<(Target, TargetHTTPOptions)> {
+    let TargetOptions::Http(ref options) = target.options else {
+        return None;
+    };
+    let options = options.clone();
+    Some((target, options))
+}
+
 async fn get_target_for_request(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
 ) -> poem::Result<Option<(Target, TargetHTTPOptions)>> {
+    let config_provider = ctx.services().config_provider.as_ref();
+
+    // A ticket is bound to one target row, and it was authorized against that row
+    // when the session was established. Resolving by id keeps the request from
+    // steering it elsewhere — via query param, host rebinding or session state —
+    // and survives the target being renamed.
+    if let RequestAuthorization::Session(SessionAuthorization::Ticket { target_id, .. }) = &ctx.auth
+    {
+        return Ok(config_provider
+            .get_target_by_id(*target_id)
+            .await?
+            .and_then(as_http_target));
+    }
+
+    let RequestAuthorization::Session(SessionAuthorization::User { user_id, username }) = &ctx.auth
+    else {
+        return Ok(None);
+    };
+
     let session = <&Session>::from_request_without_body(req).await?;
     let params: QueryParams = req.params()?;
 
-    let selected_target_name;
-    let need_role_auth;
-
     let request_host = ctx.trusted_hostname(req);
 
-    let host_based_target_name = if let Some(host) = request_host {
-        let found = ctx
-            .services()
-            .config_provider
-            .lock()
-            .await
+    let host_based_target = if let Some(host) = request_host {
+        let found = config_provider
             .get_target_by_hostname(host.as_str())
-            .await?
-            .map(|t| t.name);
+            .await?;
         if found.is_some() {
             debug!(
                 "Domain rebinding detected: host={} -> target={:?}",
-                host, found
+                host,
+                found.as_ref().map(|target| &target.name)
             );
         }
         found
@@ -92,64 +118,44 @@ async fn get_target_for_request(
         None
     };
 
-    let username = match &ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::Ticket {
-            target_name,
-            username,
-            ..
-        }) => {
-            selected_target_name = Some(target_name.clone());
-            need_role_auth = false;
-            username
-        }
-        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => {
-            need_role_auth = true;
-
-            selected_target_name = if let Some(warpgate_target) = params.warpgate_target {
-                Some(warpgate_target)
-            } else if let Some(ref rebound_target) = host_based_target_name {
-                Some(rebound_target.clone())
-            } else {
-                session.get_target_name()
-            };
-            username
-        }
-        RequestAuthorization::UserToken { .. } | RequestAuthorization::AdminToken => {
-            return Ok(None);
-        }
+    let selected_target_name = if let Some(warpgate_target) = params.warpgate_target {
+        Some(warpgate_target)
+    } else if let Some(ref rebound_target) = host_based_target {
+        Some(rebound_target.name.clone())
+    } else {
+        session.get_target_name()
     };
 
-    let domain_rebinding_configured = host_based_target_name.is_some();
-    let final_target_name = selected_target_name.or(host_based_target_name);
+    let domain_rebinding_configured = host_based_target.is_some();
+    let final_target_name = selected_target_name
+        .or_else(|| host_based_target.as_ref().map(|target| target.name.clone()));
 
     if let Some(target_name) = final_target_name {
-        let target = {
-            ctx.services()
-                .config_provider
-                .lock()
-                .await
-                .get_target_by_name(target_name.as_str())
-                .await?
-                .and_then(|t| match t.options {
-                    TargetOptions::Http(ref options) => Some((t.clone(), options.clone())),
-                    _ => None,
-                })
-        };
-
-        if let Some(target) = target {
-            if need_role_auth
-                && !ctx
-                    .services()
-                    .config_provider
-                    .lock()
-                    .await
-                    .authorize_target(username, &target.0.name)
+        let target =
+            if let Some(target) = host_based_target.filter(|target| target.name == target_name) {
+                Some(target)
+            } else {
+                config_provider
+                    .get_target_by_name(target_name.as_str())
                     .await?
-            {
-                return Ok(None);
-            }
+            };
 
-            return Ok(Some(target));
+        // Reached only for a `SessionAuthorization::User` (ticket sessions are
+        // handled separately above), so the session is the prior-auth evidence.
+        let identity = AuthorizedIdentity::for_authenticated_session(
+            AuthStateUserInfo {
+                id: *user_id,
+                username: username.clone(),
+            },
+            crate::common::PROTOCOL_NAME,
+        );
+
+        if let Some(target) = target
+            && let Some(authorization) =
+                authorize_for_target(config_provider, &identity, target).await?
+            && let Some(target_and_options) = as_http_target(authorization.into_parts().1)
+        {
+            return Ok(Some(target_and_options));
         }
     }
 

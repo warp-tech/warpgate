@@ -1,24 +1,16 @@
 use warpgate_common::WarpgateError;
-use warpgate_common::auth::{AuthCredential, AuthState};
+use warpgate_common::auth::{AuthCredential, AuthState, SubmitOutcome};
 
 use crate::ConfigProvider;
 
-pub async fn validate_and_add_credential<C: ConfigProvider>(
+pub async fn submit_credential<C: ConfigProvider>(
     state: &mut AuthState,
-    credential: &AuthCredential,
-    cp: &mut C,
-) -> Result<bool, WarpgateError> {
-    let credential_valid = cp
-        .validate_credential(&state.user_info().username, credential)
-        .await?;
-
-    if credential_valid {
-        state.add_valid_credential(credential.clone());
-    }
-
-    if !credential_valid {
-        state.emit_authentication_failed_event(Some(credential), "invalid credential");
-    }
-
-    Ok(credential_valid)
+    credential: AuthCredential,
+    cp: &C,
+) -> Result<SubmitOutcome, WarpgateError> {
+    state
+        .submit_credential(credential, |username, credential| async move {
+            cp.validate_credential(&username, &credential).await
+        })
+        .await
 }

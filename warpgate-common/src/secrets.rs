@@ -8,7 +8,8 @@ use poem_openapi::registry::{MetaSchemaRef, Registry};
 use poem_openapi::types::{ParseError, ParseFromJSON, ToJSON};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::Secret;
+use crate::encryption::EncryptionError;
+use crate::{Secret, StoredSecret};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SecretError {
@@ -24,6 +25,8 @@ pub enum SecretError {
     StoreNotSupported,
     #[error("secret backend error: {0}")]
     Backend(String),
+    #[error(transparent)]
+    Encryption(#[from] EncryptionError),
 }
 
 pub struct SecretValue(String);
@@ -143,9 +146,17 @@ impl SecretBackend for DbSecretBackend {
 
 const REFERENCE_SCHEMES: &[&str] = &["vault://", "openbao://"];
 
+/// Whether a raw (serialized) value is a backend reference rather than a
+/// (possibly encrypted-at-rest) inline secret. Used to keep the credential
+/// encryption sweep in `config::target` from encrypting reference URIs, which
+/// would silently turn a vault-backed credential into an inline one on next load.
+pub fn is_secret_reference(s: &str) -> bool {
+    REFERENCE_SCHEMES.iter().any(|prefix| s.starts_with(prefix))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MaybeSecretRef {
-    Inline(Secret<String>),
+    Inline(StoredSecret),
     Reference(SecretRef),
 }
 
@@ -160,7 +171,7 @@ impl MaybeSecretRef {
 
     pub async fn resolve(&self, backend: &dyn SecretBackend) -> Result<Secret<String>, SecretError> {
         match self {
-            Self::Inline(v) => Ok(v.clone()),
+            Self::Inline(v) => Ok(v.reveal()?),
             Self::Reference(r) => backend
                 .resolve(r)
                 .await
@@ -171,7 +182,7 @@ impl MaybeSecretRef {
 
 impl Default for MaybeSecretRef {
     fn default() -> Self {
-        Self::Inline(Secret::new(String::new()))
+        Self::Inline(StoredSecret::default())
     }
 }
 
@@ -179,10 +190,10 @@ impl FromStr for MaybeSecretRef {
     type Err = SecretError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if REFERENCE_SCHEMES.iter().any(|prefix| s.starts_with(prefix)) {
+        if is_secret_reference(s) {
             SecretRef::from_str(s).map(Self::Reference)
         } else {
-            Ok(Self::Inline(Secret::new(s.to_string())))
+            Ok(Self::Inline(StoredSecret::from(s.to_string())))
         }
     }
 }
@@ -222,7 +233,7 @@ impl poem_openapi::types::Type for MaybeSecretRef {
 
     fn as_raw_value(&self) -> Option<&Self::RawValueType> {
         match self {
-            Self::Inline(v) => Some(v.expose_secret()),
+            Self::Inline(v) => poem_openapi::types::Type::as_raw_value(v),
             Self::Reference(_) => None,
         }
     }
@@ -235,7 +246,7 @@ impl poem_openapi::types::Type for MaybeSecretRef {
 
     fn is_empty(&self) -> bool {
         match self {
-            Self::Inline(v) => v.expose_secret().is_empty(),
+            Self::Inline(v) => poem_openapi::types::Type::is_empty(v),
             Self::Reference(_) => false,
         }
     }
@@ -256,7 +267,7 @@ impl ParseFromJSON for MaybeSecretRef {
 impl ToJSON for MaybeSecretRef {
     fn to_json(&self) -> Option<serde_json::Value> {
         match self {
-            Self::Inline(v) => Some(serde_json::Value::String(v.expose_secret().clone())),
+            Self::Inline(v) => v.to_json(),
             Self::Reference(r) => Some(serde_json::Value::String(r.to_string())),
         }
     }
@@ -343,7 +354,7 @@ mod tests {
     fn maybe_secret_ref_plain_string_is_inline() {
         let v = MaybeSecretRef::from_str("hunter2").unwrap();
         match &v {
-            MaybeSecretRef::Inline(s) => assert_eq!(s.expose_secret(), "hunter2"),
+            MaybeSecretRef::Inline(s) => assert_eq!(s.reveal().unwrap().expose_secret(), "hunter2"),
             MaybeSecretRef::Reference(_) => panic!("expected Inline"),
         }
         assert_eq!(v.as_reference(), None);
@@ -376,14 +387,14 @@ mod tests {
     fn maybe_secret_ref_default_is_empty_inline() {
         let v = MaybeSecretRef::default();
         match v {
-            MaybeSecretRef::Inline(s) => assert_eq!(s.expose_secret(), ""),
+            MaybeSecretRef::Inline(s) => assert_eq!(s.reveal().unwrap().expose_secret(), ""),
             MaybeSecretRef::Reference(_) => panic!("expected Inline"),
         }
     }
 
     #[test]
     fn maybe_secret_ref_inline_serializes_as_plain_string() {
-        let v = MaybeSecretRef::Inline(Secret::new("hunter2".to_string()));
+        let v = MaybeSecretRef::Inline(StoredSecret::new(Secret::new("hunter2".to_string())));
         let json = serde_json::to_string(&v).unwrap();
         assert_eq!(json, "\"hunter2\"");
     }
@@ -401,7 +412,7 @@ mod tests {
             let json = serde_json::to_string(raw).unwrap();
             let v: MaybeSecretRef = serde_json::from_str(&json).unwrap();
             let round_tripped = match &v {
-                MaybeSecretRef::Inline(s) => s.expose_secret().clone(),
+                MaybeSecretRef::Inline(s) => s.reveal().unwrap().expose_secret().clone(),
                 MaybeSecretRef::Reference(r) => r.to_string(),
             };
             assert_eq!(round_tripped, raw);

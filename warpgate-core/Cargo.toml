@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-core"
-version = "0.26.1"
+version = "0.28.0-beta.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -36,21 +36,26 @@ serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 totp-rs = { version = "5.0", features = ["otpauth"], default-features = false }
 tracing.workspace = true
 tracing-core = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 url.workspace = true
 uuid.workspace = true
+# 0.16 pulls in a unicode-width version that conflicts with the rest of the tree
+vt100 = "0.15"
+warpgate-aws = { path = "../warpgate-aws" }
+warpgate-ca = { path = "../warpgate-ca" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-db-migrations = { path = "../warpgate-db-migrations" }
 warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-secrets-vault = { path = "../warpgate-secrets-vault" }
-warpgate-tls = { path = "../warpgate-tls" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
+warpgate-tls = { path = "../warpgate-tls" }
 webpki = { version = "0.22", default-features = false }
-zune-jpeg = "0.4"
+zune-jpeg.workspace = true
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]

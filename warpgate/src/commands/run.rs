@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures::FutureExt;
@@ -10,11 +11,12 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, error, info, warn};
+use warpgate_common::encryption::validate_encryption_config;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, WarpgateConfig};
 use warpgate_core::db::cleanup_db;
 use warpgate_core::logging::install_database_logger;
-use warpgate_core::{ConfigProvider, ProtocolServer, Services};
+use warpgate_core::{ConfigProvider, ListenerStatusRegistry, ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
@@ -37,6 +39,7 @@ async fn spawn_supervisor(
     factory: ServerFactory,
     selector: ConfigSelector<WarpgateConfig>,
     config_rx: &watch::Receiver<WarpgateConfig>,
+    status_registry: ListenerStatusRegistry,
 ) -> Result<JoinHandle<()>> {
     let params = selector(&config_rx.borrow());
     if params.enabled {
@@ -54,7 +57,7 @@ async fn spawn_supervisor(
     }
     let stream = WatchStream::new(config_rx.clone());
     Ok(tokio::spawn(
-        ListenerSupervisor::new(name, factory, selector).run(stream),
+        ListenerSupervisor::new(name, factory, selector, status_registry).run(stream),
     ))
 }
 
@@ -79,7 +82,33 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     let services = Services::new(config.clone(), admin_token, params.clone()).await?;
 
+    validate_encryption_config(&config);
+
+    // Join the cluster before the credential backfill below
+    services.cluster.start().await?;
+
     install_database_logger(services.db.clone());
+
+    // Runs even when the SSH listener is disabled so that the admin UI can
+    // manage the keys and other protocols' features relying on them work.
+    warpgate_protocol_ssh::ensure_client_keys(&services.db, &config, params).await?;
+
+    // Encrypt before listeners start
+    if warpgate_core::backfill_credential_encryption(&services.db).await?
+        == warpgate_core::BackfillOutcome::AwaitingCluster
+    {
+        let db = services.db.clone();
+        tokio::spawn(async move {
+            loop {
+                match warpgate_core::backfill_credential_encryption(&db).await {
+                    Ok(warpgate_core::BackfillOutcome::Settled) => break,
+                    Ok(warpgate_core::BackfillOutcome::AwaitingCluster) => {}
+                    Err(error) => warn!(%error, "Deferred credential encryption failed"),
+                }
+                tokio::time::sleep(Duration::from_secs(rand::random_range(3..7))).await;
+            }
+        });
+    }
 
     if console::user_attended() {
         info!("--------------------------------------------");
@@ -101,6 +130,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     // HTTP has no `enable` flag — it is always on.
     {
+        let status_registry = services.listener_status.clone();
         let services = services.clone();
         let factory: ServerFactory = Arc::new(move |address, proxy_protocol, tls| {
             let services = services.clone();
@@ -131,10 +161,13 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 tls,
             }
         });
-        supervisors.push(spawn_supervisor("HTTP", true, factory, selector, &config_rx).await?);
+        supervisors.push(
+            spawn_supervisor("HTTP", true, factory, selector, &config_rx, status_registry).await?,
+        );
     }
 
     {
+        let status_registry = services.listener_status.clone();
         let services = services.clone();
         let factory: ServerFactory = Arc::new(move |address, proxy_protocol, tls| {
             let services = services.clone();
@@ -151,13 +184,16 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 proxy_protocol: c.store.ssh.proxy_protocol,
                 tls: Vec::new(),
             });
-        supervisors.push(spawn_supervisor("SSH", false, factory, selector, &config_rx).await?);
+        supervisors.push(
+            spawn_supervisor("SSH", false, factory, selector, &config_rx, status_registry).await?,
+        );
     }
 
     // These protocols are uniform: sync `new`, one enable flag, one cert/key pair.
     // `$cfg` is the `store` field holding their config (all share the shape).
     macro_rules! tls_listener {
         ($name:literal, $server:ident, $cfg:ident) => {{
+            let status_registry = services.listener_status.clone();
             let services = services.clone();
             let base = base.clone();
             let factory: ServerFactory = Arc::new(move |address, proxy_protocol, tls| {
@@ -178,7 +214,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                         .into_iter()
                         .collect(),
                 });
-            spawn_supervisor($name, true, factory, selector, &config_rx).await?
+            spawn_supervisor($name, true, factory, selector, &config_rx, status_registry).await?
         }};
     }
 
@@ -205,7 +241,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 let interval = std::cmp::min(retention, audit_retention) / 10;
                 #[allow(clippy::explicit_auto_deref)]
                 match cleanup_db(
-                    &*services.db.lock().await,
+                    &services.db,
                     &*services.recordings.lock().await,
                     &retention,
                     &audit_retention,
@@ -247,13 +283,14 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     tokio::spawn(watch_config_and_reload(services.clone(), config_rx.clone()));
 
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
+    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
 
     loop {
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                std::process::exit(1);
-            }
             _ = sigint.recv() => {
+                break
+            }
+            _ = sigterm.recv() => {
                 break
             }
             result = supervisors.next() => {
@@ -266,6 +303,19 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 }
             }
         }
+    }
+
+    let cleanup = async {
+        services.recordings.lock().await.shutdown().await;
+        if let Err(error) = services.cluster.shutdown().await {
+            warn!(%error, "Failed to deregister cluster node");
+        }
+    };
+
+    tokio::select! {
+        () = cleanup => {}
+        _ = sigint.recv() => std::process::exit(1),
+        _ = sigterm.recv() => std::process::exit(1),
     }
 
     info!("Exiting");
@@ -286,7 +336,7 @@ pub async fn watch_config_and_reload(
 
 
         let state = services.state.lock().await;
-        let mut cp = services.config_provider.lock().await;
+        let cp = &services.config_provider;
         // TODO no longer happens since everything is in the DB
         for (id, session) in &state.sessions {
             let mut session = session.lock().await;

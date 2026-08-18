@@ -6,7 +6,6 @@ mod macros;
 
 pub mod fast_path;
 pub mod image;
-pub mod legacy;
 pub mod pointer;
 pub mod rfx; // FIXME: maybe this module should not be in this crate
 pub mod x224;
@@ -16,7 +15,7 @@ mod palette;
 
 use core::fmt;
 
-pub use active_stage::{ActiveStage, ActiveStageOutput, GracefulDisconnectReason};
+pub use active_stage::{ActiveStage, ActiveStageBuilder, ActiveStageOutput, GracefulDisconnectReason};
 
 pub type SessionResult<T> = Result<T, SessionError>;
 
@@ -71,26 +70,32 @@ pub trait SessionErrorExt {
 }
 
 impl SessionErrorExt for SessionError {
+    #[track_caller]
     fn pdu(error: ironrdp_pdu::PduError) -> Self {
         Self::new("payload error", SessionErrorKind::Pdu(error))
     }
 
+    #[track_caller]
     fn encode(error: ironrdp_core::EncodeError) -> Self {
         Self::new("encode error", SessionErrorKind::Encode(error))
     }
 
+    #[track_caller]
     fn decode(error: ironrdp_core::DecodeError) -> Self {
         Self::new("decode error", SessionErrorKind::Decode(error))
     }
 
+    #[track_caller]
     fn general(context: &'static str) -> Self {
         Self::new(context, SessionErrorKind::General)
     }
 
+    #[track_caller]
     fn reason(context: &'static str, reason: impl Into<String>) -> Self {
         Self::new(context, SessionErrorKind::Reason(reason.into()))
     }
 
+    #[track_caller]
     fn custom<E>(context: &'static str, e: E) -> Self
     where
         E: core::error::Error + Sync + Send + 'static,

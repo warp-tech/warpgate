@@ -1,55 +1,75 @@
-use std::collections::HashMap;
-use std::ops::DerefMut;
-use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
 use serde::Serialize;
 use time::OffsetDateTime;
-use tokio::fs::File;
-use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
+use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing::error;
-use uuid::Uuid;
-use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{GlobalParams, try_block};
+use warpgate_common::try_block;
 use warpgate_db_entities::Recording;
 
-use super::{Error, Result};
+use super::storage::RecordingSink;
+use super::{Error, LiveMap, Result};
+
+pub struct WriterShutdown {
+    pub token: CancellationToken,
+    pub tracker: TaskTracker,
+}
+
+/// Capacity of both the disk-write queue and the live broadcast ring. They must
+/// stay equal: the live-stream lag heal relies on any item dropped from the
+/// broadcast ring already having left the disk queue (so it is on disk, or at
+/// most one item is mid-write). That holds only because a producer blocks on the
+/// full disk queue before it can broadcast, so the ring cannot outrun the queue
+/// by more than its own capacity. Raising the ring above the queue breaks it.
+const RECORDING_QUEUE_CAPACITY: usize = 1024;
+
+/// One item of a recording's primary data stream, broadcast to live viewers.
+/// `offset` is the total bytes written through this item (its end position in
+/// `data.ndjson`), so a viewer that loaded a snapshot covering the first `N`
+/// bytes keeps only chunks with `offset > N` — splicing the live tail onto the
+/// snapshot with neither a gap nor a duplicate. Both players use this: the
+/// snapshot boundary is the `Content-Length` of the raw file they fetched.
+#[derive(Clone, Debug)]
+pub struct LiveChunk {
+    pub offset: u64,
+    pub data: Bytes,
+}
 
 #[derive(Clone)]
 pub struct RawRecordingWriter {
     sender: mpsc::Sender<Bytes>,
-    live_sender: broadcast::Sender<Bytes>,
+    live_sender: broadcast::Sender<LiveChunk>,
+    /// Running byte offset to hand out. Live viewers rely on this matching the
+    /// on-disk byte order, which holds because every write to a recording is
+    /// serialized by `NDJsonRecordingWriter`'s `buf` lock: that writer is not
+    /// `Clone`, so tasks share the one instance (through an `Arc`) and its single
+    /// lock, and the counter can't diverge from disk order.
+    offset: Arc<AtomicU64>,
     drop_signal: mpsc::Sender<()>,
 }
 
 impl RawRecordingWriter {
     pub(crate) async fn new(
-        path: PathBuf,
+        mut sink: RecordingSink,
         model: Recording::Model,
-        db: Arc<Mutex<DatabaseConnection>>,
-        live: Option<Arc<Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>>>,
-        params: &GlobalParams,
+        db: DatabaseConnection,
+        live: Option<LiveMap>,
+        shutdown: WriterShutdown,
     ) -> Result<Self> {
-        let file = File::options()
-            .append(true)
-            .create(true)
-            .open(&path)
-            .await?;
-        if params.should_secure_files() {
-            secure_file(&path)?;
-        }
-        let mut writer = BufWriter::new(file);
-        let (sender, mut receiver) = mpsc::channel::<Bytes>(1024);
+        let (sender, mut receiver) = mpsc::channel::<Bytes>(RECORDING_QUEUE_CAPACITY);
         let (drop_signal, mut drop_receiver) = mpsc::channel(1);
+        let WriterShutdown { token, tracker } = shutdown;
 
         // Register in the live-subscription map only when this file is the live stream
         // (see `RecordingWriterOpener::open`). Sidecars pass `None` so they don't clobber
         // the data writer's entry, which shares the same recording id.
-        let live_sender = broadcast::channel(128).0;
+        let live_sender = broadcast::channel(RECORDING_QUEUE_CAPACITY).0;
         if let Some(live) = live {
             {
                 let mut live = live.lock().await;
@@ -65,52 +85,66 @@ impl RawRecordingWriter {
             });
         }
 
-        tokio::spawn(async move {
+        tracker.spawn(async move {
             try_block!(async {
                 let mut last_flush = Instant::now();
                 loop {
                     if last_flush.elapsed() > Duration::from_secs(5) {
                         last_flush = Instant::now();
-                        writer.flush().await?;
+                        sink.flush().await?;
                     }
                     tokio::select! {
                         data = receiver.recv() => match data {
                             Some(bytes) => {
-                                writer.write_all(&bytes).await?;
+                                sink.write_all(&bytes).await?;
                             }
                             None => break,
                         },
+                        () = token.cancelled() => break,
                         () = tokio::time::sleep(Duration::from_millis(5000)) => ()
                     }
                 }
+
+                // Drain receiver in case writer was shut down
+                while let Ok(bytes) = receiver.try_recv() {
+                    sink.write_all(&bytes).await?;
+                }
                 Ok::<(), anyhow::Error>(())
             } catch (error: anyhow::Error) {
-                error!(%error, ?path, "Failed to write recording");
+                error!(%error, "Failed to write recording");
             });
+
+            // Complete the S3 object before the recording is marked ended, so a
+            // reader that switches to S3 on `ended` always finds the object. On
+            // failure the local scratch is kept (the recording is at least not lost).
 
             try_block!(async {
                 use sea_orm::ActiveValue::Set;
 
-                writer.flush().await?;
+                let cleanup_guard = sink.finalize().await?;
 
                 let id = model.id;
-                let db = db.lock().await;
+                let db = &db;
                 let recording = Recording::Entity::find_by_id(id)
-                    .one(&*db)
+                    .one(db)
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("Recording not found"))?;
                 let mut model: Recording::ActiveModel = recording.into();
                 model.ended = Set(Some(OffsetDateTime::now_utc()));
-                model.update(&*db).await?;
+                model.update(db).await?;
+
+                drop(cleanup_guard);
+
                 Ok::<(), anyhow::Error>(())
             } catch (error: anyhow::Error) {
-                error!(%error, ?path, "Failed to write recording");
+                error!(%error, "Failed to write recording");
             });
         });
 
         Ok(Self {
             sender,
             live_sender,
+            offset: Arc::new(AtomicU64::new(0)),
             drop_signal,
         })
     }
@@ -121,7 +155,10 @@ impl RawRecordingWriter {
             .send(data.clone())
             .await
             .map_err(|_| Error::Closed)?;
-        let _ = self.live_sender.send(data);
+        // Tag with the end byte offset (bytes written through this item) after it
+        // is durably queued, so a live viewer's offset matches the on-disk order.
+        let offset = self.offset.fetch_add(data.len() as u64, Ordering::SeqCst) + data.len() as u64;
+        let _ = self.live_sender.send(LiveChunk { offset, data });
         Ok(())
     }
 }
@@ -138,15 +175,6 @@ pub struct NDJsonRecordingWriter {
     buf: RwLock<Vec<u8>>,
 }
 
-impl Clone for NDJsonRecordingWriter {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            buf: RwLock::new(Vec::new()),
-        }
-    }
-}
-
 impl NDJsonRecordingWriter {
     pub(crate) fn new(inner: RawRecordingWriter) -> Self {
         Self {
@@ -158,9 +186,9 @@ impl NDJsonRecordingWriter {
     pub async fn write_json_line<I: Serialize>(&self, value: I) -> Result<usize> {
         let buf = &mut self.buf.write().await;
         buf.clear();
-        serde_json::to_writer(buf.deref_mut(), &value).map_err(Error::Serialization)?;
+        serde_json::to_writer(&mut **buf, &value).map_err(Error::Serialization)?;
         buf.push(b'\n');
-        self.inner.write(&buf).await?;
+        self.inner.write(buf).await?;
         Ok(buf.len())
     }
 }

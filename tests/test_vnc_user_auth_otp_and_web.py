@@ -128,7 +128,7 @@ class Test:
                 raise AssertionError("web approval was never the only remaining factor")
 
             r = await session.post(
-                f"{url}/@warpgate/api/auth/state/{auth_id}/approve", ssl=False
+                f"{url}/@warpgate/api/auth/state/{auth_id}/approve", json={"scope": "Once"}, ssl=False
             )
             assert r.status == 200
 

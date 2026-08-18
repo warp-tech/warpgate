@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-protocol-ssh"
-version = "0.26.1"
+version = "0.28.0-beta.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -8,11 +8,10 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-bimap = { version = "0.6", default-features = false, features = ["std"] }
 bytes.workspace = true
-curve25519-dalek = { version = "4.0.0", default-features = false } # pin due to build fail on x86
+curve25519-dalek = { version = "5.0.0", default-features = false } # pin due to build fail on x86
 dialoguer.workspace = true
-ed25519-dalek = { version = "2.0.0", default-features = false } # pin due to build fail on x86 in 2.1
+ed25519-dalek = { version = "3.0.0", default-features = false } # pin due to build fail on x86 in 2.1
 futures.workspace = true
 ratatui = { version = "0.30", default-features = false, features = [
     "crossterm",
@@ -27,11 +26,12 @@ thiserror.workspace = true
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tracing.workspace = true
-tui-input = { version = "0.14", default-features = false, features = [
+tui-input = { version = "0.15", default-features = false, features = [
     "ratatui-crossterm",
 ] }
 url.workspace = true
 uuid.workspace = true
+vt100 = "0.15"
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-common-http = { path = "../warpgate-common-http", default-features = false }

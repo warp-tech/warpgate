@@ -1,14 +1,18 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use config::{Config, Environment, File, FileFormat};
+use config::{Config, File, FileFormat};
 use notify::{RecursiveMode, Watcher, recommended_watcher};
 use tokio::sync::{Mutex, mpsc, watch};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateConfigStore};
+use warpgate_common::{
+    GlobalParams, WarpgateConfig, WarpgateConfigStore, clear_config_warnings, emit_config_warning,
+};
 
 pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig> {
+    clear_config_warnings();
+
     let mut store: serde_yaml::Value = Config::builder()
         .add_source(File::new(
             params
@@ -17,7 +21,6 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
                 .context("Invalid config path")?,
             FileFormat::Yaml,
         ))
-        .add_source(Environment::with_prefix("WARPGATE"))
         .build()
         .context("Could not load config")?
         .try_deserialize()
@@ -39,10 +42,10 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
     // each ignored key.
     let (store, ignored_keys) =
         deserialize_store_collecting_ignored(store).context("Could not load config")?;
-    for path in &ignored_keys {
-        warn!(
+    for path in ignored_keys {
+        emit_config_warning(format!(
             "Ignoring unknown config key `{path}` — likely a typo or a misplaced key; it has NO effect"
-        );
+        ));
     }
 
     let config = WarpgateConfig { store };
@@ -72,7 +75,9 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
     use serde_yaml::Value;
     if let Some(map) = store.as_mapping_mut() {
         if let Some(web_admin) = map.remove(Value::String("web_admin".into())) {
-            warn!("The `web_admin` config section is deprecated. Rename it to `http`.");
+            emit_config_warning(
+                "The `web_admin` config section is deprecated. Rename it to `http`.".to_owned(),
+            );
             map.insert(Value::String("http".into()), web_admin);
         }
 
@@ -100,6 +105,34 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
                     user.insert(Value::String("require".into()), new_require);
                 }
             }
+        }
+
+        // `ssh.keepalive_interval` used to be read as a raw `Duration`, so old
+        // configs carry the `{secs, nanos}` shape where a humantime string is
+        // now expected.
+        if let Some(Value::Mapping(ssh)) = map.get_mut(Value::String("ssh".into())) {
+            let key = Value::String("keepalive_interval".into());
+            if let Some(Value::Mapping(legacy)) = ssh.get(&key) {
+                let duration = std::time::Duration::new(
+                    legacy.get("secs").and_then(Value::as_u64).unwrap_or(0),
+                    legacy
+                        .get("nanos")
+                        .and_then(Value::as_u64)
+                        .and_then(|n| u32::try_from(n).ok())
+                        .unwrap_or(0),
+                );
+                let humantime = humantime::format_duration(duration).to_string();
+                emit_config_warning(format!(
+                    "Deprecated duration format for `ssh.keepalive_interval` — replace it with `{humantime}`"
+                ));
+                ssh.insert(key, Value::String(humantime));
+            }
+        }
+
+        if store.get("recordings").is_some() {
+            emit_config_warning(
+                "The `recordings` config section is deprecated. Its values have been imported into the database, you can remove this section from the file.".to_owned()
+            );
         }
     }
 }
@@ -164,11 +197,37 @@ pub async fn watch_config(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     fn parse(yaml: &str) -> (WarpgateConfigStore, Vec<String>) {
         let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
         deserialize_store_collecting_ignored(value).unwrap()
+    }
+
+    #[test]
+    fn migrates_legacy_keepalive_interval() {
+        let mut value: serde_yaml::Value = serde_yaml::from_str(
+            "ssh:\n  keepalive_interval:\n    secs: 90\n    nanos: 0\n  inactivity_timeout: 5m\n",
+        )
+        .unwrap();
+        check_and_migrate_config(&mut value);
+
+        let (store, ignored) = deserialize_store_collecting_ignored(value).unwrap();
+        assert!(ignored.is_empty(), "unexpected ignored keys: {ignored:?}");
+        assert_eq!(store.ssh.keepalive_interval, Some(Duration::from_secs(90)));
+        assert_eq!(store.ssh.inactivity_timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn keeps_humantime_keepalive_interval() {
+        let mut value: serde_yaml::Value =
+            serde_yaml::from_str("ssh:\n  keepalive_interval: 1m\n").unwrap();
+        check_and_migrate_config(&mut value);
+
+        let (store, _) = deserialize_store_collecting_ignored(value).unwrap();
+        assert_eq!(store.ssh.keepalive_interval, Some(Duration::from_secs(60)));
     }
 
     #[test]

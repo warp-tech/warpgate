@@ -1,10 +1,16 @@
+#![feature(gethostname)]
+
 pub mod analytics;
 pub mod auth;
 mod auth_state_store;
+pub mod cluster;
 mod config_providers;
 pub mod consts;
+mod credential_encryption;
 mod data;
 pub mod db;
+mod db_auth;
+mod listener_status;
 pub mod logging;
 pub mod login_protection;
 mod protocols;
@@ -16,7 +22,10 @@ mod state;
 pub mod ticket_requests;
 pub use auth_state_store::*;
 pub use config_providers::*;
+pub use credential_encryption::*;
 pub use data::*;
+pub use db_auth::*;
+pub use listener_status::*;
 pub use protocols::*;
 pub use secret_backend_registry::SecretBackendRegistry;
 pub use services::*;

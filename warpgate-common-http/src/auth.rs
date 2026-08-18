@@ -1,12 +1,15 @@
 use std::ops::Deref;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use poem::Request;
 use poem::http::uri::{Authority, Scheme};
 use poem::session::Session;
 use serde::{Deserialize, Serialize};
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
+use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_db_entities::Parameters;
 
 use crate::request::{trusted_host_header, trusted_proto};
@@ -14,11 +17,10 @@ use crate::request::{trusted_host_header, trusted_proto};
 /// Used to enforce the re-authentication policy (web_auth_max_age_seconds)
 const AUTH_TIME_SESSION_KEY: &str = "auth_time";
 
-fn now_unix() -> i64 {
+fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 pub fn stamp_session_auth_time(session: &Session) {
@@ -38,22 +40,16 @@ pub async fn web_reauth_required(
         return Ok(false);
     }
 
-    let Some(max_age) = Parameters::Entity::get(&*ctx.services().db.lock().await)
-        .await?
-        .web_auth_max_age_seconds
-    else {
+    let Some(max_age) = ctx.parameters().await?.web_auth_max_age_seconds else {
         return Ok(false);
     };
 
-    let Some(auth_time) = session.get::<i64>(AUTH_TIME_SESSION_KEY) else {
+    let Some(auth_time) = session.get::<u64>(AUTH_TIME_SESSION_KEY) else {
         return Ok(true);
     };
 
-    Ok(now_unix() - auth_time >= max_age)
+    Ok(now_unix() - auth_time >= max_age.cast_unsigned())
 }
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct AuthStateId(pub Uuid);
 
 /// Represents the source of authentication of a session
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -65,7 +61,9 @@ pub enum SessionAuthorization {
     Ticket {
         user_id: Uuid,
         username: String,
-        target_name: String,
+        /// The row the ticket was issued for. Pinned by id so a rename — or a
+        /// new target claiming the old name — can't redirect the session.
+        target_id: Uuid,
     },
 }
 
@@ -87,14 +85,24 @@ impl SessionAuthorization {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum RequestAuthorization {
     Session(SessionAuthorization),
-    UserToken { user_id: Uuid, username: String },
+    UserToken {
+        user_id: Uuid,
+        username: String,
+    },
     AdminToken,
+    /// Auth between cluster peers
+    ClusterToken,
 }
 
 #[derive(Clone)]
 pub struct UnauthenticatedRequestContext {
     services: warpgate_core::Services,
     should_trust_x_forwarded: bool,
+    /// Request-scoped cache of the global parameters row, loaded at most once
+    /// per request on first access. The base context injected at startup is
+    /// shared across requests, so [`Self::for_request`] gives each request its
+    /// own empty cell to keep the snapshot request-scoped.
+    parameters: Arc<OnceCell<Parameters::Model>>,
 }
 
 /// Provided to API handlers as Data<>
@@ -110,11 +118,35 @@ impl UnauthenticatedRequestContext {
         Self {
             services,
             should_trust_x_forwarded,
+            parameters: Arc::new(OnceCell::new()),
+        }
+    }
+
+    /// A copy for a single request, with a fresh empty parameter cache.
+    #[must_use]
+    pub fn for_request(&self) -> Self {
+        Self {
+            services: self.services.clone(),
+            should_trust_x_forwarded: self.should_trust_x_forwarded,
+            parameters: Arc::new(OnceCell::new()),
         }
     }
 
     pub const fn services(&self) -> &warpgate_core::Services {
         &self.services
+    }
+
+    /// The global parameters, cached for the duration of the request. Prefer
+    /// this over `Parameters::Entity::get` in request handlers so a request
+    /// reads the row at most once.
+    pub async fn parameters(&self) -> Result<&Parameters::Model, WarpgateError> {
+        self.parameters
+            .get_or_try_init(|| async {
+                Parameters::Entity::get(&self.services.db)
+                    .await
+                    .map_err(WarpgateError::from)
+            })
+            .await
     }
 
     pub fn to_authenticated(&self, auth: RequestAuthorization) -> AuthenticatedRequestContext {
@@ -170,22 +202,54 @@ impl Deref for AuthenticatedRequestContext {
     }
 }
 
+/// Proof that the caller is acting as a full user and not a ticket
+/// Created only by RequestAuthorization::as_full_user
+/// (compile time enforcement)
+#[derive(Debug, Clone)]
+pub struct FullUserAuthorization(AuthStateUserInfo);
+
+impl FullUserAuthorization {
+    pub const fn user_id(&self) -> Uuid {
+        self.0.id
+    }
+
+    pub fn username(&self) -> &str {
+        &self.0.username
+    }
+}
+
 impl RequestAuthorization {
     /// Returns a username if one is present (admin token has none)
     pub const fn username(&self) -> Option<&String> {
         match self {
             Self::Session(auth) => Some(auth.username()),
             Self::UserToken { username, .. } => Some(username),
-            Self::AdminToken => None,
+            Self::AdminToken | Self::ClusterToken => None,
         }
     }
 
-    /// Returns a user ID if present in the authorization context.
+    /// Returns a user ID if present in the authorization context or nil UUID
     pub const fn user_id(&self) -> Uuid {
         match self {
             Self::Session(auth) => auth.user_id(),
             Self::UserToken { user_id, .. } => *user_id,
-            Self::AdminToken => Uuid::nil(),
+            Self::AdminToken | Self::ClusterToken => Uuid::nil(),
+        }
+    }
+
+    /// Ticket requests cannot grant access to user-scoped functions such as cred management
+    pub fn as_full_user(&self) -> Option<FullUserAuthorization> {
+        match self {
+            Self::Session(SessionAuthorization::User { user_id, username })
+            | Self::UserToken { user_id, username } => {
+                Some(FullUserAuthorization(AuthStateUserInfo {
+                    id: *user_id,
+                    username: username.clone(),
+                }))
+            }
+            Self::Session(SessionAuthorization::Ticket { .. })
+            | Self::AdminToken
+            | Self::ClusterToken => None,
         }
     }
 }
@@ -193,4 +257,41 @@ impl RequestAuthorization {
 /// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
 pub fn is_localhost_host(host: &str) -> bool {
     host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::{RequestAuthorization, SessionAuthorization};
+
+    #[test]
+    fn only_full_accounts_are_full_users() {
+        // A ticket is scoped to a single target: it must never resolve to a
+        // full account, or credential/token/admin endpoints would be reachable
+        // with it.
+        let ticket = RequestAuthorization::Session(SessionAuthorization::Ticket {
+            user_id: Uuid::nil(),
+            username: "alice".into(),
+            target_id: Uuid::nil(),
+        });
+        assert!(ticket.as_full_user().is_none());
+
+        // A user session and a user's API token are full accounts.
+        let user = RequestAuthorization::Session(SessionAuthorization::User {
+            user_id: Uuid::nil(),
+            username: "alice".into(),
+        });
+        assert!(user.as_full_user().is_some());
+
+        let token = RequestAuthorization::UserToken {
+            user_id: Uuid::nil(),
+            username: "alice".into(),
+        };
+        assert!(token.as_full_user().is_some());
+
+        // Machine tokens carry no user identity.
+        assert!(RequestAuthorization::AdminToken.as_full_user().is_none());
+        assert!(RequestAuthorization::ClusterToken.as_full_user().is_none());
+    }
 }

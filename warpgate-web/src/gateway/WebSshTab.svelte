@@ -346,14 +346,16 @@
             color="secondary"
             class="modal-button"
             onclick={() => zmodem.resolveConfirm(false)}
-            >Reject</Button
         >
+            Reject
+        </Button>
         <Button
             color="primary"
             class="modal-button"
             onclick={() => zmodem.resolveConfirm(true)}
-            >Accept</Button
         >
+            Accept
+        </Button>
     </ModalFooter>
 </Modal>
 

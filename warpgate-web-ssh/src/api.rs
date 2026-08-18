@@ -7,8 +7,8 @@ use poem::web::websocket::{Message, WebSocket};
 use poem::web::{Data, Path};
 use poem::{IntoResponse, handler};
 use uuid::Uuid;
+use warpgate_common_http::SessionKeepalive;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
-use warpgate_protocol_ssh::known_hosts::KnownHosts;
 
 use crate::manager::WebSshClientManager;
 use crate::protocol::{ClientMessage, ServerMessage};
@@ -19,6 +19,7 @@ pub async fn ws_handler(
     Path(session_id): Path<Uuid>,
     ctx: Data<&AuthenticatedRequestContext>,
     manager: Data<&Arc<WebSshClientManager>>,
+    session_keepalive: Option<Data<&SessionKeepalive>>,
     ws: WebSocket,
 ) -> poem::Result<impl IntoResponse> {
     let requesting_user_id = ctx.auth.user_id();
@@ -38,7 +39,7 @@ pub async fn ws_handler(
     session.cancel_disconnect_timer().await;
 
     let manager = (*manager).clone();
-    let db = ctx.services().db.clone();
+    let session_keepalive = session_keepalive.map(|x| x.guard());
 
     Ok(ws.on_upgrade(move |socket| async move {
         let (mut sink, mut stream) = socket.split();
@@ -73,7 +74,7 @@ pub async fn ws_handler(
                         Some(Ok(Message::Text(text))) => {
                             #[allow(clippy::collapsible_if)]
                             if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text)
-                                && let Some(reply) = handle_client_message(&session, &db, client_msg).await
+                                && let Some(reply) = handle_client_message(&session, client_msg).await
                                 && let Ok(json) = serde_json::to_string(&reply) {
                                 if sink.send(Message::Text(json)).await.is_err() {
                                     break;
@@ -99,12 +100,13 @@ pub async fn ws_handler(
         }
 
         session.start_disconnect_timer(manager.clone()).await;
+
+        drop(session_keepalive);
     }))
 }
 
 async fn handle_client_message(
     session: &WebSshSession,
-    db: &std::sync::Arc<tokio::sync::Mutex<sea_orm::DatabaseConnection>>,
     msg: ClientMessage,
 ) -> Option<ServerMessage> {
     match msg {
@@ -115,7 +117,7 @@ async fn handle_client_message(
             Some(ServerMessage::ChannelOpened { channel_id })
         }
         ClientMessage::Input { channel_id, data } => {
-            session.send_input(channel_id, data);
+            session.send_input(channel_id, data).await;
             None
         }
         ClientMessage::Resize {
@@ -132,13 +134,6 @@ async fn handle_client_message(
         }
         ClientMessage::AcceptHostKey => {
             if let Some(pending) = session.take_pending_host_key().await {
-                let known_hosts = KnownHosts::new(db);
-                if let Err(e) = known_hosts
-                    .trust(&pending.host, pending.port, &pending.key)
-                    .await
-                {
-                    tracing::error!(?e, "Failed to save accepted host key");
-                }
                 let _ = pending.reply.send(true);
             }
             None

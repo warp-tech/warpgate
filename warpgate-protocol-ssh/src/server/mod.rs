@@ -1,3 +1,4 @@
+mod channel_registry;
 mod channel_writer;
 mod russh_handler;
 mod service_output;
@@ -20,7 +21,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::net::detect_port_knock;
+use warpgate_common::helpers::net::accept_client;
 use warpgate_core::{Services, SessionStateInit, State};
 use warpgate_db_entities::Parameters;
 
@@ -74,21 +75,15 @@ async fn _handle_connection(
     mut stream: TcpStream,
     proxy_protocol: bool,
 ) -> Result<()> {
-    stream.set_nodelay(true)?;
-
-    if detect_port_knock(&stream).await {
+    let Some(remote_address) = accept_client(&mut stream, proxy_protocol).await else {
         return Ok(());
-    }
-
-    let remote_address =
-        warpgate_common::helpers::proxy_protocol::remote_address(&mut stream, proxy_protocol)
-            .await?;
+    };
 
     let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
     let server_handle = State::register_session(
         &services.state,
-        &crate::PROTOCOL_NAME,
+        crate::PROTOCOL_NAME,
         SessionStateInit {
             remote_address: Some(remote_address),
             handle: Box::new(session_handle),
@@ -102,17 +97,12 @@ async fn _handle_connection(
     let (event_tx, event_rx) = unbounded_channel();
 
     let banner = {
-        let db = services.db.lock().await;
-        let text = Parameters::Entity::get(&db).await?.ssh_banner;
-        if text.trim().is_empty() {
-            None
-        } else {
-            // Normalize line endings for terminal display.
-            Some(format!(
-                "{}\r\n",
-                text.replace("\r\n", "\n").replace('\n', "\r\n")
-            ))
-        }
+        let db = &services.db;
+        // Normalize line endings for terminal display.
+        Parameters::Entity::get(db)
+            .await?
+            .banner_text()
+            .map(|text| format!("{}\r\n", text.replace("\r\n", "\n").replace('\n', "\r\n")))
     };
 
     let handler = ServerHandler { event_tx, banner };
@@ -204,8 +194,8 @@ where
 
 pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> {
     let parameters = {
-        let db = services.db.lock().await;
-        Parameters::Entity::get(&db).await?
+        let db = &services.db;
+        Parameters::Entity::get(db).await?
     };
 
     let mut methods_vec: Vec<MethodKind> = Vec::new();

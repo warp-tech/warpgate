@@ -1,0 +1,278 @@
+--- ironrdp-session-0.11.0/src/active_stage.rs
++++ base/src/active_stage.rs
+@@ -229,10 +229,11 @@
+         self.fast_path_processor = processor;
+     }
+
+-    /// Updates the share_id used by the x224 processor for encoding ShareDataPdu.
++    /// Updates the share_id used when encoding slow-path responses and fast-path frame acknowledgements.
+     /// Must be called during Deactivation-Reactivation if the server assigns a new share_id.
+     pub fn set_share_id(&mut self, share_id: u32) {
+         self.x224_processor.set_share_id(share_id);
++        self.fast_path_processor.set_share_id(share_id);
+     }
+
+     pub fn set_enable_server_pointer(&mut self, enable_server_pointer: bool) {
+--- ironrdp-session-0.11.0/src/fast_path.rs
++++ base/src/fast_path.rs
+@@ -21,6 +21,32 @@
+ use crate::pointer::PointerCache;
+ use crate::{SessionError, SessionErrorExt as _, SessionResult, custom_err, reason_err, rfx};
+
++/// Warpgate fork: re-pack bitmap pixel data so each row holds exactly `dst_row_bytes`
++/// and there are `rows` of them, dropping any right/bottom padding the server added.
++///
++/// RDP servers may pad `TS_BITMAP_DATA` beyond the destination rectangle: the width up
++/// to a multiple of 4 pixels (xrdp) and/or each row up to a multiple of 4 bytes. The
++/// `DecodedImage::apply_*` functions re-chunk the source at the rectangle width, so any
++/// padding offsets every subsequent row and shears the image. `src_row_bytes` is the
++/// stride of `data`. Returns `None` (use `data` unchanged) when there is no padding to
++/// strip or the buffer is too short to re-pack.
++fn repack_bitmap_to_rectangle(
++    data: &[u8],
++    src_row_bytes: usize,
++    dst_row_bytes: usize,
++    rows: usize,
++) -> Option<Vec<u8>> {
++    if src_row_bytes <= dst_row_bytes {
++        return None;
++    }
++    let mut out = Vec::with_capacity(dst_row_bytes.checked_mul(rows)?);
++    for r in 0..rows {
++        let start = r.checked_mul(src_row_bytes)?;
++        out.extend_from_slice(data.get(start..start.checked_add(dst_row_bytes)?)?);
++    }
++    Some(out)
++}
++
+ #[derive(Debug)]
+ pub enum UpdateKind {
+     None,
+@@ -51,6 +77,10 @@
+ }
+
+ impl Processor {
++    pub fn set_share_id(&mut self, share_id: u32) {
++        self.marker_processor.share_id = share_id;
++    }
++
+     pub fn update_mouse_pos(&mut self, x: u16, y: u16) {
+         self.mouse_pos_update = Some((x, y));
+     }
+@@ -192,6 +218,22 @@
+             trace!("{update:?}");
+             buf.clear();
+
++            // Warpgate fork: servers may pad TS_BITMAP_DATA beyond the destination
++            // rectangle (see repack_bitmap_to_rectangle), so every decoded bitmap is
++            // cropped to the rectangle before it reaches the apply_* functions.
++            let rect_width = usize::from(update.rectangle.width());
++            let rect_height = usize::from(update.rectangle.height());
++            let stride_px = usize::from(update.width);
++            // Compressed streams decode to a tightly packed `update.width` stride.
++            let crop_tight = |data: &[u8], bpp: usize| {
++                repack_bitmap_to_rectangle(data, stride_px * bpp, rect_width * bpp, rect_height)
++            };
++            // Uncompressed rows are additionally padded to a multiple of 4 bytes.
++            let crop_padded = |data: &[u8], bpp: usize| {
++                let src_row = ((stride_px * bpp) + 3) & !3;
++                repack_bitmap_to_rectangle(data, src_row, rect_width * bpp, rect_height)
++            };
++
+             // Bitmap data is either compressed or uncompressed, depending
+             // on whether the BITMAP_COMPRESSION flag is present in the
+             // flags field.
+@@ -211,7 +253,10 @@
+                         usize::from(update.width),
+                         usize::from(update.height),
+                     ) {
+-                        Ok(()) => image.apply_rgb24(&buf, &update.rectangle, true)?,
++                        Ok(()) => {
++                            let c = crop_tight(&buf, 3);
++                            image.apply_rgb24(c.as_deref().unwrap_or(&buf), &update.rectangle, true)?
++                        }
+                         Err(err) => {
+                             warn!("Invalid RDP6_BITMAP_STREAM: {err}");
+                             update.rectangle.clone()
+@@ -230,11 +275,25 @@
+                         usize::from(update.height),
+                         usize::from(update.bits_per_pixel),
+                     ) {
+-                        Ok(RlePixelFormat::Rgb16) => image.apply_rgb16_bitmap(&buf, &update.rectangle)?,
+-                        Ok(RlePixelFormat::Rgb15) => image.apply_rgb15_bitmap(&buf, &update.rectangle)?,
+-                        Ok(RlePixelFormat::Rgb24) => image.apply_bgr24_bitmap(&buf, &update.rectangle)?,
++                        Ok(RlePixelFormat::Rgb16) => {
++                            let c = crop_tight(&buf, 2);
++                            image.apply_rgb16_bitmap(c.as_deref().unwrap_or(&buf), &update.rectangle)?
++                        }
++                        Ok(RlePixelFormat::Rgb15) => {
++                            let c = crop_tight(&buf, 2);
++                            image.apply_rgb15_bitmap(c.as_deref().unwrap_or(&buf), &update.rectangle)?
++                        }
++                        Ok(RlePixelFormat::Rgb24) => {
++                            let c = crop_tight(&buf, 3);
++                            image.apply_bgr24_bitmap(c.as_deref().unwrap_or(&buf), &update.rectangle)?
++                        }
+                         Ok(RlePixelFormat::Rgb8) => {
+-                            image.apply_rgb8_with_palette(&buf, &update.rectangle, self.palette.colors())?
++                            let c = crop_tight(&buf, 1);
++                            image.apply_rgb8_with_palette(
++                                c.as_deref().unwrap_or(&buf),
++                                &update.rectangle,
++                                self.palette.colors(),
++                            )?
+                         }
+
+                         Err(e) => {
+@@ -251,46 +310,18 @@
+                 trace!("Uncompressed raw bitmap");
+
+                 let bpp = usize::from(update.bits_per_pixel);
+-                let width = usize::from(update.width);
+-                let bytes_per_pixel = bpp.div_ceil(8);
+-                let row_bytes = width * bytes_per_pixel;
+-                let padded_row_bytes = (row_bytes + 3) & !3;
+-
+-                if padded_row_bytes != row_bytes {
+-                    // Strip per-row padding before passing to the bitmap apply functions,
+-                    // which expect tightly packed pixel data.
+-                    buf.clear();
+-                    for row in update.bitmap_data.chunks(padded_row_bytes) {
+-                        let end = row_bytes.min(row.len());
+-                        buf.extend_from_slice(&row[..end]);
+-                    }
++                let c = crop_padded(update.bitmap_data, bpp.div_ceil(8));
++                let data = c.as_deref().unwrap_or(update.bitmap_data);
+
+-                    match update.bits_per_pixel {
+-                        8 => image.apply_rgb8_with_palette(&buf, &update.rectangle, self.palette.colors())?,
+-                        15 => image.apply_rgb15_bitmap(&buf, &update.rectangle)?,
+-                        16 => image.apply_rgb16_bitmap(&buf, &update.rectangle)?,
+-                        24 => image.apply_bgr24_bitmap(&buf, &update.rectangle)?,
+-                        32 => image.apply_rgb32_bitmap(&buf, PixelFormat::BgrX32, &update.rectangle)?,
+-                        _ => {
+-                            warn!("Unsupported uncompressed bitmap depth: {bpp} bpp");
+-                            update.rectangle.clone()
+-                        }
+-                    }
+-                } else {
+-                    match update.bits_per_pixel {
+-                        8 => image.apply_rgb8_with_palette(
+-                            update.bitmap_data,
+-                            &update.rectangle,
+-                            self.palette.colors(),
+-                        )?,
+-                        15 => image.apply_rgb15_bitmap(update.bitmap_data, &update.rectangle)?,
+-                        16 => image.apply_rgb16_bitmap(update.bitmap_data, &update.rectangle)?,
+-                        24 => image.apply_bgr24_bitmap(update.bitmap_data, &update.rectangle)?,
+-                        32 => image.apply_rgb32_bitmap(update.bitmap_data, PixelFormat::BgrX32, &update.rectangle)?,
+-                        _ => {
+-                            warn!("Unsupported uncompressed bitmap depth: {bpp} bpp");
+-                            update.rectangle.clone()
+-                        }
++                match update.bits_per_pixel {
++                    8 => image.apply_rgb8_with_palette(data, &update.rectangle, self.palette.colors())?,
++                    15 => image.apply_rgb15_bitmap(data, &update.rectangle)?,
++                    16 => image.apply_rgb16_bitmap(data, &update.rectangle)?,
++                    24 => image.apply_bgr24_bitmap(data, &update.rectangle)?,
++                    32 => image.apply_rgb32_bitmap(data, PixelFormat::BgrX32, &update.rectangle)?,
++                    _ => {
++                        warn!("Unsupported uncompressed bitmap depth: {bpp} bpp");
++                        update.rectangle.clone()
+                     }
+                 }
+             };
+--- ironrdp-session-0.11.0/src/x224/mod.rs
++++ base/src/x224/mod.rs
+@@ -146,6 +146,35 @@
+     fn process_io_channel(&self, data_ctx: SendDataIndicationCtx<'_>) -> SessionResult<Vec<ProcessorOutput>> {
+         debug_assert_eq!(data_ctx.channel_id, self.io_channel_id);
+
++        let Some((first_pdu, mut remaining)) = split_share_control_pdu(data_ctx.user_data)? else {
++            return self.process_single_io_channel(data_ctx);
++        };
++
++        let mut outputs = self.process_single_io_channel(SendDataIndicationCtx {
++            user_data: first_pdu,
++            ..data_ctx
++        })?;
++
++        while !remaining.is_empty() {
++            let Some((pdu, rest)) = split_share_control_pdu(remaining)? else {
++                return Err(reason_err!(
++                    "IO channel",
++                    "non-Share Control data follows a Share Control PDU"
++                ));
++            };
++            outputs.extend(self.process_single_io_channel(SendDataIndicationCtx {
++                user_data: pdu,
++                ..data_ctx
++            })?);
++            remaining = rest;
++        }
++
++        Ok(outputs)
++    }
++
++    fn process_single_io_channel(&self, data_ctx: SendDataIndicationCtx<'_>) -> SessionResult<Vec<ProcessorOutput>> {
++        debug_assert_eq!(data_ctx.channel_id, self.io_channel_id);
++
+         let io_channel = ironrdp_pdu::rdp::headers::decode_io_channel(data_ctx).map_err(SessionError::decode)?;
+
+         match io_channel {
+@@ -279,6 +308,55 @@
+     }
+ }
+
++/// Splits the first Share Control PDU from an MCS I/O-channel payload.
++///
++/// Enhanced-security servers may concatenate several Share Control PDUs in one
++/// `SendDataIndication`. The `totalLength` field delimits each PDU. A payload that does
++/// not begin with a Share Control header is left intact for alternate I/O-channel
++/// formats such as a Basic Security Header carrying a multitransport request.
++fn split_share_control_pdu(data: &[u8]) -> SessionResult<Option<(&[u8], &[u8])>> {
++    const HEADER_PREFIX_SIZE: usize = 4;
++    const SHARE_CONTROL_HEADER_SIZE: usize = 6;
++    const SHARE_CONTROL_TYPE_MASK: u16 = 0x000f;
++    const SHARE_CONTROL_VERSION: u16 = 0x0010;
++
++    let Some(prefix) = data.get(..HEADER_PREFIX_SIZE) else {
++        return Ok(None);
++    };
++    let mut header = [0_u8; HEADER_PREFIX_SIZE];
++    header.copy_from_slice(prefix);
++    let [length_lo, length_hi, type_lo, type_hi] = header;
++
++    let pdu_type_with_version = u16::from_le_bytes([type_lo, type_hi]);
++    let pdu_type = pdu_type_with_version & SHARE_CONTROL_TYPE_MASK;
++    let version = pdu_type_with_version & !SHARE_CONTROL_TYPE_MASK;
++    let is_share_control = version == SHARE_CONTROL_VERSION && matches!(pdu_type, 1 | 3 | 6 | 7 | 10);
++    if !is_share_control {
++        return Ok(None);
++    }
++
++    let length = usize::from(u16::from_le_bytes([length_lo, length_hi]));
++    if length < SHARE_CONTROL_HEADER_SIZE {
++        return Err(reason_err!("IO channel", "invalid Share Control PDU length: {length}"));
++    }
++
++    let pdu = data.get(..length).ok_or_else(|| {
++        reason_err!(
++            "IO channel",
++            "Share Control PDU length {length} exceeds remaining MCS payload length {}",
++            data.len()
++        )
++    })?;
++    let remaining = data.get(length..).ok_or_else(|| {
++        reason_err!(
++            "IO channel",
++            "failed to advance past Share Control PDU of length {length}"
++        )
++    })?;
++
++    Ok(Some((pdu, remaining)))
++}
++
+ /// Processes a vector of [`SvcMessage`] in preparation for sending them to the server on the `channel_id` channel.
+ ///
+ /// This includes chunkifying the messages, adding MCS, x224, and tpkt headers, and encoding them into a buffer.

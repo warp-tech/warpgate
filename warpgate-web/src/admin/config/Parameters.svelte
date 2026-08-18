@@ -4,8 +4,10 @@
     import {
         AnalyticsConsent,
         api,
+        type OpenTargetsInNewTabMode,
         type ParameterValues,
         type PasswordLoginMode,
+        type SshHostKeyVerificationMode,
         type TargetClickAction,
     } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
@@ -26,7 +28,54 @@
 
     let parameters: ParameterValues | undefined = $state()
     let hasSsoProviders = $state(false)
+
+    // Switching the storage kind / credential mode replaces the object with a
+    // fresh variant, since the tagged enum can't hold both shapes at once.
+    function setStorageKind(kind: string): void {
+        if (!parameters) {
+            return
+        }
+        parameters.recordingsStorage =
+            kind === 'S3'
+                ? {
+                      kind: 'S3',
+                      bucket: '',
+                      region: 'us-east-1',
+                      pathStyle: false,
+                      prefix: '',
+                      credentials: { mode: 'Auto' },
+                  }
+                : { kind: 'Disk', path: './data/recordings' }
+    }
+
+    function setCredentialMode(mode: string): void {
+        if (parameters?.recordingsStorage.kind !== 'S3') {
+            return
+        }
+        // Omit secretAccessKey so an untouched field keeps the stored secret.
+        parameters.recordingsStorage.credentials =
+            mode === 'Static'
+                ? { mode: 'Static', accessKeyId: '' }
+                : { mode: 'Auto' }
+    }
     let updateError: string | undefined = $state()
+    let testResult: { success: boolean; error?: string } | undefined = $state()
+
+    // Sends the edited config as-is; an untouched secret round-trips as
+    // undefined and the server refills it from the stored value.
+    async function testStorage(): Promise<void> {
+        if (parameters?.recordingsStorage.kind !== 'S3') {
+            return
+        }
+        testResult = undefined
+        testResult = await api.testRecordingsStorage({
+            recordingsStorageConfig: parameters.recordingsStorage,
+        })
+        if (!testResult.success) {
+            throw new Error(testResult.error ?? 'Connection failed')
+        }
+    }
+
     let formEl: HTMLFormElement | undefined = $state()
     let formValid = $state(true)
 
@@ -284,41 +333,57 @@
                                     </HelpText>
                                 </Subsection>
 
-                                <Subsection title="Quirks">
-                                    <label
-                                        for="recordScp"
-                                        class="d-flex align-items-center mt-2"
+                                <Subsection title="Target host keys">
+                                    <FormGroup
+                                        floating
+                                        label="Unknown host key handling"
                                     >
-                                        <Input
-                                            id="recordScp"
-                                            class="mb-0 me-2"
-                                            type="switch"
-                                            bind:checked={parameters.recordScp}
-                                        />
-                                        <div>Record legacy SCP transfers</div>
-                                    </label>
-                                    <HelpText>
-                                        Legacy SCP works over an exec channel
-                                        and would be normally recorded like any
-                                        other command. Disable to prevent SCP
-                                        recordings from wasting storage space.
-                                    </HelpText>
-
-                                    <FormGroup>
-                                        <label class="mb-2" for="sshBanner"
-                                            >Login banner</label
+                                        <select
+                                            id="sshHostKeyVerification"
+                                            class="form-select"
+                                            value={parameters.sshHostKeyVerification ?? 'Prompt'}
+                                            onchange={e => parameters.sshHostKeyVerification = e.currentTarget.value as SshHostKeyVerificationMode}
                                         >
-                                        <Input
-                                            id="sshBanner"
-                                            type="textarea"
-                                            rows={4}
-                                            bind:value={parameters.sshBanner}
-                                        />
+                                            <option value="Prompt">
+                                                Ask the user to trust the key
+                                            </option>
+                                            <option value="AutoAccept">
+                                                Trust and remember the key
+                                            </option>
+                                            <option value="AutoReject">
+                                                Refuse to connect
+                                            </option>
+                                            <option value="Ignore">
+                                                Don't check host keys at all
+                                            </option>
+                                        </select>
                                     </FormGroup>
-                                    <HelpText class="mt-3 mb-3">
-                                        Optional message shown to SSH clients
-                                        during authentication.
-                                    </HelpText>
+                                </Subsection>
+
+                                <Subsection title="Quirks">
+                                    {#if parameters.recordingsEnable}
+                                        <label
+                                            for="recordScp"
+                                            class="d-flex align-items-center mt-2"
+                                        >
+                                            <Input
+                                                id="recordScp"
+                                                class="mb-0 me-2"
+                                                type="switch"
+                                                bind:checked={parameters.recordScp}
+                                            />
+                                            <div>
+                                                Record legacy SCP transfers
+                                            </div>
+                                        </label>
+                                        <HelpText>
+                                            Legacy SCP works over an exec
+                                            channel and would be normally
+                                            recorded like any other command.
+                                            Disable to prevent SCP recordings
+                                            from wasting storage space.
+                                        </HelpText>
+                                    {/if}
                                 </Subsection>
                             </Section>
 
@@ -492,6 +557,28 @@
                                     </select>
                                 </FormGroup>
 
+                                <FormGroup floating label="Open targets in">
+                                    <select
+                                        id="openTargetsInNewTab"
+                                        class="form-select"
+                                        value={parameters.openTargetsInNewTab ?? 'DefaultOn'}
+                                        onchange={e => parameters.openTargetsInNewTab = e.currentTarget.value as OpenTargetsInNewTabMode}
+                                    >
+                                        <option value="DefaultOn">
+                                            New tab by default
+                                        </option>
+                                        <option value="DefaultOff">
+                                            Same tab by default
+                                        </option>
+                                        <option value="ForcedOn">
+                                            Always a new tab
+                                        </option>
+                                        <option value="ForcedOff">
+                                            Always the same tab
+                                        </option>
+                                    </select>
+                                </FormGroup>
+
                                 <label
                                     for="showSessionMenu"
                                     class="d-flex align-items-center"
@@ -579,6 +666,26 @@
                                     it for new sessions by the same user to the
                                     same target from the same IP. Blank = never
                                     cache approvals.
+                                </HelpText>
+
+                                <FormGroup>
+                                    <label class="mb-2" for="banner">
+                                        Login banner
+                                    </label>
+                                    <Input
+                                        id="banner"
+                                        type="textarea"
+                                        rows={4}
+                                        bind:value={parameters.banner}
+                                    />
+                                </FormGroup>
+                                <HelpText class="mt-3 mb-3">
+                                    Optional message shown to users when they
+                                    connect to a target: during SSH
+                                    authentication, as a modal in the UI and
+                                    proxied HTTP targets, on the RDP/VNC hold
+                                    screen and as a PostgreSQL connection
+                                    notice.
                                 </HelpText>
                             </Section>
 
@@ -705,13 +812,14 @@
                                         </div>
                                         <HelpText>
                                             Each block is
-                                            <strong
-                                                >multiplier × the previous block
-                                                duration</strong
-                                            >, capped at the maximum. The repeat
-                                            count resets only after the cooldown
-                                            period of <em>clean</em> activity —
-                                            not when a block expires.
+                                            <strong>
+                                                multiplier × the previous block
+                                                duration
+                                            </strong>, capped at the maximum.
+                                            The repeat count resets only after
+                                            the cooldown period of
+                                            <em>clean</em>
+                                            activity — not when a block expires.
                                         </HelpText>
 
                                         <Subsection title="User lockout">
@@ -822,13 +930,181 @@
                                             Manage active blocks &amp; lockouts
                                             on the
                                             <a
-                                                href="/config/login-protection"
+                                                href="/status/login-protection"
                                                 use:link
-                                                >Login protection</a
                                             >
+                                                Login protection
+                                            </a>
                                             page.
                                         </InfoBox>
                                     </Subsection>
+                                {/if}
+                            </Section>
+
+                            <Section id="recordings" title="Session recordings">
+                                <label
+                                    for="recordingsEnable"
+                                    class="d-flex align-items-center mb-2"
+                                >
+                                    <Input
+                                        id="recordingsEnable"
+                                        class="mb-0 me-2"
+                                        type="switch"
+                                        bind:checked={parameters.recordingsEnable}
+                                    />
+                                    <div>Record sessions</div>
+                                </label>
+
+                                <FormGroup floating label="Storage backend">
+                                    <select
+                                        id="recordingsStorage"
+                                        class="form-select"
+                                        value={parameters.recordingsStorage.kind}
+                                        onchange={e => setStorageKind(e.currentTarget.value)}
+                                    >
+                                        <option value="Disk">Local disk</option>
+                                        <option value="S3">
+                                            S3 / S3-compatible
+                                        </option>
+                                    </select>
+                                </FormGroup>
+
+                                <HelpText>
+                                    Changing the storage location applies to new
+                                    recordings only, copy existing recordings to
+                                    the new location manually.
+                                </HelpText>
+
+                                {#if parameters.recordingsStorage.kind === 'Disk'}
+                                    {@const disk = parameters.recordingsStorage}
+                                    <FormGroup floating label="Recordings path">
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            bind:value={disk.path}
+                                        >
+                                    </FormGroup>
+                                {:else if parameters.recordingsStorage.kind === 'S3'}
+                                    {@const s3 = parameters.recordingsStorage}
+                                    <FormGroup floating label="Bucket">
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            required
+                                            bind:value={s3.bucket}
+                                        >
+                                    </FormGroup>
+                                    <HelpText>
+                                        The bucket needs a CORS policy allowing
+                                        this origin to issue GET requests with a
+                                        Range header.
+                                    </HelpText>
+                                    <FormGroup floating label="Region">
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            placeholder="us-east-1"
+                                            required
+                                            bind:value={s3.region}
+                                        >
+                                    </FormGroup>
+                                    <FormGroup
+                                        floating
+                                        label="Endpoint (blank = AWS)"
+                                    >
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            placeholder="https://minio.example.com:9000"
+                                            value={s3.endpoint ?? ''}
+                                            oninput={e => s3.endpoint = e.currentTarget.value || undefined}
+                                        >
+                                    </FormGroup>
+                                    <FormGroup floating label="Key prefix">
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            bind:value={s3.prefix}
+                                        >
+                                    </FormGroup>
+                                    <label
+                                        for="recordingsS3PathStyle"
+                                        class="d-flex align-items-center mb-2"
+                                    >
+                                        <Input
+                                            id="recordingsS3PathStyle"
+                                            class="mb-0 me-2"
+                                            type="switch"
+                                            bind:checked={s3.pathStyle}
+                                        />
+                                        <div>Path-style addressing</div>
+                                    </label>
+                                    <HelpText>
+                                        Most S3-compatible services (e.g. MinIO,
+                                        RustFS) require path-style addressing.
+                                    </HelpText>
+
+                                    <FormGroup floating label="Credentials">
+                                        <select
+                                            id="recordingsS3CredentialMode"
+                                            class="form-select"
+                                            value={s3.credentials.mode}
+                                            onchange={e => setCredentialMode(e.currentTarget.value)}
+                                        >
+                                            <option value="Auto">
+                                                Automatic (environment or
+                                                role-based)
+                                            </option>
+                                            <option value="Static">
+                                                Access key
+                                            </option>
+                                        </select>
+                                    </FormGroup>
+
+                                    {#if s3.credentials.mode === 'Static'}
+                                        {@const creds = s3.credentials}
+                                        <FormGroup
+                                            floating
+                                            label="Access key ID"
+                                        >
+                                            <input
+                                                type="text"
+                                                class="form-control"
+                                                autocomplete="off"
+                                                bind:value={creds.accessKeyId}
+                                            >
+                                        </FormGroup>
+                                        <FormGroup
+                                            floating
+                                            label="Secret access key"
+                                        >
+                                            <input
+                                                type="password"
+                                                class="form-control"
+                                                autocomplete="off"
+                                                placeholder="********"
+                                                bind:value={creds.secretAccessKey}
+                                            >
+                                        </FormGroup>
+                                    {/if}
+
+                                    <AsyncButton
+                                        type="button"
+                                        color="secondary"
+                                        click={testStorage}
+                                    >
+                                        Test connection
+                                    </AsyncButton>
+                                    {#if testResult}
+                                        <Alert
+                                            color={testResult.success ? 'success' : 'danger'}
+                                            class="mt-2 mb-0"
+                                        >
+                                            {testResult.success
+                                                ? 'Connection successful'
+                                                : testResult.error}
+                                        </Alert>
+                                    {/if}
                                 {/if}
                             </Section>
 
@@ -845,8 +1121,9 @@
                                         class="ms-auto"
                                         color="secondary"
                                         onclick={() => analyticsModalOpen = true}
-                                        >Change</Button
                                     >
+                                        Change
+                                    </Button>
                                 </div>
                             </Section>
                         </SectionedForm>

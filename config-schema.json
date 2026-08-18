@@ -89,11 +89,14 @@
       }
     },
     "recordings": {
-      "$ref": "#/$defs/RecordingsConfig",
-      "default": {
-        "enable": false,
-        "path": "./data/recordings"
-      }
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecordingsConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "secrets": {
       "$ref": "#/$defs/SecretsConfig",
@@ -142,25 +145,6 @@
       "enum": [
         "vault",
         "openbao"
-      ]
-    },
-    "Duration": {
-      "type": "object",
-      "properties": {
-        "nanos": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "secs": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "secs",
-        "nanos"
       ]
     },
     "HttpConfig": {
@@ -552,6 +536,7 @@
           "minimum": 0
         },
         "host_key_verification": {
+          "description": "Only seeds the `ssh_host_key_verification` parameter when the database\nrow is first created; the admin UI owns the setting afterwards.",
           "$ref": "#/$defs/SshHostKeyVerificationMode",
           "default": "prompt"
         },
@@ -560,13 +545,9 @@
           "default": "5m"
         },
         "keepalive_interval": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Duration"
-            },
-            {
-              "type": "null"
-            }
+          "type": [
+            "string",
+            "null"
           ],
           "default": null
         },
@@ -590,7 +571,8 @@
       "enum": [
         "prompt",
         "auto_accept",
-        "auto_reject"
+        "auto_reject",
+        "ignore"
       ]
     },
     "SshKeysBackend": {

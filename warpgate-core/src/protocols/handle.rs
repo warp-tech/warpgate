@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tracing::{Instrument, info_span};
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{SessionId, Target, WarpgateError};
+use warpgate_common::{SessionId, Target, WarpgateError, redact_target_secrets};
 use warpgate_db_entities::Session;
 
 use crate::logging::AuditEvent;
@@ -16,19 +16,22 @@ pub trait SessionHandle {
     fn close(&mut self);
 }
 
-#[derive(Clone)]
+// Deliberately not Clone: `Drop` tears the session down, so a second copy
+// would end the session while the first is still proxying. Share via the
+// surrounding `Arc<Mutex<..>>` instead.
 pub struct WarpgateServerHandle {
     id: SessionId,
-    db: Arc<Mutex<DatabaseConnection>>,
+    db: DatabaseConnection,
     state: Arc<Mutex<State>>,
     session_state: Arc<Mutex<SessionState>>,
     rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
+    provisional: bool,
 }
 
 impl WarpgateServerHandle {
     pub const fn new(
         id: SessionId,
-        db: Arc<Mutex<DatabaseConnection>>,
+        db: DatabaseConnection,
         state: Arc<Mutex<State>>,
         session_state: Arc<Mutex<SessionState>>,
         rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
@@ -39,11 +42,26 @@ impl WarpgateServerHandle {
             state,
             session_state,
             rate_limiters_registry,
+            provisional: false,
         }
     }
 
     pub const fn id(&self) -> SessionId {
         self.id
+    }
+
+    /// Marks a session that was registered before its authentication finished
+    /// (so that it is addressable across the cluster while a web approval is
+    /// pending). Dropping the handle while still provisional deletes the
+    /// session instead of ending it, so an attempt that never became a session
+    /// leaves nothing behind.
+    pub const fn mark_provisional(&mut self) {
+        self.provisional = true;
+    }
+
+    /// Turns a provisional session into a real one.
+    pub const fn confirm(&mut self) {
+        self.provisional = false;
     }
 
     pub const fn session_state(&self) -> &Arc<Mutex<SessionState>> {
@@ -54,73 +72,71 @@ impl WarpgateServerHandle {
         use sea_orm::ActiveValue::Set;
 
         {
+            // Kubernetes reuses one session handle for many concurrent requests, so
+            // most calls are no-ops, and the lock must span the no-op check and the
+            // commit to keep the DB and in-memory state consistent.
             let mut state = self.session_state.lock().await;
-            state.user_info = Some(user_info.clone());
+            if state.user_info.as_ref() == Some(&user_info) {
+                return Ok(());
+            }
+
+            Session::Entity::update_many()
+                .set(Session::ActiveModel {
+                    username: Set(Some(user_info.username.clone())),
+                    ..Default::default()
+                })
+                .filter(Session::Column::Id.eq(self.id))
+                .exec(&self.db)
+                .await?;
+
+            state.user_info = Some(user_info);
             state.emit_change();
         }
 
-        let db = self.db.lock().await;
-
-        Session::Entity::update_many()
-            .set(Session::ActiveModel {
-                username: Set(Some(user_info.username)),
-                ..Default::default()
-            })
-            .filter(Session::Column::Id.eq(self.id))
-            .exec(&*db)
-            .await?;
-
-        drop(db);
-
-        self.update_rate_limiters().await?;
-
-        Ok(())
+        self.update_rate_limiters().await
     }
 
     pub async fn set_target(&self, target: &Target) -> Result<(), WarpgateError> {
         use sea_orm::ActiveValue::Set;
-        let previous_target = {
+
+        {
             let mut state = self.session_state.lock().await;
+            if state.target.as_ref() == Some(target) {
+                return Ok(());
+            }
+
+            let user_info = state.user_info.clone().ok_or_else(|| {
+                WarpgateError::InconsistentState("set_target called before set_user_info".into())
+            })?;
+
+            let mut snapshot = serde_json::to_value(target)?;
+            redact_target_secrets(&mut snapshot);
+
+            Session::Entity::update_many()
+                .set(Session::ActiveModel {
+                    target_snapshot: Set(Some(snapshot.to_string())),
+                    ..Default::default()
+                })
+                .filter(Session::Column::Id.eq(self.id))
+                .exec(&self.db)
+                .await?;
+
             let previous_target = state.target.replace(target.clone());
             state.emit_change();
-            previous_target
-        };
 
-        let Some(user_info) = self.session_state.lock().await.user_info.clone() else {
-            return Err(WarpgateError::InconsistentState(
-                "set_target called before set_user_info".into(),
-            ));
-        };
-
-        let db = self.db.lock().await;
-
-        Session::Entity::update_many()
-            .set(Session::ActiveModel {
-                target_snapshot: Set(Some(
-                    serde_json::to_string(&target).map_err(WarpgateError::other)?,
-                )),
-                ..Default::default()
-            })
-            .filter(Session::Column::Id.eq(self.id))
-            .exec(&*db)
-            .await?;
-
-        drop(db);
-
-        if previous_target.map(|x| x.id) != Some(target.id) {
-            AuditEvent::TargetSessionStarted {
-                session_id: self.id,
-                target_id: target.id,
-                target_name: target.name.clone(),
-                user_id: user_info.id,
-                username: user_info.username.clone(),
+            if previous_target.map(|x| x.id) != Some(target.id) {
+                AuditEvent::TargetSessionStarted {
+                    session_id: self.id,
+                    target_id: target.id,
+                    target_name: target.name.clone(),
+                    user_id: user_info.id,
+                    username: user_info.username,
+                }
+                .emit();
             }
-            .emit();
         }
 
-        self.update_rate_limiters().await?;
-
-        Ok(())
+        self.update_rate_limiters().await
     }
 
     pub async fn wrap_stream<S>(
@@ -154,7 +170,12 @@ impl Drop for WarpgateServerHandle {
         let id = self.id;
         let state = self.state.clone();
         let session_state = self.session_state.clone();
+        let provisional = self.provisional;
         tokio::spawn(async move {
+            if provisional {
+                state.lock().await.discard_session(id).await;
+                return;
+            }
             // session ID from the span is needed for the audit log to get stored in the DB
             let username = session_state
                 .lock()

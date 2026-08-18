@@ -1,9 +1,12 @@
-import type { BootstrapThemeColor } from 'gateway/lib/api'
+import { router } from 'svelte-spa-router'
 
-export function getCSSColorFromThemeColor(color?: BootstrapThemeColor): string {
-    // Handle capitalized color names from API (e.g., "Primary" -> "primary")
-    const colorLower = (color ?? 'Secondary').toLowerCase()
-    return `var(--bs-${colorLower});`
+/**
+ * Query parameters of the current hash route, e.g. `#/foo?a=b`.
+ * Read once at component init - svelte-spa-router keeps the component
+ * mounted when only the querystring changes.
+ */
+export function routeQueryParams(): URLSearchParams {
+    return new URLSearchParams(router.querystring ?? '')
 }
 
 export function downloadBlob(content: string, filename: string): void {

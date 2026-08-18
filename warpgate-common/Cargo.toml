@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-common"
-version = "0.26.1"
+version = "0.28.0-beta.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -10,6 +10,7 @@ name = "config-schema"
 path = "src/config_schema.rs"
 
 [dependencies]
+aes-gcm.workspace = true
 anyhow.workspace = true
 argon2.workspace = true
 async-trait.workspace = true
@@ -43,6 +44,8 @@ schemars.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+strum = { version = "0.28", features = ["derive"] }
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true

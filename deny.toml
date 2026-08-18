@@ -68,15 +68,16 @@ feature-depth = 1
 # output a note when they are encountered.
 ignore = [
     "RUSTSEC-2023-0071", # Marvin Attack: potential key recovery through timing sidechannels
-    "RUSTSEC-2024-0436", # paste is unmaintained, used transitively by russh
     "RUSTSEC-2025-0134", # rustls-pemfile is deprecated but poem is still using it
-    "RUSTSEC-2026-0002", # lru: IterMut violates Stacked Borrows - transitive dep, no update available
     "RUSTSEC-2026-0099", # rustls: Name constraints were accepted for certificates asserting a wildcard name
     "RUSTSEC-2026-0098", # rustls: Name constraints for URI names were incorrectly accepted
     "RUSTSEC-2026-0104", # an older pinned version of rustls-webpki used by AWS SDK
     "RUSTSEC-2026-0173", # proc-macro-error2 is unmaintained - waiting for a sea-orm update
     "RUSTSEC-2026-0195", # quick-xml memory exhaustion - we don't parse untrusted XML
+    "RUSTSEC-2026-0253", # lru: unsound LruCache::pop - an old version pinned by aws-sdk-s3
     "RUSTSEC-2026-0194", # quick-xml quadratic time - see above
+    "RUSTSEC-2021-0141", # dotenv is unmaintaned - only used for dev
+    "RUSTSEC-2026-0258", # h2 empty data frame leak - only used by old hyper-rustls via aws sdk
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -115,7 +116,7 @@ allow = [
 ]
 # List of crates to deny
 deny = [
-    "openssl-sys"
+    { crate = "openssl-sys", wrappers = ["openssl", "tokio-openssl"], reason = "RDP legacy TLS compatibility uses vendored OpenSSL for older Windows Schannel targets" }
     #"ansi_term@0.11.0",
     #{ crate = "ansi_term@0.11.0", reason = "you can specify a reason it is banned" },
     # Wrapper crates can optionally be specified to allow the crate when it
@@ -201,6 +202,7 @@ allow = [
     "MPL-2.0",
     "CDLA-Permissive-2.0",
     "Unlicense",
+    "IJG",
 ]
 
 [[licenses.clarify]]

@@ -370,31 +370,33 @@
             size="sm"
             color="link"
             on:click={() => {
-        editingCertificateCredential = true
-    }}
-            >Issue certificate</Button
+                editingCertificateCredential = true
+            }}
         >
+            Issue certificate
+        </Button>
         <Button
             id="addPublicKeyCredentialButton"
             size="sm"
             color="link"
             on:click={() => {
-            if (ldapLinked) {
-                return
-            }
-            editingPublicKeyCredentialInstance = null
-            editingPublicKeyCredential = true
-        }}
+                if (ldapLinked) {
+                    return
+                }
+                editingPublicKeyCredentialInstance = null
+                editingPublicKeyCredential = true
+            }}
             title={ldapLinked ? 'SSH keys are managed by LDAP' : ''}
-            >Add public key</Button
         >
-        <Tooltip delay="250" target="addPublicKeyCredentialButton" animation
-            >Public key credentials will be loaded from LDAP</Tooltip
-        >
+            Add public key
+        </Button>
+        <Tooltip delay="250" target="addPublicKeyCredentialButton" animation>
+            Public key credentials will be loaded from LDAP
+        </Tooltip>
 
-        <Button size="sm" color="link" on:click={() => creatingOtp = true}
-            >Add OTP</Button
-        >
+        <Button size="sm" color="link" on:click={() => creatingOtp = true}>
+            Add OTP
+        </Button>
         <Button
             size="sm"
             color="link"
@@ -402,8 +404,9 @@
         editingSsoCredentialInstance = null
         editingSsoCredential = true
     }}
-            >Add SSO</Button
         >
+            Add SSO
+        </Button>
     {/if}
 </div>
 
@@ -439,10 +442,10 @@
                         <div class="label d-flex align-items-center">
                             {credential.label}
                         </div>
-                        <small class="d-block text-muted abbreviate"
-                            >SHA-256:
-                            <code>{credential.fingerprint}</code></small
-                        >
+                        <small class="d-block text-muted abbreviate">
+                            SHA-256:
+                            <code>{credential.fingerprint}</code>
+                        </small>
                     </div>
                     <CredentialUsedStateBadge {credential} />
                 {/if}
@@ -504,7 +507,7 @@
                 <div class="mb-1">
                     <strong>{protocol.name}</strong>
                 </div>
-                {#if effectiveCredentials.size > 0}
+                {#if effectiveCredentials.size > 0 || credentialPolicy[protocol.id]?.length}
                     <AuthPolicyEditor
                         bind:value={credentialPolicy}
                         existingCredentials={credentials}
@@ -512,9 +515,9 @@
                         protocolId={protocol.id}
                     />
                 {:else}
-                    <span class="text-muted"
-                        >No authentication methods available for this protocol</span
-                    >
+                    <span class="text-muted">
+                        No authentication methods available for this protocol
+                    </span>
                 {/if}
             </div>
         {/each}

@@ -17,18 +17,18 @@ pub async fn command(params: &GlobalParams, username: Option<&String>) -> Result
     let config = load_config(params, true)?;
     let services = Services::new(config.clone(), None, params.clone()).await?;
     if let Some(backend) = warpgate_protocol_ssh::keys_managed_externally(&config) {
-        info!("SSH keys are managed by secret backend '{backend}'; skipping local key generation");
+        info!("SSH host key is managed by secret backend '{backend}'; skipping local key generation");
     } else {
         warpgate_protocol_ssh::generate_keys_on_disk(&config, params, "host")?;
-        warpgate_protocol_ssh::generate_keys_on_disk(&config, params, "client")?;
     }
+    warpgate_protocol_ssh::ensure_client_keys(&services.db, &config, params).await?;
 
     let theme = ColorfulTheme::default();
-    let db = services.db.lock().await;
+    let db = &services.db;
 
     let users = User::Entity::find()
         .order_by_asc(User::Column::Username)
-        .all(&*db)
+        .all(db)
         .await?;
 
     let users: Result<Vec<UserConfig>, _> = users
@@ -72,7 +72,7 @@ pub async fn command(params: &GlobalParams, username: Option<&String>) -> Result
         id: Set(Uuid::new_v4()),
         ..UserPasswordCredential::from_password(&password).into()
     }
-    .insert(&*db)
+    .insert(db)
     .await?;
 
     user.credential_policy
@@ -84,7 +84,7 @@ pub async fn command(params: &GlobalParams, username: Option<&String>) -> Result
         credential_policy: Set(serde_json::to_value(Some(&user.credential_policy))?),
         ..Default::default()
     }
-    .update(&*db)
+    .update(db)
     .await?;
 
     info!("All done. You can now log in");

@@ -12,10 +12,11 @@ use openidconnect::{
     EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet, HttpClientError, IdToken,
     IdTokenClaims, IdTokenFields, LogoutRequest, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
     PkceCodeVerifier, PostLogoutRedirectUrl, RedirectUrl, RequestTokenError, Scope,
-    StandardErrorResponse, StandardTokenResponse, TokenResponse, UserInfoClaims, reqwest,
+    StandardErrorResponse, StandardTokenResponse, TokenResponse, UserInfoClaims, UserInfoError,
+    reqwest,
 };
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{debug, warn};
 
 use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
@@ -26,7 +27,7 @@ use crate::{SsoError, discover_metadata};
 /// and `display` (human-readable name).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub(crate) enum GroupClaimEntry {
+pub enum GroupClaimEntry {
     Str(String),
     Obj {
         #[serde(default)]
@@ -41,7 +42,7 @@ pub(crate) enum GroupClaimEntry {
 /// value as a bare scalar rather than a one-element array; both are accepted.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub(crate) enum GroupClaim {
+pub enum GroupClaim {
     One(GroupClaimEntry),
     Many(Vec<GroupClaimEntry>),
 }
@@ -52,7 +53,7 @@ pub(crate) enum GroupClaim {
 /// so role mappings may be keyed on either the stable group ID or its name.
 /// (A collision between one group's `display` and another's `value` would map
 /// both -- effectively impossible with opaque IDs.)
-pub(crate) fn flatten_group_claim(claim: GroupClaim) -> Vec<String> {
+pub fn flatten_group_claim(claim: GroupClaim) -> Vec<String> {
     let entries = match claim {
         GroupClaim::One(e) => vec![e],
         GroupClaim::Many(v) => v,
@@ -146,6 +147,17 @@ pub fn unverified_issuer(id_token_str: &str) -> Option<String> {
         .ok()?
         .claims
         .iss
+}
+
+/// `UserInfoError`'s own Display drops the response body and its Debug renders
+/// it as a byte array, both of which hide the provider's actual error message.
+fn describe_userinfo_error(err: &UserInfoError<HttpClientError<reqwest::Error>>) -> String {
+    match err {
+        UserInfoError::Response(status, body, _) => {
+            format!("HTTP {status}: {}", String::from_utf8_lossy(body))
+        }
+        e => format!("{e}"),
+    }
 }
 
 async fn make_client(
@@ -272,7 +284,7 @@ impl SsoClient {
         let user_info_req = client
             .user_info(token_response.access_token().to_owned(), None)
             .map_err(|err| {
-                error!("Failed to fetch userinfo: {err:?}");
+                debug!("Provider has no usable userinfo endpoint: {err}");
                 err
             })
             .ok();
@@ -282,7 +294,10 @@ impl SsoClient {
                 match user_info_req.request_async(&self.http_client).await {
                     Ok(userinfo) => Some(userinfo),
                     Err(err) => {
-                        error!("Failed to fetch userinfo: {err:?}");
+                        warn!(
+                            "Failed to fetch userinfo: {}",
+                            describe_userinfo_error(&err)
+                        );
                         None
                     }
                 }

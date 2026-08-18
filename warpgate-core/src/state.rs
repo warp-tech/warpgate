@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::error;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{ProtocolName, SessionId, Target, WarpgateError};
+use warpgate_common::{Protocol, SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
 use crate::logging::AuditEvent;
@@ -18,20 +18,24 @@ use crate::{SessionHandle, WarpgateServerHandle};
 
 pub struct State {
     pub sessions: HashMap<SessionId, Arc<Mutex<SessionState>>>,
-    db: Arc<Mutex<DatabaseConnection>>,
+    db: DatabaseConnection,
+    // Node IDs are random
+    node_id: Uuid,
     rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     change_sender: broadcast::Sender<()>,
 }
 
 impl State {
     pub fn new(
-        db: &Arc<Mutex<DatabaseConnection>>,
+        db: &DatabaseConnection,
         rate_limiter_registry: &Arc<Mutex<RateLimiterRegistry>>,
+        node_id: Uuid,
     ) -> Arc<Mutex<Self>> {
         let sender = broadcast::channel(2).0;
         Arc::new(Mutex::new(Self {
             sessions: HashMap::new(),
             db: db.clone(),
+            node_id,
             rate_limiter_registry: rate_limiter_registry.clone(),
             change_sender: sender,
         }))
@@ -39,7 +43,7 @@ impl State {
 
     pub async fn register_session(
         this: &Arc<Mutex<Self>>,
-        protocol: &ProtocolName,
+        protocol: Protocol,
         state: SessionStateInit,
     ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
         let this_copy = this.clone();
@@ -65,12 +69,13 @@ impl State {
                     .remote_address
                     .map_or_else(String::new, |x| x.to_string())),
                 protocol: Set(protocol.to_string()),
+                node_id: Set(self_.node_id),
                 ..Default::default()
             };
 
-            let db = self_.db.lock().await;
+            let db = &self_.db;
             values
-                .insert(&*db)
+                .insert(db)
                 .await
                 .context("Error inserting session")
                 .map_err(WarpgateError::from)?;
@@ -91,6 +96,19 @@ impl State {
         self.change_sender.subscribe()
     }
 
+    /// Removes a session that never completed authentication, deleting its row
+    /// rather than marking it ended — see
+    /// [`WarpgateServerHandle::mark_provisional`].
+    pub async fn discard_session(&mut self, id: SessionId) {
+        self.sessions.remove(&id);
+
+        if let Err(error) = Session::Entity::delete_by_id(id).exec(&self.db).await {
+            error!(%error, %id, "Could not delete session from the DB");
+        }
+
+        let _ = self.change_sender.send(());
+    }
+
     pub async fn remove_session(&mut self, id: SessionId) {
         if let Some(session_state) = self.sessions.remove(&id) {
             let state_guard = session_state.lock().await;
@@ -106,24 +124,11 @@ impl State {
             }
         }
 
-        if let Err(error) = self.mark_session_complete(id).await {
+        if let Err(error) = crate::db::mark_session_ended(&self.db, id).await {
             error!(%error, %id, "Could not update session in the DB");
         }
 
         let _ = self.change_sender.send(());
-    }
-
-    async fn mark_session_complete(&self, id: Uuid) -> Result<()> {
-        use sea_orm::ActiveValue::Set;
-        let db = self.db.lock().await;
-        let session = Session::Entity::find_by_id(id)
-            .one(&*db)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
-        let mut model: Session::ActiveModel = session.into();
-        model.ended = Set(Some(OffsetDateTime::now_utc()));
-        model.update(&*db).await?;
-        Ok(())
     }
 }
 

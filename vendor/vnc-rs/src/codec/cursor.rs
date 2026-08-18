@@ -1,8 +1,9 @@
-use crate::{PixelFormat, Rect, VncError, VncEvent};
 use std::future::Future;
+
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use super::uninit_vec;
+use crate::{PixelFormat, Rect, VncError, VncEvent};
 
 pub struct Decoder {}
 

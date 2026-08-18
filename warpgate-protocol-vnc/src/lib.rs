@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
-use warpgate_common::{ListenEndpoint, ProtocolName};
+use warpgate_common::{ListenEndpoint, Protocol};
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
@@ -12,7 +12,7 @@ mod server;
 pub use client::{VncClientHandles, connect};
 pub use server::bind_server;
 
-pub static PROTOCOL_NAME: ProtocolName = "VNC";
+pub const PROTOCOL_NAME: Protocol = Protocol::Vnc;
 
 pub struct VncProtocolServer {
     services: Services,

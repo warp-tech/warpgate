@@ -2,6 +2,7 @@ pub mod api;
 pub mod auth;
 mod config;
 pub mod consts;
+pub mod encryption;
 mod error;
 pub mod eventhub;
 pub mod helpers;

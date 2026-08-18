@@ -8,6 +8,25 @@ use bytes::Bytes;
 
 pub const DESKTOP_INPUT_CHANNEL_CAPACITY: usize = 256;
 
+pub const MAX_CLIPBOARD_BYTES: usize = 10 * 1024 * 1024;
+
+/// The longest prefix of `text` that fits in `max` bytes, cut on a char boundary.
+pub fn truncate_clipboard_contents(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.get(..end).unwrap_or("")
+}
+
+pub fn truncate_clipboard_contents_in_place(text: &mut String, max: usize) {
+    let end = truncate_clipboard_contents(text, max).len();
+    text.truncate(end);
+}
+
 /// A rectangular region of the remote framebuffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopRect {
@@ -40,6 +59,8 @@ pub enum DesktopEvent {
     RawImage { rect: DesktopRect, data: Bytes },
     /// A region updated with a JPEG-encoded image.
     JpegImage { rect: DesktopRect, data: Bytes },
+    /// A region updated with a lossless PNG.
+    PngImage { rect: DesktopRect, data: Bytes },
     /// A region was copied from elsewhere in the framebuffer.
     CopyRect {
         dst: DesktopRect,
@@ -56,20 +77,28 @@ pub enum DesktopEvent {
     Error(String),
 }
 
+/// A physical key position: a PC/AT set-1 "make" code, with `extended` marking the
+/// `E0` prefix that distinguishes e.g. the nav cluster from the numeric keypad.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Scancode {
+    pub code: u8,
+    pub extended: bool,
+}
+
 /// An input sent to a desktop backend (client -> server direction).
 #[derive(Debug, Clone)]
 pub enum DesktopInput {
     /// Pointer moved / button state changed. `buttons` is a button mask
     /// (bit 0 = left, bit 1 = middle, bit 2 = right, ...).
     Pointer { x: u16, y: u16, buttons: u8 },
-    /// A key was pressed or released, identified by its X11 keysym.
-    Key { keysym: u32, down: bool },
-    /// A key was pressed or released, identified by its raw PC/AT scancode
-    /// (set 1 "make" code). Emitted by native RDP viewers, which send scancodes
-    /// rather than keysyms; protocols without scancode input (e.g. VNC) ignore it.
-    Scancode {
-        code: u8,
-        extended: bool,
+    /// A key was pressed or released. Viewers report the key in whichever forms they
+    /// know: `keysym` is the character the key produces under the *viewer's* keyboard
+    /// layout, `scancode` is the layout-independent physical key position. Backends use
+    /// the form their protocol speaks — RDP the scancode, so the *target's* layout
+    /// decides the character; VNC the keysym, since RFB has no scancode input.
+    Key {
+        keysym: Option<u32>,
+        scancode: Option<Scancode>,
         down: bool,
     },
     /// Mouse wheel scrolled at `(x, y)`. `delta` is a signed notch count
@@ -84,4 +113,7 @@ pub enum DesktopInput {
     Clipboard(String),
     /// Request a full framebuffer refresh.
     Refresh,
+    /// The viewer's available display area changed; request the target resize its
+    /// desktop to `width`×`height`. Backends without dynamic-resize support ignore it.
+    Resize { width: u16, height: u16 },
 }

@@ -7,6 +7,7 @@
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Button, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
+    import { routeQueryParams } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
 
     import {
@@ -20,7 +21,7 @@
     } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
-    import { replace, router } from 'svelte-spa-router'
+    import { replace } from 'svelte-spa-router'
 
     let error: string | null = $state(null)
     let username = $state('')
@@ -43,10 +44,9 @@
         passwordLoginMode === PasswordLoginMode.Minimized,
     )
 
-    const nextURL =
-        new URLSearchParams(router.querystring ?? '').get('next') ?? undefined
-    const reauthRequired =
-        new URLSearchParams(router.querystring ?? '').get('reauth') === '1'
+    const urlParams = routeQueryParams()
+    const nextURL = urlParams.get('next') ?? undefined
+    const reauthRequired = urlParams.get('reauth') === '1'
     const serverErrorMessage = new URLSearchParams(location.search).get(
         'login_error',
     )
@@ -67,9 +67,21 @@
         await continueWithState()
     }
 
+    function sanitizeRedirect(url: string): string | undefined {
+        try {
+            const resolved = new URL(url, location.origin)
+            return resolved.origin === location.origin
+                ? resolved.href
+                : undefined
+        } catch {
+            return undefined
+        }
+    }
+
     function success() {
-        if (nextURL) {
-            location.assign(nextURL)
+        const target = nextURL ? sanitizeRedirect(nextURL) : undefined
+        if (target) {
+            location.assign(target)
         } else {
             replace('/')
         }
@@ -195,19 +207,19 @@
         </FormGroup>
 
         <Button
-            class="d-flex align-items-center"
+            class="d-flex align-items-center login-view-button"
             color="primary"
             type="submit"
             disabled={busy}
         >
-            Login
+            Log in
             <Fa class="ms-2" fw icon={faArrowRight} />
         </Button>
     </form>
 {/snippet}
 
 <Loadable promise={initPromise}>
-    <div class="mt-5">
+    <div class="content">
         <div class="page-summary-bar">
             {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
                 <h1>Welcome</h1>
@@ -252,80 +264,84 @@
             {@render localLoginForm()}
         {/if}
 
-        <div class="mt-3"></div>
-
         {#if reauthRequired}
-            <Alert color="warning"
-                >The security policy requires you to sign in again before
-                accessing this function.</Alert
-            >
+            <Alert class="mt-3" color="warning">
+                The security policy requires you to sign in again before
+                accessing this function.
+            </Alert>
         {/if}
         {#if credentialRejected || authState === ApiAuthState.Failed}
-            <Alert color="danger">Incorrect credentials</Alert>
+            <Alert class="mt-3" color="danger">Incorrect credentials</Alert>
         {/if}
         {#if authState === ApiAuthState.IpRejected}
-            <Alert color="danger"
-                >Login denied: your IP address is not in the allowed range for
-                this user</Alert
-            >
+            <Alert class="mt-3" color="danger">
+                Login denied: your IP address is not in the allowed range for
+                this user
+            </Alert>
         {/if}
         {#if serverErrorMessage}
-            <Alert color="danger">{serverErrorMessage}</Alert>
+            <Alert class="mt-3" color="danger">{serverErrorMessage}</Alert>
         {/if}
         {#if error}
-            <Alert color="danger">{error}</Alert>
+            <Alert class="mt-3" color="danger">{error}</Alert>
         {/if}
-    </div>
 
-    {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
-        <Loadable promise={ssoProvidersPromise}>
-            {#snippet children(ssoProviders)}
-                <div class="mt-3 sso-buttons">
-                    {#each ssoProviders as ssoProvider (ssoProvider.name)}
-                        <button
-                            type="button"
-                            class="btn btn-secondary"
-                            disabled={busy}
-                            onclick={() => startSSO(ssoProvider)}
-                        >
-                            {#if ssoProvider.kind === SsoProviderKind.Google}
-                                <Fa fw class="me-2" icon={faGoogle} />
-                            {/if}
-                            {#if ssoProvider.kind === SsoProviderKind.Azure}
-                                <Fa fw class="me-2" icon={faMicrosoft} />
-                            {/if}
-                            {#if ssoProvider.kind === SsoProviderKind.Apple}
-                                <Fa fw class="me-2" icon={faApple} />
-                            {/if}
-                            {ssoProvider.label || ssoProvider.name}
-                        </button>
-                    {/each}
-                </div>
-            {/snippet}
-        </Loadable>
-    {/if}
+        {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
+            <Loadable promise={ssoProvidersPromise}>
+                {#snippet children(ssoProviders)}
+                    {#if ssoProviders.length && passwordLoginAllowed && !(passwordLoginMinimized && !showPasswordLogin)}
+                        <div class="sso-separator"></div>
+                    {/if}
+                    <div class="sso-buttons">
+                        {#each ssoProviders as ssoProvider (ssoProvider.name)}
+                            <button
+                                type="button"
+                                class="btn btn-secondary login-view-button"
+                                disabled={busy}
+                                onclick={() => startSSO(ssoProvider)}
+                            >
+                                {#if ssoProvider.kind === SsoProviderKind.Google}
+                                    <Fa fw class="me-2" icon={faGoogle} />
+                                {/if}
+                                {#if ssoProvider.kind === SsoProviderKind.Azure}
+                                    <Fa fw class="me-2" icon={faMicrosoft} />
+                                {/if}
+                                {#if ssoProvider.kind === SsoProviderKind.Apple}
+                                    <Fa fw class="me-2" icon={faApple} />
+                                {/if}
+                                {ssoProvider.label || ssoProvider.name}
+                            </button>
+                        {/each}
+                    </div>
+                    {#if ssoProviders.length && passwordLoginAllowed && passwordLoginMinimized && !showPasswordLogin}
+                        <div class="sso-separator"></div>
+                    {/if}
+                {/snippet}
+            </Loadable>
+        {/if}
 
-    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginMinimized && !showPasswordLogin}
-        <div class="mt-3 text-center">
+        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginMinimized && !showPasswordLogin}
+            <div class="text-center">
+                <button
+                    type="button"
+                    class="btn btn-link"
+                    onclick={() => showPasswordLogin = true}
+                >
+                    Password login
+                </button>
+            </div>
+        {/if}
+
+        {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed && authState !== ApiAuthState.IpRejected}
             <button
                 type="button"
-                class="btn btn-link"
-                onclick={() => showPasswordLogin = true}
+                class="btn w-100 mt-3 btn-secondary login-view-button"
+                onclick={cancel}
             >
-                Password login
+                Cancel
             </button>
-        </div>
-    {/if}
-
-    {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed && authState !== ApiAuthState.IpRejected}
-        <button
-            type="button"
-            class="btn w-100 mt-3 btn-secondary"
-            onclick={cancel}
-        >
-            Cancel
-        </button>
-    {/if}
+        {/if}
+    </div>
 </Loadable>
 
 <style lang="scss">
@@ -347,5 +363,44 @@
         }
     }
 
+    .sso-separator {
+        position: relative;
+        text-align: center;
+        margin: 1.5rem 0;
+        font-style: italic;
+        font-size: 0.75rem;
+        opacity: 0.5;
 
+        &::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background-color: var(--bs-body-color);
+            opacity: 0.5;
+        }
+
+        &::after {
+            content: 'or';
+            position: relative;
+            display: inline-block;
+            padding: 0 1rem;
+            background-color: var(--bs-body-bg);
+        }
+    }
+
+    :global(.login-view-button) {
+        min-height: 45px;
+    }
+
+    .content {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+
+        padding-bottom: 5rem;
+        flex-grow: 1;
+    }
 </style>

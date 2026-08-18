@@ -3,12 +3,21 @@ use poem_openapi::OpenApi;
 mod admin_roles;
 mod secret_backends;
 mod certificate_credentials;
+pub mod cluster_proxy;
+// The per-permission `require` gate, `PermissionGranted`, and the cluster variant are consumed
+// by the Stage 3 endpoint migration; until every handler is moved onto these, parts of the
+// module are intentionally unused.
+#[allow(dead_code)]
+mod admin_scheme;
 mod common;
+pub(crate) use admin_scheme::{AdminContext, ClusterOrAdminContext};
+pub use common::admin_permission_set;
 mod known_hosts_detail;
 mod known_hosts_list;
 mod ldap_servers;
 mod login_protection;
 mod logs;
+mod network_status;
 mod otp_credentials;
 mod pagination;
 mod parameters;
@@ -68,7 +77,11 @@ pub fn get() -> impl OpenApi {
                 ldap_servers::ImportApi,
             ),
             parameters::Api,
-            (ssh_connection_test::Api, login_protection::Api),
+            (
+                ssh_connection_test::Api,
+                login_protection::Api,
+                network_status::Api,
+            ),
         ),
         (
             certificate_credentials::ListApi,

@@ -1,11 +1,13 @@
 <script lang="ts">
-    import { Input } from '@sveltestrap/sveltestrap'
+    import { faWarning } from '@fortawesome/free-solid-svg-icons'
+    import { Alert, Input, Tooltip } from '@sveltestrap/sveltestrap'
     import {
         CredentialKind,
         type UserRequireCredentialsPolicy,
     } from 'admin/lib/api'
     import InfoBox from 'common/InfoBox.svelte'
     import { SvelteSet } from 'svelte/reactivity'
+    import Fa from 'svelte-fa'
     import type { ExistingCredential } from './CredentialEditor.svelte'
 
     type ProtocolID =
@@ -60,7 +62,12 @@
                 'The client is shown a link to approve the login in the browser, and is held on a waiting screen until confirmed.',
             ],
         ]),
-        rdp: new Map(),
+        rdp: new Map([
+            [
+                [CredentialKind.WebUserApproval, true],
+                'The client is shown a link to approve the login in the browser, and is held on a waiting screen until confirmed.',
+            ],
+        ]),
         kubernetes: new Map([
             [
                 [CredentialKind.WebUserApproval, true],
@@ -87,6 +94,17 @@
         vc.add(CredentialKind.WebUserApproval)
         return vc
     })
+
+    const shownCredentials = $derived.by(() => {
+        const s = new Set(possibleCredentials)
+        for (const kind of value[protocolId] ?? []) {
+            s.add(kind)
+        }
+        return s
+    })
+
+    const isAvailable = (kind: CredentialKind) =>
+        validCredentials.has(kind) && possibleCredentials.has(kind)
 
     let isAny = $derived(!value[protocolId])
 
@@ -135,7 +153,7 @@
     }
 </script>
 
-<div class="d-flex wrapper">
+<div class="d-flex wrapper gap-3">
     <Input
         id={`policy-editor-${protocolId}`}
         type="switch"
@@ -144,16 +162,39 @@
         on:change={updateAny}
     />
     {#if !isAny}
-        {#each [...validCredentials] as type (type)}
-            {#if possibleCredentials.has(type)}
+        {#each [...shownCredentials] as type (type)}
+            {@const enabled = value[protocolId]?.includes(type) ?? false}
+            {@const mandatory = requirePassword && type === CredentialKind.Password}
+            {@const disabled = mandatory || (!isAvailable(type) && !enabled)}
+            <div
+                id={`policy-editor-${protocolId}${type}-wrap`}
+                class="d-flex align-items-center gap-2"
+            >
                 <Input
                     id={`policy-editor-${protocolId}${type}`}
                     type="switch"
-                    checked={value[protocolId]?.includes(type) || (requirePassword && type === CredentialKind.Password)}
-                    disabled={requirePassword && type === CredentialKind.Password}
+                    checked={enabled || mandatory}
+                    {disabled}
                     label={labels[type]}
                     on:change={() => toggle(type)}
                 />
+                {#if enabled && !isAvailable(type)}
+                    <Fa icon={faWarning} class="text-warning" />
+                {/if}
+            </div>
+            {#if disabled}
+                <Tooltip
+                    target={`policy-editor-${protocolId}${type}-wrap`}
+                    animation
+                    delay="250"
+                >
+                    {#if mandatory}
+                        This protocol always requires a password.
+                    {/if}
+                    {#if enabled && !isAvailable(type)}
+                        The user has no credential of this kind.
+                    {/if}
+                </Tooltip>
             {/if}
         {/each}
     {/if}
@@ -166,8 +207,5 @@
 <style lang="scss">
     .wrapper {
         flex-wrap: wrap;
-        :global(.form-switch) {
-            margin-right: 1rem;
-        }
     }
 </style>

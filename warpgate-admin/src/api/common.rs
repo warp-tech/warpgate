@@ -1,84 +1,50 @@
 use sea_orm::prelude::Expr;
-use sea_orm::sea_query::{Func, IntoCondition};
-use sea_orm::{
-    ColumnTrait, Condition, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QuerySelect,
-    RelationTrait,
-};
-use warpgate_common::{AdminPermission, WarpgateError};
-pub use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
-use warpgate_db_entities::{AdminRole, User, UserAdminRoleAssignment};
+use sea_orm::sea_query::{Alias, Func, IntoCondition, SimpleExpr};
+use sea_orm::{ColumnTrait, Condition, DbBackend, EntityTrait, ModelTrait, QueryFilter};
+use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
+pub use warpgate_common_http::RequestAuthorization;
+use warpgate_db_entities::{AdminRole, User};
+
+/// The admin permissions the request's principal holds — the single place that resolves the
+/// permission model from the DB. `has_admin_permission`, `is_user_admin` and the `/info` UI
+/// serialization all read the result instead of re-deriving it three different ways.
+///
+/// An admin token holds every permission; a ticket, a cluster token, or an unauthenticated
+/// caller holds none (a ticket is scoped to one target and must never confer admin rights).
+pub async fn admin_permission_set(
+    ctx: &warpgate_common_http::AuthenticatedRequestContext,
+) -> Result<AdminPermissionSet, WarpgateError> {
+    if matches!(ctx.auth, RequestAuthorization::AdminToken) {
+        return Ok(AdminPermissionSet::all());
+    }
+    let Some(full) = ctx.auth.as_full_user() else {
+        return Ok(AdminPermissionSet::none());
+    };
+
+    let db = &ctx.services().db;
+    let Some(user_model) = User::Entity::find()
+        .filter(User::Entity::username_eq_ci(full.username()))
+        .one(db)
+        .await?
+    else {
+        return Ok(AdminPermissionSet::none());
+    };
+
+    let roles = user_model.find_related(AdminRole::Entity).all(db).await?;
+    Ok(AdminPermissionSet::from_roles(
+        roles.into_iter().map(Into::into),
+    ))
+}
 
 pub async fn has_admin_permission(
     ctx: &warpgate_common_http::AuthenticatedRequestContext,
     specific_permission: Option<AdminPermission>,
 ) -> Result<bool, WarpgateError> {
-    // Admin tokens have all permissions
-    let auth = &ctx.auth;
-    if matches!(auth, RequestAuthorization::AdminToken) {
-        return Ok(true);
-    }
-
-    let username = match auth {
-        RequestAuthorization::Session(
-            SessionAuthorization::User { username, .. }
-            | SessionAuthorization::Ticket { username, .. },
-        )
-        | RequestAuthorization::UserToken { username, .. } => username,
-        RequestAuthorization::AdminToken => unreachable!(),
-    };
-
-    let db = ctx.services().db.lock().await;
-
-    let Some(user_model) = User::Entity::find()
-        .filter(User::Entity::username_eq_ci(username))
-        .one(&*db)
-        .await?
-    else {
-        return Ok(false);
-    };
-
-    let mut query = UserAdminRoleAssignment::Entity::find()
-        .filter(UserAdminRoleAssignment::Column::UserId.eq(user_model.id))
-        .join(
-            JoinType::InnerJoin,
-            UserAdminRoleAssignment::Relation::AdminRole.def(),
-        );
-
-    if let Some(perm) = specific_permission {
-        query = query.filter(match perm {
-            AdminPermission::TargetsCreate => AdminRole::Column::TargetsCreate.eq(true),
-            AdminPermission::TargetsEdit => AdminRole::Column::TargetsEdit.eq(true),
-            AdminPermission::TargetsDelete => AdminRole::Column::TargetsDelete.eq(true),
-
-            AdminPermission::UsersCreate => AdminRole::Column::UsersCreate.eq(true),
-            AdminPermission::UsersEdit => AdminRole::Column::UsersEdit.eq(true),
-            AdminPermission::UsersDelete => AdminRole::Column::UsersDelete.eq(true),
-
-            AdminPermission::AccessRolesCreate => AdminRole::Column::AccessRolesCreate.eq(true),
-            AdminPermission::AccessRolesEdit => AdminRole::Column::AccessRolesEdit.eq(true),
-            AdminPermission::AccessRolesDelete => AdminRole::Column::AccessRolesDelete.eq(true),
-            AdminPermission::AccessRolesAssign => AdminRole::Column::AccessRolesAssign.eq(true),
-
-            AdminPermission::SessionsView => AdminRole::Column::SessionsView.eq(true),
-            AdminPermission::SessionsTerminate => AdminRole::Column::SessionsTerminate.eq(true),
-
-            AdminPermission::RecordingsView => AdminRole::Column::RecordingsView.eq(true),
-
-            AdminPermission::TicketsCreate => AdminRole::Column::TicketsCreate.eq(true),
-            AdminPermission::TicketsDelete => AdminRole::Column::TicketsDelete.eq(true),
-
-            AdminPermission::ConfigEdit => AdminRole::Column::ConfigEdit.eq(true),
-
-            AdminPermission::AdminRolesManage => AdminRole::Column::AdminRolesManage.eq(true),
-
-            AdminPermission::TicketRequestsManage => {
-                AdminRole::Column::TicketRequestsManage.eq(true)
-            }
-        });
-    }
-
-    let count = query.count(&*db).await?;
-    Ok(count > 0)
+    let permissions = admin_permission_set(ctx).await?;
+    Ok(match specific_permission {
+        Some(permission) => permissions.contains(permission),
+        None => permissions.is_admin(),
+    })
 }
 
 pub async fn require_admin_permission(
@@ -95,16 +61,50 @@ pub async fn require_admin_permission(
     }
 }
 
+/// Gate for endpoints that might have to be forwarded between nodes - so they
+/// accept a cluster token as auth (the origin node has already authorized the
+/// admin before forwarding)
+pub async fn require_cluster_or_admin_permission(
+    ctx: &warpgate_common_http::AuthenticatedRequestContext,
+    permission: AdminPermission,
+) -> Result<(), WarpgateError> {
+    if matches!(ctx.auth, RequestAuthorization::ClusterToken) {
+        return Ok(());
+    }
+    require_admin_permission(ctx, Some(permission)).await
+}
+
 pub fn case_insensitive_search<C, I>(search: &str, columns: I) -> impl IntoCondition
 where
     C: ColumnTrait,
     I: IntoIterator<Item = C>,
 {
+    case_insensitive_search_expr(search, columns.into_iter().map(|c| Expr::col(c).into()))
+}
+
+/// [`case_insensitive_search`] over arbitrary expressions, for columns that need
+/// to be coerced into text first - see [`json_as_text`].
+pub fn case_insensitive_search_expr<I>(search: &str, expressions: I) -> impl IntoCondition
+where
+    I: IntoIterator<Item = SimpleExpr>,
+{
     let search_pattern = format!("%{}%", search.to_lowercase());
 
-    columns
+    expressions
         .into_iter()
-        .fold(Condition::any(), |condition, column| {
-            condition.add(Expr::expr(Func::lower(Expr::col(column))).like(search_pattern.clone()))
+        .fold(Condition::any(), |condition, expression| {
+            condition.add(Expr::expr(Func::lower(expression)).like(search_pattern.clone()))
         })
+}
+
+/// Casts a JSON column to text so that string functions such as `lower()` can be
+/// applied to it.
+///
+/// Postgres has no `lower(json)` overload and won't coerce implicitly, unlike
+/// SQLite and MySQL. MySQL in turn spells the cast target `char`, not `text`.
+pub fn json_as_text<C: ColumnTrait>(backend: DbBackend, column: C) -> SimpleExpr {
+    Expr::col(column).cast_as(match backend {
+        DbBackend::MySql => Alias::new("char"),
+        DbBackend::Postgres | DbBackend::Sqlite => Alias::new("text"),
+    })
 }

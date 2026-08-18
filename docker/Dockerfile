@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.3-labs
 # hadolint global ignore=DL3008
-FROM rust:1.97.0-bullseye@sha256:9a11136145d74a2c7b2a74a36163fe9a58f392ef7eba15c2cb5b10e3ef13f361 AS build
+FROM rust:1.97.1-bullseye@sha256:02d78ca3f928195c2a907543de778adfd728ad7e2a24fdc6aef582b7c77842e0 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -24,10 +24,9 @@ WORKDIR /opt/warpgate
 RUN just npm ci \
     && just openapi \
     && just npm run build \
-    && just build-rdp-helper \
-    && cargo build --features mysql,postgres --release
+    && cargo build --features mysql,postgres,rdp-openssl-tls --release
 
-FROM debian:bullseye-20260623@sha256:e7100042ddfd3c1fb9d4a5bf15acbdb1058d7bb3340142916d3413a5c001fc89
+FROM debian:bullseye-20260803@sha256:99cdf7792e25416bd801861ccd8e2fb27fb527b25e8d9a8704ebc3ead2015675
 LABEL maintainer=heywoodlh
 ARG USER_ID=1000
 

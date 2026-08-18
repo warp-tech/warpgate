@@ -1,4 +1,6 @@
+mod channel_audit;
 mod client;
+mod command_detector;
 mod common;
 mod compat;
 mod keys;
@@ -7,16 +9,17 @@ mod server;
 use std::fmt::Debug;
 
 use anyhow::Result;
+pub use channel_audit::ChannelAudit;
 pub use client::*;
 pub use common::*;
 use futures::future::BoxFuture;
 pub use keys::*;
 pub use server::bind_server;
-use warpgate_common::{ListenEndpoint, ProtocolName};
+use warpgate_common::{ListenEndpoint, Protocol};
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
-pub static PROTOCOL_NAME: ProtocolName = "SSH";
+pub const PROTOCOL_NAME: Protocol = Protocol::Ssh;
 
 #[derive(Clone)]
 pub struct SSHProtocolServer {
@@ -27,13 +30,7 @@ impl SSHProtocolServer {
     pub async fn new(services: &Services) -> Result<Self> {
         let config = services.config.lock().await;
         ensure_keys(&config, &services.global_params, &*services.secret_backend, "host").await?;
-        ensure_keys(
-            &config,
-            &services.global_params,
-            &*services.secret_backend,
-            "client",
-        )
-        .await?;
+        ensure_client_keys(&services.db, &config, &services.global_params).await?;
         Ok(Self {
             services: services.clone(),
         })

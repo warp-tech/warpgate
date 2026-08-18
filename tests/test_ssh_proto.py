@@ -1,6 +1,7 @@
 from uuid import uuid4
 import os
 import requests
+import socket
 import subprocess
 import tempfile
 import time
@@ -182,6 +183,87 @@ class Test:
         response = s.get(f"https://localhost:{local_port}", timeout=timeout, verify=False)
         assert response.status_code == 200
         ssh_client.kill()
+
+    # https://github.com/warp-tech/warpgate/issues/2328
+    def test_direct_tcpip_server_speaks_first(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+        timeout,
+    ):
+        # The first direct-tcpip channel to a given host:port must deliver bytes
+        # the target sends on its own, before the client writes anything (#2328).
+        # The target's own sshd (localhost:22 inside the container) greets with an
+        # SSH-2.0 banner immediately, so it is a convenient server-first peer.
+        #
+        # On the buggy code the channel-open confirmation races the target's first
+        # bytes and can lose, so the client never sees the banner. The race is
+        # timing-sensitive: a single connection is flaky, but the first channel to
+        # a host:port in a *fresh* session reliably loses often enough that a
+        # handful of fresh sessions makes the regression deterministic. Recording
+        # is left at its default (on) — that is the exact scenario reported.
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
+
+        checked = 0
+        spawns = 0
+        while checked < 8:
+            # An ssh client that dies before the listener is up (sshpass
+            # occasionally garbles the password on this kind of rapid spawn
+            # loop) never opened a channel, so it can't count as a pass —
+            # respawn it, within a budget that still fails on systemic death.
+            spawns += 1
+            assert spawns <= 12, "too many ssh client startup failures"
+
+            local_port = alloc_port()
+            ssh_client = processes.start_ssh_client(
+                f"{user.username}:{ssh_target.name}@localhost",
+                "-p",
+                str(shared_wg.ssh_port),
+                *common_args,
+                "-L",
+                f"{local_port}:localhost:22",
+                "-N",
+                password="123",
+            )
+            try:
+                # Do not probe the port first: every accepted connection opens a
+                # fresh channel. A refused connection (listener not up yet) opens
+                # nothing, so retrying the connect is safe — the first one that
+                # succeeds is channel #1.
+                deadline = time.time() + timeout
+                conn = None
+                while time.time() < deadline and ssh_client.poll() is None:
+                    try:
+                        conn = socket.create_connection(
+                            ("localhost", local_port), timeout=5
+                        )
+                        break
+                    except socket.error:
+                        time.sleep(0.1)
+                if conn is None:
+                    assert ssh_client.poll() is not None, (
+                        f"check {checked}: forwarded port never came up"
+                    )
+                    continue
+
+                conn.settimeout(8)
+                try:
+                    banner = conn.recv(100)
+                except socket.timeout:
+                    banner = b""
+                finally:
+                    conn.close()
+
+                assert banner.startswith(b"SSH-2.0"), (
+                    f"check {checked}: first-channel banner never arrived "
+                    f"(got {banner!r}) — server-first bytes were dropped"
+                )
+                checked += 1
+            finally:
+                ssh_client.kill()
 
     def test_agent_forwarding_parallel(
         self,

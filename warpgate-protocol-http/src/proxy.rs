@@ -24,13 +24,12 @@ use warpgate_common::http_headers::{
 };
 use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
 use warpgate_common_http::logging::{get_client_ip, log_request_result};
-use warpgate_common_http::{
-    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-};
+use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization, SessionKeepalive};
 use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
-use crate::common::SessionExt;
+use crate::client_cache::HttpClientCache;
+use crate::common::{SESSION_COOKIE_NAME, SessionExt};
 use crate::session::SessionStore;
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
@@ -93,10 +92,13 @@ fn strip_warpgate_internal_query_params(pq: &PathAndQuery) -> Result<PathAndQuer
     };
     let query = form_urlencoded::parse(query.as_bytes())
         .filter(|(key, _)| key != "warpgate-target" && key != "warpgate-ticket")
-        .fold(form_urlencoded::Serializer::new(String::new()), |mut s, (k, v)| {
-            s.append_pair(&k, &v);
-            s
-        })
+        .fold(
+            form_urlencoded::Serializer::new(String::new()),
+            |mut s, (k, v)| {
+                s.append_pair(&k, &v);
+                s
+            },
+        )
         .finish();
     let path = pq.path();
     let rebuilt = if query.is_empty() {
@@ -225,9 +227,30 @@ fn rewrite_response(
     Ok(())
 }
 
-fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B {
+fn cookie_header_for_target(req: &Request) -> Result<Option<String>> {
+    let mut cookies = Vec::new();
+
+    for value in req.headers().get_all(http::header::COOKIE) {
+        for cookie in Cookie::split_parse(value.to_str()?) {
+            let cookie = cookie?;
+            if cookie.name() != SESSION_COOKIE_NAME {
+                cookies.push(cookie.stripped().to_string());
+            }
+        }
+    }
+
+    Ok((!cookies.is_empty()).then(|| cookies.join("; ")))
+}
+
+fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
     for k in req.headers().keys() {
         if !may_forward_header(k) {
+            continue;
+        }
+        if k == http::header::COOKIE {
+            if let Some(value) = cookie_header_for_target(req)? {
+                target = target.header(k.clone(), value);
+            }
             continue;
         }
         target = target.header(
@@ -241,7 +264,7 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
                 .join("; "),
         );
     }
-    target
+    Ok(target)
 }
 
 fn inject_forwarding_headers<B: SomeRequestBuilder>(
@@ -277,48 +300,21 @@ pub async fn proxy_normal_request(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
     body: Body,
+    target_name: &str,
     options: &TargetHTTPOptions,
+    client_cache: &HttpClientCache,
 ) -> poem::Result<Response> {
     let uri = construct_uri(req, options, false)?;
 
     tracing::debug!("URI: {:?}", uri);
 
-    let mut client = reqwest::Client::builder()
-        .gzip(true)
-        .redirect(reqwest::redirect::Policy::none())
-        .connection_verbose(true);
-
-    if options.tls.mode == TlsMode::Required {
-        client = client.https_only(true);
-    }
-
-    client = client.redirect(reqwest::redirect::Policy::custom({
-        let tls_mode = options.tls.mode;
-        let uri = uri.clone();
-        move |attempt| {
-            if tls_mode == TlsMode::Preferred
-                && uri.scheme() == Some(&Scheme::HTTP)
-                && attempt.url().scheme() == "https"
-            {
-                debug!("Following HTTP->HTTPS redirect");
-                attempt.follow()
-            } else {
-                attempt.stop()
-            }
-        }
-    }));
-
-    if !options.tls.verify {
-        client = client.danger_accept_invalid_certs(true);
-    }
-
-    let client = client.build().context("Could not build request")?;
+    let client = client_cache.client_for(target_name, options).await?;
 
     let (authorization_header, uri) = extract_basic_auth(uri)?;
 
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
-    client_request = copy_server_request(req, client_request);
+    client_request = copy_server_request(req, client_request)?;
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
@@ -326,7 +322,11 @@ pub async fn proxy_normal_request(
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
 
-    client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
+    if req.headers().contains_key(http::header::CONTENT_LENGTH)
+        || req.headers().contains_key(http::header::TRANSFER_ENCODING)
+    {
+        client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
+    }
 
     let client_request = client_request.build().context("Could not build request")?;
     let client_response = client
@@ -339,14 +339,18 @@ pub async fn proxy_normal_request(
 
     copy_client_response(&client_response, &mut response);
 
-    let embed_session_menu = {
-        let db = ctx.services().db.lock().await;
-        warpgate_db_entities::Parameters::Entity::get(&db)
+    // The embedded UI can go in if the response is a usable HTML page - we for example
+    // don't want to embed into a 404 page or a JS file - and it has something to show:
+    // the session menu, the login banner, or both.
+    let embed_ui = response.status() == StatusCode::OK
+        && response
+            .content_type()
+            .is_some_and(|content_type| content_type.starts_with("text/html"))
+        && ctx
+            .parameters()
             .await
-            .map(|p| p.show_session_menu)
-            .unwrap_or(true)
-    };
-    copy_client_body(client_response, &mut response, embed_session_menu).await?;
+            .map_or(true, |p| p.show_session_menu || p.banner_text().is_some());
+    copy_client_body(client_response, &mut response, embed_ui).await?;
 
     log_request_result(
         req.method(),
@@ -362,14 +366,9 @@ pub async fn proxy_normal_request(
 async fn copy_client_body(
     client_response: reqwest::Response,
     response: &mut Response,
-    embed_session_menu: bool,
+    embed_ui: bool,
 ) -> Result<()> {
-    if embed_session_menu
-        && response
-            .content_type()
-            .is_some_and(|c| c.starts_with("text/html"))
-        && response.status() == 200
-    {
+    if embed_ui {
         copy_client_body_and_embed(client_response, response).await?;
         return Ok(());
     }
@@ -477,14 +476,11 @@ async fn proxy_ws_inner(
         .clone();
     let session = <&Session>::from_request_without_body(req).await?;
     let mut close_rx = session_middleware.lock().await.close_receiver_for(session);
-    if close_rx.is_none()
-        && matches!(
-            &ctx.auth,
-            RequestAuthorization::Session(SessionAuthorization::User { .. })
-        )
-    {
-        return Err(poem::Error::from_status(StatusCode::UNAUTHORIZED));
-    }
+
+    let keepalive_guard = Data::<&SessionKeepalive>::from_request_without_body(req)
+        .await
+        .ok()
+        .map(|x| x.guard());
 
     let (authorization_header, uri) = extract_basic_auth(uri)?;
     let mut client_request = http::request::Builder::new()
@@ -509,7 +505,7 @@ async fn proxy_ws_inner(
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
 
-    client_request = copy_server_request(req, client_request);
+    client_request = copy_server_request(req, client_request)?;
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, options)?;
@@ -564,7 +560,7 @@ async fn proxy_ws_inner(
                     result = &mut client_to_server => {
                         (false, Some(result))
                     }
-                    _ = async {
+                    () = async {
                         match close_rx.as_mut() {
                             Some(close_rx) => {
                                 let _ = close_rx.recv().await;
@@ -601,6 +597,9 @@ async fn proxy_ws_inner(
             } {
                 error!(?error, "Websocket stream error");
             }
+
+            drop(keepalive_guard);
+
             Ok::<_, anyhow::Error>(())
         })
         .into_response();
@@ -613,6 +612,46 @@ async fn proxy_ws_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn forwarded_cookie_header(values: &[&str]) -> Option<String> {
+        let mut request = Request::builder();
+        for value in values {
+            request = request.header(http::header::COOKIE, *value);
+        }
+        cookie_header_for_target(&request.finish()).unwrap()
+    }
+
+    #[test]
+    fn request_cookie_header_omits_only_warpgate_session() {
+        assert_eq!(
+            forwarded_cookie_header(&[
+                "target-session=one; warpgate-http-session=secret",
+                "warpgate-http-session-extra=two; Warpgate-Http-Session=three",
+            ]),
+            Some(
+                "target-session=one; warpgate-http-session-extra=two; Warpgate-Http-Session=three"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn request_cookie_header_is_reserialized() {
+        assert_eq!(
+            forwarded_cookie_header(&[
+                " first = value ; warpgate-http-session=secret; token=abc== "
+            ]),
+            Some("first=value; token=abc==".to_string())
+        );
+    }
+
+    #[test]
+    fn request_cookie_header_is_omitted_without_target_cookies() {
+        assert_eq!(
+            forwarded_cookie_header(&["warpgate-http-session=secret"]),
+            None
+        );
+    }
 
     fn make_options(url: &str) -> TargetHTTPOptions {
         TargetHTTPOptions {

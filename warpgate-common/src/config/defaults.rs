@@ -19,6 +19,10 @@ pub const fn _default_mysql_port() -> u16 {
     3306
 }
 
+pub const fn _default_postgres_port() -> u16 {
+    5432
+}
+
 pub const fn _default_vnc_port() -> u16 {
     5900
 }
@@ -86,22 +90,22 @@ pub fn _default_rdp_listen() -> ListenEndpoint {
 
 #[inline]
 pub const fn _default_retention() -> Duration {
-    Duration::from_secs(60 * 60 * 24 * 7)
+    Duration::from_hours(168)
 }
 
 #[inline]
 pub const fn _default_audit_retention() -> Duration {
-    Duration::from_secs(60 * 60 * 24 * 365)
+    Duration::from_hours(8760)
 }
 
 #[inline]
 pub const fn _default_session_max_age() -> Duration {
-    Duration::from_secs(60 * 30)
+    Duration::from_mins(30)
 }
 
 #[inline]
 pub const fn _default_cookie_max_age() -> Duration {
-    Duration::from_secs(60 * 60 * 24)
+    Duration::from_hours(24)
 }
 
 #[inline]
@@ -118,7 +122,7 @@ pub fn _default_ssh_keys_path() -> String {
 }
 
 pub const fn _default_ssh_inactivity_timeout() -> Duration {
-    Duration::from_secs(60 * 5)
+    Duration::from_mins(5)
 }
 
 #[allow(clippy::unnecessary_wraps)]

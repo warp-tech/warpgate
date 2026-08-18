@@ -7,10 +7,9 @@ use sea_orm::{
     QueryOrder, TransactionTrait,
 };
 use time::{Duration, OffsetDateTime};
-use tokio::sync::Mutex;
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::helpers::hash::generate_ticket_secret;
+use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_db_entities::TicketRequest::TicketRequestStatus;
 use warpgate_db_entities::{Parameters, Target, Ticket, TicketRequest};
@@ -49,13 +48,13 @@ impl From<WarpgateError> for CreateTicketRequestError {
 }
 
 pub async fn create_ticket_request(
-    db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
-    config_provider: &Arc<Mutex<ConfigProviderEnum>>,
+    db: &sea_orm::DatabaseConnection,
+    config_provider: &Arc<ConfigProviderEnum>,
     params: CreateTicketRequestParams,
 ) -> Result<TicketRequestResult, CreateTicketRequestError> {
-    let db_conn = db.lock().await;
+    let db_conn = db;
 
-    let policy = Parameters::Entity::get(&db_conn).await?;
+    let policy = Parameters::Entity::get(db_conn).await?;
 
     if !policy.ticket_self_service_enabled {
         return Err(CreateTicketRequestError::InvalidInput(
@@ -65,7 +64,7 @@ pub async fn create_ticket_request(
 
     let target = Target::Entity::find()
         .filter(Target::Column::Name.eq(&params.target_name))
-        .one(&*db_conn)
+        .one(db_conn)
         .await?;
 
     let Some(target) = target else {
@@ -74,13 +73,9 @@ pub async fn create_ticket_request(
         ));
     };
 
-    let has_access = {
-        // Must drop db_conn before locking config_provider to avoid deadlock
-        drop(db_conn);
-        let mut cp = config_provider.lock().await;
-        cp.authorize_target(&params.username, &params.target_name)
-            .await?
-    };
+    let has_access = config_provider
+        .authorize_target_by_id(params.user_id, target.id)
+        .await?;
 
     // Return generic "not found" to avoid revealing target existence to unauthorized users
     if !policy.ticket_request_show_all_targets && !has_access {
@@ -137,13 +132,13 @@ pub async fn create_ticket_request(
     // Uses are always admin-controlled (target-level or global policy), not user-specified
     let effective_uses = target.ticket_max_uses.or(policy.ticket_max_uses);
 
-    let db_conn = db.lock().await;
+    let db_conn = db;
 
     let existing_pending = TicketRequest::Entity::find()
         .filter(TicketRequest::Column::UserId.eq(params.user_id))
         .filter(TicketRequest::Column::TargetId.eq(target.id))
         .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Pending))
-        .count(&*db_conn)
+        .count(db_conn)
         .await?;
 
     if existing_pending > 0 {
@@ -210,7 +205,7 @@ pub async fn create_ticket_request(
             resolved_at: Set(None),
             deny_reason: Set(None),
         };
-        let request_model = request.insert(&*db_conn).await?;
+        let request_model = request.insert(db_conn).await?;
 
         info!(
             "Created pending ticket request {} for user {} to target {}",
@@ -238,7 +233,7 @@ async fn insert_self_service_ticket(
 
     let ticket = Ticket::ActiveModel {
         id: Set(ticket_id),
-        secret: Set(secret.expose_secret().clone()),
+        secret_hash: Set(hash_secret(secret.expose_secret())),
         user_id: Set(user_id),
         target_id: Set(target_id),
         created: Set(OffsetDateTime::now_utc()),
@@ -253,22 +248,22 @@ async fn insert_self_service_ticket(
 }
 
 pub async fn approve_ticket_request(
-    db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
+    db: &sea_orm::DatabaseConnection,
     request_id: Uuid,
     admin_user_id: Option<Uuid>,
 ) -> Result<Option<TicketRequest::Model>, WarpgateError> {
-    let db_conn = db.lock().await;
+    let db_conn = db;
 
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
         .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Pending))
-        .one(&*db_conn)
+        .one(db_conn)
         .await?
     else {
         return Ok(None);
     };
 
     let user_exists = warpgate_db_entities::User::Entity::find_by_id(request.user_id)
-        .count(&*db_conn)
+        .count(db_conn)
         .await?
         > 0;
 
@@ -277,7 +272,7 @@ pub async fn approve_ticket_request(
     }
 
     let target_exists = Target::Entity::find_by_id(request.target_id)
-        .count(&*db_conn)
+        .count(db_conn)
         .await?
         > 0;
 
@@ -289,7 +284,7 @@ pub async fn approve_ticket_request(
     active.status = Set(TicketRequestStatus::Approved);
     active.resolved_by_user_id = Set(admin_user_id);
     active.resolved_at = Set(Some(OffsetDateTime::now_utc()));
-    let updated = active.update(&*db_conn).await?;
+    let updated = active.update(db_conn).await?;
 
     info!(
         "Admin {:?} approved ticket request {}",
@@ -320,16 +315,16 @@ impl From<WarpgateError> for ActivateTicketRequestError {
 }
 
 pub async fn activate_ticket_request(
-    db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
+    db: &sea_orm::DatabaseConnection,
     request_id: Uuid,
     user_id: Uuid,
 ) -> Result<(TicketRequest::Model, Secret<String>), ActivateTicketRequestError> {
-    let db_conn = db.lock().await;
+    let db_conn = db;
 
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
         .filter(TicketRequest::Column::UserId.eq(user_id))
         .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Approved))
-        .one(&*db_conn)
+        .one(db_conn)
         .await?
     else {
         return Err(ActivateTicketRequestError::NotFound);
@@ -342,14 +337,14 @@ pub async fn activate_ticket_request(
     }
 
     let target = Target::Entity::find_by_id(request.target_id)
-        .one(&*db_conn)
+        .one(db_conn)
         .await?;
 
     let Some(target) = target else {
         return Err(ActivateTicketRequestError::TargetGone);
     };
 
-    let policy = Parameters::Entity::get(&db_conn).await?;
+    let policy = Parameters::Entity::get(db_conn).await?;
     // Re-cap duration against current policy at activation time, in case
     // max duration was lowered between approval and activation
     let max_duration = target
@@ -390,16 +385,16 @@ pub async fn activate_ticket_request(
 }
 
 pub async fn deny_ticket_request(
-    db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
+    db: &sea_orm::DatabaseConnection,
     request_id: Uuid,
     admin_user_id: Option<Uuid>,
     reason: Option<String>,
 ) -> Result<Option<TicketRequest::Model>, WarpgateError> {
-    let db_conn = db.lock().await;
+    let db_conn = db;
 
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
         .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Pending))
-        .one(&*db_conn)
+        .one(db_conn)
         .await?
     else {
         return Ok(None);
@@ -418,7 +413,7 @@ pub async fn deny_ticket_request(
     active.resolved_by_user_id = Set(admin_user_id);
     active.resolved_at = Set(Some(OffsetDateTime::now_utc()));
     active.deny_reason = Set(reason);
-    let updated = active.update(&*db_conn).await?;
+    let updated = active.update(db_conn).await?;
 
     info!(
         "Admin {:?} denied ticket request {}",
@@ -429,15 +424,32 @@ pub async fn deny_ticket_request(
 }
 
 pub async fn list_ticket_requests(
-    db: &Arc<Mutex<sea_orm::DatabaseConnection>>,
+    db: &sea_orm::DatabaseConnection,
     status_filter: Option<TicketRequestStatus>,
 ) -> Result<Vec<TicketRequest::Model>, WarpgateError> {
-    let db_conn = db.lock().await;
+    let db_conn = db;
     let mut query = TicketRequest::Entity::find().order_by_desc(TicketRequest::Column::Created);
 
     if let Some(status) = status_filter {
         query = query.filter(TicketRequest::Column::Status.eq(status));
     }
 
-    Ok(query.all(&*db_conn).await?)
+    Ok(query.all(db_conn).await?)
+}
+
+pub async fn delete_ticket(
+    db: &sea_orm::DatabaseConnection,
+    ticket_id: Uuid,
+) -> Result<(), WarpgateError> {
+    let txn = db.begin().await?;
+
+    TicketRequest::Entity::delete_many()
+        .filter(TicketRequest::Column::TicketId.eq(Some(ticket_id)))
+        .exec(&txn)
+        .await?;
+
+    Ticket::Entity::delete_by_id(ticket_id).exec(&txn).await?;
+    txn.commit().await?;
+
+    Ok(())
 }

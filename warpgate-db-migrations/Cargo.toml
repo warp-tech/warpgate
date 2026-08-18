@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-db-migrations"
-version = "0.26.1"
+version = "0.28.0-beta.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -15,11 +15,13 @@ sea-orm = { workspace = true, features = ["with-uuid", "with-json"] }
 sea-orm-migration.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 time.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 warpgate-ca = { path = "../warpgate-ca", default-features = false }
+warpgate-db-entities = { path = "../warpgate-db-entities" }
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]

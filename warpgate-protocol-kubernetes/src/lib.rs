@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use anyhow::Result;
 use futures::future::BoxFuture;
-use warpgate_common::{ListenEndpoint, ProtocolName};
+use warpgate_common::{ListenEndpoint, Protocol};
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
@@ -12,7 +12,7 @@ mod server;
 mod session_handle;
 pub use server::bind_server;
 
-pub static PROTOCOL_NAME: ProtocolName = "Kubernetes";
+pub const PROTOCOL_NAME: Protocol = Protocol::Kubernetes;
 
 #[derive(Clone)]
 pub struct KubernetesProtocolServer {

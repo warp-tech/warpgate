@@ -130,8 +130,9 @@ impl PostgresClient {
                 .password
                 .resolve(secret_backend)
                 .await
-                .map_err(WarpgateError::SecretBackend)
-                .map(|s| s.expose_secret().clone())?,
+                .map_err(WarpgateError::from)?
+                .expose_secret()
+                .clone(),
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await

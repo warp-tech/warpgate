@@ -5,11 +5,15 @@ on: [push, pull_request]
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   Tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
 
@@ -21,11 +25,11 @@ jobs:
           large-packages: false
           docker-images: false
 
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
 
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           key: "test"
 
@@ -48,9 +52,6 @@ jobs:
 
       # Built separately (own lockfile) so the workspace coverage build embeds it
       # and warpgate-protocol-rdp's extraction test runs.
-      - name: Build RDP helper
-        run: just build-rdp-helper
-
       - name: Run Rust unit tests
         run: cargo llvm-cov test --workspace
 
@@ -90,7 +91,7 @@ jobs:
           path: target/llvm-cov/html
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f
         if: ${{ env.SONAR_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any

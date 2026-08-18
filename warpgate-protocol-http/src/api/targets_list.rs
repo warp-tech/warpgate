@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use futures::{StreamExt, stream};
-use poem::web::Data;
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -9,15 +7,12 @@ use sea_orm::EntityTrait;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{Target as TargetConfig, TargetOptions, WarpgateError};
-use warpgate_common_http::{
-    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-};
+use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup};
 
-use crate::api::AnySecurityScheme;
-use crate::common::endpoint_auth;
+use crate::api::auth_scheme::AuthedSession;
 
 pub struct Api;
 
@@ -47,32 +42,23 @@ enum GetTargetsResponse {
 
 #[OpenApi]
 impl Api {
-    #[oai(
-        path = "/targets",
-        method = "get",
-        operation_id = "get_targets",
-        transform = "endpoint_auth"
-    )]
+    #[oai(path = "/targets", method = "get", operation_id = "get_targets")]
     async fn api_get_all_targets(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         search: Query<Option<String>>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         // Fetch target groups for group information
         let services = ctx.services();
         let groups: Vec<TargetGroup::Model> = {
-            let db = services.db.lock().await;
-            TargetGroup::Entity::find().all(&*db).await
+            let db = &services.db;
+            TargetGroup::Entity::find().all(db).await
         }?;
 
         let group_map: HashMap<uuid::Uuid, &TargetGroup::Model> =
             groups.iter().map(|g| (g.id, g)).collect();
 
-        let mut targets: Vec<TargetConfig> = {
-            let mut config_provider = services.config_provider.lock().await;
-            config_provider.list_targets().await?
-        };
+        let mut targets: Vec<TargetConfig> = services.config_provider.list_targets().await?;
 
         if let Some(ref search) = *search {
             let search = search.to_lowercase();
@@ -83,33 +69,21 @@ impl Api {
             });
         }
 
-        let auth_clone = ctx.auth.clone();
-        let targets: Vec<_> = stream::iter(targets)
-            .filter(|t| {
-                let services = services.clone();
-                let auth = auth_clone.clone();
-                let name = t.name.clone();
-                async move {
-                    if let RequestAuthorization::Session(SessionAuthorization::Ticket {
-                        target_name,
-                        ..
-                    }) = auth
-                    {
-                        target_name == name
-                    } else {
-                        let mut config_provider = services.config_provider.lock().await;
-                        let Some(username) = auth.username() else {
-                            return false;
-                        };
-                        matches!(
-                            config_provider.authorize_target(username, &name).await,
-                            Ok(true)
-                        )
-                    }
-                }
-            })
-            .collect::<Vec<_>>()
-            .await;
+        match &ctx.auth {
+            RequestAuthorization::Session(SessionAuthorization::Ticket { target_id, .. }) => {
+                targets.retain(|t| t.id == *target_id);
+            }
+            RequestAuthorization::AdminToken => {
+                targets.clear();
+            }
+            auth => {
+                let authorized_ids = services
+                    .config_provider
+                    .authorized_target_ids(auth.user_id())
+                    .await?;
+                targets.retain(|t| authorized_ids.contains(&t.id));
+            }
+        }
 
         let result: Vec<TargetSnapshot> = targets
             .into_iter()

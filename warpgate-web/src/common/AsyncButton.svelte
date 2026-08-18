@@ -39,9 +39,12 @@
 
     let button: HTMLElement | undefined = $state()
     let lastWidth = $state(0)
+    let lastHeight = $state(0)
     let st = $state(State.Normal)
 
-    async function _click() {
+    async function _click(event: MouseEvent) {
+        event.preventDefault()
+
         if (!button) {
             return
         }
@@ -55,6 +58,7 @@
         }
 
         lastWidth = button.offsetWidth
+        lastHeight = button.offsetHeight
         st = State.Progress
         setTimeout(() => {
             if (st === State.Progress) {
@@ -72,6 +76,7 @@
                 if (st === State.Done || st === State.Failed) {
                     st = State.Normal
                     lastWidth = 0
+                    lastHeight = 0
                 }
             }, 1000)
         }
@@ -79,16 +84,20 @@
 </script>
 
 <Button
-    on:click={_click}
+    on:click={event => {
+        if (!(st === State.Progress || st === State.ProgressWithSpinner)) {
+            _click(event)
+        }
+    }}
     bind:inner={button}
-    style="min-width: {lastWidth}px;"
+    style="min-width: {lastWidth}px; min-height: {lastHeight}px;"
     class={cls}
     {outline}
     {color}
     {type}
     {size}
     {id}
-    disabled={disabled || st === State.Progress || st === State.ProgressWithSpinner}
+    {disabled}
 >
     {#if st === State.Normal || st === State.Progress}
         {#if children}

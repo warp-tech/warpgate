@@ -235,8 +235,8 @@
                 label="Copy both as kubeconfig"
             />
         {/if}
-        <Button color="danger" on:click={close} class="modal-button"
-            >Close</Button
-        >
+        <Button color="danger" on:click={close} class="modal-button">
+            Close
+        </Button>
     </ModalFooter>
 </Modal>

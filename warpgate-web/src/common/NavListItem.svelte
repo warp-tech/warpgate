@@ -2,8 +2,7 @@
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import type { Snippet } from 'svelte'
     import Fa from 'svelte-fa'
-    import { link } from 'svelte-spa-router'
-    import active from 'svelte-spa-router/active'
+    import { link, router } from 'svelte-spa-router'
     import { classnames } from './helpers'
 
     interface Props {
@@ -28,10 +27,18 @@
         small,
     }: Props = $props()
 
-    let classes = $derived(classnames(className, 'link', small ? 'sm' : false))
+    let active = $derived(router.loc.location === href)
+    let classes = $derived(
+        classnames(
+            className,
+            'link',
+            small ? 'sm' : false,
+            active ? 'active' : false,
+        ),
+    )
 </script>
 
-<a class={classes} {href} use:link use:active>
+<a class={classes} {href} use:link>
     <div class="text">
         <div class="title">
             {#if titleSnippet}

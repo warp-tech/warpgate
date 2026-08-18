@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { faCompress, faExpand } from '@fortawesome/free-solid-svg-icons'
     import { Button } from '@sveltestrap/sveltestrap'
     import {
         applyDesktopFrame,
@@ -6,8 +7,13 @@
         isIncrementalFrame,
         type Rect,
     } from 'common/desktopCanvas'
+    import { DesktopClipboard } from 'common/desktopClipboard'
+    import { codeToScancode } from 'common/desktopInput'
     import InfoBox from 'common/InfoBox.svelte'
+    import { handleReauthError } from 'common/reauth'
+    import { debounceTime, distinctUntilChanged, Subject } from 'rxjs'
     import { onDestroy, onMount } from 'svelte'
+    import Fa from 'svelte-fa'
     import { loadTheme } from 'theme'
     import { api, ResponseError, type WebDesktopSessionInfo } from './lib/api'
     import {
@@ -15,8 +21,9 @@
         ReconnectingWebSocket,
     } from './lib/ReconnectingWebSocket.svelte'
 
+    // Match both routes (start & viewer)
     interface Props {
-        params: { sessionId: string }
+        params: { sessionId?: string; targetId?: string }
     }
     let { params }: Props = $props()
 
@@ -32,9 +39,16 @@
         | { type: 'error'; message: string }
 
     // svelte-ignore state_referenced_locally
-    const { sessionId } = params
+    let sessionId = $state(params.sessionId)
 
     let canvas: HTMLCanvasElement | undefined = $state()
+    let canvasArea: HTMLDivElement | undefined = $state()
+    // Gates the fade-in; set on the first painted batch.
+    let painted = $state(false)
+    // The whole client goes fullscreen, not just the canvas, so the toolbar (and the
+    // disconnect button) stays reachable.
+    let rootElement: HTMLDivElement | undefined = $state()
+    let isFullscreen = $state(false)
     let ctx: CanvasRenderingContext2D | null = null
     let connectionError: string | null = $state(null)
     let sessionNotFound = $state(false)
@@ -50,19 +64,69 @@
     // than we need to forward); button presses/releases are sent immediately.
     let pendingPointer: { x: number; y: number; buttons: number } | null = null
 
-    const ws = new ReconnectingWebSocket({
-        url: `wss://${location.host}/@warpgate/api/web-desktop/sessions/${sessionId}/stream`,
-        onOpen: () => null,
-        onMessage: onWsMessage,
-    })
+    let ws = $state<ReconnectingWebSocket | undefined>()
+
+    function startStream() {
+        if (!sessionId) {
+            return
+        }
+        ws = new ReconnectingWebSocket({
+            url: `wss://${location.host}/@warpgate/api/web-desktop/sessions/${sessionId}/stream`,
+            onOpen: () => null,
+            onMessage: onWsMessage,
+        })
+        ws.connect()
+    }
 
     function send(msg: unknown) {
-        ws.send(JSON.stringify(msg))
+        ws?.send(JSON.stringify(msg))
     }
+
+    const clipboard = new DesktopClipboard(
+        text => send({ type: 'clipboard', text }),
+        (key, down) => send({ type: 'key_event', ...key, down }),
+    )
+
+    function viewportSize(): { width: number; height: number } | null {
+        const width = Math.floor(canvasArea?.clientWidth ?? window.innerWidth)
+        const height = Math.floor(
+            canvasArea?.clientHeight ?? window.innerHeight,
+        )
+        if (width < 1 || height < 1) {
+            return null
+        }
+        return { width, height }
+    }
+
+    interface ViewportSize {
+        width: number
+        height: number
+    }
+    // Debounce since every resize is an RDP reactivation
+    const resizeRequests = new Subject<ViewportSize>()
+
+    function sendResize(size: ViewportSize) {
+        if (ws?.state !== ConnectionState.Connected) {
+            return
+        }
+        send({ type: 'resize', ...size })
+    }
+
+    const resizeSubscription = resizeRequests
+        .pipe(
+            debounceTime(300),
+            distinctUntilChanged(
+                (a, b) => a.width === b.width && a.height === b.height,
+            ),
+        )
+        .subscribe(sendResize)
 
     // Pixel frames arrive as binary (see the backend's `ws_payload`); control messages
     // (connection state, resize, copy-rect, clipboard, error) arrive as JSON text.
     function onWsMessage(data: string | ArrayBuffer) {
+        if (!ws) {
+            return
+        }
         if (typeof data !== 'string') {
             const frame = decodeBinaryFrame(data)
             if (frame) {
@@ -75,12 +139,16 @@
             case 'connection_state':
                 if (msg.state === 'connected') {
                     ws.state = ConnectionState.Connected
+                    const size = viewportSize()
+                    if (size) {
+                        sendResize(size)
+                    }
                 } else if (msg.state === 'disconnected') {
                     ws.state = ConnectionState.Disconnected
                 }
                 break
             case 'clipboard':
-                navigator.clipboard?.writeText(msg.text).catch(() => {})
+                clipboard.onRemoteCopy(msg.text)
                 break
             case 'bell':
                 break
@@ -113,6 +181,12 @@
                 return { type: 'jpeg_image', rect, data }
             case 3:
                 return { type: 'cursor', rect, data }
+            case 4:
+                // Full-canvas base image sent on attach; never shed from the queue.
+                return { type: 'png_image', rect, data, keyframe: true }
+            case 5:
+                // Lossless resend of a region that stopped changing.
+                return { type: 'png_image', rect, data }
             default:
                 return null
         }
@@ -137,12 +211,23 @@
             for (const frame of batch) {
                 void applyDesktopFrame(canvas, ctx, frame)
             }
+            // Reveal only once there's something to show, so the canvas fades in with the
+            // first real content instead of flashing an empty surface.
+            painted = true
         }
         if (pendingPointer) {
             send({ type: 'pointer_event', ...pendingPointer })
             pendingPointer = null
         }
         rafHandle = requestAnimationFrame(tick)
+    }
+
+    function toggleFullscreen() {
+        if (document.fullscreenElement) {
+            void document.exitFullscreen()
+        } else {
+            void rootElement?.requestFullscreen()
+        }
     }
 
     // RFB button mask: bit0=left, bit1=middle, bit2=right
@@ -178,6 +263,7 @@
 
     // Button transitions must not be delayed or coalesced away, so send them immediately.
     function onPointerButton(e: MouseEvent) {
+        clipboard.flush()
         const { x, y } = canvasCoords(e)
         pendingPointer = null
         send({ type: 'pointer_event', x, y, buttons: rfbButtons(e) })
@@ -249,33 +335,91 @@
         return null
     }
 
+    // RDP uses scancodes and VNC uses the keysym since RFB has no scancodes
     function onKey(e: KeyboardEvent, down: boolean) {
+        clipboard.onKey(e, down)
+        // The paste combo is left alone so the browser still fires its own `paste`,
+        // which is the only way to read the clipboard without a permission prompt.
+        // `onPaste` replays the keystroke.
+        if (clipboard.isPasteCombo(e)) {
+            return
+        }
         const ks = keysym(e)
-        if (ks === null) {
+        const scancode = codeToScancode(e.code)
+        if (ks === null && !scancode) {
             return
         }
         e.preventDefault()
-        send({ type: 'key_event', keysym: ks, down })
+        send({
+            type: 'key_event',
+            keysym: ks,
+            scancode: scancode?.code ?? null,
+            extended: scancode?.extended ?? false,
+            down,
+        })
+    }
+
+    function onPaste(e: ClipboardEvent) {
+        if (ws?.state !== ConnectionState.Connected) {
+            return
+        }
+        clipboard.onPaste(e)
     }
 
     async function disconnect() {
-        ws.close()
-        try {
-            await api.deleteWebDesktopSession({ sessionId })
-        } catch {
-            // ignore
+        ws?.close()
+        if (sessionId) {
+            try {
+                await api.deleteWebDesktopSession({ sessionId })
+            } catch {
+                // ignore
+            }
         }
         window.close()
     }
+
+    async function startSession(targetId: string): Promise<void> {
+        const size = viewportSize()
+        const { sessionId: id } = await api.createWebDesktopSession({
+            createWebDesktopSessionBody: {
+                targetId,
+                width: size?.width,
+                height: size?.height,
+            },
+        })
+        sessionId = id
+        history.replaceState(history.state, '', `#/web-desktop/${id}`)
+    }
+
+    let resizeObserver: ResizeObserver | undefined
 
     onMount(async () => {
         if (canvas) {
             ctx = canvas.getContext('2d')
         }
+        if (canvasArea) {
+            resizeObserver = new ResizeObserver(() => {
+                const size = viewportSize()
+                if (size) {
+                    resizeRequests.next(size)
+                }
+            })
+            resizeObserver.observe(canvasArea)
+        }
         rafHandle = requestAnimationFrame(tick)
         try {
+            if (!sessionId && params.targetId) {
+                await startSession(params.targetId)
+            }
+            if (!sessionId) {
+                sessionNotFound = true
+                return
+            }
             sessionInfo = await api.getWebDesktopSession({ sessionId })
         } catch (e) {
+            if (await handleReauthError(e)) {
+                return
+            }
             connectionError =
                 e instanceof Error ? e.message : 'Failed to load session info'
             if (e instanceof ResponseError && e.response.status === 404) {
@@ -283,11 +427,21 @@
             }
             return
         }
-        ws.connect()
+        startStream()
+    })
+
+    const originalTitle = document.title
+    $effect(() => {
+        const targetName = sessionInfo?.targetName
+        if (targetName) {
+            document.title = `${targetName} - ${originalTitle}`
+        }
     })
 
     onDestroy(() => {
-        ws.close()
+        ws?.close()
+        resizeObserver?.disconnect()
+        resizeSubscription.unsubscribe()
         if (rafHandle !== null) {
             cancelAnimationFrame(rafHandle)
         }
@@ -296,24 +450,42 @@
     loadTheme('dark')
 </script>
 
-<svelte:window onkeydown={e => onKey(e, true)} onkeyup={e => onKey(e, false)} />
+<svelte:window
+    onkeydown={e => onKey(e, true)}
+    onkeyup={e => onKey(e, false)}
+    onpaste={onPaste}
+    onblur={() => clipboard.onBlur()}
+/>
+<!-- Tracked via the event rather than a local toggle, so leaving fullscreen with Esc
+     (which fires no click) still updates the button. -->
+<svelte:document
+    onfullscreenchange={() => (isFullscreen = !!document.fullscreenElement)}
+/>
 
-<div class="desktop-web-client d-flex flex-column">
+<div class="desktop-web-client d-flex flex-column" bind:this={rootElement}>
     <div class="toolbar d-flex align-items-center gap-2 p-2">
         <span class="me-auto text-muted small"
             >{sessionInfo?.targetName ?? ''}</span
         >
         {#if !sessionNotFound}
             <span class="text-muted small me-3">
-                {ws.state}
-                {#if ws.state === ConnectionState.Connecting && ws.attempt > 0}
+                {ws?.state ?? ConnectionState.Connecting}
+                {#if ws?.state === ConnectionState.Connecting && ws.attempt > 0}
                     &nbsp;(attempt {ws.attempt})
                 {/if}
             </span>
         {/if}
-        <Button color="danger" size="sm" onclick={disconnect}
-            >Disconnect</Button
+        <button
+            type="button"
+            class="btn btn-link"
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            onclick={toggleFullscreen}
         >
+            <Fa icon={isFullscreen ? faCompress : faExpand} fw />
+        </button>
+        <Button color="danger" size="sm" onclick={disconnect}>
+            Disconnect
+        </Button>
     </div>
 
     {#if connectionError}
@@ -329,10 +501,12 @@
     {/if}
 
     <div
+        bind:this={canvasArea}
         class="canvas-area flex-grow-1 d-flex align-items-center justify-content-center"
     >
         <canvas
             bind:this={canvas}
+            class:painted
             tabindex="0"
             onmousemove={onPointerMove}
             onmousedown={onPointerButton}
@@ -370,5 +544,14 @@
         max-width: 100%;
         max-height: 100%;
         outline: none;
+
+        // Hidden until the first frame is painted, so the desktop eases in instead of
+        // snapping from a blank surface.
+        opacity: 0;
+        transition: opacity 0.5s ease-in-out;
+
+        &.painted {
+            opacity: 1;
+        }
     }
 </style>

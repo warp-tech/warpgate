@@ -9,7 +9,7 @@ use crate::ConfigProvider;
 /// if `auto_create_users` is set), then apply role and admin-role mappings.
 /// Returns `None` when no user matches and auto-create is disabled.
 pub async fn resolve_and_map_sso_user<C: ConfigProvider + Send + ?Sized>(
-    cp: &mut C,
+    cp: &C,
     provider_config: &SsoProviderConfig,
     response: &SsoLoginResponse,
 ) -> Result<Option<String>, WarpgateError> {
@@ -41,7 +41,7 @@ pub async fn resolve_and_map_sso_user<C: ConfigProvider + Send + ?Sized>(
     if let Some(remote_groups) = response.access_roles.clone() {
         let managed_role_names = mappings
             .as_ref()
-            .map(|m| m.iter().flat_map(|(_, v)| v.roles()).collect::<Vec<_>>());
+            .map(|m| m.values().flat_map(|v| v.roles()).collect::<Vec<_>>());
 
         let mut active_role_names: Vec<String> = if let Some(ref mappings) = mappings {
             let mut roles: Vec<String> = if remote_groups.is_empty() {
