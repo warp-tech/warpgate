@@ -893,16 +893,35 @@ def verify_named(mutations):
     compile`.
     """
     results = []
-    for name, path, old, new in mutations:
+    total = len(mutations)
+
+    def record(result):
+        """Appended *and printed*, as each guard finishes.
+
+        Everything used to be printed after the loop returned, so a run said
+        nothing at all until it was over. A 34-guard sweep is well over an hour
+        here, and for that hour the only thing distinguishing progress from a
+        hang was `ps`. An instrument that cannot be told apart from a stuck one
+        gets killed, and two of mine were.
+        """
+        results.append(result)
+        print(
+            f"[{len(results):>2}/{total}] {result['status']:>26}  {result['guard']}",
+            flush=True,
+        )
+        return result
+
+    for index, (name, path, old, new) in enumerate(mutations, start=1):
+        print(f"[{index:>2}/{total}] measuring       {name}", flush=True)
         expected = DISCRIMINATES.get(name)
         if not expected:
-            results.append({"guard": name, "status": "no discriminating test named"})
+            record({"guard": name, "status": "no discriminating test named"})
             continue
 
         nearest = _crates_nearest(path)
         before_pass, before_fail = run_named_only(expected, nearest)
         if before_fail:
-            results.append({
+            record({
                 "guard": name,
                 "status": "already failing",
                 "tests": sorted(before_fail),
@@ -916,7 +935,7 @@ def verify_named(mutations):
         try:
             build = run(["cargo", "build", "--bin", "warpgate"])
             if build.returncode != 0:
-                results.append({"guard": name, "status": "did not compile"})
+                record({"guard": name, "status": "did not compile"})
                 continue
             after_pass, after_fail = run_named_only(expected, nearest)
             # `all`, per A2: every test the entry names has to notice.
@@ -925,7 +944,7 @@ def verify_named(mutations):
                 if set(expected) <= after_fail
                 else "does not discriminate"
             )
-            results.append({
+            record({
                 "guard": name,
                 "status": status,
                 "expected": expected,
@@ -1344,14 +1363,53 @@ def main():
     args = sys.argv[1:]
     named_mode = "--named" in args
     args = [a for a in args if a != "--named"]
-    only = args[0] if args else ""
-    rust_unit = run(["cargo", "test", "-p", "warpgate-vault", "-q"])
-    if rust_unit.returncode != 0:
-        sys.exit("the tree does not pass before mutating; fix that first")
 
-    selected = [m for m in MUTATIONS if not only or only in m[0]]
-    if not selected:
-        sys.exit(f"no guard matches {only!r}")
+    changed_base = None
+    if "--changed" in args:
+        at = args.index("--changed")
+        if at + 1 >= len(args):
+            sys.exit("--changed needs a base revision to diff against")
+        changed_base = args[at + 1]
+        del args[at : at + 2]
+
+    only = args[0] if args else ""
+
+    # Skipped in `--named` mode, on Antigravity's ruling (amendment-signed
+    # 2026-08-18). This runs the whole `warpgate-vault` suite — 250 seconds,
+    # measured — on every invocation, to establish that the tree passes before
+    # anything is mutated. `--named` establishes the same thing per guard and
+    # more narrowly: the named test must pass *before* the mutation, or the
+    # guard is reported `already failing` and no verdict is produced. The
+    # precondition is redundant there and load bearing in the other mode.
+    if not named_mode:
+        rust_unit = run(["cargo", "test", "-p", "warpgate-vault", "-q"])
+        if rust_unit.returncode != 0:
+            sys.exit("the tree does not pass before mutating; fix that first")
+
+    if changed_base is not None:
+        diff = run(["git", "diff", "--name-only", f"{changed_base}...HEAD"])
+        if diff.returncode != 0:
+            sys.exit(
+                f"could not diff against {changed_base!r}. In CI this usually "
+                "means the checkout has no history — fetch-depth: 0."
+            )
+        touched = {line.strip() for line in diff.stdout.splitlines() if line.strip()}
+        selected = [m for m in MUTATIONS if m[1] in touched]
+        print(
+            f"{len(touched)} file(s) changed against {changed_base}; "
+            f"{len(selected)} of {len(MUTATIONS)} guards live in them"
+        )
+        # Said out loud rather than left to be inferred from a green check: this
+        # mode cannot see a guard broken in a file the change did not touch.
+        # That is what the full sweep exists for, and a run that reports on a
+        # subset has to name the subset.
+        if not selected:
+            print("no guard's anchor file was touched; nothing to measure")
+            raise SystemExit(0)
+    else:
+        selected = [m for m in MUTATIONS if not only or only in m[0]]
+        if not selected:
+            sys.exit(f"no guard matches {only!r}")
     check_anchors(selected + [CANARY])
     check_no_duplicate_entries()
     check_discriminators(selected)
@@ -1359,8 +1417,6 @@ def main():
 
     if named_mode:
         results = verify_named(selected)
-        for r in results:
-            print(f"{r['status']:>26}  {r['guard']}")
         write_artifact(partial=bool(only), results=results, refused=None, mode="named")
         good = [r for r in results if r["status"] == "discriminates"]
         print(
@@ -1368,6 +1424,13 @@ def main():
             f"after the guard fails when the guard is disabled, and passes when "
             f"it is not"
         )
+        # Anything short of all of them fails, including `no discriminating test
+        # named`. A guard nothing is pinned to is not a lesser pass — amendment
+        # A2 exists because such a guard was reported on for a week while never
+        # being disabled once.
+        for r in results:
+            if r["status"] != "discriminates":
+                print(f"  {r['status']}: {r['guard']}")
         raise SystemExit(0 if len(good) == len(results) else 1)
 
     # Before measuring anything, measure the instrument.
