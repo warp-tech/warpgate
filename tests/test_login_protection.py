@@ -609,6 +609,50 @@ class TestLoginProtection:
             for entry in blocked:
                 api.unblock_ip(sdk.UnblockIpRequest(ip=entry.ip_address))
 
+    def test_pubkey_only_probe_recorded_over_ssh(
+        self,
+        processes: ProcessManager,
+        timeout,
+    ):
+        """A client that only offers unknown public keys and disconnects is
+        recorded as one failed login for the connection."""
+        wg = _lp_wg(processes, ip_max=100, user_max=100)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+            api.create_password_credential(
+                user.id, sdk.NewPasswordCredential(password="correct_password")
+            )
+            before = api.get_security_status().failed_attempts_last_hour
+
+        client = processes.start_ssh_client(
+            f"{user.username}@localhost",
+            "-p",
+            str(wg.ssh_port),
+            "-o",
+            "IdentityFile=ssh-keys/id_rsa",
+            "-o",
+            "PreferredAuthentications=publickey",
+            "-o",
+            "BatchMode=yes",
+        )
+        client.communicate(timeout=timeout)
+        assert client.returncode != 0
+
+        # The attempt is recorded when the session closes — poll briefly.
+        with admin_client(url) as api:
+            deadline = time.time() + 10
+            after = before
+            while time.time() < deadline:
+                after = api.get_security_status().failed_attempts_last_hour
+                if after > before:
+                    break
+                time.sleep(0.5)
+            assert after == before + 1, (
+                "a pubkey-only probe should record exactly one failed attempt"
+            )
+
     # ── admin exemption ──────────────────────────────────────────────────────
 
     def test_admin_exempt_from_lockout(
