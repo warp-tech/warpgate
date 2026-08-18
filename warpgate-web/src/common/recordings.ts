@@ -1,3 +1,11 @@
+import type { IconDefinition } from '@fortawesome/free-brands-svg-icons'
+import {
+    faArrowRightArrowLeft,
+    faDesktop,
+    faList,
+    faSquare,
+    faTerminal,
+} from '@fortawesome/free-solid-svg-icons'
 import type { Recording } from 'admin/lib/api'
 
 export type RecordingMetadata =
@@ -114,4 +122,32 @@ export function recordingTypeLabel(recording: Recording): string {
     }
 
     return 'Unknown type'
+}
+
+export function recordingTypeIcon(recording: Recording): IconDefinition {
+    const metadata = JSON.parse(recording.metadata) as RecordingMetadata | null
+    switch (metadata?.type) {
+        case 'kubernetes-api':
+            return faList
+        case 'kubernetes-exec':
+            return faTerminal
+        case 'kubernetes-attach':
+            return faTerminal
+        case 'ssh-shell':
+            return faTerminal
+        case 'ssh-exec':
+            return faTerminal
+        case 'ssh-direct-tcpip':
+            return faArrowRightArrowLeft
+        case 'ssh-direct-socket':
+            return faArrowRightArrowLeft
+        case 'ssh-forwarded-tcpip':
+            return faArrowRightArrowLeft
+        case 'ssh-forwarded-socket':
+            return faArrowRightArrowLeft
+        case 'desktop':
+            return faDesktop
+    }
+
+    return faSquare
 }

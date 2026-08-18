@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { Tooltip } from '@sveltestrap/sveltestrap'
     import { timeAgo } from 'admin/lib/time'
 
     interface Props {
@@ -6,6 +7,11 @@
     }
 
     let { date }: Props = $props()
+    let span = $state<HTMLElement>()
 </script>
 
-<span title={date.toLocaleString()}>{timeAgo(date)}</span>
+<span bind:this={span}>{timeAgo(date)}</span>
+
+<Tooltip target={span} placement="top" delay="500">
+    {date.toLocaleString()}
+</Tooltip>

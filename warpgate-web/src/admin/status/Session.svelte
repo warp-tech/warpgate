@@ -6,15 +6,9 @@
         api,
         type Recording,
         type SessionSnapshot,
-        type TargetHTTPOptions,
-        type TargetKubernetesOptions,
-        type TargetMySqlOptions,
-        type TargetPostgresOptions,
-        type TargetRdpOptions,
-        type TargetSSHOptions,
-        type TargetVncOptions,
+        type Target,
     } from 'admin/lib/api'
-    import { timeAgo } from 'admin/lib/time'
+    import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
@@ -22,8 +16,10 @@
     import RelativeDate from 'common/RelativeDate.svelte'
     import {
         recordingMetadataToFieldSet,
+        recordingTypeIcon,
         recordingTypeLabel,
     } from 'common/recordings'
+    import StickyActionBar from 'common/StickyActionBar.svelte'
     import { formatDistance, formatDistanceToNow } from 'date-fns'
     import { onDestroy } from 'svelte'
     import Fa from 'svelte-fa'
@@ -50,43 +46,30 @@
         api.closeSession(session)
     }
 
-    function getTargetDescription() {
-        if (session?.target) {
-            let address = '<unknown>'
-            if (session.target.options.kind === 'Ssh') {
-                const options = session.target.options as TargetSSHOptions
-                address = `${options.host}:${options?.port}`
-            }
-            if (session.target.options.kind === 'MySql') {
-                const options = session.target.options as TargetMySqlOptions
-                address = `${options.host}:${options?.port}`
-            }
-            if (session.target.options.kind === 'Postgres') {
-                const options = session.target.options as TargetPostgresOptions
-                address = `${options.host}:${options?.port}`
-            }
-            if (session.target.options.kind === 'Http') {
-                const options = session.target
-                    .options as unknown as TargetHTTPOptions
-                address = options.url
-            }
-            if (session.target.options.kind === 'Kubernetes') {
-                const options = session.target
-                    .options as unknown as TargetKubernetesOptions
-                address = options.clusterUrl
-            }
-            if (session.target.options.kind === 'Vnc') {
-                const options = session.target.options as TargetVncOptions
-                address = `${options.host}:${options?.port}`
-            }
-            if (session.target.options.kind === 'Rdp') {
-                const options = session.target.options as TargetRdpOptions
-                address = `${options.host}:${options?.port}`
-            }
-            return `${session.target.name} (${address})`
-        } else {
-            return 'Not selected yet'
+    function getTargetAddress(target: Target) {
+        let address = '<unknown>'
+        if (target.options.kind === 'Ssh') {
+            address = `${target.options.host}:${target.options?.port}`
         }
+        if (target.options.kind === 'MySql') {
+            address = `${target.options.host}:${target.options?.port}`
+        }
+        if (target.options.kind === 'Postgres') {
+            address = `${target.options.host}:${target.options?.port}`
+        }
+        if (target.options.kind === 'Http') {
+            address = target.options.url
+        }
+        if (target.options.kind === 'Kubernetes') {
+            address = target.options.clusterUrl
+        }
+        if (target.options.kind === 'Vnc') {
+            address = `${target.options.host}:${target.options?.port}`
+        }
+        if (target.options.kind === 'Rdp') {
+            address = `${target.options.host}:${target.options?.port}`
+        }
+        return address
     }
 
     load().catch(async e => {
@@ -107,7 +90,7 @@
 
 {#if session}
     <div class="page-summary-bar">
-        <div>
+        <div class="flex-grow-1">
             <h1>session</h1>
             <div class="d-flex align-items-center mt-1">
                 <Tooltip delay="250" target="usernameBadge" animation>
@@ -118,6 +101,7 @@
                 </Tooltip>
 
                 <Badge
+                    href={$adminPermissions.usersEdit && session.userId ? `#/config/users/${session.userId}` : undefined}
                     id="usernameBadge"
                     color="success"
                     class="me-2 d-flex align-items-center"
@@ -125,72 +109,95 @@
                     {#if session.username}
                         <Fa icon={faUser} class="me-2" />
                         {session.username}
+                        {#if session.remoteAddress}
+                            <span class="ms-1 ip">{session.remoteAddress}</span>
+                        {/if}
                     {:else}
                         Logging in
                     {/if}
                 </Badge>
                 {#if session.target}
                     <Badge
+                        href={$adminPermissions.targetsEdit && session.targetId ? `#/config/targets/${session.targetId}` : undefined}
                         id="targetBadge"
                         color="info"
                         class="me-2 d-flex align-items-center"
                     >
                         <Fa icon={faArrowRight} class="me-2" />
-                        {getTargetDescription()}
+                        {session.target.name}
+                        <span class="ms-1 ip">
+                            {getTargetAddress(session.target)}
+                        </span>
                     </Badge>
                 {/if}
-                <span class="text-muted">
-                    {#if session.ended}
-                        {formatDistance(new Date(session.started), new Date(session.ended))}
-                        long, <RelativeDate date={session.started} />
-                    {:else}
-                        {formatDistanceToNow(new Date(session.started))}
-                    {/if}
-                    {#if session.nodeHostname}
-                        · on {session.nodeHostname}
-                    {/if}
-                </span>
             </div>
         </div>
-        {#if !session.ended && PROTOCOL_PROPERTIES[session.protocol]?.sessionsCanBeClosed}
-            <div class="ms-auto">
-                <AsyncButton color="warning" click={close}>
-                    Close now
-                </AsyncButton>
-            </div>
-        {/if}
+        <div class="text-muted ms-auto">
+            {#if session.ended}
+                {formatDistance(new Date(session.started), new Date(session.ended))}
+                long, <RelativeDate date={session.started} />
+            {:else}
+                {formatDistanceToNow(new Date(session.started))}
+            {/if}
+            {#if session.nodeHostname}
+                · on {session.nodeHostname}
+            {/if}
+        </div>
     </div>
 
-    {#if recordings?.length}
-        <h3 class="mt-4">Recordings</h3>
-        <div class="list-group list-group-flush">
-            {#each recordings as recording (recording.id)}
-                {@const metadata = JSON.parse(recording.metadata)}
-                <a
-                    class="list-group-item list-group-item-action"
-                    href="/status/recordings/{recording.id}"
-                    use:link
-                >
-                    <div class="main gap-1">
+    {#snippet recordingButton(recording: Recording)}
+        {@const metadata = JSON.parse(recording.metadata)}
+        <a
+            class="btn"
+            class:btn-secondary={recording.ended}
+            class:btn-primary={!recording.ended}
+            href="/status/recordings/{recording.id}"
+            use:link
+        >
+            <Fa icon={recordingTypeIcon(recording)} fw size="lg" />
+            <div class="flex-grow-1">
+                <div>
+                    <div class="d-flex align-items-center gap-1">
                         <strong>
                             {recordingTypeLabel(recording)}
-                            {#if !metadata}
-                                : {recording.name}
-                            {/if}
                         </strong>
-                        {#if metadata}
-                            {#each recordingMetadataToFieldSet(metadata) as item (item[0])}
-                                <div>
-                                    <span class="text-muted">{item[0]}:</span>
-                                    {item[1]}
-                                </div>
-                            {/each}
-                        {/if}
-                        <small class="meta ms-auto">
-                            {timeAgo(recording.started)}
-                        </small>
                     </div>
-                </a>
+                    {#if metadata}
+                        <div class="meta-fields">
+                            {#each recordingMetadataToFieldSet(metadata) as item (item[0])}
+                                <small>
+                                    <span class="text-muted"> {item[0]}: </span>
+                                    {item[1]}
+                                </small>
+                            {/each}
+                        </div>
+                    {/if}
+                </div>
+                <small class="meta">
+                    <RelativeDate date={recording.started} />
+                </small>
+            </div>
+        </a>
+    {/snippet}
+
+    {#if recordings?.find(x => !x.ended)}
+        <h3 class="mt-4">Live view</h3>
+        <div class="recordings-list">
+            {#each recordings as recording (recording.id)}
+                {#if !recording.ended}
+                    {@render recordingButton(recording)}
+                {/if}
+            {/each}
+        </div>
+    {/if}
+
+    {#if recordings?.find(x => x.ended)}
+        <h3 class="mt-4">Recordings</h3>
+        <div class="recordings-list">
+            {#each recordings as recording (recording.id)}
+                {#if recording.ended}
+                    {@render recordingButton(recording)}
+                {/if}
             {/each}
         </div>
     {/if}
@@ -198,24 +205,45 @@
     <h3 class="mt-4">Log</h3>
     <LogViewer
         filters={{
-        sessionId: session.id,
-    }}
+            sessionId: session.id,
+        }}
     />
+
+    {#if !session.ended && PROTOCOL_PROPERTIES[session.protocol]?.sessionsCanBeClosed}
+        <StickyActionBar>
+            <AsyncButton color="warning" click={close}>
+                Close session now
+            </AsyncButton>
+        </StickyActionBar>
+    {/if}
 {/if}
 
 <style lang="scss">
-.list-group-item {
-    .main {
+.recordings-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2rem;
+
+   .btn {
         display: flex;
         align-items: center;
+        flex: 0.33 1 0;
+        gap: 1.5rem;
+        min-width: 300px;
+        text-align: left;
 
-        > * {
-            margin-right: 20px;
+        .meta {
+            opacity: .75;
         }
-    }
 
-    .meta {
-        opacity: .75;
-    }
+        .meta-fields {
+            display: flex;
+            gap: 1rem;
+        }
+   }
+}
+
+.ip {
+ opacity: .75;
 }
 </style>

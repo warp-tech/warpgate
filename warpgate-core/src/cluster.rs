@@ -233,6 +233,8 @@ mod tests {
             id: Set(id),
             target_snapshot: Set(None),
             username: Set(None),
+            user_id: Set(None),
+            target_id: Set(None),
             remote_address: Set("127.0.0.1:1".into()),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(ended.then(OffsetDateTime::now_utc)),
