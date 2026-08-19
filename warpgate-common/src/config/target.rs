@@ -8,7 +8,7 @@ use warpgate_tls::TlsMode;
 use super::defaults::{
     _default_empty_string, _default_empty_vec, _default_mysql_port,
     _default_postgres_idle_timeout_str, _default_postgres_port, _default_rdp_port,
-    _default_ssh_port, _default_username, _default_vnc_port,
+    _default_redis_port, _default_ssh_port, _default_username, _default_vnc_port,
 };
 use crate::encryption::EncryptionError;
 use crate::{Protocol, Secret, StoredSecret};
@@ -197,6 +197,76 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub protocol_version: PostgresProtocolVersion,
+}
+
+/// Which AWS service to sign the IAM auth token for. Redis has no RDS
+/// equivalent of its own, so unlike [`DatabaseTargetAuth::IamRole`] the
+/// service has to be picked explicitly.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum RedisIamAuthService {
+    #[serde(rename = "elasticache")]
+    ElastiCache,
+    #[serde(rename = "memorydb")]
+    MemoryDb,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[serde(tag = "kind")]
+#[oai(discriminator_name = "kind", one_of)]
+pub enum RedisTargetAuth {
+    #[serde(rename = "password")]
+    Password(DatabaseTargetPasswordAuth),
+    #[serde(rename = "iam_role")]
+    IamRole(RedisIamRoleAuth),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct RedisIamRoleAuth {
+    pub service: RedisIamAuthService,
+}
+
+impl Default for RedisTargetAuth {
+    fn default() -> Self {
+        Self::Password(DatabaseTargetPasswordAuth::default())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct TargetRedisOptions {
+    #[serde(default = "_default_empty_string")]
+    pub host: String,
+
+    #[serde(default = "_default_redis_port")]
+    pub port: u16,
+
+    /// Redis ACL username. Optional, since Redis's legacy default user has none.
+    #[serde(default)]
+    pub username: Option<String>,
+
+    #[serde(default)]
+    pub auth: Option<RedisTargetAuth>,
+
+    #[serde(default)]
+    pub tls: Tls,
+
+    /// Numbered database (`SELECT`) to switch to right after connecting.
+    #[serde(default)]
+    pub database: Option<u8>,
+
+    #[serde(default)]
+    pub idle_timeout: Option<String>,
+
+    /// ElastiCache/MemoryDB cluster or replication-group id to sign the IAM
+    /// auth token for, when `auth` is `IamRole`. Falls back to `host` if unset,
+    /// since the two are only sometimes the same string.
+    #[serde(default)]
+    pub iam_cluster_id: Option<String>,
+
+    /// AWS region to sign the IAM auth token for, when `auth` is `IamRole`.
+    /// Unlike RDS/EKS endpoints, ElastiCache/MemoryDB hostnames don't reliably
+    /// embed a parseable region, so it must be given explicitly here.
+    #[serde(default)]
+    pub iam_region: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -392,6 +462,8 @@ pub enum TargetOptions {
     Vnc(TargetVncOptions),
     #[serde(rename = "rdp")]
     Rdp(TargetRdpOptions),
+    #[serde(rename = "redis")]
+    Redis(TargetRedisOptions),
 }
 
 impl TargetOptions {
@@ -404,6 +476,7 @@ impl TargetOptions {
             TargetOptions::Postgres(_) => Protocol::Postgres,
             TargetOptions::Vnc(_) => Protocol::Vnc,
             TargetOptions::Rdp(_) => Protocol::Rdp,
+            TargetOptions::Redis(_) => Protocol::Redis,
         }
     }
 
@@ -416,10 +489,11 @@ impl TargetOptions {
         }
     }
 
-    pub fn default_database_name(&self) -> Option<&str> {
+    pub fn default_database_name(&self) -> Option<String> {
         match self {
-            Self::MySql(options) => options.default_database_name.as_deref(),
-            Self::Postgres(options) => options.default_database_name.as_deref(),
+            Self::MySql(options) => options.default_database_name.as_deref().map(String::from),
+            Self::Postgres(options) => options.default_database_name.as_deref().map(String::from),
+            Self::Redis(options) => options.database.map(|db| db.to_string()),
             _ => None,
         }
     }
@@ -435,6 +509,7 @@ const SECRET_PATHS: &[&[&str]] = &[
     &["rdp", "auth", "password"],
     &["kubernetes", "auth", "token"],
     &["kubernetes", "auth", "private_key"],
+    &["redis", "auth", "password"],
 ];
 
 /// Rewrite every secret in a serialized TargetOptions
@@ -580,6 +655,10 @@ mod tests {
             (
                 serde_json::json!({"rdp": {"auth": {"kind": "password", "password": "p"}}}),
                 serde_json::json!({"rdp": {"auth": {"kind": "password", "password": "Xp"}}}),
+            ),
+            (
+                serde_json::json!({"redis": {"auth": {"kind": "password", "password": "p"}}}),
+                serde_json::json!({"redis": {"auth": {"kind": "password", "password": "Xp"}}}),
             ),
             (
                 serde_json::json!({"kubernetes": {"auth": {"kind": "token", "token": "t"}}}),

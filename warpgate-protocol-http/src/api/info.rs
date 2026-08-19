@@ -29,6 +29,7 @@ pub struct PortsInfo {
     kubernetes: Option<u16>,
     vnc: Option<u16>,
     rdp: Option<u16>,
+    redis: Option<u16>,
 }
 
 #[derive(Serialize, Object)]
@@ -40,6 +41,7 @@ pub struct ExternalHostsInfo {
     kubernetes: Option<String>,
     vnc: Option<String>,
     rdp: Option<String>,
+    redis: Option<String>,
 }
 
 #[derive(Serialize, Object, Debug)]
@@ -277,6 +279,12 @@ impl Api {
                     .external_host
                     .clone()
                     .or_else(|| fallback_host.clone()),
+                redis: config
+                    .store
+                    .redis
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
             })
         } else {
             None
@@ -352,6 +360,11 @@ impl Api {
                     } else {
                         None
                     },
+                    redis: if config.store.redis.enable {
+                        Some(config.store.redis.external_port())
+                    } else {
+                        None
+                    },
                 }
             } else {
                 PortsInfo {
@@ -362,6 +375,7 @@ impl Api {
                     kubernetes: None,
                     vnc: None,
                     rdp: None,
+                    redis: None,
                 }
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,

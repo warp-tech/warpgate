@@ -102,10 +102,7 @@ impl Api {
                     description: t.description.clone(),
                     kind: (&t.options).into(),
                     external_host: t.options.external_host().map(ToString::to_string),
-                    default_database_name: t
-                        .options
-                        .default_database_name()
-                        .map(ToString::to_string),
+                    default_database_name: t.options.default_database_name(),
                     group,
                 }
             })
