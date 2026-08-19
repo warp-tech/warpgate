@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.0-beta.1-17-g2e5c9d724-modified"
+    "version": "v0.28.0-beta.3-45-g93e37ae8b-modified"
   },
   "servers": [
     {
@@ -6562,7 +6562,8 @@
           "id",
           "started",
           "protocol",
-          "node_id"
+          "node_id",
+          "remote_address"
         ],
         "properties": {
           "id": {
@@ -6572,8 +6573,16 @@
           "username": {
             "type": "string"
           },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "target": {
             "$ref": "#/components/schemas/Target"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           },
           "started": {
             "type": "string",
@@ -6597,6 +6606,9 @@
           "node_hostname": {
             "type": "string",
             "description": "Hostname of the owning node; only filled in by the session detail\nendpoint, and only while the node is registered."
+          },
+          "remote_address": {
+            "type": "string"
           }
         }
       },

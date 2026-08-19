@@ -98,6 +98,8 @@ Please use GitHub's [vulnerability reporting system](https://github.com/warp-tec
 
 Warpgate is being actively used in enterprise settings.
 
+What's planned and being worked on next is tracked on the public [roadmap](https://github.com/orgs/warp-tech/projects/1/views/2).
+
 ## How it works
 
 Warpgate is a service that you deploy on the bastion/DMZ host, which will accept SSH, HTTPS, Kubernetes, MySQL, PostgreSQL, RDP and VNC connections and provide an (optional) web admin UI.

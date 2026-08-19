@@ -756,12 +756,12 @@ dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "h2 0.3.27",
- "h2 0.4.14",
+ "h2 0.4.16",
  "http 0.2.12",
  "http 1.5.0",
  "http-body 0.4.6",
  "hyper 0.14.32",
- "hyper 1.10.1",
+ "hyper 1.11.0",
  "hyper-rustls 0.24.2",
  "hyper-rustls 0.27.9",
  "hyper-util",
@@ -1459,7 +1459,7 @@ checksum = "4fe5f465a4f6fee88fad41b85d990f84c835335e85b5d9e6e63e0d06d28cba7c"
 dependencies = [
  "encode_unicode",
  "libc",
- "unicode-width 0.2.2",
+ "unicode-width",
  "windows-sys 0.61.2",
 ]
 
@@ -2915,9 +2915,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.14"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "171fefbc92fe4a4de27e0698d6a5b392d6a0e333506bc49133760b3bcf948733"
+checksum = "a9f37a958b41b3b19ee2707c06439c0e9e547e847223eb791ecb0cb821c65e27"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -3259,15 +3259,15 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "1.10.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55281c53a1894c864990125767da440a4e630446785086f52523b20033b74498"
+checksum = "d22053281f852e11534f5198498373cbb59295120a20771d90f7ed1897490a72"
 dependencies = [
  "atomic-waker",
  "bytes",
  "futures-channel",
  "futures-core",
- "h2 0.4.14",
+ "h2 0.4.16",
  "http 1.5.0",
  "http-body 1.0.1",
  "httparse",
@@ -3301,7 +3301,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
 dependencies = [
  "http 1.5.0",
- "hyper 1.10.1",
+ "hyper 1.11.0",
  "hyper-util",
  "rustls 0.23.43",
  "rustls-native-certs",
@@ -3316,7 +3316,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b90d566bffbce6a75bd8b09a05aa8c2cb1fabb6cb348f8840c9e4c90a0d83b0"
 dependencies = [
- "hyper 1.10.1",
+ "hyper 1.11.0",
  "hyper-util",
  "pin-project-lite",
  "tokio",
@@ -3335,7 +3335,7 @@ dependencies = [
  "futures-util",
  "http 1.5.0",
  "http-body 1.0.1",
- "hyper 1.10.1",
+ "hyper 1.11.0",
  "ipnet",
  "libc",
  "percent-encoding",
@@ -5539,7 +5539,7 @@ dependencies = [
  "http 1.5.0",
  "http-body-util",
  "httpdate",
- "hyper 1.10.1",
+ "hyper 1.11.0",
  "hyper-util",
  "mime",
  "mime_guess",
@@ -6085,7 +6085,7 @@ dependencies = [
  "thiserror 2.0.20",
  "unicode-segmentation",
  "unicode-truncate",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -6159,7 +6159,7 @@ dependencies = [
  "strum 0.28.0",
  "time",
  "unicode-segmentation",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -6304,11 +6304,11 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "h2 0.4.14",
+ "h2 0.4.16",
  "http 1.5.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.10.1",
+ "hyper 1.11.0",
  "hyper-rustls 0.27.9",
  "hyper-util",
  "js-sys",
@@ -6345,11 +6345,11 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "h2 0.4.14",
+ "h2 0.4.16",
  "http 1.5.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.10.1",
+ "hyper 1.11.0",
  "hyper-rustls 0.27.9",
  "hyper-util",
  "js-sys",
@@ -8437,11 +8437,11 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bytes",
- "h2 0.4.14",
+ "h2 0.4.16",
  "http 1.5.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.10.1",
+ "hyper 1.11.0",
  "hyper-timeout",
  "hyper-util",
  "percent-encoding",
@@ -8611,7 +8611,7 @@ checksum = "4eb7c7ddaef6dcc58fae905d0f89a3df49ef77e93822df7447a5bb0babc9ece3"
 dependencies = [
  "ratatui",
  "unicode-segmentation",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -8740,14 +8740,8 @@ checksum = "16b380a1238663e5f8a691f9039c73e1cdae598a30e9855f541d29b08b53e9a5"
 dependencies = [
  "itertools 0.14.0",
  "unicode-segmentation",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
-
-[[package]]
-name = "unicode-width"
-version = "0.1.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
 
 [[package]]
 name = "unicode-width"
@@ -8896,35 +8890,23 @@ checksum = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64"
 
 [[package]]
 name = "vt100"
-version = "0.15.2"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84cd863bf0db7e392ba3bd04994be3473491b31e66340672af5d11943c6274de"
+checksum = "054ff75fb8fa83e609e685106df4faeffdf3a735d3c74ebce97ec557d5d36fd9"
 dependencies = [
  "itoa",
- "log",
- "unicode-width 0.1.14",
+ "unicode-width",
  "vte",
 ]
 
 [[package]]
 name = "vte"
-version = "0.11.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5022b5fbf9407086c180e9557be968742d839e68346af7792b8592489732197"
+checksum = "a5924018406ce0063cd67f8e008104968b74b563ee1b85dde3ed1f7cb87d3dbd"
 dependencies = [
  "arrayvec",
- "utf8parse",
- "vte_generate_state_changes",
-]
-
-[[package]]
-name = "vte_generate_state_changes"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e369bee1b05d510a7b4ed645f5faa90619e05437111783ea5848f28d97d3c2e"
-dependencies = [
- "proc-macro2",
- "quote",
+ "memchr",
 ]
 
 [[package]]
@@ -8966,7 +8948,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9019,7 +9001,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9087,7 +9069,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ca"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "aws-lc-rs",
  "const-oid 0.9.6",
@@ -9106,7 +9088,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "aes-gcm 0.11.0",
  "anyhow",
@@ -9163,7 +9145,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common-http"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "poem",
  "poem-openapi",
@@ -9180,7 +9162,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -9234,7 +9216,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -9247,7 +9229,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "bytes",
  "ipnet",
@@ -9266,7 +9248,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "data-encoding",
  "regex",
@@ -9310,7 +9292,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ldap"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "ldap3",
@@ -9326,7 +9308,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9369,7 +9351,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-kubernetes"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9408,7 +9390,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9438,7 +9420,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-postgres"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9495,7 +9477,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9560,7 +9542,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9579,7 +9561,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-tls"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "bytes",
  "poem",
@@ -9624,7 +9606,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 dependencies = [
  "rust-embed",
  "serde",
@@ -10612,7 +10594,7 @@ dependencies = [
  "base64 0.22.1",
  "http 1.5.0",
  "http-body-util",
- "hyper 1.10.1",
+ "hyper 1.11.0",
  "hyper-rustls 0.27.9",
  "hyper-util",
  "log",

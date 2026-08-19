@@ -83,6 +83,7 @@ impl WarpgateServerHandle {
             Session::Entity::update_many()
                 .set(Session::ActiveModel {
                     username: Set(Some(user_info.username.clone())),
+                    user_id: Set(Some(user_info.id)),
                     ..Default::default()
                 })
                 .filter(Session::Column::Id.eq(self.id))
@@ -115,6 +116,7 @@ impl WarpgateServerHandle {
             Session::Entity::update_many()
                 .set(Session::ActiveModel {
                     target_snapshot: Set(Some(snapshot.to_string())),
+                    target_id: Set(Some(target.id)),
                     ..Default::default()
                 })
                 .filter(Session::Column::Id.eq(self.id))

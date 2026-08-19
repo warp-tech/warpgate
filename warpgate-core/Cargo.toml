@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-core"
-version = "0.28.0-beta.3"
+version = "0.28.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -43,8 +43,7 @@ tracing-core = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 url.workspace = true
 uuid.workspace = true
-# 0.16 pulls in a unicode-width version that conflicts with the rest of the tree
-vt100 = "0.15"
+vt100 = "0.16"
 warpgate-aws = { path = "../warpgate-aws" }
 warpgate-ca = { path = "../warpgate-ca" }
 warpgate-common = { path = "../warpgate-common" }

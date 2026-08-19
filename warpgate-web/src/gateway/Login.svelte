@@ -289,7 +289,7 @@
         {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
             <Loadable promise={ssoProvidersPromise}>
                 {#snippet children(ssoProviders)}
-                    {#if passwordLoginAllowed && !(passwordLoginMinimized && !showPasswordLogin)}
+                    {#if ssoProviders.length && passwordLoginAllowed && !(passwordLoginMinimized && !showPasswordLogin)}
                         <div class="sso-separator"></div>
                     {/if}
                     <div class="sso-buttons">
@@ -313,7 +313,7 @@
                             </button>
                         {/each}
                     </div>
-                    {#if passwordLoginAllowed && passwordLoginMinimized && !showPasswordLogin}
+                    {#if ssoProviders.length && passwordLoginAllowed && passwordLoginMinimized && !showPasswordLogin}
                         <div class="sso-separator"></div>
                     {/if}
                 {/snippet}

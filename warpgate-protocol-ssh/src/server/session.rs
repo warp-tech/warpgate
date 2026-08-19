@@ -83,6 +83,18 @@ struct PendingKeyboardInteractiveAuth {
     web_approval_retry_count: Option<u8>,
 }
 
+enum ProbeState {
+    /// New session
+    NoAttempt,
+    /// Charged with suspicious probing
+    Probe {
+        username: String,
+        method: &'static str,
+    },
+    /// Vindicated by a successful auth or guilty as charged with a failed login
+    Settled,
+}
+
 struct CachedSuccessfulTicketAuth {
     ticket: Secret<String>,
     user_info: AuthStateUserInfo,
@@ -125,6 +137,8 @@ pub struct ServerSession {
     keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
+    /// Track the state of a client snooping around pre-auth
+    probe: ProbeState,
 }
 
 fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
@@ -196,6 +210,7 @@ impl ServerSession {
             keyboard_interactive_state: None,
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
+            probe: ProbeState::NoAttempt,
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -257,11 +272,15 @@ impl ServerSession {
         let inactivity_timeout = services.config.lock().await.store.ssh.inactivity_timeout;
 
         Ok(async move {
-            loop {
+            let result = loop {
                 let next_event_fut = this.get_next_event();
                 match tokio::time::timeout(inactivity_timeout, next_event_fut).await {
-                    Ok(Some(event)) => this.handle_event(event).await?,
-                    Ok(None) => break,
+                    Ok(Some(event)) => {
+                        if let Err(error) = this.handle_event(event).await {
+                            break Err(error);
+                        }
+                    }
+                    Ok(None) => break Ok(()),
                     Err(_) => {
                         info!("Closing the session due to inactivity");
                         let _ = this
@@ -269,11 +288,13 @@ impl ServerSession {
                             .await;
                         this.request_disconnect();
                         this.disconnect_server().await;
-                        break;
+                        break Ok(());
                     }
                 }
-            }
+            };
             debug!("No more events");
+            this.settle_failed_probe().await;
+            result?;
             Ok::<_, anyhow::Error>(())
         })
     }
@@ -348,7 +369,8 @@ impl ServerSession {
         }
     }
 
-    async fn record_failed_login_attempt(&self, username: &str, credential_type: &str) {
+    async fn record_failed_login_attempt(&mut self, username: &str, credential_type: &str) {
+        self.probe = ProbeState::Settled;
         let _ = self
             .services
             .login_protection
@@ -359,6 +381,29 @@ impl ServerSession {
                 credential_type: credential_type.to_string(),
             })
             .await;
+    }
+
+    fn note_probe(&mut self, selector: &AuthSelector, method: &'static str) {
+        if let AuthSelector::User { username, .. } = selector
+            && !matches!(self.probe, ProbeState::Settled)
+        {
+            self.probe = ProbeState::Probe {
+                username: username.clone(),
+                method,
+            };
+        }
+    }
+
+    /// At session end, record a failure if session only did
+    /// unsuccessful probes
+    async fn settle_failed_probe(&mut self) {
+        if self.user_info.is_some() {
+            return;
+        }
+        if let ProbeState::Probe { username, method } = &self.probe {
+            let (username, method) = (username.clone(), *method);
+            self.record_failed_login_attempt(&username, method).await;
+        }
     }
 
     pub fn make_logging_span(&self) -> tracing::Span {
@@ -1816,6 +1861,7 @@ impl ServerSession {
             "Client offers public key auth as {selector:?} with key {}",
             key.public_key_base64()
         );
+        self.note_probe(&selector, "public_key");
 
         if !self.allowed_auth_methods.contains(&MethodKind::PublicKey) {
             warn!("Client attempted public key auth even though it was not advertised");
@@ -1864,6 +1910,7 @@ impl ServerSession {
             "Public key auth as {selector:?} with key {}",
             key.public_key_base64()
         );
+        self.note_probe(&selector, "public_key");
 
         if !self.allowed_auth_methods.contains(&MethodKind::PublicKey) {
             warn!("Client attempted public key auth even though it was not advertised");
@@ -1915,6 +1962,7 @@ impl ServerSession {
     ) -> russh::server::Auth {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Password auth as {selector:?}");
+        self.note_probe(&selector, "password");
 
         if !self.allowed_auth_methods.contains(&MethodKind::Password) {
             warn!("Client attempted password auth even though it was not advertised");
@@ -1952,6 +2000,7 @@ impl ServerSession {
     ) -> Result<russh::server::Auth> {
         let selector: AuthSelector = ssh_username.expose_secret().into();
         info!("Keyboard-interactive auth as {:?}", selector);
+        self.note_probe(&selector, "keyboard_interactive");
 
         if !self
             .allowed_auth_methods
@@ -2197,9 +2246,9 @@ impl ServerSession {
                     )
                     .await?;
 
-                    if !outcome.is_valid()
-                        && let Some(credential_type) = credential_type
-                    {
+                    if outcome.is_valid() {
+                        self.probe = ProbeState::Settled;
+                    } else if let Some(credential_type) = credential_type {
                         self.record_failed_login_attempt(username, credential_type)
                             .await;
                     }
