@@ -123,6 +123,29 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for PostgresSessi
         Ok(true)
     }
 
+    /// The notice needs an authenticated connection to travel on, so the
+    /// `Authentication::Ok` goes out ahead of it when it hasn't already.
+    async fn notify_awaiting_admin_approval(
+        &mut self,
+        auth_ok: &mut Option<AuthOkPermit>,
+    ) -> Result<(), PostgresError> {
+        if let Some(permit) = auth_ok.take() {
+            self.send_auth_ok(permit).await?;
+        }
+        self.stream
+            .push(pgwire::messages::response::NoticeResponse::new(vec![
+                (b'S', "NOTICE".into()),
+                (b'V', "NOTICE".into()),
+                (b'C', "WG002".into()),
+                (
+                    b'M',
+                    "Warpgate: waiting for an administrator to approve this session...".into(),
+                ),
+            ]))?;
+        self.stream.flush().await?;
+        Ok(())
+    }
+
     async fn send_denied(&mut self) -> Result<(), PostgresError> {
         let error_info = ErrorInfo::new(
             "FATAL".to_owned(),

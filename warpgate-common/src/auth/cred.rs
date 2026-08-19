@@ -24,6 +24,19 @@ pub enum CredentialKind {
     WebUserApproval,
 }
 
+/// Which kind of out-of-band approval a request or a remembered grant is for.
+///
+/// Only [`ApprovalKind::User`] is a credential; administrator approval is a
+/// gate on the connection, decided after authentication. The two must never
+/// cross-satisfy, so the kind is part of every request key and match key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ApprovalKind {
+    /// Self approval from the user's own browser session.
+    User,
+    /// JIT approval by an administrator.
+    Admin,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthCredential {
     Otp(Secret<String>),

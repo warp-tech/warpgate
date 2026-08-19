@@ -12,6 +12,7 @@ use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{Protocol, SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
+use crate::approvals::AdminApprovalStatuses;
 use crate::logging::AuditEvent;
 use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
 use crate::{SessionHandle, WarpgateServerHandle};
@@ -23,6 +24,10 @@ pub struct State {
     node_id: Uuid,
     rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     change_sender: broadcast::Sender<()>,
+    /// Administrator-gate outcomes for sessions that observe the gate rather
+    /// than parking on it. Kept here because an entry describes one connection
+    /// and must be dropped with it, which is what this type already tracks.
+    admin_approval_statuses: AdminApprovalStatuses,
 }
 
 impl State {
@@ -38,7 +43,14 @@ impl State {
             node_id,
             rate_limiter_registry: rate_limiter_registry.clone(),
             change_sender: sender,
+            admin_approval_statuses: AdminApprovalStatuses::default(),
         }))
+    }
+
+    /// Handle to the administrator-gate outcomes, for the wait sites that
+    /// record them.
+    pub fn admin_approval_statuses(&self) -> AdminApprovalStatuses {
+        self.admin_approval_statuses.clone()
     }
 
     pub async fn register_session(
@@ -106,7 +118,22 @@ impl State {
             error!(%error, %id, "Could not delete session from the DB");
         }
 
+        self.drop_session_approvals(id).await;
+
         let _ = self.change_sender.send(());
+    }
+
+    /// Forgets everything an approval decision could still be applied to once a
+    /// session is over. The connection is gone, so a decision can never reach
+    /// it — but a pending request left behind would keep sitting in the
+    /// approval queues, where approving it would still stamp a grace-period
+    /// bypass, and a gate outcome left behind describes a connection a later
+    /// session must not inherit.
+    async fn drop_session_approvals(&self, id: SessionId) {
+        if let Err(error) = crate::approvals::delete_requests_for_session(&self.db, id).await {
+            error!(%error, %id, "Could not remove the session's approval requests");
+        }
+        self.admin_approval_statuses.lock().await.remove(&id);
     }
 
     pub async fn remove_session(&mut self, id: SessionId) {
@@ -127,6 +154,8 @@ impl State {
         if let Err(error) = crate::db::mark_session_ended(&self.db, id).await {
             error!(%error, %id, "Could not update session in the DB");
         }
+
+        self.drop_session_approvals(id).await;
 
         let _ = self.change_sender.send(());
     }

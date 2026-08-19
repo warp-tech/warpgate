@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.0-beta.3-modified"
+    "version": "v0.28.0-5-g8168cfdc-modified"
   },
   "servers": [
     {
@@ -210,28 +210,21 @@
             "required": true,
             "deprecated": false,
             "explode": true
+          },
+          {
+            "name": "scope",
+            "schema": {
+              "$ref": "#/components/schemas/ApprovalScope"
+            },
+            "in": "query",
+            "required": true,
+            "deprecated": false,
+            "explode": true
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json; charset=utf-8": {
-              "schema": {
-                "$ref": "#/components/schemas/ApproveAuthRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -268,14 +261,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -1620,6 +1606,7 @@
           "access_roles_assign",
           "sessions_view",
           "sessions_terminate",
+          "approve_sessions",
           "recordings_view",
           "tickets_create",
           "tickets_delete",
@@ -1664,6 +1651,9 @@
           "sessions_terminate": {
             "type": "boolean"
           },
+          "approve_sessions": {
+            "type": "boolean"
+          },
           "recordings_view": {
             "type": "boolean"
           },
@@ -1700,17 +1690,14 @@
           "IpRejected"
         ]
       },
-      "ApproveAuthRequest": {
-        "type": "object",
-        "title": "ApproveAuthRequest",
-        "required": [
-          "scope"
-        ],
-        "properties": {
-          "scope": {
-            "$ref": "#/components/schemas/WebApprovalScope"
-          }
-        }
+      "ApprovalScope": {
+        "type": "string",
+        "description": "How an approval should be remembered for later bypass.\n\nDerives the OpenAPI enum directly so both the administrator and the\nself-approval endpoints can take it as-is; a per-API copy would be three\nidentical enums and two conversions that only exist to satisfy the derive.",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
       },
       "AuthStateResponseInternal": {
         "type": "object",
@@ -2828,15 +2815,6 @@
             }
           }
         }
-      },
-      "WebApprovalScope": {
-        "type": "string",
-        "description": "How an web approval should be remembered for bypass",
-        "enum": [
-          "Once",
-          "Target",
-          "AllTargets"
-        ]
       },
       "WebDesktopSessionCreated": {
         "type": "object",

@@ -24,8 +24,9 @@ use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
 };
-use warpgate_common::{Protocol, Secret, Target};
+use warpgate_common::{Protocol, Secret, SessionId, Target, WarpgateError};
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::approvals::AdminApprovalRequest;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
@@ -61,6 +62,11 @@ pub enum DesktopAuthOutcome<O> {
     Authorized {
         authorization: TargetAuthorization,
         options: O,
+        /// A ticket that authorised this session and has *not* been spent yet.
+        /// [`approve_session`] spends it once the session is past the
+        /// administrator-approval gate, so a denied session doesn't burn a
+        /// single-use ticket.
+        pending_ticket: Option<Uuid>,
     },
     /// Password accepted, but the policy needs an interactive second factor — collected on
     /// the per-protocol holding screen.
@@ -175,6 +181,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                     Ok(DesktopAuthOutcome::Authorized {
                         authorization,
                         options,
+                        pending_ticket: None,
                     })
                 }
                 // Go interactive only when *every* still-needed factor is one the holding
@@ -205,7 +212,6 @@ pub async fn authenticate<P: DesktopProtocol>(
             .await?
             {
                 Some((ticket, authorization)) => {
-                    consume_ticket(&services.db, &ticket.id).await?;
                     let Some(options) = P::options(authorization.target()) else {
                         bail!(
                             "Target {} is not a {} target",
@@ -216,6 +222,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                     Ok(DesktopAuthOutcome::Authorized {
                         authorization,
                         options,
+                        pending_ticket: Some(ticket.id),
                     })
                 }
                 None => Ok(DesktopAuthOutcome::Failed),
@@ -246,6 +253,52 @@ pub async fn finalize_user_auth<P: DesktopProtocol>(
         bail!("Target {target_name} is not a {} target", P::NAME);
     };
     Ok((authorization, options))
+}
+
+/// Hold an authenticated desktop session at the administrator-approval gate, and spend the
+/// ticket that authorised it once it is through. Returns whether the session may proceed.
+///
+/// Call this after authentication and before dialing the target. The gate itself decides
+/// whether this session needs holding at all (the target's setting, a remembered approval),
+/// so it is safe — and required — on every authenticated path. Both desktop protocols hold
+/// their viewer connection inline while it waits.
+pub async fn approve_session(
+    services: &Services,
+    session_id: &SessionId,
+    authorization: &TargetAuthorization,
+    pending_ticket: Option<Uuid>,
+    remote_ip: Option<IpAddr>,
+) -> Result<bool> {
+    // The auth state is keyed by the session id. A ticket-authorised session has none, and
+    // so no credential fingerprints to key a remembered approval on.
+    let state = services.auth_state_store.lock().await.get(session_id);
+    let credentials = match state {
+        Some(state) => Some(state.lock().await.credential_fingerprints()),
+        None => None,
+    };
+
+    let approved = services
+        .require_admin_approval(
+            AdminApprovalRequest {
+                session_id,
+                user_info: authorization.user_info(),
+                protocol: authorization.protocol(),
+                target_name: &authorization.target().name,
+                remote_ip,
+                credentials,
+            },
+            // The viewer connection is held on this call itself; there is no separate
+            // signal to cancel the wait on.
+            std::future::pending(),
+            || async { Ok::<_, WarpgateError>(()) },
+        )
+        .await?;
+
+    if approved && let Some(ticket_id) = pending_ticket {
+        consume_ticket(&services.db, &ticket_id).await?;
+    }
+
+    Ok(approved)
 }
 
 /// Build the browser web-approval URL for the current auth state, or `None` if the external

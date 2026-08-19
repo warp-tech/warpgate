@@ -247,11 +247,12 @@ async fn negotiate_and_authorize(
 
     let mut render = RenderState::new();
 
-    let (authorization, vnc_options) = match authenticated {
+    let (authorization, vnc_options, pending_ticket) = match authenticated {
         DesktopAuthOutcome::Authorized {
             authorization,
             options,
-        } => (authorization, options),
+            pending_ticket,
+        } => (authorization, options, pending_ticket),
         DesktopAuthOutcome::NeedsInteractive(interactive) => {
             let user_info = collect_additional_credentials(
                 &mut viewer_wr,
@@ -274,11 +275,33 @@ async fn negotiate_and_authorize(
                 .login_protection
                 .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
                 .await;
-            (authorization, options)
+            (authorization, options, None)
         }
         // Already handled before the security handshake above.
         DesktopAuthOutcome::Failed => return Ok(None),
     };
+
+    // The viewer is held under the hold screen for the whole gate: VNC only paints when
+    // asked, so without it the viewer's frame requests would go unanswered and its screen
+    // would sit frozen for as long as the administrator takes to decide.
+    let session_id = server_handle.lock().await.id();
+    let approved = render_while(
+        &mut viewer_wr,
+        &mut events_rx,
+        &mut render,
+        warpgate_desktop_auth::approve_session(
+            services,
+            &session_id,
+            &authorization,
+            pending_ticket,
+            Some(remote_address.ip()),
+        ),
+    )
+    .await??;
+    if !approved {
+        warn!("Session was not approved by an administrator");
+        return Ok(None);
+    }
 
     let (user_info, target) = authorization.into_parts();
 
@@ -296,7 +319,6 @@ async fn negotiate_and_authorize(
     // Either way the session takes the same decode-and-re-encode path below, so the
     // interactive-auth / connecting screens (which render into the viewer framebuffer)
     // keep working and the viewer never needs a JPEG decoder.
-    let session_id = server_handle.lock().await.id();
     let recorder = warpgate_desktop_auth::start_recording(services, &session_id, "vnc").await;
 
     // A single backend client connection decodes every update (Tight/JPEG included, see

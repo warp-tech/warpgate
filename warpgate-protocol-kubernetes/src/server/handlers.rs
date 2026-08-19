@@ -25,6 +25,7 @@ use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 
 use crate::correlator::{RequestCorrelator, correlated_authorization};
 use crate::recording::{deduce_exec_recording_metadata, start_recording_api, start_recording_exec};
+use crate::server::approval_gate::check_admin_approval;
 use crate::server::auth::{authenticate_kubernetes_user, create_authenticated_client};
 
 /// A client-supplied impersonation header (`Impersonate-User`,
@@ -112,6 +113,14 @@ pub async fn handle_api_request(
             span_for_request(req, ctx.services(), Some(&*handle)).await?,
         )
     };
+
+    // Gated before the protocol branch so a `kubectl exec`/`port-forward`
+    // upgrade is held on the same terms as a plain API call.
+    if let Some(response) =
+        check_admin_approval(req, ctx.services(), session_id, &user_info, &target).await?
+    {
+        return Ok(response);
+    }
 
     async {
         let response = if let Some(ws) = ws {

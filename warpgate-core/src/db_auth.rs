@@ -13,6 +13,7 @@ use url::Url;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
 use warpgate_common::{Protocol, Secret, SessionId, WarpgateError};
 
+use crate::approvals::AdminApprovalRequest;
 use crate::auth::submit_credential;
 use crate::login_protection::FailedAttemptInfo;
 use crate::{
@@ -63,6 +64,40 @@ pub trait DbAuthTransport {
 
     /// Tell the client the login was denied.
     async fn send_denied(&mut self) -> Result<(), Self::Error>;
+
+    /// Announce that the session is being held for administrator approval.
+    /// Called only while it actually is held, so a session that passes the gate
+    /// straight through says nothing.
+    ///
+    /// A protocol whose notice needs an authenticated connection spends
+    /// `auth_ok` on it; what it leaves behind is what the flow sends once the
+    /// session is approved. The default says nothing, for protocols with no
+    /// in-band channel for it at this point in their handshake.
+    async fn notify_awaiting_admin_approval(
+        &mut self,
+        _auth_ok: &mut Option<AuthOkPermit>,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+/// Holds an otherwise-complete login on the administrator-approval gate.
+/// `Ok(false)` means the connection was refused and the caller must deny it.
+///
+/// The wait isn't cancelled when the client goes away — neither protocol can
+/// cheaply observe a disconnect — which only delays cleanup, since session
+/// teardown deletes the request row regardless.
+async fn hold_for_admin_approval<T: DbAuthTransport>(
+    transport: &mut T,
+    services: &Services,
+    request: AdminApprovalRequest<'_>,
+    auth_ok: &mut Option<AuthOkPermit>,
+) -> Result<bool, T::Error> {
+    services
+        .require_admin_approval(request, std::future::pending(), || async move {
+            transport.notify_awaiting_admin_approval(auth_ok).await
+        })
+        .await
 }
 
 /// Authorizes a database-protocol login end to end.
@@ -128,8 +163,35 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                 "Authorized for {} with a ticket",
                 authorization.target().name
             );
+            let mut auth_ok = Some(AuthOkPermit);
+
+            // Gated before the ticket is consumed, so a refused session doesn't
+            // burn a single-use one. A ticket is not a stable credential
+            // fingerprint, so it never contributes a remembered approval.
+            if !hold_for_admin_approval(
+                transport,
+                services,
+                AdminApprovalRequest {
+                    session_id: &session_id,
+                    user_info: authorization.user_info(),
+                    protocol: T::PROTOCOL,
+                    target_name: &authorization.target().name,
+                    remote_ip: Some(remote_ip),
+                    credentials: None,
+                },
+                &mut auth_ok,
+            )
+            .await?
+            {
+                warn!("Session was not approved by an administrator");
+                transport.send_denied().await?;
+                return Ok(None);
+            }
+
             consume_ticket(&services.db, &ticket.id).await?;
-            transport.send_auth_ok(AuthOkPermit).await?;
+            if let Some(permit) = auth_ok.take() {
+                transport.send_auth_ok(permit).await?;
+            }
             Ok(Some(authorization))
         }
     }
@@ -200,6 +262,27 @@ async fn authorize_user<T: DbAuthTransport>(
                     transport.send_denied().await?;
                     return Ok(None);
                 };
+
+                let credentials = state_arc.lock().await.credential_fingerprints();
+                if !hold_for_admin_approval(
+                    transport,
+                    services,
+                    AdminApprovalRequest {
+                        session_id: &session_id,
+                        user_info: &user_info,
+                        protocol: T::PROTOCOL,
+                        target_name,
+                        remote_ip: Some(remote_ip),
+                        credentials: Some(credentials),
+                    },
+                    &mut auth_ok,
+                )
+                .await?
+                {
+                    warn!("Session was not approved by an administrator");
+                    transport.send_denied().await?;
+                    return Ok(None);
+                }
 
                 if let Some(permit) = auth_ok.take() {
                     transport.send_auth_ok(permit).await?;

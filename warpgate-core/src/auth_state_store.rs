@@ -391,8 +391,8 @@ mod tests {
 
     use ipnet::IpNet;
     use warpgate_common::auth::{
-        AuthCredential, AuthCredentialFingerprint, AuthStateUserInfo, CredentialPolicyResponse,
-        WebApprovalScopeKey,
+        ApprovalKind, AuthCredential, AuthCredentialFingerprint, AuthStateUserInfo,
+        CredentialPolicyResponse, WebApprovalScopeKey,
     };
 
     use super::*;
@@ -644,6 +644,7 @@ mod tests {
 
     fn approval_key(scope: WebApprovalScopeKey) -> WebApprovalMatchKey {
         WebApprovalMatchKey {
+            kind: ApprovalKind::User,
             remote_ip: "10.0.0.5".parse().unwrap(),
             protocol: Protocol::Ssh,
             username: "alice".into(),

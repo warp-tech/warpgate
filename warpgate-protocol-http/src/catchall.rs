@@ -16,6 +16,7 @@ use warpgate_core::{
     AuthorizedIdentity, ConfigProvider, WarpgateServerHandle, authorize_for_target,
 };
 
+use crate::approval_gate::check_admin_approval;
 use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
@@ -49,6 +50,13 @@ pub async fn catchall_endpoint(
 
     if let Some(server_handle) = server_handle {
         server_handle.lock().await.set_target(&target).await?;
+    }
+
+    // Gated before the protocol branch so the WebSocket upgrade is held too —
+    // an upgrade has nowhere to render an interstitial, and letting it through
+    // would leave the gate applying only to plain requests.
+    if let Some(response) = check_admin_approval(req, &ctx, &target).await? {
+        return Ok(response);
     }
 
     let span = info_span!("", target=%target.name);

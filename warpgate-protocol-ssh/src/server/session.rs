@@ -15,6 +15,7 @@ use russh::{ChannelOpenFailure, MethodKind, MethodSet, Sig};
 use termcolor::Color;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, broadcast, oneshot};
+use tokio_util::sync::CancellationToken;
 use tracing::*;
 use url::Url;
 use uuid::Uuid;
@@ -25,6 +26,7 @@ use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, SessionId, TargetOptions, WarpgateError};
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::approvals::AdminApprovalRequest;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
@@ -74,6 +76,13 @@ pub enum Event {
     MenuRedraw(u16, u16),
     Menu(MenuEvent),
     ServerChannelOpenResult(Uuid, Result<ServerChannelId, russh::Error>),
+    /// The approval gate is actually holding this session (as opposed to
+    /// passing it straight through), so the user can be told why they're
+    /// waiting. Only the session can write to the terminal.
+    AdminApprovalPending,
+    AdminApprovalResolved {
+        approved: bool,
+    },
 }
 
 struct PendingKeyboardInteractiveAuth {
@@ -132,6 +141,16 @@ pub struct ServerSession {
     /// state's `target_name` is fixed at construction and scopes web approvals,
     /// so it can only be reused for that same target.
     auth_state: Option<(Arc<Mutex<AuthState>>, String)>,
+    /// Fired by the event-forwarding tasks the moment the client or an admin
+    /// ends the session. The main loop learns the same thing from its event
+    /// queue, but a hold for administrator approval sits off to the side of
+    /// that queue — this reaches it directly.
+    disconnect_token: CancellationToken,
+    /// Set once this session is past the administrator-approval gate, so the
+    /// resolve-then-connect path doesn't re-enter it.
+    admin_approval_granted: bool,
+    /// A ticket that authorised this session and has not been spent yet.
+    pending_ticket: Option<Uuid>,
     keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
@@ -205,6 +224,9 @@ impl ServerSession {
             service_output: ServiceOutput::new(),
             channel_writer: ChannelWriter::new(),
             auth_state: None,
+            disconnect_token: CancellationToken::new(),
+            admin_approval_granted: false,
+            pending_ticket: None,
             keyboard_interactive_state: None,
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
@@ -234,12 +256,17 @@ impl ServerSession {
         let name = format!("SSH {id} session control");
         tokio::task::Builder::new().name(&name).spawn({
             let sender = event_sender.clone();
+            let disconnect_token = this.disconnect_token.clone();
             async move {
                 while let Some(command) = session_handle_rx.recv().await {
+                    if matches!(command, SessionHandleCommand::Close) {
+                        disconnect_token.cancel();
+                    }
                     if sender.send_once(Event::Command(command)).await.is_err() {
                         break;
                     }
                 }
+                disconnect_token.cancel();
             }
         })?;
 
@@ -258,12 +285,19 @@ impl ServerSession {
         let name = format!("SSH {id} server handler events");
         tokio::task::Builder::new().name(&name).spawn({
             let sender: EventSender<Event> = event_sender.clone();
+            let disconnect_token = this.disconnect_token.clone();
             async move {
                 while let Some(e) = handler_event_rx.recv().await {
+                    if matches!(e, ServerHandlerEvent::Disconnect) {
+                        disconnect_token.cancel();
+                    }
                     if sender.send_once(Event::ServerHandler(e)).await.is_err() {
                         break;
                     }
                 }
+                // The channel closing means the russh protocol task is gone —
+                // the client is no longer there either way.
+                disconnect_token.cancel();
             }
         })?;
 
@@ -292,9 +326,27 @@ impl ServerSession {
             };
             debug!("No more events");
             this.settle_failed_probe().await;
+            this.consume_pending_ticket().await;
             result?;
             Ok::<_, anyhow::Error>(())
         })
+    }
+
+    /// Spends the ticket that authorised this session, if connecting never got
+    /// far enough to spend it itself.
+    ///
+    /// A ticket is spent by *authenticating* with it, not by reaching a target:
+    /// a session that opens no channel (`ssh -N`) never calls `connect_remote`,
+    /// and leaving the ticket unspent would make a single-use one reusable
+    /// without limit. The one case that must not spend it — an administrator
+    /// denying the session — clears `pending_ticket` instead.
+    async fn consume_pending_ticket(&mut self) {
+        let Some(ticket_id) = self.pending_ticket.take() else {
+            return;
+        };
+        if let Err(error) = consume_ticket(&self.services.db, &ticket_id).await {
+            error!(%error, "Failed to consume the ticket");
+        }
     }
 
     async fn get_next_event(&mut self) -> Option<Event> {
@@ -527,16 +579,89 @@ impl ServerSession {
         if let Some(authorization) = target
             && self.rc_state == RCState::NotInitialized
         {
-            self.connect_remote(&authorization).await?;
+            if self.admin_approval_granted {
+                self.connect_remote(&authorization).await?;
+            } else {
+                // Claim the slot: the gate runs off to the side, and leaving the
+                // state at `NotInitialized` across it lets a second caller
+                // re-enter and open a duplicate connection. Resumes in the
+                // `Event::AdminApprovalResolved` handler.
+                self.rc_state = RCState::Connecting;
+                self.spawn_admin_approval_gate(authorization);
+            }
         }
 
         Ok(())
+    }
+
+    /// Runs the administrator-approval gate for `authorization` off the session
+    /// event loop, reporting back as [`Event::AdminApprovalResolved`].
+    ///
+    /// Everything downstream is asynchronous anyway — `connect_remote` only
+    /// queues an `RCCommand` — so nothing is gained by awaiting here, and much
+    /// is lost: blocking the event loop also blocks russh, which is inside a
+    /// channel handler awaiting our reply and would stop reading the socket.
+    /// A client that left mid-hold would go unnoticed. Off the loop, the
+    /// terminal stays live, Ctrl-C works, and a disconnect cancels the hold.
+    ///
+    /// The gate itself decides whether this session actually needs holding
+    /// (target setting, remembered approval); it says so by calling
+    /// `notify_waiting`, which is the only thing that tells the user they are
+    /// waiting. A session that passes straight through says nothing and
+    /// resolves within the tick.
+    fn spawn_admin_approval_gate(&mut self, authorization: TargetAuthorization) {
+        let services = self.services.clone();
+        let session_id = self.id;
+        let remote_ip = self.remote_address.ip();
+        let cancel = self.disconnect_token.clone();
+        let event_sender = self.event_sender.clone();
+        let notify_sender = self.event_sender.clone();
+        let auth_state = self.auth_state.as_ref().map(|(state, _)| state.clone());
+        let user_info = authorization.user_info().clone();
+        let target_name = authorization.target().name.clone();
+
+        tokio::spawn(async move {
+            // Ticket-authorised sessions carry no auth state; without one there
+            // are no credentials to key a remembered approval on.
+            let credentials = match auth_state {
+                Some(state) => Some(state.lock().await.credential_fingerprints()),
+                None => None,
+            };
+            let approved = services
+                .require_admin_approval(
+                    AdminApprovalRequest {
+                        session_id: &session_id,
+                        user_info: &user_info,
+                        protocol: crate::PROTOCOL_NAME,
+                        target_name: &target_name,
+                        remote_ip: Some(remote_ip),
+                        credentials,
+                    },
+                    cancel.cancelled_owned(),
+                    || async move {
+                        let _ = notify_sender.send_once(Event::AdminApprovalPending).await;
+                        Ok::<_, WarpgateError>(())
+                    },
+                )
+                .await
+                .unwrap_or_else(|error| {
+                    error!(%error, "Failed to hold the session for administrator approval");
+                    false
+                });
+            let _ = event_sender
+                .send_once(Event::AdminApprovalResolved { approved })
+                .await;
+        });
     }
 
     /// Dialling takes the authorization proof rather than a bare target, so the host we
     /// connect to is necessarily the one that was authorized, for the user it was
     /// authorized for.
     async fn connect_remote(&mut self, authorization: &TargetAuthorization) -> Result<()> {
+        // Past every gate and actually going to the target, so the ticket is
+        // spent here rather than waiting for teardown to do it.
+        self.consume_pending_ticket().await;
+
         let ssh_chain = resolve_ssh_chain(
             &self.services,
             authorization.target().id,
@@ -696,6 +821,28 @@ impl ServerSession {
                     if let Err(err) = self.handle_menu_event(action).await {
                         error!(?err, "Menu loop action handler error");
                     }
+                }
+                Event::AdminApprovalPending => {
+                    self.emit_service_message(
+                        "Waiting for an administrator to approve this session...",
+                    )
+                    .await?;
+                }
+                Event::AdminApprovalResolved { approved } => {
+                    if !approved {
+                        // A denied session never reached the target, so its
+                        // ticket stays unspent.
+                        self.pending_ticket = None;
+                        self.emit_service_message("Session was not approved by an administrator")
+                            .await?;
+                        self.request_disconnect();
+                        self.disconnect_server().await;
+                        return Ok(());
+                    }
+                    self.admin_approval_granted = true;
+                    // `maybe_connect_remote` claimed the slot before the hold began.
+                    self.rc_state = RCState::NotInitialized;
+                    self.maybe_connect_remote().await?;
                 }
                 Event::ServerChannelOpenResult(id, result) => {
                     match result {
@@ -2284,7 +2431,10 @@ impl ServerSession {
                             "Authorized for {} with a ticket",
                             authorization.target().name
                         );
-                        consume_ticket(&self.services.db, &ticket.id).await?;
+                        // Spent at connect time rather than here, so a session
+                        // an administrator denies — or one that never opens a
+                        // channel — doesn't burn a single-use ticket.
+                        self.pending_ticket = Some(ticket.id);
                         let user_info = authorization.user_info().clone();
                         self._auth_accept(user_info.clone(), Some(authorization))
                             .await?;

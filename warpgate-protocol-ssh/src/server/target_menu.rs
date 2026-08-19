@@ -578,6 +578,8 @@ async fn run_target_menu_loop(
             | Event::ServiceOutput(_)
             | Event::Client(_)
             | Event::Menu(_)
+            | Event::AdminApprovalPending
+            | Event::AdminApprovalResolved { .. }
             | Event::ServerChannelOpenResult(_, _) => {}
         }
     }

@@ -11,7 +11,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{
-    AuthCredential, AuthCredentialFingerprint, CredentialKind, CredentialPolicy,
+    ApprovalKind, AuthCredential, AuthCredentialFingerprint, CredentialKind, CredentialPolicy,
     CredentialPolicyResponse,
 };
 use crate::helpers::logging::format_related_ids;
@@ -98,6 +98,10 @@ pub enum WebApprovalScopeKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebApprovalMatchKey {
+    /// Which approval the remembered grant was for. Part of the key so an
+    /// administrator's grant can never satisfy a request for the user's own
+    /// approval, or the other way round.
+    pub kind: ApprovalKind,
     pub remote_ip: IpAddr,
     pub protocol: Protocol,
     pub username: String,
@@ -196,6 +200,28 @@ impl AuthState {
         &self.target_name
     }
 
+    pub const fn remote_ip(&self) -> Option<IpAddr> {
+        self.remote_ip
+    }
+
+    /// Fingerprints of the credentials accepted so far, excluding the approval
+    /// itself so the result describes the *other* credentials presented and is
+    /// identical whether taken before an approval is added or after.
+    ///
+    /// Sorted and deduplicated, so two attempts presenting the same credentials
+    /// in a different order produce the same list.
+    pub fn credential_fingerprints(&self) -> Vec<AuthCredentialFingerprint> {
+        let mut fingerprints: Vec<AuthCredentialFingerprint> = self
+            .valid_credentials
+            .iter()
+            .filter(|c| c.kind() != CredentialKind::WebUserApproval)
+            .map(Into::into)
+            .collect();
+        fingerprints.sort_unstable();
+        fingerprints.dedup();
+        fingerprints
+    }
+
     /// Builds the key used to match this attempt against a remembered web
     /// approval.
     pub fn web_approval_match_key(&self) -> Option<WebApprovalMatchKey> {
@@ -214,6 +240,7 @@ impl AuthState {
         other_credentials.dedup();
 
         Some(WebApprovalMatchKey {
+            kind: ApprovalKind::User,
             remote_ip,
             protocol: self.protocol,
             username: self.user_info.username.to_lowercase(),

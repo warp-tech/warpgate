@@ -1,4 +1,5 @@
 pub mod api;
+mod approval_gate;
 mod catchall;
 mod client_cache;
 mod common;

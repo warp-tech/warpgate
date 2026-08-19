@@ -28,6 +28,7 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unb
 use tokio::time::{Instant, timeout_at};
 use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
+use uuid::Uuid;
 use warpgate_common::helpers::net::accept_client;
 use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetRdpOptions};
 use warpgate_core::recordings::DesktopRecorder;
@@ -50,7 +51,7 @@ use bridge::connect_backend;
 use hold_screen::{run_banner_screen, run_hold_screen};
 use protocol::{AuthVerdict, Event as ServerEvent, Input as ServerInput};
 use warpgate_desktop_auth::{
-    DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
+    DesktopAuthOutcome, DesktopProtocol, approve_session, authenticate, finalize_user_auth,
 };
 
 /// Depth of the feed into the viewer-facing RDP server. Bounded so a slow viewer
@@ -263,13 +264,14 @@ async fn control_loop(
                     Ok(DesktopAuthOutcome::Authorized {
                         authorization,
                         options,
+                        pending_ticket,
                     }) => {
                         // Accept the NLA so the capability exchange proceeds and reports
                         // the viewer's desktop size; defer the target dial to that `Size`.
                         if reply.send(AuthVerdict::StartSession).is_err() {
                             break;
                         }
-                        pending_dial = Some((authorization, options));
+                        pending_dial = Some((authorization, options, pending_ticket));
                         // The banner screen consumes the viewer's `Size` event while it waits,
                         // so dial here once it's dismissed rather than waiting for a `Size`
                         // that has already been delivered.
@@ -278,15 +280,19 @@ async fn control_loop(
                         {
                             BannerOutcome::NotShown => (),
                             BannerOutcome::Acknowledged => {
-                                dial_if_pending(
+                                if !dial_if_pending(
                                     &mut backend,
                                     &mut pending_dial,
                                     &services,
                                     &server_handle,
                                     &server_in_tx,
+                                    remote_address,
                                     screen,
                                 )
-                                .await?;
+                                .await?
+                                {
+                                    break;
+                                }
                             }
                             BannerOutcome::Disconnected => break,
                         }
@@ -318,7 +324,7 @@ async fn control_loop(
                                     Ok((authorization, options)) => {
                                         // `screen` was updated by `run_hold_screen` as the
                                         // viewer negotiated its size during the 2FA prompt.
-                                        pending_dial = Some((authorization, options));
+                                        pending_dial = Some((authorization, options, None));
                                         if matches!(
                                             acknowledge_banner(
                                                 &services,
@@ -331,15 +337,19 @@ async fn control_loop(
                                         ) {
                                             break;
                                         }
-                                        dial_if_pending(
+                                        if !dial_if_pending(
                                             &mut backend,
                                             &mut pending_dial,
                                             &services,
                                             &server_handle,
                                             &server_in_tx,
+                                            remote_address,
                                             screen,
                                         )
-                                        .await?;
+                                        .await?
+                                        {
+                                            break;
+                                        }
                                     }
                                     Err(error) => {
                                         warn!(%error, "Authorization failed after second factor");
@@ -373,15 +383,19 @@ async fn control_loop(
             }
             ServerEvent::Size { width, height } => {
                 screen = warpgate_desktop_ui::Screen { width, height };
-                dial_if_pending(
+                if !dial_if_pending(
                     &mut backend,
                     &mut pending_dial,
                     &services,
                     &server_handle,
                     &server_in_tx,
+                    remote_address,
                     screen,
                 )
-                .await?;
+                .await?
+                {
+                    break;
+                }
                 continue;
             }
             // Viewer input: record it for audit (like native VNC) then forward to the
@@ -391,15 +405,19 @@ async fn control_loop(
 
         // A viewer that never negotiates a size won't emit `Size`; dial the pending target
         // on its first input so the session still connects (at the advertised default).
-        dial_if_pending(
+        if !dial_if_pending(
             &mut backend,
             &mut pending_dial,
             &services,
             &server_handle,
             &server_in_tx,
+            remote_address,
             screen,
         )
-        .await?;
+        .await?
+        {
+            break;
+        }
 
         // Reached only for the viewer-input variants above.
         let Some(backend) = &backend else {
@@ -421,8 +439,9 @@ async fn control_loop(
     Ok(())
 }
 
-/// An authorized target held until the viewer's negotiated size is known.
-type PendingDial = (TargetAuthorization, TargetRdpOptions);
+/// An authorized target held until the viewer's negotiated size is known, along with the
+/// unspent ticket that authorised it, if it was ticket auth.
+type PendingDial = (TargetAuthorization, TargetRdpOptions, Option<Uuid>);
 
 enum BannerOutcome {
     /// No banner is configured, so nothing was rendered and no events were consumed.
@@ -456,17 +475,36 @@ async fn acknowledge_banner(
 }
 
 /// Dial the pending target, if there is one and it hasn't been dialed yet, at `screen`.
+///
+/// The single point where a session reaches its target, and so where it is held for
+/// administrator approval. Returns `false` when an administrator denied it, leaving the
+/// session torn down and nothing dialed.
 async fn dial_if_pending(
     backend: &mut Option<BackendBridge>,
     pending: &mut Option<PendingDial>,
     services: &Services,
     server_handle: &Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
     server_in_tx: &Sender<ServerInput>,
+    remote_address: SocketAddr,
     screen: warpgate_desktop_ui::Screen,
-) -> Result<()> {
+) -> Result<bool> {
     if backend.is_none()
-        && let Some((authorization, options)) = pending.take()
+        && let Some((authorization, options, pending_ticket)) = pending.take()
     {
+        let session_id = server_handle.lock().await.id();
+        if !approve_session(
+            services,
+            &session_id,
+            &authorization,
+            pending_ticket,
+            Some(remote_address.ip()),
+        )
+        .await?
+        {
+            warn!("Session was not approved by an administrator");
+            let _ = server_in_tx.send(ServerInput::Shutdown).await;
+            return Ok(false);
+        }
         *backend = Some(
             connect_backend(
                 services,
@@ -479,7 +517,7 @@ async fn dial_if_pending(
             .await?,
         );
     }
-    Ok(())
+    Ok(true)
 }
 
 /// RDP's binding to the shared desktop-auth flow.
