@@ -67,7 +67,7 @@ impl CommandDetector {
 
     pub fn on_resize(&mut self, cols: u16, rows: u16) {
         let (cols, rows) = sane_size(cols, rows);
-        self.parser.set_size(rows, cols);
+        self.parser.screen_mut().set_size(rows, cols);
         self.state = match self.state {
             State::Editing { .. } => State::Discarding,
             State::Submitted { scanned, .. } => State::Discarded { scanned },
@@ -393,6 +393,18 @@ mod tests {
         d.on_resize(120, 40);
         typed(&mut d, "top");
         assert_eq!(enter(&mut d).as_deref(), Some("top"));
+    }
+
+    #[test]
+    fn restore_cursor_after_shrink_does_not_panic() {
+        let mut d = CommandDetector::new(80, 24);
+        // Prompt saves the cursor (DECSC) on row 20; the terminal then shrinks
+        // below that row and the shell redraws with DECRC + text.
+        prompt(&mut d, "\x1b[21;1H$ \x1b7");
+        d.on_resize(80, 10);
+        prompt(&mut d, "\x1b8$ ");
+        typed(&mut d, "ls");
+        assert_eq!(enter(&mut d).as_deref(), Some("ls"));
     }
 
     #[test]
