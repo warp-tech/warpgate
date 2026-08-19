@@ -16,6 +16,10 @@ Two modes, and the routine one is `--named`. From the repository root:
 
     PYTHONPATH=$PWD poetry -C tests run python -m tests.mutation_matrix --named
     PYTHONPATH=$PWD poetry -C tests run python -m tests.mutation_matrix --named principal
+    ... --named --changed <base>      # only guards whose anchor file changed
+    ... --named --fail-fast           # stop at the first guard that does not
+                                      # discriminate, rather than spending hours
+                                      # confirming the rest
 
 `PYTHONPATH` is not decoration. The virtualenv lives in `tests/`, so poetry has
 to be pointed there, and `poetry -C tests run` executes with the working
@@ -884,7 +888,35 @@ def _is_rust(name: str, crates=None) -> bool:
     return any(name in _crate_tests(crate) for crate in (crates or RUST_CRATES))
 
 
-def verify_named(mutations):
+# Guards added or repointed in round J. A scheduling hint only: it puts the
+# least-established guards first so a `--fail-fast` run reaches them in minutes
+# rather than hours. Drifting out of date costs nothing here, unlike
+# `DISCRIMINATES`, where a stale name is a guard that cannot be measured.
+RECENT_GUARDS = frozenset({
+    "certificate: two usernames cannot produce one key ID",
+    "certificate: the unattributed placeholder cannot be claimed by a user",
+    "certificate: a username cannot shift the key ID fields",
+    "certificate: a username cannot impersonate the gateway's attribution",
+    "certificate: describing a far-future expiry cannot panic",
+    "connection: the target's own USERAUTH answer is bounded",
+    "connection: unreachable and untrusted do not read alike",
+    "connection: the handshake deadline resumes after a host key answer",
+    "error surfacing: internal error text never reaches a client message",
+})
+
+
+def _needs_gateway_binary(tests, crates) -> bool:
+    """Whether measuring this guard runs the gateway at all.
+
+    A Rust discriminator is compiled and run by `cargo test -p <crate>`, which
+    builds its own test binary from the mutated source and never looks at
+    `target/debug/warpgate`. Building the gateway for those guards — 33 of the
+    53 — was work whose result nothing read.
+    """
+    return any(t.startswith("test_") and not _is_rust(t, crates) for t in tests)
+
+
+def verify_named(mutations, fail_fast=False):
     """A/B every guard against the test named after it, one at a time.
 
     Reports per guard: `discriminates`, `does not discriminate` (the named test
@@ -911,14 +943,32 @@ def verify_named(mutations):
         )
         return result
 
+    # `target/debug/warpgate` is left holding the last mutation applied to it,
+    # because restoring a source file does not rebuild the binary compiled from
+    # it. The next guard's *baseline* then ran the previous guard's mutated
+    # gateway, and reported `already failing` for a tree that was fine — twice
+    # in one sweep, on guards 29 and 31. Raised by Antigravity as W-152, and it
+    # invalidated the baseline half of every integration guard's A/B.
+    binary_is_mutated = False
+
     for index, (name, path, old, new) in enumerate(mutations, start=1):
-        print(f"[{index:>2}/{total}] measuring       {name}", flush=True)
         expected = DISCRIMINATES.get(name)
         if not expected:
+            print(f"[{index:>2}/{total}] measuring       {name}", flush=True)
             record({"guard": name, "status": "no discriminating test named"})
             continue
 
         nearest = _crates_nearest(path)
+        needs_binary = _needs_gateway_binary(expected, nearest)
+        kind = "integration" if needs_binary else "unit"
+        print(f"[{index:>2}/{total}] measuring       {name}  ({kind})", flush=True)
+
+        if needs_binary and binary_is_mutated:
+            print(f"[{index:>2}/{total}]   rebuilding the gateway from clean source", flush=True)
+            run(["cargo", "build", "--bin", "warpgate"])
+            binary_is_mutated = False
+
+        print(f"[{index:>2}/{total}]   baseline", flush=True)
         before_pass, before_fail = run_named_only(expected, nearest)
         if before_fail:
             record({
@@ -933,10 +983,14 @@ def verify_named(mutations):
         IN_FLIGHT[str(source)] = original
         source.write_text(original.replace(old, new, 1))
         try:
-            build = run(["cargo", "build", "--bin", "warpgate"])
-            if build.returncode != 0:
-                record({"guard": name, "status": "did not compile"})
-                continue
+            if needs_binary:
+                print(f"[{index:>2}/{total}]   building the gateway with the guard off", flush=True)
+                build = run(["cargo", "build", "--bin", "warpgate"])
+                binary_is_mutated = True
+                if build.returncode != 0:
+                    record({"guard": name, "status": "did not compile"})
+                    continue
+            print(f"[{index:>2}/{total}]   testing with the guard off", flush=True)
             after_pass, after_fail = run_named_only(expected, nearest)
             # `all`, per A2: every test the entry names has to notice.
             status = (
@@ -955,7 +1009,21 @@ def verify_named(mutations):
             source.write_text(original)
             IN_FLIGHT.pop(str(source), None)
 
-    run(["cargo", "build", "--bin", "warpgate"])
+        if fail_fast and results[-1]["status"] != "discriminates":
+            print(
+                f"\nstopping at [{index}/{total}] because --fail-fast was asked "
+                f"for and this guard came back {results[-1]['status']!r}.\n"
+                f"{len(results)} of {total} measured; the rest are unknown, not "
+                f"passing.",
+                flush=True,
+            )
+            break
+
+    # The tree is clean by now but the binary is not, and whatever runs next
+    # deserves one built from the source that is actually on disk.
+    if binary_is_mutated:
+        print("rebuilding the gateway from clean source", flush=True)
+        run(["cargo", "build", "--bin", "warpgate"])
     return results
 
 
@@ -1070,6 +1138,10 @@ def check_replacements_build(mutations, in_flight):
 
 
 def _check_one_round(mutations, packages, in_flight, round_number, rounds):
+    print(
+        f"    [{round_number}/{rounds}] compiling {len(mutations)} replacement(s)",
+        flush=True,
+    )
     touched: dict[Path, str] = {}
     collided = []
     try:
@@ -1139,6 +1211,7 @@ def write_artifact(*, partial: bool, results: list, refused: str | None, mode: s
 
 def _python_test_names() -> set[str]:
     names: set[str] = set()
+    print("    collecting the Python suites", flush=True)
     collected = subprocess.run(
         ["poetry", "run", "pytest", *SUITES, "--collect-only", "-q"],
         cwd=REPO / "tests",
@@ -1153,7 +1226,13 @@ def _python_test_names() -> set[str]:
 
 def _rust_test_names(crates) -> set[str]:
     names: set[str] = set()
-    for crate in crates:
+    crates = list(crates)
+    for index, crate in enumerate(crates, start=1):
+        # One line per crate, because each of these builds that crate's test
+        # binary and the six together run for half an hour. The phase used to
+        # announce itself once and then go quiet for all of it, which is the
+        # same fault as the sweep's, one level down.
+        print(f"    [{index}/{len(crates)}] listing tests in {crate}", flush=True)
         listed = run(["cargo", "test", "-p", crate, "--", "--list"])
         for line in listed.stdout.splitlines():
             if line.endswith(": test"):
@@ -1386,6 +1465,9 @@ def main():
     named_mode = "--named" in args
     args = [a for a in args if a != "--named"]
 
+    fail_fast = "--fail-fast" in args
+    args = [a for a in args if a != "--fail-fast"]
+
     changed_base = None
     if "--changed" in args:
         at = args.index("--changed")
@@ -1448,7 +1530,13 @@ def main():
     print("  ready\n", flush=True)
 
     if named_mode:
-        results = verify_named(selected)
+        # Least-established first. A guard added yesterday is likelier to be
+        # wrong than one that has survived a dozen sweeps, and with --fail-fast
+        # that is the difference between learning in minutes and learning in
+        # hours. Order changes nothing about the verdicts: each guard is
+        # measured against its own baseline.
+        selected = sorted(selected, key=lambda m: m[0] not in RECENT_GUARDS)
+        results = verify_named(selected, fail_fast=fail_fast)
         write_artifact(partial=bool(only), results=results, refused=None, mode="named")
         good = [r for r in results if r["status"] == "discriminates"]
         print(
