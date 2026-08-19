@@ -27,6 +27,8 @@ pub enum TargetKind {
     Vnc,
     #[sea_orm(string_value = "rdp")]
     Rdp,
+    #[sea_orm(string_value = "redis")]
+    Redis,
 }
 
 impl From<&TargetOptions> for TargetKind {
@@ -39,6 +41,7 @@ impl From<&TargetOptions> for TargetKind {
             TargetOptions::Ssh(_) => Self::Ssh,
             TargetOptions::Vnc(_) => Self::Vnc,
             TargetOptions::Rdp(_) => Self::Rdp,
+            TargetOptions::Redis(_) => Self::Redis,
         }
     }
 }

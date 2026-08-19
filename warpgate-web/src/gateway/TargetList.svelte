@@ -462,7 +462,8 @@
                 targetKind={instructionsTarget.kind ?? TargetKind.Ssh}
                 targetDefaultDatabaseName={instructionsTarget.kind ===
                     TargetKind.MySql ||
-                instructionsTarget.kind === TargetKind.Postgres
+                instructionsTarget.kind === TargetKind.Postgres ||
+                instructionsTarget.kind === TargetKind.Redis
                     ? instructionsTarget.defaultDatabaseName
                     : undefined}
             />

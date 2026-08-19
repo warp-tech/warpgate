@@ -12,6 +12,7 @@ export const DEFAULT_PORTS: { [K in PortKind]: number } = {
     Postgres: 5432,
     Rdp: 3389,
     Vnc: 5900,
+    Redis: 6379,
 }
 
 function hostPort({ kind, host, port }: OptionsOf<PortKind>): string {
@@ -29,6 +30,7 @@ const ADDRESS: { [K in TargetKindName]: (_: OptionsOf<K>) => string } = {
     Kubernetes: o => o.clusterUrl,
     Rdp: hostPort,
     Vnc: hostPort,
+    Redis: hostPort,
 }
 
 export function targetAddress(options: TargetOptions): string {

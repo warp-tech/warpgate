@@ -16,8 +16,8 @@ use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::{repository_file_url, warpgate_version};
 use warpgate_common::{
     GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
-    RdpConfig, RoleId, Secret, SshConfig, SshHostKeyVerificationMode, VncConfig, WarpgateConfig,
-    WarpgateConfigStore,
+    RdpConfig, RedisConfig, RoleId, Secret, SshConfig, SshHostKeyVerificationMode, VncConfig,
+    WarpgateConfig, WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 use warpgate_core::db::{connect_to_db_and_migrate, sqlite_url};
@@ -97,6 +97,7 @@ struct Answers {
     kubernetes: Listener,
     vnc: Listener,
     rdp: Listener,
+    redis: Listener,
     host_key_verification: SshHostKeyVerificationMode,
     record_sessions: bool,
     admin_password: Secret<String>,
@@ -122,6 +123,7 @@ impl Answers {
             kubernetes: listener(args.kubernetes_port, KubernetesConfig::default().listen),
             vnc: listener(args.vnc_port, VncConfig::default().listen),
             rdp: listener(args.rdp_port, RdpConfig::default().listen),
+            redis: listener(args.redis_port, RedisConfig::default().listen),
             host_key_verification: args.host_key_verification,
             record_sessions: args.record_sessions,
             admin_password: args.admin_password(),
@@ -183,6 +185,10 @@ impl Answers {
 
         let vnc = prompt_listener(&theme, "VNC", VncConfig::default().listen, false)?;
         let rdp = prompt_listener(&theme, "RDP", RdpConfig::default().listen, false)?;
+        // Redis listens in plaintext by default (unlike the other DB protocols)
+        // since it has no in-protocol STARTTLS and most self-hosted Redis
+        // deployments run without TLS.
+        let redis = prompt_listener(&theme, "Redis", RedisConfig::default().listen, false)?;
 
         let record_sessions = dialoguer::Confirm::with_theme(&theme)
             .default(true)
@@ -205,6 +211,7 @@ impl Answers {
             kubernetes,
             vnc,
             rdp,
+            redis,
             host_key_verification: SshHostKeyVerificationMode::default(),
             record_sessions,
             admin_password,
@@ -242,6 +249,11 @@ impl Answers {
             ),
             (&self.vnc, &mut store.vnc.enable, &mut store.vnc.listen),
             (&self.rdp, &mut store.rdp.enable, &mut store.rdp.listen),
+            (
+                &self.redis,
+                &mut store.redis.enable,
+                &mut store.redis.listen,
+            ),
         ] {
             *enable = listener.enable;
             *listen = listener.listen.clone();
