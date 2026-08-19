@@ -926,6 +926,18 @@ def verify_named(mutations, fail_fast=False):
     """
     results = []
     total = len(mutations)
+    started_at = time.time()
+
+    def stamp() -> str:
+        """Elapsed since measurement began, as `h:mm:ss`.
+
+        Wall-clock duration is the only thing anyone asks of a run this long —
+        how far in, how much left — and it was the one thing the output did not
+        say. Elapsed rather than a clock time, because the interesting quantity
+        is the cost of a guard, not the hour it happened to fall in.
+        """
+        seconds = int(time.time() - started_at)
+        return f"{seconds // 3600}:{seconds // 60 % 60:02d}:{seconds % 60:02d}"
 
     def record(result):
         """Appended *and printed*, as each guard finishes.
@@ -937,8 +949,10 @@ def verify_named(mutations, fail_fast=False):
         gets killed, and two of mine were.
         """
         results.append(result)
+        result["at"] = stamp()
         print(
-            f"[{len(results):>2}/{total}] {result['status']:>26}  {result['guard']}",
+            f"[{len(results):>2}/{total}] {result['status']:>26}  "
+            f"{result['guard']}  ({stamp()})",
             flush=True,
         )
         return result
@@ -961,7 +975,7 @@ def verify_named(mutations, fail_fast=False):
         nearest = _crates_nearest(path)
         needs_binary = _needs_gateway_binary(expected, nearest)
         kind = "integration" if needs_binary else "unit"
-        print(f"[{index:>2}/{total}] measuring       {name}  ({kind})", flush=True)
+        print(f"[{index:>2}/{total}] measuring       {name}  ({kind}, {stamp()})", flush=True)
 
         if needs_binary and binary_is_mutated:
             print(f"[{index:>2}/{total}]   rebuilding the gateway from clean source", flush=True)
