@@ -30,7 +30,7 @@ impl TerminalScreen {
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
         let (cols, rows) = sane_terminal_size(cols, rows);
-        self.parser.set_size(rows, cols);
+        self.parser.screen_mut().set_size(rows, cols);
     }
 
     pub fn snapshot(&self) -> Vec<u8> {
