@@ -9285,6 +9285,7 @@ dependencies = [
  "md5",
  "poem",
  "poem-openapi",
+ "rcgen",
  "regex",
  "reqwest 0.13.4",
  "reqwest-websocket",

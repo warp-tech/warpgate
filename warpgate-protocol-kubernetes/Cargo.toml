@@ -39,3 +39,6 @@ warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
+
+[dev-dependencies]
+rcgen.workspace = true

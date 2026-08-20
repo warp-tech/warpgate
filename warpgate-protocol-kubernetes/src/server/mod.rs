@@ -8,13 +8,13 @@ use poem::{EndpointExt, Route, Server};
 use rustls::ServerConfig;
 use tracing::info;
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::proxy_protocol::ProxyProtocolAcceptor;
+use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::Services;
 use warpgate_tls::{SingleCertResolver, TlsCertificateAndPrivateKey};
 
 use crate::correlator::RequestCorrelator;
-use crate::server::client_certs::{AcceptAnyClientCert, CertificateCapturingAcceptor};
+use crate::server::client_certs::{AcceptAnyClientCert, certificate_capturing_acceptor};
 use crate::server::handlers::handle_api_request;
 
 pub mod auth;
@@ -58,8 +58,8 @@ pub async fn bind_server(
         )));
 
     let tcp_acceptor = address.poem_listener()?.into_acceptor().await?;
-    let tcp_acceptor = ProxyProtocolAcceptor::new(tcp_acceptor, proxy_protocol);
-    let cert_capturing_acceptor = CertificateCapturingAcceptor::new(tcp_acceptor, tls_config);
+    let tcp_acceptor = MaybeProxyProtocolAcceptor::new(tcp_acceptor, proxy_protocol);
+    let cert_capturing_acceptor = certificate_capturing_acceptor(tcp_acceptor, tls_config);
 
     Ok(async move {
         Server::new_with_acceptor(cert_capturing_acceptor)
