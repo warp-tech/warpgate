@@ -25,9 +25,9 @@ serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json.workspace = true
 thiserror.workspace = true
 time = { workspace = true, features = ["serde-well-known"] }
+tls-listener.workspace = true
 tokio.workspace = true
 tokio-rustls = { version = "0.26", default-features = false }
-tls-listener.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
 url.workspace = true
