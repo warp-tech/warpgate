@@ -88,7 +88,7 @@ pub async fn bind_server(
     cert_pem: String,
     key_pem: String,
 ) -> Result<BoxFuture<'static, Result<()>>> {
-    let mut listener = address.tcp_accept_stream().await?;
+    let listener = address.tcp_accept_stream().await?;
 
     Ok(async move {
         accept_loop(

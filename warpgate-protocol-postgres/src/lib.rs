@@ -56,7 +56,7 @@ impl ProtocolServer for PostgresProtocolServer {
             certificate_and_key.into(),
         ))));
 
-        let mut listener = address
+        let listener = address
             .tcp_accept_stream()
             .await
             .context("accepting connection")?;

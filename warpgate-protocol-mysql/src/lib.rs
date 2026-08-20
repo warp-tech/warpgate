@@ -55,7 +55,7 @@ impl ProtocolServer for MySQLProtocolServer {
             certificate_and_key.into(),
         ))));
 
-        let mut listener = address.tcp_accept_stream().await?;
+        let listener = address.tcp_accept_stream().await?;
 
         let services = self.services;
         Ok(async move {
