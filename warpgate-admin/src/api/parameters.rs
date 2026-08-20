@@ -1,9 +1,11 @@
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
+use poem_openapi::types::{ParseError, ParseFromJSON, ParseResult};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::NotSet;
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
+use serde_json::Value;
 use warpgate_aws::{S3Credentials, S3Storage};
 use warpgate_common::{AdminPermission, PasswordPolicy, WarpgateError};
 use warpgate_db_entities::Parameters;
@@ -12,6 +14,17 @@ use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 use super::AdminContext;
 
 pub struct Api;
+
+/// correctly deserialize Option<Option<>> (x?: T|null)
+fn parse_nullable<T: ParseFromJSON>(value: Option<Value>) -> ParseResult<Option<Option<T>>> {
+    Ok(match value {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(value) => Some(Some(
+            T::parse_from_json(Some(value)).map_err(ParseError::propagate)?,
+        )),
+    })
+}
 
 /// The stored S3 secret is never sent to the browser.
 fn redact_secret(mut config: RecordingsStorageConfig) -> RecordingsStorageConfig {
@@ -101,7 +114,9 @@ struct ParameterUpdate {
     pub password_login_mode: Option<Parameters::PasswordLoginMode>,
     pub ticket_self_service_enabled: Option<bool>,
     pub ticket_auto_approve_existing_access: Option<bool>,
+    #[oai(deserialize_with = "parse_nullable")]
     pub ticket_max_duration_seconds: Option<Option<i64>>,
+    #[oai(deserialize_with = "parse_nullable")]
     pub ticket_max_uses: Option<Option<i16>>,
     pub ticket_require_description: Option<bool>,
     pub ticket_request_show_all_targets: Option<bool>,
@@ -109,6 +124,7 @@ struct ParameterUpdate {
     pub open_targets_in_new_tab: Option<Parameters::OpenTargetsInNewTabMode>,
     pub show_session_menu: Option<bool>,
     pub password_policy: Option<PasswordPolicy>,
+    #[oai(deserialize_with = "parse_nullable")]
     pub max_api_token_duration_seconds: Option<Option<i64>>,
     pub record_scp: Option<bool>,
     pub login_protection_enabled: Option<bool>,
@@ -126,7 +142,9 @@ struct ParameterUpdate {
     pub lp_user_exempt_admins: Option<bool>,
     pub banner: Option<String>,
     pub web_clients_enabled: Option<bool>,
+    #[oai(deserialize_with = "parse_nullable")]
     pub web_auth_max_age_seconds: Option<Option<i64>>,
+    #[oai(deserialize_with = "parse_nullable")]
     pub web_approval_grace_period_seconds: Option<Option<i64>>,
     pub analytics_consent: Option<Parameters::AnalyticsConsent>,
     pub analytics_normal: Option<bool>,
@@ -383,5 +401,33 @@ impl Api {
                 error,
             },
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use poem_openapi::types::ParseFromJSON;
+    use serde_json::json;
+
+    use super::ParameterUpdate;
+
+    fn parse(value: serde_json::Value) -> Option<Option<i64>> {
+        match ParameterUpdate::parse_from_json(Some(value)) {
+            Ok(v) => v.web_approval_grace_period_seconds,
+            Err(e) => panic!("{}", e.into_message()),
+        }
+    }
+
+    #[test]
+    fn nullable_field_distinguishes_absent_from_null() {
+        assert_eq!(parse(json!({})), None);
+        assert_eq!(
+            parse(json!({ "web_approval_grace_period_seconds": null })),
+            Some(None)
+        );
+        assert_eq!(
+            parse(json!({ "web_approval_grace_period_seconds": 3600 })),
+            Some(Some(3600))
+        );
     }
 }
