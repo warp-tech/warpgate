@@ -27,7 +27,7 @@ pub use self::{DEFAULT_SCREEN_H as SCREEN_H, DEFAULT_SCREEN_W as SCREEN_W};
 use crate::char_boxes::draw_char_boxes;
 use crate::logo::logo;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Screen {
     pub width: u16,
     pub height: u16,

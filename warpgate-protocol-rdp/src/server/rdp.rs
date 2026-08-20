@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
+use ironrdp::displaycontrol::pdu::{DisplayControlMonitorLayout, MonitorLayoutEntry};
 use ironrdp_server::tokio_rustls::TlsAcceptor;
 use ironrdp_server::tokio_rustls::rustls::ServerConfig as TlsServerConfig;
 use ironrdp_server::{
@@ -20,7 +21,7 @@ use ironrdp_server::{
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, oneshot};
-use tracing::warn;
+use tracing::{debug, warn};
 use warpgate_core::{DesktopInput, Scancode};
 use warpgate_desktop_ui::DEFAULT_SIZE;
 
@@ -101,12 +102,16 @@ where
     let router = tokio::spawn(route_input(
         in_rx,
         frame_tx,
-        Arc::clone(&size),
+        DisplayRouteState {
+            size: Arc::clone(&size),
+            out: out_tx.clone(),
+        },
         clipboard.clone(),
     ));
 
     let display = DisplayHandler {
         size,
+        initial_size_negotiated: false,
         updates: Arc::new(Mutex::new(frame_rx)),
         out: out_tx.clone(),
     };
@@ -168,12 +173,18 @@ fn build_tls_acceptor(cert_pem: &str, key_pem: &str) -> Result<TlsAcceptor> {
     Ok(TlsAcceptor::from(Arc::new(config)))
 }
 
+/// Shared display state used while routing Warpgate framebuffer messages.
+struct DisplayRouteState {
+    size: Arc<Mutex<DesktopSize>>,
+    out: mpsc::UnboundedSender<Event>,
+}
+
 /// Route Warpgate's messages to the display backend (framebuffer updates) and the
 /// credential validator (auth decisions).
 async fn route_input(
     mut rx: mpsc::Receiver<Input>,
     frame_tx: mpsc::Sender<DisplayUpdate>,
-    size: Arc<Mutex<DesktopSize>>,
+    display: DisplayRouteState,
     clipboard: ViewerClipboard,
 ) {
     while let Some(msg) = rx.recv().await {
@@ -197,12 +208,18 @@ async fn route_input(
                 // down to the acceptor and renegotiates capabilities with the viewer. Skip
                 // it when the size is unchanged so an already-correct session is never
                 // disturbed.
-                if core::mem::replace(&mut *size.lock().await, new) == new {
+                let previous = core::mem::replace(&mut *display.size.lock().await, new);
+                if previous == new {
                     continue;
                 }
+                debug!(?previous, ?new, "viewer surface resized");
                 if frame_tx.send(DisplayUpdate::Resize(new)).await.is_err() {
                     break;
                 }
+                let _ = display.out.send(Event::Size {
+                    width: new.width,
+                    height: new.height,
+                });
             }
             Input::Clipboard(text) => clipboard.offer(text),
             Input::Shutdown => break,
@@ -233,8 +250,8 @@ fn frame_to_update(x: u16, y: u16, width: u16, height: u16, data: Bytes) -> Opti
     }))
 }
 
-/// Bound a viewer-supplied desktop size. This arrives during the capability exchange —
-/// before the credential validator has run — and drives full-screen framebuffer
+/// Bound a viewer-supplied desktop size. This arrives during the capability exchange,
+/// before the credential validator has run, and drives full-screen framebuffer
 /// allocations of `width * height * 4`, so it is untrusted input. Sizes whose full-screen
 /// frame would exceed [`MAX_FRAME_BYTES`] fall back to the default rather than being
 /// silently squashed to a different aspect ratio.
@@ -258,6 +275,19 @@ fn clamp_desktop_size(requested: DesktopSize) -> DesktopSize {
     size
 }
 
+fn primary_monitor_size(layout: &DisplayControlMonitorLayout) -> Option<DesktopSize> {
+    let monitor = layout
+        .monitors()
+        .iter()
+        .find(|monitor| monitor.is_primary())?;
+    let (width, height) = monitor.dimensions();
+    let (width, height) = MonitorLayoutEntry::adjust_display_size(width, height);
+    Some(clamp_desktop_size(DesktopSize {
+        width: u16::try_from(width).ok()?,
+        height: u16::try_from(height).ok()?,
+    }))
+}
+
 /// Display backend: hands the IronRDP server a receiver of framebuffer updates fed by
 /// Warpgate.
 struct DisplayHandler {
@@ -265,6 +295,10 @@ struct DisplayHandler {
     /// `UpdateEncoder`, so this has to track the size last renegotiated with the client,
     /// not the one the session started at.
     size: Arc<Mutex<DesktopSize>>,
+    /// Whether the initial viewer-driven size has been adopted. Gates
+    /// [`Self::request_initial_size`] so reactivations keep the committed size instead of
+    /// re-adopting a stale one the viewer echoes.
+    initial_size_negotiated: bool,
     // Shared, not `take()`n: ironrdp-server calls `updates()` again after every
     // deactivation-reactivation (e.g. an mstsc / MS Remote Desktop resize), so a
     // one-shot receiver would fail the second connection with "already taken".
@@ -278,11 +312,30 @@ impl RdpServerDisplay for DisplayHandler {
         *self.size.lock().await
     }
 
-    /// Whatever this returns is what the session runs at — RDP lets the server dictate, and
-    /// the viewer resizes to match. Honour what the viewer asked for, then report it so
-    /// Warpgate paints the hold screen and dials the target at that same size.
+    /// Whatever this returns is what the session runs at; RDP lets the server dictate, and
+    /// the viewer resizes to match.
+    ///
+    /// ironrdp-server also calls this on every deactivation-reactivation, passing the size
+    /// the viewer echoes in its Confirm Active. That echo can lag the resolution Warpgate
+    /// just negotiated — mstsc, growing the window, still reports the smaller previous size —
+    /// and adopting it would rebuild the encoder below the frames Warpgate is about to send,
+    /// so every larger tile hits the "bitmap exceeds desktop size" drop (a grow paints black,
+    /// while a shrink still fits and looks fine). So the viewer's size is honoured only for
+    /// the initial negotiation; from then on the committed size — driven by the target after
+    /// a Display Control resize — is authoritative and the viewer conforms to it.
     async fn request_initial_size(&mut self, client_size: DesktopSize) -> DesktopSize {
+        if self.initial_size_negotiated {
+            let committed = *self.size.lock().await;
+            debug!(
+                ?client_size,
+                ?committed,
+                "reactivation: keeping committed size, viewer echo ignored"
+            );
+            return committed;
+        }
+        self.initial_size_negotiated = true;
         let size = clamp_desktop_size(client_size);
+        debug!(?client_size, adopted = ?size, "initial viewer size negotiated");
         *self.size.lock().await = size;
         let _ = self.out.send(Event::Size {
             width: size.width,
@@ -298,6 +351,22 @@ impl RdpServerDisplay for DisplayHandler {
             rx: self.updates.clone(),
         }))
     }
+
+    fn request_layout(&mut self, layout: DisplayControlMonitorLayout) {
+        let Some(size) = primary_monitor_size(&layout) else {
+            return;
+        };
+        // ironrdp-server calls this from `spawn_blocking`, never on the runtime thread, which
+        // is what makes blocking on the lock legal here.
+        if *self.size.blocking_lock() == size {
+            return;
+        }
+        debug!(requested = ?size, "viewer requested a dynamic resize");
+        let _ = self.out.send(Event::ResizeRequest {
+            width: size.width,
+            height: size.height,
+        });
+    }
 }
 
 struct DisplayUpdatesReceiver {
@@ -308,7 +377,9 @@ struct DisplayUpdatesReceiver {
 impl RdpServerDisplayUpdates for DisplayUpdatesReceiver {
     async fn next_update(&mut self) -> Result<Option<DisplayUpdate>> {
         // `mpsc::Receiver::recv` is cancellation-safe, as this trait requires; the guard
-        // is released on cancel and no message is lost.
+        // is released on cancel and no message is lost. `Resize` and the frames that follow
+        // it share this one ordered channel, so the encoder is always resized before it is
+        // handed a frame at the new size.
         Ok(self.rx.lock().await.recv().await)
     }
 }
@@ -466,13 +537,24 @@ fn clamp_to_i16(value: i32) -> i16 {
 
 #[cfg(test)]
 mod desktop_size_tests {
+    use std::sync::Arc;
+
+    use ironrdp::displaycontrol::pdu::{DisplayControlMonitorLayout, MonitorLayoutEntry};
+    use tokio::sync::{Mutex, mpsc};
+
     use super::{
-        DEFAULT_SIZE, DesktopSize, MAX_DESKTOP_DIM, MAX_FRAME_BYTES, MIN_DESKTOP_DIM,
-        clamp_desktop_size,
+        DEFAULT_SIZE, DesktopSize, DisplayHandler, MAX_DESKTOP_DIM, MAX_FRAME_BYTES,
+        MIN_DESKTOP_DIM, RdpServerDisplay, clamp_desktop_size, primary_monitor_size,
     };
+    use crate::server::protocol::Event;
 
     fn size(width: u16, height: u16) -> DesktopSize {
         DesktopSize { width, height }
+    }
+
+    fn single_primary_layout(width: u32, height: u32) -> DisplayControlMonitorLayout {
+        DisplayControlMonitorLayout::new(&[MonitorLayoutEntry::new_primary(width, height).unwrap()])
+            .unwrap()
     }
 
     #[test]
@@ -493,10 +575,98 @@ mod desktop_size_tests {
 
     #[test]
     fn falls_back_when_a_full_frame_would_not_fit() {
-        // 8192x8192 BGRA is 256 MB — past MAX_FRAME_BYTES, so neither dimension is trusted.
+        // 8192x8192 BGRA is 256 MB, past MAX_FRAME_BYTES, so neither dimension is trusted.
         let fallback = clamp_desktop_size(size(MAX_DESKTOP_DIM, MAX_DESKTOP_DIM));
         assert_eq!(fallback, size(DEFAULT_SIZE.0, DEFAULT_SIZE.1));
         let frame_len = usize::from(fallback.width) * usize::from(fallback.height) * 4;
         assert!(frame_len <= MAX_FRAME_BYTES);
+    }
+
+    #[test]
+    fn uses_primary_monitor_for_dynamic_layout() {
+        let layout = DisplayControlMonitorLayout::new(&[
+            MonitorLayoutEntry::new_primary(1920, 1080).unwrap(),
+            MonitorLayoutEntry::new_secondary(1280, 720)
+                .unwrap()
+                .with_position(1920, 0)
+                .unwrap(),
+        ])
+        .unwrap();
+
+        assert_eq!(primary_monitor_size(&layout), Some(size(1920, 1080)));
+    }
+
+    #[test]
+    fn normalizes_dynamic_layout_size() {
+        let layout = single_primary_layout(1921, 1080);
+
+        assert_eq!(primary_monitor_size(&layout), Some(size(1920, 1080)));
+    }
+
+    fn display_handler(
+        committed: DesktopSize,
+        initial_size_negotiated: bool,
+    ) -> (DisplayHandler, mpsc::UnboundedReceiver<Event>) {
+        let (_tx, rx) = mpsc::channel(1);
+        let (out, events) = mpsc::unbounded_channel();
+        let display = DisplayHandler {
+            size: Arc::new(Mutex::new(committed)),
+            initial_size_negotiated,
+            updates: Arc::new(Mutex::new(rx)),
+            out,
+        };
+        (display, events)
+    }
+
+    /// A layout at the committed size is noise; a different one is a request for the target.
+    #[test]
+    fn dynamic_layout_request_is_forwarded_to_the_target() {
+        let (mut display, mut events) = display_handler(size(800, 600), true);
+
+        display.request_layout(single_primary_layout(800, 600));
+        assert!(events.try_recv().is_err());
+
+        display.request_layout(single_primary_layout(1024, 768));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::ResizeRequest {
+                width: 1024,
+                height: 768,
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn initial_size_adopts_the_viewer_request() {
+        let (mut display, mut events) =
+            display_handler(size(DEFAULT_SIZE.0, DEFAULT_SIZE.1), false);
+
+        assert_eq!(
+            display.request_initial_size(size(1024, 768)).await,
+            size(1024, 768)
+        );
+        assert_eq!(display.size().await, size(1024, 768));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::Size {
+                width: 1024,
+                height: 768,
+            })
+        ));
+    }
+
+    /// On reactivation the viewer can echo a size that lags the freshly negotiated one; the
+    /// committed (target-driven) size must win, or a grow would rebuild the encoder too small
+    /// and drop every oversized tile.
+    #[tokio::test]
+    async fn reactivation_keeps_the_committed_size() {
+        let (mut display, mut events) = display_handler(size(1920, 1080), true);
+
+        assert_eq!(
+            display.request_initial_size(size(1024, 768)).await,
+            size(1920, 1080)
+        );
+        assert_eq!(display.size().await, size(1920, 1080));
+        assert!(events.try_recv().is_err());
     }
 }

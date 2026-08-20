@@ -55,5 +55,12 @@ pub enum Event {
         width: u16,
         height: u16,
     },
+    /// The viewer requested a dynamic desktop resize over the Display Control channel.
+    /// This is distinct from [`Self::Size`]: it is a request to resize the target, not a
+    /// signal that Warpgate should start painting at the new size.
+    ResizeRequest {
+        width: u16,
+        height: u16,
+    },
     Input(DesktopInput),
 }

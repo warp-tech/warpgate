@@ -3,11 +3,10 @@
 //! Collects that factor over the live RDP session before the target is dialed.
 
 use std::convert::Infallible;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use anyhow::{Result, bail};
-use tokio::sync::Mutex;
+use anyhow::{Result, anyhow};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_core::{DesktopInput, Scancode, Services};
@@ -34,10 +33,11 @@ pub(super) async fn run_hold_screen(
     server_in_tx: &Sender<ServerInput>,
     screen: &mut ui::Screen,
 ) -> Result<Option<AuthStateUserInfo>> {
-    // The negotiated size is written by viewer resize events (in the input source) and read
-    // by the painter — and, once auth completes, by the caller to dial the target at it.
-    // Shared behind a lock because the input and painter are separate objects (so the driver
-    // can await input and paint without aliasing one `&mut` across its `select!`).
+    // A resize can arrive mid-hold (a viewer window drag, or mstsc's initial Display Control
+    // layout): the input reader records it here and the painter follows it. Shared behind a
+    // lock because the reader and the painter are separate objects (so the driver can await
+    // input and paint without aliasing one `&mut` across its `select!`); the lock is never
+    // held across an await, which keeps the reader cancel-safe.
     let shared_screen = Arc::new(Mutex::new(*screen));
     let mut input = RdpHoldInput {
         events,
@@ -61,8 +61,8 @@ pub(super) async fn run_hold_screen(
     )
     .await;
 
-    // Hand the size the viewer settled on back to the caller so it dials the target at it.
-    *screen = *shared_screen.lock().await;
+    // Hand the negotiated size back to the caller so it dials the target at it.
+    *screen = *shared_screen.lock().unwrap_or_else(PoisonError::into_inner);
     result
 }
 
@@ -85,8 +85,11 @@ impl HoldInputSource for RdpHoldInput<'_> {
                 .and_then(scancode_otp_action)
                 .or_else(|| keysym.and_then(key_otp_action))
                 .map_or(HoldEvent::Other, HoldEvent::Otp),
-            Some(ServerEvent::Size { width, height }) => {
-                *self.screen.lock().await = ui::Screen { width, height };
+            Some(
+                ServerEvent::Size { width, height } | ServerEvent::ResizeRequest { width, height },
+            ) => {
+                *self.screen.lock().unwrap_or_else(PoisonError::into_inner) =
+                    ui::Screen { width, height };
                 HoldEvent::Other
             }
             Some(_) => HoldEvent::Other,
@@ -104,7 +107,8 @@ struct RdpHoldPainter {
 
 impl HoldPainterExt for RdpHoldPainter {
     async fn paint(&mut self, frame: HoldFrame<'_>) -> Result<()> {
-        self.inner.set_screen(*self.screen.lock().await);
+        self.inner
+            .set_screen(*self.screen.lock().unwrap_or_else(PoisonError::into_inner));
         match frame {
             HoldFrame::Prompt(prompt) => {
                 self.inner
@@ -151,7 +155,8 @@ pub(super) async fn run_banner_screen(
                     ServerEvent::Input(DesktopInput::Pointer { buttons, .. }) if buttons != 0 => {
                         return Ok(true);
                     }
-                    ServerEvent::Size { width, height } => {
+                    ServerEvent::Size { width, height }
+                    | ServerEvent::ResizeRequest { width, height } => {
                         *screen = ui::Screen { width, height };
                         painter.set_screen(*screen);
                     }
@@ -167,17 +172,24 @@ pub(super) async fn run_banner_screen(
     }
 }
 
-/// Paints the full-screen hold-screen UI to the RDP viewer, owning the
-/// spinner tick. `paint` takes a UI render function (`ui::render_*`) so the prompt and
-/// "Connecting" screens go through one code path.
+/// Paints the full-screen hold-screen UI to the RDP viewer, owning the spinner tick and
+/// keeping the RDP server's desktop in step with the negotiated size. `paint` takes a UI
+/// render function (`ui::render_*`) so the prompt and "Connecting" screens go through one
+/// code path.
 struct HoldPainter {
     tick: u64,
     screen: ui::Screen,
+    /// The size the RDP server was last told to run at.
+    server_screen: ui::Screen,
 }
 
 impl HoldPainter {
     const fn new(screen: ui::Screen) -> Self {
-        Self { tick: 0, screen }
+        Self {
+            tick: 0,
+            screen,
+            server_screen: screen,
+        }
     }
 
     const fn set_screen(&mut self, screen: ui::Screen) {
@@ -186,11 +198,29 @@ impl HoldPainter {
 
     /// Render one frame with `render_frame(tick)` (RGB888), convert it to the BGRA the RDP
     /// server expects, and push it as a full-screen frame. Advances the spinner tick.
+    ///
+    /// A changed size is pushed to the server first, so it never sees a frame larger than
+    /// its desktop. Pre-dial there is no target to consult, so a viewer's resize request is
+    /// granted as-is (a size the server already runs at is ignored by it). This happens here
+    /// rather than where the resize event is read because the input reader is polled inside
+    /// the driver's `select!` and can be dropped mid-await, whereas `paint` runs to completion.
     async fn paint(
         &mut self,
         server_in_tx: &Sender<ServerInput>,
         render_frame: impl FnOnce(ui::Screen, u64) -> Result<Vec<u8>, Infallible>,
     ) -> Result<()> {
+        if self.screen != self.server_screen {
+            Self::send(
+                server_in_tx,
+                ServerInput::Resize {
+                    width: self.screen.width,
+                    height: self.screen.height,
+                },
+            )
+            .await?;
+            self.server_screen = self.screen;
+        }
+
         let rgb = render_frame(self.screen, self.tick).unwrap_or_default();
         self.tick = self.tick.wrapping_add(1);
 
@@ -200,20 +230,24 @@ impl HoldPainter {
                 bgra.extend_from_slice(&[b, g, r, 255]);
             }
         }
-        if server_in_tx
-            .send(ServerInput::Frame {
+        Self::send(
+            server_in_tx,
+            ServerInput::Frame {
                 x: 0,
                 y: 0,
                 width: self.screen.width,
                 height: self.screen.height,
                 data: bgra.into(),
-            })
+            },
+        )
+        .await
+    }
+
+    async fn send(server_in_tx: &Sender<ServerInput>, input: ServerInput) -> Result<()> {
+        server_in_tx
+            .send(input)
             .await
-            .is_err()
-        {
-            bail!("RDP server channel closed");
-        }
-        Ok(())
+            .map_err(|_| anyhow!("RDP server channel closed"))
     }
 }
 
