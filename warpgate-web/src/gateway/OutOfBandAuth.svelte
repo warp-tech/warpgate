@@ -41,7 +41,7 @@
     async function approve(scope: ApprovalScope) {
         await api.approveAuth({
             id: params.stateId,
-            scope,
+            approveAuthRequest: { scope },
         })
         await reload()
         window.close()

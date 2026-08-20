@@ -6,7 +6,7 @@ use poem::session::Session;
 use poem::web::Data;
 use poem::web::websocket::{Message, WebSocket};
 use poem::{FromRequest, IntoResponse, Request, handler};
-use poem_openapi::param::{Path, Query};
+use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::types::ToJSON;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
@@ -130,7 +130,7 @@ struct AuthStateResponseInternal {
 
 /// The outcome of acting on an approval request. The decision is applied by the
 /// node holding the login, so there is no updated state to hand back here.
-#[derive(Object, serde::Deserialize)]
+#[derive(Object)]
 struct ApproveAuthRequest {
     scope: ApprovalScope,
 }
@@ -376,20 +376,9 @@ impl Api {
         &self,
         ctx: AuthedSession,
         id: Path<Uuid>,
-        scope: Query<Option<ApprovalScope>>,
-        body: Option<poem::web::Json<ApproveAuthRequest>>,
+        body: Json<ApproveAuthRequest>,
     ) -> poem::Result<ApprovalActionResponse> {
-        // The query parameter is the documented input. The JSON body is the
-        // shape earlier clients were built against, so it is still accepted —
-        // as a plain poem extractor, since the OpenAPI layer cannot declare an
-        // optional request body.
-        let Some(scope) = scope.0.or(body.map(|body| body.scope)) else {
-            return Err(poem::Error::from_string(
-                "missing approval scope",
-                http::StatusCode::BAD_REQUEST,
-            ));
-        };
-        resolve_own_approval(&ctx, &id, ApprovalDecision::Approved(scope)).await
+        resolve_own_approval(&ctx, &id, ApprovalDecision::Approved(body.scope)).await
     }
 
     #[oai(

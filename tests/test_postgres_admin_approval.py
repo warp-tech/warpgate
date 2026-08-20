@@ -125,9 +125,7 @@ class Test:
         auth_id = msg.data
         r = await session.post(
             f"{url}/@warpgate/api/auth/state/{auth_id}/approve",
-            # The query form of the scope is the endpoint's legacy shape;
-            # test_cluster_web_approval covers the JSON-body form.
-            params={"scope": "Once"},
+            json={"scope": "Once"},
             ssl=False,
         )
         assert r.status == 200

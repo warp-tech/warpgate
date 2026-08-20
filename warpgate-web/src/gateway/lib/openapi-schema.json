@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.0-6-g0509c293-modified"
+    "version": "v0.28.0-7-g8df75c7a-modified"
   },
   "servers": [
     {
@@ -210,18 +210,18 @@
             "required": true,
             "deprecated": false,
             "explode": true
-          },
-          {
-            "name": "scope",
-            "schema": {
-              "$ref": "#/components/schemas/ApprovalScope"
-            },
-            "in": "query",
-            "required": false,
-            "deprecated": false,
-            "explode": true
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveAuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": ""
@@ -1698,6 +1698,19 @@
           "Target",
           "AllTargets"
         ]
+      },
+      "ApproveAuthRequest": {
+        "type": "object",
+        "title": "ApproveAuthRequest",
+        "description": "The outcome of acting on an approval request. The decision is applied by the\nnode holding the login, so there is no updated state to hand back here.",
+        "required": [
+          "scope"
+        ],
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/ApprovalScope"
+          }
+        }
       },
       "AuthStateResponseInternal": {
         "type": "object",
