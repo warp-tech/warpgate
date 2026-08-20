@@ -1,20 +1,19 @@
-use std::io;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use base64::{self, Engine};
-use futures::{Stream, StreamExt};
 use poem::Addr;
 use poem::listener::Acceptor;
-use poem::web::{LocalAddr, RemoteAddr};
+use poem::web::RemoteAddr;
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, ServerConfig, SignatureScheme};
-use tokio::sync::Mutex;
+use tokio::time::timeout;
 use tokio_rustls::server::TlsStream;
 use tracing::{debug, warn};
+use warpgate_common::helpers::concurrent_acceptor::ConcurrentAcceptor;
 
 /// Client certificate verifier that proves the peer holds the presented
 /// certificate's private key (by verifying the handshake signature) but does
@@ -91,86 +90,50 @@ impl ClientCertVerifier for AcceptAnyClientCert {
     }
 }
 
-type ConnectionMetadata = (LocalAddr, RemoteAddr, http::uri::Scheme);
-type IncomingTlsConnections<T> =
-    Pin<Box<dyn Stream<Item = io::Result<(TlsStream<T>, ConnectionMetadata)>> + Send>>;
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// TLS acceptor that captures client certificates after concurrent handshakes.
-pub struct CertificateCapturingAcceptor<T: Acceptor> {
-    local_addr: Vec<LocalAddr>,
-    incoming: IncomingTlsConnections<T::Io>,
-}
-
-impl<T> CertificateCapturingAcceptor<T>
+/// Custom TLS acceptor that captures client certificates and embeds them in remote_addr
+pub fn certificate_capturing_acceptor<A>(
+    inner: A,
+    server_config: ServerConfig,
+) -> ConcurrentAcceptor<TlsStream<A::Io>>
 where
-    T: Acceptor + 'static,
+    A: Acceptor + 'static,
 {
-    pub fn new(inner: T, server_config: ServerConfig) -> Self {
-        let local_addr = inner.local_addr();
-        let inner = Arc::new(Mutex::new(inner));
-        let transport = tls_listener::accept_generator(move || {
-            let inner = inner.clone();
-            async move {
-                let (stream, local_addr, remote_addr, scheme) = inner.lock().await.accept().await?;
-                Ok::<_, io::Error>((stream, (local_addr, remote_addr, scheme)))
-            }
-        });
-
-        let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
-        let mut builder = tls_listener::builder(tls_acceptor);
-        builder.handshake_timeout(Duration::from_secs(10));
-        let incoming = builder
-            .listen(transport)
-            .map(|result| result.map_err(|error| io::Error::other(error.to_string())));
-
-        Self {
-            local_addr,
-            incoming: Box::pin(incoming),
-        }
-    }
-}
-
-impl<T> Acceptor for CertificateCapturingAcceptor<T>
-where
-    T: Acceptor + 'static,
-{
-    type Io = TlsStream<T::Io>;
-
-    fn local_addr(&self) -> Vec<LocalAddr> {
-        self.local_addr.clone()
-    }
-
-    async fn accept(&mut self) -> io::Result<(Self::Io, LocalAddr, RemoteAddr, http::uri::Scheme)> {
-        let (tls_stream, (local_addr, remote_addr, _)) = self
-            .incoming
-            .next()
-            .await
-            .expect("TLS listener stream cannot end")?;
-
-        // Extract client certificate from the TLS connection
-        let enhanced_remote_addr = if let Some(cert_der) = extract_peer_certificates(&tls_stream) {
-            // Serialize certificate as base64 and embed in remote_addr
-            let cert_b64 = base64::engine::general_purpose::STANDARD.encode(&cert_der);
-            let original_remote_addr_str = match &remote_addr.0 {
-                Addr::SocketAddr(addr) => addr.to_string(),
-                Addr::Unix(_) => remote_addr.to_string(),
-                Addr::Custom(_, _) => "".into(),
-            };
-            RemoteAddr(Addr::Custom(
-                "captured-cert",
-                format!("{original_remote_addr_str}|cert:{cert_b64}").into(),
+    let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+    ConcurrentAcceptor::new(inner, move |(stream, local_addr, remote_addr, _)| {
+        let tls_acceptor = tls_acceptor.clone();
+        async move {
+            let tls_stream = timeout(HANDSHAKE_TIMEOUT, tls_acceptor.accept(stream))
+                .await
+                .context("TLS handshake timed out")?
+                .context("TLS handshake failed")?;
+            let remote_addr = embed_client_certificate(&tls_stream, remote_addr);
+            Ok((
+                tls_stream,
+                local_addr,
+                remote_addr,
+                http::uri::Scheme::HTTPS,
             ))
-        } else {
-            remote_addr
-        };
+        }
+    })
+}
 
-        Ok((
-            tls_stream,
-            local_addr,
-            enhanced_remote_addr,
-            http::uri::Scheme::HTTPS,
-        ))
-    }
+/// Smuggle the peer certificate in the RemoteAddr
+fn embed_client_certificate<T>(tls_stream: &TlsStream<T>, remote_addr: RemoteAddr) -> RemoteAddr {
+    let Some(cert_der) = extract_peer_certificates(tls_stream) else {
+        return remote_addr;
+    };
+    let cert_b64 = base64::engine::general_purpose::STANDARD.encode(&cert_der);
+    let original_remote_addr_str = match &remote_addr.0 {
+        Addr::SocketAddr(addr) => addr.to_string(),
+        Addr::Unix(_) => remote_addr.to_string(),
+        Addr::Custom(_, _) => "".into(),
+    };
+    RemoteAddr(Addr::Custom(
+        "captured-cert",
+        format!("{original_remote_addr_str}|cert:{cert_b64}").into(),
+    ))
 }
 
 /// Extract peer certificates from the TLS stream
@@ -283,7 +246,7 @@ mod tests {
     use tokio::time::timeout;
     use tokio_rustls::TlsConnector;
 
-    use super::{AcceptAnyClientCert, CertificateCapturingAcceptor};
+    use super::{AcceptAnyClientCert, certificate_capturing_acceptor};
 
     #[tokio::test]
     async fn stalled_tls_handshake_does_not_block_later_connections() {
@@ -330,7 +293,7 @@ mod tests {
         // Queue a connection that will never send a TLS ClientHello before the
         // acceptor starts polling, ensuring it is accepted first.
         let stalled_connection = TcpStream::connect(address).await.unwrap();
-        let mut acceptor = CertificateCapturingAcceptor::new(tcp_acceptor, server_config);
+        let mut acceptor = certificate_capturing_acceptor(tcp_acceptor, server_config);
 
         // A later, valid TLS handshake must still complete.
         let second_connection = TcpStream::connect(address).await.unwrap();
