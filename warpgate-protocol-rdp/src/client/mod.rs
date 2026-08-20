@@ -26,13 +26,15 @@ use ironrdp::pdu::gcc::KeyboardType;
 use ironrdp::pdu::geometry::InclusiveRectangle;
 use ironrdp::pdu::rdp::capability_sets::MajorPlatformType;
 use ironrdp::pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
+use ironrdp::pdu::rdp::headers::ShareDataPdu;
+use ironrdp::pdu::rdp::refresh_rectangle::RefreshRectanglePdu;
 use ironrdp::session::image::DecodedImage;
 use ironrdp::session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
-use tracing::warn;
+use tracing::{debug, warn};
 use warpgate_common::{RdpTargetAuth, TargetRdpOptions};
 use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
 
@@ -253,8 +255,8 @@ async fn active_loop(
             Ok(false) => {}
         }
 
-        if should_reactivate {
-            reactivate(
+        if should_reactivate
+            && let Some(size) = reactivate(
                 &mut framed,
                 &mut active_stage,
                 &activation_factory,
@@ -262,7 +264,9 @@ async fn active_loop(
                 event_tx,
             )
             .await
-            .context("RDP deactivation-reactivation sequence")?;
+            .context("RDP deactivation-reactivation sequence")?
+        {
+            send_refresh_request(&mut framed, &mut active_stage, size).await?;
         }
     }
 }
@@ -355,13 +359,15 @@ async fn send_clipboard(
         .context("sending clipboard message")
 }
 
+/// Drive the deactivation-reactivation sequence. Returns the new desktop size if the target
+/// came back at a different one.
 async fn reactivate(
     framed: &mut Framed,
     active_stage: &mut ActiveStage,
     activation_factory: &ConnectionActivationFactory,
     image: &mut DecodedImage,
     event_tx: &Sender<DesktopEvent>,
-) -> Result<()> {
+) -> Result<Option<connector::DesktopSize>> {
     let mut activation = activation_factory.create();
     let mut output = WriteBuf::new();
 
@@ -384,6 +390,14 @@ async fn reactivate(
         active_stage.set_enable_server_pointer(enable_server_pointer);
 
         if image.width() != desktop_size.width || image.height() != desktop_size.height {
+            debug!(
+                from = ?(image.width(), image.height()),
+                to = ?(desktop_size.width, desktop_size.height),
+                "target reactivated at a new desktop size"
+            );
+            // Reactivation resets the viewer's surface; re-seed it with the pre-resize content
+            // (overlap kept, new margin black) so it isn't blank until the full refresh lands.
+            let keyframe = encode_resized_keyframe(image, desktop_size);
             *image =
                 DecodedImage::new(PixelFormat::RgbA32, desktop_size.width, desktop_size.height);
             event_tx
@@ -393,10 +407,53 @@ async fn reactivate(
                 })
                 .await
                 .context("reporting reactivated desktop size")?;
+            if let Some(keyframe) = keyframe {
+                event_tx
+                    .send(keyframe)
+                    .await
+                    .context("sending resized keyframe")?;
+            }
+            return Ok(Some(desktop_size));
         }
 
-        return Ok(());
+        return Ok(None);
     }
+}
+
+/// Ask the target to repaint the whole desktop. After a resize the target only sends the
+/// regions it considers changed, so the freshly-exposed margin of a grow would stay blank;
+/// a full refresh forces it to resend everything for the new size.
+///
+/// `&mut` even though only `encode_static(&self)` is needed: `ActiveStage` is `Send` but not
+/// `Sync`, so a shared borrow held across the write would make the session future non-`Send`.
+async fn send_refresh_request(
+    framed: &mut Framed,
+    active_stage: &mut ActiveStage,
+    size: connector::DesktopSize,
+) -> Result<()> {
+    let (Some(right), Some(bottom)) = (size.width.checked_sub(1), size.height.checked_sub(1))
+    else {
+        return Ok(());
+    };
+
+    let mut output = WriteBuf::new();
+    active_stage
+        .encode_static(
+            &mut output,
+            ShareDataPdu::RefreshRectangle(RefreshRectanglePdu {
+                areas_to_refresh: vec![InclusiveRectangle {
+                    left: 0,
+                    top: 0,
+                    right,
+                    bottom,
+                }],
+            }),
+        )
+        .context("encoding refresh rectangle request")?;
+    framed
+        .write_all(output.filled())
+        .await
+        .context("requesting refreshed desktop after resize")
 }
 
 /// Handle a batch of active-stage outputs. Returns `true` if the session should terminate.
@@ -495,6 +552,51 @@ fn encode_region(image: &DecodedImage, region: &InclusiveRectangle) -> Option<De
             y: top as u16,
             width: w as u16,
             height: h as u16,
+        },
+        data: Bytes::from(data),
+    })
+}
+
+/// A full BGRA frame for the resized desktop: opaque black with the pre-resize content copied
+/// into the overlap.
+fn encode_resized_keyframe(
+    image: &DecodedImage,
+    size: connector::DesktopSize,
+) -> Option<DesktopEvent> {
+    let old_w = usize::from(image.width());
+    let old_h = usize::from(image.height());
+    let new_w = usize::from(size.width);
+    let new_h = usize::from(size.height);
+    if old_w == 0 || old_h == 0 || new_w == 0 || new_h == 0 {
+        return None;
+    }
+    let src = image.data();
+    if src.len() < old_w.checked_mul(old_h)?.checked_mul(4)? {
+        return None;
+    }
+
+    let mut data = [0u8, 0, 0, 255].repeat(new_w.checked_mul(new_h)?);
+    // `zip` stops at the shorter side, so this walks exactly the overlap.
+    for (src_row, dst_row) in src
+        .chunks_exact(old_w * 4)
+        .zip(data.chunks_exact_mut(new_w * 4))
+    {
+        for (src_px, dst_px) in src_row
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(dst_row.as_chunks_mut::<4>().0.iter_mut())
+        {
+            *dst_px = [src_px[2], src_px[1], src_px[0], 255];
+        }
+    }
+
+    Some(DesktopEvent::RawImage {
+        rect: DesktopRect {
+            x: 0,
+            y: 0,
+            width: size.width,
+            height: size.height,
         },
         data: Bytes::from(data),
     })
@@ -609,4 +711,38 @@ async fn connect(
     }
 
     Ok((connection_result, upgraded_framed))
+}
+
+#[cfg(test)]
+mod tests {
+    use ironrdp::graphics::image_processing::PixelFormat;
+    use ironrdp::session::image::DecodedImage;
+    use warpgate_core::{DesktopEvent, DesktopRect};
+
+    use super::{connector, encode_resized_keyframe};
+
+    #[test]
+    fn resized_keyframe_covers_the_new_desktop() {
+        let image = DecodedImage::new(PixelFormat::RgbA32, 2, 2);
+        let event = encode_resized_keyframe(
+            &image,
+            connector::DesktopSize {
+                width: 4,
+                height: 3,
+            },
+        );
+
+        assert!(matches!(
+            event,
+            Some(DesktopEvent::RawImage {
+                rect: DesktopRect {
+                    x: 0,
+                    y: 0,
+                    width: 4,
+                    height: 3,
+                },
+                data,
+            }) if data.len() == 4 * 3 * 4 && data.iter().skip(3).step_by(4).all(|alpha| *alpha == 255)
+        ));
+    }
 }
