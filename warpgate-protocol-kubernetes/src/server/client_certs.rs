@@ -1,6 +1,10 @@
+use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use base64::{self, Engine};
+use futures::{Stream, StreamExt};
 use poem::Addr;
 use poem::listener::Acceptor;
 use poem::web::{LocalAddr, RemoteAddr};
@@ -8,6 +12,7 @@ use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, ServerConfig, SignatureScheme};
+use tokio::sync::Mutex;
 use tokio_rustls::server::TlsStream;
 use tracing::{debug, warn};
 
@@ -86,38 +91,61 @@ impl ClientCertVerifier for AcceptAnyClientCert {
     }
 }
 
-/// Custom TLS acceptor that captures client certificates and embeds them in remote_addr
-pub struct CertificateCapturingAcceptor<T> {
-    inner: T,
-    tls_acceptor: tokio_rustls::TlsAcceptor,
+type ConnectionMetadata = (LocalAddr, RemoteAddr, http::uri::Scheme);
+type IncomingTlsConnections<T> =
+    Pin<Box<dyn Stream<Item = io::Result<(TlsStream<T>, ConnectionMetadata)>> + Send>>;
+
+/// TLS acceptor that captures client certificates after concurrent handshakes.
+pub struct CertificateCapturingAcceptor<T: Acceptor> {
+    local_addr: Vec<LocalAddr>,
+    incoming: IncomingTlsConnections<T::Io>,
 }
 
-impl<T> CertificateCapturingAcceptor<T> {
+impl<T> CertificateCapturingAcceptor<T>
+where
+    T: Acceptor + 'static,
+{
     pub fn new(inner: T, server_config: ServerConfig) -> Self {
+        let local_addr = inner.local_addr();
+        let inner = Arc::new(Mutex::new(inner));
+        let transport = tls_listener::accept_generator(move || {
+            let inner = inner.clone();
+            async move {
+                let (stream, local_addr, remote_addr, scheme) = inner.lock().await.accept().await?;
+                Ok::<_, io::Error>((stream, (local_addr, remote_addr, scheme)))
+            }
+        });
+
+        let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+        let mut builder = tls_listener::builder(tls_acceptor);
+        builder.handshake_timeout(Duration::from_secs(10));
+        let incoming = builder
+            .listen(transport)
+            .map(|result| result.map_err(|error| io::Error::other(error.to_string())));
+
         Self {
-            inner,
-            tls_acceptor: tokio_rustls::TlsAcceptor::from(Arc::new(server_config)),
+            local_addr,
+            incoming: Box::pin(incoming),
         }
     }
 }
 
 impl<T> Acceptor for CertificateCapturingAcceptor<T>
 where
-    T: Acceptor,
+    T: Acceptor + 'static,
 {
     type Io = TlsStream<T::Io>;
 
     fn local_addr(&self) -> Vec<LocalAddr> {
-        self.inner.local_addr()
+        self.local_addr.clone()
     }
 
-    async fn accept(
-        &mut self,
-    ) -> std::io::Result<(Self::Io, LocalAddr, RemoteAddr, http::uri::Scheme)> {
-        let (stream, local_addr, remote_addr, _) = self.inner.accept().await?;
-
-        // Perform TLS handshake
-        let tls_stream = self.tls_acceptor.accept(stream).await?;
+    async fn accept(&mut self) -> io::Result<(Self::Io, LocalAddr, RemoteAddr, http::uri::Scheme)> {
+        let (tls_stream, (local_addr, remote_addr, _)) = self
+            .incoming
+            .next()
+            .await
+            .expect("TLS listener stream cannot end")?;
 
         // Extract client certificate from the TLS connection
         let enhanced_remote_addr = if let Some(cert_der) = extract_peer_certificates(&tls_stream) {
@@ -237,5 +265,95 @@ pub trait RequestCertificateExt {
 impl RequestCertificateExt for poem::Request {
     fn client_certificate(&self) -> Option<&ClientCertificate> {
         self.extensions().get::<ClientCertificate>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use base64::Engine;
+    use poem::Addr;
+    use poem::listener::{Acceptor, Listener, TcpListener};
+    use poem::web::RemoteAddr;
+    use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName};
+    use rustls::{ClientConfig, RootCertStore, ServerConfig};
+    use tokio::net::TcpStream;
+    use tokio::time::timeout;
+    use tokio_rustls::TlsConnector;
+
+    use super::{AcceptAnyClientCert, CertificateCapturingAcceptor};
+
+    #[tokio::test]
+    async fn stalled_tls_handshake_does_not_block_later_connections() {
+        let certificate =
+            rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let certificate_der = CertificateDer::from(certificate.cert.der().to_vec());
+        let private_key = PrivatePkcs8KeyDer::from(certificate.signing_key.serialize_der());
+        let client_certificate =
+            rcgen::generate_simple_self_signed(vec!["kubectl-client".to_string()]).unwrap();
+        let client_certificate_der = CertificateDer::from(client_certificate.cert.der().to_vec());
+        let client_private_key =
+            PrivatePkcs8KeyDer::from(client_certificate.signing_key.serialize_der());
+
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let server_config = ServerConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_client_cert_verifier(Arc::new(AcceptAnyClientCert::new(provider.clone())))
+            .with_single_cert(vec![certificate_der.clone()], private_key.into())
+            .unwrap();
+
+        let mut roots = RootCertStore::empty();
+        roots.add(certificate_der).unwrap();
+        let client_config = ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_client_auth_cert(
+                vec![client_certificate_der.clone()],
+                client_private_key.into(),
+            )
+            .unwrap();
+
+        let tcp_acceptor = TcpListener::bind("127.0.0.1:0")
+            .into_acceptor()
+            .await
+            .unwrap();
+        let address = tcp_acceptor
+            .local_addr()
+            .into_iter()
+            .find_map(|address| address.0.as_socket_addr().copied())
+            .unwrap();
+
+        // Queue a connection that will never send a TLS ClientHello before the
+        // acceptor starts polling, ensuring it is accepted first.
+        let stalled_connection = TcpStream::connect(address).await.unwrap();
+        let mut acceptor = CertificateCapturingAcceptor::new(tcp_acceptor, server_config);
+
+        // A later, valid TLS handshake must still complete.
+        let second_connection = TcpStream::connect(address).await.unwrap();
+        let connector = TlsConnector::from(Arc::new(client_config));
+        let server_name = ServerName::try_from("localhost").unwrap().to_owned();
+        let ((_, _, remote_addr, _), second_tls) = timeout(Duration::from_secs(1), async {
+            tokio::try_join!(
+                acceptor.accept(),
+                connector.connect(server_name, second_connection),
+            )
+        })
+        .await
+        .expect("a stalled TLS handshake blocked the next connection")
+        .expect("the second TLS handshake failed");
+        let RemoteAddr(Addr::Custom("captured-cert", value)) = remote_addr else {
+            panic!("client certificate was not captured")
+        };
+        let captured_certificate = base64::engine::general_purpose::STANDARD
+            .decode(value.split("|cert:").nth(1).unwrap())
+            .unwrap();
+        assert_eq!(captured_certificate, client_certificate_der.as_ref());
+
+        drop(second_tls);
+        drop(stalled_connection);
     }
 }

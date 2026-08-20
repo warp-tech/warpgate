@@ -8200,6 +8200,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
+name = "tls-listener"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1461056cc1ef47003f7ee16e4cef3741068d4c7f6b627bfce49b7c00c120a530"
+dependencies = [
+ "futures-util",
+ "pin-project-lite",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-rustls 0.26.4",
+]
+
+[[package]]
 name = "tls_codec"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9285,6 +9298,7 @@ dependencies = [
  "md5",
  "poem",
  "poem-openapi",
+ "rcgen",
  "regex",
  "reqwest 0.13.4",
  "reqwest-websocket",
@@ -9294,6 +9308,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "time",
+ "tls-listener",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-tungstenite 0.30.0",
