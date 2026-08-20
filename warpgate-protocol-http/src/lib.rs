@@ -28,7 +28,7 @@ use tokio::sync::Mutex;
 use tracing::{Instrument, debug, warn};
 use warpgate_admin::admin_api_app;
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::proxy_protocol::ProxyProtocolAcceptor;
+use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
@@ -357,7 +357,7 @@ impl ProtocolServer for HTTPProtocolServer {
         // Bind the socket now (errors here are non-fatal to the supervisor); the
         // returned future drives the accept loop (errors there restart the listener).
         let acceptor = address.poem_listener()?.into_acceptor().await?;
-        let acceptor = ProxyProtocolAcceptor::new(acceptor, proxy_protocol)
+        let acceptor = MaybeProxyProtocolAcceptor::new(acceptor, proxy_protocol)
             .rustls(stream::once(future::ready(rustls_config)));
 
         Ok(async move {
