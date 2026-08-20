@@ -13,9 +13,9 @@
     import RelativeDate from 'common/RelativeDate.svelte'
     import {
         ApiAuthState,
+        ApprovalScope,
         type AuthStateResponseInternal,
         api,
-        ApprovalScope,
     } from 'gateway/lib/api'
 
     interface Props {

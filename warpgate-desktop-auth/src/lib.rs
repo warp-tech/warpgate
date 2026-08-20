@@ -31,8 +31,8 @@ use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    AuthorizedIdentity, Services, TargetAuthorization, WarpgateServerHandle,
-    authorize_for_target_by_name, authorize_ticket, consume_ticket,
+    AuthorizedIdentity, PendingTicket, Services, TargetAuthorization, WarpgateServerHandle,
+    authorize_for_target_by_name, authorize_ticket,
 };
 use warpgate_desktop_ui::AuthPrompt;
 
@@ -277,6 +277,11 @@ pub async fn approve_session(
         None => None,
     };
 
+    // Armed for the whole wait: the viewer dropping mid-approval cancels this
+    // future, so the ticket has to be spent by the guard rather than by any
+    // statement below.
+    let mut ticket = PendingTicket::new(services.db.clone(), pending_ticket);
+
     let approved = services
         .require_admin_approval(
             AdminApprovalRequest {
@@ -292,13 +297,15 @@ pub async fn approve_session(
             std::future::pending(),
             || async { Ok::<_, WarpgateError>(()) },
         )
-        .await?;
+        .await;
 
-    if approved && let Some(ticket_id) = pending_ticket {
-        consume_ticket(&services.db, &ticket_id).await?;
+    // A refusal — whether the administrator's or a gate that failed to reach
+    // one — is not the user's doing, so the ticket keeps its use.
+    if !matches!(approved, Ok(true)) {
+        ticket.disarm();
     }
 
-    Ok(approved)
+    approved.map_err(Into::into)
 }
 
 /// Build the browser web-approval URL for the current auth state, or `None` if the external

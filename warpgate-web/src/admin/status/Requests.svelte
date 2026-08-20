@@ -55,11 +55,6 @@
     let denyReason = $state('')
     let denyError: string | undefined = $state()
 
-    /// Ticket requests carry ids only, so names come from a one-off lookup; an
-    /// entry for a user or target created later falls back to showing the id.
-    let userMap: Map<string, string> = $state(new Map())
-    let targetMap: Map<string, string> = $state(new Map())
-
     let canSeeSessions = $derived($adminPermissions.approveSessions)
     let canManageTickets = $derived($adminPermissions.ticketRequestsManage)
 
@@ -87,19 +82,7 @@
         ].sort((a, b) => a.at.getTime() - b.at.getTime()),
     )
 
-    async function loadLookups() {
-        const [users, targets] = await Promise.all([
-            api.getUsers({}),
-            api.getTargets({}),
-        ])
-        userMap = new Map(users.map(u => [u.id, u.username]))
-        targetMap = new Map(targets.map(t => [t.id, t.name]))
-    }
-
     async function reload() {
-        if (canManageTickets && !userMap.size) {
-            await loadLookups()
-        }
         const result = await loadPendingRequests({
             canSeeSessions,
             canManageTickets,
@@ -294,13 +277,13 @@
                         <div>
                             <div>
                                 <strong>
-                                    {userMap.get(entry.ticket.userId) ?? entry.ticket.userId}
+                                    {entry.ticket.username ?? entry.ticket.userId}
                                 </strong>
                                 <span class="text-muted">
                                     needs a ticket for
                                 </span>
                                 <strong>
-                                    {targetMap.get(entry.ticket.targetId) ?? entry.ticket.targetId}
+                                    {entry.ticket.targetName ?? entry.ticket.targetId}
                                 </strong>
                             </div>
                             <div class="small text-muted">
@@ -355,11 +338,11 @@
             <p>
                 Deny request from
                 <strong>
-                    {userMap.get(denyModalRequest.userId) ?? denyModalRequest.userId}
+                    {denyModalRequest.username ?? denyModalRequest.userId}
                 </strong>
                 to
                 <strong>
-                    {targetMap.get(denyModalRequest.targetId) ?? denyModalRequest.targetId}
+                    {denyModalRequest.targetName ?? denyModalRequest.targetId}
                 </strong>?
             </p>
             <FormGroup floating label="Reason (optional)">

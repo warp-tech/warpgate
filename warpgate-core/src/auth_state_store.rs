@@ -3,7 +3,9 @@ use std::net::IpAddr;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
+use sea_orm::DatabaseConnection;
 use tokio::sync::{Mutex, broadcast};
+use tracing::error;
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthResult, AuthState, CredentialKind, CredentialPolicy, WebApprovalMatchKey,
@@ -168,6 +170,9 @@ pub struct AuthStateStore {
     store: HashMap<Uuid, (Arc<Mutex<AuthState>>, Instant)>,
     web_auth_request_signal: broadcast::Sender<Uuid>,
     recent_approvals: HashMap<WebApprovalMatchKey, Instant>,
+    /// Where a self-approval request is recorded so other nodes can see it.
+    /// Unset in unit tests, which run the state machine without a database.
+    request_sink: Option<(DatabaseConnection, Uuid)>,
 }
 
 impl Default for AuthStateStore {
@@ -182,7 +187,14 @@ impl AuthStateStore {
             store: HashMap::new(),
             web_auth_request_signal: broadcast::channel(100).0,
             recent_approvals: HashMap::new(),
+            request_sink: None,
         }
+    }
+
+    /// Points the store at the database that records self-approval requests.
+    /// Set once at startup; until then requests are only signalled locally.
+    pub fn set_request_sink(&mut self, db: DatabaseConnection, node_id: Uuid) {
+        self.request_sink = Some((db, node_id));
     }
 
     pub fn contains_key(&self, id: &Uuid) -> bool {
@@ -288,16 +300,10 @@ impl AuthStateStore {
         let id = *session_id;
 
         // Small backlog so subscribers that briefly fall behind still see the
-        // terminal transition; laggards re-check the state directly.
+        // terminal transition; laggards re-check the state directly. The
+        // receiver is taken before the state exists, so the transition
+        // `AuthState::new` itself produces is buffered rather than missed.
         let (state_change_tx, mut state_change_rx) = broadcast::channel(8);
-        let web_auth_request_signal = self.web_auth_request_signal.clone();
-        tokio::spawn(async move {
-            while let Ok(AuthResult::Need(result)) = state_change_rx.recv().await {
-                if result.contains(&CredentialKind::WebUserApproval) {
-                    let _ = web_auth_request_signal.send(id);
-                }
-            }
-        });
 
         let state = AuthState::new(
             id,
@@ -310,6 +316,27 @@ impl AuthStateStore {
         );
         let state_arc = Arc::new(Mutex::new(state));
         self.store.insert(id, (state_arc.clone(), Instant::now()));
+
+        let web_auth_request_signal = self.web_auth_request_signal.clone();
+        let request_sink = self.request_sink.clone();
+        let watched = state_arc.clone();
+        tokio::spawn(async move {
+            while let Ok(AuthResult::Need(result)) = state_change_rx.recv().await {
+                if !result.contains(&CredentialKind::WebUserApproval) {
+                    continue;
+                }
+                // Recorded before it is announced, so a user acting on the
+                // notification the moment it arrives always finds the request —
+                // including from another node, which has only the record to go on.
+                if let Some((db, node_id)) = &request_sink
+                    && let Err(error) =
+                        crate::approvals::advertise_user_request(db, *node_id, &watched).await
+                {
+                    error!(%error, "Failed to record a session approval request");
+                }
+                let _ = web_auth_request_signal.send(id);
+            }
+        });
 
         state_arc
     }

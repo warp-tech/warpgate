@@ -646,6 +646,33 @@ impl Services {
         Ok(AdminApprovalStatus::Pending)
     }
 
+    /// Applies a decision already recorded for this session's own approval, if
+    /// one is waiting on its row.
+    ///
+    /// The background sweep delivers these within a tick anyway; an auth flow
+    /// that answers the client per message calls this before reporting "still
+    /// waiting", so a decision the user just made takes effect on that very
+    /// round. SSH clients with no TTY answer the web-approval prompt instantly
+    /// and burn through their retry budget in well under a sweep interval, so
+    /// for them this is correctness, not just latency.
+    pub async fn apply_recorded_user_decision(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), WarpgateError> {
+        let Some(row) = find_request(&self.db, *session_id, ApprovalKind::User).await? else {
+            return Ok(());
+        };
+        let Some((decision, actor)) = decision_from_row(&row) else {
+            return Ok(());
+        };
+        let Some(auth_state_id) = row.auth_state_id else {
+            return Ok(());
+        };
+        self.apply_user_approval(row.session_id, auth_state_id, decision, &actor)
+            .await?;
+        Ok(())
+    }
+
     /// Applies decisions recorded elsewhere to the auth states this node holds.
     ///
     /// A self approval satisfies a credential on an in-memory auth state, so
@@ -713,35 +740,6 @@ impl Services {
     /// The row is keyed by the session id, and so is the auth state it resolves
     /// against — the store hands out states by session id — so `auth_state_id`
     /// and `session_id` are the same value seen from the two sides.
-    pub async fn request_approval(
-        &self,
-        state_arc: &Arc<Mutex<AuthState>>,
-    ) -> Result<(), WarpgateError> {
-        // Snapshot under the state lock and release it before the insert, so
-        // database IO never runs while a login's state is held.
-        let row = {
-            let state = state_arc.lock().await;
-            let session_id = *state.session_id();
-            SessionApprovalRequest::ActiveModel {
-                session_id: Set(session_id),
-                kind: Set(ApprovalKind::User.into()),
-                auth_state_id: Set(Some(session_id)),
-                node_id: Set(self.cluster.node_id),
-                protocol: Set(state.protocol().to_string()),
-                username: Set(state.user_info().username.clone()),
-                target: Set(state.target_name().to_string()),
-                remote_address: Set(state.remote_ip().map(|ip| ip.to_string())),
-                identification_string: Set(Some(state.identification_string().to_owned())),
-                started: Set(*state.started()),
-                status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
-                scope: Set(None),
-                resolved_by_username: Set(None),
-                resolved_by_user_id: Set(None),
-            }
-        };
-
-        upsert_request(&self.db, row).await
-    }
 
     /// Applies a user's own approval to the locally-owned auth state: adds or
     /// withholds the approval credential through the pending gate, records the
@@ -832,10 +830,50 @@ async fn decided_gate(
         .map(|gate| gate.status)
 }
 
+/// Records a self-approval request, so it is visible to every node.
+///
+/// Written *before* the user is told a request is waiting: the notification and
+/// the record would otherwise race, and a user acting on the notification the
+/// instant it arrives could find nothing to act on.
+pub(crate) async fn advertise_user_request(
+    db: &DatabaseConnection,
+    node_id: Uuid,
+    state_arc: &Arc<Mutex<AuthState>>,
+) -> Result<(), WarpgateError> {
+    // Snapshot under the state lock and release it before the insert, so
+    // database IO never runs while a login's state is held.
+    let row = {
+        let state = state_arc.lock().await;
+        let session_id = *state.session_id();
+        SessionApprovalRequest::ActiveModel {
+            session_id: Set(session_id),
+            kind: Set(ApprovalKind::User.into()),
+            auth_state_id: Set(Some(session_id)),
+            node_id: Set(node_id),
+            protocol: Set(state.protocol().to_string()),
+            username: Set(state.user_info().username.clone()),
+            target: Set(state.target_name().to_string()),
+            remote_address: Set(state.remote_ip().map(|ip| ip.to_string())),
+            identification_string: Set(Some(state.identification_string().to_owned())),
+            started: Set(*state.started()),
+            status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
+            scope: Set(None),
+            resolved_by_username: Set(None),
+            resolved_by_user_id: Set(None),
+        }
+    };
+
+    upsert_request(db, row).await
+}
+
 /// Rows are keyed by `(session_id, kind)`, so a wait site that runs twice for
 /// the same session updates its own request instead of queueing a duplicate.
-/// The decision columns are rewritten too: re-advertising starts a fresh wait,
-/// which must not inherit an answer given to the previous one.
+///
+/// A decision already recorded is deliberately left alone. Re-advertising is
+/// the same session asking the same question again — a request/response
+/// protocol re-enters its gate on every request — and an answer given between
+/// two of those is the answer to *this* question. Rewriting it would silently
+/// discard a decision an administrator has already made.
 async fn upsert_request(
     db: &DatabaseConnection,
     row: SessionApprovalRequest::ActiveModel,
@@ -855,10 +893,6 @@ async fn upsert_request(
                 SessionApprovalRequest::Column::RemoteAddress,
                 SessionApprovalRequest::Column::IdentificationString,
                 SessionApprovalRequest::Column::Started,
-                SessionApprovalRequest::Column::Status,
-                SessionApprovalRequest::Column::Scope,
-                SessionApprovalRequest::Column::ResolvedByUsername,
-                SessionApprovalRequest::Column::ResolvedByUserId,
             ])
             .to_owned(),
         )
@@ -927,4 +961,128 @@ pub(crate) async fn reap_stale(db: &DatabaseConnection) -> Result<(), WarpgateEr
         .exec(db)
         .await?;
     Ok(())
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod tests {
+    use sea_orm::Database;
+    use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+    use warpgate_db_migrations::migrate_database;
+
+    use super::*;
+
+    async fn migrated_db() -> DatabaseConnection {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        db
+    }
+
+    async fn pending_row(db: &DatabaseConnection, session_id: Uuid) {
+        upsert_request(
+            db,
+            SessionApprovalRequest::ActiveModel {
+                session_id: Set(session_id),
+                kind: Set(ApprovalKind::Admin.into()),
+                auth_state_id: Set(None),
+                node_id: Set(Uuid::new_v4()),
+                protocol: Set("SSH".into()),
+                username: Set("someone".into()),
+                target: Set("a-target".into()),
+                remote_address: Set(None),
+                identification_string: Set(None),
+                started: Set(OffsetDateTime::now_utc()),
+                status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
+                scope: Set(None),
+                resolved_by_username: Set(None),
+                resolved_by_user_id: Set(None),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    /// A request/response protocol re-enters its gate on every request, so the
+    /// same session re-advertises constantly. If that overwrote the decision
+    /// columns it would erase an administrator's answer, and the session would
+    /// wait forever while the inbox kept offering it again.
+    #[tokio::test]
+    async fn re_advertising_keeps_a_recorded_decision() {
+        let db = migrated_db().await;
+        let session_id = Uuid::new_v4();
+        pending_row(&db, session_id).await;
+
+        assert!(
+            record_decision(
+                &db,
+                session_id,
+                ApprovalKind::Admin,
+                ApprovalDecision::Approved(ApprovalScope::Once),
+                &ApprovalActor {
+                    username: "admin".into(),
+                    user_id: None,
+                },
+            )
+            .await
+            .unwrap()
+        );
+
+        pending_row(&db, session_id).await;
+
+        let row = find_request(&db, session_id, ApprovalKind::Admin)
+            .await
+            .unwrap()
+            .expect("the request should still exist");
+        assert!(
+            decision_from_row(&row).is_some(),
+            "re-advertising must not erase the recorded decision",
+        );
+    }
+
+    /// The waiting side has to notice a decision written by *another* task —
+    /// that hand-off is the whole substrate, and a wait that only ever reads the
+    /// row once would hold the session open forever.
+    #[tokio::test]
+    async fn a_decision_written_later_is_picked_up() {
+        let db = migrated_db().await;
+        let session_id = Uuid::new_v4();
+        pending_row(&db, session_id).await;
+
+        let writer = {
+            let db = db.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                record_decision(
+                    &db,
+                    session_id,
+                    ApprovalKind::Admin,
+                    ApprovalDecision::Approved(ApprovalScope::Once),
+                    &ApprovalActor {
+                        username: "admin".into(),
+                        user_id: None,
+                    },
+                )
+                .await
+                .unwrap()
+            })
+        };
+
+        let outcome = await_row_decision(
+            &db,
+            session_id,
+            ApprovalKind::Admin,
+            Duration::from_secs(20),
+            std::future::pending(),
+        )
+        .await;
+
+        assert!(writer.await.unwrap(), "the decision should have been recorded");
+        assert!(
+            matches!(
+                outcome,
+                RowOutcome::Decided(ApprovalDecision::Approved(ApprovalScope::Once), _)
+            ),
+            "the wait should have seen the recorded decision",
+        );
+    }
 }

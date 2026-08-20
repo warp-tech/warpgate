@@ -10,7 +10,7 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 pub use sso_user::resolve_and_map_sso_user;
 use time::OffsetDateTime;
-use tracing::warn;
+use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialKind, CredentialPolicy,
@@ -311,6 +311,54 @@ pub async fn consume_ticket(
     }
 
     Ok(())
+}
+
+/// Holds a ticket-authorised session's ticket until its fate is known, and
+/// spends it on every way out but one.
+///
+/// A ticket is spent by *authenticating* with it, not by reaching a target:
+/// leaving it unspent whenever a session ends early would make a single-use
+/// ticket reusable without limit. The one case that must not spend it is an
+/// administrator denying the session — the user should not lose their single
+/// use to someone else's refusal — so that path [`disarm`]s the guard.
+///
+/// Spending on drop rather than at a call site is what makes this hold: a
+/// protocol that parks on the approval gate is dropped mid-await when its
+/// client disconnects, so any code placed after the wait simply never runs.
+///
+/// [`disarm`]: Self::disarm
+pub struct PendingTicket {
+    ticket_id: Option<Uuid>,
+    db: DatabaseConnection,
+}
+
+impl PendingTicket {
+    /// `None` for a session that didn't authenticate with a ticket, which makes
+    /// the guard inert and lets callers hold one unconditionally.
+    pub const fn new(db: DatabaseConnection, ticket_id: Option<Uuid>) -> Self {
+        Self { ticket_id, db }
+    }
+
+    /// The session was refused, so the ticket keeps its use.
+    pub const fn disarm(&mut self) {
+        self.ticket_id = None;
+    }
+}
+
+impl Drop for PendingTicket {
+    fn drop(&mut self) {
+        // Drop can't await, and the ticket must be spent even when the task is
+        // being torn down, so the decrement outlives this future.
+        let Some(ticket_id) = self.ticket_id.take() else {
+            return;
+        };
+        let db = self.db.clone();
+        tokio::spawn(async move {
+            if let Err(error) = consume_ticket(&db, &ticket_id).await {
+                error!(%error, %ticket_id, "Failed to consume the ticket");
+            }
+        });
+    }
 }
 
 #[cfg(test)]

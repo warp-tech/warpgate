@@ -2374,6 +2374,9 @@ impl ServerSession {
                 if matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval))
                 {
                     drop(state);
+                    // An explicit decision recorded for this session wins over
+                    // a remembered grant, so it is pulled first.
+                    self.services.apply_recorded_user_decision(&self.id).await?;
                     self.services.try_web_approval_bypass(&state_arc).await?;
                     state = state_arc.lock().await;
                 }

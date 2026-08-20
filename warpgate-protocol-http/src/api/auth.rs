@@ -21,7 +21,7 @@ use warpgate_admin::api::cluster_proxy::{
     proxy_or_serve_pending_login, session_owner,
 };
 use warpgate_admin::approvals::{
-    ApprovalResolution, find_pending_user_approval, find_user_approval_row,
+    ApprovalResolution, acting_approver, find_pending_user_approval, find_user_approval_row,
     resolve_pending_approval,
 };
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
@@ -130,6 +130,11 @@ struct AuthStateResponseInternal {
 
 /// The outcome of acting on an approval request. The decision is applied by the
 /// node holding the login, so there is no updated state to hand back here.
+#[derive(Object, serde::Deserialize)]
+struct ApproveAuthRequest {
+    scope: ApprovalScope,
+}
+
 #[derive(ApiResponse)]
 enum ApprovalActionResponse {
     #[oai(status = 200)]
@@ -371,9 +376,20 @@ impl Api {
         &self,
         ctx: AuthedSession,
         id: Path<Uuid>,
-        scope: Query<ApprovalScope>,
+        scope: Query<Option<ApprovalScope>>,
+        body: Option<poem::web::Json<ApproveAuthRequest>>,
     ) -> poem::Result<ApprovalActionResponse> {
-        resolve_own_approval(&ctx, &id, ApprovalDecision::Approved(scope.0)).await
+        // The query parameter is the documented input. The JSON body is the
+        // shape earlier clients were built against, so it is still accepted —
+        // as a plain poem extractor, since the OpenAPI layer cannot declare an
+        // optional request body.
+        let Some(scope) = scope.0.or(body.map(|body| body.scope)) else {
+            return Err(poem::Error::from_string(
+                "missing approval scope",
+                http::StatusCode::BAD_REQUEST,
+            ));
+        };
+        resolve_own_approval(&ctx, &id, ApprovalDecision::Approved(scope)).await
     }
 
     #[oai(
@@ -400,6 +416,27 @@ async fn resolve_own_approval(
     auth_state_id: &Uuid,
     decision: ApprovalDecision,
 ) -> poem::Result<ApprovalActionResponse> {
+    // The auth state is what the approval actually satisfies, so the node
+    // holding it settles the decision itself. The request row exists to reach
+    // the *other* nodes, and it is written from the same signal that tells the
+    // user a request is waiting — so acting on that notification immediately
+    // can outrun it. Going to the state first makes that race unobservable.
+    if let Some(state_arc) = local_auth_state_for_user(ctx, auth_state_id).await {
+        let session_id = *state_arc.lock().await.session_id();
+        let actor = acting_approver(ctx);
+        return Ok(
+            if ctx
+                .services()
+                .apply_user_approval(session_id, *auth_state_id, decision, &actor)
+                .await?
+            {
+                ApprovalActionResponse::Ok
+            } else {
+                ApprovalActionResponse::NotFound
+            },
+        );
+    }
+
     let Some(pending) = find_pending_user_approval(ctx, *auth_state_id).await? else {
         return Ok(ApprovalActionResponse::NotFound);
     };

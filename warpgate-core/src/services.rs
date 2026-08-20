@@ -166,6 +166,14 @@ impl Services {
             });
         }
 
+        // Lets the store record a self-approval request before it announces one,
+        // which is the one place every protocol's auth state passes through.
+        services
+            .auth_state_store
+            .lock()
+            .await
+            .set_request_sink(services.db.clone(), services.cluster.node_id);
+
         Ok(services)
     }
 
