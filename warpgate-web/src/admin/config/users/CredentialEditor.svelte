@@ -11,11 +11,15 @@
               kind: typeof CredentialKind.Certificate
           } & ExistingCertificateCredential)
         | ({ kind: typeof CredentialKind.Totp } & ExistingOtpCredential)
+        | ({
+              kind: typeof CredentialKind.WebAuthn
+          } & ExistingWebauthnCredential)
 </script>
 
 <script lang="ts">
     import {
         faCertificate,
+        faFingerprint,
         faIdBadge,
         faKey,
         faKeyboard,
@@ -30,6 +34,7 @@
         type ExistingPasswordCredential,
         type ExistingPublicKeyCredential,
         type ExistingSsoCredential,
+        type ExistingWebauthnCredential,
         type ParameterValues,
         type UserRequireCredentialsPolicy,
     } from 'admin/lib/api'
@@ -38,6 +43,8 @@
     import EmptyState from 'common/EmptyState.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
+    import { api as gatewayApi } from 'gateway/lib/api'
+    import { serverInfo } from 'gateway/lib/store'
     import { SvelteSet } from 'svelte/reactivity'
     import Fa from 'svelte-fa'
     import CertificateCredentialModal from '../../CertificateCredentialModal.svelte'
@@ -45,6 +52,7 @@
     import CreatePasswordModal from '../../CreatePasswordModal.svelte'
     import PublicKeyCredentialModal from '../../PublicKeyCredentialModal.svelte'
     import SsoCredentialModal from '../../SsoCredentialModal.svelte'
+    import WebauthnCredentialModal from '../../WebauthnCredentialModal.svelte'
     import AuthPolicyEditor from './AuthPolicyEditor.svelte'
 
     interface Props {
@@ -61,10 +69,12 @@
     }: Props = $props()
 
     let credentials: ExistingCredential[] = $state([])
+    const isOwnUser = $derived($serverInfo?.username === username)
     let globalParameters: ParameterValues | undefined = $state()
 
     let creatingPassword = $state(false)
     let creatingOtp = $state(false)
+    let creatingWebauthn = $state(false)
     let editingSsoCredential = $state(false)
     let editingSsoCredentialInstance: ExistingSsoCredential | null =
         $state(null)
@@ -138,6 +148,7 @@
             loadPublicKeys(),
             loadCertificates(),
             loadOtp(),
+            loadWebauthn(),
             loadParameters(),
         ])
     }
@@ -191,11 +202,29 @@
         )
     }
 
+    async function loadWebauthn() {
+        credentials.push(
+            ...(await api.getWebauthnCredentials({ userId })).map(c => ({
+                kind: CredentialKind.WebAuthn,
+                ...c,
+            })),
+        )
+    }
+
     async function deleteCredential(credential: ExistingCredential) {
         if (credential.kind === CredentialKind.Certificate) {
             if (
                 !confirm(
                     'Permanently revoke certificate? This cannot be undone.',
+                )
+            ) {
+                return
+            }
+        }
+        if (credential.kind === CredentialKind.WebAuthn) {
+            if (
+                !confirm(
+                    'Delete this passkey? The user will need to re-register it.',
                 )
             ) {
                 return
@@ -233,6 +262,38 @@
                 id: credential.id,
                 userId,
             })
+        }
+        if (credential.kind === CredentialKind.WebAuthn) {
+            await api.deleteWebauthnCredential({
+                id: credential.id,
+                userId,
+            })
+        }
+
+        // If the user has no more credentials of this kind, remove it from the policy
+        const remainingOfKind = credentials.filter(
+            c => c.kind === credential.kind,
+        )
+        if (remainingOfKind.length === 0) {
+            for (const protocol of [
+                'http',
+                'ssh',
+                'mysql',
+                'postgres',
+                'kubernetes',
+                'vnc',
+                'rdp',
+            ] as const) {
+                if (credentialPolicy[protocol]?.includes(credential.kind)) {
+                    credentialPolicy = {
+                        ...credentialPolicy,
+                        [protocol]:
+                            credentialPolicy[protocol]?.filter(
+                                k => k !== credential.kind,
+                            ) ?? [],
+                    }
+                }
+            }
         }
     }
 
@@ -357,6 +418,29 @@
 
         return response
     }
+
+    function base64UrlToBuffer(base64url: string): ArrayBuffer {
+        const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
+        const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+        const binary = atob(padded)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i)
+        }
+        return bytes.buffer
+    }
+
+    function bufferToBase64Url(buffer: ArrayBuffer): string {
+        const bytes = new Uint8Array(buffer)
+        let binary = ''
+        for (const byte of bytes) {
+            binary += String.fromCharCode(byte)
+        }
+        return btoa(binary)
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '')
+    }
 </script>
 
 <div class="d-flex mt-4 mb-2 header">
@@ -397,6 +481,15 @@
         <Button size="sm" color="link" on:click={() => creatingOtp = true}>
             Add OTP
         </Button>
+        {#if isOwnUser}
+            <Button
+                size="sm"
+                color="link"
+                on:click={() => creatingWebauthn = true}
+            >
+                Add passkey
+            </Button>
+        {/if}
         <Button
             size="sm"
             color="link"
@@ -452,6 +545,15 @@
                 {#if credential.kind === 'Totp'}
                     <Fa fw icon={faMobileScreen} />
                     <span class="label me-auto">One-time password</span>
+                {/if}
+                {#if credential.kind === CredentialKind.WebAuthn}
+                    <Fa fw icon={faFingerprint} />
+                    <div class="main me-auto">
+                        <div class="label d-flex align-items-center">
+                            {credential.label}
+                        </div>
+                    </div>
+                    <CredentialUsedStateBadge {credential} />
                 {/if}
                 {#if credential.kind === CredentialKind.Sso}
                     <Fa fw icon={faIdBadge} />
@@ -559,6 +661,80 @@
         onClose={() => {
         editingCertificateCredential = false
     }}
+    />
+{/if}
+
+{#if creatingWebauthn}
+    <WebauthnCredentialModal
+        bind:isOpen={creatingWebauthn}
+        {userId}
+        save={async (label, signal) => {
+            if (credentials.some(c => c.kind === CredentialKind.WebAuthn && c.label === label)) {
+                throw new Error('A passkey with this name already exists')
+            }
+
+            const startResp = await gatewayApi.startWebauthnRegistration()
+            const challengeOptions = JSON.parse(startResp.challengeJson)
+
+            const pubKey = challengeOptions.publicKey
+            pubKey.challenge = base64UrlToBuffer(pubKey.challenge)
+            pubKey.user.id = base64UrlToBuffer(pubKey.user.id)
+            if (pubKey.excludeCredentials) {
+                pubKey.excludeCredentials = pubKey.excludeCredentials.map((c: { id: string }) => ({
+                    ...c,
+                    id: base64UrlToBuffer(c.id),
+                }))
+            }
+
+            let credential: PublicKeyCredential
+            try {
+                const result = await navigator.credentials.create({ publicKey: pubKey, signal })
+                if (!result) throw new Error('Registration was cancelled')
+                credential = result as PublicKeyCredential
+            } catch (e: unknown) {
+                if (e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'AbortError')) {
+                    throw e
+                }
+                throw e
+            }
+
+            const response = credential.response as AuthenticatorAttestationResponse
+            const credentialJson = JSON.stringify({
+                id: credential.id,
+                rawId: bufferToBase64Url(credential.rawId),
+                type: credential.type,
+                response: {
+                    attestationObject: bufferToBase64Url(response.attestationObject),
+                    clientDataJSON: bufferToBase64Url(response.clientDataJSON),
+                    transports: response.getTransports ? response.getTransports() : [],
+                },
+            })
+
+            const result = await gatewayApi.completeWebauthnRegistration({
+                registrationCompleteRequest: { credentialJson, label },
+            })
+            credentials.push({ kind: CredentialKind.WebAuthn, id: result.id, label: result.label, dateAdded: new Date(), lastUsed: undefined })
+
+            // Automatically set up a 2FA policy when adding a passkey
+            for (const protocol of ['http', 'ssh'] as ('http' | 'ssh')[]) {
+                for (const ck of [
+                    CredentialKind.Password,
+                    CredentialKind.PublicKey,
+                ]) {
+                    const effectiveCreds = getEffectivePossibleCredentials(protocol)
+                    if (
+                        !credentialPolicy[protocol] &&
+                        credentials.some(x => x.kind === ck) &&
+                        effectiveCreds.has(ck)
+                    ) {
+                        credentialPolicy = {
+                            ...(credentialPolicy ?? {}),
+                            [protocol]: [ck, CredentialKind.WebAuthn],
+                        }
+                    }
+                }
+            }
+        }}
     />
 {/if}
 

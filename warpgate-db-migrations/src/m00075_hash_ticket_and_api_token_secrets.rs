@@ -102,7 +102,7 @@ mod tests {
     use uuid::Uuid;
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
 
-    use super::index_name;
+    use super::{Migration, index_name};
     use crate::Migrator;
 
     #[tokio::test]
@@ -112,7 +112,12 @@ mod tests {
         let backend = db.get_database_backend();
 
         // Migrate up to just before this migration, then seed raw-secret rows.
-        let steps = 74;
+        let all_migrations = Migrator::migrations();
+        let this_migration_index = all_migrations
+            .iter()
+            .position(|m| m.name() == Migration.name())
+            .expect("this migration must be registered in Migrator::migrations()");
+        let steps = this_migration_index as u32;
         Migrator::up(&db, Some(steps)).await.unwrap();
 
         db.execute_unprepared("PRAGMA foreign_keys = OFF")

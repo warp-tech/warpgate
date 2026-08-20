@@ -13,6 +13,7 @@ pub mod ticket_request_targets;
 pub mod ticket_requests;
 mod web_desktop;
 mod web_ssh;
+pub mod webauthn;
 
 pub fn get() -> impl OpenApi {
     (
@@ -27,5 +28,6 @@ pub fn get() -> impl OpenApi {
         ticket_request_targets::Api,
         web_ssh::Api,
         web_desktop::Api,
+        webauthn::Api,
     )
 }

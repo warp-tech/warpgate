@@ -11,7 +11,7 @@ use warpgate_common::{User, UserDetails, WarpgateError};
 
 use crate::{
     CertificateCredential, OtpCredential, PasswordCredential, PublicKeyCredential, Role,
-    SsoCredential,
+    SsoCredential, WebauthnCredential,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
@@ -83,6 +83,12 @@ impl Related<super::SsoCredential::Entity> for Entity {
     }
 }
 
+impl Related<super::WebauthnCredential::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::WebauthnCredentials.def()
+    }
+}
+
 impl Related<super::ApiToken::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ApiTokens.def()
@@ -97,6 +103,7 @@ pub enum Relation {
     PublicKeyCredentials,
     CertificateCredentials,
     SsoCredentials,
+    WebauthnCredentials,
     ApiTokens,
     AdminRoles,
 }
@@ -123,6 +130,10 @@ impl RelationTrait for Relation {
             Self::SsoCredentials => Entity::has_many(super::SsoCredential::Entity)
                 .from(Column::Id)
                 .to(super::SsoCredential::Column::UserId)
+                .into(),
+            Self::WebauthnCredentials => Entity::has_many(super::WebauthnCredential::Entity)
+                .from(Column::Id)
+                .to(super::WebauthnCredential::Column::UserId)
                 .into(),
             Self::ApiTokens => Entity::has_many(super::ApiToken::Entity)
                 .from(Column::Id)
@@ -217,6 +228,13 @@ impl Model {
         );
         credentials.extend(
             self.find_related(CertificateCredential::Entity)
+                .all(db)
+                .await?
+                .into_iter()
+                .map(Into::into),
+        );
+        credentials.extend(
+            self.find_related(WebauthnCredential::Entity)
                 .all(db)
                 .await?
                 .into_iter()
