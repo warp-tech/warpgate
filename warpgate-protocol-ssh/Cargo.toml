@@ -13,6 +13,7 @@ curve25519-dalek = { version = "5.0.0", default-features = false } # pin due to 
 dialoguer.workspace = true
 ed25519-dalek = { version = "3.0.0", default-features = false } # pin due to build fail on x86 in 2.1
 futures.workspace = true
+natord = { version = "1.0", default-features = false }
 ratatui = { version = "0.30", default-features = false, features = [
     "crossterm",
     "unstable-backend-writer",
