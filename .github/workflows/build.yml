@@ -23,16 +23,6 @@ jobs:
             os: ubuntu-22.04-arm # older image for glibc compatibility
             cyclonedx-build: cyclonedx-linux-arm64
             cargo-cross: false
-          - arch: x86_64-macos
-            target: x86_64-apple-darwin
-            os: macos-latest
-            cyclonedx-build: cyclonedx-osx-x64
-            cargo-cross: false
-          - arch: arm64-macos
-            target: aarch64-apple-darwin
-            os: macos-latest
-            cyclonedx-build: cyclonedx-osx-arm64
-            cargo-cross: true
       fail-fast: false
 
     name: Build (${{ matrix.arch }})
