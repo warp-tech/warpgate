@@ -384,6 +384,25 @@ async fn control_loop(
                 .await?;
                 continue;
             }
+            ServerEvent::ResizeRequest { width, height } => {
+                if let Some(backend) = &backend {
+                    if backend
+                        .input_tx
+                        .send(DesktopInput::Resize { width, height })
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                } else if server_in_tx
+                    .send(ServerInput::Resize { width, height })
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+                continue;
+            }
             // Viewer input: record it for audit (like native VNC) then forward to the
             // target. `break` once the target client is gone (send fails).
             ServerEvent::Input(input) => input,
