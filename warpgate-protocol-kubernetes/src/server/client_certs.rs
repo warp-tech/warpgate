@@ -141,11 +141,10 @@ where
     }
 
     async fn accept(&mut self) -> io::Result<(Self::Io, LocalAddr, RemoteAddr, http::uri::Scheme)> {
-        let (tls_stream, (local_addr, remote_addr, _)) = self
-            .incoming
-            .next()
-            .await
-            .expect("TLS listener stream cannot end")?;
+        let (tls_stream, (local_addr, remote_addr, _)) =
+            self.incoming.next().await.transpose()?.ok_or_else(|| {
+                io::Error::new(io::ErrorKind::UnexpectedEof, "TLS listener stream ended")
+            })?;
 
         // Extract client certificate from the TLS connection
         let enhanced_remote_addr = if let Some(cert_der) = extract_peer_certificates(&tls_stream) {
