@@ -30,6 +30,25 @@
     let cachingEnabled = $derived(cachingGrace > 0)
     let graceLabel = $derived(formatDurationAsHumantime(cachingGrace))
 
+    function labelForScope(scope: WebApprovalScope): string {
+        switch (scope) {
+            case WebApprovalScope.Target:
+                return `Authorize & remember for ${graceLabel}`
+            case WebApprovalScope.AllTargets:
+                return `Authorize for all targets & remember for ${graceLabel}`
+            case WebApprovalScope.Once:
+                return 'Authorize this time only'
+        }
+    }
+
+    const allScopes = [
+        WebApprovalScope.Target,
+        WebApprovalScope.AllTargets,
+        WebApprovalScope.Once,
+    ]
+    let primaryScope = $derived(authState?.defaultWebApprovalScope ?? WebApprovalScope.Target)
+    let otherScopes = $derived(allScopes.filter(s => s !== primaryScope))
+
     async function reload() {
         authState = await api.getAuthState({ id: params.stateId })
     }
@@ -107,9 +126,9 @@
                     <ButtonGroup>
                         <AsyncButton
                             color="primary"
-                            click={() => approve(WebApprovalScope.Target)}
+                            click={() => approve(primaryScope)}
                         >
-                            Authorize & remember for {graceLabel}
+                            {labelForScope(primaryScope)}
                         </AsyncButton>
                         <Dropdown class="btn-group">
                             <DropdownToggle
@@ -118,17 +137,13 @@
                                 class="ps-2"
                             />
                             <DropdownMenu end>
-                                <DropdownItem
-                                    onclick={() => approve(WebApprovalScope.AllTargets)}
-                                >
-                                    Authorize for all targets & remember for
-                                    {graceLabel}
-                                </DropdownItem>
-                                <DropdownItem
-                                    onclick={() => approve(WebApprovalScope.Once)}
-                                >
-                                    Authorize this time only
-                                </DropdownItem>
+                                {#each otherScopes as scope (scope)}
+                                    <DropdownItem
+                                        onclick={() => approve(scope)}
+                                    >
+                                        {labelForScope(scope)}
+                                    </DropdownItem>
+                                {/each}
                             </DropdownMenu>
                         </Dropdown>
                     </ButtonGroup>

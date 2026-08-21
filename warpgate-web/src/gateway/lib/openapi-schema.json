@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.0-beta.3-modified"
+    "version": "v0.28.2-1-g250f869b-modified"
   },
   "servers": [
     {
@@ -1720,7 +1720,8 @@
           "protocol",
           "started",
           "state",
-          "identification_string"
+          "identification_string",
+          "default_web_approval_scope"
         ],
         "properties": {
           "id": {
@@ -1746,6 +1747,17 @@
             "type": "integer",
             "format": "int64",
             "description": "When web-approval caching is enabled, the caching window in seconds;\n`None` when caching is disabled."
+          },
+          "default_web_approval_scope": {
+            "description": "Which action is the one-click default in the approval dialog.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebApprovalScope"
+              },
+              {
+                "description": "Which action is the one-click default in the approval dialog."
+              }
+            ]
           }
         }
       },

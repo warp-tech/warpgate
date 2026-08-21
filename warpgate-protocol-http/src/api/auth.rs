@@ -121,6 +121,8 @@ struct AuthStateResponseInternal {
     /// When web-approval caching is enabled, the caching window in seconds;
     /// `None` when caching is disabled.
     pub web_approval_caching_grace_seconds: Option<i64>,
+    /// Which action is the one-click default in the approval dialog.
+    pub default_web_approval_scope: WebApprovalScope,
 }
 
 /// How an web approval should be remembered for bypass
@@ -129,6 +131,16 @@ enum WebApprovalScope {
     Once,
     Target,
     AllTargets,
+}
+
+impl From<Parameters::DefaultWebApprovalScope> for WebApprovalScope {
+    fn from(scope: Parameters::DefaultWebApprovalScope) -> Self {
+        match scope {
+            Parameters::DefaultWebApprovalScope::Once => Self::Once,
+            Parameters::DefaultWebApprovalScope::Target => Self::Target,
+            Parameters::DefaultWebApprovalScope::AllTargets => Self::AllTargets,
+        }
+    }
 }
 
 #[derive(Object)]
@@ -846,6 +858,8 @@ async fn serialize_auth_state_inner(
         .await?
         .and_then(|d| i64::try_from(d.as_secs()).ok());
 
+    let default_web_approval_scope = services.default_web_approval_scope().await?.into();
+
     Ok(AuthStateResponseInternal {
         id: state.session_id().to_string(),
         protocol: state.protocol().to_string(),
@@ -854,6 +868,7 @@ async fn serialize_auth_state_inner(
         state: state.verify().into(),
         identification_string: state.identification_string().to_owned(),
         web_approval_caching_grace_seconds,
+        default_web_approval_scope,
     })
 }
 

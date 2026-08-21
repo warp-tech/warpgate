@@ -4,6 +4,7 @@
     import {
         AnalyticsConsent,
         api,
+        type DefaultWebApprovalScope,
         type OpenTargetsInNewTabMode,
         type ParameterValues,
         type PasswordLoginMode,
@@ -666,6 +667,34 @@
                                     it for new sessions by the same user to the
                                     same target from the same IP. Blank = never
                                     cache approvals.
+                                </HelpText>
+
+                                <FormGroup
+                                    floating
+                                    label="Default web approval action"
+                                >
+                                    <select
+                                        id="defaultWebApprovalScope"
+                                        class="form-select"
+                                        value={parameters.defaultWebApprovalScope ?? 'Target'}
+                                        onchange={e => parameters.defaultWebApprovalScope = e.currentTarget.value as DefaultWebApprovalScope}
+                                    >
+                                        <option value="Target">
+                                            Authorize & remember (single target)
+                                        </option>
+                                        <option value="AllTargets">
+                                            Authorize for all targets & remember
+                                        </option>
+                                        <option value="Once">
+                                            Authorize this time only
+                                        </option>
+                                    </select>
+                                </FormGroup>
+                                <HelpText>
+                                    Which action is the one-click default in
+                                    the in-browser approval dialog. Only
+                                    relevant while a web approval cache period
+                                    is set above.
                                 </HelpText>
 
                                 <FormGroup>
