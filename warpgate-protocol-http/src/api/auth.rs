@@ -842,7 +842,7 @@ async fn serialize_auth_state_inner(
     };
 
     let web_approval_caching_grace_seconds = services
-        .web_approval_grace_period()
+        .effective_web_approval_grace_period(state.user_info().id)
         .await?
         .and_then(|d| i64::try_from(d.as_secs()).ok());
 

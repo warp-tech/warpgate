@@ -15,6 +15,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub description: String,
     pub is_default: bool,
+    pub web_approval_grace_period_seconds: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -71,6 +72,7 @@ impl From<Model> for Role {
             name: model.name,
             description: model.description,
             is_default: model.is_default,
+            web_approval_grace_period_seconds: model.web_approval_grace_period_seconds,
         }
     }
 }

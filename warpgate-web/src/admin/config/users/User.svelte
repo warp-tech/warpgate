@@ -27,10 +27,12 @@
         type User,
         type UserRoleAssignmentResponse,
     } from 'admin/lib/api'
+    import HelpText from 'admin/lib/HelpText.svelte'
     import Section from 'admin/lib/Section.svelte'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import { humantimeDuration } from 'common/duration'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import PageSummaryBar from 'common/PageSummaryBar.svelte'
@@ -527,6 +529,23 @@
                     </FormGroup>
 
                     <AllowedIpRangesEditor bind:ranges={user.allowedIpRanges} />
+                </Section>
+
+                <Section id="security" title="Security">
+                    <FormGroup floating label="Web approval cache period">
+                        <input
+                            type="text"
+                            class="form-control"
+                            placeholder="e.g. 5m, 1h"
+                            use:humantimeDuration={{ seconds: user.webApprovalGracePeriodSeconds, onChange: v => { if (user) user.webApprovalGracePeriodSeconds = v } }}
+                        >
+                    </FormGroup>
+                    <HelpText>
+                        Overrides the role and global web approval cache period
+                        for this user. Blank = inherit from the user's roles, or
+                        the global default if none of their roles set one
+                        either.
+                    </HelpText>
                 </Section>
             </SectionedForm>
 

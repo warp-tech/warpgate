@@ -442,6 +442,7 @@ mod tests {
             rate_limit_bytes_per_second: None,
             ldap_server_id: None,
             allowed_ip_ranges: None,
+            web_approval_grace_period_seconds: None,
         }
     }
 
