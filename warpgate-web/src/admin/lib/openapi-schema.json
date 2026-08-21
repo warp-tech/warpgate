@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.0-beta.3-modified"
+    "version": "v0.28.2-1-g250f869b-modified"
   },
   "servers": [
     {
@@ -4936,6 +4936,15 @@
           }
         }
       },
+      "DefaultWebApprovalScope": {
+        "type": "string",
+        "description": "Which action is the one-click default in the in-browser web approval\ndialog. Variant names match `WebApprovalScope` in\n`warpgate-protocol-http`'s auth API.",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
+      },
       "DenyTicketRequestBody": {
         "type": "object",
         "title": "DenyTicketRequestBody",
@@ -5653,6 +5662,9 @@
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
           },
+          "default_web_approval_scope": {
+            "$ref": "#/components/schemas/DefaultWebApprovalScope"
+          },
           "ticket_self_service_enabled": {
             "type": "boolean"
           },
@@ -5780,6 +5792,7 @@
           "ssh_host_key_verification",
           "password_login_mode",
           "minimize_password_login",
+          "default_web_approval_scope",
           "ticket_self_service_enabled",
           "ticket_auto_approve_existing_access",
           "ticket_require_description",
@@ -5836,6 +5849,9 @@
           "minimize_password_login": {
             "type": "boolean",
             "description": "Deprecated in 0.26: superseded by `password_login_mode`"
+          },
+          "default_web_approval_scope": {
+            "$ref": "#/components/schemas/DefaultWebApprovalScope"
           },
           "ticket_self_service_enabled": {
             "type": "boolean"

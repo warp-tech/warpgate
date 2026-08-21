@@ -178,6 +178,15 @@ impl Services {
             .map(Duration::from_secs))
     }
 
+    /// Which action is the one-click default in the in-browser web approval dialog.
+    pub async fn default_web_approval_scope(
+        &self,
+    ) -> Result<Parameters::DefaultWebApprovalScope, WarpgateError> {
+        Ok(Parameters::Entity::get(&self.db)
+            .await?
+            .default_web_approval_scope)
+    }
+
     /// If a matching web approval is still within the grace period, satisfies the
     /// pending `WebUserApproval` requirement and logs an audit event
     pub async fn try_web_approval_bypass(

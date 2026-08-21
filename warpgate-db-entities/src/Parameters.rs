@@ -49,6 +49,26 @@ pub enum PasswordLoginMode {
     Disabled,
 }
 
+/// Which action is the one-click default in the in-browser web approval
+/// dialog. Variant names match `WebApprovalScope` in
+/// `warpgate-protocol-http`'s auth API.
+#[derive(
+    Debug, Default, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
+pub enum DefaultWebApprovalScope {
+    /// Approve without remembering.
+    #[sea_orm(string_value = "Once")]
+    Once,
+    /// Approve and remember for this target only.
+    #[default]
+    #[sea_orm(string_value = "Target")]
+    Target,
+    /// Approve and remember for all targets.
+    #[sea_orm(string_value = "AllTargets")]
+    AllTargets,
+}
+
 /// What to do when a target's SSH host key isn't in the known hosts list.
 #[derive(
     Debug, Default, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum,
@@ -165,6 +185,7 @@ pub struct Model {
     pub ssh_client_auth_keyboard_interactive: bool,
     pub ssh_host_key_verification: SshHostKeyVerificationMode,
     pub password_login_mode: PasswordLoginMode,
+    pub default_web_approval_scope: DefaultWebApprovalScope,
     pub ticket_self_service_enabled: bool,
     pub ticket_auto_approve_existing_access: bool,
     pub ticket_max_duration_seconds: Option<i64>,
@@ -269,6 +290,7 @@ impl Entity {
                         get_config_migration_values().ssh_host_key_verification
                     ),
                     password_login_mode: Set(PasswordLoginMode::Enabled),
+                    default_web_approval_scope: Set(DefaultWebApprovalScope::Target),
                     ticket_self_service_enabled: Set(false),
                     ticket_auto_approve_existing_access: Set(true),
                     ticket_max_duration_seconds: Set(Some(28800)),
