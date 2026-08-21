@@ -7,6 +7,7 @@ use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthResult, AuthState, CredentialKind, CredentialPolicy, WebApprovalMatchKey,
+    WebApprovalScopeKey,
 };
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::helpers::username::username_eq_ci;
@@ -376,6 +377,51 @@ impl AuthStateStore {
         Ok(true)
     }
 
+    /// Clears every remembered web approval, immediately revoking all
+    /// outstanding auth-bypass grants. Returns the number of entries cleared.
+    pub fn clear_recent_approvals(&mut self) -> usize {
+        let count = self.recent_approvals.len();
+        self.recent_approvals.clear();
+        count
+    }
+
+    /// Clears remembered web approvals for a single user (case-insensitive),
+    /// immediately revoking that user's outstanding bypass grants. Returns the
+    /// number of entries cleared.
+    pub fn clear_recent_approvals_for_user(&mut self, username: &str) -> usize {
+        let before = self.recent_approvals.len();
+        self.recent_approvals
+            .retain(|key, _| !username_eq_ci(&key.username, username));
+        before - self.recent_approvals.len()
+    }
+
+    /// Clears remembered web approvals for a single user and scope
+    /// (case-insensitive username match), immediately revoking just that
+    /// target's — or, for [`WebApprovalScopeKey::AllTargets`], every
+    /// target's — bypass grant. Returns the number of entries cleared.
+    pub fn clear_recent_approvals_for_user_and_scope(
+        &mut self,
+        username: &str,
+        scope: &WebApprovalScopeKey,
+    ) -> usize {
+        let before = self.recent_approvals.len();
+        self.recent_approvals
+            .retain(|key, _| !(username_eq_ci(&key.username, username) && &key.scope == scope));
+        before - self.recent_approvals.len()
+    }
+
+    /// Remembered web approvals still within `grace`, paired with how long ago
+    /// each was granted. For admin visibility into active bypass grants.
+    pub fn list_active_approvals(&self, grace: Duration) -> Vec<(WebApprovalMatchKey, Duration)> {
+        self.recent_approvals
+            .iter()
+            .filter_map(|(key, at)| {
+                let age = at.elapsed();
+                (age < grace).then(|| (key.clone(), age))
+            })
+            .collect()
+    }
+
     pub fn vacuum(&mut self) {
         self.store
             .retain(|_, (_, started_at)| started_at.elapsed() < *TIMEOUT);
@@ -708,6 +754,72 @@ mod tests {
         assert!(!store.recent_approval_is_fresh(&for_target("prod"), grace));
         // ...nor be mistaken for an all-targets grant.
         assert!(!store.recent_approval_is_fresh(&for_target("prod").for_all_targets(), grace));
+    }
+
+    #[test]
+    fn clear_recent_approvals_removes_everything() {
+        let mut store = AuthStateStore::new();
+        store.record_web_approval(for_target("prod"));
+        store.record_web_approval(approval_key(WebApprovalScopeKey::AllTargets));
+
+        assert_eq!(store.clear_recent_approvals(), 2);
+        assert_eq!(store.clear_recent_approvals(), 0);
+
+        let grace = Duration::from_secs(3600);
+        assert!(!store.recent_approval_is_fresh(&for_target("prod"), grace));
+        assert!(!store.recent_approval_is_fresh(
+            &approval_key(WebApprovalScopeKey::AllTargets),
+            grace
+        ));
+    }
+
+    #[test]
+    fn clear_recent_approvals_for_user_only_removes_that_users_entries() {
+        let mut store = AuthStateStore::new();
+        store.record_web_approval(for_target("prod"));
+
+        let mut other_user = for_target("prod");
+        other_user.username = "bob".into();
+        store.record_web_approval(other_user.clone());
+
+        // Case-insensitive, matching the rest of the auth path.
+        assert_eq!(store.clear_recent_approvals_for_user("ALICE"), 1);
+
+        let grace = Duration::from_secs(3600);
+        assert!(!store.recent_approval_is_fresh(&for_target("prod"), grace));
+        assert!(store.recent_approval_is_fresh(&other_user, grace));
+    }
+
+    #[test]
+    fn clear_recent_approvals_for_user_and_scope_only_removes_the_matching_scope() {
+        let mut store = AuthStateStore::new();
+        store.record_web_approval(for_target("prod"));
+        store.record_web_approval(for_target("staging"));
+
+        assert_eq!(
+            store.clear_recent_approvals_for_user_and_scope(
+                "alice",
+                &WebApprovalScopeKey::Target("prod".into())
+            ),
+            1
+        );
+
+        let grace = Duration::from_secs(3600);
+        assert!(!store.recent_approval_is_fresh(&for_target("prod"), grace));
+        assert!(store.recent_approval_is_fresh(&for_target("staging"), grace));
+    }
+
+    #[test]
+    fn list_active_approvals_only_returns_entries_within_grace() {
+        let mut store = AuthStateStore::new();
+        store.record_web_approval(for_target("prod"));
+
+        let grace = Duration::from_secs(3600);
+        let active = store.list_active_approvals(grace);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].0, for_target("prod"));
+
+        assert!(store.list_active_approvals(Duration::ZERO).is_empty());
     }
 
     #[test]

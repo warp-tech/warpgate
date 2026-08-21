@@ -13,6 +13,9 @@
         '/login-protection': wrap({
             asyncComponent: () => import('./LoginProtection.svelte'),
         }),
+        '/web-approvals': wrap({
+            asyncComponent: () => import('./WebApprovals.svelte'),
+        }),
         '/network': wrap({
             asyncComponent: () => import('./NetworkStatus.svelte'),
         }),
@@ -43,6 +46,14 @@
             title="Network status"
             description="Listeners, certificates and client IP detection"
             href="/status/network"
+        />
+
+        <NavListItem
+            small
+            class="mb-2"
+            title="Web approvals"
+            description="View and revoke cached approval bypasses"
+            href="/status/web-approvals"
         />
     {/snippet}
 </SidebarNavContainer>
