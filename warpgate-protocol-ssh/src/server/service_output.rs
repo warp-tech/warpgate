@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt::Display;
 use std::io::Write as _;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -144,18 +144,32 @@ fn erase_for_width(w: usize) -> String {
     format!("{CURSOR_UP}\r{}\r", " ".repeat(w))
 }
 
+#[derive(Clone, Debug)]
+pub struct ServiceOutputFrame {
+    data: Bytes,
+    generation: u64,
+}
+
+impl ServiceOutputFrame {
+    pub const fn data(&self) -> &Bytes {
+        &self.data
+    }
+}
+
 #[derive(Clone)]
 pub struct ServiceOutput {
     progress_visible: Arc<AtomicBool>,
+    progress_generation: Arc<AtomicU64>,
     last_progress_width: Arc<AtomicUsize>,
     chain: Arc<Mutex<Option<VisualConnectionChainState>>>,
     abort_tx: mpsc::Sender<()>,
-    output_tx: broadcast::Sender<Bytes>,
+    output_tx: broadcast::Sender<ServiceOutputFrame>,
 }
 
 impl ServiceOutput {
     pub fn new() -> Self {
         let progress_visible = Arc::new(AtomicBool::new(false));
+        let progress_generation = Arc::new(AtomicU64::new(0));
         let last_progress_width = Arc::new(AtomicUsize::new(0));
         let chain: Arc<Mutex<Option<VisualConnectionChainState>>> = Arc::new(Mutex::new(None));
         let (abort_tx, mut abort_rx) = mpsc::channel(1);
@@ -165,6 +179,7 @@ impl ServiceOutput {
             let output_tx = output_tx.clone();
             let last_progress_width = last_progress_width.clone();
             let progress_visible = progress_visible.clone();
+            let progress_generation = progress_generation.clone();
             let chain = chain.clone();
             let mut tick = 0usize;
             async move {
@@ -173,12 +188,16 @@ impl ServiceOutput {
                         _ = abort_rx.recv() => return,
                         () = tokio::time::sleep(ANIM_FRAME_DURATION) => {
                             if progress_visible.load(Ordering::Relaxed) {
+                                let generation = progress_generation.load(Ordering::Relaxed);
                                 tick += 1;
                                 let guard = chain.lock().await;
                                 if let Some(c) = &*guard {
                                     let frame = format!("{CURSOR_UP}\r{}", render_connection_chain(c, tick));
                                     last_progress_width.store(frame.len(), Ordering::Relaxed);
-                                    let _ = output_tx.send(Bytes::from(frame.into_bytes()));
+                                    let _ = output_tx.send(ServiceOutputFrame {
+                                        data: Bytes::from(frame.into_bytes()),
+                                        generation,
+                                    });
                                 }
                             }
                         }
@@ -189,6 +208,7 @@ impl ServiceOutput {
 
         Self {
             progress_visible,
+            progress_generation,
             last_progress_width,
             chain,
             abort_tx,
@@ -201,6 +221,7 @@ impl ServiceOutput {
             items: hosts,
             connected_hops: 1,
         });
+        self.progress_generation.fetch_add(1, Ordering::Relaxed);
         self.progress_visible.store(true, Ordering::Relaxed);
     }
 
@@ -213,20 +234,28 @@ impl ServiceOutput {
 
     /// Re-enable the animation (e.g. after pausing for a host-key prompt).
     pub fn show_progress(&self) {
+        self.progress_generation.fetch_add(1, Ordering::Relaxed);
         self.progress_visible.store(true, Ordering::Relaxed);
     }
 
     pub fn stop_progress(&self) {
         self.progress_visible.store(false, Ordering::Relaxed);
+        self.progress_generation.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn progress_visible(&self) -> bool {
         self.progress_visible.load(Ordering::Relaxed)
     }
 
+    pub fn should_render(&self, frame: &ServiceOutputFrame) -> bool {
+        self.progress_visible()
+            && frame.generation == self.progress_generation.load(Ordering::Relaxed)
+    }
+
     #[must_use]
     pub async fn render_final_success_static_frame(&self) -> String {
         self.progress_visible.store(false, Ordering::Relaxed);
+        self.progress_generation.fetch_add(1, Ordering::Relaxed);
         let chain = self.chain.lock().await;
         let graph = if let Some(c) = &*chain {
             let n = c.items.len();
@@ -248,7 +277,7 @@ impl ServiceOutput {
         erase_for_width(self.last_progress_width.load(Ordering::Relaxed))
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<Bytes> {
+    pub fn subscribe(&self) -> broadcast::Receiver<ServiceOutputFrame> {
         self.output_tx.subscribe()
     }
 }
@@ -257,5 +286,28 @@ impl Drop for ServiceOutput {
     fn drop(&mut self) {
         let signal = std::mem::replace(&mut self.abort_tx, mpsc::channel(1).0);
         tokio::spawn(async move { signal.send(()).await });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn invalidates_queued_frames_when_progress_pauses() {
+        let output = ServiceOutput::new();
+        output.start_progress(vec![]).await;
+        let queued_frame = ServiceOutputFrame {
+            data: Bytes::new(),
+            generation: output.progress_generation.load(Ordering::Relaxed),
+        };
+
+        assert!(output.should_render(&queued_frame));
+
+        output.stop_progress();
+        assert!(!output.should_render(&queued_frame));
+
+        output.show_progress();
+        assert!(!output.should_render(&queued_frame));
     }
 }
