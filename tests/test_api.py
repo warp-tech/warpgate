@@ -892,6 +892,32 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         call=lambda api, r: api.get_ip_echo_with_http_info(),
         expected_statuses={200},
     ),
+    AdminApiTestCase(
+        id="list_web_approvals",
+        permission=None,
+        call=lambda api, r: api.list_web_approvals_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="clear_web_approvals",
+        permission="config_edit",
+        call=lambda api, r: api.clear_web_approvals_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="clear_web_approvals_for_user",
+        permission="config_edit",
+        call=lambda api, r: api.clear_web_approvals_for_user_with_http_info(r["username"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="clear_web_approval_scope_for_user",
+        permission="config_edit",
+        call=lambda api, r: api.clear_web_approval_scope_for_user_with_http_info(
+            r["username"]
+        ),
+        expected_statuses={200},
+    ),
 ]
 
 
