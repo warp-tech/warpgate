@@ -351,6 +351,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "fergusean",
+      "name": "Sean Ferguson",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1029297?v=4",
+      "profile": "https://fergusean.com",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
