@@ -176,6 +176,8 @@ enum UpdateTargetResponse {
     Ok(Json<TargetConfig>),
     #[oai(status = 400)]
     BadRequest,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -234,6 +236,17 @@ impl DetailApi {
         let Some(target) = Target::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateTargetResponse::NotFound);
         };
+
+        let existing = Target::Entity::find()
+            .filter(Target::Column::Name.eq(body.name.clone()))
+            .filter(Target::Column::Id.ne(id.0))
+            .one(db)
+            .await?;
+        if existing.is_some() {
+            return Ok(UpdateTargetResponse::Conflict(Json(
+                "Name already exists".into(),
+            )));
+        }
 
         if target.kind != (&body.options).into() {
             return Ok(UpdateTargetResponse::BadRequest);

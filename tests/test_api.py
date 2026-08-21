@@ -1128,3 +1128,30 @@ def test_admin_api_permission_enforcement(
         assert status in {401, 403}, (
             f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
         )
+
+
+def _ssh_target_request(name: str) -> sdk.TargetDataRequest:
+    return sdk.TargetDataRequest(
+        name=name,
+        options=sdk.TargetOptions(
+            sdk.TargetOptionsTargetSSHOptions(
+                kind="Ssh",
+                host="127.0.0.1",
+                port=22,
+                username="user",
+                auth=sdk.SSHTargetAuth(
+                    sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                ),
+            )
+        ),
+    )
+
+
+def test_update_target_rejects_duplicate_name(admin_client: sdk.DefaultApi):
+    first = admin_client.create_target(_ssh_target_request(f"dup-a-{uuid4()}"))
+    second = admin_client.create_target(_ssh_target_request(f"dup-b-{uuid4()}"))
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.update_target(second.id, _ssh_target_request(first.name))
+    assert err.value.status == 409
+    still = admin_client.get_target(second.id)
+    assert still.name == second.name
