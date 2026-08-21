@@ -19,16 +19,15 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use tokio::io::copy_bidirectional;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::time::{Instant, timeout_at};
-use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
-use warpgate_common::helpers::net::accept_client;
+use warpgate_common::helpers::net::accept_loop;
 use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetRdpOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{
@@ -89,57 +88,54 @@ pub async fn bind_server(
     cert_pem: String,
     key_pem: String,
 ) -> Result<BoxFuture<'static, Result<()>>> {
-    let mut listener = address.tcp_accept_stream().await?;
+    let listener = address.tcp_accept_stream().await?;
 
     Ok(async move {
-        while let Some(mut stream) = listener.next().await {
-            let Some(remote_address) = accept_client(&mut stream, proxy_protocol).await else {
-                continue;
-            };
+        accept_loop(
+            "RDP connection",
+            listener,
+            proxy_protocol,
+            move |stream, remote_address| {
+                let services = services.clone();
+                let cert_pem = cert_pem.clone();
+                let key_pem = key_pem.clone();
+                async move {
+                    let (session_handle, mut abort_rx) = RdpSessionHandle::new();
 
-            let services = services.clone();
-            let cert_pem = cert_pem.clone();
-            let key_pem = key_pem.clone();
-            tokio::spawn(async move {
-                let (session_handle, mut abort_rx) = RdpSessionHandle::new();
+                    let server_handle = State::register_session(
+                        &services.state,
+                        PROTOCOL_NAME,
+                        SessionStateInit {
+                            remote_address: Some(remote_address),
+                            handle: Box::new(session_handle),
+                        },
+                    )
+                    .await
+                    .context("registering session")?;
 
-                let server_handle = match State::register_session(
-                    &services.state,
-                    PROTOCOL_NAME,
-                    SessionStateInit {
-                        remote_address: Some(remote_address),
-                        handle: Box::new(session_handle),
-                    },
-                )
-                .await
-                {
-                    Ok(h) => h,
-                    Err(error) => {
-                        error!(%error, "Failed to register session");
-                        return;
+                    let span = info_span!("RDP", session=%server_handle.lock().await.id());
+
+                    tokio::select! {
+                        result = handle_connection(
+                            services,
+                            server_handle.clone(),
+                            stream,
+                            remote_address,
+                            cert_pem,
+                            key_pem,
+                        ).instrument(span) => match result {
+                            Ok(()) => info!("Session ended"),
+                            Err(error) => error!(%error, "Session failed"),
+                        },
+                        _ = abort_rx.recv() => {
+                            warn!("Session aborted by admin");
+                        }
                     }
-                };
-
-                let span = info_span!("RDP", session=%server_handle.lock().await.id());
-
-                tokio::select! {
-                    result = handle_connection(
-                        services,
-                        server_handle.clone(),
-                        stream,
-                        remote_address,
-                        cert_pem,
-                        key_pem,
-                    ).instrument(span) => match result {
-                        Ok(()) => info!("Session ended"),
-                        Err(error) => error!(%error, "Session failed"),
-                    },
-                    _ = abort_rx.recv() => {
-                        warn!("Session aborted by admin");
-                    }
+                    Ok(())
                 }
-            });
-        }
+            },
+        )
+        .await;
 
         Ok(())
     }
@@ -382,6 +378,25 @@ async fn control_loop(
                     screen,
                 )
                 .await?;
+                continue;
+            }
+            ServerEvent::ResizeRequest { width, height } => {
+                if let Some(backend) = &backend {
+                    if backend
+                        .input_tx
+                        .send(DesktopInput::Resize { width, height })
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                } else if server_in_tx
+                    .send(ServerInput::Resize { width, height })
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
                 continue;
             }
             // Viewer input: record it for audit (like native VNC) then forward to the

@@ -12,8 +12,6 @@ use ironrdp::core::{AsAny, IntoOwned as _};
 use tracing::debug;
 use warpgate_core::MAX_CLIPBOARD_BYTES;
 
-const TEXT: ClipboardFormatId = ClipboardFormatId::CF_UNICODETEXT;
-
 /// truncate so that utf16 encoded `text` fits in `max` bytes
 fn truncate_for_wire(text: &mut String, max: usize) {
     let mut wire = 0;
@@ -26,10 +24,23 @@ fn truncate_for_wire(text: &mut String, max: usize) {
     }
 }
 
+/// Only Unicode is advertised: a peer that wants ANSI text synthesises it from this in its
+/// own code page, which we have no way to render for it.
 fn advertise_text(sink: &impl ClipboardSink) {
     sink.request(ClipboardMessage::SendInitiateCopy(vec![
-        ClipboardFormat::new(TEXT),
+        ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT),
     ]));
+}
+
+/// The best text format a peer offers; some only put up ANSI text.
+fn preferred_text_format(formats: &[ClipboardFormat]) -> Option<ClipboardFormatId> {
+    [
+        ClipboardFormatId::CF_UNICODETEXT,
+        ClipboardFormatId::CF_TEXT,
+        ClipboardFormatId::CF_OEMTEXT,
+    ]
+    .into_iter()
+    .find(|id| formats.iter().any(|format| format.id() == *id))
 }
 
 /// Underlying sink for TextClipboard
@@ -77,6 +88,7 @@ impl<S: ClipboardSink + Clone> Clipboard<S> {
         TextClipboard {
             store: self.store.clone(),
             sink: self.sink.clone(),
+            paste_format: None,
         }
     }
 
@@ -93,6 +105,7 @@ impl<S: ClipboardSink + Clone> Clipboard<S> {
 pub(crate) struct TextClipboard<S> {
     store: ClipboardText,
     sink: S,
+    paste_format: Option<ClipboardFormatId>,
 }
 
 impl<S: ClipboardSink> AsAny for TextClipboard<S> {
@@ -130,13 +143,15 @@ impl<S: ClipboardSink> CliprdrBackend for TextClipboard<S> {
     }
 
     fn on_remote_copy(&mut self, available_formats: &[ClipboardFormat]) {
-        if available_formats.iter().any(|format| format.id() == TEXT) {
-            self.sink.request(ClipboardMessage::SendInitiatePaste(TEXT));
+        if let Some(format) = preferred_text_format(available_formats) {
+            self.paste_format = Some(format);
+            self.sink
+                .request(ClipboardMessage::SendInitiatePaste(format));
         }
     }
 
     fn on_format_data_request(&mut self, request: FormatDataRequest) {
-        let response = if request.format == TEXT {
+        let response = if request.format == ClipboardFormatId::CF_UNICODETEXT {
             FormatDataResponse::new_unicode_string(&self.store.get())
         } else {
             FormatDataResponse::new_error()
@@ -150,7 +165,16 @@ impl<S: ClipboardSink> CliprdrBackend for TextClipboard<S> {
             debug!("remote failed to render clipboard text");
             return;
         }
-        match response.to_unicode_string() {
+        let format = self
+            .paste_format
+            .take()
+            .unwrap_or(ClipboardFormatId::CF_UNICODETEXT);
+        let decoded = if format == ClipboardFormatId::CF_UNICODETEXT {
+            response.to_unicode_string()
+        } else {
+            response.to_string()
+        };
+        match decoded {
             Ok(mut text) => {
                 truncate_for_wire(&mut text, MAX_CLIPBOARD_BYTES);
                 self.sink.text_received(text);
@@ -208,11 +232,29 @@ mod tests {
         backend.on_remote_copy(&[ClipboardFormat::new(ClipboardFormatId::CF_DIB)]);
         assert!(requests.try_recv().is_err());
 
-        backend.on_remote_copy(&[ClipboardFormat::new(TEXT)]);
+        backend.on_remote_copy(&[ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)]);
         assert!(matches!(
             requests.try_recv(),
-            Ok(ClipboardMessage::SendInitiatePaste(TEXT))
+            Ok(ClipboardMessage::SendInitiatePaste(
+                ClipboardFormatId::CF_UNICODETEXT
+            ))
         ));
+    }
+
+    #[test]
+    fn ansi_text_copy_is_used_as_a_fallback() {
+        let (_clipboard, mut backend, requests, texts) = fixture();
+
+        backend.on_remote_copy(&[ClipboardFormat::new(ClipboardFormatId::CF_TEXT)]);
+        assert!(matches!(
+            requests.try_recv(),
+            Ok(ClipboardMessage::SendInitiatePaste(
+                ClipboardFormatId::CF_TEXT
+            ))
+        ));
+
+        backend.on_format_data_response(FormatDataResponse::new_string("hello"));
+        assert_eq!(texts.try_recv().ok().as_deref(), Some("hello"));
     }
 
     /// End to end through the shared store: what one side offers is what the other
@@ -226,7 +268,9 @@ mod tests {
             Ok(ClipboardMessage::SendInitiateCopy(_))
         ));
 
-        backend.on_format_data_request(FormatDataRequest { format: TEXT });
+        backend.on_format_data_request(FormatDataRequest {
+            format: ClipboardFormatId::CF_UNICODETEXT,
+        });
         let Ok(ClipboardMessage::SendFormatData(response)) = requests.try_recv() else {
             panic!("expected format data");
         };

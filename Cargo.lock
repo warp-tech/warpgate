@@ -4503,6 +4503,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "natord"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "308d96db8debc727c3fd9744aac51751243420e46edf401010908da7f8d5e57c"
+
+[[package]]
 name = "nix"
 version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8261,6 +8267,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
+name = "tls-listener"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1461056cc1ef47003f7ee16e4cef3741068d4c7f6b627bfce49b7c00c120a530"
+dependencies = [
+ "futures-util",
+ "pin-project-lite",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-rustls 0.26.4",
+]
+
+[[package]]
 name = "tls_codec"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8948,7 +8967,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9001,7 +9020,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9069,7 +9088,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ca"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "aws-lc-rs",
  "const-oid 0.9.6",
@@ -9088,7 +9107,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "aes-gcm 0.11.0",
  "anyhow",
@@ -9145,7 +9164,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common-http"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "poem",
  "poem-openapi",
@@ -9162,7 +9181,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -9216,7 +9235,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -9229,7 +9248,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "bytes",
  "ipnet",
@@ -9248,7 +9267,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "data-encoding",
  "regex",
@@ -9292,7 +9311,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ldap"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "anyhow",
  "ldap3",
@@ -9308,7 +9327,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9351,7 +9370,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-kubernetes"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9363,6 +9382,7 @@ dependencies = [
  "md5",
  "poem",
  "poem-openapi",
+ "rcgen",
  "regex",
  "reqwest 0.13.4",
  "reqwest-websocket",
@@ -9372,6 +9392,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "time",
+ "tls-listener",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-tungstenite 0.30.0",
@@ -9390,7 +9411,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9420,7 +9441,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-postgres"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9477,7 +9498,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9487,6 +9508,7 @@ dependencies = [
  "ed25519-dalek 3.0.0",
  "futures",
  "humantime",
+ "natord",
  "ratatui",
  "russh",
  "sea-orm",
@@ -9542,7 +9564,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9561,7 +9583,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-tls"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "bytes",
  "poem",
@@ -9606,7 +9628,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.28.0"
+version = "0.28.2"
 dependencies = [
  "rust-embed",
  "serde",
