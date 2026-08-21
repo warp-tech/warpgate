@@ -151,6 +151,7 @@ pub struct User {
     pub rate_limit_bytes_per_second: Option<i64>,
     pub ldap_server_id: Option<Uuid>,
     pub allowed_ip_ranges: Option<Vec<WarpgateIpNet>>,
+    pub web_approval_grace_period_seconds: Option<i64>,
 }
 
 #[derive(Debug, Clone, Object)]
@@ -174,6 +175,7 @@ pub struct Role {
     pub name: String,
     pub description: String,
     pub is_default: bool,
+    pub web_approval_grace_period_seconds: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Object)]

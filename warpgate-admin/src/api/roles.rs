@@ -18,6 +18,7 @@ struct RoleDataRequest {
     name: String,
     description: Option<String>,
     is_default: Option<bool>,
+    web_approval_grace_period_seconds: Option<i64>,
 }
 
 #[derive(ApiResponse)]
@@ -81,6 +82,7 @@ impl ListApi {
             name: Set(body.name.clone()),
             description: Set(body.description.clone().unwrap_or_default()),
             is_default: Set(body.is_default.unwrap_or(false)),
+            web_approval_grace_period_seconds: Set(body.web_approval_grace_period_seconds),
         };
 
         let role = values.insert(db).await.map_err(WarpgateError::from)?;
@@ -169,6 +171,7 @@ impl DetailApi {
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
         model.is_default = Set(body.is_default.unwrap_or(current_is_default));
+        model.web_approval_grace_period_seconds = Set(body.web_approval_grace_period_seconds);
         let role = model.update(db).await?;
 
         Ok(UpdateRoleResponse::Ok(Json(role.into())))

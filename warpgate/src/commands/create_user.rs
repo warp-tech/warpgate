@@ -42,6 +42,7 @@ pub async fn command(
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            web_approval_grace_period_seconds: Set(None),
         };
         let user = values.insert(db).await.map_err(WarpgateError::from)?;
 

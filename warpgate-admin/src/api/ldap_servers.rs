@@ -77,6 +77,7 @@ impl ImportApi {
                         ldap_object_uuid: Set(Some(user.object_uuid)),
                         ldap_server_id: Set(Some(server.id)),
                         allowed_ip_ranges: Set(serde_json::Value::Null),
+                        web_approval_grace_period_seconds: Set(None),
                     };
                     values.insert(db).await?;
                     imported.push(user.username.clone());

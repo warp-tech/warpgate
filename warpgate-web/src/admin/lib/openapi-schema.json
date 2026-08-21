@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.0-beta.3-modified"
+    "version": "v0.28.2-1-g250f869b-modified"
   },
   "servers": [
     {
@@ -6224,6 +6224,10 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "web_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -6242,6 +6246,10 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "web_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -7587,6 +7595,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "web_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -7615,6 +7627,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "web_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },

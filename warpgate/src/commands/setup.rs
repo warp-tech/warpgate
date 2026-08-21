@@ -436,6 +436,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
                 name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
                 description: Set("".to_string()),
                 is_default: Set(false),
+                web_approval_grace_period_seconds: Set(None),
             }
             .insert(&db)
             .await?

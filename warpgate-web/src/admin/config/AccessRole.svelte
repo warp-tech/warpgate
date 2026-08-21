@@ -1,7 +1,9 @@
 <script lang="ts">
     import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { api, type Role, type Target, type User } from 'admin/lib/api'
+    import HelpText from 'admin/lib/HelpText.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import { humantimeDuration } from 'common/duration'
     import { stringifyError } from 'common/errors'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -105,6 +107,22 @@
                     <div>Automatically assign to all new users</div>
                 </label>
             </div>
+
+            <FormGroup floating label="Web approval cache period">
+                <input
+                    type="text"
+                    class="form-control"
+                    placeholder="e.g. 5m, 1h"
+                    use:humantimeDuration={{ seconds: role.webApprovalGracePeriodSeconds, onChange: v => { role.webApprovalGracePeriodSeconds = v } }}
+                >
+            </FormGroup>
+            <HelpText>
+                Overrides the global web approval cache period for users with
+                this role. Blank = inherit the global default. If a user holds
+                multiple roles with different values, the shortest one applies.
+                A user's own override, if set, always takes precedence over
+                this.
+            </HelpText>
         {/snippet}
     </Loadable>
 

@@ -30,6 +30,7 @@ struct UserDataRequest {
     description: Option<String>,
     rate_limit_bytes_per_second: Option<u32>,
     allowed_ip_ranges: Option<Vec<String>>,
+    web_approval_grace_period_seconds: Option<i64>,
 }
 
 #[derive(ApiResponse)]
@@ -109,6 +110,7 @@ impl ListApi {
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            web_approval_grace_period_seconds: Set(None),
         };
 
         let user = values.insert(db).await.map_err(WarpgateError::from)?;
@@ -262,6 +264,7 @@ impl DetailApi {
                 .map_err(WarpgateError::from)?,
             None => serde_json::Value::Null,
         });
+        model.web_approval_grace_period_seconds = Set(body.web_approval_grace_period_seconds);
         let user = model.update(db).await?;
 
         warpgate_core::rate_limiting::apply_new_rate_limits(
