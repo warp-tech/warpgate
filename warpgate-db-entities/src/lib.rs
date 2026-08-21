@@ -1,31 +1,48 @@
 #![allow(non_snake_case)]
 
-pub mod AdminRole;
-pub mod ApiToken;
-pub mod CertificateCredential;
-pub mod CertificateRevocation;
-pub mod FailedLoginAttempt;
-pub mod HttpSession;
-pub mod IpBlock;
-pub mod KnownHost;
-pub mod LdapServer;
-pub mod LogEntry;
-pub mod Node;
-pub mod OtpCredential;
-pub mod Parameters;
-pub mod PasswordCredential;
-pub mod PublicKeyCredential;
-pub mod Recording;
-pub mod Role;
-pub mod Session;
-pub mod SshClientKey;
-pub mod SsoCredential;
-pub mod Target;
-pub mod TargetGroup;
-pub mod TargetRoleAssignment;
-pub mod Ticket;
-pub mod TicketRequest;
-pub mod User;
-pub mod UserAdminRoleAssignment;
-pub mod UserLockout;
-pub mod UserRoleAssignment;
+// macro list allows compile-time iteration
+
+#[macro_export]
+macro_rules! with_every_entity {
+    ($callback:ident) => {
+        $callback![
+            AdminRole,
+            ApiToken,
+            CertificateCredential,
+            CertificateRevocation,
+            FailedLoginAttempt,
+            HttpSession,
+            IpBlock,
+            KnownHost,
+            LdapServer,
+            LogEntry,
+            Node,
+            OtpCredential,
+            Parameters,
+            PasswordCredential,
+            PublicKeyCredential,
+            Recording,
+            Role,
+            Session,
+            SshClientKey,
+            SsoCredential,
+            Target,
+            TargetGroup,
+            TargetRoleAssignment,
+            Ticket,
+            TicketRequest,
+            User,
+            UserAdminRoleAssignment,
+            UserLockout,
+            UserRoleAssignment,
+        ];
+    };
+}
+
+macro_rules! declare_modules {
+    ($($name:ident),* $(,)?) => {
+        $( pub mod $name; )*
+    };
+}
+
+with_every_entity!(declare_modules);

@@ -159,6 +159,38 @@ fn format_web_auth_instructions(login_url: Option<Url>, identification_string: &
     )
 }
 
+fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::server::Auth {
+    russh::server::Auth::Reject {
+        proceed_with_methods: Some(allowed_auth_methods),
+        partial_success: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use russh::{MethodKind, MethodSet};
+
+    use super::reject_with_allowed_auth_methods;
+
+    #[test]
+    fn rejected_public_key_auth_advertises_only_configured_methods() {
+        let configured_methods = MethodSet::from(&[MethodKind::PublicKey][..]);
+        let auth = reject_with_allowed_auth_methods(configured_methods.clone());
+
+        let russh::server::Auth::Reject {
+            proceed_with_methods: Some(advertised_methods),
+            ..
+        } = auth
+        else {
+            panic!("expected an authentication rejection with advertised methods");
+        };
+
+        assert_eq!(advertised_methods, configured_methods);
+        assert!(!advertised_methods.contains(&MethodKind::Password));
+        assert!(!advertised_methods.contains(&MethodKind::KeyboardInteractive));
+    }
+}
+
 impl std::fmt::Debug for ServerSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", session_debug_tag(&self.id, &self.remote_address))
@@ -1912,10 +1944,9 @@ impl ServerSession {
                 }
                 russh::server::Auth::Accept
             }
-            Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
-                proceed_with_methods: Some(MethodSet::all()),
-                partial_success: false,
-            },
+            Ok(AuthResult::Rejected) => {
+                reject_with_allowed_auth_methods(self.allowed_auth_methods.clone())
+            }
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
                 partial_success: false,
