@@ -42,7 +42,7 @@ use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
 use crate::compat::ContextExt;
 use crate::server::get_allowed_auth_methods;
-use crate::server::service_output::{ServiceOutputFrame, VisualConnectionChainItem, paint_fg};
+use crate::server::service_output::{VisualConnectionChainItem, paint_fg};
 use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
@@ -69,7 +69,7 @@ pub enum Event {
     Command(SessionHandleCommand),
     ServerHandler(ServerHandlerEvent),
     ConsoleInput(Bytes),
-    ServiceOutput(ServiceOutputFrame),
+    ServiceOutput(Bytes),
     Client(RCEvent),
     MenuRedraw(u16, u16),
     Menu(MenuEvent),
@@ -248,9 +248,9 @@ impl ServerSession {
         tokio::spawn(async move {
             loop {
                 match so_rx.recv().await {
-                    Ok(frame) => {
+                    Ok(data) => {
                         if so_sender
-                            .send_once(Event::ServiceOutput(frame))
+                            .send_once(Event::ServiceOutput(data))
                             .await
                             .is_err()
                         {
@@ -721,12 +721,9 @@ impl ServerSession {
                         // break;
                     }
                 }
-                Event::ServiceOutput(frame) => {
-                    // A connection can pause for an interactive prompt after
-                    // animation frames have already queued. Do not let one
-                    // of those stale frames redraw over the prompt.
-                    if self.service_output.should_render(&frame) {
-                        let _ = self.emit_pty_output(frame.data()).await;
+                Event::ServiceOutput(data) => {
+                    if let Some(frame) = self.service_output.take_frame(&data) {
+                        let _ = self.emit_pty_output(&frame).await;
                     }
                 }
                 Event::Menu(action) => {
@@ -1357,8 +1354,6 @@ impl ServerSession {
         key: PublicKey,
         reply: oneshot::Sender<bool>,
     ) -> Result<()> {
-        self.service_output.stop_progress();
-
         let mode = Parameters::Entity::get(&self.services.db)
             .await?
             .ssh_host_key_verification;
@@ -1375,6 +1370,8 @@ impl ServerSession {
             info!("Rejected untrusted host key (auto-reject is enabled)");
             return Ok(());
         }
+
+        self.service_output.stop_progress();
 
         if !self.channels.values().any(Channel::has_pty) {
             warn!(

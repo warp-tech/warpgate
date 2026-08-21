@@ -2,10 +2,10 @@ use std::borrow::Cow;
 use std::fmt::Display;
 use std::io::Write as _;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use termcolor::{Buffer, Color, ColorSpec, WriteColor as _};
 use tokio::sync::{Mutex, broadcast, mpsc};
 
@@ -18,6 +18,7 @@ const CH_SEGMENT_NOT_CONNECTED: char = '─';
 const CH_TARGET_CONNECTED: char = '●';
 const CH_TARGET_NOT_CONNECTED: char = '○';
 const CURSOR_UP: &str = "\x1b[1A";
+const ERASE_LINE: &str = "\x1b[2K";
 
 #[must_use]
 pub(super) fn paint_fg<S: Display>(fg: Color, dimmed: bool, text: S) -> String {
@@ -140,46 +141,27 @@ pub fn render_connection_chain(chain: &VisualConnectionChainState, tick: usize) 
     out
 }
 
-fn erase_for_width(w: usize) -> String {
-    format!("{CURSOR_UP}\r{}\r", " ".repeat(w))
-}
-
-#[derive(Clone, Debug)]
-pub struct ServiceOutputFrame {
-    data: Bytes,
-    generation: u64,
-}
-
-impl ServiceOutputFrame {
-    pub const fn data(&self) -> &Bytes {
-        &self.data
-    }
-}
-
 #[derive(Clone)]
 pub struct ServiceOutput {
     progress_visible: Arc<AtomicBool>,
-    progress_generation: Arc<AtomicU64>,
-    last_progress_width: Arc<AtomicUsize>,
+    /// is progress the last thing printed to the terminal?
+    on_screen: Arc<AtomicBool>,
     chain: Arc<Mutex<Option<VisualConnectionChainState>>>,
     abort_tx: mpsc::Sender<()>,
-    output_tx: broadcast::Sender<ServiceOutputFrame>,
+    output_tx: broadcast::Sender<Bytes>,
 }
 
 impl ServiceOutput {
     pub fn new() -> Self {
         let progress_visible = Arc::new(AtomicBool::new(false));
-        let progress_generation = Arc::new(AtomicU64::new(0));
-        let last_progress_width = Arc::new(AtomicUsize::new(0));
+        let on_screen = Arc::new(AtomicBool::new(false));
         let chain: Arc<Mutex<Option<VisualConnectionChainState>>> = Arc::new(Mutex::new(None));
         let (abort_tx, mut abort_rx) = mpsc::channel(1);
         let output_tx = broadcast::channel(32).0;
 
         tokio::spawn({
             let output_tx = output_tx.clone();
-            let last_progress_width = last_progress_width.clone();
             let progress_visible = progress_visible.clone();
-            let progress_generation = progress_generation.clone();
             let chain = chain.clone();
             let mut tick = 0usize;
             async move {
@@ -188,16 +170,11 @@ impl ServiceOutput {
                         _ = abort_rx.recv() => return,
                         () = tokio::time::sleep(ANIM_FRAME_DURATION) => {
                             if progress_visible.load(Ordering::Relaxed) {
-                                let generation = progress_generation.load(Ordering::Relaxed);
                                 tick += 1;
                                 let guard = chain.lock().await;
                                 if let Some(c) = &*guard {
-                                    let frame = format!("{CURSOR_UP}\r{}", render_connection_chain(c, tick));
-                                    last_progress_width.store(frame.len(), Ordering::Relaxed);
-                                    let _ = output_tx.send(ServiceOutputFrame {
-                                        data: Bytes::from(frame.into_bytes()),
-                                        generation,
-                                    });
+                                    let frame = render_connection_chain(c, tick);
+                                    let _ = output_tx.send(Bytes::from(frame.into_bytes()));
                                 }
                             }
                         }
@@ -208,8 +185,7 @@ impl ServiceOutput {
 
         Self {
             progress_visible,
-            progress_generation,
-            last_progress_width,
+            on_screen,
             chain,
             abort_tx,
             output_tx,
@@ -221,7 +197,6 @@ impl ServiceOutput {
             items: hosts,
             connected_hops: 1,
         });
-        self.progress_generation.fetch_add(1, Ordering::Relaxed);
         self.progress_visible.store(true, Ordering::Relaxed);
     }
 
@@ -234,28 +209,36 @@ impl ServiceOutput {
 
     /// Re-enable the animation (e.g. after pausing for a host-key prompt).
     pub fn show_progress(&self) {
-        self.progress_generation.fetch_add(1, Ordering::Relaxed);
         self.progress_visible.store(true, Ordering::Relaxed);
     }
 
     pub fn stop_progress(&self) {
         self.progress_visible.store(false, Ordering::Relaxed);
-        self.progress_generation.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn progress_visible(&self) -> bool {
         self.progress_visible.load(Ordering::Relaxed)
     }
 
-    pub fn should_render(&self, frame: &ServiceOutputFrame) -> bool {
-        self.progress_visible()
-            && frame.generation == self.progress_generation.load(Ordering::Relaxed)
+    #[must_use]
+    pub fn take_frame(&self, frame: &Bytes) -> Option<Bytes> {
+        if !self.progress_visible() {
+            return None;
+        }
+        if !self.on_screen.swap(true, Ordering::Relaxed) {
+            // Nothing to repaint over: the cursor already sits on a free line.
+            return Some(frame.clone());
+        }
+        let mut out = BytesMut::with_capacity(CURSOR_UP.len() + 1 + frame.len());
+        out.extend_from_slice(CURSOR_UP.as_bytes());
+        out.extend_from_slice(b"\r");
+        out.extend_from_slice(frame);
+        Some(out.freeze())
     }
 
     #[must_use]
     pub async fn render_final_success_static_frame(&self) -> String {
         self.progress_visible.store(false, Ordering::Relaxed);
-        self.progress_generation.fetch_add(1, Ordering::Relaxed);
         let chain = self.chain.lock().await;
         let graph = if let Some(c) = &*chain {
             let n = c.items.len();
@@ -271,13 +254,17 @@ impl ServiceOutput {
         format!("{}{}\r\n", self.erase_display(), graph)
     }
 
-    /// String that erases the last line
+    /// String that erases the progress line, if one is on screen
     #[must_use]
     pub fn erase_display(&self) -> String {
-        erase_for_width(self.last_progress_width.load(Ordering::Relaxed))
+        if self.on_screen.swap(false, Ordering::Relaxed) {
+            format!("{CURSOR_UP}\r{ERASE_LINE}")
+        } else {
+            String::new()
+        }
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<ServiceOutputFrame> {
+    pub fn subscribe(&self) -> broadcast::Receiver<Bytes> {
         self.output_tx.subscribe()
     }
 }
@@ -294,20 +281,34 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn invalidates_queued_frames_when_progress_pauses() {
+    async fn repaints_in_place_only_while_the_frame_is_on_screen() {
         let output = ServiceOutput::new();
+        let frame = Bytes::from_static(b"chain\r\n");
+
+        assert_eq!(output.take_frame(&frame), None, "not started yet");
+
         output.start_progress(vec![]).await;
-        let queued_frame = ServiceOutputFrame {
-            data: Bytes::new(),
-            generation: output.progress_generation.load(Ordering::Relaxed),
-        };
+        assert_eq!(
+            output.take_frame(&frame).as_deref(),
+            Some(&b"chain\r\n"[..])
+        );
+        assert_eq!(
+            output.take_frame(&frame).as_deref(),
+            Some(format!("{CURSOR_UP}\rchain\r\n").as_bytes())
+        );
 
-        assert!(output.should_render(&queued_frame));
-
+        // Pausing for a prompt: queued frames are dropped, and the prompt
+        // erases the progress line it replaces.
         output.stop_progress();
-        assert!(!output.should_render(&queued_frame));
+        assert_eq!(output.take_frame(&frame), None);
+        assert_eq!(output.erase_display(), format!("{CURSOR_UP}\r{ERASE_LINE}"));
+        assert_eq!(output.erase_display(), "", "nothing left to erase");
 
+        // Resuming draws on the free line below the prompt, not over it.
         output.show_progress();
-        assert!(!output.should_render(&queued_frame));
+        assert_eq!(
+            output.take_frame(&frame).as_deref(),
+            Some(&b"chain\r\n"[..])
+        );
     }
 }
