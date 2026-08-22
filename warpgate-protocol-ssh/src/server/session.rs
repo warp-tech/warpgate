@@ -722,7 +722,9 @@ impl ServerSession {
                     }
                 }
                 Event::ServiceOutput(data) => {
-                    let _ = self.emit_pty_output(&data).await;
+                    if let Some(frame) = self.service_output.take_frame(&data) {
+                        let _ = self.emit_pty_output(&frame).await;
+                    }
                 }
                 Event::Menu(action) => {
                     if let Err(err) = self.handle_menu_event(action).await {
@@ -1352,8 +1354,6 @@ impl ServerSession {
         key: PublicKey,
         reply: oneshot::Sender<bool>,
     ) -> Result<()> {
-        self.service_output.stop_progress();
-
         let mode = Parameters::Entity::get(&self.services.db)
             .await?
             .ssh_host_key_verification;
@@ -1370,6 +1370,8 @@ impl ServerSession {
             info!("Rejected untrusted host key (auto-reject is enabled)");
             return Ok(());
         }
+
+        self.service_output.stop_progress();
 
         if !self.channels.values().any(Channel::has_pty) {
             warn!(
