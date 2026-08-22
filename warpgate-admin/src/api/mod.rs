@@ -36,6 +36,7 @@ mod ticket_requests_list;
 mod tickets_detail;
 mod tickets_list;
 pub mod users;
+mod web_approvals;
 
 pub use warpgate_common::api::AnySecurityScheme;
 
@@ -86,5 +87,6 @@ pub fn get() -> impl OpenApi {
             certificate_credentials::ListApi,
             certificate_credentials::DetailApi,
         ),
+        web_approvals::Api,
     )
 }
