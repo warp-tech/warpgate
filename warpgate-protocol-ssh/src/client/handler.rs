@@ -1,6 +1,6 @@
 use russh::Channel;
 use russh::client::{ChannelOpenHandle, Msg, Session};
-use russh::keys::{PublicKey, PublicKeyBase64};
+use russh::keys::{PublicKey, PublicKeyBase64, PublicKeyOrCertificate};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
@@ -47,8 +47,9 @@ impl russh::client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        let server_public_key = server_public_key.public_key();
         let known_hosts = KnownHosts::new(&self.services.db);
         self.event_tx
             .send(ClientHandlerEvent::HostKeyReceived(
@@ -73,7 +74,7 @@ impl russh::client::Handler for ClientHandler {
             .validate(
                 &self.ssh_options.host,
                 self.ssh_options.port,
-                server_public_key,
+                &server_public_key,
             )
             .await
         {
@@ -108,7 +109,7 @@ impl russh::client::Handler for ClientHandler {
                         .trust(
                             &self.ssh_options.host,
                             self.ssh_options.port,
-                            server_public_key,
+                            &server_public_key,
                         )
                         .await
                     {

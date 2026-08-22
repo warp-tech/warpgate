@@ -1908,7 +1908,7 @@ impl ServerSession {
                 russh::server::Auth::Accept
             }
             Ok(AuthResult::Rejected) => russh::server::Auth::Reject {
-                proceed_with_methods: Some(MethodSet::all()),
+                proceed_with_methods: Some(MethodSet::server_supported()),
                 partial_success: false,
             },
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
