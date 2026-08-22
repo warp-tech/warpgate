@@ -334,9 +334,9 @@ async fn connect_any(addrs: &[SocketAddr]) -> poem::Result<tokio::net::TcpStream
             Err(error) => last_error = Some(error),
         }
     }
-    Err(poem::error::BadGateway(
-        last_error.unwrap_or_else(|| std::io::Error::other("no peer address")),
-    ))
+    Err(poem::error::BadGateway(last_error.unwrap_or_else(|| {
+        std::io::Error::other("no peer address")
+    })))
 }
 
 /// Forwards `req` to `path` on the peer rather than the request's own path - for

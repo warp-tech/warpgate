@@ -12,7 +12,7 @@ use poem::{IntoResponse, Request, Response};
 use warpgate_common::Target;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::approvals::{AdminApprovalRequest, AdminApprovalStatus};
+use warpgate_core::approvals::{AdminApprovalContext, PolledGate};
 
 use crate::session_handle::warpgate_server_handle_for_request;
 
@@ -34,11 +34,7 @@ pub async fn check_admin_approval(
     // is simply unreachable on this path rather than silently open.
     let handle = warpgate_server_handle_for_request(req).await.ok();
     let (Some(handle), Some(username)) = (handle, ctx.auth.username().cloned()) else {
-        return Ok(if services.target_requires_approval(&target.name).await? {
-            Some(denied_response(target))
-        } else {
-            None
-        });
+        return Ok(target.require_approval.then(|| denied_response(target)));
     };
 
     let session_id = handle.lock().await.id();
@@ -47,30 +43,32 @@ pub async fn check_admin_approval(
         username,
     };
 
-    let status = services
-        .poll_admin_approval(AdminApprovalRequest {
-            session_id: &session_id,
-            user_info: &user_info,
-            protocol: crate::common::PROTOCOL_NAME,
-            target_name: &target.name,
-            remote_ip: req.remote_addr().as_socket_addr().map(|a| a.ip()),
-            // The credentials that authenticated the session aren't carried on
-            // the request, so an HTTP session neither contributes nor consumes
-            // a remembered approval.
-            credentials: None,
-        })
+    let gate = services
+        .poll_admin_approval_for_http(
+            target.clone(),
+            user_info,
+            crate::common::PROTOCOL_NAME,
+            AdminApprovalContext {
+                session_id: &session_id,
+                remote_ip: req.remote_addr().as_socket_addr().map(|a| a.ip()),
+                // The credentials that authenticated the session aren't carried
+                // on the request, so an HTTP session neither contributes nor
+                // consumes a remembered approval.
+                credentials: None,
+            },
+        )
         .await?;
 
-    Ok(match status {
-        AdminApprovalStatus::Approved => None,
-        AdminApprovalStatus::Pending => Some(gate_response(
+    Ok(match gate {
+        PolledGate::Approved(_) => None,
+        PolledGate::Pending => Some(gate_response(
             target,
             "Waiting for approval",
             "An administrator has been asked to approve this session. This page will \
              continue automatically once they do.",
             true,
         )),
-        AdminApprovalStatus::Denied => Some(denied_response(target)),
+        PolledGate::Denied => Some(denied_response(target)),
     })
 }
 

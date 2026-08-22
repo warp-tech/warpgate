@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::warn;
 use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{GlobalParams, Protocol, Secret, SessionId, WarpgateConfig, WarpgateError};
-use warpgate_db_entities::{Parameters, Target};
+use warpgate_db_entities::Parameters;
 
 use crate::approvals::AdminApprovalStatuses;
 use crate::cluster::Cluster;
@@ -186,15 +186,6 @@ impl Services {
     /// Handle to the per-session administrator-gate outcomes.
     pub(crate) async fn admin_approval_statuses(&self) -> AdminApprovalStatuses {
         self.state.lock().await.admin_approval_statuses()
-    }
-
-    /// Whether connections to this target must be approved by an administrator.
-    pub async fn target_requires_approval(&self, target_name: &str) -> Result<bool, WarpgateError> {
-        Ok(Target::Entity::find()
-            .filter(Target::Column::Name.eq(target_name))
-            .one(&self.db)
-            .await?
-            .is_some_and(|t| t.require_approval))
     }
 
     /// How long a session held for administrator approval waits before being

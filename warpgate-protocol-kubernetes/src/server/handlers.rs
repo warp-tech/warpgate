@@ -94,20 +94,18 @@ pub async fn handle_api_request(
     let (handle, authorization) =
         correlated_authorization(correlator.0, req, &user, &target_name, ctx.services()).await?;
 
-    let (user_info, target) = authorization.into_parts();
-
-    let TargetOptions::Kubernetes(k8s_options) = &target.options else {
+    if !matches!(authorization.target().options, TargetOptions::Kubernetes(_)) {
         return Err(poem::Error::from_string(
             "Invalid target type",
             poem::http::StatusCode::BAD_REQUEST,
         ));
-    };
+    }
 
     let (session_id, log_span) = {
         // The user info is already on the session: it is set when the session is
         // registered, before its authorization is resolved.
         let handle = handle.lock().await;
-        handle.set_target(&target).await?;
+        handle.set_target(authorization.target()).await?;
         (
             handle.id(),
             span_for_request(req, ctx.services(), Some(&*handle)).await?,
@@ -115,12 +113,22 @@ pub async fn handle_api_request(
     };
 
     // Gated before the protocol branch so a `kubectl exec`/`port-forward`
-    // upgrade is held on the same terms as a plain API call.
-    if let Some(response) =
-        check_admin_approval(req, ctx.services(), session_id, &user_info, &target).await?
-    {
-        return Ok(response);
-    }
+    // upgrade is held on the same terms as a plain API call. Nothing below can
+    // run without the proof it hands back.
+    let approved =
+        match check_admin_approval(req, ctx.services(), session_id, authorization).await? {
+            Ok(approved) => approved,
+            Err(response) => return Ok(response),
+        };
+
+    let (user_info, target) = approved.into_parts();
+
+    let TargetOptions::Kubernetes(k8s_options) = &target.options else {
+        return Err(poem::Error::from_string(
+            "Invalid target type",
+            poem::http::StatusCode::BAD_REQUEST,
+        ));
+    };
 
     async {
         let response = if let Some(ws) = ws {

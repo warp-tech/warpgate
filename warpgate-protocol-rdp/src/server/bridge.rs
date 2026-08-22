@@ -9,9 +9,7 @@ use tokio::sync::mpsc::Sender;
 use tracing::{info, warn};
 use warpgate_common::TargetRdpOptions;
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{
-    DesktopEvent, DesktopState, Services, TargetAuthorization, WarpgateServerHandle,
-};
+use warpgate_core::{ApprovedTarget, DesktopEvent, DesktopState, Services, WarpgateServerHandle};
 
 use super::BackendBridge;
 use super::protocol::Input as ServerInput;
@@ -87,11 +85,11 @@ pub(super) async fn connect_backend(
     services: &Services,
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     server_in_tx: &Sender<ServerInput>,
-    authorization: TargetAuthorization,
+    approved: ApprovedTarget,
     options: TargetRdpOptions,
     screen: warpgate_desktop_ui::Screen,
 ) -> Result<BackendBridge> {
-    let (user_info, target) = authorization.into_parts();
+    let (user_info, target) = approved.into_parts();
     {
         let handle = server_handle.lock().await;
         handle.set_user_info(user_info).await?;

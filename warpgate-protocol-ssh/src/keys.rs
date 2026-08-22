@@ -177,10 +177,14 @@ pub async fn load_client_keys(
     key_id: Option<Uuid>,
 ) -> Result<Vec<PrivateKey>, WarpgateError> {
     let models = match key_id {
-        Some(id) => if let Some(model) = SshClientKey::Entity::find_by_id(id).one(db).await? { vec![model] } else {
-            warn!("SSH client key {id} chosen for the target does not exist; using defaults");
-            default_client_keys(db).await?
-        },
+        Some(id) => {
+            if let Some(model) = SshClientKey::Entity::find_by_id(id).one(db).await? {
+                vec![model]
+            } else {
+                warn!("SSH client key {id} chosen for the target does not exist; using defaults");
+                default_client_keys(db).await?
+            }
+        }
         None => default_client_keys(db).await?,
     };
     models

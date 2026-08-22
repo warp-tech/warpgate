@@ -153,7 +153,12 @@ impl std::ops::Deref for AuthorizedIdentity {
 /// Proof that a user is authorized for a specific target. Only
 /// [`authorize_for_target`] and [`authorize_ticket`] construct it, so a
 /// session can't be opened for a target without passing authorization.
-#[derive(Clone)]
+///
+/// Authorization is not the last word: it says the user *may* reach the target,
+/// not that this connection *may proceed now*. Turning it into something
+/// dialable goes through the administrator gate, which is why it hands out no
+/// owned parts — see [`ApprovedTarget`].
+#[derive(Clone, Debug)]
 pub struct TargetAuthorization {
     user_info: AuthStateUserInfo,
     target: Target,
@@ -161,6 +166,25 @@ pub struct TargetAuthorization {
 }
 
 impl TargetAuthorization {
+    /// For a caller whose authorization proof is not a value it can hand over —
+    /// the HTTP proxy, where a ticket session is authorized against its target
+    /// row when the session is established and each request only re-resolves
+    /// that row by id.
+    ///
+    /// Restricted to this crate so the set of places that can assert
+    /// authorization without having just checked it stays greppable and small.
+    pub(crate) const fn established_by_session(
+        user_info: AuthStateUserInfo,
+        target: Target,
+        protocol: Protocol,
+    ) -> Self {
+        Self {
+            user_info,
+            target,
+            protocol,
+        }
+    }
+
     pub const fn user_info(&self) -> &AuthStateUserInfo {
         &self.user_info
     }
@@ -175,9 +199,44 @@ impl TargetAuthorization {
     pub const fn protocol(&self) -> Protocol {
         self.protocol
     }
+}
+
+/// Proof that a session has been through the administrator-approval gate for
+/// the target it names, and was let through.
+///
+/// This is the only thing that can be taken apart into the pieces a dial site
+/// needs, and only [`Services::require_admin_approval`] and
+/// [`Services::poll_admin_approval`] construct one — so a target with
+/// `require_approval` cannot be reached by forgetting to ask. A protocol that
+/// skips the gate has nothing to connect with, and says so at compile time
+/// rather than at the next audit.
+///
+/// [`Services::require_admin_approval`]: crate::Services::require_admin_approval
+/// [`Services::poll_admin_approval`]: crate::Services::poll_admin_approval
+#[derive(Debug)]
+pub struct ApprovedTarget(TargetAuthorization);
+
+impl ApprovedTarget {
+    /// Restricted to this crate: the approval gate lives in `crate::approvals`,
+    /// and nothing outside it may mint the proof.
+    pub(crate) const fn new(authorization: TargetAuthorization) -> Self {
+        Self(authorization)
+    }
+
+    pub const fn user_info(&self) -> &AuthStateUserInfo {
+        self.0.user_info()
+    }
+
+    pub const fn target(&self) -> &Target {
+        self.0.target()
+    }
+
+    pub const fn protocol(&self) -> Protocol {
+        self.0.protocol()
+    }
 
     pub fn into_parts(self) -> (AuthStateUserInfo, Target) {
-        (self.user_info, self.target)
+        (self.0.user_info, self.0.target)
     }
 }
 

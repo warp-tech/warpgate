@@ -47,6 +47,7 @@ use warpgate_common::{Protocol, SessionId, WarpgateError};
 use warpgate_db_entities::{Parameters, SessionApprovalRequest};
 
 use crate::auth_state_store::TIMEOUT;
+use crate::config_providers::{ApprovedTarget, TargetAuthorization};
 use crate::services::Services;
 
 /// How an approval should be remembered for later bypass.
@@ -128,6 +129,13 @@ impl ApprovalSubject {
         let mut other_credentials = self.credentials.clone()?;
         other_credentials.sort_unstable();
         other_credentials.dedup();
+        // An empty set is not "matches anything" — it is a session with no
+        // stable credential to pin a grant to, which is the same situation as
+        // having none at all. A policy whose only factor is the approval itself
+        // gets here, and would otherwise key a bypass on origin and name alone.
+        if other_credentials.is_empty() {
+            return None;
+        }
 
         Some(WebApprovalMatchKey {
             kind: self.kind,
@@ -458,19 +466,58 @@ pub async fn record_decision(
     Ok(result.rows_affected > 0)
 }
 
+/// How a gate ended for a connection that was waiting on it.
+///
+/// `Refused` and `Expired` are kept apart because they mean opposite things to
+/// a protocol that can ask again: an administrator said no, versus nobody was
+/// there to say anything. Treating the second as the first locks a session out
+/// of a target for good on the strength of one unattended window.
+#[must_use = "a gate outcome that is dropped is a gate that was never applied"]
+pub enum GateOutcome {
+    /// Let through, with the proof needed to reach the target.
+    Approved(ApprovedTarget),
+    /// An administrator decided against it.
+    Refused,
+    /// The window ran out, the client left, or the request stopped being a live
+    /// question. Nothing was decided, and asking again is legitimate.
+    Expired,
+}
+
+impl GateOutcome {
+    /// The proof, for a caller that treats every non-approval the same way —
+    /// a connection-holding protocol has nothing to retry with.
+    pub fn approved(self) -> Option<ApprovedTarget> {
+        match self {
+            Self::Approved(target) => Some(target),
+            Self::Refused | Self::Expired => None,
+        }
+    }
+}
+
 /// Where a session's administrator gate has got to.
 ///
 /// Request/response protocols answer each request on its own rather than
 /// holding a connection open, so they need to *observe* the gate instead of
 /// awaiting it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AdminApprovalStatus {
-    Approved,
+#[must_use = "a polled gate that is dropped is a gate that was never applied"]
+pub enum PolledGate {
+    Approved(ApprovedTarget),
     Pending,
     Denied,
 }
 
-/// A session's current gate: which target it decided, and what it decided.
+/// What a session's gate has settled on, for the non-blocking path.
+///
+/// Only settled outcomes are recorded: a wait that expired without a decision
+/// leaves no entry, so the next request starts a fresh one rather than
+/// inheriting an unattended window as a refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettledGate {
+    Approved,
+    Denied,
+}
+
+/// A session's current gate: which target it settled, and what it settled on.
 ///
 /// The target is part of the entry because a gate answers a question about one
 /// target, and a session is not confined to one. Switching targets asks a new
@@ -479,8 +526,9 @@ pub enum AdminApprovalStatus {
 /// other gated target it can reach.
 #[derive(Debug, Clone)]
 pub struct SessionGate {
-    pub target_name: String,
-    pub status: AdminApprovalStatus,
+    target_name: String,
+    /// `None` while the wait is still running.
+    settled: Option<SettledGate>,
 }
 
 /// Per-session gate outcomes for the non-blocking path, owned by [`State`] so a
@@ -489,12 +537,11 @@ pub struct SessionGate {
 /// [`State`]: crate::State
 pub type AdminApprovalStatuses = Arc<Mutex<HashMap<SessionId, SessionGate>>>;
 
-/// The session an administrator gate is being asked about.
-pub struct AdminApprovalRequest<'a> {
+/// Everything about the *connection* a gate is being asked about. What it is
+/// asked about — the user and the target — comes from the authorization, so the
+/// two can never disagree.
+pub struct AdminApprovalContext<'a> {
     pub session_id: &'a SessionId,
-    pub user_info: &'a AuthStateUserInfo,
-    pub protocol: Protocol,
-    pub target_name: &'a str,
     pub remote_ip: Option<IpAddr>,
     /// Fingerprints of the credentials that authenticated this session, keying
     /// the remembered-approval bypass. `None` disables remembering for this
@@ -525,33 +572,39 @@ impl Services {
     /// may pass `std::future::pending()`.
     pub async fn require_admin_approval<E, F, Fut>(
         &self,
-        request: AdminApprovalRequest<'_>,
+        authorization: TargetAuthorization,
+        context: AdminApprovalContext<'_>,
         cancel: impl Future<Output = ()> + Send,
         notify_waiting: F,
-    ) -> Result<bool, E>
+    ) -> Result<GateOutcome, E>
     where
         E: From<WarpgateError>,
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<(), E>>,
     {
-        if !self.target_requires_approval(request.target_name).await? {
-            return Ok(true);
+        // Read off the authorization rather than re-resolved: the target it
+        // names is the row the user was authorized against, and a lookup by
+        // name here could answer about a different one — or, if the target had
+        // since been renamed, about none at all, which would read as "no
+        // approval needed".
+        if !authorization.target().require_approval {
+            return Ok(GateOutcome::Approved(ApprovedTarget::new(authorization)));
         }
 
-        let session_id = request.session_id;
+        let session_id = context.session_id;
         let subject = ApprovalSubject {
             kind: ApprovalKind::Admin,
             session_id: *session_id,
-            user_info: request.user_info.clone(),
-            protocol: request.protocol,
-            target_name: request.target_name.to_string(),
-            remote_ip: request.remote_ip,
-            credentials: request.credentials,
+            user_info: authorization.user_info().clone(),
+            protocol: authorization.protocol(),
+            target_name: authorization.target().name.clone(),
+            remote_ip: context.remote_ip,
+            credentials: context.credentials,
         };
 
         if self.admin_approval_is_remembered(&subject).await? {
             subject.emit_bypassed_event();
-            return Ok(true);
+            return Ok(GateOutcome::Approved(ApprovedTarget::new(authorization)));
         }
 
         let mut guard =
@@ -574,9 +627,9 @@ impl Services {
                 RowOutcome::TimedOut => {
                     guard.timed_out();
                     subject.emit_timed_out_event();
-                    return Ok(false);
+                    return Ok(GateOutcome::Expired);
                 }
-                RowOutcome::Ended | RowOutcome::Cancelled => return Ok(false),
+                RowOutcome::Ended | RowOutcome::Cancelled => return Ok(GateOutcome::Expired),
             };
 
         subject.emit_resolved_event(&actor, matches!(decision, ApprovalDecision::Approved(_)));
@@ -584,9 +637,9 @@ impl Services {
         match decision {
             ApprovalDecision::Approved(scope) => {
                 self.remember_admin_approval(&subject, scope).await;
-                Ok(true)
+                Ok(GateOutcome::Approved(ApprovedTarget::new(authorization)))
             }
-            ApprovalDecision::Rejected => Ok(false),
+            ApprovalDecision::Rejected => Ok(GateOutcome::Refused),
         }
     }
 
@@ -602,61 +655,72 @@ impl Services {
     ///
     /// The session's entry is dropped when the session ends, so a status is
     /// only ever reused for the connection it was decided for.
+    ///
+    /// A wait that expires without a decision records nothing, so the next
+    /// request asks again. An unattended window is not an answer, and caching
+    /// it as one would shut a session out of the target until it is rebuilt.
     pub async fn poll_admin_approval(
         &self,
-        request: AdminApprovalRequest<'_>,
-    ) -> Result<AdminApprovalStatus, WarpgateError> {
-        let session_id = *request.session_id;
+        authorization: TargetAuthorization,
+        context: AdminApprovalContext<'_>,
+    ) -> Result<PolledGate, WarpgateError> {
+        let session_id = *context.session_id;
+        let target_name = authorization.target().name.clone();
         let statuses = self.admin_approval_statuses().await;
 
-        // Ahead of the target lookup: these protocols poll per request, so on a
-        // decided gate this answers every request after the first without
+        // Ahead of everything else: these protocols poll per request, so on a
+        // settled gate this answers every request after the first without
         // touching the database at all.
-        if let Some(status) = decided_gate(&statuses, &session_id, request.target_name).await {
-            return Ok(status);
+        if let Some(settled) = settled_gate(&statuses, &session_id, &target_name).await {
+            return Ok(match settled {
+                SettledGate::Approved => PolledGate::Approved(ApprovedTarget::new(authorization)),
+                SettledGate::Denied => PolledGate::Denied,
+            });
         }
 
-        if !self.target_requires_approval(request.target_name).await? {
-            return Ok(AdminApprovalStatus::Approved);
+        if !authorization.target().require_approval {
+            return Ok(PolledGate::Approved(ApprovedTarget::new(authorization)));
         }
 
         // Claim the slot under the same lock the lookup uses, so concurrent
-        // requests for one session start exactly one wait between them. The
-        // gate may have been decided while the target lookup was in flight, so
-        // the check is repeated rather than assumed still false.
+        // requests for one session start exactly one wait between them.
         {
             let mut gates = statuses.lock().await;
             if let Some(gate) = gates.get(&session_id)
-                && gate.target_name == request.target_name
+                && gate.target_name == target_name
             {
-                return Ok(gate.status);
+                return Ok(match gate.settled {
+                    Some(SettledGate::Approved) => {
+                        PolledGate::Approved(ApprovedTarget::new(authorization))
+                    }
+                    Some(SettledGate::Denied) => PolledGate::Denied,
+                    None => PolledGate::Pending,
+                });
             }
             gates.insert(
                 session_id,
                 SessionGate {
-                    target_name: request.target_name.to_string(),
-                    status: AdminApprovalStatus::Pending,
+                    target_name: target_name.clone(),
+                    settled: None,
                 },
             );
         }
 
         let services = self.clone();
-        let user_info = request.user_info.clone();
-        let protocol = request.protocol;
-        let target_name = request.target_name.to_string();
-        let remote_ip = request.remote_ip;
-        let credentials = request.credentials;
+        let context = AdminApprovalContext {
+            session_id: &session_id,
+            remote_ip: context.remote_ip,
+            credentials: context.credentials,
+        };
 
         tokio::spawn(async move {
-            let approved = services
+            let outcome = services
                 .require_admin_approval(
-                    AdminApprovalRequest {
+                    authorization,
+                    AdminApprovalContext {
                         session_id: &session_id,
-                        user_info: &user_info,
-                        protocol,
-                        target_name: &target_name,
-                        remote_ip,
-                        credentials,
+                        remote_ip: context.remote_ip,
+                        credentials: context.credentials,
                     },
                     std::future::pending(),
                     || async { Ok::<_, WarpgateError>(()) },
@@ -664,26 +728,63 @@ impl Services {
                 .await
                 .unwrap_or_else(|error| {
                     error!(%error, "Failed to hold the session for administrator approval");
-                    false
+                    GateOutcome::Refused
                 });
 
-            // Recorded only if this gate is still the session's current one.
-            // A target switch or a session teardown drops the entry, and this
+            let settled = match outcome {
+                GateOutcome::Approved(_) => Some(SettledGate::Approved),
+                GateOutcome::Refused => Some(SettledGate::Denied),
+                // Nothing was decided. Leaving the entry unsettled lets the next
+                // request start a fresh wait instead of inheriting this one.
+                GateOutcome::Expired => None,
+            };
+
+            let mut gates = statuses.lock().await;
+            // Applied only if this gate is still the session's current one. A
+            // target switch or a session teardown drops the entry, and this
             // answer is about a question no longer being asked — reinstating it
             // would resurrect a decision for a dead session, which nothing ever
             // removes again.
-            if let Some(gate) = statuses.lock().await.get_mut(&session_id)
-                && gate.target_name == target_name
+            if gates
+                .get(&session_id)
+                .is_some_and(|gate| gate.target_name == target_name)
             {
-                gate.status = if approved {
-                    AdminApprovalStatus::Approved
-                } else {
-                    AdminApprovalStatus::Denied
-                };
+                match settled {
+                    Some(settled) => {
+                        if let Some(gate) = gates.get_mut(&session_id) {
+                            gate.settled = Some(settled);
+                        }
+                    }
+                    None => {
+                        gates.remove(&session_id);
+                    }
+                }
             }
         });
 
-        Ok(AdminApprovalStatus::Pending)
+        Ok(PolledGate::Pending)
+    }
+
+    /// The gate for the HTTP proxy, which holds no authorization value to pass.
+    ///
+    /// A browser session's authorization is the session itself: a ticket session
+    /// is authorized against its target row when it is established, and each
+    /// request only re-resolves that row by id. Every other protocol passes its
+    /// [`TargetAuthorization`] to [`Self::poll_admin_approval`]; this takes the
+    /// pieces because that path has none to pass, not because gating without one
+    /// is acceptable.
+    pub async fn poll_admin_approval_for_http(
+        &self,
+        target: warpgate_common::Target,
+        user_info: AuthStateUserInfo,
+        protocol: Protocol,
+        context: AdminApprovalContext<'_>,
+    ) -> Result<PolledGate, WarpgateError> {
+        self.poll_admin_approval(
+            TargetAuthorization::established_by_session(user_info, target, protocol),
+            context,
+        )
+        .await
     }
 
     /// Applies a decision already recorded for this session's own approval, if
@@ -859,19 +960,20 @@ impl Services {
     }
 }
 
-/// The gate's decision for `target_name`, if this session has one. `None` when
-/// there is no gate, or when the one there decided another target.
-async fn decided_gate(
+/// What this session's gate settled on for `target_name`. `None` when there is
+/// no gate, when the one there is still running, or when it settled another
+/// target.
+async fn settled_gate(
     statuses: &AdminApprovalStatuses,
     session_id: &SessionId,
     target_name: &str,
-) -> Option<AdminApprovalStatus> {
+) -> Option<SettledGate> {
     statuses
         .lock()
         .await
         .get(session_id)
         .filter(|gate| gate.target_name == target_name)
-        .map(|gate| gate.status)
+        .and_then(|gate| gate.settled)
 }
 
 /// Records a self-approval request, so it is visible to every node.

@@ -740,9 +740,9 @@ impl ReparseForwardedResponse for LoginResponse {
     async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
         match response.status() {
             http::StatusCode::CREATED => Ok(Self::Success),
-            http::StatusCode::UNAUTHORIZED => Ok(Self::Failure(Json(
-                parse_forwarded_body(response).await?,
-            ))),
+            http::StatusCode::UNAUTHORIZED => {
+                Ok(Self::Failure(Json(parse_forwarded_body(response).await?)))
+            }
             _ => Err(forwarded_error(response).await),
         }
     }
@@ -752,9 +752,7 @@ impl ReparseForwardedResponse for AuthStateResponse {
     async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
         match response.status() {
             http::StatusCode::NOT_FOUND => Ok(Self::NotFound),
-            http::StatusCode::OK => Ok(Self::Ok(Json(
-                parse_forwarded_body(response).await?,
-            ))),
+            http::StatusCode::OK => Ok(Self::Ok(Json(parse_forwarded_body(response).await?))),
             _ => Err(forwarded_error(response).await),
         }
     }

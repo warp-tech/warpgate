@@ -26,13 +26,14 @@ use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, SessionId, TargetOptions, WarpgateError};
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::approvals::AdminApprovalRequest;
+use warpgate_core::approvals::{AdminApprovalContext, GateOutcome};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
 use warpgate_core::{
-    AuthorizedIdentity, ConfigProvider, PendingTicket, Services, TargetAuthorization,
-    WarpgateServerHandle, authorize_for_target, authorize_for_target_by_name, authorize_ticket,
+    ApprovedTarget, AuthorizedIdentity, ConfigProvider, PendingTicket, Services,
+    TargetAuthorization, WarpgateServerHandle, authorize_for_target, authorize_for_target_by_name,
+    authorize_ticket,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
@@ -80,8 +81,12 @@ pub enum Event {
     /// passing it straight through), so the user can be told why they're
     /// waiting. Only the session can write to the terminal.
     AdminApprovalPending,
+    /// Carries the gate's proof rather than a flag: the session can only reach
+    /// the target by being handed one, so a resolution that let it through and
+    /// one that didn't are different shapes, not the same shape with a
+    /// different value.
     AdminApprovalResolved {
-        approved: bool,
+        approved: Option<ApprovedTarget>,
     },
 }
 
@@ -146,9 +151,6 @@ pub struct ServerSession {
     /// queue, but a hold for administrator approval sits off to the side of
     /// that queue — this reaches it directly.
     disconnect_token: CancellationToken,
-    /// Set once this session is past the administrator-approval gate, so the
-    /// resolve-then-connect path doesn't re-enter it.
-    admin_approval_granted: bool,
     /// Holds the ticket that authorised this session while an administrator
     /// could still refuse it. Spent whichever way the session ends, unless the
     /// refusal comes.
@@ -259,7 +261,6 @@ impl ServerSession {
             channel_writer: ChannelWriter::new(),
             auth_state: None,
             disconnect_token: CancellationToken::new(),
-            admin_approval_granted: false,
             pending_ticket: None,
             keyboard_interactive_state: None,
             cached_successful_ticket_auth: None,
@@ -595,16 +596,12 @@ impl ServerSession {
         if let Some(authorization) = target
             && self.rc_state == RCState::NotInitialized
         {
-            if self.admin_approval_granted {
-                self.connect_remote(&authorization).await?;
-            } else {
-                // Claim the slot: the gate runs off to the side, and leaving the
-                // state at `NotInitialized` across it lets a second caller
-                // re-enter and open a duplicate connection. Resumes in the
-                // `Event::AdminApprovalResolved` handler.
-                self.rc_state = RCState::Connecting;
-                self.spawn_admin_approval_gate(authorization);
-            }
+            // Claim the slot: the gate runs off to the side, and leaving the
+            // state at `NotInitialized` across it lets a second caller re-enter
+            // and open a duplicate connection. Resumes in the
+            // `Event::AdminApprovalResolved` handler.
+            self.rc_state = RCState::Connecting;
+            self.spawn_admin_approval_gate(authorization);
         }
 
         Ok(())
@@ -633,8 +630,6 @@ impl ServerSession {
         let event_sender = self.event_sender.clone();
         let notify_sender = self.event_sender.clone();
         let auth_state = self.auth_state.as_ref().map(|(state, _)| state.clone());
-        let user_info = authorization.user_info().clone();
-        let target_name = authorization.target().name.clone();
 
         tokio::spawn(async move {
             // Ticket-authorised sessions carry no auth state; without one there
@@ -645,11 +640,9 @@ impl ServerSession {
             };
             let approved = services
                 .require_admin_approval(
-                    AdminApprovalRequest {
+                    authorization,
+                    AdminApprovalContext {
                         session_id: &session_id,
-                        user_info: &user_info,
-                        protocol: crate::PROTOCOL_NAME,
-                        target_name: &target_name,
                         remote_ip: Some(remote_ip),
                         credentials,
                     },
@@ -660,28 +653,31 @@ impl ServerSession {
                     },
                 )
                 .await
-                .unwrap_or_else(|error| {
-                    error!(%error, "Failed to hold the session for administrator approval");
-                    false
-                });
+                .map_or_else(
+                    |error| {
+                        error!(%error, "Failed to hold the session for administrator approval");
+                        None
+                    },
+                    GateOutcome::approved,
+                );
             let _ = event_sender
                 .send_once(Event::AdminApprovalResolved { approved })
                 .await;
         });
     }
 
-    /// Dialling takes the authorization proof rather than a bare target, so the host we
-    /// connect to is necessarily the one that was authorized, for the user it was
-    /// authorized for.
-    async fn connect_remote(&mut self, authorization: &TargetAuthorization) -> Result<()> {
+    /// Dialling takes the gate's proof rather than a bare target, so the host we connect to
+    /// is necessarily the one that was authorized, for the user it was authorized for, and
+    /// necessarily one an administrator let this connection through to.
+    async fn connect_remote(&mut self, approved: &ApprovedTarget) -> Result<()> {
         // Past every gate, so nothing can refund the ticket any more; dropping
         // the guard spends it now rather than at teardown.
         self.pending_ticket = None;
 
         let ssh_chain = resolve_ssh_chain(
             &self.services,
-            authorization.target().id,
-            Some(&authorization.user_info().username),
+            approved.target().id,
+            Some(&approved.user_info().username),
         )
         .await?;
 
@@ -847,7 +843,7 @@ impl ServerSession {
                     .await?;
                 }
                 Event::AdminApprovalResolved { approved } => {
-                    if !approved {
+                    let Some(approved) = approved else {
                         // A denied session never reached the target, so its
                         // ticket keeps its use.
                         if let Some(ticket) = &mut self.pending_ticket {
@@ -859,11 +855,11 @@ impl ServerSession {
                         self.request_disconnect();
                         self.disconnect_server().await;
                         return Ok(());
-                    }
-                    self.admin_approval_granted = true;
-                    // `maybe_connect_remote` claimed the slot before the hold began.
+                    };
+                    // `maybe_connect_remote` claimed the slot before the hold
+                    // began; `connect_remote` reclaims it as it dials.
                     self.rc_state = RCState::NotInitialized;
-                    self.maybe_connect_remote().await?;
+                    self.connect_remote(&approved).await?;
                 }
                 Event::ServerChannelOpenResult(id, result) => {
                     match result {
@@ -2460,11 +2456,7 @@ impl ServerSession {
                         // the targets that have a gate to refuse it — otherwise
                         // the guard drops here and spends it now.
                         let ticket = PendingTicket::new(self.services.db.clone(), Some(ticket.id));
-                        if self
-                            .services
-                            .target_requires_approval(&authorization.target().name)
-                            .await?
-                        {
+                        if authorization.target().require_approval {
                             self.pending_ticket = Some(ticket);
                         }
                         let user_info = authorization.user_info().clone();

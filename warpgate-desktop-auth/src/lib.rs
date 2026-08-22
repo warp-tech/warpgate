@@ -26,13 +26,13 @@ use warpgate_common::auth::{
 };
 use warpgate_common::{Protocol, Secret, SessionId, Target, WarpgateError};
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::approvals::AdminApprovalRequest;
+use warpgate_core::approvals::{AdminApprovalContext, GateOutcome};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    AuthorizedIdentity, PendingTicket, Services, TargetAuthorization, WarpgateServerHandle,
-    authorize_for_target_by_name, authorize_ticket,
+    ApprovedTarget, AuthorizedIdentity, PendingTicket, Services, TargetAuthorization,
+    WarpgateServerHandle, authorize_for_target_by_name, authorize_ticket,
 };
 use warpgate_desktop_ui::AuthPrompt;
 
@@ -256,19 +256,21 @@ pub async fn finalize_user_auth<P: DesktopProtocol>(
 }
 
 /// Hold an authenticated desktop session at the administrator-approval gate, and spend the
-/// ticket that authorised it once it is through. Returns whether the session may proceed.
+/// ticket that authorised it once it is through. `Ok(None)` means the session may not
+/// proceed.
 ///
-/// Call this after authentication and before dialing the target. The gate itself decides
-/// whether this session needs holding at all (the target's setting, a remembered approval),
-/// so it is safe — and required — on every authenticated path. Both desktop protocols hold
-/// their viewer connection inline while it waits.
+/// Call this after authentication and before dialing the target — it takes the
+/// authorization and hands back the proof the dial sites need, so there is no way to reach
+/// a target around it. The gate itself decides whether this session needs holding at all
+/// (the target's setting, a remembered approval). Both desktop protocols hold their viewer
+/// connection inline while it waits.
 pub async fn approve_session(
     services: &Services,
     session_id: &SessionId,
-    authorization: &TargetAuthorization,
+    authorization: TargetAuthorization,
     pending_ticket: Option<Uuid>,
     remote_ip: Option<IpAddr>,
-) -> Result<bool> {
+) -> Result<Option<ApprovedTarget>> {
     // The auth state is keyed by the session id. A ticket-authorised session has none, and
     // so no credential fingerprints to key a remembered approval on.
     let state = services.auth_state_store.lock().await.get(session_id);
@@ -282,13 +284,11 @@ pub async fn approve_session(
     // statement below.
     let mut ticket = PendingTicket::new(services.db.clone(), pending_ticket);
 
-    let approved = services
+    let outcome = services
         .require_admin_approval(
-            AdminApprovalRequest {
+            authorization,
+            AdminApprovalContext {
                 session_id,
-                user_info: authorization.user_info(),
-                protocol: authorization.protocol(),
-                target_name: &authorization.target().name,
                 remote_ip,
                 credentials,
             },
@@ -301,11 +301,11 @@ pub async fn approve_session(
 
     // A refusal — whether the administrator's or a gate that failed to reach
     // one — is not the user's doing, so the ticket keeps its use.
-    if !matches!(approved, Ok(true)) {
+    if !matches!(outcome, Ok(GateOutcome::Approved(_))) {
         ticket.disarm();
     }
 
-    approved.map_err(Into::into)
+    Ok(outcome?.approved())
 }
 
 /// Build the browser web-approval URL for the current auth state, or `None` if the external

@@ -36,7 +36,9 @@ fn decode_logo() -> (Vec<u8>, u32) {
         png::ColorType::Rgb => buf,
         // The logo is actually fully opaque
         png::ColorType::Rgba => buf
-            .as_chunks::<4>().0.iter()
+            .as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|px| px.iter().copied().take(3))
             .collect(),
         t => panic!("logo has unexpected color type: {t:?}"),

@@ -13,12 +13,12 @@ use url::Url;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
 use warpgate_common::{Protocol, Secret, SessionId, WarpgateError};
 
-use crate::approvals::AdminApprovalRequest;
+use crate::approvals::{AdminApprovalContext, GateOutcome};
 use crate::auth::submit_credential;
 use crate::login_protection::FailedAttemptInfo;
 use crate::{
-    AuthorizedIdentity, PendingTicket, Services, TargetAuthorization, authorize_for_target_by_name,
-    authorize_ticket, wait_for_auth_completion,
+    ApprovedTarget, AuthorizedIdentity, PendingTicket, Services, TargetAuthorization,
+    authorize_for_target_by_name, authorize_ticket, wait_for_auth_completion,
 };
 
 /// Proof that the success message has not been sent yet. Exactly one is minted
@@ -82,7 +82,6 @@ pub trait DbAuthTransport {
 }
 
 /// Holds an otherwise-complete login on the administrator-approval gate.
-/// `Ok(false)` means the connection was refused and the caller must deny it.
 ///
 /// The wait isn't cancelled when the client goes away — neither protocol can
 /// cheaply observe a disconnect — which only delays cleanup, since session
@@ -90,28 +89,33 @@ pub trait DbAuthTransport {
 async fn hold_for_admin_approval<T: DbAuthTransport>(
     transport: &mut T,
     services: &Services,
-    request: AdminApprovalRequest<'_>,
+    authorization: TargetAuthorization,
+    context: AdminApprovalContext<'_>,
     auth_ok: &mut Option<AuthOkPermit>,
-) -> Result<bool, T::Error> {
+) -> Result<GateOutcome, T::Error> {
     services
-        .require_admin_approval(request, std::future::pending(), || async move {
-            transport.notify_awaiting_admin_approval(auth_ok).await
-        })
+        .require_admin_approval(
+            authorization,
+            context,
+            std::future::pending(),
+            || async move { transport.notify_awaiting_admin_approval(auth_ok).await },
+        )
         .await
 }
 
 /// Authorizes a database-protocol login end to end.
 ///
 /// `Ok(None)` means the login was denied and the client has already been told;
-/// the caller only has to stop. A returned [`TargetAuthorization`] is proof the
-/// user may open the target it names.
+/// the caller only has to stop. A returned [`ApprovedTarget`] is proof the user
+/// may open the target it names *and* that any administrator gate on it let this
+/// connection through.
 pub async fn run_db_authorization<T: DbAuthTransport>(
     transport: &mut T,
     services: &Services,
     session_id: SessionId,
     selector: AuthSelector,
     remote_ip: IpAddr,
-) -> Result<Option<TargetAuthorization>, T::Error> {
+) -> Result<Option<ApprovedTarget>, T::Error> {
     // A lookup error must fail closed: propagate it rather than letting a
     // possibly-blocked IP through.
     if let Some(block_info) = services
@@ -172,14 +176,12 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
             // approval.
             let mut ticket = PendingTicket::new(services.db.clone(), Some(ticket.id));
 
-            let approved = hold_for_admin_approval(
+            let outcome = hold_for_admin_approval(
                 transport,
                 services,
-                AdminApprovalRequest {
+                authorization,
+                AdminApprovalContext {
                     session_id: &session_id,
-                    user_info: authorization.user_info(),
-                    protocol: T::PROTOCOL,
-                    target_name: &authorization.target().name,
                     remote_ip: Some(remote_ip),
                     credentials: None,
                 },
@@ -189,20 +191,20 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
 
             // A refusal — the administrator's, or a gate that failed to reach
             // one — is not the user's doing, so the ticket keeps its use.
-            if !matches!(approved, Ok(true)) {
+            if !matches!(outcome, Ok(GateOutcome::Approved(_))) {
                 ticket.disarm();
             }
 
-            if !approved? {
+            let Some(approved) = outcome?.approved() else {
                 warn!("Session was not approved by an administrator");
                 transport.send_denied().await?;
                 return Ok(None);
-            }
+            };
 
             if let Some(permit) = auth_ok.take() {
                 transport.send_auth_ok(permit).await?;
             }
-            Ok(Some(authorization))
+            Ok(Some(approved))
         }
     }
 }
@@ -215,7 +217,7 @@ async fn authorize_user<T: DbAuthTransport>(
     target_name: &str,
     remote_ip: IpAddr,
     auth_ok: AuthOkPermit,
-) -> Result<Option<TargetAuthorization>, T::Error> {
+) -> Result<Option<ApprovedTarget>, T::Error> {
     // As with the IP check above, a lookup error fails closed.
     if services
         .login_protection
@@ -274,25 +276,23 @@ async fn authorize_user<T: DbAuthTransport>(
                 };
 
                 let credentials = state_arc.lock().await.credential_fingerprints();
-                if !hold_for_admin_approval(
+                let Some(approved) = hold_for_admin_approval(
                     transport,
                     services,
-                    AdminApprovalRequest {
+                    authorization,
+                    AdminApprovalContext {
                         session_id: &session_id,
-                        user_info: &user_info,
-                        protocol: T::PROTOCOL,
-                        target_name,
                         remote_ip: Some(remote_ip),
                         credentials: Some(credentials),
                     },
                     &mut auth_ok,
                 )
                 .await?
-                {
+                .approved() else {
                     warn!("Session was not approved by an administrator");
                     transport.send_denied().await?;
                     return Ok(None);
-                }
+                };
 
                 if let Some(permit) = auth_ok.take() {
                     transport.send_auth_ok(permit).await?;
@@ -303,7 +303,7 @@ async fn authorize_user<T: DbAuthTransport>(
                     .clear_failed_attempts(&remote_ip, &user_info.username)
                     .await;
 
-                return Ok(Some(authorization));
+                return Ok(Some(approved));
             }
 
             AuthResult::Need(kinds) if kinds.contains(&CredentialKind::Password) => {

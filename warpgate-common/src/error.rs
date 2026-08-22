@@ -76,6 +76,8 @@ pub enum WarpgateError {
     InvalidNetworkAddress(String),
     #[error("session limit reached")]
     SessionLimitReached,
+    #[error("an administrator did not approve this session")]
+    SessionNotApproved,
     #[error("the node ID {0} is gone from the cluster")]
     NodeGone(Uuid),
     #[error(transparent)]
@@ -92,6 +94,7 @@ impl ResponseError for WarpgateError {
             Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
             Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
             Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
+            Self::SessionNotApproved => poem::http::StatusCode::FORBIDDEN,
             _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

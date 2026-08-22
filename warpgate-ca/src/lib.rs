@@ -145,8 +145,7 @@ impl ClusterTlsIdentity {
         // Backdated in case of clock skew
         // long-lived cause it's never rotated until the process dies
         params.not_before = (SystemTime::now() - Duration::from_mins(5)).into();
-        params.not_after =
-            (SystemTime::now() + Duration::from_hours(87600)).into();
+        params.not_after = (SystemTime::now() + Duration::from_hours(87600)).into();
 
         let certificate = params.signed_by(&key_pair, &issuer)?;
         Ok(Self {

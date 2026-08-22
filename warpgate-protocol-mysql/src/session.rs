@@ -15,7 +15,7 @@ use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Protocol, Secret, TargetMySqlOptions, TargetOptions};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    AuthOkPermit, DbAuthTransport, Services, TargetAuthorization, WarpgateServerHandle,
+    ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, WarpgateServerHandle,
     run_db_authorization,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
@@ -240,21 +240,21 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         self.handshake_password = Some(password);
 
         let services = self.services.clone();
-        let Some(authorization) =
+        let Some(approved) =
             run_db_authorization(&mut self, &services, session_id, selector, remote_ip).await?
         else {
             return Ok(());
         };
 
-        self.run_authorized(handshake, authorization).await
+        self.run_authorized(handshake, approved).await
     }
 
     async fn run_authorized(
         mut self,
         handshake: HandshakeResponse,
-        authorization: TargetAuthorization,
+        approved: ApprovedTarget,
     ) -> Result<(), MySqlError> {
-        let (user_info, target) = authorization.into_parts();
+        let (user_info, target) = approved.into_parts();
 
         let TargetOptions::MySql(ref mysql_options) = target.options else {
             warn!("Selected target is not a MySQL target");

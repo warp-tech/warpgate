@@ -287,18 +287,18 @@ async fn negotiate_and_authorize(
         warpgate_desktop_auth::approve_session(
             services,
             &session_id,
-            &authorization,
+            authorization,
             pending_ticket,
             Some(remote_address.ip()),
         ),
     )
     .await??;
-    if !approved {
+    let Some(approved) = approved else {
         warn!("Session was not approved by an administrator");
         return Ok(None);
-    }
+    };
 
-    let (user_info, target) = authorization.into_parts();
+    let (user_info, target) = approved.into_parts();
 
     {
         let handle = server_handle.lock().await;

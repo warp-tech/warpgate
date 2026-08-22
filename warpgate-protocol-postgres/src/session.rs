@@ -22,7 +22,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    AuthOkPermit, DbAuthTransport, Services, TargetAuthorization, WarpgateServerHandle,
+    ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, WarpgateServerHandle,
     run_db_authorization,
 };
 use warpgate_tls::ServerTlsStream;
@@ -284,19 +284,19 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         let session_id = self.server_handle.lock().await.id();
 
         let services = self.services.clone();
-        let Some(authorization) =
+        let Some(approved) =
             run_db_authorization(&mut self, &services, session_id, selector, remote_ip).await?
         else {
             return Ok(());
         };
 
-        self.run_authorized(startup, authorization).await
+        self.run_authorized(startup, approved).await
     }
 
     async fn run_authorized(
         mut self,
         startup: pgwire::messages::startup::Startup,
-        authorization: TargetAuthorization,
+        approved: ApprovedTarget,
     ) -> Result<(), PostgresError> {
         if let Some(banner) = warpgate_db_entities::Parameters::Entity::get(&self.services.db)
             .await
@@ -314,7 +314,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
         self.stream.flush().await?;
 
-        let (user_info, target) = authorization.into_parts();
+        let (user_info, target) = approved.into_parts();
 
         let TargetOptions::Postgres(ref postgres_options) = target.options else {
             warn!("Selected target is not a PostgreSQL target");

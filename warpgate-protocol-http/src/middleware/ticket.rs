@@ -85,11 +85,10 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                     }
                 }
             {
-                let (user_info, target) = authorization.into_parts();
                 session.set_auth(SessionAuthorization::Ticket {
-                    user_id: user_info.id,
-                    username: user_info.username,
-                    target_id: target.id,
+                    user_id: authorization.user_info().id,
+                    username: authorization.user_info().username.clone(),
+                    target_id: authorization.target().id,
                 });
             }
         }

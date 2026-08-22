@@ -8,6 +8,7 @@ use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::{TargetOptions, WarpgateError};
+use warpgate_core::approvals::AdminApprovalContext;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{DesktopEvent, Services, SessionStateInit, State, TargetAuthorization};
 use warpgate_db_entities::Target::TargetKind;
@@ -52,10 +53,7 @@ impl WebDesktopClientManager {
             return Err(WarpgateError::SessionLimitReached);
         }
 
-        let (user_info, target) = authorization.into_parts();
-        let username = user_info.username.clone();
-
-        let protocol_name = match &target.options {
+        let protocol_name = match &authorization.target().options {
             TargetOptions::Vnc(_) => warpgate_protocol_vnc::PROTOCOL_NAME,
             TargetOptions::Rdp(_) => warpgate_protocol_rdp::PROTOCOL_NAME,
             _ => return Err(WarpgateError::InvalidTarget),
@@ -75,6 +73,35 @@ impl WebDesktopClientManager {
         .await
         .context("registering web-desktop session")?;
 
+        let session_id = server_handle.lock().await.id();
+
+        // The in-browser client reaches the same targets as every other
+        // protocol, so it is held on the same terms. Gated after registration so
+        // the request is attributable to a session an administrator can see, and
+        // before anything is dialed. A browser session carries no credential
+        // fingerprints of its own, so it neither contributes nor consumes a
+        // remembered approval.
+        let Some(approved) = services
+            .require_admin_approval(
+                authorization,
+                AdminApprovalContext {
+                    session_id: &session_id,
+                    remote_ip: remote_address.map(|address| address.ip()),
+                    credentials: None,
+                },
+                std::future::pending(),
+                || async { Ok::<_, WarpgateError>(()) },
+            )
+            .await?
+            .approved()
+        else {
+            warn!("Session was not approved by an administrator");
+            return Err(WarpgateError::SessionNotApproved);
+        };
+
+        let (user_info, target) = approved.into_parts();
+        let username = user_info.username.clone();
+
         {
             let server_handle = server_handle.lock().await;
             server_handle
@@ -87,7 +114,6 @@ impl WebDesktopClientManager {
                 .context("setting target on server handle")?;
         }
 
-        let session_id = server_handle.lock().await.id();
         let target_kind = TargetKind::from(&target.options);
 
         // Each backend exposes the same (event_rx, input_tx, abort_tx) handle shape

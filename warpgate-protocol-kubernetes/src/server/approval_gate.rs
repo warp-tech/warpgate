@@ -7,51 +7,48 @@
 
 use poem::http::StatusCode;
 use poem::{IntoResponse, Request, Response};
-use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{SessionId, Target, WarpgateError};
-use warpgate_core::Services;
-use warpgate_core::approvals::{AdminApprovalRequest, AdminApprovalStatus};
+use warpgate_common::{SessionId, WarpgateError};
+use warpgate_core::approvals::{AdminApprovalContext, PolledGate};
+use warpgate_core::{ApprovedTarget, Services, TargetAuthorization};
 
-/// Whether the request may proceed to the cluster. `Some(response)` is what to
-/// send back instead.
+/// The proof needed to reach the cluster, or the response to send back instead.
 pub async fn check_admin_approval(
     req: &Request,
     services: &Services,
     session_id: SessionId,
-    user_info: &AuthStateUserInfo,
-    target: &Target,
-) -> Result<Option<Response>, WarpgateError> {
-    let status = services
-        .poll_admin_approval(AdminApprovalRequest {
-            session_id: &session_id,
-            user_info,
-            protocol: crate::PROTOCOL_NAME,
-            target_name: &target.name,
-            remote_ip: req.remote_addr().as_socket_addr().map(|a| a.ip()),
-            // Client certificates and tokens are re-presented per request rather
-            // than settled into an auth state, so a Kubernetes session neither
-            // contributes nor consumes a remembered approval.
-            credentials: None,
-        })
+    authorization: TargetAuthorization,
+) -> Result<Result<ApprovedTarget, Response>, WarpgateError> {
+    let target_name = authorization.target().name.clone();
+    let gate = services
+        .poll_admin_approval(
+            authorization,
+            AdminApprovalContext {
+                session_id: &session_id,
+                remote_ip: req.remote_addr().as_socket_addr().map(|a| a.ip()),
+                // Client certificates and tokens are re-presented per request rather
+                // than settled into an auth state, so a Kubernetes session neither
+                // contributes nor consumes a remembered approval.
+                credentials: None,
+            },
+        )
         .await?;
 
-    Ok(match status {
-        AdminApprovalStatus::Approved => None,
+    Ok(match gate {
+        PolledGate::Approved(approved) => Ok(approved),
         // 503 rather than 403: the request hasn't been refused, it hasn't been
         // decided, and retrying is the right thing for the client to do.
-        AdminApprovalStatus::Pending => Some(status_response(
+        PolledGate::Pending => Err(status_response(
             StatusCode::SERVICE_UNAVAILABLE,
             &format!(
-                "Warpgate: session for target \"{}\" is waiting for administrator approval; \
-                 retry shortly",
-                target.name
+                "Warpgate: session for target \"{target_name}\" is waiting for administrator \
+                 approval; retry shortly"
             ),
         )),
-        AdminApprovalStatus::Denied => Some(status_response(
+        PolledGate::Denied => Err(status_response(
             StatusCode::FORBIDDEN,
             &format!(
-                "Warpgate: an administrator did not approve this session for target \"{}\"",
-                target.name
+                "Warpgate: an administrator did not approve this session for target \
+                 \"{target_name}\""
             ),
         )),
     })

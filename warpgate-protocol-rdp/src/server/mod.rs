@@ -507,25 +507,25 @@ async fn dial_if_pending(
         && let Some((authorization, options, pending_ticket)) = pending.take()
     {
         let session_id = server_handle.lock().await.id();
-        if !approve_session(
+        let Some(approved) = approve_session(
             services,
             &session_id,
-            &authorization,
+            authorization,
             pending_ticket,
             Some(remote_address.ip()),
         )
         .await?
-        {
+        else {
             warn!("Session was not approved by an administrator");
             let _ = server_in_tx.send(ServerInput::Shutdown).await;
             return Ok(false);
-        }
+        };
         *backend = Some(
             connect_backend(
                 services,
                 server_handle,
                 server_in_tx,
-                authorization,
+                approved,
                 options,
                 screen,
             )

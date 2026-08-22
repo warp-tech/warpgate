@@ -161,7 +161,7 @@ async fn get_target_for_request(
         if let Some(target) = target
             && let Some(authorization) =
                 authorize_for_target(config_provider, &identity, target).await?
-            && let Some(target_and_options) = as_http_target(authorization.into_parts().1)
+            && let Some(target_and_options) = as_http_target(authorization.target().clone())
         {
             return Ok(Some(target_and_options));
         }
