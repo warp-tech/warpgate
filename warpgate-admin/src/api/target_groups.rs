@@ -11,6 +11,7 @@ use warpgate_db_entities::TargetGroup;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 
 use super::AdminContext;
+use crate::api::common::is_unique_violation;
 
 #[derive(Object)]
 struct TargetGroupDataRequest {
@@ -76,16 +77,6 @@ impl ListApi {
         }
 
         let db = &admin.services().db;
-        let existing = TargetGroup::Entity::find()
-            .filter(TargetGroup::Column::Name.eq(body.name.clone()))
-            .one(db)
-            .await?;
-        if existing.is_some() {
-            return Ok(CreateTargetGroupResponse::Conflict(Json(
-                "Name already exists".into(),
-            )));
-        }
-
         let values = TargetGroup::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
@@ -93,7 +84,15 @@ impl ListApi {
             color: Set(body.color.clone()),
         };
 
-        let group = values.insert(db).await?;
+        let group = match values.insert(db).await {
+            Ok(group) => group,
+            Err(err) if is_unique_violation(&err) => {
+                return Ok(CreateTargetGroupResponse::Conflict(Json(
+                    "Name already exists".into(),
+                )));
+            }
+            Err(err) => return Err(WarpgateError::from(err)),
+        };
 
         Ok(CreateTargetGroupResponse::Created(Json(group)))
     }
@@ -113,6 +112,8 @@ enum UpdateTargetGroupResponse {
     Ok(Json<TargetGroup::Model>),
     #[oai(status = 400)]
     BadRequest,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -173,22 +174,20 @@ impl DetailApi {
             return Ok(UpdateTargetGroupResponse::NotFound);
         };
 
-        // Check if name is already taken by another group
-        let existing = TargetGroup::Entity::find()
-            .filter(TargetGroup::Column::Name.eq(body.name.clone()))
-            .filter(TargetGroup::Column::Id.ne(id.0))
-            .one(db)
-            .await?;
-        if existing.is_some() {
-            return Ok(UpdateTargetGroupResponse::BadRequest);
-        }
-
         let mut group: TargetGroup::ActiveModel = group.into();
         group.name = Set(body.name.clone());
         group.description = Set(body.description.clone().unwrap_or_default());
         group.color = Set(body.color.clone());
 
-        let group = group.update(db).await?;
+        let group = match group.update(db).await {
+            Ok(group) => group,
+            Err(err) if is_unique_violation(&err) => {
+                return Ok(UpdateTargetGroupResponse::Conflict(Json(
+                    "Name already exists".into(),
+                )));
+            }
+            Err(err) => return Err(WarpgateError::from(err)),
+        };
         Ok(UpdateTargetGroupResponse::Ok(Json(group)))
     }
 
