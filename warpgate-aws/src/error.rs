@@ -19,8 +19,13 @@ pub enum AwsError {
     ResourceNotFound(AwsResourceType, String),
     #[error("no AWS credentials available")]
     NoCredentials,
+    #[error(
+        "static AWS credentials (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY without a session token) are disallowed; Vault authentication requires a temporary workload identity (instance profile, pod identity, or IRSA)"
+    )]
+    StaticCredentialsDisallowed,
     #[error("credentials: {0}")]
     Credentials(#[from] CredentialsError),
+
     #[error("signing parameters: {0}")]
     SigningParams(#[from] BuildError),
     #[error("signing: {0}")]
@@ -34,5 +39,18 @@ pub enum AwsError {
 impl AwsError {
     pub fn sdk_error<E: Error + Send + Sync + 'static>(err: E) -> Self {
         Self::Other(Box::new(err))
+    }
+
+    pub fn client_message(&self) -> &'static str {
+        match self {
+            AwsError::NoCredentials
+            | AwsError::StaticCredentialsDisallowed
+            | AwsError::Credentials(_) => "AWS credential provider error",
+            AwsError::SigningParams(_) | AwsError::Signing(_) | AwsError::Http(_) => {
+                "AWS signing request failed"
+            }
+            AwsError::RegionUnknown(_) | AwsError::ResourceNotFound(_, _) => "AWS resource error",
+            AwsError::Other(_) => "AWS integration error",
+        }
     }
 }

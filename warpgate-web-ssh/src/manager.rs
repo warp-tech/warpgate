@@ -13,7 +13,27 @@ use warpgate_core::{Services, SessionStateInit, State, TargetAuthorization};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient, resolve_ssh_chain};
+use warpgate_protocol_ssh::{
+    ConnectionError, RCCommand, RCEvent, RCState, RemoteClient, client_error_message,
+    resolve_ssh_chain,
+};
+
+/// What a browser session is told when the connection fails.
+///
+/// A named function rather than a method call inside the event loop, because
+/// the guard here is the *choice* — `client_message()` and not `Display`. The
+/// raw form carries the issuer's own words, mounts, policies and hostnames,
+/// which the SSH path has kept from users since it was first reported; this
+/// entry point renders the same errors and was missed.
+///
+/// A call inside an async loop cannot be reached by a test without driving a
+/// browser session, and the integration test that was credited with covering
+/// this one turned out to exercise the SSH path instead — measured, not
+/// suspected. Named here, the boundary has somewhere a test can stand.
+#[must_use]
+pub fn shown_to_the_browser(error: &ConnectionError) -> String {
+    error.client_message()
+}
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
 use crate::protocol::ServerMessage;
@@ -118,11 +138,7 @@ impl WebSshClientManager {
 
         self.insert(session.clone()).await;
 
-        let ssh_chain = resolve_ssh_chain(services, target.id, Some(&username))
-            .await?
-            .into_iter()
-            .map(|x| x.ssh_options)
-            .collect::<Vec<_>>();
+        let ssh_chain = resolve_ssh_chain(services, target.id, Some(&username)).await?;
         rc_handles
             .command_tx
             .send((RCCommand::Connect(ssh_chain), None))
@@ -185,16 +201,22 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::Error(e) => {
+                            // Same boundary as the SSH path, for the same
+                            // reason. Disclosure only here rather than terminal
+                            // injection — this lands in a Svelte alert, which
+                            // escapes — but the text is the one `client_message`
+                            // exists to keep away from a user.
+                            tracing::error!(error=%e, "Client session error");
                             session
                                 .push(ServerMessage::Error {
-                                    message: e.to_string(),
+                                    message: client_error_message(&e).to_owned(),
                                 })
                                 .await;
                         }
                         RCEvent::ConnectionError(e) => {
                             session
                                 .push(ServerMessage::Error {
-                                    message: e.to_string(),
+                                    message: shown_to_the_browser(&e),
                                 })
                                 .await;
                             session
@@ -256,4 +278,30 @@ fn spawn_event_loop(
             .instrument(span),
         )
         .ok();
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_common::WarpgateError;
+
+    use super::{ConnectionError, shown_to_the_browser};
+
+    /// The browser is told a fixed phrase, never the error's own words.
+    ///
+    /// `Warpgate` is `#[error(transparent)]`, so its `Display` is whatever the
+    /// inner error says — a database failure renders as `database error: …`
+    /// carrying SQL text. That variant is the one this boundary exists for, and
+    /// asserting on it specifically is what makes this test fail if the call
+    /// reverts to `to_string()`.
+    #[test]
+    fn a_browser_never_sees_the_error_s_own_words() {
+        let leaky = ConnectionError::Warpgate(WarpgateError::Other(
+            "database error: SELECT secret FROM credentials".into(),
+        ));
+
+        let shown = shown_to_the_browser(&leaky);
+        assert!(!shown.contains("SELECT"), "the raw error reached the browser: {shown}");
+        assert!(!shown.contains("database error"), "the raw error reached the browser: {shown}");
+        assert_eq!(shown, leaky.client_message());
+    }
 }

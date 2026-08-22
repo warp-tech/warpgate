@@ -36,3 +36,6 @@ node_modules
 .github
 *.md
 .env
+
+# rustc crash dumps land in the working directory and are not ours to keep
+rustc-ice-*.txt

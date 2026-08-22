@@ -9,8 +9,8 @@ use sea_orm::{
 use uuid::Uuid;
 use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::{
-    AdminPermission, Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions,
-    WarpgateError, map_target_secrets,
+    AdminPermission, Role as RoleConfig, SSHTargetAuth, Target as TargetConfig, TargetOptions,
+    TargetSSHOptions, WarpgateError, map_target_secrets,
 };
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
@@ -63,6 +63,24 @@ enum CreateTargetResponse {
 
     #[oai(status = 400)]
     BadRequest(Json<String>),
+}
+
+/// Whether a target's options name a Vault role the signing path could use.
+///
+/// Checked when the target is saved, not only when a session tries to use it.
+/// The connect path validates the role and refuses — correctly, and hours later,
+/// with an error naming the session rather than the form that accepted the typo.
+fn vault_role_is_usable(options: &TargetOptions) -> bool {
+    let TargetOptions::Ssh(ssh) = options else {
+        return true;
+    };
+    let SSHTargetAuth::Certificate(certificate) = &ssh.auth else {
+        return true;
+    };
+    certificate
+        .role
+        .as_ref()
+        .is_none_or(|role| warpgate_common::vault_name_is_well_formed(role))
 }
 
 pub struct ListApi;
@@ -125,6 +143,10 @@ impl ListApi {
 
         if body.name.is_empty() {
             return Ok(CreateTargetResponse::BadRequest(Json("name".into())));
+        }
+
+        if !vault_role_is_usable(&body.options) {
+            return Ok(CreateTargetResponse::BadRequest(Json("role".into())));
         }
 
         let db = &admin.services().db;
@@ -239,7 +261,7 @@ impl DetailApi {
             return Ok(UpdateTargetResponse::NotFound);
         };
 
-        if target.kind != (&body.options).into() {
+        if target.kind != (&body.options).into() || !vault_role_is_usable(&body.options) {
             return Ok(UpdateTargetResponse::BadRequest);
         }
 
@@ -481,5 +503,59 @@ impl RolesApi {
         model.delete(db).await.map_err(WarpgateError::from)?;
 
         Ok(DeleteTargetRoleResponse::Deleted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_common::{
+        SSHTargetAuth, SshTargetCertificateAuth, SshTargetPublicKeyAuth, TargetOptions,
+        TargetSSHOptions,
+    };
+
+    use super::vault_role_is_usable;
+
+    fn ssh_target(auth: SSHTargetAuth) -> TargetOptions {
+        TargetOptions::Ssh(TargetSSHOptions {
+            host: "localhost".to_owned(),
+            port: 22,
+            username: "root".to_owned(),
+            allow_insecure_algos: None,
+            auth,
+            jump_host: None,
+        })
+    }
+
+    fn certificate_target(role: Option<&str>) -> TargetOptions {
+        ssh_target(SSHTargetAuth::Certificate(SshTargetCertificateAuth {
+            role: role.map(str::to_owned),
+            ..Default::default()
+        }))
+    }
+
+    /// The admin API used to take a role the signing path would refuse, so the
+    /// operator learned of the typo from a broken session rather than from the
+    /// form that accepted it.
+    #[test]
+    fn a_role_the_signing_path_would_refuse_is_refused_at_save_time() {
+        assert!(vault_role_is_usable(&certificate_target(Some("warpgate"))));
+        assert!(vault_role_is_usable(&certificate_target(None)));
+        assert!(
+            !vault_role_is_usable(&certificate_target(Some("warp/gate"))),
+            "a role with a path separator was accepted at save time"
+        );
+        assert!(
+            !vault_role_is_usable(&certificate_target(Some(""))),
+            "an empty role was accepted at save time"
+        );
+    }
+
+    /// A target with no Vault role has nothing to check, and must not be
+    /// refused for lacking one.
+    #[test]
+    fn a_target_without_a_vault_role_is_left_alone() {
+        assert!(vault_role_is_usable(&ssh_target(SSHTargetAuth::PublicKey(
+            SshTargetPublicKeyAuth::default()
+        ))));
     }
 }

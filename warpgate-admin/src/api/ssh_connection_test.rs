@@ -3,7 +3,9 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient, resolve_ssh_chain};
+use warpgate_protocol_ssh::{
+    ConnectionError, IdentityHint, RCCommand, RCEvent, RemoteClient, resolve_ssh_chain,
+};
 
 use super::AdminContext;
 
@@ -45,36 +47,49 @@ impl Api {
         let ssh_chain =
             resolve_ssh_chain(admin.services(), body.target_id, admin.auth.username()).await?;
 
-        let Some(target) = ssh_chain.last() else {
-            return Err(WarpgateError::InconsistentState(
-                "Did not resolve SSH chain".into(),
-            ));
-        };
-        let (target_host, target_port) = (target.ssh_options.host.clone(), target.ssh_options.port);
-
-        let ssh_chain = ssh_chain
-            .into_iter()
-            .map(|x| x.ssh_options)
-            .collect::<Vec<_>>();
-
         let mut handles = RemoteClient::create(Uuid::new_v4(), admin.services().clone())?;
-        let _ = handles
-            .command_tx
-            .send((RCCommand::Connect(ssh_chain), None));
+        // Not `Connect`: that would carry on into authenticating to the target
+        // once the key had been reported, opening a session nothing is attached
+        // to — and, for a certificate target, minting a real certificate to do
+        // it with.
+        let _ = handles.command_tx.send((
+            RCCommand::CheckHostKey {
+                chain: ssh_chain,
+                // By identity. Which hop answers is decided by which target was
+                // asked about, not by which happens to be last.
+                target_id: body.target_id,
+                requested_by: if admin.auth.attribution_is_gateway() {
+                    IdentityHint::Gateway(admin.auth.attribution().to_owned())
+                } else {
+                    IdentityHint::Person(admin.auth.attribution().to_owned())
+                },
+            },
+            None,
+        ));
+
+        // Kept out of the future below so the connection can be torn down after
+        // it resolves. `CheckHostKey` already ends the client task on its own;
+        // this is the second lock on the same door, scoped to this caller so
+        // that a real session's graceful disconnect stays untouched.
+        let abort_tx = handles.abort_tx.clone();
 
         let fut = async move {
             let key = loop {
                 match handles.event_rx.recv().await {
-                    Some(RCEvent::HostKeyReceived(key, host, port))
-                        if host == target_host && port == target_port =>
-                    {
-                        break key;
-                    }
-                    Some(RCEvent::HostKeyUnknown(_, host, port, reply)) => {
-                        // this is a jump host, target key would hit  HostKeyReceived
-                        let _ = reply.send(false);
-                        anyhow::bail!("Jump host {host}:{port} has an untrusted host key");
-                    }
+                    // The address rides along with the key since #2437, and is
+                    // deliberately not matched on here. Upstream needed it
+                    // because their walk reported every hop; ours reports only
+                    // the hop the caller named, decided by identity in
+                    // `connect_chain`. Filtering by address on top of that is
+                    // not a second opinion — both values come off the same
+                    // resolved hop — and it made two integration tests pass
+                    // with that identity gate disabled, which is the one thing
+                    // they exist to notice.
+                    //
+                    // An untrusted jump host never reaches this loop as
+                    // `HostKeyUnknown` either: the walk refuses it at the hop
+                    // and arrives here as `ConnectionError::UntrustedJumpHost`.
+                    Some(RCEvent::HostKeyReceived(key, _, _)) => break key,
                     Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
                     Some(RCEvent::Error(err)) => return Err(err),
                     None => anyhow::bail!("Failed to connect to target"),
@@ -84,18 +99,24 @@ impl Api {
             anyhow::Ok(key)
         };
 
-        // Result is matched manually since we need to manually format
-        // the error message with :# to included the nested errors here
-        match fut.await {
+        let result = fut.await;
+        let _ = abort_tx.send(());
+
+        // Sanitised, like every other place a connection error is shown to a
+        // person. Reaching a target behind a jump host authenticates that hop,
+        // so a Vault failure is reachable here and used to be rendered with its
+        // whole source chain — mount, policy and all.
+        match result {
             Ok(key) => Ok(CheckSshHostKeyResponse::Ok(Json(
                 CheckSshHostKeyResponseBody {
                     remote_key_type: key.algorithm().as_str().into(),
                     remote_key_base64: key.public_key_base64(),
                 },
             ))),
-            Err(err) => Ok(CheckSshHostKeyResponse::Error(PlainText(format!(
-                "{err:#}"
-            )))),
+            Err(err) => Ok(CheckSshHostKeyResponse::Error(PlainText(
+                err.downcast_ref::<ConnectionError>()
+                    .map_or_else(|| format!("{err:#}"), ConnectionError::client_message),
+            ))),
         }
     }
 }

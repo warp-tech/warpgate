@@ -24,6 +24,7 @@ use warpgate_protocol_postgres::PostgresProtocolServer;
 use warpgate_protocol_rdp::RdpProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 use warpgate_protocol_vnc::VncProtocolServer;
+use warpgate_vault::VaultClient;
 
 use crate::config::{load_config, watch_config};
 use crate::listener_supervisor::{
@@ -120,6 +121,36 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     // The config file is watched and pushed onto this channel; each protocol
     // supervisor and the session-reauth loop react to changes off a clone of it.
     let config_rx = watch_config(params, services.config.clone()).await?;
+
+    // The Vault client is rebuilt off the same stream, for the same reason the
+    // listeners are: `vault:` lives in the file everything else lives in, and a
+    // section that quietly needed a restart would be the only one.
+    {
+        let mut config_rx = config_rx.clone();
+        let vault = services.vault.clone();
+        let mut current = config_rx.borrow().store.vault.clone();
+        tokio::spawn(async move {
+            while config_rx.changed().await.is_ok() {
+                let desired = config_rx.borrow().store.vault.clone();
+                if desired == current {
+                    continue;
+                }
+                match desired.clone().map(VaultClient::new).transpose() {
+                    Ok(client) => {
+                        vault.replace(client.map(Arc::new));
+                        current = desired;
+                        info!("Reloaded the Vault configuration");
+                    }
+                    // Same choice the listener supervisor makes on a bad bind:
+                    // an unusable new configuration must not cost the working
+                    // one, or a typo takes every certificate target down.
+                    Err(error) => {
+                        error!(%error, "Keeping the previous Vault client");
+                    }
+                }
+            }
+        });
+    }
 
     let base = params.paths_relative_to().clone();
 

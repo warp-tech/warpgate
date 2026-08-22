@@ -41,6 +41,14 @@ pub async fn command(params: &GlobalParams) -> Result<()> {
             .await
             .with_context(|| "Checking PostgreSQL key".to_string())?;
     }
+    // The command whose whole job is finding a broken config did not look at
+    // `vault:` at all — while an unusable one stops every certificate session,
+    // and used to stop `recover-access` too. Constructed and dropped: building
+    // the client is the validation.
+    if let Some(vault) = config.store.vault.clone() {
+        warpgate_vault::VaultClient::new(vault).with_context(|| "Checking Vault configuration")?;
+    }
+
     info!("No problems found");
     Ok(())
 }

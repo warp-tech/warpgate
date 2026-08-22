@@ -4,6 +4,7 @@ DB field type related issues that don't surface on SQLite (e.g. timestamp types)
 """
 
 import contextlib
+import tempfile
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Set
 from json import load
@@ -77,6 +78,11 @@ def make_limited_admin_role_payload(**overrides):
         **overrides,
     }
 
+
+# A fresh directory per run rather than a fixed name in a world-writable one.
+# `/tmp/recordings-test` can be pre-created as a symlink by any other user on a
+# shared machine, and this case asks Warpgate to write there.
+RECORDINGS_TEST_PATH = tempfile.mkdtemp(prefix="warpgate-recordings-")
 
 ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     AdminApiTestCase(
@@ -710,7 +716,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         call=lambda api, r: api.test_recordings_storage_with_http_info(
             sdk.RecordingsStorageConfig(
                 sdk.RecordingsStorageConfigRecordingsDiskConfig(
-                    kind="Disk", path="/tmp/recordings-test"
+                    kind="Disk", path=RECORDINGS_TEST_PATH
                 )
             )
         ),

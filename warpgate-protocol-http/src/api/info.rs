@@ -133,6 +133,9 @@ pub struct Info {
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
     running_on_ec2: Option<bool>,
+    /// Whether a Vault server is configured, so the admin UI can hide target
+    /// authentication options that would fail at connect time.
+    has_vault: Option<bool>,
     should_prompt_analytics: bool,
     /// Login banner, shown to unauthenticated visitors too. Empty when unset.
     banner: String,
@@ -357,6 +360,9 @@ impl Api {
             } else {
                 None
             },
+            has_vault: auth_ctx
+                .is_some()
+                .then(|| ctx.services().vault.get().is_some()),
             should_prompt_analytics,
             banner: parameters.banner.clone(),
             show_session_menu: parameters.show_session_menu,
