@@ -129,9 +129,12 @@ impl State {
     /// approval queues, where approving it would still stamp a grace-period
     /// bypass, and a gate outcome left behind describes a connection a later
     /// session must not inherit.
+    ///
+    /// The requests are closed, not removed: they stay as the record of what
+    /// was asked, and are pruned with the rest of the audit trail.
     async fn drop_session_approvals(&self, id: SessionId) {
-        if let Err(error) = crate::approvals::delete_requests_for_session(&self.db, id).await {
-            error!(%error, %id, "Could not remove the session's approval requests");
+        if let Err(error) = crate::approvals::abandon_requests_for_session(&self.db, id).await {
+            error!(%error, %id, "Could not close the session's approval requests");
         }
         self.admin_approval_statuses.lock().await.remove(&id);
     }

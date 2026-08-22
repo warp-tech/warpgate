@@ -17,8 +17,8 @@ use crate::approvals::AdminApprovalRequest;
 use crate::auth::submit_credential;
 use crate::login_protection::FailedAttemptInfo;
 use crate::{
-    AuthorizedIdentity, Services, TargetAuthorization, authorize_for_target_by_name,
-    authorize_ticket, consume_ticket, wait_for_auth_completion,
+    AuthorizedIdentity, PendingTicket, Services, TargetAuthorization, authorize_for_target_by_name,
+    authorize_ticket, wait_for_auth_completion,
 };
 
 /// Proof that the success message has not been sent yet. Exactly one is minted
@@ -86,7 +86,7 @@ pub trait DbAuthTransport {
 ///
 /// The wait isn't cancelled when the client goes away — neither protocol can
 /// cheaply observe a disconnect — which only delays cleanup, since session
-/// teardown deletes the request row regardless.
+/// teardown closes the request row regardless.
 async fn hold_for_admin_approval<T: DbAuthTransport>(
     transport: &mut T,
     services: &Services,
@@ -165,10 +165,14 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
             );
             let mut auth_ok = Some(AuthOkPermit);
 
-            // Gated before the ticket is consumed, so a refused session doesn't
-            // burn a single-use one. A ticket is not a stable credential
-            // fingerprint, so it never contributes a remembered approval.
-            if !hold_for_admin_approval(
+            // Armed for the whole hold: the client dropping mid-approval
+            // cancels this future, so the ticket has to be spent by the guard
+            // rather than by any statement below. A ticket is not a stable
+            // credential fingerprint, so it never contributes a remembered
+            // approval.
+            let mut ticket = PendingTicket::new(services.db.clone(), Some(ticket.id));
+
+            let approved = hold_for_admin_approval(
                 transport,
                 services,
                 AdminApprovalRequest {
@@ -181,14 +185,20 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                 },
                 &mut auth_ok,
             )
-            .await?
-            {
+            .await;
+
+            // A refusal — the administrator's, or a gate that failed to reach
+            // one — is not the user's doing, so the ticket keeps its use.
+            if !matches!(approved, Ok(true)) {
+                ticket.disarm();
+            }
+
+            if !approved? {
                 warn!("Session was not approved by an administrator");
                 transport.send_denied().await?;
                 return Ok(None);
             }
 
-            consume_ticket(&services.db, &ticket.id).await?;
             if let Some(permit) = auth_ok.take() {
                 transport.send_auth_ok(permit).await?;
             }

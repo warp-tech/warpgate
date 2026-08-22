@@ -319,12 +319,18 @@ impl AuthStateStore {
 
         let web_auth_request_signal = self.web_auth_request_signal.clone();
         let request_sink = self.request_sink.clone();
-        let watched = state_arc.clone();
+        // Weak, because the state owns the sender this task receives on: a
+        // strong handle here would keep the channel open forever, so the task
+        // would never end and `vacuum` could never free the state.
+        let watched = Arc::downgrade(&state_arc);
         tokio::spawn(async move {
             while let Ok(AuthResult::Need(result)) = state_change_rx.recv().await {
                 if !result.contains(&CredentialKind::WebUserApproval) {
                     continue;
                 }
+                let Some(watched) = watched.upgrade() else {
+                    break;
+                };
                 // Recorded before it is announced, so a user acting on the
                 // notification the moment it arrives always finds the request —
                 // including from another node, which has only the record to go on.

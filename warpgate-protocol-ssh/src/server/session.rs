@@ -31,8 +31,8 @@ use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
 use warpgate_core::{
-    AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, WarpgateServerHandle,
-    authorize_for_target, authorize_for_target_by_name, authorize_ticket, consume_ticket,
+    AuthorizedIdentity, ConfigProvider, PendingTicket, Services, TargetAuthorization,
+    WarpgateServerHandle, authorize_for_target, authorize_for_target_by_name, authorize_ticket,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
@@ -149,8 +149,10 @@ pub struct ServerSession {
     /// Set once this session is past the administrator-approval gate, so the
     /// resolve-then-connect path doesn't re-enter it.
     admin_approval_granted: bool,
-    /// A ticket that authorised this session and has not been spent yet.
-    pending_ticket: Option<Uuid>,
+    /// Holds the ticket that authorised this session while an administrator
+    /// could still refuse it. Spent whichever way the session ends, unless the
+    /// refusal comes.
+    pending_ticket: Option<PendingTicket>,
     keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
@@ -358,27 +360,9 @@ impl ServerSession {
             };
             debug!("No more events");
             this.settle_failed_probe().await;
-            this.consume_pending_ticket().await;
             result?;
             Ok::<_, anyhow::Error>(())
         })
-    }
-
-    /// Spends the ticket that authorised this session, if connecting never got
-    /// far enough to spend it itself.
-    ///
-    /// A ticket is spent by *authenticating* with it, not by reaching a target:
-    /// a session that opens no channel (`ssh -N`) never calls `connect_remote`,
-    /// and leaving the ticket unspent would make a single-use one reusable
-    /// without limit. The one case that must not spend it — an administrator
-    /// denying the session — clears `pending_ticket` instead.
-    async fn consume_pending_ticket(&mut self) {
-        let Some(ticket_id) = self.pending_ticket.take() else {
-            return;
-        };
-        if let Err(error) = consume_ticket(&self.services.db, &ticket_id).await {
-            error!(%error, "Failed to consume the ticket");
-        }
     }
 
     async fn get_next_event(&mut self) -> Option<Event> {
@@ -690,9 +674,9 @@ impl ServerSession {
     /// connect to is necessarily the one that was authorized, for the user it was
     /// authorized for.
     async fn connect_remote(&mut self, authorization: &TargetAuthorization) -> Result<()> {
-        // Past every gate and actually going to the target, so the ticket is
-        // spent here rather than waiting for teardown to do it.
-        self.consume_pending_ticket().await;
+        // Past every gate, so nothing can refund the ticket any more; dropping
+        // the guard spends it now rather than at teardown.
+        self.pending_ticket = None;
 
         let ssh_chain = resolve_ssh_chain(
             &self.services,
@@ -865,7 +849,10 @@ impl ServerSession {
                 Event::AdminApprovalResolved { approved } => {
                     if !approved {
                         // A denied session never reached the target, so its
-                        // ticket stays unspent.
+                        // ticket keeps its use.
+                        if let Some(ticket) = &mut self.pending_ticket {
+                            ticket.disarm();
+                        }
                         self.pending_ticket = None;
                         self.emit_service_message("Session was not approved by an administrator")
                             .await?;
@@ -2467,10 +2454,19 @@ impl ServerSession {
                             "Authorized for {} with a ticket",
                             authorization.target().name
                         );
-                        // Spent at connect time rather than here, so a session
-                        // an administrator denies — or one that never opens a
-                        // channel — doesn't burn a single-use ticket.
-                        self.pending_ticket = Some(ticket.id);
+                        // A ticket is spent by authenticating with it. The only
+                        // thing that can still refund it is an administrator
+                        // refusing the session, so it is held unspent just for
+                        // the targets that have a gate to refuse it — otherwise
+                        // the guard drops here and spends it now.
+                        let ticket = PendingTicket::new(self.services.db.clone(), Some(ticket.id));
+                        if self
+                            .services
+                            .target_requires_approval(&authorization.target().name)
+                            .await?
+                        {
+                            self.pending_ticket = Some(ticket);
+                        }
                         let user_info = authorization.user_info().clone();
                         self._auth_accept(user_info.clone(), Some(authorization))
                             .await?;

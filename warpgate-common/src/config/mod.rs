@@ -342,6 +342,7 @@ mod admin_permission_set_tests {
             access_roles_assign: false,
             sessions_view: false,
             sessions_terminate: false,
+            approve_sessions: false,
             recordings_view: false,
             tickets_create: false,
             tickets_delete: false,

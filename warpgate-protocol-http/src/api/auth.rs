@@ -402,7 +402,7 @@ impl Api {
 /// is what enforces that the request belongs to the user asking.
 async fn resolve_own_approval(
     ctx: &AuthenticatedRequestContext,
-    auth_state_id: &Uuid,
+    session_id: &Uuid,
     decision: ApprovalDecision,
 ) -> poem::Result<ApprovalActionResponse> {
     // The auth state is what the approval actually satisfies, so the node
@@ -410,13 +410,12 @@ async fn resolve_own_approval(
     // the *other* nodes, and it is written from the same signal that tells the
     // user a request is waiting — so acting on that notification immediately
     // can outrun it. Going to the state first makes that race unobservable.
-    if let Some(state_arc) = local_auth_state_for_user(ctx, auth_state_id).await {
-        let session_id = *state_arc.lock().await.session_id();
+    if local_auth_state_for_user(ctx, session_id).await.is_some() {
         let actor = acting_approver(ctx);
         return Ok(
             if ctx
                 .services()
-                .apply_user_approval(session_id, *auth_state_id, decision, &actor)
+                .apply_user_approval(*session_id, decision, &actor)
                 .await?
             {
                 ApprovalActionResponse::Ok
@@ -426,7 +425,7 @@ async fn resolve_own_approval(
         );
     }
 
-    let Some(pending) = find_pending_user_approval(ctx, *auth_state_id).await? else {
+    let Some(pending) = find_pending_user_approval(ctx, *session_id).await? else {
         return Ok(ApprovalActionResponse::NotFound);
     };
     match resolve_pending_approval(ctx, pending, decision).await? {
@@ -772,12 +771,7 @@ async fn request_to_auth_state(
         .await?
         .and_then(|d| i64::try_from(d.as_secs()).ok());
     Ok(AuthStateResponseInternal {
-        // The browser addresses the request by auth state throughout, so keep
-        // handing back the same id it followed here.
-        id: request
-            .auth_state_id
-            .unwrap_or(request.session_id)
-            .to_string(),
+        id: request.session_id.to_string(),
         protocol: request.protocol,
         address: request.remote_address,
         started: request.started,

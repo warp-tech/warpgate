@@ -28,7 +28,7 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unb
 use tokio::time::{Instant, timeout_at};
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use uuid::Uuid;
-use warpgate_common::helpers::net::{accept_client, accept_loop};
+use warpgate_common::helpers::net::accept_loop;
 use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetRdpOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{

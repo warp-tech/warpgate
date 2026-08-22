@@ -3,8 +3,9 @@
 //!
 //! The two are deliberately different mechanisms. Self approval is a
 //! *credential* — it satisfies a pending [`CredentialKind::WebUserApproval`] on
-//! an in-memory auth state, so its request row carries the auth state it
-//! resolves against. Administrator approval is a *gate on the connection*,
+//! an in-memory auth state, held by the node that keyed it under the same
+//! session id the row is keyed by. Administrator approval is a *gate on the
+//! connection*,
 //! decided once the target is known and after the credentials are settled; it
 //! touches no auth state at all.
 //!
@@ -17,8 +18,13 @@
 //! connection, and self approvals are applied by a node-wide sweep, since only
 //! the node holding an auth state can satisfy a credential on it.
 //!
-//! Rows are deleted once the owner has consumed the decision, when the waiter
-//! gives up, when the session ends, and are aged out if the owner died.
+//! No row is ever deleted while it still means something. A request that ends —
+//! consumed, timed out, given up on, torn down with its session, or aged out
+//! because its owner died — moves to a terminal status and stays as the record
+//! of what was asked and who answered. Only the audit retention removes one.
+//! That is also what makes the row safe to read: a gate can tell "answered, and
+//! I have yet to see it" from "no longer a live question", where a row that
+//! could disappear underneath a wait can only ever mean the second.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -27,7 +33,7 @@ use std::time::Duration;
 
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
@@ -216,20 +222,27 @@ impl ApprovalSubject {
 /// ends however it ends — resolved, timed out, cancelled, or the future dropped.
 ///
 /// A session waits on at most one administrator gate at a time (the row's key
-/// says so), so the guard can drop the row without asking whose it is.
+/// says so), so the guard can close the row without asking whose it is.
 struct PendingApproval {
     session_id: SessionId,
     db: DatabaseConnection,
+    /// How to end the row if the wait produces no decision. `None` once one
+    /// has, when the row is stamped as picked up instead.
+    close_as: Option<SessionApprovalRequest::ApprovalRequestStatus>,
 }
 
 impl Drop for PendingApproval {
     fn drop(&mut self) {
         // Drop can't await. `reap_stale` and the session-teardown sweep both
-        // cover a row this spawn never gets to delete.
+        // cover a row this spawn never gets to close.
         let session_id = self.session_id;
         let db = self.db.clone();
+        let close_as = self.close_as;
         tokio::spawn(async move {
-            let _ = delete_request(&db, session_id, ApprovalKind::Admin).await;
+            let _ = match close_as {
+                Some(status) => close_request(&db, session_id, ApprovalKind::Admin, status).await,
+                None => mark_consumed(&db, session_id, ApprovalKind::Admin).await,
+            };
         });
     }
 }
@@ -248,9 +261,21 @@ impl PendingApproval {
         let guard = Self {
             session_id: subject.session_id,
             db,
+            close_as: Some(SessionApprovalRequest::ApprovalRequestStatus::Abandoned),
         };
         advertise_admin_request(&guard.db, node_id, subject).await?;
         Ok(guard)
+    }
+
+    /// The window ran out with nobody having decided.
+    const fn timed_out(&mut self) {
+        self.close_as = Some(SessionApprovalRequest::ApprovalRequestStatus::TimedOut);
+    }
+
+    /// A decision was read off the row and acted on, so the row keeps it and is
+    /// only stamped as picked up.
+    const fn decided(&mut self) {
+        self.close_as = None;
     }
 }
 
@@ -267,7 +292,6 @@ async fn advertise_admin_request(
         SessionApprovalRequest::ActiveModel {
             session_id: Set(subject.session_id),
             kind: Set(ApprovalKind::Admin.into()),
-            auth_state_id: Set(None),
             node_id: Set(node_id),
             protocol: Set(subject.protocol.to_string()),
             username: Set(subject.user_info.username.clone()),
@@ -279,6 +303,7 @@ async fn advertise_admin_request(
             scope: Set(None),
             resolved_by_username: Set(None),
             resolved_by_user_id: Set(None),
+            consumed_at: Set(None),
         },
     )
     .await
@@ -294,21 +319,25 @@ const POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// How a wait on a request row ended.
 enum RowOutcome {
     Decided(ApprovalDecision, ApprovalActor),
-    /// The row went away underneath the wait — the session ended, or it was
-    /// reaped because this node looked dead. Nothing approved the connection.
-    Vanished,
+    /// The row stopped being a live question underneath the wait — the session
+    /// ended, or it was reaped because this node looked dead. Nothing approved
+    /// the connection.
+    Ended,
     TimedOut,
     Cancelled,
 }
 
-/// The decision recorded on a row, or `None` while it is still pending.
+/// The decision recorded on a row, or `None` if it carries none — still
+/// pending, or ended without one.
 fn decision_from_row(
     row: &SessionApprovalRequest::Model,
 ) -> Option<(ApprovalDecision, ApprovalActor)> {
     use SessionApprovalRequest::{ApprovalRequestScope, ApprovalRequestStatus};
 
     let decision = match row.status {
-        ApprovalRequestStatus::Pending => return None,
+        ApprovalRequestStatus::Pending
+        | ApprovalRequestStatus::TimedOut
+        | ApprovalRequestStatus::Abandoned => return None,
         ApprovalRequestStatus::Rejected => ApprovalDecision::Rejected,
         ApprovalRequestStatus::Approved => ApprovalDecision::Approved(match row.scope {
             Some(ApprovalRequestScope::Target) => ApprovalScope::Target,
@@ -353,12 +382,19 @@ async fn await_row_decision(
             // between advertising the row and starting the wait.
             _ = ticker.tick() => {
                 match find_request(db, session_id, kind).await {
-                    Ok(Some(row)) => {
-                        if let Some((decision, actor)) = decision_from_row(&row) {
-                            return RowOutcome::Decided(decision, actor);
+                    Ok(Some(row)) => match decision_from_row(&row) {
+                        Some((decision, actor)) => return RowOutcome::Decided(decision, actor),
+                        // Terminal with no decision: something else ended this
+                        // wait, so there is nothing left to wait for.
+                        None if row.status
+                            != SessionApprovalRequest::ApprovalRequestStatus::Pending =>
+                        {
+                            return RowOutcome::Ended;
                         }
-                    }
-                    Ok(None) => return RowOutcome::Vanished,
+                        None => {}
+                    },
+                    // Only retention prunes a row, and never one this young.
+                    Ok(None) => return RowOutcome::Ended,
                     Err(error) => {
                         warn!(%error, "Failed to read a session approval request");
                     }
@@ -383,8 +419,8 @@ async fn find_request(
 
 /// Records a decision against a pending request, from whichever node the
 /// approver happens to be talking to. `Ok(false)` when there is no longer a
-/// pending request to decide — already resolved, or the waiter gave up and took
-/// the row with it.
+/// pending request to decide — already resolved, or the waiter gave up and
+/// closed it.
 pub async fn record_decision(
     db: &DatabaseConnection,
     session_id: SessionId,
@@ -484,7 +520,7 @@ impl Services {
     /// pass a no-op.
     ///
     /// `cancel` ends the wait early when the client goes away. It is a
-    /// promptness measure, not a correctness one — session teardown deletes the
+    /// promptness measure, not a correctness one — session teardown closes the
     /// row regardless — so protocols that can't cheaply observe a disconnect
     /// may pass `std::future::pending()`.
     pub async fn require_admin_approval<E, F, Fut>(
@@ -518,7 +554,7 @@ impl Services {
             return Ok(true);
         }
 
-        let _guard =
+        let mut guard =
             PendingApproval::begin(self.db.clone(), self.cluster.node_id, &subject).await?;
 
         subject.emit_requested_event();
@@ -531,12 +567,16 @@ impl Services {
             match await_row_decision(&self.db, *session_id, ApprovalKind::Admin, timeout, cancel)
                 .await
             {
-                RowOutcome::Decided(decision, actor) => (decision, actor),
+                RowOutcome::Decided(decision, actor) => {
+                    guard.decided();
+                    (decision, actor)
+                }
                 RowOutcome::TimedOut => {
+                    guard.timed_out();
                     subject.emit_timed_out_event();
                     return Ok(false);
                 }
-                RowOutcome::Vanished | RowOutcome::Cancelled => return Ok(false),
+                RowOutcome::Ended | RowOutcome::Cancelled => return Ok(false),
             };
 
         subject.emit_resolved_event(&actor, matches!(decision, ApprovalDecision::Approved(_)));
@@ -662,13 +702,15 @@ impl Services {
         let Some(row) = find_request(&self.db, *session_id, ApprovalKind::User).await? else {
             return Ok(());
         };
+        // A row that has been picked up is the record of a decision already
+        // delivered, not one waiting to be.
+        if row.consumed_at.is_some() {
+            return Ok(());
+        }
         let Some((decision, actor)) = decision_from_row(&row) else {
             return Ok(());
         };
-        let Some(auth_state_id) = row.auth_state_id else {
-            return Ok(());
-        };
-        self.apply_user_approval(row.session_id, auth_state_id, decision, &actor)
+        self.apply_user_approval(row.session_id, decision, &actor)
             .await?;
         Ok(())
     }
@@ -682,10 +724,17 @@ impl Services {
     pub(crate) async fn apply_decided_user_approvals(&self) -> Result<(), WarpgateError> {
         use SessionApprovalRequest::{ApprovalRequestKind, ApprovalRequestStatus, Column};
 
+        // Decided and not yet picked up. Rows stay behind as audit records once
+        // they are, so the stamp — not the row's absence — is what stops this
+        // delivering the same decision every tick.
         let rows = SessionApprovalRequest::Entity::find()
             .filter(Column::Kind.eq(ApprovalRequestKind::User))
             .filter(Column::NodeId.eq(self.cluster.node_id))
-            .filter(Column::Status.ne(ApprovalRequestStatus::Pending))
+            .filter(Column::Status.is_in([
+                ApprovalRequestStatus::Approved,
+                ApprovalRequestStatus::Rejected,
+            ]))
+            .filter(Column::ConsumedAt.is_null())
             .all(&self.db)
             .await?;
 
@@ -693,14 +742,8 @@ impl Services {
             let Some((decision, actor)) = decision_from_row(&row) else {
                 continue;
             };
-            match row.auth_state_id {
-                Some(auth_state_id) => {
-                    self.apply_user_approval(row.session_id, auth_state_id, decision, &actor)
-                        .await?;
-                }
-                // Nothing to satisfy — drop it rather than sweep it forever.
-                None => delete_request(&self.db, row.session_id, ApprovalKind::User).await?,
-            }
+            self.apply_user_approval(row.session_id, decision, &actor)
+                .await?;
         }
         Ok(())
     }
@@ -737,25 +780,26 @@ impl Services {
     /// approval: creates the request row, idempotently, so a login driven
     /// through several credential submissions ends up with one request.
     ///
-    /// The row is keyed by the session id, and so is the auth state it resolves
-    /// against — the store hands out states by session id — so `auth_state_id`
-    /// and `session_id` are the same value seen from the two sides.
-
     /// Applies a user's own approval to the locally-owned auth state: adds or
     /// withholds the approval credential through the pending gate, records the
-    /// grace key, audits, and deletes the row. `Ok(false)` when the state is
+    /// grace key, audits, and stamps the row as picked up. `Ok(false)` when the state is
     /// gone or no longer pending an approval (resolved concurrently, expired,
     /// or never asked).
+    ///
+    /// The store hands out auth states by session id, so the row's key is also
+    /// the key of the state it resolves against.
     pub async fn apply_user_approval(
         &self,
         session_id: SessionId,
-        auth_state_id: Uuid,
         decision: ApprovalDecision,
         actor: &ApprovalActor,
     ) -> Result<bool, WarpgateError> {
-        let Some(state_arc) = self.auth_state_store.lock().await.get(&auth_state_id) else {
-            // The state is gone (vacuumed or node restarted) — the row is a ghost.
-            delete_request(&self.db, session_id, ApprovalKind::User).await?;
+        let Some(state_arc) = self.auth_state_store.lock().await.get(&session_id) else {
+            // The state is gone (vacuumed or node restarted) — nothing can act
+            // on the decision, so the row is stamped picked up to stop the
+            // sweep re-offering it. It keeps who decided what; that the login
+            // never heard is in its own audit trail.
+            mark_consumed(&self.db, session_id, ApprovalKind::User).await?;
             return Ok(false);
         };
 
@@ -773,10 +817,10 @@ impl Services {
             ) {
                 // A state that no longer wants it means the row is stale
                 // (satisfied by a grace bypass, or resolved concurrently) —
-                // drop it rather than leave it advertising a request nobody can
-                // fulfil.
+                // close it rather than leave it advertising a request nobody
+                // can fulfil.
                 drop(state);
-                delete_request(&self.db, session_id, ApprovalKind::User).await?;
+                mark_consumed(&self.db, session_id, ApprovalKind::User).await?;
                 return Ok(false);
             }
 
@@ -810,7 +854,7 @@ impl Services {
         if let Some(key) = grace_key {
             self.auth_state_store.lock().await.record_web_approval(key);
         }
-        delete_request(&self.db, session_id, ApprovalKind::User).await?;
+        mark_consumed(&self.db, session_id, ApprovalKind::User).await?;
         Ok(true)
     }
 }
@@ -848,7 +892,6 @@ pub(crate) async fn advertise_user_request(
         SessionApprovalRequest::ActiveModel {
             session_id: Set(session_id),
             kind: Set(ApprovalKind::User.into()),
-            auth_state_id: Set(Some(session_id)),
             node_id: Set(node_id),
             protocol: Set(state.protocol().to_string()),
             username: Set(state.user_info().username.clone()),
@@ -860,6 +903,7 @@ pub(crate) async fn advertise_user_request(
             scope: Set(None),
             resolved_by_username: Set(None),
             resolved_by_user_id: Set(None),
+            consumed_at: Set(None),
         }
     };
 
@@ -869,15 +913,44 @@ pub(crate) async fn advertise_user_request(
 /// Rows are keyed by `(session_id, kind)`, so a wait site that runs twice for
 /// the same session updates its own request instead of queueing a duplicate.
 ///
-/// A decision already recorded is deliberately left alone. Re-advertising is
-/// the same session asking the same question again — a request/response
+/// A decision nobody has picked up yet is deliberately left alone. Re-advertising
+/// is the same session asking the same question again — a request/response
 /// protocol re-enters its gate on every request — and an answer given between
 /// two of those is the answer to *this* question. Rewriting it would silently
 /// discard a decision an administrator has already made.
+///
+/// A row whose gate has *finished*, though, is a previous question: the session
+/// timed out, was torn down, or has since moved to another target. Reopening it
+/// is what stops that answer being read as this one's — which is the whole
+/// hazard of keeping rows around instead of deleting them.
 async fn upsert_request(
     db: &DatabaseConnection,
     row: SessionApprovalRequest::ActiveModel,
 ) -> Result<(), WarpgateError> {
+    use SessionApprovalRequest::{ApprovalRequestStatus as Status, Column};
+
+    let mut reopened = row.clone();
+    reopened.status = Set(Status::Pending);
+    reopened.scope = Set(None);
+    reopened.resolved_by_username = Set(None);
+    reopened.resolved_by_user_id = Set(None);
+    reopened.consumed_at = Set(None);
+
+    match SessionApprovalRequest::Entity::update(reopened)
+        .filter(
+            Column::ConsumedAt
+                .is_not_null()
+                .or(Column::Status.is_in(Status::UNANSWERED)),
+        )
+        .exec(db)
+        .await
+    {
+        Ok(_) => return Ok(()),
+        // No row at all, or one that is still this session's live question.
+        Err(DbErr::RecordNotUpdated) => {}
+        Err(error) => return Err(error.into()),
+    }
+
     SessionApprovalRequest::Entity::insert(row)
         .on_conflict(
             OnConflict::columns([
@@ -885,7 +958,6 @@ async fn upsert_request(
                 SessionApprovalRequest::Column::Kind,
             ])
             .update_columns([
-                SessionApprovalRequest::Column::AuthStateId,
                 SessionApprovalRequest::Column::NodeId,
                 SessionApprovalRequest::Column::Protocol,
                 SessionApprovalRequest::Column::Username,
@@ -914,28 +986,60 @@ pub(crate) async fn admin_approval_timeout(
         .map_or(*TIMEOUT, Duration::from_secs))
 }
 
-pub(crate) async fn delete_request(
+/// Ends a request that is still waiting, leaving the row as the record of how.
+///
+/// Only a pending request can be closed this way: a decision already written to
+/// the row is the answer, and outranks whatever the waiting side went on to do.
+pub async fn close_request(
+    db: &DatabaseConnection,
+    session_id: SessionId,
+    kind: ApprovalKind,
+    status: SessionApprovalRequest::ApprovalRequestStatus,
+) -> Result<(), WarpgateError> {
+    use SessionApprovalRequest::{ApprovalRequestStatus, Column};
+
+    SessionApprovalRequest::Entity::update_many()
+        .col_expr(Column::Status, status.into())
+        .filter(Column::SessionId.eq(session_id))
+        .filter(Column::Kind.eq(SessionApprovalRequest::ApprovalRequestKind::from(kind)))
+        .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+/// Records that the owning node has read a decision off the row and acted on
+/// it. The row stays as the audit record; the stamp is what takes it out of the
+/// sweep and marks it reusable by a later gate on the same session.
+async fn mark_consumed(
     db: &DatabaseConnection,
     session_id: SessionId,
     kind: ApprovalKind,
 ) -> Result<(), WarpgateError> {
-    SessionApprovalRequest::Entity::delete_by_id((
-        session_id,
-        SessionApprovalRequest::ApprovalRequestKind::from(kind),
-    ))
-    .exec(db)
-    .await?;
+    use SessionApprovalRequest::Column;
+
+    SessionApprovalRequest::Entity::update_many()
+        .col_expr(Column::ConsumedAt, OffsetDateTime::now_utc().into())
+        .filter(Column::SessionId.eq(session_id))
+        .filter(Column::Kind.eq(SessionApprovalRequest::ApprovalRequestKind::from(kind)))
+        .filter(Column::ConsumedAt.is_null())
+        .exec(db)
+        .await?;
     Ok(())
 }
 
-/// Drops every approval request belonging to a session, for when the session
-/// itself ends — the waiting connection is gone, so nothing can consume them.
-pub(crate) async fn delete_requests_for_session(
+/// Ends every request still waiting on a session, for when the session itself
+/// ends — the waiting connection is gone, so nothing can consume them.
+pub(crate) async fn abandon_requests_for_session(
     db: &DatabaseConnection,
     session_id: Uuid,
 ) -> Result<(), WarpgateError> {
-    SessionApprovalRequest::Entity::delete_many()
-        .filter(SessionApprovalRequest::Column::SessionId.eq(session_id))
+    use SessionApprovalRequest::{ApprovalRequestStatus, Column};
+
+    SessionApprovalRequest::Entity::update_many()
+        .col_expr(Column::Status, ApprovalRequestStatus::Abandoned.into())
+        .filter(Column::SessionId.eq(session_id))
+        .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
         .exec(db)
         .await?;
     Ok(())
@@ -950,12 +1054,31 @@ pub(crate) async fn request_lifetime(db: &DatabaseConnection) -> Result<Duration
     Ok(admin_approval_timeout(db).await?.max(*TIMEOUT))
 }
 
-/// Ages out request rows whose waiter is gone without having deleted them
-/// (owning node crashed, or a `Drop` cleanup that never got to run).
+/// Ends requests whose waiter is gone without having closed them (owning node
+/// crashed, or a `Drop` that never got to run). Nothing can still be waiting on
+/// a request older than the window it would have waited for.
 pub(crate) async fn reap_stale(db: &DatabaseConnection) -> Result<(), WarpgateError> {
+    use SessionApprovalRequest::{ApprovalRequestStatus, Column};
+
     let lifetime = request_lifetime(db).await?;
     #[allow(clippy::cast_possible_wrap)]
     let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(lifetime.as_secs() as i64);
+    SessionApprovalRequest::Entity::update_many()
+        .col_expr(Column::Status, ApprovalRequestStatus::Abandoned.into())
+        .filter(Column::Started.lt(cutoff))
+        .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+/// Drops request rows past the audit retention. The only thing that deletes
+/// one: everything else moves a request to a terminal status and leaves it as
+/// the record of what was asked and who answered.
+pub async fn prune_before(
+    db: &DatabaseConnection,
+    cutoff: OffsetDateTime,
+) -> Result<(), WarpgateError> {
     SessionApprovalRequest::Entity::delete_many()
         .filter(SessionApprovalRequest::Column::Started.lt(cutoff))
         .exec(db)
@@ -984,7 +1107,6 @@ mod tests {
             SessionApprovalRequest::ActiveModel {
                 session_id: Set(session_id),
                 kind: Set(ApprovalKind::Admin.into()),
-                auth_state_id: Set(None),
                 node_id: Set(Uuid::new_v4()),
                 protocol: Set("SSH".into()),
                 username: Set("someone".into()),
@@ -996,10 +1118,37 @@ mod tests {
                 scope: Set(None),
                 resolved_by_username: Set(None),
                 resolved_by_user_id: Set(None),
+                consumed_at: Set(None),
             },
         )
         .await
         .unwrap();
+    }
+
+    async fn approve(db: &DatabaseConnection, session_id: Uuid) -> bool {
+        record_decision(
+            db,
+            session_id,
+            ApprovalKind::Admin,
+            ApprovalDecision::Approved(ApprovalScope::Once),
+            &ApprovalActor {
+                username: "admin".into(),
+                user_id: None,
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn status_of(
+        db: &DatabaseConnection,
+        session_id: Uuid,
+    ) -> SessionApprovalRequest::ApprovalRequestStatus {
+        find_request(db, session_id, ApprovalKind::Admin)
+            .await
+            .unwrap()
+            .expect("the request should still exist")
+            .status
     }
 
     /// A request/response protocol re-enters its gate on every request, so the
@@ -1011,21 +1160,7 @@ mod tests {
         let db = migrated_db().await;
         let session_id = Uuid::new_v4();
         pending_row(&db, session_id).await;
-
-        assert!(
-            record_decision(
-                &db,
-                session_id,
-                ApprovalKind::Admin,
-                ApprovalDecision::Approved(ApprovalScope::Once),
-                &ApprovalActor {
-                    username: "admin".into(),
-                    user_id: None,
-                },
-            )
-            .await
-            .unwrap()
-        );
+        assert!(approve(&db, session_id).await);
 
         pending_row(&db, session_id).await;
 
@@ -1036,6 +1171,90 @@ mod tests {
         assert!(
             decision_from_row(&row).is_some(),
             "re-advertising must not erase the recorded decision",
+        );
+    }
+
+    /// Rows outlive their gate now, so a session that gates again — a new
+    /// target, or a retry after a timeout — would otherwise read the previous
+    /// gate's answer as this one's and walk straight through.
+    #[tokio::test]
+    async fn re_advertising_reopens_a_finished_request() {
+        let db = migrated_db().await;
+
+        for finished in [
+            SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+            SessionApprovalRequest::ApprovalRequestStatus::Abandoned,
+        ] {
+            let session_id = Uuid::new_v4();
+            pending_row(&db, session_id).await;
+            close_request(&db, session_id, ApprovalKind::Admin, finished)
+                .await
+                .unwrap();
+
+            pending_row(&db, session_id).await;
+
+            assert_eq!(
+                status_of(&db, session_id).await,
+                SessionApprovalRequest::ApprovalRequestStatus::Pending,
+                "a request left {finished:?} must be reopened, not reused",
+            );
+        }
+    }
+
+    /// The same, for the decision that *was* delivered: once the owning node has
+    /// picked it up, the question is over, and the next gate has to ask afresh.
+    #[tokio::test]
+    async fn re_advertising_reopens_a_consumed_request() {
+        let db = migrated_db().await;
+        let session_id = Uuid::new_v4();
+        pending_row(&db, session_id).await;
+        assert!(approve(&db, session_id).await);
+        mark_consumed(&db, session_id, ApprovalKind::Admin)
+            .await
+            .unwrap();
+
+        pending_row(&db, session_id).await;
+
+        let row = find_request(&db, session_id, ApprovalKind::Admin)
+            .await
+            .unwrap()
+            .expect("the request should still exist");
+        assert_eq!(
+            row.status,
+            SessionApprovalRequest::ApprovalRequestStatus::Pending,
+        );
+        assert!(row.consumed_at.is_none(), "the stamp must be cleared too");
+    }
+
+    /// Closing is what replaces deleting: a waiter that gives up must leave the
+    /// row behind as the record, and must not overwrite an answer that landed
+    /// while it was giving up.
+    #[tokio::test]
+    async fn closing_keeps_the_row_and_never_overwrites_an_answer() {
+        let db = migrated_db().await;
+
+        let abandoned = Uuid::new_v4();
+        pending_row(&db, abandoned).await;
+        abandon_requests_for_session(&db, abandoned).await.unwrap();
+        assert_eq!(
+            status_of(&db, abandoned).await,
+            SessionApprovalRequest::ApprovalRequestStatus::Abandoned,
+        );
+
+        let answered = Uuid::new_v4();
+        pending_row(&db, answered).await;
+        assert!(approve(&db, answered).await);
+        close_request(
+            &db,
+            answered,
+            ApprovalKind::Admin,
+            SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            status_of(&db, answered).await,
+            SessionApprovalRequest::ApprovalRequestStatus::Approved,
         );
     }
 
@@ -1076,7 +1295,10 @@ mod tests {
         )
         .await;
 
-        assert!(writer.await.unwrap(), "the decision should have been recorded");
+        assert!(
+            writer.await.unwrap(),
+            "the decision should have been recorded"
+        );
         assert!(
             matches!(
                 outcome,

@@ -84,8 +84,6 @@ mod m00077_session_user_target_id;
 mod m00078_assignment_composite_pks;
 mod m00079_unique_target_and_group_names;
 mod m00080_jit_session_approval;
-mod m00081_approve_sessions_permission;
-mod m00082_approval_decision_in_row;
 
 pub(crate) mod helpers;
 
@@ -175,8 +173,6 @@ impl MigratorTrait for Migrator {
             Box::new(m00078_assignment_composite_pks::Migration),
             Box::new(m00079_unique_target_and_group_names::Migration),
             Box::new(m00080_jit_session_approval::Migration),
-            Box::new(m00081_approve_sessions_permission::Migration),
-            Box::new(m00082_approval_decision_in_row::Migration),
         ]
     }
 }
@@ -270,7 +266,7 @@ mod tests {
             .unwrap()
     }
 
-    /// The whole chain has to apply cleanly, and `m00079`'s backfill has to
+    /// The whole chain has to apply cleanly, and `m00080`'s backfill has to
     /// actually grant the new permission to roles that could already see
     /// sessions — it is raw SQL with a backend-specific boolean literal, so
     /// nothing else would catch it being wrong.

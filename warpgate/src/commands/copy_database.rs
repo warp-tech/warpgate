@@ -44,6 +44,7 @@ macro_rules! with_every_table_in_order {
             OtpCredential,
             SsoCredential,
             CertificateCredential,
+            SessionApprovalRequest,
         ];
     };
 }

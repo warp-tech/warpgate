@@ -7,7 +7,7 @@
 //! is served wherever it lands: no forwarding, no cluster token, and no
 //! dependency on the owner being reachable at the moment of the click.
 
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::EntityTrait;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common::auth::ApprovalKind;
@@ -15,7 +15,7 @@ use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
-use warpgate_core::approvals::{ApprovalActor, ApprovalDecision, record_decision};
+use warpgate_core::approvals::{ApprovalActor, ApprovalDecision, close_request, record_decision};
 use warpgate_db_entities::{Node, SessionApprovalRequest};
 
 /// The identity to record against a decision.
@@ -65,6 +65,7 @@ pub async fn find_pending_approval(
     let Some(row) = SessionApprovalRequest::Entity::find_by_id(key)
         .one(&ctx.services().db)
         .await?
+        .filter(is_pending)
     else {
         return Ok(None);
     };
@@ -72,52 +73,60 @@ pub async fn find_pending_approval(
     pending_approval_from_row(ctx, row).await
 }
 
-/// The user-approval request for an auth state, if it belongs to the
+/// Rows outlive the request they record, so being there is no longer the same
+/// as being answerable.
+fn is_pending(row: &SessionApprovalRequest::Model) -> bool {
+    row.status == SessionApprovalRequest::ApprovalRequestStatus::Pending
+}
+
+/// The user-approval request of a session, if it belongs to the
 /// browser-authenticated user.
 ///
 /// The row is the whole record, so it is also what a node that isn't holding
 /// the auth state renders the approval page from.
 pub async fn find_user_approval_row(
     ctx: &AuthenticatedRequestContext,
-    auth_state_id: Uuid,
+    session_id: Uuid,
 ) -> Result<Option<SessionApprovalRequest::Model>, WarpgateError> {
     let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
     else {
         return Ok(None);
     };
-    let row = SessionApprovalRequest::Entity::find()
-        .filter(SessionApprovalRequest::Column::AuthStateId.eq(auth_state_id))
-        .filter(
-            SessionApprovalRequest::Column::Kind
-                .eq(SessionApprovalRequest::ApprovalRequestKind::User),
-        )
-        .one(&ctx.services().db)
-        .await?;
-    Ok(row.filter(|row| username_eq_ci(&row.username, username)))
+    let row = SessionApprovalRequest::Entity::find_by_id((
+        session_id,
+        SessionApprovalRequest::ApprovalRequestKind::User,
+    ))
+    .one(&ctx.services().db)
+    .await?;
+    Ok(row.filter(|row| is_pending(row) && username_eq_ci(&row.username, username)))
 }
 
 /// Looks up the pending user approval for an auth state, provided it belongs
 /// to the browser-authenticated user.
 pub async fn find_pending_user_approval(
     ctx: &AuthenticatedRequestContext,
-    auth_state_id: Uuid,
+    session_id: Uuid,
 ) -> Result<Option<PendingApproval>, WarpgateError> {
-    let Some(row) = find_user_approval_row(ctx, auth_state_id).await? else {
+    let Some(row) = find_user_approval_row(ctx, session_id).await? else {
         return Ok(None);
     };
 
     pending_approval_from_row(ctx, row).await
 }
 
-/// Turns a row into a resolvable request, dropping one whose owning node has
+/// Turns a row into a resolvable request, closing one whose owning node has
 /// left the cluster: the waiting connection went with it, so a decision written
-/// there would never be read. Deleting it now keeps it out of the approvals
-/// list rather than leaving it to be reaped by age.
+/// there would never be read. Closing it now keeps it out of the approvals list
+/// rather than leaving it to be reaped by age.
 async fn pending_approval_from_row(
     ctx: &AuthenticatedRequestContext,
     row: SessionApprovalRequest::Model,
 ) -> Result<Option<PendingApproval>, WarpgateError> {
     let services = ctx.services();
+    let kind = match row.kind {
+        SessionApprovalRequest::ApprovalRequestKind::User => ApprovalKind::User,
+        SessionApprovalRequest::ApprovalRequestKind::Admin => ApprovalKind::Admin,
+    };
 
     if row.node_id != services.cluster.node_id
         && Node::Entity::find_by_id(row.node_id)
@@ -125,18 +134,19 @@ async fn pending_approval_from_row(
             .await?
             .is_none()
     {
-        SessionApprovalRequest::Entity::delete_by_id((row.session_id, row.kind))
-            .exec(&services.db)
-            .await?;
+        close_request(
+            &services.db,
+            row.session_id,
+            kind,
+            SessionApprovalRequest::ApprovalRequestStatus::Abandoned,
+        )
+        .await?;
         return Ok(None);
     }
 
     Ok(Some(PendingApproval {
         session_id: row.session_id,
-        kind: match row.kind {
-            SessionApprovalRequest::ApprovalRequestKind::User => ApprovalKind::User,
-            SessionApprovalRequest::ApprovalRequestKind::Admin => ApprovalKind::Admin,
-        },
+        kind,
         username: row.username,
     }))
 }

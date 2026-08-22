@@ -156,6 +156,10 @@ pub async fn cleanup_db(
     let audit_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*audit_retention)?;
     let recording_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*retention)?;
 
+    // Approval requests are audit records once their gate has finished — this
+    // is the only thing that deletes one.
+    crate::approvals::prune_before(db, audit_cutoff).await?;
+
     LogEntry::Entity::delete_many()
         .filter(Expr::col(LogEntry::Column::Target).eq("audit"))
         .filter(Expr::col(LogEntry::Column::Timestamp).lt(audit_cutoff))
