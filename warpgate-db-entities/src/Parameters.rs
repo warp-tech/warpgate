@@ -130,6 +130,17 @@ pub struct ConfigMigrationValues {
     pub ssh_host_key_verification: SshHostKeyVerificationMode,
 }
 
+impl ConfigMigrationValues {
+    pub fn from_config(config: &warpgate_common::WarpgateConfig) -> Self {
+        let recordings = config.store.recordings.clone().unwrap_or_default();
+        Self {
+            recordings_enable: recordings.enable,
+            recordings_path: recordings.path,
+            ssh_host_key_verification: config.store.ssh.host_key_verification.into(),
+        }
+    }
+}
+
 static CONFIG_MIGRATION_VALUES: std::sync::OnceLock<ConfigMigrationValues> =
     std::sync::OnceLock::new();
 

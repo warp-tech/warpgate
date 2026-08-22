@@ -16,7 +16,7 @@ use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
 
 use super::AdminContext;
-use crate::api::common::case_insensitive_search;
+use crate::api::common::{case_insensitive_search, is_unique_violation};
 
 /// Normalize, encrypt and serialize options
 fn serialize_options_for_storage(
@@ -150,16 +150,6 @@ impl ListApi {
         }
 
         let db = &admin.services().db;
-        let existing = Target::Entity::find()
-            .filter(Target::Column::Name.eq(body.name.clone()))
-            .one(db)
-            .await?;
-        if existing.is_some() {
-            return Ok(CreateTargetResponse::Conflict(Json(
-                "Name already exists".into(),
-            )));
-        }
-
         let values = Target::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
@@ -174,7 +164,15 @@ impl ListApi {
             ticket_max_uses: Set(body.ticket_max_uses),
         };
 
-        let target = values.insert(db).await.map_err(WarpgateError::from)?;
+        let target = match values.insert(db).await {
+            Ok(target) => target,
+            Err(err) if is_unique_violation(&err) => {
+                return Ok(CreateTargetResponse::Conflict(Json(
+                    "Name already exists".into(),
+                )));
+            }
+            Err(err) => return Err(WarpgateError::from(err)),
+        };
 
         Ok(CreateTargetResponse::Created(Json(
             target.try_into().map_err(WarpgateError::from)?,
@@ -198,6 +196,8 @@ enum UpdateTargetResponse {
     Ok(Json<TargetConfig>),
     #[oai(status = 400)]
     BadRequest,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -251,6 +251,10 @@ impl DetailApi {
     ) -> Result<UpdateTargetResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsEdit)?;
 
+        if body.name.is_empty() {
+            return Ok(UpdateTargetResponse::BadRequest);
+        }
+
         let db = &admin.services().db;
 
         let Some(target) = Target::Entity::find_by_id(id.0).one(db).await? else {
@@ -272,7 +276,15 @@ impl DetailApi {
         model.ticket_requests_disabled = Set(body.ticket_requests_disabled.unwrap_or(false));
         model.ticket_require_approval = Set(body.ticket_require_approval.unwrap_or(false));
         model.ticket_max_uses = Set(body.ticket_max_uses);
-        let target = model.update(db).await?;
+        let target = match model.update(db).await {
+            Ok(target) => target,
+            Err(err) if is_unique_violation(&err) => {
+                return Ok(UpdateTargetResponse::Conflict(Json(
+                    "Name already exists".into(),
+                )));
+            }
+            Err(err) => return Err(WarpgateError::from(err)),
+        };
 
         warpgate_core::rate_limiting::apply_new_rate_limits(
             &services.rate_limiter_registry,
@@ -456,7 +468,6 @@ impl RolesApi {
         let values = TargetRoleAssignment::ActiveModel {
             target_id: Set(id.0),
             role_id: Set(role_id.0),
-            ..Default::default()
         };
 
         values.insert(db).await.map_err(WarpgateError::from)?;

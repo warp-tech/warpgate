@@ -2,10 +2,10 @@ use std::borrow::Cow;
 use std::fmt::Display;
 use std::io::Write as _;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use termcolor::{Buffer, Color, ColorSpec, WriteColor as _};
 use tokio::sync::{Mutex, broadcast, mpsc};
 
@@ -18,6 +18,7 @@ const CH_SEGMENT_NOT_CONNECTED: char = '─';
 const CH_TARGET_CONNECTED: char = '●';
 const CH_TARGET_NOT_CONNECTED: char = '○';
 const CURSOR_UP: &str = "\x1b[1A";
+const ERASE_LINE: &str = "\x1b[2K";
 
 #[must_use]
 pub(super) fn paint_fg<S: Display>(fg: Color, dimmed: bool, text: S) -> String {
@@ -188,14 +189,11 @@ pub fn render_connection_chain(chain: &VisualConnectionChainState, tick: usize) 
     out
 }
 
-fn erase_for_width(w: usize) -> String {
-    format!("{CURSOR_UP}\r{}\r", " ".repeat(w))
-}
-
 #[derive(Clone)]
 pub struct ServiceOutput {
     progress_visible: Arc<AtomicBool>,
-    last_progress_width: Arc<AtomicUsize>,
+    /// is progress the last thing printed to the terminal?
+    on_screen: Arc<AtomicBool>,
     chain: Arc<Mutex<Option<VisualConnectionChainState>>>,
     abort_tx: mpsc::Sender<()>,
     output_tx: broadcast::Sender<Bytes>,
@@ -204,14 +202,13 @@ pub struct ServiceOutput {
 impl ServiceOutput {
     pub fn new() -> Self {
         let progress_visible = Arc::new(AtomicBool::new(false));
-        let last_progress_width = Arc::new(AtomicUsize::new(0));
+        let on_screen = Arc::new(AtomicBool::new(false));
         let chain: Arc<Mutex<Option<VisualConnectionChainState>>> = Arc::new(Mutex::new(None));
         let (abort_tx, mut abort_rx) = mpsc::channel(1);
         let output_tx = broadcast::channel(32).0;
 
         tokio::spawn({
             let output_tx = output_tx.clone();
-            let last_progress_width = last_progress_width.clone();
             let progress_visible = progress_visible.clone();
             let chain = chain.clone();
             let mut tick = 0usize;
@@ -224,8 +221,7 @@ impl ServiceOutput {
                                 tick += 1;
                                 let guard = chain.lock().await;
                                 if let Some(c) = &*guard {
-                                    let frame = format!("{CURSOR_UP}\r{}", render_connection_chain(c, tick));
-                                    last_progress_width.store(frame.len(), Ordering::Relaxed);
+                                    let frame = render_connection_chain(c, tick);
                                     let _ = output_tx.send(Bytes::from(frame.into_bytes()));
                                 }
                             }
@@ -237,7 +233,7 @@ impl ServiceOutput {
 
         Self {
             progress_visible,
-            last_progress_width,
+            on_screen,
             chain,
             abort_tx,
             output_tx,
@@ -273,6 +269,22 @@ impl ServiceOutput {
     }
 
     #[must_use]
+    pub fn take_frame(&self, frame: &Bytes) -> Option<Bytes> {
+        if !self.progress_visible() {
+            return None;
+        }
+        if !self.on_screen.swap(true, Ordering::Relaxed) {
+            // Nothing to repaint over: the cursor already sits on a free line.
+            return Some(frame.clone());
+        }
+        let mut out = BytesMut::with_capacity(CURSOR_UP.len() + 1 + frame.len());
+        out.extend_from_slice(CURSOR_UP.as_bytes());
+        out.extend_from_slice(b"\r");
+        out.extend_from_slice(frame);
+        Some(out.freeze())
+    }
+
+    #[must_use]
     pub async fn render_final_success_static_frame(&self) -> String {
         self.progress_visible.store(false, Ordering::Relaxed);
         let chain = self.chain.lock().await;
@@ -290,10 +302,14 @@ impl ServiceOutput {
         format!("{}{}\r\n", self.erase_display(), graph)
     }
 
-    /// String that erases the last line
+    /// String that erases the progress line, if one is on screen
     #[must_use]
     pub fn erase_display(&self) -> String {
-        erase_for_width(self.last_progress_width.load(Ordering::Relaxed))
+        if self.on_screen.swap(false, Ordering::Relaxed) {
+            format!("{CURSOR_UP}\r{ERASE_LINE}")
+        } else {
+            String::new()
+        }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Bytes> {
@@ -310,7 +326,40 @@ impl Drop for ServiceOutput {
 
 #[cfg(test)]
 mod tests {
-    use super::VisualConnectionChainItem;
+    use super::*;
+
+    #[tokio::test]
+    async fn repaints_in_place_only_while_the_frame_is_on_screen() {
+        let output = ServiceOutput::new();
+        let frame = Bytes::from_static(b"chain\r\n");
+
+        assert_eq!(output.take_frame(&frame), None, "not started yet");
+
+        output.start_progress(vec![]).await;
+        assert_eq!(
+            output.take_frame(&frame).as_deref(),
+            Some(&b"chain\r\n"[..])
+        );
+        assert_eq!(
+            output.take_frame(&frame).as_deref(),
+            Some(format!("{CURSOR_UP}\rchain\r\n").as_bytes())
+        );
+
+        // Pausing for a prompt: queued frames are dropped, and the prompt
+        // erases the progress line it replaces.
+        output.stop_progress();
+        assert_eq!(output.take_frame(&frame), None);
+        assert_eq!(output.erase_display(), format!("{CURSOR_UP}\r{ERASE_LINE}"));
+        assert_eq!(output.erase_display(), "", "nothing left to erase");
+
+        // Resuming draws on the free line below the prompt, not over it.
+        output.show_progress();
+        assert_eq!(
+            output.take_frame(&frame).as_deref(),
+            Some(&b"chain\r\n"[..])
+        );
+    }
+
 
     /// A target name is free text an operator types; it is drawn into the PTY of
     /// everyone who connects through that target.

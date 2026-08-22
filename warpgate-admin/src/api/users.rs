@@ -819,7 +819,6 @@ impl RolesApi {
         let values = warpgate_db_entities::UserAdminRoleAssignment::ActiveModel {
             user_id: Set(id.0),
             admin_role_id: Set(role_id.0),
-            ..Default::default()
         };
 
         values.insert(db).await.map_err(WarpgateError::from)?;

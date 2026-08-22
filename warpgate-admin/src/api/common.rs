@@ -1,9 +1,18 @@
 use sea_orm::prelude::Expr;
 use sea_orm::sea_query::{Alias, Func, IntoCondition, SimpleExpr};
-use sea_orm::{ColumnTrait, Condition, DbBackend, EntityTrait, ModelTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, Condition, DbBackend, DbErr, EntityTrait, ModelTrait, QueryFilter, SqlErr,
+};
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
 pub use warpgate_common_http::RequestAuthorization;
 use warpgate_db_entities::{AdminRole, User};
+
+/// Lets a handler answer a unique-name collision with a 409 instead of a 500. What counts
+/// as a duplicate is whatever the index's collation says, which is also what the queries
+/// looking a row up by that name will see.
+pub fn is_unique_violation(err: &DbErr) -> bool {
+    matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_)))
+}
 
 /// The admin permissions the request's principal holds — the single place that resolves the
 /// permission model from the DB. `has_admin_permission`, `is_user_admin` and the `/info` UI

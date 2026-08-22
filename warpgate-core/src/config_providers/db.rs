@@ -843,7 +843,6 @@ impl ConfigProvider for DatabaseConfigProvider {
                     let values = entities::UserAdminRoleAssignment::ActiveModel {
                         user_id: Set(user.id),
                         admin_role_id: Set(role.id),
-                        ..Default::default()
                     };
 
                     values.insert(db).await?;
