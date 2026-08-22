@@ -6,12 +6,13 @@ mod session;
 mod session_handle;
 mod target_menu;
 use std::borrow::Cow;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use futures::FutureExt;
 use futures::future::BoxFuture;
-use futures::{FutureExt, StreamExt};
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use russh::{MethodKind, MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
@@ -21,7 +22,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::net::accept_client;
+use warpgate_common::helpers::net::accept_loop;
 use warpgate_core::{Services, SessionStateInit, State};
 use warpgate_db_entities::Parameters;
 
@@ -45,24 +46,22 @@ pub async fn bind_server(
         }
     });
 
-    let mut listener = address.tcp_accept_stream().await?;
+    let listener = address.tcp_accept_stream().await?;
 
     Ok(async move {
-        while let Some(stream) = listener.next().await {
-            let russh_config_init = russh_config_init.clone();
-            let services = services.clone();
-
-            tokio::task::Builder::new()
-                .name("SSH new connection setup")
-                .spawn(async move {
-                    if let Err(e) =
-                        _handle_connection(services, russh_config_init, stream, proxy_protocol)
-                            .await
-                    {
-                        error!(%e, "Connection handling failed");
-                    }
-                })?;
-        }
+        accept_loop(
+            "SSH connection",
+            listener,
+            proxy_protocol,
+            move |stream, remote_address| {
+                let russh_config_init = russh_config_init.clone();
+                let services = services.clone();
+                async move {
+                    _handle_connection(services, russh_config_init, stream, remote_address).await
+                }
+            },
+        )
+        .await;
         Ok(())
     }
     .boxed())
@@ -71,13 +70,9 @@ pub async fn bind_server(
 async fn _handle_connection(
     services: Services,
     russh_config_init: Arc<RusshConfigInit>,
-    mut stream: TcpStream,
-    proxy_protocol: bool,
+    stream: TcpStream,
+    remote_address: SocketAddr,
 ) -> Result<()> {
-    let Some(remote_address) = accept_client(&mut stream, proxy_protocol).await else {
-        return Ok(());
-    };
-
     let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
     let server_handle = State::register_session(

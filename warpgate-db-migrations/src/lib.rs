@@ -81,9 +81,11 @@ mod m00074_encryption_key_rotation;
 mod m00075_hash_ticket_and_api_token_secrets;
 mod m00076_open_targets_in_new_tab;
 mod m00077_session_user_target_id;
-mod m00078_jit_session_approval;
-mod m00079_approve_sessions_permission;
-mod m00080_approval_decision_in_row;
+mod m00078_assignment_composite_pks;
+mod m00079_unique_target_and_group_names;
+mod m00080_jit_session_approval;
+mod m00081_approve_sessions_permission;
+mod m00082_approval_decision_in_row;
 
 pub(crate) mod helpers;
 
@@ -170,9 +172,11 @@ impl MigratorTrait for Migrator {
             Box::new(m00075_hash_ticket_and_api_token_secrets::Migration),
             Box::new(m00076_open_targets_in_new_tab::Migration),
             Box::new(m00077_session_user_target_id::Migration),
-            Box::new(m00078_jit_session_approval::Migration),
-            Box::new(m00079_approve_sessions_permission::Migration),
-            Box::new(m00080_approval_decision_in_row::Migration),
+            Box::new(m00078_assignment_composite_pks::Migration),
+            Box::new(m00079_unique_target_and_group_names::Migration),
+            Box::new(m00080_jit_session_approval::Migration),
+            Box::new(m00081_approve_sessions_permission::Migration),
+            Box::new(m00082_approval_decision_in_row::Migration),
         ]
     }
 }

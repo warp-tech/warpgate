@@ -35,6 +35,23 @@ def assert_401():
     assert e.value.status == 401
 
 
+def _ssh_target_request(name: str) -> sdk.TargetDataRequest:
+    return sdk.TargetDataRequest(
+        name=name,
+        options=sdk.TargetOptions(
+            sdk.TargetOptionsTargetSSHOptions(
+                kind="Ssh",
+                host="127.0.0.1",
+                port=22,
+                username="user",
+                auth=sdk.SSHTargetAuth(
+                    sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                ),
+            )
+        ),
+    )
+
+
 def make_limited_admin_role_payload(**overrides):
     return {
         "name": overrides.get("name", f"limited-{uuid4()}"),
@@ -293,20 +310,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         id="create_target",
         permission="targets_create",
         call=lambda api, r: api.create_target_with_http_info(
-            sdk.TargetDataRequest(
-                name=f"target-{uuid4()}",
-                options=sdk.TargetOptions(
-                    sdk.TargetOptionsTargetSSHOptions(
-                        kind="Ssh",
-                        host="127.0.0.1",
-                        port=22,
-                        username="user",
-                        auth=sdk.SSHTargetAuth(
-                            sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
-                        ),
-                    )
-                ),
-            ),
+            _ssh_target_request(f"target-{uuid4()}"),
         ),
         expected_statuses={201},
     ),
@@ -321,20 +325,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         permission="targets_edit",
         call=lambda api, r: api.update_target_with_http_info(
             r["target_id"],
-            sdk.TargetDataRequest(
-                name=f"target-{uuid4()}",
-                options=sdk.TargetOptions(
-                    sdk.TargetOptionsTargetSSHOptions(
-                        kind="Ssh",
-                        host="127.0.0.1",
-                        port=22,
-                        username="user",
-                        auth=sdk.SSHTargetAuth(
-                            sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
-                        ),
-                    )
-                ),
-            ),
+            _ssh_target_request(f"target-{uuid4()}"),
         ),
         expected_statuses={200},
     ),
@@ -1010,22 +1001,7 @@ def api_test_resources(
     resources["ssh_client_key_id"] = str(uuid4())
     resources["ticket_request_id"] = str(uuid4())
 
-    target = ac.create_target(
-        sdk.TargetDataRequest(
-            name=f"target-{uuid4()}",
-            options=sdk.TargetOptions(
-                sdk.TargetOptionsTargetSSHOptions(
-                    kind="Ssh",
-                    host="127.0.0.1",
-                    port=22,
-                    username="user",
-                    auth=sdk.SSHTargetAuth(
-                        sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
-                    ),
-                )
-            ),
-        )
-    )
+    target = ac.create_target(_ssh_target_request(f"target-{uuid4()}"))
     resources["target_id"] = target.id
     resources["target_name"] = target.name
 
@@ -1128,3 +1104,24 @@ def test_admin_api_permission_enforcement(
         assert status in {401, 403}, (
             f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
         )
+
+
+def test_update_target_rejects_duplicate_name(admin_client: sdk.DefaultApi):
+    first = admin_client.create_target(_ssh_target_request(f"dup-a-{uuid4()}"))
+    second = admin_client.create_target(_ssh_target_request(f"dup-b-{uuid4()}"))
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.update_target(second.id, _ssh_target_request(first.name))
+    assert err.value.status == 409
+    still = admin_client.get_target(second.id)
+    assert still.name == second.name
+
+    renamed = admin_client.update_target(second.id, _ssh_target_request(second.name))
+    assert renamed.name == second.name
+
+
+def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
+    target = admin_client.create_target(_ssh_target_request(f"empty-{uuid4()}"))
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.update_target(target.id, _ssh_target_request(""))
+    assert err.value.status == 400
+    assert admin_client.get_target(target.id).name == target.name

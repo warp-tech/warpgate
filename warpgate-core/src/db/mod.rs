@@ -101,14 +101,17 @@ pub async fn connect_to_db_and_migrate(
     // Publish the config-file settings that have moved into the parameters row
     // so the migrations can copy them into the DB; afterwards the config file's
     // copies are ignored.
-    let recordings = config.store.recordings.clone().unwrap_or_default();
-    warpgate_db_entities::Parameters::set_config_migration_values(ConfigMigrationValues {
-        recordings_enable: recordings.enable,
-        recordings_path: recordings.path,
-        ssh_host_key_verification: config.store.ssh.host_key_verification.into(),
-    });
+    warpgate_db_entities::Parameters::set_config_migration_values(
+        ConfigMigrationValues::from_config(config),
+    );
     migrate_database(&connection).await?;
     Ok(connection)
+}
+
+/// Apply all pending migrations.
+pub async fn migrate_all(connection: &DatabaseConnection) -> Result<()> {
+    migrate_database(connection).await?;
+    Ok(())
 }
 
 /// Apply `steps` pending migrations.

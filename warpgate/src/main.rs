@@ -129,6 +129,12 @@ pub(crate) enum Commands {
         #[clap(action=ArgAction::Set)]
         username: Option<String>,
     },
+    /// Copy the current database contents into another database
+    CopyDatabase {
+        /// Target database URL
+        #[clap(action=ArgAction::Set)]
+        target_url: String,
+    },
     /// Run database migrations
     #[clap(allow_negative_numbers = true)]
     MigrateDatabase {
@@ -211,6 +217,9 @@ async fn _main() -> Result<()> {
                 std::process::exit(1);
             }
             crate::commands::migrate::command(&params, *steps).await
+        }
+        Commands::CopyDatabase { target_url } => {
+            crate::commands::copy_database::command(&params, target_url).await
         }
     }
 }

@@ -1,15 +1,63 @@
+use std::future::Future;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
+use futures::{Stream, StreamExt};
 use tokio::net::TcpStream;
+use tokio::sync::Semaphore;
 use tokio::time::timeout;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use super::proxy_protocol::remote_address;
 
 /// A connection that sends nothing for this long after accept() or PROXY header
 /// is assumed to be a port knock / LB test
 const KNOCK_TIMEOUT: Duration = Duration::from_millis(1000);
+
+/// Limit for concurrent connection setup tasks
+pub fn connection_setup_slots() -> Arc<Semaphore> {
+    Arc::new(Semaphore::new(4096))
+}
+
+/// Run a listener (possibly hadling PROXY) and spawn a handler task
+/// for each connection.
+pub async fn accept_loop<S, F, Fut>(
+    tokio_task_name: &str,
+    mut listener: S,
+    proxy_protocol: bool,
+    handler: F,
+) where
+    S: Stream<Item = TcpStream> + Unpin,
+    F: Fn(TcpStream, SocketAddr) -> Fut + Clone + Send + 'static,
+    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+{
+    let setups = connection_setup_slots();
+    loop {
+        let Ok(setup_slot) = setups.clone().acquire_owned().await else {
+            // never happens
+            return;
+        };
+        let Some(mut stream) = listener.next().await else {
+            return;
+        };
+        let handler = handler.clone();
+        let spawned = tokio::task::Builder::new()
+            .name(tokio_task_name)
+            .spawn(async move {
+                let Some(remote_address) = accept_client(&mut stream, proxy_protocol).await else {
+                    return;
+                };
+                drop(setup_slot);
+                if let Err(error) = handler(stream, remote_address).await {
+                    error!(%error, "Connection handling failed");
+                }
+            });
+        if let Err(error) = spawned {
+            error!(%error, "Failed to spawn a connection task");
+        }
+    }
+}
 
 /// Connection setup for a freshly accept()'ed stream. If proxy_protocol
 /// is on, reads the header.

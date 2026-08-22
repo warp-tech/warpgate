@@ -19,9 +19,8 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, timeout_at};
 use tokio_rustls::TlsAcceptor;
-use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
-use warpgate_common::helpers::net::accept_client;
+use warpgate_common::helpers::net::accept_loop;
 use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetVncOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
@@ -60,56 +59,52 @@ pub async fn bind_server(
     ))));
     let tls_config = Arc::new(tls_config);
 
-    let mut listener = address.tcp_accept_stream().await?;
+    let listener = address.tcp_accept_stream().await?;
 
     Ok(async move {
-        while let Some(mut stream) = listener.next().await {
-            let Some(remote_address) = accept_client(&mut stream, proxy_protocol).await else {
-                continue;
-            };
+        accept_loop(
+            "VNC connection",
+            listener,
+            proxy_protocol,
+            move |stream, remote_address| {
+                let tls_config = tls_config.clone();
+                let services = services.clone();
+                async move {
+                    let (session_handle, mut abort_rx) = VncSessionHandle::new();
 
-            let tls_config = tls_config.clone();
-            let services = services.clone();
-            tokio::spawn(async move {
-                let (session_handle, mut abort_rx) = VncSessionHandle::new();
+                    let server_handle = State::register_session(
+                        &services.state,
+                        PROTOCOL_NAME,
+                        SessionStateInit {
+                            remote_address: Some(remote_address),
+                            handle: Box::new(session_handle),
+                        },
+                    )
+                    .await
+                    .context("registering session")?;
 
-                let server_handle = match State::register_session(
-                    &services.state,
-                    PROTOCOL_NAME,
-                    SessionStateInit {
-                        remote_address: Some(remote_address),
-                        handle: Box::new(session_handle),
-                    },
-                )
-                .await
-                {
-                    Ok(h) => h,
-                    Err(error) => {
-                        error!(%error, "Failed to register session");
-                        return;
+                    let span = info_span!("VNC", session=%server_handle.lock().await.id());
+
+                    tokio::select! {
+                        result = handle_connection(
+                            services,
+                            server_handle.clone(),
+                            stream,
+                            tls_config,
+                            remote_address,
+                        ).instrument(span) => match result {
+                            Ok(()) => info!("Session ended"),
+                            Err(error) => error!(%error, "Session failed"),
+                        },
+                        _ = abort_rx.recv() => {
+                            warn!("Session aborted by admin");
+                        }
                     }
-                };
-
-                let span = info_span!("VNC", session=%server_handle.lock().await.id());
-
-                tokio::select! {
-                    result = handle_connection(
-                        services,
-                        server_handle.clone(),
-                        stream,
-                        tls_config,
-                        remote_address,
-                    ).instrument(span) => match result {
-                        Ok(()) => info!("Session ended"),
-                        Err(error) => error!(%error, "Session failed"),
-                    },
-                    _ = abort_rx.recv() => {
-                        warn!("Session aborted by admin");
-                    }
+                    Ok(())
                 }
-            });
-        }
-
+            },
+        )
+        .await;
         Ok(())
     }
     .boxed())
