@@ -7,9 +7,9 @@ use uuid::Uuid;
 #[sea_orm(table_name = "user_admin_roles")]
 #[oai(rename = "UserAdminRoleAssignment")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = true)]
-    pub id: i32,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub user_id: Uuid,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub admin_role_id: Uuid,
 }
 

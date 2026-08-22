@@ -446,7 +446,6 @@ impl RolesApi {
         let values = TargetRoleAssignment::ActiveModel {
             target_id: Set(id.0),
             role_id: Set(role_id.0),
-            ..Default::default()
         };
 
         values.insert(db).await.map_err(WarpgateError::from)?;

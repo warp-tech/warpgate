@@ -83,7 +83,6 @@ pub async fn command(
             let values = UserAdminRoleAssignment::ActiveModel {
                 user_id: Set(db_user.id),
                 admin_role_id: Set(db_admin.id),
-                ..Default::default()
             };
             values.insert(db).await.map_err(WarpgateError::from)?;
         }
