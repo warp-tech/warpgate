@@ -7,6 +7,7 @@ use anyhow::Context;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, info_span, warn};
 use uuid::Uuid;
+use warpgate_common::auth::RememberedBy;
 use warpgate_common::{TargetOptions, WarpgateError};
 use warpgate_core::approvals::AdminApprovalContext;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
@@ -49,9 +50,9 @@ impl WebDesktopClientManager {
         size: Option<(u16, u16)>,
     ) -> Result<Uuid, WarpgateError> {
         let user_id = authorization.user_info().id;
-        if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
-            return Err(WarpgateError::SessionLimitReached);
-        }
+        // Held until the session is in the registry, so the attempts waiting on
+        // the approval gate count against the limit too.
+        let _slot = self.reserve_slot(user_id, MAX_SESSIONS_PER_USER).await?;
 
         let protocol_name = match &authorization.target().options {
             TargetOptions::Vnc(_) => warpgate_protocol_vnc::PROTOCOL_NAME,
@@ -73,7 +74,15 @@ impl WebDesktopClientManager {
         .await
         .context("registering web-desktop session")?;
 
-        let session_id = server_handle.lock().await.id();
+        let session_id = {
+            let mut server_handle = server_handle.lock().await;
+            // Registered before the gate so an administrator can see (and close)
+            // the attempt while it waits, but provisional until it is let
+            // through: one that never becomes a session leaves no session
+            // behind, only its approval request.
+            server_handle.mark_provisional();
+            server_handle.id()
+        };
 
         // The in-browser client reaches the same targets as every other
         // protocol, so it is held on the same terms. Gated after registration so
@@ -85,9 +94,9 @@ impl WebDesktopClientManager {
             .require_admin_approval(
                 authorization,
                 AdminApprovalContext {
-                    session_id: &session_id,
+                    session_id,
                     remote_ip: remote_address.map(|address| address.ip()),
-                    credentials: None,
+                    credentials: RememberedBy::Nothing,
                 },
                 std::future::pending(),
                 || async { Ok::<_, WarpgateError>(()) },
@@ -100,6 +109,7 @@ impl WebDesktopClientManager {
         };
 
         let (user_info, target) = approved.into_parts();
+        server_handle.lock().await.confirm();
         let username = user_info.username.clone();
 
         {

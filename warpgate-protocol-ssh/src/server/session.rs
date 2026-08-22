@@ -21,6 +21,7 @@ use url::Url;
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
+    RememberedBy,
 };
 use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
 use warpgate_common::helpers::username::username_eq_ci;
@@ -155,6 +156,15 @@ pub struct ServerSession {
     /// could still refuse it. Spent whichever way the session ends, unless the
     /// refusal comes.
     pending_ticket: Option<PendingTicket>,
+    /// Set while the administrator gate is holding this session: the one attempt
+    /// at the target is claimed, but no remote client exists yet.
+    ///
+    /// Kept apart from [`RCState`] because a hold is not a connection. Code that
+    /// asks `rc_state` whether there is a remote client to talk to must not be
+    /// answered `Connecting` when the honest answer is "there is none, we are
+    /// waiting on a human" — `request_disconnect` would send a `Disconnect` to a
+    /// client that was never asked to connect.
+    awaiting_approval: bool,
     keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
@@ -262,6 +272,7 @@ impl ServerSession {
             auth_state: None,
             disconnect_token: CancellationToken::new(),
             pending_ticket: None,
+            awaiting_approval: false,
             keyboard_interactive_state: None,
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
@@ -595,12 +606,12 @@ impl ServerSession {
 
         if let Some(authorization) = target
             && self.rc_state == RCState::NotInitialized
+            && !self.awaiting_approval
         {
-            // Claim the slot: the gate runs off to the side, and leaving the
-            // state at `NotInitialized` across it lets a second caller re-enter
-            // and open a duplicate connection. Resumes in the
-            // `Event::AdminApprovalResolved` handler.
-            self.rc_state = RCState::Connecting;
+            // Claim the attempt: the gate runs off to the side, and without a
+            // claim a second caller re-enters and opens a duplicate connection.
+            // Resumes in the `Event::AdminApprovalResolved` handler.
+            self.awaiting_approval = true;
             self.spawn_admin_approval_gate(authorization);
         }
 
@@ -635,14 +646,14 @@ impl ServerSession {
             // Ticket-authorised sessions carry no auth state; without one there
             // are no credentials to key a remembered approval on.
             let credentials = match auth_state {
-                Some(state) => Some(state.lock().await.credential_fingerprints()),
-                None => None,
+                Some(state) => state.lock().await.remembered_by(),
+                None => RememberedBy::Nothing,
             };
             let approved = services
                 .require_admin_approval(
                     authorization,
                     AdminApprovalContext {
-                        session_id: &session_id,
+                        session_id,
                         remote_ip: Some(remote_ip),
                         credentials,
                     },
@@ -843,6 +854,10 @@ impl ServerSession {
                     .await?;
                 }
                 Event::AdminApprovalResolved { approved } => {
+                    // False already if the user aborted the hold themselves, in
+                    // which case the session is on its way out and the outcome
+                    // is about a question nobody is waiting on any more.
+                    let was_waiting = std::mem::take(&mut self.awaiting_approval);
                     let Some(approved) = approved else {
                         // A denied session never reached the target, so its
                         // ticket keeps its use.
@@ -850,15 +865,16 @@ impl ServerSession {
                             ticket.disarm();
                         }
                         self.pending_ticket = None;
-                        self.emit_service_message("Session was not approved by an administrator")
+                        if was_waiting {
+                            self.emit_service_message(
+                                "Session was not approved by an administrator",
+                            )
                             .await?;
-                        self.request_disconnect();
-                        self.disconnect_server().await;
+                            self.request_disconnect();
+                            self.disconnect_server().await;
+                        }
                         return Ok(());
                     };
-                    // `maybe_connect_remote` claimed the slot before the hold
-                    // began; `connect_remote` reclaims it as it dials.
-                    self.rc_state = RCState::NotInitialized;
                     self.connect_remote(&approved).await?;
                 }
                 Event::ServerChannelOpenResult(id, result) => {
@@ -1889,8 +1905,18 @@ impl ServerSession {
     async fn _data(&mut self, server_channel_id: ServerChannelId, data: Bytes) -> Result<()> {
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%server_channel_id.0, ?data, "Data");
-        if self.rc_state == RCState::Connecting && data.first() == Some(&3) {
+        // Both waits the user might want out of: dialling the target, and being
+        // held for an administrator.
+        if (self.rc_state == RCState::Connecting || self.awaiting_approval)
+            && data.first() == Some(&3)
+        {
             info!(channel=%channel_id, "User requested connection abort (Ctrl-C)");
+            // A hold has no remote client to abort — the cancellation token is
+            // what the gate is watching. Dropping the claim here also tells the
+            // resolution that arrives afterwards it has nothing to report: the
+            // user left, they were not refused.
+            self.awaiting_approval = false;
+            self.disconnect_token.cancel();
             self.request_disconnect();
             return Ok(());
         }

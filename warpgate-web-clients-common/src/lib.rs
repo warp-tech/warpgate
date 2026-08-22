@@ -6,6 +6,7 @@
 //! Only the message type and the protocol-specific `create_session`/event-loop differ,
 //! so those live in each crate; everything here is generic over the message type `M`.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::sync::Arc;
@@ -17,6 +18,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
+use warpgate_common::WarpgateError;
 use warpgate_core::{SessionHandle, WarpgateServerHandle};
 use warpgate_db_entities::Target::TargetKind;
 
@@ -191,16 +193,51 @@ pub trait ManagedSession: Send + Sync + 'static {
     fn on_removed(&self);
 }
 
+/// A user's claim on one session slot, held from before the session exists until
+/// it is in the registry.
+///
+/// Setting a session up is not instant — most of the wait is the administrator
+/// approval gate — and until [`ClientManager::insert`] runs the session is in no
+/// map, so it counts towards nothing. Without the claim a user can park any
+/// number of attempts at the gate: the per-user limit only sees the ones that
+/// got through, and each attempt is a registered session and an entry in the
+/// approvals queue.
+#[must_use = "dropping the reservation immediately releases the slot it holds"]
+pub struct SessionSlot {
+    user_id: Uuid,
+    reservations: Arc<Mutex<HashMap<Uuid, usize>>>,
+}
+
+impl Drop for SessionSlot {
+    fn drop(&mut self) {
+        // Drop can't await, and the slot has to come back however the setup
+        // ended — approved, refused, or the client hanging up mid-wait.
+        let user_id = self.user_id;
+        let reservations = self.reservations.clone();
+        tokio::spawn(async move {
+            if let Entry::Occupied(mut entry) = reservations.lock().await.entry(user_id) {
+                *entry.get_mut() -= 1;
+                if *entry.get() == 0 {
+                    entry.remove();
+                }
+            }
+        });
+    }
+}
+
 /// In-memory registry of live sessions, keyed by id. Each crate wraps this and adds its own
 /// protocol-specific `create_session`.
 pub struct ClientManager<S> {
     sessions: Arc<Mutex<HashMap<Uuid, Arc<S>>>>,
+    /// Slots claimed by sessions being set up, which are in no map yet.
+    reservations: Arc<Mutex<HashMap<Uuid, usize>>>,
 }
 
 impl<S> Default for ClientManager<S> {
     fn default() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            reservations: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -219,13 +256,34 @@ impl<S: ManagedSession> ClientManager<S> {
         self.sessions.lock().await.get(&id).cloned()
     }
 
-    pub async fn count_for_user(&self, user_id: Uuid) -> usize {
-        self.sessions
+    /// Claims a slot for `user_id`, counting the sessions being set up as well
+    /// as the live ones. Hold the returned [`SessionSlot`] until the session is
+    /// in the registry; dropping it gives the slot back.
+    pub async fn reserve_slot(
+        &self,
+        user_id: Uuid,
+        max_per_user: usize,
+    ) -> Result<SessionSlot, WarpgateError> {
+        // Reservations before sessions, the one order this pair is ever taken in.
+        let mut reservations = self.reservations.lock().await;
+        let live = self
+            .sessions
             .lock()
             .await
             .values()
             .filter(|s| s.user_id() == user_id)
-            .count()
+            .count();
+
+        let claimed = reservations.entry(user_id).or_default();
+        if live + *claimed >= max_per_user {
+            return Err(WarpgateError::SessionLimitReached);
+        }
+        *claimed += 1;
+
+        Ok(SessionSlot {
+            user_id,
+            reservations: self.reservations.clone(),
+        })
     }
 
     pub async fn insert(&self, session: Arc<S>) {

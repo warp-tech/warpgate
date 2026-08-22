@@ -10,40 +10,18 @@ use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 use warpgate_common::auth::ApprovalKind;
-use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::approvals::{ApprovalDecision, ApprovalScope};
 use warpgate_db_entities::SessionApprovalRequest;
 
 use super::AdminContext;
-use crate::api::common::{has_admin_permission, require_admin_permission};
-use crate::approvals::{ApprovalResolution, find_pending_approval, resolve_pending_approval};
+use crate::api::common::require_admin_permission;
+use crate::approvals::{
+    ApprovalResolution, Approver, find_pending_approval, resolve_pending_approval,
+};
 
 pub struct Api;
-
-/// Approving your own held session defeats the four-eyes property the gate
-/// exists for, so it is refused — unless the approver could edit targets, since
-/// that lets them clear `require_approval` and walk through anyway.
-async fn require_not_self_approval(
-    ctx: &AuthenticatedRequestContext,
-    held_username: &str,
-) -> Result<(), WarpgateError> {
-    let Some(approver) = ctx.auth.username() else {
-        // Not a user (admin API token) — there is no "own session" to speak of.
-        return Ok(());
-    };
-
-    if !username_eq_ci(held_username, approver)
-        || has_admin_permission(ctx, Some(AdminPermission::TargetsEdit)).await?
-    {
-        return Ok(());
-    }
-
-    Err(WarpgateError::NoAdminPermission(
-        AdminPermission::TargetsEdit,
-    ))
-}
 
 /// A session held pending administrator (JIT) approval.
 #[derive(Object)]
@@ -86,14 +64,7 @@ async fn resolve(
         return Ok(ActionResponse::NotFound);
     };
 
-    // Checked here rather than at the endpoint so it can't be reached around,
-    // and so it reuses the row the lookup above already read. Only approvals:
-    // rejecting your own session grants nothing.
-    if matches!(decision, ApprovalDecision::Approved(_)) {
-        require_not_self_approval(ctx, &pending.username).await?;
-    }
-
-    match resolve_pending_approval(ctx, pending, decision).await? {
+    match resolve_pending_approval(ctx, Approver::Administrator, pending, decision).await? {
         ApprovalResolution::Resolved => Ok(ActionResponse::Ok),
         ApprovalResolution::NotFound => Ok(ActionResponse::NotFound),
     }

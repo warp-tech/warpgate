@@ -425,7 +425,7 @@ mod tests {
     use ipnet::IpNet;
     use warpgate_common::auth::{
         ApprovalKind, AuthCredential, AuthCredentialFingerprint, AuthStateUserInfo,
-        CredentialPolicyResponse, WebApprovalScopeKey,
+        CredentialFingerprints, CredentialPolicyResponse, WebApprovalScopeKey,
     };
 
     use super::*;
@@ -675,6 +675,11 @@ mod tests {
         assert!(ip_allowed(None, Some("192.168.0.1".parse().unwrap())));
     }
 
+    fn credentials(hash: [u8; 32]) -> CredentialFingerprints {
+        CredentialFingerprints::new(vec![AuthCredentialFingerprint::Password { hash }])
+            .expect("a one-credential set is not empty")
+    }
+
     fn approval_key(scope: WebApprovalScopeKey) -> WebApprovalMatchKey {
         WebApprovalMatchKey {
             kind: ApprovalKind::User,
@@ -682,7 +687,7 @@ mod tests {
             protocol: Protocol::Ssh,
             username: "alice".into(),
             scope,
-            other_credentials: vec![AuthCredentialFingerprint::Password { hash: [7u8; 32] }],
+            other_credentials: credentials([7u8; 32]),
         }
     }
 
@@ -706,8 +711,7 @@ mod tests {
         assert!(!store.recent_approval_is_fresh(&for_target("staging"), grace));
         // Different credentials are not a full match.
         let mut wrong_cred = for_target("prod");
-        wrong_cred.other_credentials =
-            vec![AuthCredentialFingerprint::Password { hash: [9u8; 32] }];
+        wrong_cred.other_credentials = credentials([9u8; 32]);
         assert!(!store.recent_approval_is_fresh(&wrong_cred, grace));
         // A zero grace never counts as fresh, so approval is required again.
         assert!(!store.recent_approval_is_fresh(&for_target("prod"), Duration::ZERO));

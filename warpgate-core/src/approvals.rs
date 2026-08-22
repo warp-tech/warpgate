@@ -32,15 +32,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::OnConflict;
+use sea_orm::sea_query::{Condition, IntoCondition, OnConflict, SimpleExpr};
 use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
-    ApprovalKind, AuthCredential, AuthCredentialFingerprint, AuthResult, AuthState,
-    AuthStateUserInfo, CredentialKind, WebApprovalMatchKey, WebApprovalScopeKey,
+    ApprovalKind, AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialKind,
+    RememberedBy, WebApprovalMatchKey, WebApprovalScopeKey,
 };
 use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{Protocol, SessionId, WarpgateError};
@@ -97,10 +97,9 @@ struct ApprovalSubject {
     protocol: Protocol,
     target_name: String,
     remote_ip: Option<IpAddr>,
-    /// Credentials this session authenticated with, keying the remembered
-    /// approval. `None` where they aren't a stable fingerprint (ticket auth),
-    /// which disables remembering rather than keying on less.
-    credentials: Option<Vec<AuthCredentialFingerprint>>,
+    /// What a grant to this session could be remembered on. Where that is
+    /// nothing, remembering is disabled rather than keyed on less.
+    credentials: RememberedBy,
 }
 
 impl ApprovalSubject {
@@ -112,7 +111,7 @@ impl ApprovalSubject {
             protocol: state.protocol(),
             target_name: state.target_name().to_string(),
             remote_ip: state.remote_ip(),
-            credentials: Some(state.credential_fingerprints()),
+            credentials: state.remembered_by(),
         }
     }
 
@@ -126,16 +125,7 @@ impl ApprovalSubject {
     /// never replayed for a session that can't be pinned to the same origin
     /// and the same credentials.
     fn match_key(&self) -> Option<WebApprovalMatchKey> {
-        let mut other_credentials = self.credentials.clone()?;
-        other_credentials.sort_unstable();
-        other_credentials.dedup();
-        // An empty set is not "matches anything" — it is a session with no
-        // stable credential to pin a grant to, which is the same situation as
-        // having none at all. A policy whose only factor is the approval itself
-        // gets here, and would otherwise key a bypass on origin and name alone.
-        if other_credentials.is_empty() {
-            return None;
-        }
+        let other_credentials = self.credentials.credentials()?.clone();
 
         Some(WebApprovalMatchKey {
             kind: self.kind,
@@ -335,17 +325,29 @@ enum RowOutcome {
     Cancelled,
 }
 
-/// The decision recorded on a row, or `None` if it carries none — still
-/// pending, or ended without one.
-fn decision_from_row(
-    row: &SessionApprovalRequest::Model,
-) -> Option<(ApprovalDecision, ApprovalActor)> {
+/// What a request row currently says.
+///
+/// Three states, not an `Option`: "nobody has answered yet" and "this will never
+/// be answered" both carry no decision but mean opposite things to a waiter, and
+/// an `Option` makes them the same value with the difference left on the row for
+/// each caller to re-derive.
+enum RowState {
+    /// Still a live question.
+    Pending,
+    Decided(ApprovalDecision, ApprovalActor),
+    /// Terminal with no decision — nobody answered in time, or nobody was left
+    /// to answer for.
+    Ended,
+}
+
+fn row_state(row: &SessionApprovalRequest::Model) -> RowState {
     use SessionApprovalRequest::{ApprovalRequestScope, ApprovalRequestStatus};
 
     let decision = match row.status {
-        ApprovalRequestStatus::Pending
-        | ApprovalRequestStatus::TimedOut
-        | ApprovalRequestStatus::Abandoned => return None,
+        ApprovalRequestStatus::Pending => return RowState::Pending,
+        ApprovalRequestStatus::TimedOut | ApprovalRequestStatus::Abandoned => {
+            return RowState::Ended;
+        }
         ApprovalRequestStatus::Rejected => ApprovalDecision::Rejected,
         ApprovalRequestStatus::Approved => ApprovalDecision::Approved(match row.scope {
             Some(ApprovalRequestScope::Target) => ApprovalScope::Target,
@@ -362,7 +364,7 @@ fn decision_from_row(
             .unwrap_or_else(|| "<unknown>".to_string()),
         user_id: row.resolved_by_user_id,
     };
-    Some((decision, actor))
+    RowState::Decided(decision, actor)
 }
 
 /// Waits for a decision to be written to this request's row, giving up at
@@ -390,16 +392,14 @@ async fn await_row_decision(
             // between advertising the row and starting the wait.
             _ = ticker.tick() => {
                 match find_request(db, session_id, kind).await {
-                    Ok(Some(row)) => match decision_from_row(&row) {
-                        Some((decision, actor)) => return RowOutcome::Decided(decision, actor),
-                        // Terminal with no decision: something else ended this
-                        // wait, so there is nothing left to wait for.
-                        None if row.status
-                            != SessionApprovalRequest::ApprovalRequestStatus::Pending =>
-                        {
-                            return RowOutcome::Ended;
+                    Ok(Some(row)) => match row_state(&row) {
+                        RowState::Pending => {}
+                        RowState::Decided(decision, actor) => {
+                            return RowOutcome::Decided(decision, actor);
                         }
-                        None => {}
+                        // Something else ended this wait, so there is nothing
+                        // left to wait for.
+                        RowState::Ended => return RowOutcome::Ended,
                     },
                     // Only retention prunes a row, and never one this young.
                     Ok(None) => return RowOutcome::Ended,
@@ -423,6 +423,82 @@ async fn find_request(
     ))
     .one(db)
     .await?)
+}
+
+/// A status change on request rows, and the only thing in this module that
+/// writes [`SessionApprovalRequest::Column::Status`].
+///
+/// There is no constructor that doesn't name the states it may leave. That is
+/// the whole point: every write here is a close of some kind, and a close that
+/// forgot to exclude `Approved`/`Rejected` would erase an answer an
+/// administrator had already given — the session would then wait out its window
+/// while the inbox kept offering it again. Making the guard part of building the
+/// statement means a new close site cannot be written without one.
+///
+/// The one status write that doesn't go through this is the row takeover in
+/// [`upsert_request`], which rewrites every column and so builds its statement
+/// from the model; it names its source states with [`question_is_over`].
+struct StatusTransition {
+    to: SessionApprovalRequest::ApprovalRequestStatus,
+    /// Which rows this transition is allowed to leave.
+    from: Condition,
+    /// Columns written alongside the status.
+    columns: Vec<(SessionApprovalRequest::Column, SimpleExpr)>,
+}
+
+impl StatusTransition {
+    /// The ordinary case: a request still waiting on an answer.
+    fn from_pending(to: SessionApprovalRequest::ApprovalRequestStatus) -> Self {
+        Self {
+            to,
+            from: SessionApprovalRequest::Column::Status
+                .eq(SessionApprovalRequest::ApprovalRequestStatus::Pending)
+                .into_condition(),
+            columns: vec![],
+        }
+    }
+
+    fn set(mut self, column: SessionApprovalRequest::Column, value: impl Into<SimpleExpr>) -> Self {
+        self.columns.push((column, value.into()));
+        self
+    }
+
+    /// Applies to every row matching `which` that is also in an allowed source
+    /// state. Returns how many rows moved.
+    async fn apply(self, db: &DatabaseConnection, which: Condition) -> Result<u64, WarpgateError> {
+        let mut query = SessionApprovalRequest::Entity::update_many()
+            .col_expr(SessionApprovalRequest::Column::Status, self.to.into())
+            .filter(which)
+            .filter(self.from);
+        for (column, value) in self.columns {
+            query = query.col_expr(column, value);
+        }
+        Ok(query.exec(db).await?.rows_affected)
+    }
+}
+
+/// Rows whose question is over: they ended without an answer, or the owning node
+/// has already taken the one they had. Nothing is waiting on either, so a later
+/// gate on the same session may take the row over.
+///
+/// The counterpart to [`StatusTransition::from_pending`] — the two together are
+/// every source state any write in this module is allowed to leave.
+fn question_is_over() -> Condition {
+    SessionApprovalRequest::Column::Status
+        .is_in(SessionApprovalRequest::ApprovalRequestStatus::UNANSWERED)
+        .or(SessionApprovalRequest::Column::ConsumedAt.is_not_null())
+        .into_condition()
+}
+
+/// The rows of one request: a session's approval of a given kind.
+fn one_request(session_id: SessionId, kind: ApprovalKind) -> Condition {
+    SessionApprovalRequest::Column::SessionId
+        .eq(session_id)
+        .and(
+            SessionApprovalRequest::Column::Kind
+                .eq(SessionApprovalRequest::ApprovalRequestKind::from(kind)),
+        )
+        .into_condition()
 }
 
 /// Records a decision against a pending request, from whichever node the
@@ -450,20 +526,14 @@ pub async fn record_decision(
         ApprovalDecision::Rejected => (ApprovalRequestStatus::Rejected, None),
     };
 
-    let result = SessionApprovalRequest::Entity::update_many()
-        .col_expr(Column::Status, status.into())
-        .col_expr(Column::Scope, scope.into())
-        .col_expr(Column::ResolvedByUsername, actor.username.clone().into())
-        .col_expr(Column::ResolvedByUserId, actor.user_id.into())
-        .filter(Column::SessionId.eq(session_id))
-        .filter(Column::Kind.eq(SessionApprovalRequest::ApprovalRequestKind::from(kind)))
-        // Only a request still waiting can be decided, so a decision already
-        // recorded is never overwritten by a later click.
-        .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
-        .exec(db)
+    let moved = StatusTransition::from_pending(status)
+        .set(Column::Scope, scope)
+        .set(Column::ResolvedByUsername, actor.username.clone())
+        .set(Column::ResolvedByUserId, actor.user_id)
+        .apply(db, one_request(session_id, kind))
         .await?;
 
-    Ok(result.rows_affected > 0)
+    Ok(moved > 0)
 }
 
 /// How a gate ended for a connection that was waiting on it.
@@ -540,14 +610,14 @@ pub type AdminApprovalStatuses = Arc<Mutex<HashMap<SessionId, SessionGate>>>;
 /// Everything about the *connection* a gate is being asked about. What it is
 /// asked about — the user and the target — comes from the authorization, so the
 /// two can never disagree.
-pub struct AdminApprovalContext<'a> {
-    pub session_id: &'a SessionId,
+pub struct AdminApprovalContext {
+    pub session_id: SessionId,
     pub remote_ip: Option<IpAddr>,
-    /// Fingerprints of the credentials that authenticated this session, keying
-    /// the remembered-approval bypass. `None` disables remembering for this
-    /// session — pass it wherever the authenticating credential has no stable
-    /// fingerprint, such as ticket auth.
-    pub credentials: Option<Vec<AuthCredentialFingerprint>>,
+    /// What a grant to this session may be remembered on, keying the bypass for
+    /// a later identical connection. [`RememberedBy::Nothing`] wherever the
+    /// authenticating credential has no stable fingerprint (ticket auth) or
+    /// isn't carried on the request at all (HTTP, Kubernetes).
+    pub credentials: RememberedBy,
 }
 
 impl Services {
@@ -573,7 +643,7 @@ impl Services {
     pub async fn require_admin_approval<E, F, Fut>(
         &self,
         authorization: TargetAuthorization,
-        context: AdminApprovalContext<'_>,
+        context: AdminApprovalContext,
         cancel: impl Future<Output = ()> + Send,
         notify_waiting: F,
     ) -> Result<GateOutcome, E>
@@ -594,7 +664,7 @@ impl Services {
         let session_id = context.session_id;
         let subject = ApprovalSubject {
             kind: ApprovalKind::Admin,
-            session_id: *session_id,
+            session_id,
             user_info: authorization.user_info().clone(),
             protocol: authorization.protocol(),
             target_name: authorization.target().name.clone(),
@@ -611,13 +681,13 @@ impl Services {
             PendingApproval::begin(self.db.clone(), self.cluster.node_id, &subject).await?;
 
         subject.emit_requested_event();
-        let _ = self.admin_approval_request_tx.send(*session_id);
+        let _ = self.admin_approval_request_tx.send(session_id);
 
         notify_waiting().await?;
 
         let timeout = self.admin_approval_timeout().await?;
         let (decision, actor) =
-            match await_row_decision(&self.db, *session_id, ApprovalKind::Admin, timeout, cancel)
+            match await_row_decision(&self.db, session_id, ApprovalKind::Admin, timeout, cancel)
                 .await
             {
                 RowOutcome::Decided(decision, actor) => {
@@ -662,9 +732,9 @@ impl Services {
     pub async fn poll_admin_approval(
         &self,
         authorization: TargetAuthorization,
-        context: AdminApprovalContext<'_>,
+        context: AdminApprovalContext,
     ) -> Result<PolledGate, WarpgateError> {
-        let session_id = *context.session_id;
+        let session_id = context.session_id;
         let target_name = authorization.target().name.clone();
         let statuses = self.admin_approval_statuses().await;
 
@@ -707,24 +777,12 @@ impl Services {
         }
 
         let services = self.clone();
-        let context = AdminApprovalContext {
-            session_id: &session_id,
-            remote_ip: context.remote_ip,
-            credentials: context.credentials,
-        };
 
         tokio::spawn(async move {
             let outcome = services
-                .require_admin_approval(
-                    authorization,
-                    AdminApprovalContext {
-                        session_id: &session_id,
-                        remote_ip: context.remote_ip,
-                        credentials: context.credentials,
-                    },
-                    std::future::pending(),
-                    || async { Ok::<_, WarpgateError>(()) },
-                )
+                .require_admin_approval(authorization, context, std::future::pending(), || async {
+                    Ok::<_, WarpgateError>(())
+                })
                 .await
                 .unwrap_or_else(|error| {
                     error!(%error, "Failed to hold the session for administrator approval");
@@ -778,7 +836,7 @@ impl Services {
         target: warpgate_common::Target,
         user_info: AuthStateUserInfo,
         protocol: Protocol,
-        context: AdminApprovalContext<'_>,
+        context: AdminApprovalContext,
     ) -> Result<PolledGate, WarpgateError> {
         self.poll_admin_approval(
             TargetAuthorization::established_by_session(user_info, target, protocol),
@@ -808,7 +866,7 @@ impl Services {
         if row.consumed_at.is_some() {
             return Ok(());
         }
-        let Some((decision, actor)) = decision_from_row(&row) else {
+        let RowState::Decided(decision, actor) = row_state(&row) else {
             return Ok(());
         };
         self.apply_user_approval(row.session_id, decision, &actor)
@@ -840,7 +898,7 @@ impl Services {
             .await?;
 
         for row in rows {
-            let Some((decision, actor)) = decision_from_row(&row) else {
+            let RowState::Decided(decision, actor) = row_state(&row) else {
                 continue;
             };
             self.apply_user_approval(row.session_id, decision, &actor)
@@ -1029,8 +1087,11 @@ async fn upsert_request(
     db: &DatabaseConnection,
     row: SessionApprovalRequest::ActiveModel,
 ) -> Result<(), WarpgateError> {
-    use SessionApprovalRequest::{ApprovalRequestStatus as Status, Column};
+    use SessionApprovalRequest::ApprovalRequestStatus as Status;
 
+    // The whole row is rewritten, so this writes its status through
+    // `Entity::update` rather than a `StatusTransition` — but under the same
+    // rule: the states it may take over are named, not assumed.
     let mut reopened = row.clone();
     reopened.status = Set(Status::Pending);
     reopened.scope = Set(None);
@@ -1039,11 +1100,7 @@ async fn upsert_request(
     reopened.consumed_at = Set(None);
 
     match SessionApprovalRequest::Entity::update(reopened)
-        .filter(
-            Column::ConsumedAt
-                .is_not_null()
-                .or(Column::Status.is_in(Status::UNANSWERED)),
-        )
+        .filter(question_is_over())
         .exec(db)
         .await
     {
@@ -1098,14 +1155,8 @@ pub async fn close_request(
     kind: ApprovalKind,
     status: SessionApprovalRequest::ApprovalRequestStatus,
 ) -> Result<(), WarpgateError> {
-    use SessionApprovalRequest::{ApprovalRequestStatus, Column};
-
-    SessionApprovalRequest::Entity::update_many()
-        .col_expr(Column::Status, status.into())
-        .filter(Column::SessionId.eq(session_id))
-        .filter(Column::Kind.eq(SessionApprovalRequest::ApprovalRequestKind::from(kind)))
-        .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
-        .exec(db)
+    StatusTransition::from_pending(status)
+        .apply(db, one_request(session_id, kind))
         .await?;
     Ok(())
 }
@@ -1136,13 +1187,13 @@ pub(crate) async fn abandon_requests_for_session(
     db: &DatabaseConnection,
     session_id: Uuid,
 ) -> Result<(), WarpgateError> {
-    use SessionApprovalRequest::{ApprovalRequestStatus, Column};
-
-    SessionApprovalRequest::Entity::update_many()
-        .col_expr(Column::Status, ApprovalRequestStatus::Abandoned.into())
-        .filter(Column::SessionId.eq(session_id))
-        .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
-        .exec(db)
+    StatusTransition::from_pending(SessionApprovalRequest::ApprovalRequestStatus::Abandoned)
+        .apply(
+            db,
+            SessionApprovalRequest::Column::SessionId
+                .eq(session_id)
+                .into_condition(),
+        )
         .await?;
     Ok(())
 }
@@ -1165,11 +1216,8 @@ pub(crate) async fn reap_stale(db: &DatabaseConnection) -> Result<(), WarpgateEr
     let lifetime = request_lifetime(db).await?;
     #[allow(clippy::cast_possible_wrap)]
     let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(lifetime.as_secs() as i64);
-    SessionApprovalRequest::Entity::update_many()
-        .col_expr(Column::Status, ApprovalRequestStatus::Abandoned.into())
-        .filter(Column::Started.lt(cutoff))
-        .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
-        .exec(db)
+    StatusTransition::from_pending(ApprovalRequestStatus::Abandoned)
+        .apply(db, Column::Started.lt(cutoff).into_condition())
         .await?;
     Ok(())
 }
@@ -1271,7 +1319,7 @@ mod tests {
             .unwrap()
             .expect("the request should still exist");
         assert!(
-            decision_from_row(&row).is_some(),
+            matches!(row_state(&row), RowState::Decided(..)),
             "re-advertising must not erase the recorded decision",
         );
     }

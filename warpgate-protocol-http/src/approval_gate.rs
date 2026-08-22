@@ -10,7 +10,7 @@ use http::StatusCode;
 use poem::web::Html;
 use poem::{IntoResponse, Request, Response};
 use warpgate_common::Target;
-use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_common::auth::{AuthStateUserInfo, RememberedBy};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::approvals::{AdminApprovalContext, PolledGate};
 
@@ -49,12 +49,12 @@ pub async fn check_admin_approval(
             user_info,
             crate::common::PROTOCOL_NAME,
             AdminApprovalContext {
-                session_id: &session_id,
+                session_id,
                 remote_ip: req.remote_addr().as_socket_addr().map(|a| a.ip()),
                 // The credentials that authenticated the session aren't carried
                 // on the request, so an HTTP session neither contributes nor
                 // consumes a remembered approval.
-                credentials: None,
+                credentials: RememberedBy::Nothing,
             },
         )
         .await?;

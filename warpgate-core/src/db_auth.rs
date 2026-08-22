@@ -10,7 +10,9 @@ use std::net::IpAddr;
 
 use tracing::{error, info, warn};
 use url::Url;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
+use warpgate_common::auth::{
+    AuthCredential, AuthResult, AuthSelector, CredentialKind, RememberedBy,
+};
 use warpgate_common::{Protocol, Secret, SessionId, WarpgateError};
 
 use crate::approvals::{AdminApprovalContext, GateOutcome};
@@ -90,7 +92,7 @@ async fn hold_for_admin_approval<T: DbAuthTransport>(
     transport: &mut T,
     services: &Services,
     authorization: TargetAuthorization,
-    context: AdminApprovalContext<'_>,
+    context: AdminApprovalContext,
     auth_ok: &mut Option<AuthOkPermit>,
 ) -> Result<GateOutcome, T::Error> {
     services
@@ -181,9 +183,10 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                 services,
                 authorization,
                 AdminApprovalContext {
-                    session_id: &session_id,
+                    session_id,
                     remote_ip: Some(remote_ip),
-                    credentials: None,
+                    // A ticket is not a stable credential fingerprint.
+                    credentials: RememberedBy::Nothing,
                 },
                 &mut auth_ok,
             )
@@ -275,15 +278,15 @@ async fn authorize_user<T: DbAuthTransport>(
                     return Ok(None);
                 };
 
-                let credentials = state_arc.lock().await.credential_fingerprints();
+                let credentials = state_arc.lock().await.remembered_by();
                 let Some(approved) = hold_for_admin_approval(
                     transport,
                     services,
                     authorization,
                     AdminApprovalContext {
-                        session_id: &session_id,
+                        session_id,
                         remote_ip: Some(remote_ip),
-                        credentials: Some(credentials),
+                        credentials,
                     },
                     &mut auth_ok,
                 )

@@ -23,6 +23,7 @@ use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
+    RememberedBy,
 };
 use warpgate_common::{Protocol, Secret, SessionId, Target, WarpgateError};
 use warpgate_common_http::ext::construct_external_url;
@@ -275,8 +276,8 @@ pub async fn approve_session(
     // so no credential fingerprints to key a remembered approval on.
     let state = services.auth_state_store.lock().await.get(session_id);
     let credentials = match state {
-        Some(state) => Some(state.lock().await.credential_fingerprints()),
-        None => None,
+        Some(state) => state.lock().await.remembered_by(),
+        None => RememberedBy::Nothing,
     };
 
     // Armed for the whole wait: the viewer dropping mid-approval cancels this
@@ -288,7 +289,7 @@ pub async fn approve_session(
         .require_admin_approval(
             authorization,
             AdminApprovalContext {
-                session_id,
+                session_id: *session_id,
                 remote_ip,
                 credentials,
             },

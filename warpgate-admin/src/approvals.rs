@@ -9,14 +9,16 @@
 
 use sea_orm::EntityTrait;
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
 use warpgate_common::auth::ApprovalKind;
 use warpgate_common::helpers::username::username_eq_ci;
+use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
 use warpgate_core::approvals::{ApprovalActor, ApprovalDecision, close_request, record_decision};
 use warpgate_db_entities::{Node, SessionApprovalRequest};
+
+use crate::api::common::has_admin_permission;
 
 /// The identity to record against a decision.
 pub fn acting_approver(ctx: &AuthenticatedRequestContext) -> ApprovalActor {
@@ -151,6 +153,55 @@ async fn pending_approval_from_row(
     }))
 }
 
+/// Who is answering a request, which is what decides whether answering for
+/// yourself is allowed.
+///
+/// The two callers of [`resolve_pending_approval`] want opposite things here —
+/// the administrator inbox must refuse a self-approval, the gateway's own-request
+/// endpoint exists to serve one — and nothing in a `ctx` says which you are. So
+/// the caller states it, and the check lives with the resolution rather than in
+/// whichever endpoint remembered to run it.
+pub enum Approver {
+    /// An administrator acting on someone else's held session.
+    Administrator,
+    /// The user answering their own out-of-band request.
+    TheUserThemselves,
+}
+
+/// Approving your own held session defeats the four-eyes property the
+/// administrator gate exists for, so it is refused — unless the approver could
+/// edit targets, since that lets them clear `require_approval` and walk through
+/// anyway.
+///
+/// Only approvals: rejecting your own session grants nothing.
+async fn check_self_approval(
+    ctx: &AuthenticatedRequestContext,
+    approver: &Approver,
+    pending: &PendingApproval,
+    decision: ApprovalDecision,
+) -> Result<(), WarpgateError> {
+    if matches!(approver, Approver::TheUserThemselves)
+        || matches!(decision, ApprovalDecision::Rejected)
+    {
+        return Ok(());
+    }
+
+    let Some(username) = ctx.auth.username() else {
+        // Not a user (admin API token) — there is no "own session" to speak of.
+        return Ok(());
+    };
+
+    if !username_eq_ci(&pending.username, username)
+        || has_admin_permission(ctx, Some(AdminPermission::TargetsEdit)).await?
+    {
+        return Ok(());
+    }
+
+    Err(WarpgateError::NoAdminPermission(
+        AdminPermission::TargetsEdit,
+    ))
+}
+
 /// Records a decision on a pending request, wherever the approver is talking to
 /// the cluster. The owning node picks it up from the row.
 ///
@@ -159,9 +210,12 @@ async fn pending_approval_from_row(
 /// administrator requirement.
 pub async fn resolve_pending_approval(
     ctx: &AuthenticatedRequestContext,
+    approver: Approver,
     pending: PendingApproval,
     decision: ApprovalDecision,
 ) -> Result<ApprovalResolution, WarpgateError> {
+    check_self_approval(ctx, &approver, &pending, decision).await?;
+
     let actor = acting_approver(ctx);
     let recorded = record_decision(
         &ctx.services().db,

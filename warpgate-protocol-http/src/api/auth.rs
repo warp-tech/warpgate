@@ -21,8 +21,8 @@ use warpgate_admin::api::cluster_proxy::{
     proxy_or_serve_pending_login, session_owner,
 };
 use warpgate_admin::approvals::{
-    ApprovalResolution, acting_approver, find_pending_user_approval, find_user_approval_row,
-    resolve_pending_approval,
+    ApprovalResolution, Approver, acting_approver, find_pending_user_approval,
+    find_user_approval_row, resolve_pending_approval,
 };
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
@@ -428,7 +428,7 @@ async fn resolve_own_approval(
     let Some(pending) = find_pending_user_approval(ctx, *session_id).await? else {
         return Ok(ApprovalActionResponse::NotFound);
     };
-    match resolve_pending_approval(ctx, pending, decision).await? {
+    match resolve_pending_approval(ctx, Approver::TheUserThemselves, pending, decision).await? {
         ApprovalResolution::Resolved => Ok(ApprovalActionResponse::Ok),
         ApprovalResolution::NotFound => Ok(ApprovalActionResponse::NotFound),
     }
