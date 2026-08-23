@@ -35,7 +35,7 @@ RUN <<EOF
   set -xe
   apt-get -y update -qq
   apt-get install --no-install-recommends --no-install-suggests -y \
-    ca-certificates wget
+    ca-certificates wget sqlite3
   apt-get clean
   rm -rf /var/lib/apt/lists/*
 EOF
