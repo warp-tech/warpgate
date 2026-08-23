@@ -23,7 +23,7 @@ use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::accept_loop;
 use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetVncOptions};
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
+use warpgate_core::{PendingTicket, Services, SessionStateInit, State, WarpgateServerHandle};
 use warpgate_desktop_auth::{
     DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
 };
@@ -270,7 +270,11 @@ async fn negotiate_and_authorize(
                 .login_protection
                 .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
                 .await;
-            (authorization, options, None)
+            (
+                authorization,
+                options,
+                PendingTicket::new(services.db.clone(), None),
+            )
         }
         // Already handled before the security handshake above.
         DesktopAuthOutcome::Failed => return Ok(None),

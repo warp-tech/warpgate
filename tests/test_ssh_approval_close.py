@@ -53,7 +53,7 @@ class Test:
             time.sleep(2)
             assert client.poll() is None, "session connected before approval"
 
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
 
         assert b"gate-marker" in client.communicate(timeout=timeout)[0]
 

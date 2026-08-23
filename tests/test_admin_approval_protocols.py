@@ -71,7 +71,7 @@ class Test:
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
             assert approval.protocol == "MySQL"
-            api.reject_session(approval.id)
+            api.reject_session(approval.id, approval.target)
 
         client.communicate(b"show tables;\n", timeout=timeout)
         assert client.returncode != 0
@@ -104,7 +104,7 @@ class Test:
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
             assert approval.protocol == "HTTP"
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
 
         # The client's own retry now goes through to the echo server.
         for _ in range(40):
@@ -138,7 +138,7 @@ class Test:
 
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.reject_session(approval.id)
+            api.reject_session(approval.id, approval.target)
 
         for _ in range(40):
             response = session.get(f"{url}/?warpgate-target={target.name}")
@@ -212,7 +212,7 @@ class Test:
 
         with admin_client(f"https://localhost:{node_b.http_port}") as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.reject_session(approval.id)
+            api.reject_session(approval.id, approval.target)
 
         client.communicate(timeout=timeout)
         assert client.returncode != 0
@@ -277,7 +277,7 @@ class Test:
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
             assert approval.protocol == "VNC"
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
 
         viewer.join(timeout=timeout)
         assert "error" not in result, result.get("error")

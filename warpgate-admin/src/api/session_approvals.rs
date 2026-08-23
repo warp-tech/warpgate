@@ -55,14 +55,23 @@ enum ActionResponse {
 ///
 /// The decision is recorded on the request row and read back by the node
 /// running the held session, so this is served wherever it lands.
+///
+/// `target` is the target the admin's screen showed for this session. The
+/// request may have been reopened for a different target since the list was
+/// rendered — that is a question the admin never saw, so the stale click gets
+/// a not-found rather than resolving it.
 async fn resolve(
     ctx: &AuthenticatedRequestContext,
     session_id: Uuid,
+    target: &str,
     decision: ApprovalDecision,
 ) -> poem::Result<ActionResponse> {
     let Some(pending) = find_pending_approval(ctx, session_id, ApprovalKind::Admin).await? else {
         return Ok(ActionResponse::NotFound);
     };
+    if pending.target != target {
+        return Ok(ActionResponse::NotFound);
+    }
 
     match resolve_pending_approval(ctx, Approver::Administrator, pending, decision).await? {
         ApprovalResolution::Resolved => Ok(ActionResponse::Ok),
@@ -130,9 +139,11 @@ impl Api {
         admin: AdminContext,
         id: Path<Uuid>,
         scope: Query<ApprovalScope>,
+        /// The target shown for this session in the approvals list.
+        target: Query<String>,
     ) -> poem::Result<ActionResponse> {
         admin.require(AdminPermission::ApproveSessions)?;
-        resolve(&admin, id.0, ApprovalDecision::Approved(scope.0)).await
+        resolve(&admin, id.0, &target.0, ApprovalDecision::Approved(scope.0)).await
     }
 
     #[oai(
@@ -144,9 +155,11 @@ impl Api {
         &self,
         admin: AdminContext,
         id: Path<Uuid>,
+        /// The target shown for this session in the approvals list.
+        target: Query<String>,
     ) -> poem::Result<ActionResponse> {
         admin.require(AdminPermission::ApproveSessions)?;
-        resolve(&admin, id.0, ApprovalDecision::Rejected).await
+        resolve(&admin, id.0, &target.0, ApprovalDecision::Rejected).await
     }
 }
 

@@ -9,7 +9,8 @@ use poem::http::StatusCode;
 use poem::{IntoResponse, Request, Response};
 use warpgate_common::auth::RememberedBy;
 use warpgate_common::{SessionId, WarpgateError};
-use warpgate_core::approvals::{AdminApprovalContext, PolledGate};
+use warpgate_common_http::logging::get_client_ip_addr;
+use warpgate_core::approvals::{AdminApprovalContext, PolledGate, TicketStake};
 use warpgate_core::{ApprovedTarget, Services, TargetAuthorization};
 
 /// The proof needed to reach the cluster, or the response to send back instead.
@@ -25,11 +26,14 @@ pub async fn check_admin_approval(
             authorization,
             AdminApprovalContext {
                 session_id,
-                remote_ip: req.remote_addr().as_socket_addr().map(|a| a.ip()),
+                remote_ip: get_client_ip_addr(req, services).await,
                 // Client certificates and tokens are re-presented per request rather
                 // than settled into an auth state, so a Kubernetes session neither
                 // contributes nor consumes a remembered approval.
                 credentials: RememberedBy::Nothing,
+                // Kubernetes authenticates with certificates and tokens, never
+                // a ticket.
+                ticket: TicketStake::None,
             },
         )
         .await?;

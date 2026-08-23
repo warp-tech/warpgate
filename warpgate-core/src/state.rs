@@ -12,7 +12,7 @@ use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{Protocol, SessionId, Target, WarpgateError};
 use warpgate_db_entities::Session;
 
-use crate::approvals::AdminApprovalStatuses;
+use crate::approvals::SessionGates;
 use crate::logging::AuditEvent;
 use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
 use crate::{SessionHandle, WarpgateServerHandle};
@@ -24,10 +24,10 @@ pub struct State {
     node_id: Uuid,
     rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     change_sender: broadcast::Sender<()>,
-    /// Administrator-gate outcomes for sessions that observe the gate rather
+    /// Administrator-gate ledger for sessions that observe the gate rather
     /// than parking on it. Kept here because an entry describes one connection
     /// and must be dropped with it, which is what this type already tracks.
-    admin_approval_statuses: AdminApprovalStatuses,
+    admin_approval_gates: Arc<SessionGates>,
 }
 
 impl State {
@@ -43,14 +43,14 @@ impl State {
             node_id,
             rate_limiter_registry: rate_limiter_registry.clone(),
             change_sender: sender,
-            admin_approval_statuses: AdminApprovalStatuses::default(),
+            admin_approval_gates: Arc::default(),
         }))
     }
 
-    /// Handle to the administrator-gate outcomes, for the wait sites that
-    /// record them.
-    pub fn admin_approval_statuses(&self) -> AdminApprovalStatuses {
-        self.admin_approval_statuses.clone()
+    /// Handle to the administrator-gate ledger, for the wait sites that
+    /// record into it.
+    pub fn admin_approval_gates(&self) -> Arc<SessionGates> {
+        self.admin_approval_gates.clone()
     }
 
     pub async fn register_session(
@@ -136,7 +136,7 @@ impl State {
         if let Err(error) = crate::approvals::abandon_requests_for_session(&self.db, id).await {
             error!(%error, %id, "Could not close the session's approval requests");
         }
-        self.admin_approval_statuses.lock().await.remove(&id);
+        self.admin_approval_gates.forget_session(&id).await;
     }
 
     pub async fn remove_session(&mut self, id: SessionId) {

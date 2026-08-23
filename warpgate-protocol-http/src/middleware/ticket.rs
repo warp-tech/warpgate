@@ -64,7 +64,7 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
             }
 
             if let Some(ticket) = ticket_value
-                && let Some(authorization) = {
+                && let Some((authorization, unconsumed_ticket_id)) = {
                     let ticket_secret = Secret::new(ticket);
                     let client_ip: Option<IpAddr> = get_client_ip(&req, ctx.services())
                         .await
@@ -78,8 +78,20 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                     )
                     .await?
                     {
-                        consume_ticket(&ctx.services().db, &ticket.id).await?;
-                        Some(authorization)
+                        // A ticket for a gated target is spent by the
+                        // administrator's approval, not by establishing the
+                        // session — a refusal must not burn a use. The id rides
+                        // on the session so the gate knows which ticket its
+                        // approval consumes; a target whose approval
+                        // requirement is cleared mid-session simply leaves the
+                        // use unspent.
+                        let unconsumed_ticket_id = if authorization.target().require_approval {
+                            Some(ticket.id)
+                        } else {
+                            consume_ticket(&ctx.services().db, &ticket.id).await?;
+                            None
+                        };
+                        Some((authorization, unconsumed_ticket_id))
                     } else {
                         None
                     }
@@ -89,6 +101,7 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                     user_id: authorization.user_info().id,
                     username: authorization.user_info().username.clone(),
                     target_id: authorization.target().id,
+                    unconsumed_ticket_id,
                 });
             }
         }

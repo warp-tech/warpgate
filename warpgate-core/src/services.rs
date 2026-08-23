@@ -7,11 +7,11 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::{Mutex, broadcast};
 use tracing::warn;
-use warpgate_common::auth::{AuthState, CredentialKind};
+use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
 use warpgate_common::{GlobalParams, Protocol, Secret, SessionId, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Parameters;
 
-use crate::approvals::AdminApprovalStatuses;
+use crate::approvals::SessionGates;
 use crate::cluster::Cluster;
 use crate::db::connect_to_db_and_migrate;
 use crate::login_protection::LoginProtectionService;
@@ -183,9 +183,9 @@ impl Services {
         self.admin_approval_request_tx.subscribe()
     }
 
-    /// Handle to the per-session administrator-gate outcomes.
-    pub(crate) async fn admin_approval_statuses(&self) -> AdminApprovalStatuses {
-        self.state.lock().await.admin_approval_statuses()
+    /// Handle to the per-session administrator-gate ledger.
+    pub(crate) async fn admin_approval_gates(&self) -> Arc<SessionGates> {
+        self.state.lock().await.admin_approval_gates()
     }
 
     /// How long a session held for administrator approval waits before being
@@ -250,7 +250,10 @@ impl Services {
     }
 
     /// If a matching web approval is still within the grace period, satisfies the
-    /// pending `WebUserApproval` requirement and logs an audit event
+    /// pending `WebUserApproval` requirement and logs an audit event.
+    ///
+    /// The lookup runs against the stored approval records, so an approval
+    /// granted while the user was talking to another node bypasses here too.
     pub async fn try_web_approval_bypass(
         &self,
         state_arc: &Arc<Mutex<AuthState>>,
@@ -258,10 +261,24 @@ impl Services {
         let Some(grace) = self.web_approval_grace_period().await? else {
             return Ok(false);
         };
-        self.auth_state_store
-            .lock()
-            .await
-            .try_web_approval_bypass(state_arc, grace)
-            .await
+        let Some(key) = state_arc.lock().await.web_approval_match_key() else {
+            return Ok(false);
+        };
+        if !crate::approvals::approval_is_remembered(&self.db, &key, grace).await? {
+            return Ok(false);
+        }
+
+        let mut state = state_arc.lock().await;
+
+        // A concurrent change may have satisfied or cancelled the requirement
+        // while the lookup ran unlocked.
+        if !matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval))
+        {
+            return Ok(false);
+        }
+
+        state.add_web_user_approval();
+        state.emit_web_approval_bypassed_event();
+        Ok(true)
     }
 }

@@ -64,6 +64,13 @@ pub enum SessionAuthorization {
         /// The row the ticket was issued for. Pinned by id so a rename — or a
         /// new target claiming the old name — can't redirect the session.
         target_id: Uuid,
+        /// The ticket this session authenticated with, where its consumption
+        /// is deferred: a target that requires administrator approval spends
+        /// the ticket on the approval, not on establishing the session, so a
+        /// refusal doesn't burn a use. `None` once (or where) the ticket is
+        /// consumed.
+        #[serde(default)]
+        unconsumed_ticket_id: Option<Uuid>,
     },
 }
 
@@ -274,6 +281,7 @@ mod tests {
             user_id: Uuid::nil(),
             username: "alice".into(),
             target_id: Uuid::nil(),
+            unconsumed_ticket_id: None,
         });
         assert!(ticket.as_full_user().is_none());
 

@@ -42,6 +42,10 @@ pub struct PendingApproval {
     pub kind: ApprovalKind,
     /// The user whose session is being held — the one an approver must not be.
     pub username: String,
+    /// The target the question was about when the row was read. Echoed into
+    /// the decision, so a request reopened for a different target in the
+    /// meantime cannot be resolved by a click meant for this one.
+    pub target: String,
 }
 
 /// Whether a decision was recorded, or the request had already gone.
@@ -140,6 +144,7 @@ async fn pending_approval_from_row(
             &services.db,
             row.session_id,
             kind,
+            &row.target,
             SessionApprovalRequest::ApprovalRequestStatus::Abandoned,
         )
         .await?;
@@ -150,6 +155,7 @@ async fn pending_approval_from_row(
         session_id: row.session_id,
         kind,
         username: row.username,
+        target: row.target,
     }))
 }
 
@@ -214,6 +220,16 @@ pub async fn resolve_pending_approval(
     pending: PendingApproval,
     decision: ApprovalDecision,
 ) -> Result<ApprovalResolution, WarpgateError> {
+    // [`Approver::TheUserThemselves`] exists to answer the user's own
+    // `User`-kind request, and skips the four-eyes check on that basis. An
+    // administrator gate answered under that flag would skip it too, so the
+    // pairing is enforced here rather than trusted to each endpoint.
+    if matches!(approver, Approver::TheUserThemselves) && pending.kind != ApprovalKind::User {
+        return Err(WarpgateError::InconsistentState(
+            "only the user's own approval request can be answered as the user themselves".into(),
+        ));
+    }
+
     check_self_approval(ctx, &approver, &pending, decision).await?;
 
     let actor = acting_approver(ctx);
@@ -221,6 +237,7 @@ pub async fn resolve_pending_approval(
         &ctx.services().db,
         pending.session_id,
         pending.kind,
+        &pending.target,
         decision,
         &actor,
     )

@@ -96,6 +96,41 @@ fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
+impl AuthCredentialFingerprint {
+    /// Appends a canonical byte encoding of this fingerprint, for digesting a
+    /// set of them into a value stable across processes and releases — it is
+    /// compared against digests stored in the database. Variable-length parts
+    /// are length-prefixed so no two sets can encode to the same bytes.
+    pub(crate) fn write_canonical_bytes(&self, out: &mut Vec<u8>) {
+        fn push_str(out: &mut Vec<u8>, s: &str) {
+            out.extend_from_slice(&(s.len() as u64).to_le_bytes());
+            out.extend_from_slice(s.as_bytes());
+        }
+        match self {
+            Self::Otp => out.push(1),
+            Self::Password { hash } => {
+                out.push(2);
+                out.extend_from_slice(hash);
+            }
+            Self::PublicKey { kind, hash } => {
+                out.push(3);
+                push_str(out, kind);
+                out.extend_from_slice(hash);
+            }
+            Self::Certificate { hash } => {
+                out.push(4);
+                out.extend_from_slice(hash);
+            }
+            Self::Sso { provider, email } => {
+                out.push(5);
+                push_str(out, provider);
+                push_str(out, email);
+            }
+            Self::WebUserApproval => out.push(6),
+        }
+    }
+}
+
 impl From<&AuthCredential> for AuthCredentialFingerprint {
     fn from(cred: &AuthCredential) -> Self {
         match cred {

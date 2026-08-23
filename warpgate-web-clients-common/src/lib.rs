@@ -9,6 +9,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -17,9 +18,14 @@ use tokio::sync::futures::Notified;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
-use warpgate_core::{SessionHandle, WarpgateServerHandle};
+use warpgate_common::auth::RememberedBy;
+use warpgate_core::approvals::{AdminApprovalContext, TicketStake};
+use warpgate_core::{
+    ApprovedTarget, Services, SessionHandle, TargetAuthorization, WarpgateServerHandle,
+};
 use warpgate_db_entities::Target::TargetKind;
 
 /// Session grace period: how long a session lingers after the WebSocket drops before the
@@ -191,6 +197,51 @@ pub trait ManagedSession: Send + Sync + 'static {
     fn user_id(&self) -> Uuid;
     /// Invoked when the manager drops this session (abort the backend; mark dead if needed).
     fn on_removed(&self);
+}
+
+/// Holds a freshly registered in-browser client session at the administrator
+/// gate, and hands back the proof its dial site needs.
+///
+/// The session is registered before the gate so an administrator can see (and
+/// close) the attempt while it waits, but marked provisional until it is let
+/// through: one that never becomes a session leaves no session behind, only
+/// its approval request. A browser session carries no credential fingerprints
+/// of its own, so it neither contributes nor consumes a remembered approval.
+pub async fn gate_web_client_session(
+    services: &Services,
+    server_handle: &Arc<Mutex<WarpgateServerHandle>>,
+    authorization: TargetAuthorization,
+    remote_address: Option<SocketAddr>,
+) -> Result<ApprovedTarget, WarpgateError> {
+    let session_id = {
+        let mut handle = server_handle.lock().await;
+        handle.mark_provisional();
+        handle.id()
+    };
+
+    let Some(approved) = services
+        .require_admin_approval(
+            authorization,
+            AdminApprovalContext {
+                session_id,
+                remote_ip: remote_address.map(|address| address.ip()),
+                credentials: RememberedBy::Nothing,
+                // A browser client session is opened from an already
+                // established portal login, never by a ticket.
+                ticket: TicketStake::None,
+            },
+            std::future::pending(),
+            || async { Ok::<_, WarpgateError>(()) },
+        )
+        .await?
+        .approved()
+    else {
+        warn!("Session was not approved by an administrator");
+        return Err(WarpgateError::SessionNotApproved);
+    };
+
+    server_handle.lock().await.confirm();
+    Ok(approved)
 }
 
 /// A user's claim on one session slot, held from before the session exists until

@@ -8,15 +8,15 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, error, info_span, warn};
 use uuid::Uuid;
-use warpgate_common::auth::RememberedBy;
 use warpgate_common::{TargetOptions, WarpgateError};
-use warpgate_core::approvals::AdminApprovalContext;
 use warpgate_core::{Services, SessionStateInit, State, TargetAuthorization};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient, resolve_ssh_chain};
-use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
+use warpgate_web_clients_common::{
+    ClientManager, SessionRemover, WebSessionHandle, gate_web_client_session,
+};
 
 use crate::protocol::ServerMessage;
 use crate::session::WebSshSession;
@@ -73,42 +73,12 @@ impl WebSshClientManager {
         .await
         .context("registering webSSH session")?;
 
-        let session_id = {
-            let mut server_handle = server_handle.lock().await;
-            // Registered before the gate so an administrator can see (and close)
-            // the attempt while it waits, but provisional until it is let
-            // through: one that never becomes a session leaves no session
-            // behind, only its approval request.
-            server_handle.mark_provisional();
-            server_handle.id()
-        };
-
-        // The in-browser client reaches the same targets as every other
-        // protocol, so it is held on the same terms. Gated after registration so
-        // the request is attributable to a session an administrator can see, and
-        // before anything is dialed. A browser session carries no credential
-        // fingerprints of its own, so it neither contributes nor consumes a
-        // remembered approval.
-        let Some(approved) = services
-            .require_admin_approval(
-                authorization,
-                AdminApprovalContext {
-                    session_id,
-                    remote_ip: remote_address.map(|address| address.ip()),
-                    credentials: RememberedBy::Nothing,
-                },
-                std::future::pending(),
-                || async { Ok::<_, WarpgateError>(()) },
-            )
-            .await?
-            .approved()
-        else {
-            warn!("Session was not approved by an administrator");
-            return Err(WarpgateError::SessionNotApproved);
-        };
+        let approved =
+            gate_web_client_session(services, &server_handle, authorization, remote_address)
+                .await?;
+        let session_id = server_handle.lock().await.id();
 
         let (user_info, target) = approved.into_parts();
-        server_handle.lock().await.confirm();
         let username = user_info.username.clone();
 
         {

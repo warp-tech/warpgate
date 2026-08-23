@@ -36,7 +36,7 @@ class Test:
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
             assert approval.protocol == "PostgreSQL"
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
 
         # Once approved the session proceeds and the query runs.
         assert b"tbl" in client.communicate(b"\\dt\n", timeout=timeout)[0]
@@ -72,7 +72,7 @@ class Test:
 
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.reject_session(approval.id)
+            api.reject_session(approval.id, approval.target)
 
         # A rejected session is denied: psql exits non-zero without connecting.
         client.communicate(timeout=timeout)
@@ -134,7 +134,7 @@ class Test:
         # an administrator.
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
 
         assert b"tbl" in client.communicate(b"\\dt\n", timeout=timeout)[0]
         assert client.returncode == 0
@@ -189,7 +189,7 @@ class Test:
         assert len(ours) == 1, "indicator would show no outstanding requests"
 
         with admin_client(url) as api:
-            api.approve_session(ours[0]["id"], sdk.ApprovalScope.ONCE)
+            api.approve_session(ours[0]["id"], sdk.ApprovalScope.ONCE, ours[0]["target"])
 
         # Resolved requests drop out of the count.
         client.communicate(b"\\dt\n", timeout=timeout)
@@ -270,7 +270,7 @@ class Test:
         # Resolving one kind leaves the other counted.
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
         client.communicate(b"\\dt\n", timeout=timeout)
         assert counts() == (0, 1)
 
@@ -316,7 +316,7 @@ class Test:
         # The ticket connection is held, and appears in the approval queue.
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
 
         assert b"tbl" in client.communicate(b"\\dt\n", timeout=timeout)[0]
         assert client.returncode == 0
@@ -346,7 +346,7 @@ class Test:
         # Approved from node B.
         with admin_client(f"https://localhost:{node_b.http_port}") as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
 
         assert b"tbl" in client.communicate(b"\\dt\n", timeout=timeout)[0]
         assert client.returncode == 0

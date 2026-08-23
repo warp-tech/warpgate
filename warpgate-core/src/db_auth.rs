@@ -15,7 +15,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::{Protocol, Secret, SessionId, WarpgateError};
 
-use crate::approvals::{AdminApprovalContext, GateOutcome};
+use crate::approvals::{AdminApprovalContext, GateOutcome, TicketStake};
 use crate::auth::submit_credential;
 use crate::login_protection::FailedAttemptInfo;
 use crate::{
@@ -171,13 +171,6 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
             );
             let mut auth_ok = Some(AuthOkPermit);
 
-            // Armed for the whole hold: the client dropping mid-approval
-            // cancels this future, so the ticket has to be spent by the guard
-            // rather than by any statement below. A ticket is not a stable
-            // credential fingerprint, so it never contributes a remembered
-            // approval.
-            let mut ticket = PendingTicket::new(services.db.clone(), Some(ticket.id));
-
             let outcome = hold_for_admin_approval(
                 transport,
                 services,
@@ -187,16 +180,18 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                     remote_ip: Some(remote_ip),
                     // A ticket is not a stable credential fingerprint.
                     credentials: RememberedBy::Nothing,
+                    // Armed for the whole hold: the client dropping
+                    // mid-approval cancels this future, so the ticket has to
+                    // be settled by the gate and the guard rather than by any
+                    // statement below.
+                    ticket: TicketStake::Held(PendingTicket::new(
+                        services.db.clone(),
+                        Some(ticket.id),
+                    )),
                 },
                 &mut auth_ok,
             )
             .await;
-
-            // A refusal — the administrator's, or a gate that failed to reach
-            // one — is not the user's doing, so the ticket keeps its use.
-            if !matches!(outcome, Ok(GateOutcome::Approved(_))) {
-                ticket.disarm();
-            }
 
             let Some(approved) = outcome?.approved() else {
                 warn!("Session was not approved by an administrator");
@@ -287,6 +282,7 @@ async fn authorize_user<T: DbAuthTransport>(
                         session_id,
                         remote_ip: Some(remote_ip),
                         credentials,
+                        ticket: TicketStake::None,
                     },
                     &mut auth_ok,
                 )

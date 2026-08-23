@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.2-12-g573c796b-modified"
+    "version": "v0.28.2-15-g697f9193-modified"
   },
   "servers": [
     {
@@ -4276,6 +4276,17 @@
             "required": true,
             "deprecated": false,
             "explode": true
+          },
+          {
+            "name": "target",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "description": "The target shown for this session in the approvals list.",
+            "required": true,
+            "deprecated": false,
+            "explode": true
           }
         ],
         "responses": {
@@ -4307,6 +4318,17 @@
               "format": "uuid"
             },
             "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "target",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "description": "The target shown for this session in the approvals list.",
             "required": true,
             "deprecated": false,
             "explode": true

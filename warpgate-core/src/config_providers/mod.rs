@@ -166,23 +166,29 @@ pub struct TargetAuthorization {
 }
 
 impl TargetAuthorization {
-    /// For a caller whose authorization proof is not a value it can hand over —
-    /// the HTTP proxy, where a ticket session is authorized against its target
-    /// row when the session is established and each request only re-resolves
-    /// that row by id.
+    /// Authorization for a request on a session that ticket auth established:
+    /// the ticket bound the user to one target row when the session was made,
+    /// and each request re-resolves that row by id.
     ///
-    /// Restricted to this crate so the set of places that can assert
-    /// authorization without having just checked it stays greppable and small.
-    pub(crate) const fn established_by_session(
+    /// `target` must be the row `ticket_target_id` names — a target resolved
+    /// any other way is refused, so this cannot launder an unauthorized
+    /// target into a proof.
+    pub fn for_ticket_session(
         user_info: AuthStateUserInfo,
         target: Target,
+        ticket_target_id: Uuid,
         protocol: Protocol,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, WarpgateError> {
+        if target.id != ticket_target_id {
+            return Err(WarpgateError::InconsistentState(
+                "ticket session target does not match the ticket's target".into(),
+            ));
+        }
+        Ok(Self {
             user_info,
             target,
             protocol,
-        }
+        })
     }
 
     pub const fn user_info(&self) -> &AuthStateUserInfo {
@@ -377,9 +383,11 @@ pub async fn consume_ticket(
 ///
 /// A ticket is spent by *authenticating* with it, not by reaching a target:
 /// leaving it unspent whenever a session ends early would make a single-use
-/// ticket reusable without limit. The one case that must not spend it is an
-/// administrator denying the session — the user should not lose their single
-/// use to someone else's refusal — so that path [`disarm`]s the guard.
+/// ticket reusable without limit. The one case that must not spend it is the
+/// administrator gate refusing (or never deciding on) the session — the user
+/// should not lose their single use to someone else's refusal — and that call
+/// is the gate's: hand the guard to `require_admin_approval` as
+/// `TicketStake::Held` and it [`disarm`]s on every outcome but an approval.
 ///
 /// Spending on drop rather than at a call site is what makes this hold: a
 /// protocol that parks on the approval gate is dropped mid-await when its

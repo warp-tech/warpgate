@@ -27,12 +27,12 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::time::{Instant, timeout_at};
 use tracing::{Instrument, debug, error, info, info_span, warn};
-use uuid::Uuid;
 use warpgate_common::helpers::net::accept_loop;
 use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetRdpOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{
-    DesktopInput, Services, SessionStateInit, State, TargetAuthorization, WarpgateServerHandle,
+    DesktopInput, PendingTicket, Services, SessionStateInit, State, TargetAuthorization,
+    WarpgateServerHandle,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_desktop_ui::{DEFAULT_SCREEN_H, DEFAULT_SCREEN_W};
@@ -320,7 +320,11 @@ async fn control_loop(
                                     Ok((authorization, options)) => {
                                         // `screen` was updated by `run_hold_screen` as the
                                         // viewer negotiated its size during the 2FA prompt.
-                                        pending_dial = Some((authorization, options, None));
+                                        pending_dial = Some((
+                                            authorization,
+                                            options,
+                                            PendingTicket::new(services.db.clone(), None),
+                                        ));
                                         if matches!(
                                             acknowledge_banner(
                                                 &services,
@@ -455,8 +459,10 @@ async fn control_loop(
 }
 
 /// An authorized target held until the viewer's negotiated size is known, along with the
-/// unspent ticket that authorised it, if it was ticket auth.
-type PendingDial = (TargetAuthorization, TargetRdpOptions, Option<Uuid>);
+/// guard holding the ticket that authorised it (inert for non-ticket auth). Dropping the
+/// dial — the viewer leaving during the banner or size negotiation — spends the ticket
+/// through the guard: it was already used to authenticate.
+type PendingDial = (TargetAuthorization, TargetRdpOptions, PendingTicket);
 
 enum BannerOutcome {
     /// No banner is configured, so nothing was rendered and no events were consumed.

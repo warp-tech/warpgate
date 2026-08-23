@@ -4,6 +4,7 @@ use std::future::Future;
 use std::net::IpAddr;
 
 use rand::RngExt;
+use sha2::Digest;
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use tracing::{debug, info};
@@ -81,10 +82,9 @@ pub struct AuthStateUserInfo {
     pub username: String,
 }
 
-/// Cache matching key for web approval bypass.
-/// What a remembered web approval covers — and, on the lookup side, what a login
-/// is asking for. Kept as three explicit states because "no target yet" and
-/// "every target" are different things that a single `Option` would conflate.
+/// What a login is asking a remembered approval for. Explicit rather than an
+/// `Option`, because "no target yet" is a real bucket of its own: an untargeted
+/// grant must not stand in for approval of an actual target.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WebApprovalScopeKey {
     /// The flow isn't target-scoped: an HTTP portal sign-in, or SSH before the
@@ -92,8 +92,6 @@ pub enum WebApprovalScopeKey {
     Untargeted,
     /// Bound to a single target.
     Target(String),
-    /// Granted for every target.
-    AllTargets,
 }
 
 /// A non-empty, sorted, deduplicated set of credential fingerprints: the part of
@@ -115,6 +113,22 @@ impl CredentialFingerprints {
         fingerprints.sort_unstable();
         fingerprints.dedup();
         (!fingerprints.is_empty()).then_some(Self(fingerprints))
+    }
+
+    /// A stable digest of the set, for matching a session's credentials
+    /// against a stored approval record. Order-independent because the set is
+    /// sorted on construction.
+    #[must_use]
+    pub fn digest(&self) -> String {
+        let mut bytes = Vec::new();
+        for fingerprint in &self.0 {
+            fingerprint.write_canonical_bytes(&mut bytes);
+        }
+        let mut out = String::new();
+        for byte in sha2::Sha256::digest(&bytes) {
+            let _ = write!(&mut out, "{byte:02x}");
+        }
+        out
     }
 }
 
@@ -151,9 +165,11 @@ impl RememberedBy {
     }
 }
 
+/// What a login must match in a stored approval record for the grace-period
+/// bypass to fire.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebApprovalMatchKey {
-    /// Which approval the remembered grant was for. Part of the key so an
+    /// Which approval kind is being asked about. Part of the key so an
     /// administrator's grant can never satisfy a request for the user's own
     /// approval, or the other way round.
     pub kind: ApprovalKind,
@@ -165,14 +181,36 @@ pub struct WebApprovalMatchKey {
 }
 
 impl WebApprovalMatchKey {
-    /// A copy of this key that matches an approval remembered for all targets.
+    /// The one place a lookup key is normalised, shared by every approval
+    /// kind. `None` without a remote IP or without known credentials, so a
+    /// remembered approval is never replayed for a session that can't be
+    /// pinned to the same origin and the same credentials.
     #[must_use]
-    pub fn for_all_targets(&self) -> Self {
-        Self {
-            scope: WebApprovalScopeKey::AllTargets,
-            ..self.clone()
-        }
+    pub fn build(
+        kind: ApprovalKind,
+        remote_ip: Option<IpAddr>,
+        protocol: Protocol,
+        username: &str,
+        target_name: &str,
+        credentials: &RememberedBy,
+    ) -> Option<Self> {
+        Some(Self {
+            kind,
+            remote_ip: remote_ip?,
+            protocol,
+            username: username.to_lowercase(),
+            // An empty target name means the flow hasn't picked one (HTTP
+            // sign-in, SSH menu) — which is not the same as an approval
+            // covering all targets.
+            scope: if target_name.is_empty() {
+                WebApprovalScopeKey::Untargeted
+            } else {
+                WebApprovalScopeKey::Target(target_name.to_string())
+            },
+            other_credentials: credentials.credentials()?.clone(),
+        })
     }
+
 }
 
 impl From<&User> for AuthStateUserInfo {
@@ -278,20 +316,14 @@ impl AuthState {
     /// Builds the key used to match this attempt against a remembered web
     /// approval.
     pub fn web_approval_match_key(&self) -> Option<WebApprovalMatchKey> {
-        Some(WebApprovalMatchKey {
-            kind: ApprovalKind::User,
-            remote_ip: self.remote_ip?,
-            protocol: self.protocol,
-            username: self.user_info.username.to_lowercase(),
-            // An empty target name means the flow hasn't picked one (HTTP sign-in,
-            // SSH menu) — which is not the same as an approval covering all targets.
-            scope: if self.target_name.is_empty() {
-                WebApprovalScopeKey::Untargeted
-            } else {
-                WebApprovalScopeKey::Target(self.target_name.clone())
-            },
-            other_credentials: self.remembered_by().credentials()?.clone(),
-        })
+        WebApprovalMatchKey::build(
+            ApprovalKind::User,
+            self.remote_ip,
+            self.protocol,
+            &self.user_info.username,
+            &self.target_name,
+            &self.remembered_by(),
+        )
     }
 
     pub const fn started(&self) -> &OffsetDateTime {

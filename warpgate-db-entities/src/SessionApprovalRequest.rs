@@ -101,6 +101,16 @@ pub struct Model {
     /// administrator approval is a gate on a connection, with no second party
     /// reading a code off a screen.
     pub identification_string: Option<String>,
+    /// A digest of the credentials the session authenticated with, so an
+    /// approved row can be matched against a later identical connection for
+    /// the grace-period bypass. Null when the session has nothing stable to
+    /// pin a grant to — then the row can never serve as a remembered approval.
+    pub credentials_digest: Option<String>,
+    /// The ticket to consume if this request is approved. Set only where a
+    /// ticket's consumption is deferred to the gate (an HTTP ticket session,
+    /// whose session outlives any one request); connection-holding protocols
+    /// settle their ticket through the gate outcome instead.
+    pub consumes_ticket_id: Option<Uuid>,
     pub started: OffsetDateTime,
     pub status: ApprovalRequestStatus,
     /// Set alongside [`ApprovalRequestStatus::Approved`].
@@ -108,10 +118,45 @@ pub struct Model {
     pub resolved_by_username: Option<String>,
     /// Null when the resolver isn't a user, such as the admin API token.
     pub resolved_by_user_id: Option<Uuid>,
+    /// When the question left [`ApprovalRequestStatus::Pending`], however it
+    /// did. For an approval this anchors the grace-period window.
+    pub resolved_at: Option<OffsetDateTime>,
     /// When the owning node read the decision back and acted on it. Null while
     /// the request is still a live question, which is what keeps the node-wide
     /// sweep from re-applying a decision it has already delivered.
     pub consumed_at: Option<OffsetDateTime>,
+}
+
+impl Column {
+    /// The question: who is asking, from where, about what. Rewritten wholesale
+    /// whenever the row is re-advertised or a finished request is reopened.
+    ///
+    /// Every non-key column belongs to exactly this set or [`Self::DECISION`] —
+    /// a new column must be added to one of them so the reopen/takeover paths
+    /// handle it (enforced by a test in `warpgate_core::approvals`).
+    pub const IDENTITY: [Self; 9] = [
+        Self::NodeId,
+        Self::Protocol,
+        Self::Username,
+        Self::Target,
+        Self::RemoteAddress,
+        Self::IdentificationString,
+        Self::CredentialsDigest,
+        Self::ConsumesTicketId,
+        Self::Started,
+    ];
+
+    /// The answer: how the question ended, who ended it, and whether the owner
+    /// picked it up. Reset when a row is reopened for a new question, and never
+    /// overwritten while the question stands.
+    pub const DECISION: [Self; 6] = [
+        Self::Status,
+        Self::Scope,
+        Self::ResolvedByUsername,
+        Self::ResolvedByUserId,
+        Self::ResolvedAt,
+        Self::ConsumedAt,
+    ];
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

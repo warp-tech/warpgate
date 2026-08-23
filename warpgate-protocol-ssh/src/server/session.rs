@@ -27,7 +27,7 @@ use warpgate_common::eventhub::{EventHub, EventSender, EventSubscription};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, SessionId, TargetOptions, WarpgateError};
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::approvals::{AdminApprovalContext, GateOutcome};
+use warpgate_core::approvals::{AdminApprovalContext, GateOutcome, TicketStake};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
@@ -152,9 +152,10 @@ pub struct ServerSession {
     /// queue, but a hold for administrator approval sits off to the side of
     /// that queue — this reaches it directly.
     disconnect_token: CancellationToken,
-    /// Holds the ticket that authorised this session while an administrator
-    /// could still refuse it. Spent whichever way the session ends, unless the
-    /// refusal comes.
+    /// Holds the ticket that authorised this session between authentication
+    /// and the approval gate, which settles it: spent on an approval, refunded
+    /// on a refusal. A session that never reaches a gate spends it when the
+    /// guard drops at teardown — authenticating is what spends a ticket.
     pending_ticket: Option<PendingTicket>,
     /// Set while the administrator gate is holding this session: the one attempt
     /// at the target is claimed, but no remote client exists yet.
@@ -641,6 +642,12 @@ impl ServerSession {
         let event_sender = self.event_sender.clone();
         let notify_sender = self.event_sender.clone();
         let auth_state = self.auth_state.as_ref().map(|(state, _)| state.clone());
+        // The gate settles the ticket — spent on an approval, refunded on
+        // anything else — so the guard rides into it rather than staying here.
+        let ticket = self
+            .pending_ticket
+            .take()
+            .map_or(TicketStake::None, TicketStake::Held);
 
         tokio::spawn(async move {
             // Ticket-authorised sessions carry no auth state; without one there
@@ -656,6 +663,7 @@ impl ServerSession {
                         session_id,
                         remote_ip: Some(remote_ip),
                         credentials,
+                        ticket,
                     },
                     cancel.cancelled_owned(),
                     || async move {
@@ -681,10 +689,6 @@ impl ServerSession {
     /// is necessarily the one that was authorized, for the user it was authorized for, and
     /// necessarily one an administrator let this connection through to.
     async fn connect_remote(&mut self, approved: &ApprovedTarget) -> Result<()> {
-        // Past every gate, so nothing can refund the ticket any more; dropping
-        // the guard spends it now rather than at teardown.
-        self.pending_ticket = None;
-
         let ssh_chain = resolve_ssh_chain(
             &self.services,
             approved.target().id,
@@ -854,25 +858,19 @@ impl ServerSession {
                     .await?;
                 }
                 Event::AdminApprovalResolved { approved } => {
-                    // False already if the user aborted the hold themselves, in
-                    // which case the session is on its way out and the outcome
-                    // is about a question nobody is waiting on any more.
-                    let was_waiting = std::mem::take(&mut self.awaiting_approval);
+                    // Cleared already if the user aborted the hold themselves:
+                    // the session is on its way out, the outcome answers a
+                    // question nobody is waiting on any more, and dialling the
+                    // target for it would open a connection no one is there
+                    // to use.
+                    if !std::mem::take(&mut self.awaiting_approval) {
+                        return Ok(());
+                    }
                     let Some(approved) = approved else {
-                        // A denied session never reached the target, so its
-                        // ticket keeps its use.
-                        if let Some(ticket) = &mut self.pending_ticket {
-                            ticket.disarm();
-                        }
-                        self.pending_ticket = None;
-                        if was_waiting {
-                            self.emit_service_message(
-                                "Session was not approved by an administrator",
-                            )
+                        self.emit_service_message("Session was not approved by an administrator")
                             .await?;
-                            self.request_disconnect();
-                            self.disconnect_server().await;
-                        }
+                        self.request_disconnect();
+                        self.disconnect_server().await;
                         return Ok(());
                     };
                     self.connect_remote(&approved).await?;
@@ -2476,15 +2474,12 @@ impl ServerSession {
                             "Authorized for {} with a ticket",
                             authorization.target().name
                         );
-                        // A ticket is spent by authenticating with it. The only
-                        // thing that can still refund it is an administrator
-                        // refusing the session, so it is held unspent just for
-                        // the targets that have a gate to refuse it — otherwise
-                        // the guard drops here and spends it now.
-                        let ticket = PendingTicket::new(self.services.db.clone(), Some(ticket.id));
-                        if authorization.target().require_approval {
-                            self.pending_ticket = Some(ticket);
-                        }
+                        // A ticket is spent by authenticating with it. Held
+                        // for the approval gate, the one thing that can still
+                        // refund it; a session that never reaches a gate
+                        // spends it when the guard drops at teardown.
+                        self.pending_ticket =
+                            Some(PendingTicket::new(self.services.db.clone(), Some(ticket.id)));
                         let user_info = authorization.user_info().clone();
                         self._auth_accept(user_info.clone(), Some(authorization))
                             .await?;

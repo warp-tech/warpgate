@@ -8,15 +8,15 @@ use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{Instrument, debug, info_span};
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
 use warpgate_core::{
-    AuthorizedIdentity, ConfigProvider, WarpgateServerHandle, authorize_for_target,
+    AuthorizedIdentity, ConfigProvider, TargetAuthorization, WarpgateServerHandle,
+    authorize_for_target,
 };
 
-use crate::approval_gate::check_admin_approval;
+use crate::approval_gate::{UngatedTarget, check_admin_approval};
 use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
@@ -41,23 +41,28 @@ pub async fn catchall_endpoint(
     http_client_cache: Data<&HttpClientCache>,
     server_handle: Option<Data<&Arc<Mutex<WarpgateServerHandle>>>>,
 ) -> poem::Result<Response> {
-    let target_and_options = get_target_for_request(req, &ctx).await?;
-    let Some((target, options)) = target_and_options else {
+    let Some(ungated) = get_target_for_request(req, &ctx).await? else {
         return Ok(target_select_redirect());
     };
 
-    session.set_target_name(target.name.clone());
+    session.set_target_name(ungated.target().name.clone());
 
     if let Some(server_handle) = server_handle {
-        server_handle.lock().await.set_target(&target).await?;
+        server_handle
+            .lock()
+            .await
+            .set_target(ungated.target())
+            .await?;
     }
 
     // Gated before the protocol branch so the WebSocket upgrade is held too —
     // an upgrade has nowhere to render an interstitial, and letting it through
-    // would leave the gate applying only to plain requests.
-    if let Some(response) = check_admin_approval(req, &ctx, &target).await? {
-        return Ok(response);
-    }
+    // would leave the gate applying only to plain requests. The target the
+    // proxy dials only exists on the far side of the gate.
+    let (target, options) = match check_admin_approval(req, &ctx, ungated).await? {
+        Ok(approved) => approved,
+        Err(response) => return Ok(response),
+    };
 
     let span = info_span!("", target=%target.name);
 
@@ -73,31 +78,36 @@ pub async fn catchall_endpoint(
     })
 }
 
-/// Pairs a target with its HTTP options, discarding targets of other protocols.
-fn as_http_target(target: Target) -> Option<(Target, TargetHTTPOptions)> {
-    let TargetOptions::Http(ref options) = target.options else {
-        return None;
-    };
-    let options = options.clone();
-    Some((target, options))
-}
-
 async fn get_target_for_request(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
-) -> poem::Result<Option<(Target, TargetHTTPOptions)>> {
+) -> poem::Result<Option<UngatedTarget>> {
     let config_provider = ctx.services().config_provider.as_ref();
 
     // A ticket is bound to one target row, and it was authorized against that row
     // when the session was established. Resolving by id keeps the request from
     // steering it elsewhere — via query param, host rebinding or session state —
     // and survives the target being renamed.
-    if let RequestAuthorization::Session(SessionAuthorization::Ticket { target_id, .. }) = &ctx.auth
+    if let RequestAuthorization::Session(SessionAuthorization::Ticket {
+        user_id,
+        username,
+        target_id,
+        ..
+    }) = &ctx.auth
     {
-        return Ok(config_provider
-            .get_target_by_id(*target_id)
-            .await?
-            .and_then(as_http_target));
+        let Some(target) = config_provider.get_target_by_id(*target_id).await? else {
+            return Ok(None);
+        };
+        let authorization = TargetAuthorization::for_ticket_session(
+            AuthStateUserInfo {
+                id: *user_id,
+                username: username.clone(),
+            },
+            target,
+            *target_id,
+            crate::common::PROTOCOL_NAME,
+        )?;
+        return Ok(UngatedTarget::new_http(authorization));
     }
 
     let RequestAuthorization::Session(SessionAuthorization::User { user_id, username }) = &ctx.auth
@@ -161,9 +171,9 @@ async fn get_target_for_request(
         if let Some(target) = target
             && let Some(authorization) =
                 authorize_for_target(config_provider, &identity, target).await?
-            && let Some(target_and_options) = as_http_target(authorization.target().clone())
+            && let Some(ungated) = UngatedTarget::new_http(authorization)
         {
-            return Ok(Some(target_and_options));
+            return Ok(Some(ungated));
         }
     }
 

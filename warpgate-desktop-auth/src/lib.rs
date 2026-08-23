@@ -27,7 +27,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::{Protocol, Secret, SessionId, Target, WarpgateError};
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::approvals::{AdminApprovalContext, GateOutcome};
+use warpgate_core::approvals::{AdminApprovalContext, GateOutcome, TicketStake};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
@@ -63,11 +63,13 @@ pub enum DesktopAuthOutcome<O> {
     Authorized {
         authorization: TargetAuthorization,
         options: O,
-        /// A ticket that authorised this session and has *not* been spent yet.
-        /// [`approve_session`] spends it once the session is past the
-        /// administrator-approval gate, so a denied session doesn't burn a
-        /// single-use ticket.
-        pending_ticket: Option<Uuid>,
+        /// The guard holding the ticket that authorised this session, inert
+        /// for non-ticket auth. Carried as the guard rather than an id so the
+        /// ticket is spent however the session ends — a viewer that
+        /// authenticates and drops before dialing has still spent it —
+        /// while [`approve_session`] can still refund a refusal by disarming
+        /// it.
+        pending_ticket: PendingTicket,
     },
     /// Password accepted, but the policy needs an interactive second factor — collected on
     /// the per-protocol holding screen.
@@ -182,7 +184,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                     Ok(DesktopAuthOutcome::Authorized {
                         authorization,
                         options,
-                        pending_ticket: None,
+                        pending_ticket: PendingTicket::new(services.db.clone(), None),
                     })
                 }
                 // Go interactive only when *every* still-needed factor is one the holding
@@ -223,7 +225,11 @@ pub async fn authenticate<P: DesktopProtocol>(
                     Ok(DesktopAuthOutcome::Authorized {
                         authorization,
                         options,
-                        pending_ticket: Some(ticket.id),
+                        // Armed from here on: authenticating is what spends a
+                        // ticket, so however the session ends past this point,
+                        // the guard's drop spends it — unless the approval
+                        // gate refunds a refusal.
+                        pending_ticket: PendingTicket::new(services.db.clone(), Some(ticket.id)),
                     })
                 }
                 None => Ok(DesktopAuthOutcome::Failed),
@@ -256,20 +262,24 @@ pub async fn finalize_user_auth<P: DesktopProtocol>(
     Ok((authorization, options))
 }
 
-/// Hold an authenticated desktop session at the administrator-approval gate, and spend the
-/// ticket that authorised it once it is through. `Ok(None)` means the session may not
-/// proceed.
+/// Hold an authenticated desktop session at the administrator-approval gate.
+/// `Ok(None)` means the session may not proceed.
 ///
 /// Call this after authentication and before dialing the target — it takes the
 /// authorization and hands back the proof the dial sites need, so there is no way to reach
 /// a target around it. The gate itself decides whether this session needs holding at all
 /// (the target's setting, a remembered approval). Both desktop protocols hold their viewer
 /// connection inline while it waits.
+///
+/// The ticket guard arrives armed from [`authenticate`] and rides on the gate's outcome,
+/// which refunds it on everything but an approval — a refusal is not the user's doing.
+/// Every other way the session can end, before or after this call, spends it through the
+/// guard's drop.
 pub async fn approve_session(
     services: &Services,
     session_id: &SessionId,
     authorization: TargetAuthorization,
-    pending_ticket: Option<Uuid>,
+    ticket: PendingTicket,
     remote_ip: Option<IpAddr>,
 ) -> Result<Option<ApprovedTarget>> {
     // The auth state is keyed by the session id. A ticket-authorised session has none, and
@@ -280,33 +290,23 @@ pub async fn approve_session(
         None => RememberedBy::Nothing,
     };
 
-    // Armed for the whole wait: the viewer dropping mid-approval cancels this
-    // future, so the ticket has to be spent by the guard rather than by any
-    // statement below.
-    let mut ticket = PendingTicket::new(services.db.clone(), pending_ticket);
-
-    let outcome = services
+    let outcome: GateOutcome = services
         .require_admin_approval(
             authorization,
             AdminApprovalContext {
                 session_id: *session_id,
                 remote_ip,
                 credentials,
+                ticket: TicketStake::Held(ticket),
             },
             // The viewer connection is held on this call itself; there is no separate
             // signal to cancel the wait on.
             std::future::pending(),
             || async { Ok::<_, WarpgateError>(()) },
         )
-        .await;
+        .await?;
 
-    // A refusal — whether the administrator's or a gate that failed to reach
-    // one — is not the user's doing, so the ticket keeps its use.
-    if !matches!(outcome, Ok(GateOutcome::Approved(_))) {
-        ticket.disarm();
-    }
-
-    Ok(outcome?.approved())
+    Ok(outcome.approved())
 }
 
 /// Build the browser web-approval URL for the current auth state, or `None` if the external

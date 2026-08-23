@@ -24,6 +24,13 @@ pub mod session_approval_request {
         pub target: String,
         pub remote_address: Option<String>,
         pub identification_string: Option<String>,
+        /// Digest of the credentials the session authenticated with; an
+        /// approved row is matched against later connections through it for
+        /// the grace-period bypass.
+        pub credentials_digest: Option<String>,
+        /// The ticket an approval of this request consumes, where consumption
+        /// is deferred to the gate (HTTP ticket sessions).
+        pub consumes_ticket_id: Option<Uuid>,
         pub started: OffsetDateTime,
         /// The row carries the decision itself, so an approval is resolved by
         /// writing to it from any node; the owning node reads it back.
@@ -35,6 +42,8 @@ pub mod session_approval_request {
         pub resolved_by_username: Option<String>,
         /// Null for a resolver that isn't a user, such as the admin API token.
         pub resolved_by_user_id: Option<Uuid>,
+        /// When the question left `pending`, however it did.
+        pub resolved_at: Option<OffsetDateTime>,
         /// When the owning node read the decision back and acted on it. Null
         /// while a request is still a live question.
         pub consumed_at: Option<OffsetDateTime>,
