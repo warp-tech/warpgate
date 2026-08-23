@@ -8,7 +8,7 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use tracing::warn;
 use warpgate_common::auth::{AuthState, CredentialKind};
-use warpgate_common::{GlobalParams, Protocol, Secret, SessionId, WarpgateConfig, WarpgateError};
+use warpgate_common::{GlobalParams, Protocol, Secret, UserSessionId, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Parameters;
 
 use crate::cluster::Cluster;
@@ -140,7 +140,7 @@ impl Services {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_auth_state(
         &self,
-        session_id: &SessionId,
+        session_id: &UserSessionId,
         username: &str,
         protocol: Protocol,
         target_name: &str,

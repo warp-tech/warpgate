@@ -17,8 +17,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use tokio::time::{MissedTickBehavior, Sleep, interval, sleep};
 use tracing::warn;
-use uuid::Uuid;
-use warpgate_common::Protocol;
+use warpgate_common::{Protocol, UserSessionId};
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
 use warpgate_core::{Services, TIMEOUT};
 use warpgate_desktop_ui::AuthPrompt;
@@ -103,7 +102,7 @@ impl Deadline {
 #[allow(clippy::too_many_arguments)]
 pub async fn run_hold_screen<I, P>(
     services: &Services,
-    state_id: Uuid,
+    state_id: UserSessionId,
     protocol: Protocol,
     username: &str,
     remote_ip: IpAddr,

@@ -16,7 +16,10 @@ use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialKind, CredentialPolicy,
 };
 use warpgate_common::helpers::hash::hash_secret;
-use warpgate_common::{Protocol, Secret, Target, User, WarpgateError};
+use warpgate_common::{
+    Protocol, Secret, SpecificTarget, Target, TargetOptions, TargetOptionsVariant, User,
+    WarpgateError,
+};
 use warpgate_db_entities as e;
 use warpgate_sso::SsoProviderConfig;
 
@@ -150,34 +153,131 @@ impl std::ops::Deref for AuthorizedIdentity {
     }
 }
 
-/// Proof that a user is authorized for a specific target. Only
-/// [`authorize_for_target`] and [`authorize_ticket`] construct it, so a
-/// session can't be opened for a target without passing authorization.
-#[derive(Clone)]
-pub struct TargetAuthorization {
+/// Proof that a user is authorized for a specific target. Authorization is not
+/// permission to dial: it must be consumed by target-session creation, which
+/// returns an [`ApprovedTarget`].
+///
+/// The parameter is the protocol's [`TargetOptionsVariant`]; the default is the
+/// un-narrowed form that [`TargetAuthorization::specific`] narrows once, so
+/// downstream code reads `options()` instead of pattern-checking the enum.
+pub struct TargetAuthorization<O = TargetOptions> {
     user_info: AuthStateUserInfo,
-    target: Target,
+    target: SpecificTarget<O>,
     protocol: Protocol,
 }
 
 impl TargetAuthorization {
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        user_info: AuthStateUserInfo,
+        target: Target,
+        protocol: Protocol,
+    ) -> Self {
+        Self {
+            user_info,
+            target: SpecificTarget::any(target),
+            protocol,
+        }
+    }
+
+    /// Authorization for a request on a session established by a ticket. The
+    /// caller must resolve the target by the ticket's pinned row id first.
+    pub fn for_ticket_session(
+        user_info: AuthStateUserInfo,
+        target: Target,
+        ticket_target_id: Uuid,
+        protocol: Protocol,
+    ) -> Result<Self, WarpgateError> {
+        if target.id != ticket_target_id {
+            return Err(WarpgateError::InconsistentState(
+                "ticket session target does not match the ticket's target".into(),
+            ));
+        }
+        Ok(Self {
+            user_info,
+            target: SpecificTarget::any(target),
+            protocol,
+        })
+    }
+
+    /// Narrows the authorization to one protocol's options variant, failing on
+    /// a target of another kind or a protocol mismatch. Dial code downstream
+    /// then reads `options()` with no pattern check left to forget.
+    pub fn narrow<O: TargetOptionsVariant>(
+        self,
+    ) -> Result<TargetAuthorization<O>, WarpgateError> {
+        if O::PROTOCOL != self.protocol {
+            return Err(WarpgateError::InvalidTarget);
+        }
+        Ok(TargetAuthorization {
+            user_info: self.user_info,
+            target: self.target.narrow()?,
+            protocol: self.protocol,
+        })
+    }
+}
+
+impl<O> TargetAuthorization<O> {
     pub const fn user_info(&self) -> &AuthStateUserInfo {
         &self.user_info
     }
 
     /// The target this authorization was granted for. Carrying it means a dial
     /// site never has to re-resolve — and so can't resolve a *different* one.
-    pub const fn target(&self) -> &Target {
+    pub fn target(&self) -> &Target {
         &self.target
+    }
+
+    pub const fn options(&self) -> &O {
+        self.target.options()
     }
 
     /// The protocol the authorizing authentication ran under.
     pub const fn protocol(&self) -> Protocol {
         self.protocol
     }
+}
 
-    pub fn into_parts(self) -> (AuthStateUserInfo, Target) {
-        (self.user_info, self.target)
+impl ApprovedTarget {
+    /// Narrows the capability to one protocol's options variant. The admission
+    /// is unchanged — only the type gets more precise.
+    pub fn narrow<O: TargetOptionsVariant>(self) -> Result<ApprovedTarget<O>, WarpgateError> {
+        Ok(ApprovedTarget(self.0.narrow()?))
+    }
+}
+
+/// Proof that one target connection passed both authorization and the
+/// target-session approval gate. Dial sites accept this type instead of a
+/// target or authorization proof, making a skipped gate a compile-time error.
+///
+/// This capability is intentionally not cloneable. It is minted only when a
+/// target session starts and is consumed or borrowed by that session's dial
+/// boundary.
+pub struct ApprovedTarget<O = TargetOptions>(TargetAuthorization<O>);
+
+impl<O> ApprovedTarget<O> {
+    pub(crate) const fn new(authorization: TargetAuthorization<O>) -> Self {
+        Self(authorization)
+    }
+
+    pub const fn user_info(&self) -> &AuthStateUserInfo {
+        self.0.user_info()
+    }
+
+    pub fn target(&self) -> &Target {
+        self.0.target()
+    }
+
+    pub const fn options(&self) -> &O {
+        self.0.options()
+    }
+
+    pub const fn protocol(&self) -> Protocol {
+        self.0.protocol()
+    }
+
+    pub fn into_parts(self) -> (AuthStateUserInfo, SpecificTarget<O>) {
+        (self.0.user_info, self.0.target)
     }
 }
 
@@ -196,7 +296,7 @@ pub async fn authorize_for_target<C: ConfigProvider + ?Sized>(
         .await?
         .then(|| TargetAuthorization {
             user_info: identity.user_info.clone(),
-            target,
+            target: SpecificTarget::any(target),
             protocol: identity.protocol,
         }))
 }
@@ -278,7 +378,7 @@ pub async fn authorize_ticket(
         // role check — that's what makes it a ticket.
         let authorization = TargetAuthorization {
             user_info: (&user).into(),
-            target: Target::try_from(ticket_target)?,
+            target: SpecificTarget::any(Target::try_from(ticket_target)?),
             protocol,
         };
         Ok(Some((ticket, authorization)))
@@ -317,8 +417,50 @@ pub async fn consume_ticket(
 mod tests {
     use tokio::sync::broadcast;
     use warpgate_common::auth::CredentialPolicyResponse;
+    use warpgate_common::{TargetHTTPOptions, TargetSSHOptions, Tls, UserSessionId};
 
     use super::*;
+
+    fn http_target() -> Target {
+        Target {
+            id: Uuid::new_v4(),
+            name: "web".into(),
+            description: String::new(),
+            allow_roles: vec![],
+            options: TargetOptions::Http(TargetHTTPOptions {
+                url: "http://target".into(),
+                tls: Tls::default(),
+                headers: None,
+                external_host: None,
+            }),
+            rate_limit_bytes_per_second: None,
+            group_id: None,
+            ticket_max_duration_seconds: None,
+            ticket_requests_disabled: false,
+            ticket_require_approval: false,
+            ticket_max_uses: None,
+        }
+    }
+
+    #[test]
+    fn specific_narrows_only_matching_kind_and_protocol() {
+        let user = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+
+        let narrowed = TargetAuthorization::for_test(user.clone(), http_target(), Protocol::Http)
+            .narrow::<TargetHTTPOptions>();
+        assert!(narrowed.is_ok_and(|a| a.options().url == "http://target"));
+
+        let wrong_kind = TargetAuthorization::for_test(user.clone(), http_target(), Protocol::Http)
+            .narrow::<TargetSSHOptions>();
+        assert!(wrong_kind.is_err());
+
+        let wrong_protocol = TargetAuthorization::for_test(user, http_target(), Protocol::Ssh)
+            .narrow::<TargetHTTPOptions>();
+        assert!(wrong_protocol.is_err());
+    }
 
     struct FixedPolicy(bool);
     impl CredentialPolicy for FixedPolicy {
@@ -334,7 +476,7 @@ mod tests {
     fn auth_state(satisfied: bool) -> AuthState {
         let (tx, _rx) = broadcast::channel(1);
         AuthState::new(
-            Uuid::new_v4(),
+            UserSessionId(Uuid::new_v4()),
             None,
             AuthStateUserInfo {
                 id: Uuid::nil(),

@@ -343,8 +343,8 @@ impl ProtocolServer for HTTPProtocolServer {
 
         tokio::spawn(async move {
             loop {
-                session_store.lock().await.vacuum(session_max_age).await;
-                if let Err(error) = session_storage.gc(cookie_max_age).await {
+                session_store.lock().await.vacuum(session_max_age);
+                if let Err(error) = session_storage.gc(session_max_age).await {
                     warn!(%error, "Failed to expire stored HTTP sessions");
                 }
                 http_client_cache.vacuum().await;

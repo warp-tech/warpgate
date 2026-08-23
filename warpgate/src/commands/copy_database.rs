@@ -32,7 +32,8 @@ macro_rules! with_every_table_in_order {
             CertificateRevocation,
             // Referencing the tables above
             Ticket,
-            Session,
+            UserSession,
+            TargetSession,
             Recording,
             TicketRequest,
             TargetRoleAssignment,

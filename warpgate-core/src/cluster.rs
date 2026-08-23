@@ -4,13 +4,13 @@ use std::time::Duration;
 
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, IntoCondition, OnConflict};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use time::OffsetDateTime;
 use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_ca::ClusterTlsIdentity;
-use warpgate_common::WarpgateError;
-use warpgate_db_entities::{Node, Parameters, Session};
+use warpgate_common::{Protocol, WarpgateError};
+use warpgate_db_entities::{Node, Parameters, TargetSession, UserSession};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const REAP_INTERVAL: Duration = Duration::from_secs(15);
@@ -111,7 +111,9 @@ impl Cluster {
     /// Graceful shutdown: end this node's still-open sessions and drop its row, so
     /// a scale-down deregisters immediately instead of waiting for the reaper.
     pub async fn shutdown(&self) -> Result<(), WarpgateError> {
-        mark_sessions_ended(&self.db, Session::Column::NodeId.eq(self.node_id)).await?;
+        mark_target_sessions_ended(&self.db, TargetSession::Column::NodeId.eq(self.node_id))
+            .await?;
+        mark_user_sessions_ended(&self.db, UserSession::Column::NodeId.eq(self.node_id)).await?;
         Node::Entity::delete_by_id(self.node_id)
             .exec(&self.db)
             .await?;
@@ -119,18 +121,43 @@ impl Cluster {
     }
 }
 
-/// Mark every still-open session whose owner node matches `node_filter` as ended.
-async fn mark_sessions_ended(
+/// Mark every still-open target session whose owner node matches `node_filter`
+/// as ended.
+async fn mark_target_sessions_ended(
     db: &DatabaseConnection,
     node_filter: impl IntoCondition,
 ) -> Result<(), WarpgateError> {
-    Session::Entity::update_many()
+    TargetSession::Entity::update_many()
         .col_expr(
-            Session::Column::Ended,
+            TargetSession::Column::Ended,
             Expr::value(OffsetDateTime::now_utc()),
         )
         .filter(node_filter)
-        .filter(Session::Column::Ended.is_null())
+        .filter(TargetSession::Column::Ended.is_null())
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+async fn mark_user_sessions_ended(
+    db: &DatabaseConnection,
+    node_filter: impl IntoCondition,
+) -> Result<(), WarpgateError> {
+    UserSession::Entity::update_many()
+        .col_expr(
+            UserSession::Column::Ended,
+            Expr::value(OffsetDateTime::now_utc()),
+        )
+        .filter(node_filter)
+        // An authenticated HTTP parent is backed by shared Poem session
+        // storage and remains valid after the node that created it disappears.
+        // Incomplete HTTP logins and every direct protocol remain node-bound.
+        .filter(
+            Condition::any()
+                .add(UserSession::Column::Protocol.ne(Protocol::Http.name()))
+                .add(UserSession::Column::UserId.is_null()),
+        )
+        .filter(UserSession::Column::Ended.is_null())
         .exec(db)
         .await?;
     Ok(())
@@ -157,7 +184,10 @@ async fn reap(db: &DatabaseConnection) -> Result<(), WarpgateError> {
         .collect();
     if !dead.is_empty() {
         warn!(count = dead.len(), "Reaping dead cluster nodes");
-        mark_sessions_ended(db, Session::Column::NodeId.is_in(dead.iter().copied())).await?;
+        mark_target_sessions_ended(db, TargetSession::Column::NodeId.is_in(dead.iter().copied()))
+            .await?;
+        mark_user_sessions_ended(db, UserSession::Column::NodeId.is_in(dead.iter().copied()))
+            .await?;
         Node::Entity::delete_many()
             .filter(Node::Column::Id.is_in(dead))
             .exec(db)
@@ -177,7 +207,16 @@ async fn reap(db: &DatabaseConnection) -> Result<(), WarpgateError> {
     if live.is_empty() {
         return Ok(());
     }
-    mark_sessions_ended(db, Session::Column::NodeId.is_not_in(live)).await?;
+    mark_target_sessions_ended(
+        db,
+        TargetSession::Column::NodeId.is_not_in(live.iter().copied()),
+    )
+    .await?;
+    mark_user_sessions_ended(
+        db,
+        UserSession::Column::NodeId.is_not_in(live.iter().copied()),
+    )
+    .await?;
     Ok(())
 }
 
@@ -229,17 +268,14 @@ mod tests {
 
     async fn session(db: &DatabaseConnection, node_id: Uuid, ended: bool) -> Uuid {
         let id = Uuid::new_v4();
-        Session::Entity::insert(Session::ActiveModel {
+        TargetSession::Entity::insert(TargetSession::ActiveModel {
             id: Set(id),
-            target_snapshot: Set(None),
-            username: Set(None),
-            user_id: Set(None),
-            target_id: Set(None),
-            remote_address: Set("127.0.0.1:1".into()),
+            user_session_id: Set(Uuid::new_v4()),
+            target_snapshot: Set(r#"{"name":"web"}"#.into()),
+            target_id: Set(Uuid::new_v4()),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(ended.then(OffsetDateTime::now_utc)),
             ticket_id: Set(None),
-            protocol: Set("SSH".into()),
             node_id: Set(node_id),
         })
         .exec_without_returning(db)
@@ -249,7 +285,40 @@ mod tests {
     }
 
     async fn is_open(db: &DatabaseConnection, id: Uuid) -> bool {
-        Session::Entity::find_by_id(id)
+        TargetSession::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .unwrap()
+            .unwrap()
+            .ended
+            .is_none()
+    }
+
+    async fn user_session(
+        db: &DatabaseConnection,
+        node_id: Uuid,
+        protocol: Protocol,
+        authenticated: bool,
+    ) -> Uuid {
+        let id = Uuid::new_v4();
+        UserSession::Entity::insert(UserSession::ActiveModel {
+            id: Set(id),
+            username: Set(authenticated.then(|| "alice".into())),
+            user_id: Set(authenticated.then(Uuid::new_v4)),
+            remote_address: Set("127.0.0.1:1".into()),
+            started: Set(OffsetDateTime::now_utc()),
+            ended: Set(None),
+            protocol: Set(protocol.to_string()),
+            node_id: Set(node_id),
+        })
+        .exec_without_returning(db)
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn is_user_session_open(db: &DatabaseConnection, id: Uuid) -> bool {
+        UserSession::Entity::find_by_id(id)
             .one(db)
             .await
             .unwrap()
@@ -294,5 +363,22 @@ mod tests {
         let id = session(&db, Uuid::new_v4(), false).await;
         reap(&db).await.unwrap();
         assert!(is_open(&db, id).await);
+    }
+
+    #[tokio::test]
+    async fn authenticated_http_user_sessions_survive_owner_loss() {
+        let db = migrated_db().await;
+        let node_id = Uuid::new_v4();
+        let direct = user_session(&db, node_id, Protocol::Ssh, true).await;
+        let incomplete_http = user_session(&db, node_id, Protocol::Http, false).await;
+        let shared_http = user_session(&db, node_id, Protocol::Http, true).await;
+
+        mark_user_sessions_ended(&db, UserSession::Column::NodeId.eq(node_id))
+            .await
+            .unwrap();
+
+        assert!(!is_user_session_open(&db, direct).await);
+        assert!(!is_user_session_open(&db, incomplete_http).await);
+        assert!(is_user_session_open(&db, shared_http).await);
     }
 }

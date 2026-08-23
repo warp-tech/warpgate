@@ -11,7 +11,7 @@ use anyhow::{Result, bail};
 use tokio::io::AsyncWrite;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
-use uuid::Uuid;
+use warpgate_common::UserSessionId;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_core::Services;
 use warpgate_db_entities::Parameters;
@@ -99,7 +99,7 @@ pub(super) async fn collect_additional_credentials<W>(
     events_rx: &mut mpsc::UnboundedReceiver<ClientEvent>,
     render: &mut RenderState,
     services: &Services,
-    state_id: Uuid,
+    state_id: UserSessionId,
     username: &str,
     remote_ip: IpAddr,
 ) -> Result<AuthStateUserInfo>

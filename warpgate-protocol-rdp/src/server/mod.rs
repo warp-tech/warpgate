@@ -28,10 +28,10 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unb
 use tokio::time::{Instant, timeout_at};
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::accept_loop;
-use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetRdpOptions};
+use warpgate_common::{ListenEndpoint, TargetRdpOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{
-    DesktopInput, Services, SessionStateInit, State, TargetAuthorization, WarpgateServerHandle,
+    DesktopInput, Services, State, TargetAuthorization, UserSessionStateInit, WarpgateServerHandle,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_desktop_ui::{DEFAULT_SCREEN_H, DEFAULT_SCREEN_W};
@@ -49,7 +49,7 @@ use bridge::connect_backend;
 use hold_screen::{run_banner_screen, run_hold_screen};
 use protocol::{AuthVerdict, Event as ServerEvent, Input as ServerInput};
 use warpgate_desktop_auth::{
-    DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
+    DesktopAuthOutcome, authenticate, finalize_user_auth,
 };
 
 /// Depth of the feed into the viewer-facing RDP server. Bounded so a slow viewer
@@ -102,10 +102,10 @@ pub async fn bind_server(
                 async move {
                     let (session_handle, mut abort_rx) = RdpSessionHandle::new();
 
-                    let server_handle = State::register_session(
+                    let server_handle = State::register_user_session(
                         &services.state,
                         PROTOCOL_NAME,
-                        SessionStateInit {
+                        UserSessionStateInit {
                             remote_address: Some(remote_address),
                             handle: Box::new(session_handle),
                         },
@@ -247,7 +247,7 @@ async fn control_loop(
                     // duplicate request by dropping its reply rather than answering twice.
                     continue;
                 }
-                match authenticate::<RdpProto>(
+                match authenticate::<TargetRdpOptions>(
                     &services,
                     &server_handle,
                     &username,
@@ -256,16 +256,13 @@ async fn control_loop(
                 )
                 .await
                 {
-                    Ok(DesktopAuthOutcome::Authorized {
-                        authorization,
-                        options,
-                    }) => {
+                    Ok(DesktopAuthOutcome::Authorized { authorization }) => {
                         // Accept the NLA so the capability exchange proceeds and reports
                         // the viewer's desktop size; defer the target dial to that `Size`.
                         if reply.send(AuthVerdict::StartSession).is_err() {
                             break;
                         }
-                        pending_dial = Some((authorization, options));
+                        pending_dial = Some(authorization);
                         // The banner screen consumes the viewer's `Size` event while it waits,
                         // so dial here once it's dismissed rather than waiting for a `Size`
                         // that has already been delivered.
@@ -304,17 +301,17 @@ async fn control_loop(
                         .await
                         {
                             Ok(Some(user_info)) => {
-                                match finalize_user_auth::<RdpProto>(
+                                match finalize_user_auth::<TargetRdpOptions>(
                                     &services,
                                     &user_info,
                                     &interactive.target_name,
                                 )
                                 .await
                                 {
-                                    Ok((authorization, options)) => {
+                                    Ok(authorization) => {
                                         // `screen` was updated by `run_hold_screen` as the
                                         // viewer negotiated its size during the 2FA prompt.
-                                        pending_dial = Some((authorization, options));
+                                        pending_dial = Some(authorization);
                                         if matches!(
                                             acknowledge_banner(
                                                 &services,
@@ -437,7 +434,7 @@ async fn control_loop(
 }
 
 /// An authorized target held until the viewer's negotiated size is known.
-type PendingDial = (TargetAuthorization, TargetRdpOptions);
+type PendingDial = TargetAuthorization<TargetRdpOptions>;
 
 enum BannerOutcome {
     /// No banner is configured, so nothing was rendered and no events were consumed.
@@ -480,34 +477,12 @@ async fn dial_if_pending(
     screen: warpgate_desktop_ui::Screen,
 ) -> Result<()> {
     if backend.is_none()
-        && let Some((authorization, options)) = pending.take()
+        && let Some(authorization) = pending.take()
     {
         *backend = Some(
-            connect_backend(
-                services,
-                server_handle,
-                server_in_tx,
-                authorization,
-                options,
-                screen,
-            )
-            .await?,
+            connect_backend(services, server_handle, server_in_tx, authorization, screen).await?,
         );
     }
     Ok(())
 }
 
-/// RDP's binding to the shared desktop-auth flow.
-struct RdpProto;
-
-impl DesktopProtocol for RdpProto {
-    type Options = TargetRdpOptions;
-    const NAME: Protocol = PROTOCOL_NAME;
-
-    fn options(target: &Target) -> Option<TargetRdpOptions> {
-        match &target.options {
-            TargetOptions::Rdp(options) => Some(options.clone()),
-            _ => None,
-        }
-    }
-}

@@ -3,7 +3,7 @@ use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter};
 use tracing::info;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{SessionId, WarpgateError};
+use warpgate_common::{Protocol, TargetOptions, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, FullUserAuthorization, web_reauth_required,
 };
@@ -15,7 +15,7 @@ use warpgate_db_entities as entities;
 use crate::session::SessionStore;
 
 pub fn emit_unknown_authentication_failed_event(
-    session_id: SessionId,
+    session_id: UserSessionId,
     remote_ip: Option<std::net::IpAddr>,
     username: &str,
     credentials: &str,
@@ -77,6 +77,13 @@ pub async fn authorize_web_client_target(
         return Ok(WebClientTargetAccess::NotFound);
     };
 
+    // The in-browser client's session runs under the target's own protocol,
+    // not the browser's HTTP, and the authorization must carry that protocol
+    // to match it. A kind with no in-browser client reads as absent.
+    let Some(protocol) = web_client_protocol(&target.options) else {
+        return Ok(WebClientTargetAccess::NotFound);
+    };
+
     // The session already authenticated as a full user (checked above), so this
     // is a legitimate out-of-band identity for the authorization check.
     let identity = AuthorizedIdentity::for_authenticated_session(
@@ -84,7 +91,7 @@ pub async fn authorize_web_client_target(
             id: full.user_id(),
             username: full.username().to_owned(),
         },
-        crate::common::PROTOCOL_NAME,
+        protocol,
     );
 
     Ok(authorize_for_target(config_provider, &identity, target)
@@ -93,6 +100,17 @@ pub async fn authorize_web_client_target(
             WebClientTargetAccess::Forbidden,
             WebClientTargetAccess::Authorized,
         ))
+}
+
+/// The protocol an in-browser client for this target kind runs under, or
+/// `None` for kinds that have no in-browser client.
+const fn web_client_protocol(options: &TargetOptions) -> Option<Protocol> {
+    match options {
+        TargetOptions::Ssh(_) => Some(Protocol::Ssh),
+        TargetOptions::Vnc(_) => Some(Protocol::Vnc),
+        TargetOptions::Rdp(_) => Some(Protocol::Rdp),
+        _ => None,
+    }
 }
 
 /// Resolves the model for the authenticated account. Takes a

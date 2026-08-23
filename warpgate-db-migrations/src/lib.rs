@@ -83,6 +83,7 @@ mod m00076_open_targets_in_new_tab;
 mod m00077_session_user_target_id;
 mod m00078_assignment_composite_pks;
 mod m00079_unique_target_and_group_names;
+mod m00080_user_and_target_sessions;
 
 pub(crate) mod helpers;
 
@@ -171,6 +172,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00077_session_user_target_id::Migration),
             Box::new(m00078_assignment_composite_pks::Migration),
             Box::new(m00079_unique_target_and_group_names::Migration),
+            Box::new(m00080_user_and_target_sessions::Migration),
         ]
     }
 }

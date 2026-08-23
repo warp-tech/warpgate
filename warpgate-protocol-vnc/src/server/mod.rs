@@ -21,11 +21,11 @@ use tokio::time::{Instant, timeout_at};
 use tokio_rustls::TlsAcceptor;
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::accept_loop;
-use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetVncOptions};
+use warpgate_common::{ListenEndpoint, TargetVncOptions};
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
+use warpgate_core::{Services, State, UserSessionStateInit, WarpgateServerHandle};
 use warpgate_desktop_auth::{
-    DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
+    DesktopAuthOutcome, authenticate, finalize_user_auth,
 };
 use warpgate_desktop_ui as ui;
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
@@ -72,10 +72,10 @@ pub async fn bind_server(
                 async move {
                     let (session_handle, mut abort_rx) = VncSessionHandle::new();
 
-                    let server_handle = State::register_session(
+                    let server_handle = State::register_user_session(
                         &services.state,
                         PROTOCOL_NAME,
-                        SessionStateInit {
+                        UserSessionStateInit {
                             remote_address: Some(remote_address),
                             handle: Box::new(session_handle),
                         },
@@ -194,7 +194,7 @@ async fn negotiate_and_authorize(
             }
         };
 
-    let authenticated = match authenticate::<VncProto>(
+    let authenticated = match authenticate::<TargetVncOptions>(
         services,
         server_handle,
         &username,
@@ -242,11 +242,8 @@ async fn negotiate_and_authorize(
 
     let mut render = RenderState::new();
 
-    let (authorization, vnc_options) = match authenticated {
-        DesktopAuthOutcome::Authorized {
-            authorization,
-            options,
-        } => (authorization, options),
+    let authorization = match authenticated {
+        DesktopAuthOutcome::Authorized { authorization } => authorization,
         DesktopAuthOutcome::NeedsInteractive(interactive) => {
             let user_info = collect_additional_credentials(
                 &mut viewer_wr,
@@ -259,9 +256,12 @@ async fn negotiate_and_authorize(
             )
             .await?;
 
-            let (authorization, options) =
-                finalize_user_auth::<VncProto>(services, &user_info, &interactive.target_name)
-                    .await?;
+            let authorization = finalize_user_auth::<TargetVncOptions>(
+                services,
+                &user_info,
+                &interactive.target_name,
+            )
+            .await?;
             // Interactive (TOTP / web-approval) auth fully succeeded: clear any failed
             // attempts, mirroring the password-only `Accepted` path in `authenticate` and
             // the SSH baseline, which clears counters once 2FA completes. Fail open.
@@ -269,21 +269,24 @@ async fn negotiate_and_authorize(
                 .login_protection
                 .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
                 .await;
-            (authorization, options)
+            authorization
         }
         // Already handled before the security handshake above.
         DesktopAuthOutcome::Failed => return Ok(None),
     };
 
-    let (user_info, target) = authorization.into_parts();
+    let (_, approved, _) = *{
+        let mut handle = server_handle.lock().await;
+        handle
+            .set_user_info(authorization.user_info().clone())
+            .await?;
+        handle
+            .start_target_session(authorization)
+            .await?
+            .admitted()?
+    };
 
-    {
-        let handle = server_handle.lock().await;
-        handle.set_user_info(user_info).await?;
-        handle.set_target(&target).await?;
-    }
-
-    info!(target=%target.name, "Authorized");
+    info!(target=%approved.target().name, "Authorized");
 
     show_banner(&mut viewer_wr, &mut events_rx, &mut render, services).await?;
 
@@ -296,8 +299,8 @@ async fn negotiate_and_authorize(
 
     // A single backend client connection decodes every update (Tight/JPEG included, see
     // PROXY_ENCODINGS); we both record it and re-encode it toward the viewer as RFB Raw.
-    debug!(host = %vnc_options.host, port = vnc_options.port, "connecting to backend");
-    let mut backend = crate::client::connect_for_proxy(vnc_options.clone());
+    debug!(host = %approved.options().host, port = approved.options().port, "connecting to backend");
+    let mut backend = crate::client::connect_for_proxy(approved)?;
 
     // Wait under the hold screen for the backend's initial geometry, recording every
     // event consumed so nothing is dropped from the recording.
@@ -425,17 +428,3 @@ impl RenderState {
     }
 }
 
-/// VNC's binding to the shared desktop-auth flow.
-struct VncProto;
-
-impl DesktopProtocol for VncProto {
-    type Options = TargetVncOptions;
-    const NAME: Protocol = PROTOCOL_NAME;
-
-    fn options(target: &Target) -> Option<TargetVncOptions> {
-        match &target.options {
-            TargetOptions::Vnc(options) => Some(options.clone()),
-            _ => None,
-        }
-    }
-}

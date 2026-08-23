@@ -7,6 +7,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info};
 use uuid::Uuid;
+use warpgate_common::TargetSessionId;
 use warpgate_core::WarpgateServerHandle;
 use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Target::TargetKind;
@@ -91,7 +92,7 @@ impl WebSshSession {
             .lock()
             .await
             .start::<TerminalRecorder, _>(
-                &self.id(),
+                &TargetSessionId(self.id()),
                 None,
                 SshRecordingMetadata::Shell {
                     channel: channel_number,

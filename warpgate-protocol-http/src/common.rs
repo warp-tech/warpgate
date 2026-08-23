@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{Protocol, SessionId, WarpgateError};
+use warpgate_common::{Protocol, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::get_client_ip_addr;
@@ -61,7 +61,7 @@ pub trait SessionExt {
     /// The Warpgate session id of this browser session, once one has been
     /// registered for it. Unlike [`session_id_for_request`] this never creates
     /// one.
-    fn get_session_id(&self) -> Option<SessionId>;
+    fn get_session_id(&self) -> Option<UserSessionId>;
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState>;
     fn set_sso_login_state(&self, token: SsoLoginState);
@@ -84,7 +84,7 @@ impl SessionExt for Session {
         self.set(AUTH_SESSION_KEY, auth);
     }
 
-    fn get_session_id(&self) -> Option<SessionId> {
+    fn get_session_id(&self) -> Option<UserSessionId> {
         self.get(crate::session::SESSION_ID_SESSION_KEY)
     }
 
@@ -233,7 +233,7 @@ pub async fn get_auth_state_for_request(
 pub async fn session_id_for_request(
     req: &Request,
     ctx: &UnauthenticatedRequestContext,
-) -> Result<SessionId, WarpgateError> {
+) -> Result<UserSessionId, WarpgateError> {
     let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
         .await
         .context("SessionStore not in request")?;

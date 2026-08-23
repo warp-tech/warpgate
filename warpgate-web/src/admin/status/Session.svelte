@@ -5,7 +5,7 @@
     import {
         api,
         type Recording,
-        type SessionSnapshot,
+        type UserSessionSnapshot,
         type Target,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
@@ -33,7 +33,7 @@
     let { params = { id: '' } }: Props = $props()
 
     let error: string | null = $state(null)
-    let session: SessionSnapshot | null = $state(null)
+    let session: UserSessionSnapshot | null = $state(null)
     let recordings: Recording[] | null = $state(null)
 
     async function load() {
@@ -91,15 +91,11 @@
 {#if session}
     <div class="page-summary-bar">
         <div class="flex-grow-1">
-            <h1>session</h1>
+            <h1>{session.protocol} session</h1>
             <div class="d-flex align-items-center mt-1">
                 <Tooltip delay="250" target="usernameBadge" animation>
                     Authenticated user
                 </Tooltip>
-                <Tooltip delay="250" target="targetBadge" animation>
-                    Selected target
-                </Tooltip>
-
                 <Badge
                     href={$adminPermissions.usersEdit && session.userId ? `#/config/users/${session.userId}` : undefined}
                     id="usernameBadge"
@@ -116,20 +112,6 @@
                         Logging in
                     {/if}
                 </Badge>
-                {#if session.target}
-                    <Badge
-                        href={$adminPermissions.targetsEdit && session.targetId ? `#/config/targets/${session.targetId}` : undefined}
-                        id="targetBadge"
-                        color="info"
-                        class="me-2 d-flex align-items-center"
-                    >
-                        <Fa icon={faArrowRight} class="me-2" />
-                        {session.target.name}
-                        <span class="ms-1 ip">
-                            {getTargetAddress(session.target)}
-                        </span>
-                    </Badge>
-                {/if}
             </div>
         </div>
         <div class="text-muted ms-auto">
@@ -144,6 +126,44 @@
             {/if}
         </div>
     </div>
+
+    <h3 class="mt-4">Connections</h3>
+    {#if session.targetSessions.length}
+        <div class="list-group">
+            {#each session.targetSessions as targetSession (targetSession.id)}
+                <div class="list-group-item d-flex align-items-center gap-3">
+                    <span class:text-success={!targetSession.ended}>
+                        {targetSession.ended ? 'Ended' : 'Active'}
+                    </span>
+                    {#if targetSession.target}
+                        <Badge
+                            href={$adminPermissions.targetsEdit && targetSession.targetId ? `#/config/targets/${targetSession.targetId}` : undefined}
+                            color="info"
+                            class="d-flex align-items-center"
+                        >
+                            <Fa icon={faArrowRight} class="me-2" />
+                            {targetSession.target.name}
+                            <span class="ms-1 ip">
+                                {getTargetAddress(targetSession.target)}
+                            </span>
+                        </Badge>
+                    {/if}
+                    <small class="text-muted ms-auto">
+                        {#if targetSession.ended}
+                            {formatDistance(new Date(targetSession.started), new Date(targetSession.ended))}
+                        {:else}
+                            {formatDistanceToNow(new Date(targetSession.started))}
+                        {/if}
+                        {#if targetSession.nodeHostname}
+                            · via {targetSession.nodeHostname}
+                        {/if}
+                    </small>
+                </div>
+            {/each}
+        </div>
+    {:else}
+        <p class="text-muted">No target connections.</p>
+    {/if}
 
     {#snippet recordingButton(recording: Recording)}
         {@const metadata = JSON.parse(recording.metadata)}

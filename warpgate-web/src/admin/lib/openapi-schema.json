@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.0-beta.3-modified"
+    "version": "v0.28.3-1-g982129b0-modified"
   },
   "servers": [
     {
@@ -73,7 +73,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaginatedResponse_SessionSnapshot"
+                  "$ref": "#/components/schemas/PaginatedResponse_UserSessionSnapshot"
                 }
               }
             }
@@ -143,7 +143,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionSnapshot"
+                  "$ref": "#/components/schemas/UserSessionSnapshot"
                 }
               }
             }
@@ -215,6 +215,17 @@
             },
             "in": "path",
             "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "local_only",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "description": "Close only connections owned by this node.",
+            "required": false,
             "deprecated": false,
             "explode": true
           }
@@ -5622,9 +5633,9 @@
           "ForcedOff"
         ]
       },
-      "PaginatedResponse_SessionSnapshot": {
+      "PaginatedResponse_UserSessionSnapshot": {
         "type": "object",
-        "title": "PaginatedResponse_SessionSnapshot",
+        "title": "PaginatedResponse_UserSessionSnapshot",
         "required": [
           "items",
           "offset",
@@ -5634,7 +5645,7 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SessionSnapshot"
+              "$ref": "#/components/schemas/UserSessionSnapshot"
             }
           },
           "offset": {
@@ -6549,63 +6560,6 @@
           }
         }
       },
-      "SessionSnapshot": {
-        "type": "object",
-        "title": "SessionSnapshot",
-        "required": [
-          "id",
-          "started",
-          "protocol",
-          "node_id",
-          "remote_address"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "username": {
-            "type": "string"
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "target": {
-            "$ref": "#/components/schemas/Target"
-          },
-          "target_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "started": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "ended": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "ticket_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "protocol": {
-            "type": "string"
-          },
-          "node_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "node_hostname": {
-            "type": "string",
-            "description": "Hostname of the owning node; only filled in by the session detail\nendpoint, and only while the node is registered."
-          },
-          "remote_address": {
-            "type": "string"
-          }
-        }
-      },
       "SshHostKeyVerificationMode": {
         "type": "string",
         "description": "What to do when a target's SSH host key isn't in the known hosts list.",
@@ -7188,6 +7142,58 @@
           }
         }
       },
+      "TargetSessionSnapshot": {
+        "type": "object",
+        "title": "TargetSessionSnapshot",
+        "required": [
+          "id",
+          "target_id",
+          "started",
+          "node_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Identity of one target connection — never of a login."
+          },
+          "target": {
+            "description": "`None` only when the stored snapshot fails to parse.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Target"
+              },
+              {
+                "description": "`None` only when the stored snapshot fails to parse."
+              }
+            ]
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "node_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "node_hostname": {
+            "type": "string",
+            "description": "Hostname of the node that owns this target connection, while registered."
+          }
+        }
+      },
       "TargetVncOptions": {
         "type": "object",
         "title": "TargetVncOptions",
@@ -7728,6 +7734,60 @@
           "is_active": {
             "type": "boolean",
             "description": "Whether this assignment is currently active (not expired, not revoked)"
+          }
+        }
+      },
+      "UserSessionSnapshot": {
+        "type": "object",
+        "title": "UserSessionSnapshot",
+        "required": [
+          "id",
+          "started",
+          "protocol",
+          "node_id",
+          "remote_address",
+          "target_sessions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Identity of a login (user session) — never of a target connection."
+          },
+          "username": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "node_hostname": {
+            "type": "string",
+            "description": "Hostname of the node that created this user session, while registered."
+          },
+          "remote_address": {
+            "type": "string"
+          },
+          "target_sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TargetSessionSnapshot"
+            }
           }
         }
       },

@@ -8,12 +8,16 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, error, info_span, warn};
 use uuid::Uuid;
-use warpgate_common::{TargetOptions, WarpgateError};
-use warpgate_core::{Services, SessionStateInit, State, TargetAuthorization};
+use warpgate_common::{TargetSSHOptions, WarpgateError};
+use warpgate_core::{
+    Services, State, TargetAuthorization, TargetSessionStart, UserSessionStateInit,
+};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient, resolve_ssh_chain};
+use warpgate_protocol_ssh::{
+    RCCommand, RCEvent, RCState, RemoteClient, resolve_approved_ssh_chain,
+};
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
 use crate::protocol::ServerMessage;
@@ -53,20 +57,18 @@ impl WebSshClientManager {
             return Err(WarpgateError::SessionLimitReached);
         }
 
-        let (user_info, target) = authorization.into_parts();
-        let username = user_info.username.clone();
-
-        let TargetOptions::Ssh(_) = &target.options else {
-            return Err(WarpgateError::InvalidTarget);
-        };
+        let authorization = authorization.narrow::<TargetSSHOptions>()?;
+        let username = authorization.user_info().username.clone();
+        let target_name = authorization.target().name.clone();
+        let target_kind = TargetKind::from(&authorization.target().options);
 
         let (abort_tx, mut abort_rx) = mpsc::unbounded_channel::<()>();
         let session_handle = WebSessionHandle::new(abort_tx);
 
-        let server_handle = State::register_session(
+        let server_handle = State::register_user_session(
             &services.state,
             warpgate_protocol_ssh::PROTOCOL_NAME,
-            SessionStateInit {
+            UserSessionStateInit {
                 remote_address,
                 handle: Box::new(session_handle),
             },
@@ -74,29 +76,30 @@ impl WebSshClientManager {
         .await
         .context("registering webSSH session")?;
 
-        {
-            let server_handle = server_handle.lock().await;
+        let (_, approved, _) = *{
+            let mut server_handle = server_handle.lock().await;
 
             server_handle
-                .set_user_info(user_info)
+                .set_user_info(authorization.user_info().clone())
                 .await
                 .context("setting user info on server handle")?;
 
             server_handle
-                .set_target(&target)
+                .start_target_session(authorization)
                 .await
-                .context("setting target on server handle")?;
-        }
+                .and_then(TargetSessionStart::admitted)
+                .context("starting target session")?
+        };
 
         let session_id = server_handle.lock().await.id();
         let rc_handles = RemoteClient::create(session_id, services.clone())
             .context("creating SSH remote client")?;
 
         let session = Arc::new(WebSshSession::new(
-            session_id,
+            session_id.0,
             user_id,
-            target.name.clone(),
-            TargetKind::from(&target.options),
+            target_name.clone(),
+            target_kind,
             server_handle,
             rc_handles.command_tx.clone(),
             rc_handles.abort_tx.clone(),
@@ -118,7 +121,7 @@ impl WebSshClientManager {
 
         self.insert(session.clone()).await;
 
-        let ssh_chain = resolve_ssh_chain(services, target.id, Some(&username))
+        let ssh_chain = resolve_approved_ssh_chain(services, approved)
             .await?
             .into_iter()
             .map(|x| x.ssh_options)
@@ -135,9 +138,9 @@ impl WebSshClientManager {
             services.clone(),
         );
 
-        debug!(session=%session_id, user=%username, target=%target.name, "Web-SSH session created");
+        debug!(session=%session_id, user=%username, target=%target_name, "Web-SSH session created");
 
-        Ok(session_id)
+        Ok(session_id.0)
     }
 }
 

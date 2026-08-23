@@ -40,6 +40,8 @@ pub enum WarpgateError {
     NoHostInUrl,
     #[error("Inconsistent state: {0}")]
     InconsistentState(String),
+    #[error("target session requires administrator approval")]
+    TargetSessionRequiresApproval,
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
     #[error(transparent)]

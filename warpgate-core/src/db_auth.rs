@@ -11,7 +11,7 @@ use std::net::IpAddr;
 use tracing::{error, info, warn};
 use url::Url;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
-use warpgate_common::{Protocol, Secret, SessionId, WarpgateError};
+use warpgate_common::{Protocol, Secret, UserSessionId, WarpgateError};
 
 use crate::auth::submit_credential;
 use crate::login_protection::FailedAttemptInfo;
@@ -73,7 +73,7 @@ pub trait DbAuthTransport {
 pub async fn run_db_authorization<T: DbAuthTransport>(
     transport: &mut T,
     services: &Services,
-    session_id: SessionId,
+    session_id: UserSessionId,
     selector: AuthSelector,
     remote_ip: IpAddr,
 ) -> Result<Option<TargetAuthorization>, T::Error> {
@@ -138,7 +138,7 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
 async fn authorize_user<T: DbAuthTransport>(
     transport: &mut T,
     services: &Services,
-    session_id: SessionId,
+    session_id: UserSessionId,
     username: &str,
     target_name: &str,
     remote_ip: IpAddr,

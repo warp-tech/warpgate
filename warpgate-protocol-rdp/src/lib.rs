@@ -16,10 +16,10 @@ use futures::future::BoxFuture;
 pub use server::bind_server;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender, channel, unbounded_channel};
 use tracing::{Instrument, error, info_span};
-use warpgate_common::{ListenEndpoint, Protocol, TargetRdpOptions};
+use warpgate_common::{ListenEndpoint, Protocol, TargetRdpOptions, WarpgateError};
 use warpgate_core::{
-    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopState, ProtocolServer,
-    Services,
+    ApprovedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopState,
+    ProtocolServer, Services,
 };
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
@@ -79,7 +79,12 @@ pub struct RdpClientHandles {
 }
 
 /// Start an RDP client for a target and bridge it to normalised desktop streams.
-pub fn connect(options: TargetRdpOptions, size: (u16, u16)) -> RdpClientHandles {
+pub fn connect(
+    approved: ApprovedTarget<TargetRdpOptions>,
+    size: (u16, u16),
+) -> Result<RdpClientHandles, WarpgateError> {
+    let (_, target) = approved.into_parts();
+    let (_, options) = target.into_parts();
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
     let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);
     let (abort_tx, abort_rx) = unbounded_channel::<()>();
@@ -101,9 +106,9 @@ pub fn connect(options: TargetRdpOptions, size: (u16, u16)) -> RdpClientHandles 
         .instrument(span),
     );
 
-    RdpClientHandles {
+    Ok(RdpClientHandles {
         event_rx,
         input_tx,
         abort_tx,
-    }
+    })
 }

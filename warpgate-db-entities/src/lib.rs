@@ -23,18 +23,19 @@ macro_rules! with_every_entity {
             PublicKeyCredential,
             Recording,
             Role,
-            Session,
             SshClientKey,
             SsoCredential,
             Target,
             TargetGroup,
             TargetRoleAssignment,
+            TargetSession,
             Ticket,
             TicketRequest,
             User,
             UserAdminRoleAssignment,
             UserLockout,
             UserRoleAssignment,
+            UserSession,
         ];
     };
 }

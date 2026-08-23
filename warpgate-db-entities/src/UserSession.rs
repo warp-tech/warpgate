@@ -2,48 +2,42 @@ use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+/// A Warpgate login/authentication lifetime. Target connections are recorded
+/// separately as [`super::TargetSession`] rows, linked through
+/// `user_session_id`.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-#[sea_orm(table_name = "sessions")]
+#[sea_orm(table_name = "user_sessions")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    pub target_snapshot: Option<String>,
     pub username: Option<String>,
     pub user_id: Option<Uuid>,
-    pub target_id: Option<Uuid>,
     pub remote_address: String,
     pub started: OffsetDateTime,
     pub ended: Option<OffsetDateTime>,
-    pub ticket_id: Option<Uuid>,
     pub protocol: String,
     pub node_id: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]
 pub enum Relation {
-    Recordings,
-    Ticket,
+    TargetSessions,
 }
 
 impl RelationTrait for Relation {
     fn def(&self) -> RelationDef {
         match self {
-            Self::Recordings => Entity::has_many(super::Recording::Entity)
+            Self::TargetSessions => Entity::has_many(super::TargetSession::Entity)
                 .from(Column::Id)
-                .to(super::Recording::Column::SessionId)
-                .into(),
-            Self::Ticket => Entity::belongs_to(super::Ticket::Entity)
-                .from(Column::TicketId)
-                .to(super::Ticket::Column::Id)
-                .on_delete(ForeignKeyAction::SetNull)
+                .to(super::TargetSession::Column::UserSessionId)
                 .into(),
         }
     }
 }
 
-impl Related<super::Ticket::Entity> for Entity {
+impl Related<super::TargetSession::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Ticket.def()
+        Relation::TargetSessions.def()
     }
 }
 

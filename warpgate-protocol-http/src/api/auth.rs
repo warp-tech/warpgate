@@ -17,19 +17,19 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{
-    Owner, ReparseForwardedResponse, fan_out_to_peers, forwarded_error, parse_forwarded_body,
-    proxy_or_serve, proxy_or_serve_pending_login, session_owner,
+    Owner, ReparseForwardedResponse, fan_out_to_peers, forwarded_error, node_owner,
+    parse_forwarded_body, proxy_or_serve, proxy_or_serve_pending_login,
 };
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{Secret, WarpgateError};
+use warpgate_common::{Secret, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization, is_cluster_peer_request};
 use warpgate_core::Services;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_db_entities::{Parameters, Session as SessionEntity};
+use warpgate_db_entities::{Parameters, UserSession};
 
 use super::common::{emit_unknown_authentication_failed_event, logout};
 use crate::api::auth_scheme::AuthedSession;
@@ -326,9 +326,9 @@ impl Api {
         ctx: AuthedSession,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(*id)).await?;
+        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
         proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &id).await else {
+            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
                 return Ok(AuthStateResponse::NotFound);
             };
             Ok(AuthStateResponse::Ok(Json(
@@ -350,10 +350,10 @@ impl Api {
         id: Path<Uuid>,
         body: Json<ApproveAuthRequest>,
     ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(*id)).await?;
+        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
         proxy_or_serve(&ctx, req, owner, Some(&body.to_json()), || async {
             let services = ctx.services();
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &id).await else {
+            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
                 return Ok(AuthStateResponse::NotFound);
             };
 
@@ -394,9 +394,9 @@ impl Api {
         ctx: AuthedSession,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(*id)).await?;
+        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
         proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &id).await else {
+            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
                 return Ok(AuthStateResponse::NotFound);
             };
             {
@@ -657,25 +657,25 @@ async fn serve_otp_login(
 }
 
 /// The owner of an auth state: auth states are keyed by session id and held only
-/// in memory on the node that created them, but the `sessions` row records that
-/// node, so the owner is the session's node. An unknown session or a gone owner
-/// node both resolve to `Local`, where the store lookup then reports not-found
-/// and the caller retries.
+/// in memory on the node that created them, but the `user_sessions` row records
+/// that node, so the owner is the user session's node. An unknown session or a
+/// gone owner node both resolve to `Local`, where the store lookup then reports
+/// not-found and the caller retries.
 async fn auth_state_owner(
     ctx: &UnauthenticatedRequestContext,
-    id: Option<Uuid>,
+    id: Option<UserSessionId>,
 ) -> poem::Result<Owner> {
     let Some(id) = id else {
         return Ok(Owner::local());
     };
-    let Some(session) = SessionEntity::Entity::find_by_id(id)
+    let Some(session) = UserSession::Entity::find_by_id(id.0)
         .one(&ctx.services().db)
         .await
         .map_err(poem::error::InternalServerError)?
     else {
         return Ok(Owner::local());
     };
-    match session_owner(ctx, &session).await {
+    match node_owner(ctx, session.node_id).await {
         Err(WarpgateError::NodeGone(node_id)) => {
             warn!(%node_id, "Auth state owner node is gone; reporting not found");
             Ok(Owner::local())
@@ -719,9 +719,9 @@ impl ReparseForwardedResponse for LoginResponse {
     async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
         match response.status() {
             http::StatusCode::CREATED => Ok(Self::Success),
-            http::StatusCode::UNAUTHORIZED => Ok(Self::Failure(Json(
-                parse_forwarded_body(response).await?,
-            ))),
+            http::StatusCode::UNAUTHORIZED => {
+                Ok(Self::Failure(Json(parse_forwarded_body(response).await?)))
+            }
             _ => Err(forwarded_error(response).await),
         }
     }
@@ -731,9 +731,7 @@ impl ReparseForwardedResponse for AuthStateResponse {
     async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
         match response.status() {
             http::StatusCode::NOT_FOUND => Ok(Self::NotFound),
-            http::StatusCode::OK => Ok(Self::Ok(Json(
-                parse_forwarded_body(response).await?,
-            ))),
+            http::StatusCode::OK => Ok(Self::Ok(Json(parse_forwarded_body(response).await?))),
             _ => Err(forwarded_error(response).await),
         }
     }
@@ -806,7 +804,7 @@ async fn web_auth_requests_from_peers(
 /// request (carrying the origin's user identity) is re-checked here.
 async fn local_auth_state_for_user(
     ctx: &AuthenticatedRequestContext,
-    id: &Uuid,
+    id: &UserSessionId,
 ) -> Option<Arc<Mutex<AuthState>>> {
     let username = ctx.auth.username().cloned()?;
     let state_arc = {
@@ -831,7 +829,7 @@ async fn serialize_auth_state_inner(
     let session_state = {
         let session_state_store = services.state.lock().await;
         session_state_store
-            .sessions
+            .user_sessions
             .get(state.session_id())
             .cloned()
     };

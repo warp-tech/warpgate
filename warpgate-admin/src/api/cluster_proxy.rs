@@ -40,7 +40,7 @@ use warpgate_common_http::{
     X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN, is_cluster_peer_request,
 };
 use warpgate_core::Services;
-use warpgate_db_entities::{Node, Parameters, Session};
+use warpgate_db_entities::{Node, Parameters, TargetSession};
 use warpgate_tls::configure_cluster_tls_connector;
 
 pub struct RemoteNode {
@@ -94,7 +94,7 @@ pub async fn node_owner(
 
 pub async fn session_owner(
     ctx: &UnauthenticatedRequestContext,
-    session: &Session::Model,
+    session: &TargetSession::Model,
 ) -> Result<Owner, WarpgateError> {
     node_owner(ctx, session.node_id).await
 }
