@@ -99,7 +99,7 @@ pub async fn run(
     );
 
     let (clipboard_tx, clipboard_rx) = unbounded_channel();
-    let clipboard = Clipboard::new(ClientClipboardSink(clipboard_tx));
+    let clipboard = Clipboard::deferred(ClientClipboardSink(clipboard_tx));
 
     let (connection_result, framed) = tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
