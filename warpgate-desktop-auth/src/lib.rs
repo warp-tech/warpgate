@@ -21,9 +21,7 @@ pub use hold_screen::{
 pub use otp::{MAX_OTP_ATTEMPTS, OtpAction, OtpActionApplyOutcome, OtpEntry};
 use tokio::sync::Mutex;
 use tracing::warn;
-use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind,
-};
+use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind};
 use warpgate_common::{Secret, TargetOptionsVariant, TargetSessionId, UserSessionId};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::submit_credential;

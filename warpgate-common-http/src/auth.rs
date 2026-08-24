@@ -8,8 +8,8 @@ use poem::session::Session;
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use uuid::Uuid;
-use warpgate_common::{Protocol, WarpgateError};
 use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_common::{Protocol, WarpgateError};
 use warpgate_db_entities::Parameters;
 
 use crate::request::{trusted_host_header, trusted_proto};

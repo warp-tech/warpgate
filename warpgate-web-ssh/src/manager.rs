@@ -8,9 +8,7 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, error, info_span, warn};
 use warpgate_common::{TargetSSHOptions, UserSessionId, WarpgateError};
-use warpgate_core::{
-    Services, State, TargetAuthorization, UserSessionStateInit,
-};
+use warpgate_core::{Services, State, TargetAuthorization, UserSessionStateInit};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;

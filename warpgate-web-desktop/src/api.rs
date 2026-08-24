@@ -10,8 +10,8 @@ use uuid::Uuid;
 use warpgate_common::UserSessionId;
 use warpgate_common_http::SessionKeepalive;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
-use warpgate_web_clients_common::SessionAccess;
 use warpgate_core::DesktopInput;
+use warpgate_web_clients_common::SessionAccess;
 
 use crate::manager::WebDesktopClientManager;
 use crate::protocol::{ClientMessage, WsPayload};
