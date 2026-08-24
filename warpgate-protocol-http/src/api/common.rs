@@ -9,9 +9,7 @@ use warpgate_common::{NodeId, Protocol, TargetOptions, UserSessionId, WarpgateEr
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, FullUserAuthorization, web_reauth_required,
 };
-use warpgate_core::{
-    ConfigProvider, TargetAuthorization, authorize_for_target,
-};
+use warpgate_core::{ConfigProvider, TargetAuthorization, authorize_for_target};
 use warpgate_db_entities as entities;
 
 use crate::session::SessionStore;
@@ -134,9 +132,9 @@ pub async fn get_user(
 /// `Local`, where the manager lookup then reports not-found.
 pub async fn web_client_session_owner(
     ctx: &AuthenticatedRequestContext,
-    session_id: Uuid,
+    session_id: UserSessionId,
 ) -> poem::Result<Owner> {
-    let Some(row) = entities::UserSession::Entity::find_by_id(session_id)
+    let Some(row) = entities::UserSession::Entity::find_by_id(session_id.0)
         .one(&ctx.services().db)
         .await
         .map_err(WarpgateError::from)?
@@ -144,7 +142,9 @@ pub async fn web_client_session_owner(
     else {
         return Ok(Owner::Local);
     };
-    node_owner(ctx, row.node_id.map(NodeId)).await.map_err(Into::into)
+    node_owner(ctx, row.node_id.map(NodeId))
+        .await
+        .map_err(Into::into)
 }
 
 /// Wraps a web-client websocket endpoint (`:session_id` in its path) with
@@ -159,7 +159,8 @@ pub fn forward_ws_to_session_owner<E: Endpoint + 'static>(
         };
         let session_id = req
             .raw_path_param("session_id")
-            .and_then(|raw| raw.parse::<Uuid>().ok());
+            .and_then(|raw| raw.parse::<Uuid>().ok())
+            .map(UserSessionId);
         let Some(session_id) = session_id else {
             return ep.call(req).await.map(IntoResponse::into_response);
         };

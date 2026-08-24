@@ -8,8 +8,7 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
-use warpgate_core::AuthorizedIdentity;
-use warpgate_core::{DesktopInput, Scancode, Services};
+use warpgate_core::{AuthorizedIdentity, DesktopInput, Scancode, Services};
 use warpgate_desktop_auth::{
     Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter as HoldPainterExt,
     InteractiveAuth, OtpAction, run_hold_screen as run_hold_screen_driver,

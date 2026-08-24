@@ -12,8 +12,7 @@ use tokio::io::AsyncWrite;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
 use warpgate_common::UserSessionId;
-use warpgate_core::AuthorizedIdentity;
-use warpgate_core::Services;
+use warpgate_core::{AuthorizedIdentity, Services};
 use warpgate_db_entities::Parameters;
 use warpgate_desktop_auth::{
     Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter, OtpAction, run_hold_screen,

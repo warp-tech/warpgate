@@ -367,7 +367,11 @@ mod tests {
         id
     }
 
-    async fn user_session(db: &DatabaseConnection, node_id: Option<Uuid>, protocol: Protocol) -> Uuid {
+    async fn user_session(
+        db: &DatabaseConnection,
+        node_id: Option<Uuid>,
+        protocol: Protocol,
+    ) -> Uuid {
         user_session_started(db, node_id, protocol, OffsetDateTime::now_utc()).await
     }
 
@@ -462,5 +466,24 @@ mod tests {
         assert!(!is_open(&db, orphan_child).await);
         assert!(is_user_session_open(&db, backed).await);
         assert!(is_user_session_open(&db, newborn).await);
+    }
+
+    /// An HTTP session can be held open by a node-local handle instead of a
+    /// stored cookie — a header-borne ticket's. It registers `ConnectionBound`
+    /// and so records an owner, which is what keeps the orphan sweep (whose
+    /// only liveness test is a cookie row) from ending it mid-use.
+    #[tokio::test]
+    async fn node_owned_http_sessions_survive_the_orphan_sweep() {
+        let db = migrated_db().await;
+        let node = register_node(&db).await;
+        let stale = OffsetDateTime::now_utc() - SHARED_SESSION_ORPHAN_GRACE * 2;
+
+        let ticket_session = user_session_started(&db, Some(node), Protocol::Http, stale).await;
+        let ticket_child = target_session(&db, ticket_session, Some(node)).await;
+
+        reap(&db).await.unwrap();
+
+        assert!(is_user_session_open(&db, ticket_session).await);
+        assert!(is_open(&db, ticket_child).await);
     }
 }

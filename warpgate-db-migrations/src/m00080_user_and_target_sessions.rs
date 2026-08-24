@@ -336,7 +336,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test]
     async fn backfills_existing_sessions_as_one_to_one_parents() {
         set_config_migration_values(ConfigMigrationValues::default());

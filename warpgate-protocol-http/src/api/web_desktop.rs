@@ -11,7 +11,7 @@ use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{
     ReparseForwardedResponse, forwarded_error, parse_forwarded_body, proxy_or_serve,
 };
-use warpgate_common::WarpgateError;
+use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_clients_common::SessionAccess;
 use warpgate_web_desktop::WebDesktopClientManager;
@@ -125,7 +125,9 @@ impl Api {
             Err(e) => return Err(e.into()),
         };
         Ok(CreateWebDesktopSessionResponse::Created(Json(
-            WebDesktopSessionCreated { session_id },
+            WebDesktopSessionCreated {
+                session_id: session_id.0,
+            },
         )))
     }
 
@@ -141,11 +143,14 @@ impl Api {
         session_id: Path<Uuid>,
         manager: Data<&Arc<WebDesktopClientManager>>,
     ) -> poem::Result<GetWebDesktopSessionResponse> {
-        let owner = web_client_session_owner(&ctx, *session_id).await?;
+        let owner = web_client_session_owner(&ctx, UserSessionId(*session_id)).await?;
         proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
             // Someone else's session reads as absent here: a lookup must not
             // reveal that the id exists.
-            match manager.access(*session_id, ctx.auth.user_id()).await {
+            match manager
+                .access(UserSessionId(*session_id), ctx.auth.user_id())
+                .await
+            {
                 SessionAccess::Granted(session) => Ok(GetWebDesktopSessionResponse::Ok(Json(
                     WebDesktopSessionInfo {
                         target_name: session.target_name().into(),
@@ -172,11 +177,14 @@ impl Api {
         session_id: Path<Uuid>,
         manager: Data<&Arc<WebDesktopClientManager>>,
     ) -> poem::Result<DeleteWebDesktopSessionResponse> {
-        let owner = web_client_session_owner(&ctx, *session_id).await?;
+        let owner = web_client_session_owner(&ctx, UserSessionId(*session_id)).await?;
         proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            match manager.access(*session_id, ctx.auth.user_id()).await {
+            match manager
+                .access(UserSessionId(*session_id), ctx.auth.user_id())
+                .await
+            {
                 SessionAccess::Granted(_) => {
-                    manager.remove_session(*session_id).await;
+                    manager.remove_session(UserSessionId(*session_id)).await;
                     Ok(DeleteWebDesktopSessionResponse::Deleted)
                 }
                 SessionAccess::Forbidden => Ok(DeleteWebDesktopSessionResponse::Forbidden),

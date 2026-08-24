@@ -166,6 +166,10 @@ pub struct TargetAuthorization<O = TargetOptions> {
     user_info: AuthStateUserInfo,
     target: SpecificTarget<O>,
     protocol: Protocol,
+    /// The ticket this authorization was minted from, recorded on the target
+    /// session so the audit trail names which ticket opened it. `None` for a
+    /// role-based authorization, which no ticket backs.
+    ticket_id: Option<Uuid>,
 }
 
 impl TargetAuthorization {
@@ -179,6 +183,7 @@ impl TargetAuthorization {
             user_info,
             target: SpecificTarget::any(target),
             protocol,
+            ticket_id: None,
         }
     }
 
@@ -188,6 +193,7 @@ impl TargetAuthorization {
         user_info: AuthStateUserInfo,
         target: Target,
         ticket_target_id: Uuid,
+        ticket_id: Option<Uuid>,
         protocol: Protocol,
     ) -> Result<Self, WarpgateError> {
         if target.id != ticket_target_id {
@@ -199,6 +205,7 @@ impl TargetAuthorization {
             user_info,
             target: SpecificTarget::any(target),
             protocol,
+            ticket_id,
         })
     }
 
@@ -213,6 +220,7 @@ impl TargetAuthorization {
             user_info: self.user_info,
             target: self.target.narrow()?,
             protocol: self.protocol,
+            ticket_id: self.ticket_id,
         })
     }
 }
@@ -235,6 +243,11 @@ impl<O> TargetAuthorization<O> {
     /// The protocol the authorizing authentication ran under.
     pub const fn protocol(&self) -> Protocol {
         self.protocol
+    }
+
+    /// The ticket this authorization came from, if any.
+    pub const fn ticket_id(&self) -> Option<Uuid> {
+        self.ticket_id
     }
 }
 
@@ -276,6 +289,10 @@ impl<O> ApprovedTarget<O> {
         self.0.protocol()
     }
 
+    pub const fn ticket_id(&self) -> Option<Uuid> {
+        self.0.ticket_id()
+    }
+
     pub fn into_parts(self) -> (AuthStateUserInfo, SpecificTarget<O>) {
         (self.0.user_info, self.0.target)
     }
@@ -298,6 +315,7 @@ pub async fn authorize_for_target<C: ConfigProvider + ?Sized>(
             user_info: identity.user_info.clone(),
             target: SpecificTarget::any(target),
             protocol: identity.protocol,
+            ticket_id: None,
         }))
 }
 
@@ -402,6 +420,7 @@ pub async fn authorize_ticket(
             user_info: (&user).into(),
             target: SpecificTarget::any(target),
             protocol,
+            ticket_id: Some(ticket.id),
         }))
     } else {
         warn!("Ticket not found");
@@ -463,7 +482,8 @@ mod tests {
     #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn a_ticket_spend_is_atomic_with_its_authorization() {
-        use sea_orm::{ActiveModelTrait, ActiveValue::Set, Database};
+        use sea_orm::ActiveValue::Set;
+        use sea_orm::{ActiveModelTrait, Database};
         use warpgate_db_entities::Parameters::{
             ConfigMigrationValues, set_config_migration_values,
         };
@@ -524,7 +544,12 @@ mod tests {
         let first = authorize_ticket(&db, &login_protection, &secret, None, Protocol::Http)
             .await
             .unwrap();
-        assert!(first.is_some_and(|authorization| authorization.target().id == target.id));
+        // The ticket travels with the authorization so the target session it
+        // opens can record which ticket opened it.
+        assert!(
+            first.is_some_and(|authorization| authorization.target().id == target.id
+                && authorization.ticket_id() == Some(ticket_id))
+        );
 
         let second = authorize_ticket(&db, &login_protection, &secret, None, Protocol::Http)
             .await

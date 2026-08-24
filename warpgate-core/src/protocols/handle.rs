@@ -29,8 +29,12 @@ pub struct WarpgateServerHandle {
     user_session_state: Arc<Mutex<UserSessionState>>,
     rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
     protocol: Protocol,
+    /// What keeps this session alive, as chosen at registration. Read here
+    /// rather than re-derived from `protocol`, so a session registered against
+    /// its protocol's non-default lifecycle behaves consistently in teardown,
+    /// readmission and child-session creation.
+    lifecycle: SessionLifecycle,
     provisional: bool,
-    end_user_session_on_drop: bool,
 }
 
 impl WarpgateServerHandle {
@@ -41,6 +45,7 @@ impl WarpgateServerHandle {
         user_session_state: Arc<Mutex<UserSessionState>>,
         rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
         protocol: Protocol,
+        lifecycle: SessionLifecycle,
     ) -> Self {
         Self {
             user_session_id,
@@ -49,11 +54,8 @@ impl WarpgateServerHandle {
             user_session_state,
             rate_limiters_registry,
             protocol,
+            lifecycle,
             provisional: false,
-            // Shared sessions can be active on several nodes; their DB
-            // lifetime is ended by the shared session storage, not by one
-            // node dropping its local handle.
-            end_user_session_on_drop: protocol.lifecycle() == SessionLifecycle::ConnectionBound,
         }
     }
 
@@ -175,7 +177,7 @@ impl WarpgateServerHandle {
             ));
         }
 
-        let lifecycle = self.protocol.lifecycle();
+        let lifecycle = self.lifecycle;
 
         // Phase 1, under the parent lock: stamp the identity and read the
         // slot. Nothing slow happens here — see the lock note below.
@@ -290,6 +292,8 @@ impl WarpgateServerHandle {
             id,
             authorization.target(),
             &parent,
+            lifecycle,
+            authorization.ticket_id(),
         )
         .await?;
         // A shared session may have adopted the live row another node opened
@@ -503,7 +507,9 @@ impl Drop for WarpgateServerHandle {
         let user_session_state = self.user_session_state.clone();
         let provisional = self.provisional;
         let protocol = self.protocol;
-        let end_user_session_on_drop = self.end_user_session_on_drop;
+        // A shared session can be active on several nodes; its DB lifetime is
+        // ended by whatever backs it, not by one node dropping its local view.
+        let end_user_session_on_drop = self.lifecycle == SessionLifecycle::ConnectionBound;
         tokio::spawn(async move {
             if provisional {
                 state.lock().await.discard_session(id).await;

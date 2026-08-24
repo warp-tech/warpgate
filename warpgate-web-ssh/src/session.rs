@@ -7,7 +7,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info};
 use uuid::Uuid;
-use warpgate_common::TargetSessionId;
+use warpgate_common::{TargetSessionId, UserSessionId};
 use warpgate_core::WarpgateServerHandle;
 use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Target::TargetKind;
@@ -48,7 +48,7 @@ pub struct WebSshSession {
 impl WebSshSession {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: Uuid,
+        id: UserSessionId,
         user_id: Uuid,
         target_name: String,
         target_kind: TargetKind,
@@ -191,7 +191,7 @@ impl std::ops::Deref for WebSshSession {
 }
 
 impl ManagedSession for WebSshSession {
-    fn id(&self) -> Uuid {
+    fn id(&self) -> UserSessionId {
         self.core.id()
     }
 

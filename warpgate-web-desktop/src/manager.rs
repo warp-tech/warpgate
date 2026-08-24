@@ -6,8 +6,7 @@ use std::time::Instant;
 use anyhow::Context;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, info_span, warn};
-use uuid::Uuid;
-use warpgate_common::{TargetOptions, WarpgateError};
+use warpgate_common::{TargetOptions, UserSessionId, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
     DesktopEvent, Services, State, TargetAuthorization, UserSessionStateInit,
@@ -32,7 +31,7 @@ impl std::ops::Deref for WebDesktopClientManager {
 }
 
 impl SessionRemover for WebDesktopClientManager {
-    async fn remove_session(&self, id: Uuid) {
+    async fn remove_session(&self, id: UserSessionId) {
         self.0.remove_session(id).await;
     }
 }
@@ -48,7 +47,7 @@ impl WebDesktopClientManager {
         authorization: TargetAuthorization,
         remote_address: Option<SocketAddr>,
         size: Option<(u16, u16)>,
-    ) -> Result<Uuid, WarpgateError> {
+    ) -> Result<UserSessionId, WarpgateError> {
         let user_id = authorization.user_info().id;
         if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
             return Err(WarpgateError::SessionLimitReached);
@@ -133,7 +132,7 @@ impl WebDesktopClientManager {
         };
 
         let session = Arc::new(WebDesktopSession::new(
-            session_id.0,
+            session_id,
             user_id,
             target_name.clone(),
             target_kind,
@@ -171,7 +170,7 @@ impl WebDesktopClientManager {
 
         debug!(session=%session_id, user=%username, target=%target_name, "Web-desktop session created");
 
-        Ok(session_id.0)
+        Ok(session_id)
     }
 }
 
@@ -193,7 +192,7 @@ async fn emit(
 fn spawn_event_loop(
     session: Arc<WebDesktopSession>,
     mut event_rx: mpsc::Receiver<warpgate_core::DesktopEvent>,
-    sessions: Arc<Mutex<HashMap<Uuid, Arc<WebDesktopSession>>>>,
+    sessions: Arc<Mutex<HashMap<UserSessionId, Arc<WebDesktopSession>>>>,
     recorder: Option<Arc<DesktopRecorder>>,
     encode_jpeg: bool,
 ) {

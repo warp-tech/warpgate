@@ -72,9 +72,13 @@ pub enum Protocol {
     Rdp,
 }
 
-/// How a protocol's user sessions live and die. Stamped into each session row
-/// at registration (`user_sessions.node_id`), so the reaper and teardown read
-/// the row itself instead of re-deriving protocol semantics.
+/// How one user session lives and dies. Chosen by the code that registers the
+/// session — not by its protocol, which cannot know what keeps a particular
+/// session alive — and stamped into the row (`user_sessions.node_id`), so the
+/// reaper and teardown read the row itself instead of re-deriving anything.
+/// [`Protocol::lifecycle`] is the usual answer, but a protocol can register
+/// sessions of either kind: an HTTP session held open by a node-local handle
+/// rather than by a stored cookie is `ConnectionBound`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionLifecycle {
     /// The session is a runtime object on one node — a live connection, or
@@ -111,6 +115,9 @@ impl Protocol {
         Self::Rdp,
     ];
 
+    /// How this protocol's sessions live and die by default. Registration
+    /// takes the lifecycle as an argument, so a session kept alive by
+    /// something other than its protocol's usual backing says so there.
     pub const fn lifecycle(self) -> SessionLifecycle {
         match self {
             Self::Http => SessionLifecycle::Shared(SharedSessionBacking::CookieSession),
@@ -119,12 +126,9 @@ impl Protocol {
             // pending-approval auth state are in-memory on one node, and the
             // session row's node is what routes approvals there. Making it
             // Shared requires DB-backed request correlation first.
-            Self::Kubernetes
-            | Self::Ssh
-            | Self::MySql
-            | Self::Postgres
-            | Self::Vnc
-            | Self::Rdp => SessionLifecycle::ConnectionBound,
+            Self::Kubernetes | Self::Ssh | Self::MySql | Self::Postgres | Self::Vnc | Self::Rdp => {
+                SessionLifecycle::ConnectionBound
+            }
         }
     }
 

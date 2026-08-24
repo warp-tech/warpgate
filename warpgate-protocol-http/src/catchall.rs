@@ -7,15 +7,14 @@ use poem::{Body, IntoResponse, Request, Response, handler};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{Instrument, debug, info_span};
-use warpgate_common::{TargetHTTPOptions, WarpgateError};
 use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_common::{TargetHTTPOptions, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization, SessionKeepalive,
 };
 use warpgate_core::{
-    ConfigProvider, TargetAuthorization, TargetSessionStart,
-    authorize_for_target,
+    ConfigProvider, TargetAuthorization, TargetSessionStart, authorize_for_target,
 };
 
 use crate::client_cache::HttpClientCache;
@@ -64,7 +63,11 @@ pub async fn catchall_endpoint(
 
     // `start_target_session` stamps (or verifies) the session's user from the
     // authorization itself, so there is no separate stamping step to drift.
-    let started = handle.lock().await.start_target_session(authorization).await;
+    let started = handle
+        .lock()
+        .await
+        .start_target_session(authorization)
+        .await;
     let (target_session_id, approved, close_signal) = match started {
         Err(WarpgateError::UserSessionEnded) => {
             // Revoked between this node resolving its view of the session and
@@ -136,7 +139,7 @@ async fn get_target_for_request(
         user_id,
         username,
         target_id,
-        ..
+        ticket_id,
     }) = &ctx.auth
     {
         let Some(target) = config_provider.get_target_by_id(*target_id).await? else {
@@ -150,13 +153,13 @@ async fn get_target_for_request(
                 },
                 target,
                 *target_id,
+                *ticket_id,
                 crate::common::PROTOCOL_NAME,
             )?,
         ));
     }
 
-    let RequestAuthorization::Session(SessionAuthorization::User { .. }) = &ctx.auth
-    else {
+    let RequestAuthorization::Session(SessionAuthorization::User { .. }) = &ctx.auth else {
         return Ok(None);
     };
 

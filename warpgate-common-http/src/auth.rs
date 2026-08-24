@@ -64,6 +64,10 @@ pub enum SessionAuthorization {
         /// The row the ticket was issued for. Pinned by id so a rename — or a
         /// new target claiming the old name — can't redirect the session.
         target_id: Uuid,
+        /// The ticket itself, recorded on the target sessions it opens.
+        /// `None` for a browser session stored before this was carried.
+        #[serde(default)]
+        ticket_id: Option<Uuid>,
     },
 }
 
@@ -285,6 +289,7 @@ mod tests {
             user_id: Uuid::nil(),
             username: "alice".into(),
             target_id: Uuid::nil(),
+            ticket_id: None,
         });
         assert!(ticket.as_full_user().is_none());
 

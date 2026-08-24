@@ -9567,6 +9567,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
 ]

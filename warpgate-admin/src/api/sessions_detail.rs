@@ -7,7 +7,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
 use warpgate_core::UserSessionSnapshot;
-use warpgate_db_entities::{Recording, TargetSession, UserSession};
+use warpgate_db_entities::{HttpSession, Recording, TargetSession, UserSession};
 
 use super::sessions_list::user_session_snapshots;
 use super::{AdminContext, ClusterOrAdminContext};
@@ -127,7 +127,11 @@ impl Api {
             user_state.lock().await.handle.close();
         }
 
-        if browser_session.get::<Uuid>("session_id") == Some(id.0) {
+        // Keyed through the entity's own constant, so this stays in step with
+        // what the HTTP session middleware writes.
+        if browser_session.get::<UserSessionId>(HttpSession::SESSION_ID_DATA_KEY)
+            == Some(UserSessionId(id.0))
+        {
             browser_session.purge();
         }
 

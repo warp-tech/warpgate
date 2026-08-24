@@ -7,8 +7,7 @@ use russh::keys::PublicKeyBase64;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, error, info_span, warn};
-use uuid::Uuid;
-use warpgate_common::{TargetSSHOptions, WarpgateError};
+use warpgate_common::{TargetSSHOptions, UserSessionId, WarpgateError};
 use warpgate_core::{
     Services, State, TargetAuthorization, UserSessionStateInit,
 };
@@ -36,7 +35,7 @@ impl std::ops::Deref for WebSshClientManager {
 }
 
 impl SessionRemover for WebSshClientManager {
-    async fn remove_session(&self, id: Uuid) {
+    async fn remove_session(&self, id: UserSessionId) {
         self.0.remove_session(id).await;
     }
 }
@@ -51,7 +50,7 @@ impl WebSshClientManager {
         services: &Services,
         authorization: TargetAuthorization,
         remote_address: Option<SocketAddr>,
-    ) -> Result<Uuid, WarpgateError> {
+    ) -> Result<UserSessionId, WarpgateError> {
         let user_id = authorization.user_info().id;
         if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
             return Err(WarpgateError::SessionLimitReached);
@@ -88,7 +87,7 @@ impl WebSshClientManager {
             .context("creating SSH remote client")?;
 
         let session = Arc::new(WebSshSession::new(
-            session_id.0,
+            session_id,
             user_id,
             target_name.clone(),
             target_kind,
@@ -133,14 +132,14 @@ impl WebSshClientManager {
 
         debug!(session=%session_id, user=%username, target=%target_name, "Web-SSH session created");
 
-        Ok(session_id.0)
+        Ok(session_id)
     }
 }
 
 fn spawn_event_loop(
     session: Arc<WebSshSession>,
     mut event_rx: Receiver<RCEvent>,
-    sessions: Arc<Mutex<HashMap<Uuid, Arc<WebSshSession>>>>,
+    sessions: Arc<Mutex<HashMap<UserSessionId, Arc<WebSshSession>>>>,
     services: Services,
 ) {
     let session_id = session.id();

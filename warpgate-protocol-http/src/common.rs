@@ -517,7 +517,10 @@ mod tests {
     fn session_host_check_fails_closed() {
         use super::session_host_is_authorized;
 
-        assert!(session_host_is_authorized(Some("example.com"), "example.com"));
+        assert!(session_host_is_authorized(
+            Some("example.com"),
+            "example.com"
+        ));
         assert!(session_host_is_authorized(
             Some("app.example.com"),
             "example.com"

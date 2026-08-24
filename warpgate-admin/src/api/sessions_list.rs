@@ -175,7 +175,9 @@ pub(super) async fn user_session_snapshots(
     for target in targets {
         let parent_id = target.user_session_id;
         let mut snapshot: TargetSessionSnapshot = target.into();
-        snapshot.node_hostname = snapshot.node_id.and_then(|id| node_names.get(&id.0).cloned());
+        snapshot.node_hostname = snapshot
+            .node_id
+            .and_then(|id| node_names.get(&id.0).cloned());
         targets_by_parent
             .entry(parent_id)
             .or_default()
@@ -186,7 +188,9 @@ pub(super) async fn user_session_snapshots(
         .into_iter()
         .map(|parent| {
             let mut snapshot: UserSessionSnapshot = parent.into();
-            snapshot.node_hostname = snapshot.node_id.and_then(|id| node_names.get(&id.0).cloned());
+            snapshot.node_hostname = snapshot
+                .node_id
+                .and_then(|id| node_names.get(&id.0).cloned());
             snapshot.target_sessions = targets_by_parent.remove(&snapshot.id.0).unwrap_or_default();
             snapshot
         })

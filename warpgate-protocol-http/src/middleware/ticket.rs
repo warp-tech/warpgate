@@ -92,6 +92,7 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                     user_id: authorization.user_info().id,
                     username: authorization.user_info().username.clone(),
                     target_id: authorization.target().id,
+                    ticket_id: authorization.ticket_id(),
                 });
             }
         }

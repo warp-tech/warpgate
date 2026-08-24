@@ -92,7 +92,10 @@ pub async fn node_owner(
     if node_id.is_nil() || node_id == services.cluster.node_id {
         return Ok(Owner::Local);
     }
-    let Some(node) = Node::Entity::find_by_id(node_id.0).one(&services.db).await? else {
+    let Some(node) = Node::Entity::find_by_id(node_id.0)
+        .one(&services.db)
+        .await?
+    else {
         warn!(%node_id, "Owner node is gone from the cluster; serving locally");
         return Ok(Owner::Local);
     };

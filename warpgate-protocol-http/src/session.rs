@@ -241,8 +241,9 @@ impl SessionStorage for SharedSessionStorage {
 
 /// Request-data marker set by the ticket middleware for a header-borne ticket:
 /// the request runs on a detached session that is never stored, so the user
-/// session registered for it has no cookie to end it and is ended by `vacuum`
-/// instead.
+/// session registered for it is kept alive by this node's `SessionStore` entry
+/// rather than by a stored cookie — see the lifecycle chosen in
+/// [`SessionStore::create_handle_for`].
 #[derive(Clone, Copy)]
 pub(crate) struct TemporaryTicketSession;
 
@@ -277,9 +278,8 @@ struct SessionEntry {
     close_sender: broadcast::Sender<()>,
     last_activity: Instant,
     keepalive: Weak<()>,
-    /// Set for a [`TemporaryTicketSession`]: its index key, and the marker
-    /// that expiring this entry must end the user session, since no stored
-    /// browser session references it.
+    /// Set for a [`TemporaryTicketSession`]: the key this entry is indexed
+    /// under in `ticket_sessions`, so removing it clears the index too.
     ticket_key: Option<TicketSessionKey>,
 }
 
@@ -444,12 +444,17 @@ impl SessionStore {
         let session = <&Session>::from_request_without_body(req).await?;
 
         let (session_handle, session_handle_rx) = HttpSessionHandle::new();
-        let server_handle = State::register_user_session(
-            &ctx.services().state,
-            PROTOCOL_NAME,
-            Self::state_init_for(req, session_handle).await?,
-        )
-        .await?;
+        let init = Self::state_init_for(req, session_handle).await?;
+        // A header-ticket session is held open by this node's entry alone: it
+        // has no stored browser session, so the shared-lifecycle reaper would
+        // see it as an orphan and end it while it is still serving. Its
+        // lifetime is this node's, and it registers as such.
+        let server_handle = if ticket_session_key(req, session).is_some() {
+            State::register_node_local_user_session(&ctx.services().state, PROTOCOL_NAME, init)
+                .await?
+        } else {
+            State::register_user_session(&ctx.services().state, PROTOCOL_NAME, init).await?
+        };
 
         let id = server_handle.lock().await.id();
         session.set(SESSION_ID_SESSION_KEY, id);
@@ -600,15 +605,14 @@ impl SessionStore {
         }
     }
 
-    /// Expires idle local entries. Returns the expired *temporary* sessions —
-    /// no stored browser session references those, so the caller must end
-    /// them; the rest are only detached here, since another node may still be
-    /// serving the DB-backed browser session and shared storage GC is the
-    /// authority for global idle expiration.
-    #[must_use]
-    pub fn vacuum(&mut self, session_max_age: Duration) -> Vec<UserSessionId> {
+    /// Expires idle local entries. Removing an entry drops the last handle
+    /// reference, and what that does is the session's own business: a
+    /// connection-bound session (a header ticket's) ends, while a cookie-backed
+    /// one is only detached, since another node may still be serving it and
+    /// shared storage GC is the authority for global idle expiration.
+    pub fn vacuum(&mut self, session_max_age: Duration) {
         let now = Instant::now();
-        let to_remove: Vec<(UserSessionId, bool)> = self
+        let to_remove: Vec<UserSessionId> = self
             .sessions
             .iter()
             .filter(|(_, entry)| {
@@ -616,19 +620,19 @@ impl SessionStore {
                 // looks idle: a header-ticket request registers no keepalive,
                 // since the token is attached before its session exists.
                 Arc::strong_count(&entry.handle) == 1
-                    && is_session_expired(entry.last_activity, &entry.keepalive, now, session_max_age)
+                    && is_session_expired(
+                        entry.last_activity,
+                        &entry.keepalive,
+                        now,
+                        session_max_age,
+                    )
             })
-            .map(|(id, entry)| (*id, entry.ticket_key.is_some()))
+            .map(|(id, _)| *id)
             .collect();
-        let mut ended = vec![];
-        for (id, temporary) in to_remove {
-            info!(%id, "Detaching idle local HTTP session handle");
+        for id in to_remove {
+            info!(%id, "Expiring idle local HTTP session handle");
             self.remove_session_by_id(id);
-            if temporary {
-                ended.push(id);
-            }
         }
-        ended
     }
 
     /// The sessions this node is actively serving, so their stored browser

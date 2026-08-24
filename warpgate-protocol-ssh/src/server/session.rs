@@ -657,9 +657,12 @@ impl ServerSession {
             MenuEvent::Selected(target) => {
                 // The proof stored when the login's auth state was accepted;
                 // absent for ticket sessions, which never reach the menu.
-                let identity = self.authorized_identity.clone().ok_or(
-                    WarpgateError::InconsistentState("No authorized identity".into()),
-                )?;
+                let identity =
+                    self.authorized_identity
+                        .clone()
+                        .ok_or(WarpgateError::InconsistentState(
+                            "No authorized identity".into(),
+                        ))?;
                 // The menu list was authorized when it was built; permissions
                 // may have changed while it was open, so re-check on selection.
                 let target_name = target.name.clone();

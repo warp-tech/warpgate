@@ -48,9 +48,37 @@ impl State {
         }))
     }
 
+    /// Registers a user session with the protocol's own lifecycle. The one
+    /// valid exception — a session kept alive by a node-local handle rather
+    /// than its protocol's usual backing — registers through
+    /// [`Self::register_node_local_user_session`] instead; there is no
+    /// lifecycle to pass, so it cannot be passed wrong.
     pub async fn register_user_session(
         this: &Arc<Mutex<Self>>,
         protocol: Protocol,
+        state: UserSessionStateInit,
+    ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
+        Self::register_user_session_in(this, protocol, protocol.lifecycle(), state).await
+    }
+
+    /// Registers a session that is [`SessionLifecycle::ConnectionBound`]
+    /// regardless of its protocol's default: it is kept alive by this node's
+    /// handle alone (a header-borne ticket's cookieless HTTP session), so the
+    /// row must record an owner — as a shared session it would back nothing
+    /// and the orphan reaper would end it mid-use.
+    pub async fn register_node_local_user_session(
+        this: &Arc<Mutex<Self>>,
+        protocol: Protocol,
+        state: UserSessionStateInit,
+    ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
+        Self::register_user_session_in(this, protocol, SessionLifecycle::ConnectionBound, state)
+            .await
+    }
+
+    async fn register_user_session_in(
+        this: &Arc<Mutex<Self>>,
+        protocol: Protocol,
+        lifecycle: SessionLifecycle,
         state: UserSessionStateInit,
     ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
         let mut self_ = this.lock().await;
@@ -80,7 +108,7 @@ impl State {
                 // A shared session is served by any node and owned by none;
                 // recording an owner would make the reaper end it when this
                 // node goes away.
-                node_id: Set(match protocol.lifecycle() {
+                node_id: Set(match lifecycle {
                     SessionLifecycle::ConnectionBound => Some(self_.node_id.0),
                     SessionLifecycle::Shared(_) => None,
                 }),
@@ -95,12 +123,15 @@ impl State {
                 .map_err(WarpgateError::from)?;
         }
 
-        Ok(self_.install_user_session(this, id, state, protocol))
+        Ok(self_.install_user_session(this, id, state, protocol, lifecycle))
     }
 
     /// Registers a user session and wraps its raw connection stream with the
     /// session rate limiters in one step, so a raw-TCP protocol cannot serve
     /// an unlimited stream by forgetting the wrap.
+    ///
+    /// The session is necessarily connection-bound: it is this socket, and it
+    /// ends with it — which is also every raw-TCP protocol's default.
     pub async fn register_user_session_with_stream<S>(
         this: &Arc<Mutex<Self>>,
         protocol: Protocol,
@@ -125,6 +156,10 @@ impl State {
     /// HTTP browser session created on another node. No row is inserted; the
     /// caller has validated the row. The local handle's drop detaches rather
     /// than ends the session ([`WarpgateServerHandle`] does this for HTTP).
+    ///
+    /// Always the protocol's own (shared) lifecycle: only a stored-cookie
+    /// session has a row to re-attach to — a node-local session lives and dies
+    /// with its one owning node and is never adopted.
     pub async fn adopt_user_session(
         this: &Arc<Mutex<Self>>,
         id: UserSessionId,
@@ -136,7 +171,7 @@ impl State {
             state,
             self_.change_sender.clone(),
         )));
-        self_.install_user_session(this, id, state, protocol)
+        self_.install_user_session(this, id, state, protocol, protocol.lifecycle())
     }
 
     fn install_user_session(
@@ -145,6 +180,7 @@ impl State {
         id: UserSessionId,
         state: Arc<Mutex<UserSessionState>>,
         protocol: Protocol,
+        lifecycle: SessionLifecycle,
     ) -> Arc<Mutex<WarpgateServerHandle>> {
         self.user_sessions.insert(id, state.clone());
         let _ = self.change_sender.send(());
@@ -155,6 +191,7 @@ impl State {
             state,
             self.rate_limiter_registry.clone(),
             protocol,
+            lifecycle,
         )))
     }
 
@@ -213,6 +250,8 @@ impl State {
         id: TargetSessionId,
         target: &Target,
         parent: &UserSessionState,
+        lifecycle: SessionLifecycle,
+        ticket_id: Option<Uuid>,
     ) -> Result<TargetSessionHandle, WarpgateError> {
         let user_info = parent.user_info.clone().ok_or_else(|| {
             WarpgateError::InconsistentState(
@@ -239,10 +278,17 @@ impl State {
                 self_.rate_limiter_registry.clone(),
             )
         };
-        let lifecycle = target.options.protocol().lifecycle();
-        let id =
-            Self::open_target_session_row(&db, node_id, lifecycle, id, user_session_id, target, &user_info)
-                .await?;
+        let id = Self::open_target_session_row(
+            &db,
+            node_id,
+            lifecycle,
+            id,
+            user_session_id,
+            target,
+            &user_info,
+            ticket_id,
+        )
+        .await?;
 
         {
             let mut self_ = this.lock().await;
@@ -277,6 +323,7 @@ impl State {
         user_session_id: UserSessionId,
         target: &Target,
         user_info: &AuthStateUserInfo,
+        ticket_id: Option<Uuid>,
     ) -> Result<TargetSessionId, WarpgateError> {
         use sea_orm::ActiveValue::Set;
 
@@ -300,7 +347,7 @@ impl State {
             target_id: Set(target.id),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),
-            ticket_id: Set(None),
+            ticket_id: Set(ticket_id),
             node_id: Set(match lifecycle {
                 SessionLifecycle::ConnectionBound => Some(node_id.0),
                 SessionLifecycle::Shared(_) => None,
@@ -540,10 +587,7 @@ mod tests {
                 Protocol::Http,
             ))
             .await;
-        assert!(matches!(
-            refused,
-            Err(WarpgateError::UserSessionEnded)
-        ));
+        assert!(matches!(refused, Err(WarpgateError::UserSessionEnded)));
     }
 
     /// Closing a login is what aborts the traffic running under it, and the
@@ -791,6 +835,45 @@ mod tests {
                 .ended
                 .is_none()
         );
+    }
+
+    /// Which constructor a session registers through — not its protocol — is
+    /// what decides whether the row records an owning node, the only thing the
+    /// reaper reads. An HTTP session held open by a node-local handle (a
+    /// header-borne ticket's) records its owner and so is not swept as an
+    /// unbacked orphan.
+    #[tokio::test]
+    async fn registration_kind_decides_the_owning_node() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
+        let node_id = NodeId(Uuid::new_v4());
+        let state = State::new(&db, &rate_limiters, node_id);
+
+        let init = || UserSessionStateInit {
+            remote_address: None,
+            handle: Box::new(TestHandle),
+        };
+        let node_of = async |handle: &Arc<Mutex<WarpgateServerHandle>>| {
+            let id = handle.lock().await.user_session_id();
+            UserSession::Entity::find_by_id(id.0)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .node_id
+        };
+
+        let cookie_backed = State::register_user_session(&state, Protocol::Http, init())
+            .await
+            .unwrap();
+        assert_eq!(node_of(&cookie_backed).await, None);
+
+        let node_local = State::register_node_local_user_session(&state, Protocol::Http, init())
+            .await
+            .unwrap();
+        assert_eq!(node_of(&node_local).await, Some(node_id.0));
     }
 
     #[tokio::test]
