@@ -56,7 +56,11 @@ impl Api {
         admin.require(AdminPermission::SessionsView)?;
 
         let db = &admin.services().db;
-        let mut q = UserSession::Entity::find().order_by_desc(UserSession::Column::Started);
+        // The id tiebreaker keeps offset pagination stable when sessions share
+        // a start timestamp.
+        let mut q = UserSession::Entity::find()
+            .order_by_desc(UserSession::Column::Started)
+            .order_by_desc(UserSession::Column::Id);
 
         if active_only.unwrap_or(false) {
             q = q.filter(UserSession::Column::Ended.is_null());

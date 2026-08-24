@@ -46,6 +46,18 @@ pub fn host_is_subdomain_of_or_equal(host: &str, base_domain: &str) -> bool {
     host == base || host.ends_with(&format!(".{base}"))
 }
 
+/// Whether a request may present a session cookie, given the configured base
+/// host: the base host itself, its subdomains, or localhost (for development
+/// against a non-localhost deployment). A request whose host cannot be
+/// determined proves nothing and is refused — this check must not fail open.
+fn session_host_is_authorized(request_host: Option<&str>, base_host: &str) -> bool {
+    let Some(host) = request_host else {
+        return false;
+    };
+    host_is_subdomain_of_or_equal(host, base_host)
+        || (is_localhost_host(host) && base_host != "localhost" && base_host != "127.0.0.1")
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SsoLoginState {
     pub token: WarpgateIdToken,
@@ -391,28 +403,26 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     // A forwarded request's Host is the cluster SNI name by construction, so the
     // origin check below would reject - and clear - a session that is fine.
     if session_auth.is_some() && !is_cluster_peer {
-        let config = ctx.services().config.lock().await;
-        if let Ok(base_url) = construct_external_url(None, &config, None).await
-            && let Some(base_host) = base_url.host_str()
-        {
+        // Host binding only means something when `external_host` pins an
+        // origin. Without it the external URL is derived from the request's
+        // own Host header, so a check would compare the host against itself.
+        let base_host = {
+            let config = ctx.services().config.lock().await;
+            construct_external_url(None, &config, None)
+                .await
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_owned))
+        };
+        if let Some(base_host) = base_host {
             let request_host = ctx.trusted_hostname(&req);
-
-            if let Some(host) = request_host {
-                // Validate request host matches base host or is a subdomain/localhost
-                let is_localhost = is_localhost_host(&host);
-                let is_authorized = host == base_host
-                    || host.ends_with(&format!(".{base_host}"))
-                    || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
-
-                if !is_authorized {
-                    tracing::warn!(
-                        "Session cookie rejected: request host '{}' is not authorized (base host: '{}'). Clearing session.",
-                        host,
-                        base_host
-                    );
-                    session.clear();
-                    session_auth = None;
-                }
+            if !session_host_is_authorized(request_host.as_deref(), &base_host) {
+                tracing::warn!(
+                    "Session cookie rejected: request host {:?} is not authorized (base host: '{}'). Clearing session.",
+                    request_host,
+                    base_host
+                );
+                session.clear();
+                session_auth = None;
             }
         }
     }
@@ -491,6 +501,28 @@ mod tests {
             let resp = gateway_redirect(&req);
             assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         }
+    }
+
+    #[test]
+    fn session_host_check_fails_closed() {
+        use super::session_host_is_authorized;
+
+        assert!(session_host_is_authorized(Some("example.com"), "example.com"));
+        assert!(session_host_is_authorized(
+            Some("app.example.com"),
+            "example.com"
+        ));
+        assert!(session_host_is_authorized(Some("localhost"), "example.com"));
+        assert!(!session_host_is_authorized(
+            Some("evil-example.com"),
+            "example.com"
+        ));
+        assert!(session_host_is_authorized(Some("localhost"), "localhost"));
+        // The localhost exception is for developing against a real deployment,
+        // not a blanket pass when the deployment itself is localhost.
+        assert!(!session_host_is_authorized(Some("127.0.0.5"), "localhost"));
+        // A host that cannot be determined proves nothing.
+        assert!(!session_host_is_authorized(None, "example.com"));
     }
 
     #[test]

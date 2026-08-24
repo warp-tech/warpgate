@@ -196,8 +196,9 @@ impl SessionStorage for SharedSessionStorage {
 }
 
 /// Request-data marker set by the ticket middleware for a header-borne ticket:
-/// the browser session is discarded after the request, so the user session
-/// registered for it has no cookie to end it and is ended by `vacuum` instead.
+/// the request runs on a detached session that is never stored, so the user
+/// session registered for it has no cookie to end it and is ended by `vacuum`
+/// instead.
 #[derive(Clone, Copy)]
 pub(crate) struct TemporaryTicketSession;
 
