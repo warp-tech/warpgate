@@ -16,7 +16,9 @@ use tokio::time;
 use tracing::{debug, error, info, info_span, warn};
 use url::Url;
 use warpgate_common::auth::AuthSelector;
-use warpgate_common::{PostgresProtocolVersion, Protocol, Secret, TargetPostgresOptions, UserSessionId};
+use warpgate_common::{
+    PostgresProtocolVersion, Protocol, Secret, TargetPostgresOptions, UserSessionId,
+};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
     ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, TargetAuthorization,
@@ -302,16 +304,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             }
         };
 
-        let (_, approved, _) = *{
-            let mut handle = self.server_handle.lock().await;
-            handle
-                .set_user_info(authorization.user_info().clone())
-                .await?;
-            handle
-                .start_target_session(authorization)
-                .await?
-                .admitted()?
-        };
+        let (_, approved, close_signal) = *self
+            .server_handle
+            .lock()
+            .await
+            .start_target_session(authorization)
+            .await?
+            .admitted()?;
+        close_signal.forget();
 
         self.run_authorized_inner(startup, approved).await
     }

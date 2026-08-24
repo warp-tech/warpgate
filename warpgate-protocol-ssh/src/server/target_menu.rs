@@ -14,7 +14,7 @@ use ratatui::{Terminal, TerminalOptions, Viewport};
 use termwiz::input::{InputEvent, InputParser, KeyCode, Modifiers};
 use tui_input::{Input, InputRequest};
 use warpgate_common::eventhub::{EventSender, EventSubscription};
-use warpgate_common::{UserSessionId, Target, TargetSSHOptions, WarpgateError};
+use warpgate_common::{Target, TargetSSHOptions, UserSessionId, WarpgateError};
 
 use crate::server::session::Event;
 

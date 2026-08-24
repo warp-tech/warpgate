@@ -167,6 +167,16 @@ impl ClusterOrAdminContext {
         }
     }
 
+    /// Whether this request is a peer-forwarded copy rather than one straight
+    /// from an administrator. Forwarding strips every other credential, so the
+    /// cluster token is the one way to land on that variant. Fan-out endpoints
+    /// treat a forwarded copy as "act on this node only": the originating node
+    /// owns the cluster-wide half, and this is also what stops a forwarded
+    /// request from fanning out again.
+    pub(crate) const fn is_cluster_peer(&self) -> bool {
+        matches!(self, Self::ClusterToken(_))
+    }
+
     pub(crate) const fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {
         self.access().require(permission)
     }

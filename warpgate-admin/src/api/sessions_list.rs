@@ -23,7 +23,7 @@ use warpgate_db_entities::{Node, TargetSession, UserSession};
 
 use super::pagination::PaginatedResponse;
 use super::{AdminContext, ClusterOrAdminContext};
-use crate::api::cluster_proxy::fan_out_to_peers;
+use crate::api::cluster_proxy::fan_out_to_peers_expecting;
 use crate::api::common::require_admin_permission;
 
 pub struct Api;
@@ -97,9 +97,6 @@ impl Api {
         admin: ClusterOrAdminContext,
         session: &Session,
         req: &poem::Request,
-        /// Close only this node's own sessions instead of the whole cluster's.
-        /// Set on cluster-forwarded copies of the request.
-        local_only: Query<Option<bool>>,
     ) -> poem::Result<CloseAllSessionsResponse> {
         admin.require(AdminPermission::SessionsTerminate)?;
 
@@ -116,9 +113,20 @@ impl Api {
         session.purge();
 
         // A session's handle lives only on the node owning its connection, so
-        // the request goes out to every other node too.
-        if !local_only.unwrap_or(false) {
-            close_on_peers(&admin, req).await;
+        // the request goes out to every other node too — unless this is
+        // itself a forwarded copy, which acts on this node only. Best effort:
+        // the database sweep below ends every session anyway, so an
+        // unreachable peer is logged, not raised.
+        if !admin.is_cluster_peer() {
+            for (node, status) in fan_out_to_peers_expecting(&admin, req, StatusCode::CREATED).await
+            {
+                warn!(%node, %status, "Failed to close sessions on a cluster node");
+            }
+            // Handles only cover attached sessions; a shared (HTTP) session
+            // idle on every node has none, and only this ends it.
+            warpgate_core::db::revoke_all_user_sessions(&admin.services().db)
+                .await
+                .map_err(poem::error::InternalServerError)?;
         }
 
         Ok(CloseAllSessionsResponse::Ok)
@@ -142,8 +150,8 @@ pub(super) async fn user_session_snapshots(
 
     let mut node_ids = parents
         .iter()
-        .map(|session| session.node_id)
-        .chain(targets.iter().map(|session| session.node_id))
+        .filter_map(|session| session.node_id)
+        .chain(targets.iter().filter_map(|session| session.node_id))
         .collect::<Vec<_>>();
     node_ids.sort_unstable();
     node_ids.dedup();
@@ -163,7 +171,7 @@ pub(super) async fn user_session_snapshots(
     for target in targets {
         let parent_id = target.user_session_id;
         let mut snapshot: TargetSessionSnapshot = target.into();
-        snapshot.node_hostname = node_names.get(&snapshot.node_id).cloned();
+        snapshot.node_hostname = snapshot.node_id.and_then(|id| node_names.get(&id.0).cloned());
         targets_by_parent
             .entry(parent_id)
             .or_default()
@@ -174,27 +182,11 @@ pub(super) async fn user_session_snapshots(
         .into_iter()
         .map(|parent| {
             let mut snapshot: UserSessionSnapshot = parent.into();
-            snapshot.node_hostname = node_names.get(&snapshot.node_id).cloned();
+            snapshot.node_hostname = snapshot.node_id.and_then(|id| node_names.get(&id.0).cloned());
             snapshot.target_sessions = targets_by_parent.remove(&snapshot.id.0).unwrap_or_default();
             snapshot
         })
         .collect())
-}
-
-/// Forward the close-all request to every other registered cluster node.
-///
-/// Best effort: a node's sessions get marked ended in the database anyway, so an
-/// unreachable peer is logged, not raised.
-async fn close_on_peers(ctx: &AuthenticatedRequestContext, req: &poem::Request) {
-    // `local_only` stops the peers from fanning out again
-    let path = format!("{}?local_only=true", req.original_uri().path());
-
-    for (hostname, response) in fan_out_to_peers(ctx, req, &path).await {
-        if response.status() != StatusCode::CREATED {
-            let status = response.status();
-            warn!(node = %hostname, %status, "Failed to close sessions on a cluster node");
-        }
-    }
 }
 
 #[handler]
@@ -209,6 +201,8 @@ pub async fn api_get_sessions_changes_stream(
     Ok(ws
         .on_upgrade(|socket| async move {
             let (mut sink, _) = socket.split();
+
+            // TODO cluster broadcast
 
             while receiver.recv().await.is_ok() {
                 sink.send(Message::Text("".into())).await?;
@@ -245,7 +239,8 @@ mod tests {
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),
             protocol: Set("SSH".into()),
-            node_id: Set(node_id),
+            node_id: Set(Some(node_id)),
+            auth_state_node_id: Set(None),
         }
         .insert(&db)
         .await
@@ -260,7 +255,7 @@ mod tests {
                 started: Set(parent.started),
                 ended: Set(None),
                 ticket_id: Set(None),
-                node_id: Set(node_id),
+                node_id: Set(Some(node_id)),
             }
             .insert(&db)
             .await

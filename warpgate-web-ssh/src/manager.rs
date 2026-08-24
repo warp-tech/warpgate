@@ -76,20 +76,14 @@ impl WebSshClientManager {
         .await
         .context("registering webSSH session")?;
 
-        let (_, approved, _) = *{
-            let mut server_handle = server_handle.lock().await;
-
-            server_handle
-                .set_user_info(authorization.user_info().clone())
-                .await
-                .context("setting user info on server handle")?;
-
-            server_handle
-                .start_target_session(authorization)
-                .await
-                .and_then(TargetSessionStart::admitted)
-                .context("starting target session")?
-        };
+        let (target_session_id, approved, close_signal) = *server_handle
+            .lock()
+            .await
+            .start_target_session(authorization)
+            .await
+            .and_then(TargetSessionStart::admitted)
+            .context("starting target session")?;
+        close_signal.forget();
 
         let session_id = server_handle.lock().await.id();
         let rc_handles = RemoteClient::create(session_id, services.clone())
@@ -100,6 +94,7 @@ impl WebSshClientManager {
             user_id,
             target_name.clone(),
             target_kind,
+            target_session_id,
             server_handle,
             rc_handles.command_tx.clone(),
             rc_handles.abort_tx.clone(),

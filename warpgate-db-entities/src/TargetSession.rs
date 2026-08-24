@@ -21,7 +21,11 @@ pub struct Model {
     pub started: OffsetDateTime,
     pub ended: Option<OffsetDateTime>,
     pub ticket_id: Option<Uuid>,
-    pub node_id: Uuid,
+    /// The node serving this target connection, for connection-bound
+    /// protocols — live streams (recordings) route here. NULL for shared
+    /// (HTTP) target sessions, which are access records any node serves and
+    /// which end with their parent rather than with a node.
+    pub node_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

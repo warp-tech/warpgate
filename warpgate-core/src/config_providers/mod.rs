@@ -121,11 +121,13 @@ impl AuthorizedIdentity {
         }
     }
 
-    /// For a request already authenticated out of band — an established HTTP
-    /// session (backed by a `FullUserAuthorization`) or a Kubernetes credential
-    /// the caller validated itself. The caller vouches that authentication
-    /// happened; this is the one path that isn't a fresh [`AuthState`], so its
-    /// call sites are the ones to audit when reasoning about the gate.
+    /// For a request already authenticated out of band. Exactly two callers
+    /// are sanctioned — `FullUserAuthorization::identity` (an established
+    /// browser session or API token, vetted by the HTTP auth middleware) and
+    /// the Kubernetes transport-credential check — and any new one extends
+    /// the trust audit surface. Everything backed by a live [`AuthState`]
+    /// must mint through [`Self::from_auth_state`] instead, which cannot be
+    /// reached without a satisfied credential policy.
     pub const fn for_authenticated_session(
         user_info: AuthStateUserInfo,
         protocol: Protocol,
@@ -203,9 +205,7 @@ impl TargetAuthorization {
     /// Narrows the authorization to one protocol's options variant, failing on
     /// a target of another kind or a protocol mismatch. Dial code downstream
     /// then reads `options()` with no pattern check left to forget.
-    pub fn narrow<O: TargetOptionsVariant>(
-        self,
-    ) -> Result<TargetAuthorization<O>, WarpgateError> {
+    pub fn narrow<O: TargetOptionsVariant>(self) -> Result<TargetAuthorization<O>, WarpgateError> {
         if O::PROTOCOL != self.protocol {
             return Err(WarpgateError::InvalidTarget);
         }
@@ -316,13 +316,16 @@ pub async fn authorize_for_target_by_name<C: ConfigProvider + ?Sized>(
 }
 
 //TODO: move this somewhere
+/// Authorizes and spends the ticket in one call: a success has already
+/// decremented `uses_left`, so concurrent presentations of an N-use ticket
+/// yield at most N authorizations.
 pub async fn authorize_ticket(
     db: &DatabaseConnection,
     login_protection: &LoginProtectionService,
     secret: &Secret<String>,
     remote_ip: Option<IpAddr>,
     protocol: Protocol,
-) -> Result<Option<(e::Ticket::Model, TargetAuthorization)>, WarpgateError> {
+) -> Result<Option<TargetAuthorization>, WarpgateError> {
     // Spending a ticket is a login, so a blocked IP can't do it either. Checked ahead of the
     // lookup so a blocked caller can't use this as a ticket-existence oracle.
     if let Some(ip) = remote_ip
@@ -339,11 +342,6 @@ pub async fn authorize_ticket(
             .await?
     };
     if let Some(ticket) = ticket {
-        if ticket.uses_left == Some(0) {
-            warn!("Ticket is used up: {}", &ticket.id);
-            return Ok(None);
-        }
-
         if let Some(datetime) = ticket.expiry
             && datetime < OffsetDateTime::now_utc()
         {
@@ -374,43 +372,41 @@ pub async fn authorize_ticket(
             return Ok(None);
         };
 
+        let target = Target::try_from(ticket_target)?;
+
+        // Spending is the last gate, after every other check, so a denied user
+        // or a broken target does not burn a use. The guarded decrement is
+        // what enforces the use limit: N concurrent presentations race on it
+        // and only the winners with uses left get authorized. A ticket that
+        // loses reads as not-found, preserving the no-existence-oracle
+        // property.
+        if ticket.uses_left.is_some() {
+            let spent = e::Ticket::Entity::update_many()
+                .col_expr(
+                    e::Ticket::Column::UsesLeft,
+                    Expr::col(e::Ticket::Column::UsesLeft).sub(1),
+                )
+                .filter(e::Ticket::Column::Id.eq(ticket.id))
+                .filter(e::Ticket::Column::UsesLeft.gt(0))
+                .exec(db)
+                .await?;
+            if spent.rows_affected == 0 {
+                warn!("Ticket is used up: {}", &ticket.id);
+                return Ok(None);
+            }
+        }
+
         // A ticket binds user↔target directly, so it mints the proof without a
         // role check — that's what makes it a ticket.
-        let authorization = TargetAuthorization {
+        Ok(Some(TargetAuthorization {
             user_info: (&user).into(),
-            target: SpecificTarget::any(Target::try_from(ticket_target)?),
+            target: SpecificTarget::any(target),
             protocol,
-        };
-        Ok(Some((ticket, authorization)))
+        }))
     } else {
         warn!("Ticket not found");
         Ok(None)
     }
-}
-
-pub async fn consume_ticket(
-    db: &DatabaseConnection,
-    ticket_id: &Uuid,
-) -> Result<(), WarpgateError> {
-    let ticket = e::Ticket::Entity::find_by_id(*ticket_id).one(db).await?;
-    let Some(ticket) = ticket else {
-        return Err(WarpgateError::InvalidTicket(*ticket_id));
-    };
-
-    // Decrement atomically
-    if ticket.uses_left.is_some() {
-        e::Ticket::Entity::update_many()
-            .col_expr(
-                e::Ticket::Column::UsesLeft,
-                Expr::col(e::Ticket::Column::UsesLeft).sub(1),
-            )
-            .filter(e::Ticket::Column::Id.eq(*ticket_id))
-            .filter(e::Ticket::Column::UsesLeft.gt(0))
-            .exec(db)
-            .await?;
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -460,6 +456,90 @@ mod tests {
         let wrong_protocol = TargetAuthorization::for_test(user, http_target(), Protocol::Ssh)
             .narrow::<TargetHTTPOptions>();
         assert!(wrong_protocol.is_err());
+    }
+
+    /// Two presentations of a 1-use ticket race on the spend; only one may be
+    /// authorized, however they interleave.
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn a_ticket_spend_is_atomic_with_its_authorization() {
+        use sea_orm::{ActiveModelTrait, ActiveValue::Set, Database};
+        use warpgate_db_entities::Parameters::{
+            ConfigMigrationValues, set_config_migration_values,
+        };
+
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        warpgate_db_migrations::migrate_database(&db).await.unwrap();
+        let login_protection = LoginProtectionService::new(db.clone()).await.unwrap();
+
+        let target = http_target();
+        let user_id = Uuid::new_v4();
+        e::User::ActiveModel {
+            id: Set(user_id),
+            username: Set("alice".into()),
+            description: Set(String::new()),
+            credential_policy: Set(serde_json::json!({})),
+            rate_limit_bytes_per_second: Set(None),
+            ldap_server_id: Set(None),
+            ldap_object_uuid: Set(None),
+            allowed_ip_ranges: Set(serde_json::Value::Null),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        e::Target::ActiveModel {
+            id: Set(target.id),
+            name: Set(target.name.clone()),
+            description: Set(String::new()),
+            kind: Set(e::Target::TargetKind::Http),
+            options: Set(serde_json::to_value(&target.options).unwrap()),
+            rate_limit_bytes_per_second: Set(None),
+            group_id: Set(None),
+            ticket_max_duration_seconds: Set(None),
+            ticket_requests_disabled: Set(false),
+            ticket_require_approval: Set(false),
+            ticket_max_uses: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let secret = Secret::new("t1cket".to_string());
+        let ticket_id = Uuid::new_v4();
+        e::Ticket::ActiveModel {
+            id: Set(ticket_id),
+            secret_hash: Set(hash_secret("t1cket")),
+            user_id: Set(user_id),
+            description: Set(String::new()),
+            target_id: Set(target.id),
+            uses_left: Set(Some(1)),
+            self_service: Set(false),
+            expiry: Set(None),
+            created: Set(OffsetDateTime::now_utc()),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let first = authorize_ticket(&db, &login_protection, &secret, None, Protocol::Http)
+            .await
+            .unwrap();
+        assert!(first.is_some_and(|authorization| authorization.target().id == target.id));
+
+        let second = authorize_ticket(&db, &login_protection, &secret, None, Protocol::Http)
+            .await
+            .unwrap();
+        assert!(second.is_none());
+
+        assert_eq!(
+            e::Ticket::Entity::find_by_id(ticket_id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .uses_left,
+            Some(0)
+        );
     }
 
     struct FixedPolicy(bool);

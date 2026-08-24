@@ -7,7 +7,7 @@ use anyhow::Context;
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, info_span, warn};
 use uuid::Uuid;
-use warpgate_common::{TargetOptions, TargetSessionId, WarpgateError};
+use warpgate_common::{TargetOptions, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
     DesktopEvent, Services, State, TargetAuthorization, TargetSessionStart, UserSessionStateInit,
@@ -77,18 +77,14 @@ impl WebDesktopClientManager {
         .await
         .context("registering web-desktop session")?;
 
-        let (_, approved, _) = *{
-            let mut server_handle = server_handle.lock().await;
-            server_handle
-                .set_user_info(authorization.user_info().clone())
-                .await
-                .context("setting user info on server handle")?;
-            server_handle
-                .start_target_session(authorization)
-                .await
-                .and_then(TargetSessionStart::admitted)
-                .context("starting target session")?
-        };
+        let (target_session_id, approved, close_signal) = *server_handle
+            .lock()
+            .await
+            .start_target_session(authorization)
+            .await
+            .and_then(TargetSessionStart::admitted)
+            .context("starting target session")?;
+        close_signal.forget();
 
         let session_id = server_handle.lock().await.id();
 
@@ -123,7 +119,11 @@ impl WebDesktopClientManager {
             .recordings
             .lock()
             .await
-            .start::<DesktopRecorder, _>(&TargetSessionId(session_id.0), None, DesktopRecordingMetadata::Desktop)
+            .start::<DesktopRecorder, _>(
+                &target_session_id,
+                None,
+                DesktopRecordingMetadata::Desktop,
+            )
             .await
         {
             Ok(recorder) => Some(Arc::new(recorder)),

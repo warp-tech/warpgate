@@ -1,14 +1,16 @@
 use poem::session::Session;
+use poem::web::websocket::WebSocket;
+use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Response};
 use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter};
 use tracing::info;
 use uuid::Uuid;
-use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{Protocol, TargetOptions, UserSessionId, WarpgateError};
+use warpgate_admin::api::cluster_proxy::{Owner, forward_websocket, node_owner};
+use warpgate_common::{NodeId, Protocol, TargetOptions, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, FullUserAuthorization, web_reauth_required,
 };
 use warpgate_core::{
-    AuthorizedIdentity, ConfigProvider, TargetAuthorization, authorize_for_target,
+    ConfigProvider, TargetAuthorization, authorize_for_target,
 };
 use warpgate_db_entities as entities;
 
@@ -84,15 +86,9 @@ pub async fn authorize_web_client_target(
         return Ok(WebClientTargetAccess::NotFound);
     };
 
-    // The session already authenticated as a full user (checked above), so this
-    // is a legitimate out-of-band identity for the authorization check.
-    let identity = AuthorizedIdentity::for_authenticated_session(
-        AuthStateUserInfo {
-            id: full.user_id(),
-            username: full.username().to_owned(),
-        },
-        protocol,
-    );
+    // The session already authenticated as a full user (checked above), so
+    // this is a legitimate out-of-band identity for the authorization check.
+    let identity = full.identity(protocol);
 
     Ok(authorize_for_target(config_provider, &identity, target)
         .await?
@@ -130,4 +126,49 @@ pub async fn get_user(
     };
 
     Ok(Some(user_model))
+}
+
+/// The node holding a web-client session's live state. Web-client sessions
+/// are direct-protocol user sessions, so the session id is the user-session
+/// id and its row records the owning node. A missing or ended row resolves
+/// `Local`, where the manager lookup then reports not-found.
+pub async fn web_client_session_owner(
+    ctx: &AuthenticatedRequestContext,
+    session_id: Uuid,
+) -> poem::Result<Owner> {
+    let Some(row) = entities::UserSession::Entity::find_by_id(session_id)
+        .one(&ctx.services().db)
+        .await
+        .map_err(WarpgateError::from)?
+        .filter(|row| row.ended.is_none())
+    else {
+        return Ok(Owner::Local);
+    };
+    node_owner(ctx, row.node_id.map(NodeId)).await.map_err(Into::into)
+}
+
+/// Wraps a web-client websocket endpoint (`:session_id` in its path) with
+/// session-owner forwarding: a stream request landing on a node that does not
+/// hold the session's live state is forwarded to the node that does.
+pub fn forward_ws_to_session_owner<E: Endpoint + 'static>(
+    ep: E,
+) -> impl Endpoint<Output = Response> {
+    ep.around(|ep, req| async move {
+        let Some(ctx) = req.data::<AuthenticatedRequestContext>().cloned() else {
+            return ep.call(req).await.map(IntoResponse::into_response);
+        };
+        let session_id = req
+            .raw_path_param("session_id")
+            .and_then(|raw| raw.parse::<Uuid>().ok());
+        let Some(session_id) = session_id else {
+            return ep.call(req).await.map(IntoResponse::into_response);
+        };
+        match web_client_session_owner(&ctx, session_id).await? {
+            Owner::Local => ep.call(req).await.map(IntoResponse::into_response),
+            Owner::Remote(remote) => {
+                let ws = WebSocket::from_request_without_body(&req).await?;
+                forward_websocket(&ctx, &req, ws, remote, &ctx.services().cluster_token).await
+            }
+        }
+    })
 }

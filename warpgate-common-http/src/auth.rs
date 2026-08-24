@@ -8,7 +8,7 @@ use poem::session::Session;
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
+use warpgate_common::{Protocol, WarpgateError};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_db_entities::Parameters;
 
@@ -215,6 +215,17 @@ impl FullUserAuthorization {
 
     pub fn username(&self) -> &str {
         &self.0.username
+    }
+
+    /// The one conversion from an established browser session (or API token)
+    /// to an [`AuthorizedIdentity`]: this type is minted only by
+    /// [`RequestAuthorization::as_full_user`], whose input the auth middleware
+    /// validated against the stored session, so the identity is backed by a
+    /// completed login rather than hand-built fields. Target-authorization
+    /// code takes this over calling
+    /// `AuthorizedIdentity::for_authenticated_session` directly.
+    pub fn identity(&self, protocol: Protocol) -> warpgate_core::AuthorizedIdentity {
+        warpgate_core::AuthorizedIdentity::for_authenticated_session(self.0.clone(), protocol)
     }
 }
 

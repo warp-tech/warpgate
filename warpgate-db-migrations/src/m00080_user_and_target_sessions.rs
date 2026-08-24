@@ -1,10 +1,109 @@
-use sea_orm::{ConnectionTrait, DbBackend, Schema};
+use std::collections::HashMap;
+
+use sea_orm::{ConnectionTrait, DbBackend, Order, Schema};
 use sea_orm_migration::prelude::*;
+use uuid::Uuid;
 
 use crate::m00002_create_session::session;
 
 /// Login-identity columns that moved from `sessions` to `user_sessions`.
 const MOVED_COLUMNS: [&str; 4] = ["username", "user_id", "remote_address", "protocol"];
+
+const BACKFILL_BATCH: u64 = 1000;
+
+/// The target id for a session that connected before `target_id` existed
+/// (m00077 added the column without a backfill), recovered from its snapshot:
+/// by target name against the current `targets` table first — names are unique
+/// (m00079) and survive snapshot redaction — then the id embedded in the
+/// snapshot for targets renamed or deleted since, then the nil UUID for a
+/// snapshot that resolves to nothing at all.
+fn recover_target_id(snapshot: &str, targets_by_name: &HashMap<String, Uuid>) -> Uuid {
+    let value: Option<serde_json::Value> = serde_json::from_str(snapshot).ok();
+    let by_name = value
+        .as_ref()
+        .and_then(|value| value.get("name"))
+        .and_then(|name| name.as_str())
+        .and_then(|name| targets_by_name.get(name))
+        .copied();
+    let by_embedded_id = || {
+        value
+            .as_ref()
+            .and_then(|value| value.get("id"))
+            .and_then(|id| id.as_str())
+            .and_then(|id| Uuid::parse_str(id).ok())
+    };
+    by_name.or_else(by_embedded_id).unwrap_or_else(Uuid::nil)
+}
+
+/// Fills `sessions.target_id` for rows that carry a `target_snapshot` but no
+/// `target_id`, so the "never reached a target" cleanup below (and the NOT
+/// NULL tightening after it) can key on `target_snapshot` alone.
+async fn backfill_target_ids(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    let db = manager.get_connection();
+    let backend = db.get_database_backend();
+
+    let sessions = Alias::new("sessions");
+    let id_col = Alias::new("id");
+    let snapshot_col = Alias::new("target_snapshot");
+    let target_id_col = Alias::new("target_id");
+
+    let targets_by_name: HashMap<String, Uuid> = {
+        let select = Query::select()
+            .column(Alias::new("name"))
+            .column(id_col.clone())
+            .from(Alias::new("targets"))
+            .to_owned();
+        let mut map = HashMap::new();
+        for row in db.query_all(backend.build(&select)).await? {
+            map.insert(
+                row.try_get::<String>("", "name")?,
+                row.try_get::<Uuid>("", "id")?,
+            );
+        }
+        map
+    };
+
+    // Keyset pagination: updated rows stop matching the filter, but an offset
+    // over a shrinking result set would skip rows.
+    let mut last_id: Option<Uuid> = None;
+    loop {
+        let mut select = Query::select()
+            .column(id_col.clone())
+            .column(snapshot_col.clone())
+            .from(sessions.clone())
+            .and_where(Expr::col(target_id_col.clone()).is_null())
+            .and_where(Expr::col(snapshot_col.clone()).is_not_null())
+            .order_by(id_col.clone(), Order::Asc)
+            .limit(BACKFILL_BATCH)
+            .to_owned();
+        if let Some(last_id) = last_id {
+            select.and_where(Expr::col(id_col.clone()).gt(last_id));
+        }
+
+        let rows = db.query_all(backend.build(&select)).await?;
+        let done = (rows.len() as u64) < BACKFILL_BATCH;
+
+        for row in &rows {
+            let id: Uuid = row.try_get("", "id")?;
+            last_id = Some(id);
+
+            let snapshot: String = row.try_get("", "target_snapshot")?;
+            let update = Query::update()
+                .table(sessions.clone())
+                .value(
+                    target_id_col.clone(),
+                    recover_target_id(&snapshot, &targets_by_name),
+                )
+                .and_where(Expr::col(id_col.clone()).eq(id))
+                .to_owned();
+            db.execute(backend.build(&update)).await?;
+        }
+
+        if done {
+            return Ok(());
+        }
+    }
+}
 
 pub mod user_session {
     use sea_orm::entity::prelude::*;
@@ -22,7 +121,9 @@ pub mod user_session {
         pub started: OffsetDateTime,
         pub ended: Option<OffsetDateTime>,
         pub protocol: String,
-        pub node_id: Uuid,
+        /// NULL for shared-lifecycle (HTTP) sessions — no node owns them.
+        pub node_id: Option<Uuid>,
+        pub auth_state_node_id: Option<Uuid>,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -67,23 +168,54 @@ impl MigrationTrait for Migration {
             .execute_unprepared("UPDATE sessions SET user_session_id = id")
             .await?;
 
-        // A pre-split row that never reached a target was only ever a login:
-        // it lives on as the `user_sessions` row created above, and its
-        // `sessions` row goes. Recording rows are removed first — none should
-        // exist for a session that never connected, but an orphan must not
-        // survive its session.
+        // `sessions.node_id` becomes nullable again (reverting m00072's
+        // tightening): NULL now means shared lifecycle, not a missing value.
+        // SQLite never enforced the NOT NULL (see m00072) and needs no change.
+        if manager.get_database_backend() != DbBackend::Sqlite {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(session::Entity)
+                        .modify_column(ColumnDef::new(Alias::new("node_id")).uuid().null())
+                        .to_owned(),
+                )
+                .await?;
+        }
+
+        // Shared-lifecycle (HTTP) sessions have no owning node: any node
+        // serves them and they must survive the reaper ending a dead node's
+        // sessions — including the node that wrote them before this upgrade.
         manager
             .get_connection()
-            .execute_unprepared(
-                "DELETE FROM recordings WHERE session_id IN \
-                 (SELECT id FROM sessions WHERE target_id IS NULL OR target_snapshot IS NULL)",
-            )
+            .execute_unprepared("UPDATE user_sessions SET node_id = NULL WHERE protocol = 'HTTP'")
             .await?;
         manager
             .get_connection()
             .execute_unprepared(
-                "DELETE FROM sessions WHERE target_id IS NULL OR target_snapshot IS NULL",
+                "UPDATE sessions SET node_id = NULL WHERE user_session_id IN \
+                 (SELECT id FROM user_sessions WHERE node_id IS NULL)",
             )
+            .await?;
+
+        backfill_target_ids(manager).await?;
+
+        // A pre-split row with no target snapshot never reached a target and
+        // was only ever a login: it lives on as the `user_sessions` row
+        // created above, and its `sessions` row goes. (`target_id` is not the
+        // discriminator — it is NULL on every row predating m00077.) Recording
+        // rows go first: pre-split SSH recorded the target-selection menu, so
+        // login-only rows can carry recordings, and an orphan must not survive
+        // its session.
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "DELETE FROM recordings WHERE session_id IN \
+                 (SELECT id FROM sessions WHERE target_snapshot IS NULL)",
+            )
+            .await?;
+        manager
+            .get_connection()
+            .execute_unprepared("DELETE FROM sessions WHERE target_snapshot IS NULL")
             .await?;
 
         manager
@@ -138,7 +270,11 @@ impl MigrationTrait for Migration {
                 .alter_table(
                     Table::alter()
                         .table(session::Entity)
-                        .modify_column(ColumnDef::new(Alias::new("user_session_id")).uuid().not_null())
+                        .modify_column(
+                            ColumnDef::new(Alias::new("user_session_id"))
+                                .uuid()
+                                .not_null(),
+                        )
                         .to_owned(),
                 )
                 .await?;
@@ -155,7 +291,11 @@ impl MigrationTrait for Migration {
                     Table::alter()
                         .table(session::Entity)
                         // `text()`, matching the m00049 widening on these backends.
-                        .modify_column(ColumnDef::new(Alias::new("target_snapshot")).text().not_null())
+                        .modify_column(
+                            ColumnDef::new(Alias::new("target_snapshot"))
+                                .text()
+                                .not_null(),
+                        )
                         .to_owned(),
                 )
                 .await?;
@@ -247,6 +387,27 @@ impl MigrationTrait for Migration {
                     Table::alter()
                         .table(session::Entity)
                         .modify_column(ColumnDef::new(Alias::new("target_snapshot")).text().null())
+                        .to_owned(),
+                )
+                .await?;
+        }
+        // Restore m00072's NOT NULL; shared-lifecycle NULLs go back to the nil
+        // sentinel it introduced.
+        manager
+            .exec_stmt(
+                Query::update()
+                    .table(session::Entity)
+                    .value(Alias::new("node_id"), Uuid::nil())
+                    .and_where(Expr::col(Alias::new("node_id")).is_null())
+                    .to_owned(),
+            )
+            .await?;
+        if manager.get_database_backend() != DbBackend::Sqlite {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(session::Entity)
+                        .modify_column(ColumnDef::new(Alias::new("node_id")).uuid().not_null())
                         .to_owned(),
                 )
                 .await?;
@@ -384,6 +545,105 @@ mod tests {
                 .await
                 .unwrap(),
             2
+        );
+    }
+
+    #[test]
+    fn target_id_recovery_prefers_name_then_embedded_id() {
+        let target_id = Uuid::new_v4();
+        let embedded = Uuid::new_v4();
+        let targets = std::collections::HashMap::from([("web".to_string(), target_id)]);
+
+        assert_eq!(
+            super::recover_target_id(&format!(r#"{{"name":"web","id":"{embedded}"}}"#), &targets),
+            target_id
+        );
+        assert_eq!(
+            super::recover_target_id(&format!(r#"{{"name":"gone","id":"{embedded}"}}"#), &targets),
+            embedded
+        );
+        assert_eq!(super::recover_target_id("not json", &targets), Uuid::nil());
+    }
+
+    /// Sessions predating m00077 carry a `target_snapshot` but a NULL
+    /// `target_id` — they connected, and the migration must keep them and
+    /// their recordings.
+    #[tokio::test]
+    async fn a_pre_target_id_column_row_keeps_its_history() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        Migrator::up(&db, Some(79)).await.unwrap();
+
+        let target_id = Uuid::new_v4();
+        warpgate_db_entities::Target::Entity::insert(warpgate_db_entities::Target::ActiveModel {
+            id: Set(target_id),
+            name: Set("web".into()),
+            description: Set(String::new()),
+            kind: Set(warpgate_db_entities::Target::TargetKind::Http),
+            options: Set(serde_json::json!({})),
+            rate_limit_bytes_per_second: Set(None),
+            group_id: Set(None),
+            ticket_max_duration_seconds: Set(None),
+            ticket_requests_disabled: Set(false),
+            ticket_require_approval: Set(false),
+            ticket_max_uses: Set(None),
+        })
+        .exec_without_returning(&db)
+        .await
+        .unwrap();
+
+        let resolved_id = Uuid::new_v4();
+        let mut row = legacy_row(resolved_id, None);
+        row.target_snapshot = Set(Some(r#"{"name":"web"}"#.into()));
+        legacy_session::Entity::insert(row)
+            .exec_without_returning(&db)
+            .await
+            .unwrap();
+
+        let embedded = Uuid::new_v4();
+        let renamed_id = Uuid::new_v4();
+        let mut row = legacy_row(renamed_id, None);
+        row.target_snapshot = Set(Some(format!(r#"{{"name":"gone","id":"{embedded}"}}"#)));
+        legacy_session::Entity::insert(row)
+            .exec_without_returning(&db)
+            .await
+            .unwrap();
+
+        Recording::Entity::insert(Recording::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            name: Set("terminal".into()),
+            started: Set(OffsetDateTime::now_utc()),
+            ended: Set(None),
+            session_id: Set(resolved_id),
+            kind: Set(Recording::RecordingKind::Terminal),
+            metadata: Set("{}".into()),
+            generation: Set(1),
+        })
+        .exec_without_returning(&db)
+        .await
+        .unwrap();
+
+        Migrator::up(&db, None).await.unwrap();
+
+        let child = TargetSession::Entity::find_by_id(resolved_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(child.target_id, target_id);
+        let child = TargetSession::Entity::find_by_id(renamed_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(child.target_id, embedded);
+        assert_eq!(
+            Recording::Entity::find()
+                .filter(Recording::Column::SessionId.eq(resolved_id))
+                .count(&db)
+                .await
+                .unwrap(),
+            1
         );
     }
 

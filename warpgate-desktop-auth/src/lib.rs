@@ -22,7 +22,7 @@ pub use otp::{MAX_OTP_ATTEMPTS, OtpAction, OtpActionApplyOutcome, OtpEntry};
 use tokio::sync::Mutex;
 use tracing::warn;
 use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
+    AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind,
 };
 use warpgate_common::{Secret, TargetOptionsVariant, TargetSessionId, UserSessionId};
 use warpgate_common_http::ext::construct_external_url;
@@ -31,7 +31,7 @@ use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
     AuthorizedIdentity, Services, TargetAuthorization, WarpgateServerHandle,
-    authorize_for_target_by_name, authorize_ticket, consume_ticket,
+    authorize_for_target_by_name, authorize_ticket,
 };
 use warpgate_desktop_ui::AuthPrompt;
 
@@ -127,6 +127,7 @@ pub async fn authenticate<O: TargetOptionsVariant>(
                     &mut state,
                     AuthCredential::Password(Secret::new(password)),
                     services.config_provider.as_ref(),
+                    &services.login_protection,
                 )
                 .await?;
                 if !outcome.is_valid() {
@@ -160,8 +161,15 @@ pub async fn authenticate<O: TargetOptionsVariant>(
                         .login_protection
                         .clear_failed_attempts(&remote_ip, &user_info.username)
                         .await;
+                    // Verified `Accepted` a moment ago; a state that no longer
+                    // is means the login was concurrently rejected — deny.
+                    let Some(identity) =
+                        AuthorizedIdentity::from_auth_state(&*state_arc.lock().await)
+                    else {
+                        return Ok(DesktopAuthOutcome::Failed);
+                    };
                     let authorization =
-                        finalize_user_auth::<O>(services, &user_info, &target_name).await?;
+                        finalize_user_auth::<O>(services, &identity, &target_name).await?;
                     Ok(DesktopAuthOutcome::Authorized { authorization })
                 }
                 // Go interactive only when *every* still-needed factor is one the holding
@@ -191,8 +199,7 @@ pub async fn authenticate<O: TargetOptionsVariant>(
             )
             .await?
             {
-                Some((ticket, authorization)) => {
-                    consume_ticket(&services.db, &ticket.id).await?;
+                Some(authorization) => {
                     let target_name = authorization.target().name.clone();
                     let Ok(authorization) = authorization.narrow::<O>() else {
                         bail!("Target {target_name} is not a {} target", O::PROTOCOL);
@@ -205,23 +212,22 @@ pub async fn authenticate<O: TargetOptionsVariant>(
     }
 }
 
-/// Authorise a fully-authenticated user against a target and narrow it to the
+/// Authorise an authenticated identity against a target and narrow it to the
 /// protocol's options variant. Used after the holding screen completes the
-/// interactive factor.
+/// interactive factor; taking the sealed [`AuthorizedIdentity`] means the
+/// authentication behind it happened by construction.
 pub async fn finalize_user_auth<O: TargetOptionsVariant>(
     services: &Services,
-    user_info: &AuthStateUserInfo,
+    identity: &AuthorizedIdentity,
     target_name: &str,
 ) -> Result<TargetAuthorization<O>> {
-    // Reached only after the holding screen drove the auth state to `Accepted`.
-    let identity = AuthorizedIdentity::for_authenticated_session(user_info.clone(), O::PROTOCOL);
     let Some(authorization) =
         authorize_for_target_by_name(services.config_provider.as_ref(), &identity, target_name)
             .await?
     else {
         bail!(
             "Target {target_name} not authorized for {}",
-            user_info.username
+            identity.username
         );
     };
     let Ok(authorization) = authorization.narrow::<O>() else {
@@ -248,14 +254,14 @@ async fn web_approval_url(services: &Services, state: &Arc<Mutex<AuthState>>) ->
 /// recording is disabled, or fails to start (logged against `protocol_label`).
 pub async fn start_recording(
     services: &Services,
-    session_id: &UserSessionId,
+    target_session_id: &TargetSessionId,
     protocol_label: &str,
 ) -> Option<DesktopRecorder> {
     match services
         .recordings
         .lock()
         .await
-        .start::<DesktopRecorder, _>(&TargetSessionId(session_id.0), None, DesktopRecordingMetadata::Desktop)
+        .start::<DesktopRecorder, _>(target_session_id, None, DesktopRecordingMetadata::Desktop)
         .await
     {
         Ok(recorder) => Some(recorder),

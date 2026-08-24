@@ -4,7 +4,7 @@ use russh::keys::{PublicKey, PublicKeyBase64, PublicKeyOrCertificate};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
-use warpgate_common::{UserSessionId, TargetSSHOptions};
+use warpgate_common::{TargetSSHOptions, UserSessionId};
 use warpgate_core::Services;
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;

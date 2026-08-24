@@ -69,21 +69,18 @@ impl ProtocolServer for MySQLProtocolServer {
                     async move {
                         let (session_handle, mut abort_rx) = MySqlSessionHandle::new();
 
-                        let server_handle = State::register_user_session(
-                            &services.state,
-                            crate::common::PROTOCOL_NAME,
-                            UserSessionStateInit {
-                                remote_address: Some(remote_address),
-                                handle: Box::new(session_handle),
-                            },
-                        )
-                        .await
-                        .context("registering session")?;
-
-                        let wrapped_stream = {
-                            let guard = server_handle.lock().await;
-                            guard.wrap_stream(stream).await?
-                        };
+                        let (server_handle, wrapped_stream) =
+                            State::register_user_session_with_stream(
+                                &services.state,
+                                crate::common::PROTOCOL_NAME,
+                                UserSessionStateInit {
+                                    remote_address: Some(remote_address),
+                                    handle: Box::new(session_handle),
+                                },
+                                stream,
+                            )
+                            .await
+                            .context("registering session")?;
 
                         let session = MySqlSession::new(
                             server_handle,

@@ -241,7 +241,7 @@ pub async fn session_id_for_request(
     let server_handle = session_middleware
         .lock()
         .await
-        .create_handle_for(req, ctx)
+        .handle_for_request(req, ctx)
         .await
         .context("creating session handle")?;
 
@@ -260,12 +260,45 @@ pub async fn authorize_session(
         .await
         .context("Session not in request")?;
 
-    let server_handle = session_middleware
+    let mut server_handle = session_middleware
         .lock()
         .await
-        .create_handle_for(req, ctx)
+        .handle_for_request(req, ctx)
         .await
-        .context("create_handle_for")?;
+        .context("resolving session handle")?;
+
+    // A user session's identity is write-once: a different account logging in
+    // on the same browser session ends the old session (keeping its history
+    // attributed to the old user) and starts a fresh one.
+    let existing_user = server_handle
+        .lock()
+        .await
+        .user_session_state()
+        .lock()
+        .await
+        .user_info
+        .clone();
+    if existing_user.is_some_and(|existing| existing.id != user_info.id) {
+        let old_id = server_handle.lock().await.id();
+        {
+            let mut store = session_middleware.lock().await;
+            store.remove_session(session);
+        }
+        ctx.services()
+            .state
+            .lock()
+            .await
+            .remove_session(old_id)
+            .await;
+        session.clear();
+        server_handle = session_middleware
+            .lock()
+            .await
+            .handle_for_request(req, ctx)
+            .await
+            .context("registering replacement session")?;
+    }
+
     server_handle
         .lock()
         .await

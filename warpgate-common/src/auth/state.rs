@@ -192,6 +192,10 @@ impl AuthState {
         self.protocol
     }
 
+    pub const fn remote_ip(&self) -> Option<IpAddr> {
+        self.remote_ip
+    }
+
     pub fn target_name(&self) -> &str {
         &self.target_name
     }

@@ -32,7 +32,7 @@ use uuid::Uuid;
 use warpgate_ca::CLUSTER_TLS_SNI_NAME;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
-use warpgate_common::{Secret, WarpgateError};
+use warpgate_common::{NodeId, Secret, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_common_http::{
@@ -75,19 +75,26 @@ impl Owner {
     }
 }
 
-/// Resolves an owning node id to an [`Owner`]. The nil UUID (no owning node),
-/// or this node's own id, is [`Owner::Local`]; a foreign id is looked up in the
-/// registry and yields [`WarpgateError::NodeGone`] if it is no longer there.
+/// Resolves an owning node id to an [`Owner`]. NULL (a shared-lifecycle
+/// session no node owns), the nil UUID (the pre-clustering legacy sentinel),
+/// this node's own id, and a node no longer in the registry all resolve to
+/// [`Owner::Local`]: for a gone owner, the local lookup then reports not-found
+/// and the client retries — never an opaque error for a resource whose owner
+/// merely crashed.
 pub async fn node_owner(
     ctx: &UnauthenticatedRequestContext,
-    node_id: Uuid,
+    node_id: Option<NodeId>,
 ) -> Result<Owner, WarpgateError> {
     let services = ctx.services();
+    let Some(node_id) = node_id else {
+        return Ok(Owner::Local);
+    };
     if node_id.is_nil() || node_id == services.cluster.node_id {
         return Ok(Owner::Local);
     }
-    let Some(node) = Node::Entity::find_by_id(node_id).one(&services.db).await? else {
-        return Err(WarpgateError::NodeGone(node_id));
+    let Some(node) = Node::Entity::find_by_id(node_id.0).one(&services.db).await? else {
+        warn!(%node_id, "Owner node is gone from the cluster; serving locally");
+        return Ok(Owner::Local);
     };
     Ok(Owner::remote(node))
 }
@@ -96,7 +103,7 @@ pub async fn session_owner(
     ctx: &UnauthenticatedRequestContext,
     session: &TargetSession::Model,
 ) -> Result<Owner, WarpgateError> {
-    node_owner(ctx, session.node_id).await
+    node_owner(ctx, session.node_id.map(NodeId)).await
 }
 
 /// Who a forwarded request acts as on the peer.
@@ -228,6 +235,25 @@ where
 /// unreachable must not hold up the rest of a fan-out.
 const PEER_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Forwards this request as-is to every other registered node and returns the
+/// peers that did not answer `expected`, for the caller to log or report. The
+/// forwarded copies authenticate as cluster peers
+/// (`ClusterOrAdminContext::is_cluster_peer`), which the receiving endpoints
+/// treat as "act on this node only" — so a forwarded copy never fans out
+/// again.
+pub async fn fan_out_to_peers_expecting(
+    ctx: &AuthenticatedRequestContext,
+    req: &Request,
+    expected: StatusCode,
+) -> Vec<(String, StatusCode)> {
+    fan_out_to_peers(ctx, req, req.original_uri().path())
+        .await
+        .into_iter()
+        .map(|(hostname, response)| (hostname, response.status()))
+        .filter(|(_, status)| *status != expected)
+        .collect()
+}
+
 /// Forwards `req` as `path` to every other registered node and collects what
 /// they answer, paired with the node's hostname for logging.
 ///
@@ -242,7 +268,7 @@ pub async fn fan_out_to_peers(
 ) -> Vec<(String, Response)> {
     let services = ctx.services();
     let peers = Node::Entity::find()
-        .filter(Node::Column::Id.ne(services.cluster.node_id))
+        .filter(Node::Column::Id.ne(services.cluster.node_id.0))
         .all(&services.db)
         .await;
     let peers = match peers {
@@ -334,9 +360,9 @@ async fn connect_any(addrs: &[SocketAddr]) -> poem::Result<tokio::net::TcpStream
             Err(error) => last_error = Some(error),
         }
     }
-    Err(poem::error::BadGateway(
-        last_error.unwrap_or_else(|| std::io::Error::other("no peer address")),
-    ))
+    Err(poem::error::BadGateway(last_error.unwrap_or_else(|| {
+        std::io::Error::other("no peer address")
+    })))
 }
 
 /// Forwards `req` to `path` on the peer rather than the request's own path - for
@@ -420,7 +446,7 @@ async fn forward_http_inner(
     )))
 }
 
-async fn forward_websocket(
+pub async fn forward_websocket(
     ctx: &AuthenticatedRequestContext,
     req: &Request,
     ws: WebSocket,

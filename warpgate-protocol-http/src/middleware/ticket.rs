@@ -8,7 +8,7 @@ use warpgate_common::Secret;
 use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
-use warpgate_core::{authorize_ticket, consume_ticket};
+use warpgate_core::authorize_ticket;
 
 use crate::common::SessionExt;
 
@@ -41,7 +41,7 @@ struct QueryParams {
 impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
     type Output = E::Output;
 
-    async fn call(&self, req: Request) -> poem::Result<Self::Output> {
+    async fn call(&self, mut req: Request) -> poem::Result<Self::Output> {
         let mut session_is_temporary = false;
         let session = <&Session>::from_request_without_body(&req).await?;
         let session = session.clone();
@@ -69,7 +69,7 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                     let client_ip: Option<IpAddr> = get_client_ip(&req, ctx.services())
                         .await
                         .and_then(|s| s.parse().ok());
-                    if let Some((ticket, authorization)) = authorize_ticket(
+                    if let Some(authorization) = authorize_ticket(
                         &ctx.services().db,
                         &ctx.services().login_protection,
                         &ticket_secret,
@@ -78,7 +78,6 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                     )
                     .await?
                     {
-                        consume_ticket(&ctx.services().db, &ticket.id).await?;
                         Some(authorization)
                     } else {
                         None
@@ -91,6 +90,12 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                     target_id: authorization.target().id,
                 });
             }
+        }
+
+        if session_is_temporary {
+            // The user session registered under this request has no stored
+            // browser session to end it; the marker routes it to the vacuum.
+            req.set_data(crate::session::TemporaryTicketSession);
         }
 
         let resp = self.inner.call(req).await;

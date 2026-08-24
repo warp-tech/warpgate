@@ -5,17 +5,26 @@ use std::time::{Duration, Instant};
 use poem::Request;
 use tokio::sync::Mutex;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
-use warpgate_common::{TargetKubernetesOptions, User, UserSessionId, WarpgateError};
+use warpgate_common::{
+    TargetKubernetesOptions, TargetSessionId, User, UserSessionId, WarpgateError,
+};
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::{
-    ApprovedTarget, Services, State, TargetSessionStart, UserSessionStateInit,
-    WarpgateServerHandle,
+    ApprovedTarget, Services, State, TargetSessionStart, UserSessionStateInit, WarpgateServerHandle,
 };
 
 use crate::server::auth::{authorize_kubernetes_target, unauthorized};
 use crate::session_handle::KubernetesSessionHandle;
 
 type CorrelationKey = (String, String, Option<String>); // (username, target_name, ip)
+
+/// One admitted target session: the capability plus the child-session id that
+/// recordings key on. Shared by every request the correlation joins.
+#[derive(Clone)]
+pub struct AdmittedSession {
+    pub target_session_id: TargetSessionId,
+    pub approved: Arc<ApprovedTarget<TargetKubernetesOptions>>,
+}
 
 /// The outcome of the request that opened one correlated session. Requests that
 /// join a session in flight wait on the mutex, so a `kubectl` command's fan-out
@@ -27,7 +36,7 @@ enum Authorization {
     /// opening request that was dropped mid-approval.
     #[default]
     Pending,
-    Authorized(Arc<ApprovedTarget<TargetKubernetesOptions>>),
+    Authorized(AdmittedSession),
     Denied,
 }
 
@@ -61,7 +70,7 @@ pub async fn correlated_authorization(
     user: &User,
     target_name: &str,
     services: &Services,
-) -> poem::Result<(Arc<Mutex<WarpgateServerHandle>>, Arc<ApprovedTarget<TargetKubernetesOptions>>)> {
+) -> poem::Result<(Arc<Mutex<WarpgateServerHandle>>, AdmittedSession)> {
     let user_info: AuthStateUserInfo = user.into();
     let key = correlation_key_for_request(request, services, &user_info, target_name).await?;
 
@@ -112,14 +121,21 @@ pub async fn correlated_authorization(
             .await
         {
             Ok(resolved) => {
-                let approved = match handle
+                let admitted = match handle
                     .lock()
                     .await
                     .start_target_session(resolved)
                     .await
                     .and_then(TargetSessionStart::admitted)
                 {
-                    Ok(started) => Arc::new(started.1),
+                    Ok(started) => {
+                        let (target_session_id, approved, close_signal) = *started;
+                        close_signal.forget();
+                        AdmittedSession {
+                            target_session_id,
+                            approved: Arc::new(approved),
+                        }
+                    }
                     Err(error) => {
                         *authorization = Authorization::Denied;
                         correlator.lock().await.evict(&key, &slot);
@@ -128,8 +144,8 @@ pub async fn correlated_authorization(
                     }
                 };
                 handle.lock().await.confirm();
-                *authorization = Authorization::Authorized(approved.clone());
-                Ok((handle, approved))
+                *authorization = Authorization::Authorized(admitted.clone());
+                Ok((handle, admitted))
             }
             Err(error) => {
                 // A denied attempt is not cached: the requests waiting on this
@@ -157,11 +173,11 @@ async fn join_session(
     handle: Arc<Mutex<WarpgateServerHandle>>,
     slot: SharedAuthorization,
     services: &Services,
-) -> poem::Result<Option<(Arc<Mutex<WarpgateServerHandle>>, Arc<ApprovedTarget<TargetKubernetesOptions>>)>> {
+) -> poem::Result<Option<(Arc<Mutex<WarpgateServerHandle>>, AdmittedSession)>> {
     // Cloned out so the slot lock is not held while taking the correlator lock.
     let outcome = slot.lock().await.clone();
     match outcome {
-        Authorization::Authorized(authorization) => Ok(Some((handle, authorization))),
+        Authorization::Authorized(admitted) => Ok(Some((handle, admitted))),
         Authorization::Denied => Err(unauthorized()),
         Authorization::Pending => {
             correlator.lock().await.evict(key, &slot);

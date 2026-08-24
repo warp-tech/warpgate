@@ -45,6 +45,7 @@ use warpgate_web_desktop::api::ws_handler as desktop_web_client_ws_handler;
 use warpgate_web_ssh::WebSshClientManager;
 use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 
+use crate::api::common::forward_ws_to_session_owner;
 use crate::client_cache::{HTTP_CLIENT_CACHE_VACUUM_INTERVAL, HttpClientCache};
 use crate::common::{SESSION_COOKIE_NAME, endpoint_auth, page_auth};
 use crate::error::error_page;
@@ -251,11 +252,11 @@ impl ProtocolServer for HTTPProtocolServer {
                 )
                 .at(
                     "/api/web-ssh/sessions/:session_id/stream",
-                    endpoint_auth(ssh_web_client_ws_handler),
+                    endpoint_auth(forward_ws_to_session_owner(ssh_web_client_ws_handler)),
                 )
                 .at(
                     "/api/web-desktop/sessions/:session_id/stream",
-                    endpoint_auth(desktop_web_client_ws_handler),
+                    endpoint_auth(forward_ws_to_session_owner(desktop_web_client_ws_handler)),
                 )
                 .at(
                     "",
@@ -341,9 +342,13 @@ impl ProtocolServer for HTTPProtocolServer {
             .data(session_store.clone())
             .data(session_storage.clone());
 
+        let state = self.services.state.clone();
         tokio::spawn(async move {
             loop {
-                session_store.lock().await.vacuum(session_max_age);
+                let ended = session_store.lock().await.vacuum(session_max_age);
+                for id in ended {
+                    state.lock().await.remove_session(id).await;
+                }
                 if let Err(error) = session_storage.gc(session_max_age).await {
                     warn!(%error, "Failed to expire stored HTTP sessions");
                 }

@@ -203,7 +203,12 @@ impl SessionRecordings {
     }
 
     /// Starting a recording with the same name again will append to it
-    pub async fn start<T, M>(&self, id: &TargetSessionId, name: Option<String>, metadata: M) -> Result<T>
+    pub async fn start<T, M>(
+        &self,
+        id: &TargetSessionId,
+        name: Option<String>,
+        metadata: M,
+    ) -> Result<T>
     where
         T: Recorder,
         M: Serialize + Debug,

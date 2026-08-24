@@ -15,7 +15,6 @@ use futures::future::BoxFuture;
 use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, timeout_at};
 use tokio_rustls::TlsAcceptor;
@@ -24,9 +23,7 @@ use warpgate_common::helpers::net::accept_loop;
 use warpgate_common::{ListenEndpoint, TargetVncOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{Services, State, UserSessionStateInit, WarpgateServerHandle};
-use warpgate_desktop_auth::{
-    DesktopAuthOutcome, authenticate, finalize_user_auth,
-};
+use warpgate_desktop_auth::{DesktopAuthOutcome, authenticate, finalize_user_auth};
 use warpgate_desktop_ui as ui;
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
@@ -72,13 +69,14 @@ pub async fn bind_server(
                 async move {
                     let (session_handle, mut abort_rx) = VncSessionHandle::new();
 
-                    let server_handle = State::register_user_session(
+                    let (server_handle, viewer_stream) = State::register_user_session_with_stream(
                         &services.state,
                         PROTOCOL_NAME,
                         UserSessionStateInit {
                             remote_address: Some(remote_address),
                             handle: Box::new(session_handle),
                         },
+                        stream,
                     )
                     .await
                     .context("registering session")?;
@@ -89,7 +87,7 @@ pub async fn bind_server(
                         result = handle_connection(
                             services,
                             server_handle.clone(),
-                            stream,
+                            viewer_stream,
                             tls_config,
                             remote_address,
                         ).instrument(span) => match result {
@@ -124,15 +122,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> ViewerStream for T {}
 async fn handle_connection(
     services: Services,
     server_handle: Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
-    stream: TcpStream,
+    stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     tls_config: Arc<ServerConfig>,
     remote_address: SocketAddr,
 ) -> Result<()> {
-    let stream = {
-        let guard = server_handle.lock().await;
-        guard.wrap_stream(stream).await?
-    };
-
     // Bound the whole handshake + auth phase with a single timeout, so a viewer that
     // can't speak our auth (or stalls) is dropped with an error instead of hanging.
     // The relay afterwards is intentionally untimed.
@@ -245,7 +238,7 @@ async fn negotiate_and_authorize(
     let authorization = match authenticated {
         DesktopAuthOutcome::Authorized { authorization } => authorization,
         DesktopAuthOutcome::NeedsInteractive(interactive) => {
-            let user_info = collect_additional_credentials(
+            let identity = collect_additional_credentials(
                 &mut viewer_wr,
                 &mut events_rx,
                 &mut render,
@@ -258,7 +251,7 @@ async fn negotiate_and_authorize(
 
             let authorization = finalize_user_auth::<TargetVncOptions>(
                 services,
-                &user_info,
+                &identity,
                 &interactive.target_name,
             )
             .await?;
@@ -267,7 +260,7 @@ async fn negotiate_and_authorize(
             // the SSH baseline, which clears counters once 2FA completes. Fail open.
             let _ = services
                 .login_protection
-                .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
+                .clear_failed_attempts(&interactive.remote_ip, &identity.username)
                 .await;
             authorization
         }
@@ -275,16 +268,13 @@ async fn negotiate_and_authorize(
         DesktopAuthOutcome::Failed => return Ok(None),
     };
 
-    let (_, approved, _) = *{
-        let mut handle = server_handle.lock().await;
-        handle
-            .set_user_info(authorization.user_info().clone())
-            .await?;
-        handle
-            .start_target_session(authorization)
-            .await?
-            .admitted()?
-    };
+    let (target_session_id, approved, close_signal) = *server_handle
+        .lock()
+        .await
+        .start_target_session(authorization)
+        .await?
+        .admitted()?;
+    close_signal.forget();
 
     info!(target=%approved.target().name, "Authorized");
 
@@ -294,8 +284,8 @@ async fn negotiate_and_authorize(
     // Either way the session takes the same decode-and-re-encode path below, so the
     // interactive-auth / connecting screens (which render into the viewer framebuffer)
     // keep working and the viewer never needs a JPEG decoder.
-    let session_id = server_handle.lock().await.id();
-    let recorder = warpgate_desktop_auth::start_recording(services, &session_id, "vnc").await;
+    let recorder =
+        warpgate_desktop_auth::start_recording(services, &target_session_id, "vnc").await;
 
     // A single backend client connection decodes every update (Tight/JPEG included, see
     // PROXY_ENCODINGS); we both record it and re-encode it toward the viewer as RFB Raw.
@@ -427,4 +417,3 @@ impl RenderState {
         Ok(())
     }
 }
-

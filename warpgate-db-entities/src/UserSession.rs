@@ -16,7 +16,17 @@ pub struct Model {
     pub started: OffsetDateTime,
     pub ended: Option<OffsetDateTime>,
     pub protocol: String,
-    pub node_id: Uuid,
+    /// The node whose registration this session's lifetime is bound to, for
+    /// connection-bound protocols; NULL for shared (DB-backed) sessions, which
+    /// any node serves and no node's death ends. See
+    /// `warpgate_common::SessionLifecycle`.
+    pub node_id: Option<Uuid>,
+    /// The node holding this session's in-flight login state
+    /// (`AuthStateStore` is in-memory), stamped whenever a node creates an
+    /// auth state for the session. Login steps and web approvals landing
+    /// elsewhere are forwarded here. Stale after the login completes — a
+    /// forwarded miss falls back to a local not-found.
+    pub auth_state_node_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

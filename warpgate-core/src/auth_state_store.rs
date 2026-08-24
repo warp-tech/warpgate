@@ -9,7 +9,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{Protocol, UserSessionId, User, WarpgateError};
+use warpgate_common::{Protocol, User, UserSessionId, WarpgateError};
 
 use crate::login_protection::{FailedAttemptInfo, LoginProtectionService};
 use crate::{ConfigProvider, ConfigProviderEnum};
@@ -388,8 +388,8 @@ impl AuthStateStore {
 mod tests {
     use std::str::FromStr;
 
-    use uuid::Uuid;
     use ipnet::IpNet;
+    use uuid::Uuid;
     use warpgate_common::auth::{
         AuthCredential, AuthCredentialFingerprint, AuthStateUserInfo, CredentialPolicyResponse,
         WebApprovalScopeKey,

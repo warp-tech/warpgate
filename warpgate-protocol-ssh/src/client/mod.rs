@@ -28,7 +28,9 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
-use warpgate_common::{SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserSessionId, WarpgateError};
+use warpgate_common::{
+    SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserSessionId, WarpgateError,
+};
 use warpgate_core::{ApprovedTarget, ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;

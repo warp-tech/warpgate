@@ -462,19 +462,12 @@ pub async fn proxy_websocket_request(
     let (_, target) = approved.into_parts();
     let (_, options) = target.into_parts();
     let uri = construct_uri(req, &options, true)?;
-    proxy_ws_inner(
-        req,
-        ws,
-        uri.clone(),
-        ctx,
-        options,
-        target_close_rx,
-    )
-    .await
-    .map_err(|error| {
-        tracing::error!(?uri, ?error, "WebSocket proxy failed");
-        error
-    })
+    proxy_ws_inner(req, ws, uri.clone(), ctx, options, target_close_rx)
+        .await
+        .map_err(|error| {
+            tracing::error!(?uri, ?error, "WebSocket proxy failed");
+            error
+        })
 }
 
 /// Remove the username/password from the URL before using it for the Host header

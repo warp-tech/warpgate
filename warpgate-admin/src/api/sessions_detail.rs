@@ -1,6 +1,6 @@
 use poem::http::StatusCode;
 use poem::session::Session;
-use poem_openapi::param::{Path, Query};
+use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
@@ -11,7 +11,7 @@ use warpgate_db_entities::{Recording, TargetSession, UserSession};
 
 use super::sessions_list::user_session_snapshots;
 use super::{AdminContext, ClusterOrAdminContext};
-use crate::api::cluster_proxy::fan_out_to_peers;
+use crate::api::cluster_proxy::fan_out_to_peers_expecting;
 
 pub struct Api;
 
@@ -106,8 +106,6 @@ impl Api {
         id: Path<Uuid>,
         req: &poem::Request,
         browser_session: &Session,
-        /// Close only connections owned by this node.
-        local_only: Query<Option<bool>>,
     ) -> poem::Result<CloseSessionResponse> {
         admin.require(AdminPermission::SessionsTerminate)?;
 
@@ -133,25 +131,18 @@ impl Api {
             browser_session.purge();
         }
 
-        if !local_only.unwrap_or(false) {
-            close_on_peers(&admin, req).await;
-            warpgate_core::db::mark_user_session_and_targets_ended(&admin.services().db, UserSessionId(id.0))
+        // A forwarded copy closes this node's connection only; the originating
+        // node owns the fan-out and the cluster-wide state below.
+        if !admin.is_cluster_peer() {
+            for (node, status) in fan_out_to_peers_expecting(&admin, req, StatusCode::CREATED).await
+            {
+                tracing::warn!(%node, %status, "Failed to close a user session on a cluster node");
+            }
+            warpgate_core::db::revoke_user_session(&admin.services().db, UserSessionId(id.0))
                 .await
                 .map_err(poem::error::InternalServerError)?;
         }
 
         Ok(CloseSessionResponse::Ok)
-    }
-}
-
-async fn close_on_peers(
-    ctx: &warpgate_common_http::AuthenticatedRequestContext,
-    req: &poem::Request,
-) {
-    let path = format!("{}?local_only=true", req.original_uri().path());
-    for (hostname, response) in fan_out_to_peers(ctx, req, &path).await {
-        if response.status() != StatusCode::CREATED {
-            tracing::warn!(node = %hostname, status = %response.status(), "Failed to close a user session on a cluster node");
-        }
     }
 }

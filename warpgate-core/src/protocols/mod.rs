@@ -18,8 +18,8 @@ pub use desktop::{
 };
 pub use framebuffer::{Framebuffer, PngEncodeError, Rect, decode_png_rgba};
 pub use handle::{
-    SessionHandle, TargetSessionHandle, TargetSessionStart, WarpgateServerHandle,
-    target_session_needs_approval,
+    SessionHandle, TargetSessionCloseSignal, TargetSessionHandle, TargetSessionStart,
+    WarpgateServerHandle, target_session_needs_approval,
 };
 pub use terminal_screen::{TerminalScreen, sane_terminal_size};
 

@@ -2,7 +2,7 @@ use poem_openapi::Object;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{Target, TargetSessionId, UserSessionId, redact_target_secrets};
+use warpgate_common::{NodeId, Target, TargetSessionId, UserSessionId, redact_target_secrets};
 use warpgate_db_entities::{TargetSession, UserSession};
 
 #[derive(Serialize, Deserialize, Object)]
@@ -13,8 +13,10 @@ pub struct UserSessionSnapshot {
     pub started: OffsetDateTime,
     pub ended: Option<OffsetDateTime>,
     pub protocol: String,
-    pub node_id: Uuid,
-    /// Hostname of the node that created this user session, while registered.
+    /// The node this session's lifetime is bound to; `None` for shared
+    /// sessions, which any node serves.
+    pub node_id: Option<NodeId>,
+    /// Hostname of the bound node, while registered.
     pub node_hostname: Option<String>,
     pub remote_address: String,
     pub target_sessions: Vec<TargetSessionSnapshot>,
@@ -23,13 +25,13 @@ pub struct UserSessionSnapshot {
 impl From<UserSession::Model> for UserSessionSnapshot {
     fn from(model: UserSession::Model) -> Self {
         Self {
-            id: model.id.into(),
+            id: UserSessionId(model.id),
             username: model.username,
             user_id: model.user_id,
             started: model.started,
             ended: model.ended,
             protocol: model.protocol,
-            node_id: model.node_id,
+            node_id: model.node_id.map(NodeId),
             node_hostname: None,
             remote_address: model.remote_address,
             target_sessions: vec![],
@@ -46,15 +48,17 @@ pub struct TargetSessionSnapshot {
     pub started: OffsetDateTime,
     pub ended: Option<OffsetDateTime>,
     pub ticket_id: Option<Uuid>,
-    pub node_id: Uuid,
-    /// Hostname of the node that owns this target connection, while registered.
+    /// The node serving this target connection; `None` for shared (HTTP)
+    /// target sessions, which are access records any node serves.
+    pub node_id: Option<NodeId>,
+    /// Hostname of the serving node, while registered.
     pub node_hostname: Option<String>,
 }
 
 impl From<TargetSession::Model> for TargetSessionSnapshot {
     fn from(model: TargetSession::Model) -> Self {
         Self {
-            id: model.id.into(),
+            id: TargetSessionId(model.id),
             // Unredacted snapshots can be written by an old node during a rolling upgrade.
             target: serde_json::from_str(&model.target_snapshot)
                 .ok()
@@ -66,7 +70,7 @@ impl From<TargetSession::Model> for TargetSessionSnapshot {
             started: model.started,
             ended: model.ended,
             ticket_id: model.ticket_id,
-            node_id: model.node_id,
+            node_id: model.node_id.map(NodeId),
             node_hostname: None,
         }
     }

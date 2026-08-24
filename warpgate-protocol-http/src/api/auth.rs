@@ -14,7 +14,7 @@ use sea_orm::EntityTrait;
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
-use tracing::{error, warn};
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{
     Owner, ReparseForwardedResponse, fan_out_to_peers, forwarded_error, node_owner,
@@ -22,7 +22,7 @@ use warpgate_admin::api::cluster_proxy::{
 };
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{Secret, UserSessionId, WarpgateError};
+use warpgate_common::{NodeId, Secret, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization, is_cluster_peer_request};
@@ -413,7 +413,7 @@ impl Api {
     }
 }
 
-async fn record_failed_login_attempt(
+pub(crate) async fn record_failed_login_attempt(
     services: &Services,
     client_ip: Option<std::net::IpAddr>,
     username: &str,
@@ -515,11 +515,37 @@ async fn serve_login(
         x => x,
     }?;
     let mut state = state_arc.lock().await;
-
-    let outcome = submit_credential(
+    submit_and_finalize(
+        req,
+        ctx,
         &mut state,
         AuthCredential::Password(Secret::new(body.password.clone())),
-        ctx.services().config_provider.as_ref(),
+        "password",
+    )
+    .await
+}
+
+/// The shared tail of every login step: submits the credential and applies the
+/// one login-outcome policy — authorize the browser session and clear failed
+/// attempts on success; record a failed attempt when the credential itself was
+/// rejected (a valid credential that merely needs another factor is not a
+/// failure); and mask an overall-`Accepted` state left by an invalid extra
+/// credential as a failure to the client.
+async fn submit_and_finalize(
+    req: &Request,
+    ctx: &UnauthenticatedRequestContext,
+    state: &mut warpgate_common::auth::AuthState,
+    credential: AuthCredential,
+    credential_type: &str,
+) -> poem::Result<LoginResponse> {
+    let services = ctx.services();
+    let client_ip = get_client_ip_addr(req, services).await;
+
+    let outcome = submit_credential(
+        state,
+        credential,
+        services.config_provider.as_ref(),
+        &services.login_protection,
     )
     .await?;
 
@@ -528,7 +554,6 @@ async fn serve_login(
             let username = user_info.username.clone();
             authorize_session(req, ctx, user_info).await?;
             state.emit_authenticated_event_once();
-            // Clear failed attempts on successful login
             if let Some(ip) = client_ip {
                 let _ = services
                     .login_protection
@@ -538,22 +563,16 @@ async fn serve_login(
             Ok(LoginResponse::Success)
         }
         Err(rejection) => {
-            // Only an invalid password counts as a failed attempt; a valid
-            // password that merely needs a second factor is not a failure.
             if rejection.credential_rejected {
-                error!("Password authentication failed");
                 record_failed_login_attempt(
                     services,
                     client_ip,
                     &state.user_info().username,
-                    "password",
+                    credential_type,
                 )
                 .await;
             }
             Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                // An invalid extra credential can leave the overall state
-                // `Accepted`; the attempt was still rejected, so it must
-                // report a failure rather than `Success` to the client.
                 state: match rejection.state {
                     AuthResult::Accepted { .. } => ApiAuthState::Failed,
                     other => other.into(),
@@ -610,57 +629,22 @@ async fn serve_otp_login(
         ))));
     }
 
-    let outcome = submit_credential(
+    submit_and_finalize(
+        req,
+        ctx,
         &mut state,
         AuthCredential::Otp(otp.to_owned().into()),
-        services.config_provider.as_ref(),
+        "otp",
     )
-    .await?;
-
-    match outcome.into_accepted() {
-        Ok(user_info) => {
-            let username = user_info.username.clone();
-            authorize_session(req, ctx, user_info).await?;
-            state.emit_authenticated_event_once();
-            // Clear failed attempts on successful login
-            if let Some(ip) = client_ip {
-                let _ = services
-                    .login_protection
-                    .clear_failed_attempts(&ip, &username)
-                    .await;
-            }
-            Ok(LoginResponse::Success)
-        }
-        Err(rejection) => {
-            // Only an invalid OTP counts as a failed attempt.
-            if rejection.credential_rejected {
-                record_failed_login_attempt(
-                    services,
-                    client_ip,
-                    &state.user_info().username,
-                    "otp",
-                )
-                .await;
-            }
-            Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                // An invalid extra credential can leave the overall state
-                // `Accepted`; the attempt was still rejected, so it must
-                // report a failure rather than `Success` to the client.
-                state: match rejection.state {
-                    AuthResult::Accepted { .. } => ApiAuthState::Failed,
-                    other => other.into(),
-                },
-                credential_rejected: rejection.credential_rejected,
-            })))
-        }
-    }
+    .await
 }
 
-/// The owner of an auth state: auth states are keyed by session id and held only
-/// in memory on the node that created them, but the `user_sessions` row records
-/// that node, so the owner is the user session's node. An unknown session or a
-/// gone owner node both resolve to `Local`, where the store lookup then reports
-/// not-found and the caller retries.
+/// The owner of an auth state: auth states are keyed by session id and held
+/// only in memory on the node that created them, and the `user_sessions` row
+/// records that node (`auth_state_node_id`, stamped at state creation). Rows
+/// written before the stamp existed fall back to the session's lifecycle node.
+/// An unknown session or a gone owner node both resolve to `Local`, where the
+/// store lookup then reports not-found and the caller retries.
 async fn auth_state_owner(
     ctx: &UnauthenticatedRequestContext,
     id: Option<UserSessionId>,
@@ -675,13 +659,12 @@ async fn auth_state_owner(
     else {
         return Ok(Owner::local());
     };
-    match node_owner(ctx, session.node_id).await {
-        Err(WarpgateError::NodeGone(node_id)) => {
-            warn!(%node_id, "Auth state owner node is gone; reporting not found");
-            Ok(Owner::local())
-        }
-        owner => owner.map_err(Into::into),
-    }
+    node_owner(
+        ctx,
+        session.auth_state_node_id.or(session.node_id).map(NodeId),
+    )
+    .await
+    .map_err(Into::into)
 }
 
 /// Runs a login step (OTP submit, state poll, cancel) for this request's own

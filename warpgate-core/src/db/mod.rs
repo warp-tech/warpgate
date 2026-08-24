@@ -14,7 +14,7 @@ use warpgate_common::{
     GlobalParams, TargetSessionId, UserSessionId, WarpgateConfig, WarpgateError,
 };
 use warpgate_db_entities::Parameters::ConfigMigrationValues;
-use warpgate_db_entities::{TargetSession, UserSession};
+use warpgate_db_entities::{HttpSession, TargetSession, UserSession};
 use warpgate_db_migrations::{migrate_database, migrate_database_down, migrate_database_up};
 
 use crate::logging::AuditEvent;
@@ -182,11 +182,44 @@ pub async fn mark_user_session_and_targets_ended(
         .all(db)
         .await?;
     for target in targets {
-        if mark_target_session_ended(db, target.id.into()).await? {
+        if mark_target_session_ended(db, TargetSessionId(target.id)).await? {
             emit_target_session_ended(db, target).await;
         }
     }
     let _ = mark_user_session_ended(db, id).await?;
+    Ok(())
+}
+
+/// Cluster-wide logout of one user session: ends it and its target sessions
+/// and deletes every stored browser session referencing it, so no node keeps
+/// accepting its cookie. The one way to close a session — closing is these
+/// three steps, and a caller doing fewer leaves the login alive somewhere.
+pub async fn revoke_user_session(
+    db: &DatabaseConnection,
+    id: UserSessionId,
+) -> Result<(), WarpgateError> {
+    mark_user_session_and_targets_ended(db, id).await?;
+    HttpSession::Entity::delete_many()
+        .filter(HttpSession::Column::UserSessionId.eq(id.0))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+/// [`revoke_user_session`] for every open session cluster-wide — including
+/// shared (HTTP) sessions no node currently holds a handle for, which a
+/// per-handle close can never reach.
+pub async fn revoke_all_user_sessions(db: &DatabaseConnection) -> Result<(), WarpgateError> {
+    let open: Vec<Uuid> = UserSession::Entity::find()
+        .filter(UserSession::Column::Ended.is_null())
+        .select_only()
+        .column(UserSession::Column::Id)
+        .into_tuple()
+        .all(db)
+        .await?;
+    for id in open {
+        revoke_user_session(db, UserSessionId(id)).await?;
+    }
     Ok(())
 }
 
@@ -309,7 +342,7 @@ pub async fn cleanup_db(
 
         for recording in recordings_to_delete {
             if let Err(error) = recordings
-                .remove(&recording.session_id.into(), &recording.name)
+                .remove(&TargetSessionId(recording.session_id), &recording.name)
                 .await
             {
                 error!(session=%recording.session_id, name=%recording.name, %error, "Failed to remove recording");
@@ -351,4 +384,71 @@ pub async fn cleanup_db(
         .await?;
 
     Ok(())
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod tests {
+    use sea_orm::ActiveValue::Set;
+    use sea_orm::{Database, EntityTrait, PaginatorTrait};
+    use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+    use warpgate_db_migrations::migrate_database;
+
+    use super::*;
+
+    async fn open_session(db: &DatabaseConnection, node_id: Option<Uuid>) -> Uuid {
+        let id = Uuid::new_v4();
+        UserSession::Entity::insert(UserSession::ActiveModel {
+            id: Set(id),
+            username: Set(Some("alice".into())),
+            user_id: Set(Some(Uuid::new_v4())),
+            remote_address: Set("127.0.0.1:1".into()),
+            started: Set(OffsetDateTime::now_utc()),
+            ended: Set(None),
+            protocol: Set(if node_id.is_some() { "SSH" } else { "HTTP" }.into()),
+            node_id: Set(node_id),
+            auth_state_node_id: Set(None),
+        })
+        .exec_without_returning(db)
+        .await
+        .unwrap();
+        id
+    }
+
+    /// The close-everything sweep must reach sessions no node holds a handle
+    /// for — that is its whole point — and log everyone out by deleting their
+    /// stored browser sessions.
+    #[tokio::test]
+    async fn revoke_all_ends_detached_sessions_and_their_cookies() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+
+        let direct = open_session(&db, Some(Uuid::new_v4())).await;
+        let detached_http = open_session(&db, None).await;
+        HttpSession::Entity::insert(HttpSession::ActiveModel {
+            id: Set("cookie".into()),
+            expires: Set(None),
+            data: Set("{}".into()),
+            updated: Set(OffsetDateTime::now_utc()),
+            user_session_id: Set(Some(detached_http)),
+        })
+        .exec_without_returning(&db)
+        .await
+        .unwrap();
+
+        revoke_all_user_sessions(&db).await.unwrap();
+
+        for id in [direct, detached_http] {
+            assert!(
+                UserSession::Entity::find_by_id(id)
+                    .one(&db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .ended
+                    .is_some()
+            );
+        }
+        assert_eq!(HttpSession::Entity::find().count(&db).await.unwrap(), 0);
+    }
 }

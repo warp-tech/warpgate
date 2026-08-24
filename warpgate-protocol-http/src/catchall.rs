@@ -14,7 +14,7 @@ use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization, SessionKeepalive,
 };
 use warpgate_core::{
-    AuthorizedIdentity, ConfigProvider, TargetAuthorization, TargetSessionStart,
+    ConfigProvider, TargetAuthorization, TargetSessionStart,
     authorize_for_target,
 };
 
@@ -56,26 +56,15 @@ pub async fn catchall_endpoint(
             poem::http::StatusCode::UNAUTHORIZED,
         ));
     };
-    let user_info = authorization.user_info().clone();
-    let handle = {
-        let mut store = session_store.lock().await;
-        match store.handle_for(session) {
-            Some(handle) => handle,
-            None => match session.get_session_id() {
-                // The parent is DB-backed: a node that didn't create it serves
-                // it through a local view handle.
-                Some(id) => {
-                    store
-                        .adopt_handle_for(req, &unauthenticated_ctx, id)
-                        .await?
-                }
-                None => store.create_handle_for(req, &unauthenticated_ctx).await?,
-            },
-        }
-    };
-    handle.lock().await.set_user_info(user_info.clone()).await?;
+    let handle = session_store
+        .lock()
+        .await
+        .handle_for_request(req, &unauthenticated_ctx)
+        .await?;
 
-    let (target_session_id, approved, target_close_rx) = match handle
+    // `start_target_session` stamps (or verifies) the session's user from the
+    // authorization itself, so there is no separate stamping step to drift.
+    let (target_session_id, approved, close_signal) = match handle
         .lock()
         .await
         .start_target_session(authorization)
@@ -88,6 +77,7 @@ pub async fn catchall_endpoint(
                 .body("Target approval required"));
         }
     };
+    let target_close_rx = close_signal.receiver();
     let keepalive_guard = Data::<&SessionKeepalive>::from_request_without_body(req)
         .await
         .ok()
@@ -96,12 +86,10 @@ pub async fn catchall_endpoint(
     let span = info_span!("", session=%target_session_id, target=%approved.target().name);
 
     Ok(match ws {
-        Some(ws) => {
-            proxy_websocket_request(req, ws, &ctx, approved, target_close_rx)
-                .instrument(span)
-                .await?
-                .into_response()
-        }
+        Some(ws) => proxy_websocket_request(req, ws, &ctx, approved, target_close_rx)
+            .instrument(span)
+            .await?
+            .into_response(),
         None => proxy_normal_request(
             req,
             *ctx,
@@ -157,7 +145,7 @@ async fn get_target_for_request(
         ));
     }
 
-    let RequestAuthorization::Session(SessionAuthorization::User { user_id, username }) = &ctx.auth
+    let RequestAuthorization::Session(SessionAuthorization::User { .. }) = &ctx.auth
     else {
         return Ok(None);
     };
@@ -207,13 +195,10 @@ async fn get_target_for_request(
 
         // Reached only for a `SessionAuthorization::User` (ticket sessions are
         // handled separately above), so the session is the prior-auth evidence.
-        let identity = AuthorizedIdentity::for_authenticated_session(
-            AuthStateUserInfo {
-                id: *user_id,
-                username: username.clone(),
-            },
-            crate::common::PROTOCOL_NAME,
-        );
+        let Some(full) = ctx.auth.as_full_user() else {
+            return Ok(None);
+        };
+        let identity = full.identity(crate::common::PROTOCOL_NAME);
 
         if let Some(target) = target
             && let Some(authorization) =

@@ -6,7 +6,9 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::{Instrument, info_span};
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{Protocol, Target, TargetSessionId, UserSessionId, WarpgateError};
+use warpgate_common::{
+    Protocol, SessionLifecycle, Target, TargetSessionId, UserSessionId, WarpgateError,
+};
 use warpgate_db_entities::UserSession;
 
 use crate::rate_limiting::{RateLimiterRegistry, stack_rate_limiters};
@@ -48,10 +50,10 @@ impl WarpgateServerHandle {
             rate_limiters_registry,
             protocol,
             provisional: false,
-            // HTTP browser sessions are DB-backed and can be active on several
-            // nodes. Their DB lifetime is ended by the Poem session storage,
-            // not by one node dropping its local handle.
-            end_user_session_on_drop: protocol != Protocol::Http,
+            // Shared sessions can be active on several nodes; their DB
+            // lifetime is ended by the shared session storage, not by one
+            // node dropping its local handle.
+            end_user_session_on_drop: protocol.lifecycle() == SessionLifecycle::ConnectionBound,
         }
     }
 
@@ -84,32 +86,58 @@ impl WarpgateServerHandle {
     }
 
     pub async fn set_user_info(&self, user_info: AuthStateUserInfo) -> Result<(), WarpgateError> {
-        use sea_orm::ActiveValue::Set;
-
         {
             // Kubernetes reuses one session handle for many concurrent requests, so
             // most calls are no-ops, and the lock must span the no-op check and the
             // commit to keep the DB and in-memory state consistent.
             let mut state = self.user_session_state.lock().await;
-            if state.user_info.as_ref() == Some(&user_info) {
-                return Ok(());
-            }
-
-            UserSession::Entity::update_many()
-                .set(UserSession::ActiveModel {
-                    username: Set(Some(user_info.username.clone())),
-                    user_id: Set(Some(user_info.id)),
-                    ..Default::default()
-                })
-                .filter(UserSession::Column::Id.eq(self.user_session_id.0))
-                .exec(&self.db)
-                .await?;
-
-            state.user_info = Some(user_info);
-            state.emit_change();
+            self.set_user_info_in(&mut state, user_info).await?;
         }
 
         self.update_user_rate_limiters().await
+    }
+
+    /// The locked half of [`Self::set_user_info`], for callers already holding
+    /// the session state lock. The caller is responsible for refreshing user
+    /// rate limiters afterwards (outside the lock).
+    ///
+    /// A user session's identity is write-once: target sessions and audit
+    /// events attribute through the parent row, so changing it would rewrite
+    /// who did everything recorded under it. Logging in as someone else
+    /// requires a fresh session.
+    async fn set_user_info_in(
+        &self,
+        state: &mut UserSessionState,
+        user_info: AuthStateUserInfo,
+    ) -> Result<(), WarpgateError> {
+        use sea_orm::ActiveValue::Set;
+
+        if state.user_info.as_ref() == Some(&user_info) {
+            return Ok(());
+        }
+        if state
+            .user_info
+            .as_ref()
+            .is_some_and(|existing| existing.id != user_info.id)
+        {
+            return Err(WarpgateError::InconsistentState(
+                "user session is already attributed to another user".into(),
+            ));
+        }
+
+        UserSession::Entity::update_many()
+            .set(UserSession::ActiveModel {
+                username: Set(Some(user_info.username.clone())),
+                user_id: Set(Some(user_info.id)),
+                ..Default::default()
+            })
+            .filter(UserSession::Column::Id.eq(self.user_session_id.0))
+            .exec(&self.db)
+            .await?;
+
+        state.user_info = Some(user_info);
+        state.emit_change();
+        Ok(())
     }
 
     /// The user session's target session for the authorized target, opening
@@ -130,7 +158,7 @@ impl WarpgateServerHandle {
         &mut self,
         authorization: TargetAuthorization<O>,
     ) -> Result<
-        TargetSessionStart<Box<(TargetSessionId, ApprovedTarget<O>, broadcast::Receiver<()>)>>,
+        TargetSessionStart<Box<(TargetSessionId, ApprovedTarget<O>, TargetSessionCloseSignal)>>,
         WarpgateError,
     > {
         if authorization.protocol() != self.protocol {
@@ -140,17 +168,27 @@ impl WarpgateServerHandle {
         }
 
         let mut parent = self.user_session_state.lock().await;
-        if parent.user_info.as_ref() != Some(authorization.user_info()) {
-            return Err(WarpgateError::InconsistentState(
-                "target authorization user does not match the user session".into(),
-            ));
-        }
+        // The authorization already carries the authenticated user, so a
+        // session whose user was never set explicitly (target-only protocols)
+        // is stamped here; one attributed to a different user is refused.
+        let user_info_stamped = if parent.user_info.is_none() {
+            self.set_user_info_in(&mut parent, authorization.user_info().clone())
+                .await?;
+            true
+        } else {
+            if parent.user_info.as_ref() != Some(authorization.user_info()) {
+                return Err(WarpgateError::InconsistentState(
+                    "target authorization user does not match the user session".into(),
+                ));
+            }
+            false
+        };
 
         if let Some(slot) = parent.target_sessions.get(&authorization.target().id) {
             return Ok(TargetSessionStart::Started(Box::new((
                 slot.handle.id(),
                 ApprovedTarget::new(authorization),
-                slot.close_tx.subscribe(),
+                TargetSessionCloseSignal(slot.close_tx.subscribe()),
             ))));
         }
 
@@ -160,10 +198,20 @@ impl WarpgateServerHandle {
             return Ok(TargetSessionStart::NeedsApproval);
         }
 
-        let id = if self.protocol == Protocol::Http {
-            TargetSessionId(Uuid::new_v4())
-        } else {
-            TargetSessionId(self.user_session_id.0)
+        let lifecycle = self.protocol.lifecycle();
+        let id = match lifecycle {
+            SessionLifecycle::Shared => TargetSessionId(Uuid::new_v4()),
+            SessionLifecycle::ConnectionBound => {
+                // One-to-one protocols reuse the parent id, so a second target
+                // session would collide on the primary key. Refusing here turns
+                // that into a typed error instead of a DB constraint failure.
+                if !parent.target_sessions.is_empty() {
+                    return Err(WarpgateError::InconsistentState(
+                        "this protocol allows one target session per user session".into(),
+                    ));
+                }
+                TargetSessionId(self.user_session_id.0)
+            }
         };
         let target_session = State::create_target_session(
             &self.state,
@@ -173,6 +221,10 @@ impl WarpgateServerHandle {
             &parent,
         )
         .await?;
+        // A shared session may have adopted the live row another node opened
+        // for this target, so the row's id — not the proposed one — is the
+        // session's id from here on.
+        let id = target_session.id();
         target_session.update_rate_limiters().await?;
 
         let close_tx = broadcast::channel(1).0;
@@ -184,10 +236,14 @@ impl WarpgateServerHandle {
                 close_tx,
             },
         );
+        drop(parent);
+        if user_info_stamped {
+            self.update_user_rate_limiters().await?;
+        }
         Ok(TargetSessionStart::Started(Box::new((
             id,
             ApprovedTarget::new(authorization),
-            close_rx,
+            TargetSessionCloseSignal(close_rx),
         ))))
     }
 
@@ -196,10 +252,11 @@ impl WarpgateServerHandle {
     }
 
     /// Wraps a connection stream with the user-session rate limiters. Streams
-    /// are wrapped at accept time, before any target is known; once a target
-    /// session starts, [`State::start_target_session`] moves the handles onto
-    /// it and re-derives the limits for the target.
-    pub async fn wrap_stream<S>(
+    /// are wrapped at accept time — via
+    /// [`State::register_user_session_with_stream`], the only outside entry —
+    /// before any target is known; a starting target session shares these
+    /// handles and re-derives the target limits onto them.
+    pub(crate) async fn wrap_stream<S>(
         &self,
         stream: S,
     ) -> Result<impl AsyncRead + AsyncWrite + Unpin + Send + use<S>, WarpgateError>
@@ -237,6 +294,27 @@ pub async fn target_session_needs_approval(
     Ok(false)
 }
 
+/// Fires (or closes) when the target session is torn down, so the requests
+/// served through it can abort. Consuming it is a decision: [`Self::receiver`]
+/// to actually watch it, or [`Self::forget`] where teardown provably arrives
+/// another way — silently dropping it as `_` is how a session outlives its
+/// teardown.
+#[must_use = "either watch the close signal or explicitly forget() it"]
+pub struct TargetSessionCloseSignal(broadcast::Receiver<()>);
+
+impl TargetSessionCloseSignal {
+    pub fn receiver(self) -> broadcast::Receiver<()> {
+        self.0
+    }
+
+    /// For one-to-one protocols whose sole target session shares the parent's
+    /// lifetime: the parent's abort path already tears down everything served
+    /// here, so the signal is redundant. That reasoning breaks the moment a
+    /// target session can end while its parent survives — a caller of this
+    /// method is signing up to revisit it then.
+    pub fn forget(self) {}
+}
+
 /// Admission outcome for a target session: direct protocols start
 /// `TargetSessionStart<ApprovedTarget>` sessions, HTTP additionally receives
 /// the lifetime handle. One shared enum keeps every protocol's
@@ -257,14 +335,17 @@ impl<T> TargetSessionStart<T> {
     }
 }
 
-/// Lifetime guard for one target connection. Dropping it ends only that child
-/// session; the parent user session can continue and start another connection.
+/// Lifetime guard for one target connection. For a connection-bound session,
+/// dropping it ends that child session (the parent user session can continue
+/// and start another connection); for a shared session it detaches this node's
+/// view only — the row is an access record that ends with its parent.
 pub struct TargetSessionHandle {
     id: TargetSessionId,
     user_session_id: UserSessionId,
     state: Arc<Mutex<State>>,
     session_state: Arc<Mutex<TargetSessionState>>,
     rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
+    lifecycle: SessionLifecycle,
 }
 
 impl TargetSessionHandle {
@@ -274,6 +355,7 @@ impl TargetSessionHandle {
         state: Arc<Mutex<State>>,
         session_state: Arc<Mutex<TargetSessionState>>,
         rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
+        lifecycle: SessionLifecycle,
     ) -> Self {
         Self {
             id,
@@ -281,6 +363,7 @@ impl TargetSessionHandle {
             state,
             session_state,
             rate_limiters_registry,
+            lifecycle,
         }
     }
 
@@ -312,8 +395,17 @@ impl Drop for TargetSessionHandle {
     fn drop(&mut self) {
         let id = self.id;
         let state = self.state.clone();
+        let session_state = self.session_state.clone();
+        let lifecycle = self.lifecycle;
         tokio::spawn(async move {
-            state.lock().await.remove_target_session(id).await;
+            match lifecycle {
+                SessionLifecycle::ConnectionBound => {
+                    state.lock().await.remove_target_session(id).await;
+                }
+                SessionLifecycle::Shared => {
+                    state.lock().await.detach_target_session(id, &session_state);
+                }
+            }
         });
     }
 }
@@ -324,6 +416,7 @@ impl Drop for WarpgateServerHandle {
         let state = self.state.clone();
         let user_session_state = self.user_session_state.clone();
         let provisional = self.provisional;
+        let protocol = self.protocol;
         let end_user_session_on_drop = self.end_user_session_on_drop;
         tokio::spawn(async move {
             if provisional {
@@ -344,7 +437,7 @@ impl Drop for WarpgateServerHandle {
                 .user_info
                 .as_ref()
                 .map_or_else(String::new, |x| x.username.clone());
-            let span = info_span!("SSH", session=%id, session_username=%username);
+            let span = info_span!("Teardown", protocol=protocol.name(), session=%id, session_username=%username);
             state.lock().await.remove_session(id).instrument(span).await;
         });
     }

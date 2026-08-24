@@ -22,8 +22,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use tokio::io::copy_bidirectional;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite, copy_bidirectional};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::time::{Instant, timeout_at};
 use tracing::{Instrument, debug, error, info, info_span, warn};
@@ -48,9 +47,7 @@ mod rdp;
 use bridge::connect_backend;
 use hold_screen::{run_banner_screen, run_hold_screen};
 use protocol::{AuthVerdict, Event as ServerEvent, Input as ServerInput};
-use warpgate_desktop_auth::{
-    DesktopAuthOutcome, authenticate, finalize_user_auth,
-};
+use warpgate_desktop_auth::{DesktopAuthOutcome, authenticate, finalize_user_auth};
 
 /// Depth of the feed into the viewer-facing RDP server. Bounded so a slow viewer
 /// backpressures `frame_bridge` (and through it the target) rather than letting delta
@@ -102,13 +99,14 @@ pub async fn bind_server(
                 async move {
                     let (session_handle, mut abort_rx) = RdpSessionHandle::new();
 
-                    let server_handle = State::register_user_session(
+                    let (server_handle, viewer_stream) = State::register_user_session_with_stream(
                         &services.state,
                         PROTOCOL_NAME,
                         UserSessionStateInit {
                             remote_address: Some(remote_address),
                             handle: Box::new(session_handle),
                         },
+                        stream,
                     )
                     .await
                     .context("registering session")?;
@@ -119,7 +117,7 @@ pub async fn bind_server(
                         result = handle_connection(
                             services,
                             server_handle.clone(),
-                            stream,
+                            viewer_stream,
                             remote_address,
                             cert_pem,
                             key_pem,
@@ -145,16 +143,11 @@ pub async fn bind_server(
 async fn handle_connection(
     services: Services,
     server_handle: Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
-    stream: TcpStream,
+    mut viewer: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     remote_address: SocketAddr,
     cert_pem: String,
     key_pem: String,
 ) -> Result<()> {
-    let mut viewer = {
-        let guard = server_handle.lock().await;
-        guard.wrap_stream(stream).await?
-    };
-
     // Warpgate owns the viewer socket and the session; `rdp` runs the RDP server state
     // machine over it and terminates TLS toward the viewer.
     let (server_out_tx, server_out_rx) = unbounded_channel::<ServerEvent>();
@@ -300,10 +293,10 @@ async fn control_loop(
                         )
                         .await
                         {
-                            Ok(Some(user_info)) => {
+                            Ok(Some(identity)) => {
                                 match finalize_user_auth::<TargetRdpOptions>(
                                     &services,
-                                    &user_info,
+                                    &identity,
                                     &interactive.target_name,
                                 )
                                 .await
@@ -485,4 +478,3 @@ async fn dial_if_pending(
     }
     Ok(())
 }
-

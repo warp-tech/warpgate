@@ -192,6 +192,10 @@ impl ChannelRegistry {
         self.channels.values()
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = (&Uuid, &Channel)> {
+        self.channels.iter()
+    }
+
     pub fn has_opening(&self) -> bool {
         self.channels.values().any(Channel::is_opening)
     }

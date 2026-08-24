@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.3-1-g982129b0-modified"
+    "version": "v0.28.3-2-g68fd429f-modified"
   },
   "servers": [
     {
@@ -90,19 +90,6 @@
         "operationId": "get_sessions"
       },
       "delete": {
-        "parameters": [
-          {
-            "name": "local_only",
-            "schema": {
-              "type": "boolean"
-            },
-            "in": "query",
-            "description": "Close only this node's own sessions instead of the whole cluster's.\nSet on cluster-forwarded copies of the request.",
-            "required": false,
-            "deprecated": false,
-            "explode": true
-          }
-        ],
         "responses": {
           "201": {
             "description": ""
@@ -215,17 +202,6 @@
             },
             "in": "path",
             "required": true,
-            "deprecated": false,
-            "explode": true
-          },
-          {
-            "name": "local_only",
-            "schema": {
-              "type": "boolean"
-            },
-            "in": "query",
-            "description": "Close only connections owned by this node.",
-            "required": false,
             "deprecated": false,
             "explode": true
           }
@@ -7148,14 +7124,12 @@
         "required": [
           "id",
           "target_id",
-          "started",
-          "node_id"
+          "started"
         ],
         "properties": {
           "id": {
             "type": "string",
-            "format": "uuid",
-            "title": "Identity of one target connection — never of a login."
+            "format": "uuid"
           },
           "target": {
             "description": "`None` only when the stored snapshot fails to parse.",
@@ -7186,11 +7160,13 @@
           },
           "node_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "A cluster node's ephemeral identity (random per process start). The\nnil UUID is the legacy \"no owning node\" sentinel in stored rows and\nmust never be treated as a reachable peer — `node_owner` is the one\nplace that decodes it.",
+            "description": "The node serving this target connection; `None` for shared (HTTP)\ntarget sessions, which are access records any node serves."
           },
           "node_hostname": {
             "type": "string",
-            "description": "Hostname of the node that owns this target connection, while registered."
+            "description": "Hostname of the serving node, while registered."
           }
         }
       },
@@ -7744,15 +7720,13 @@
           "id",
           "started",
           "protocol",
-          "node_id",
           "remote_address",
           "target_sessions"
         ],
         "properties": {
           "id": {
             "type": "string",
-            "format": "uuid",
-            "title": "Identity of a login (user session) — never of a target connection."
+            "format": "uuid"
           },
           "username": {
             "type": "string"
@@ -7774,11 +7748,13 @@
           },
           "node_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "title": "A cluster node's ephemeral identity (random per process start). The\nnil UUID is the legacy \"no owning node\" sentinel in stored rows and\nmust never be treated as a reachable peer — `node_owner` is the one\nplace that decodes it.",
+            "description": "The node this session's lifetime is bound to; `None` for shared\nsessions, which any node serves."
           },
           "node_hostname": {
             "type": "string",
-            "description": "Hostname of the node that created this user session, while registered."
+            "description": "Hostname of the bound node, while registered."
           },
           "remote_address": {
             "type": "string"

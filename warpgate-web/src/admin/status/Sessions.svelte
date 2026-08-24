@@ -86,12 +86,13 @@
         let user =
             session.username ??
             (session.ended ? '<not logged in>' : '<logging in>')
-        let activeTargets = session.targetSessions.filter(target => !target.ended)
+        let activeTargets = session.targetSessions.filter(
+            target => !target.ended,
+        )
         if (!activeTargets.length) {
             return user
         }
-        let suffix = activeTargets.length === 1 ? 'target' : 'targets'
-        return `${user} · ${activeTargets.length} active ${suffix}`
+        return `${user} on ${activeTargets.map(x => x.target?.name).join(', ')}`
     }
 
     _reloadSessions()

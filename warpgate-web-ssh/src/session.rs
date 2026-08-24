@@ -39,6 +39,7 @@ pub struct WebSshSession {
     command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
 
     channel_counter: Arc<AtomicUsize>,
+    target_session_id: TargetSessionId,
     recordings: Arc<Mutex<SessionRecordings>>,
     channel_audits: Arc<Mutex<HashMap<Uuid, ChannelAudit>>>,
     pending_host_key: Arc<Mutex<Option<PendingHostKey>>>,
@@ -51,6 +52,7 @@ impl WebSshSession {
         user_id: Uuid,
         target_name: String,
         target_kind: TargetKind,
+        target_session_id: TargetSessionId,
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
         abort_tx: UnboundedSender<()>,
@@ -69,6 +71,7 @@ impl WebSshSession {
             ),
             command_tx,
             channel_counter: Arc::new(AtomicUsize::new(0)),
+            target_session_id,
             recordings,
             channel_audits: Arc::new(Mutex::new(HashMap::new())),
             pending_host_key: Arc::new(Mutex::new(None)),
@@ -92,7 +95,7 @@ impl WebSshSession {
             .lock()
             .await
             .start::<TerminalRecorder, _>(
-                &TargetSessionId(self.id()),
+                &self.target_session_id,
                 None,
                 SshRecordingMetadata::Shell {
                     channel: channel_number,

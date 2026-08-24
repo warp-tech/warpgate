@@ -58,7 +58,8 @@ impl Api {
             .map(|x| x.ssh_options)
             .collect::<Vec<_>>();
 
-        let mut handles = RemoteClient::create(UserSessionId(Uuid::new_v4()), admin.services().clone())?;
+        let mut handles =
+            RemoteClient::create(UserSessionId(Uuid::new_v4()), admin.services().clone())?;
         let _ = handles
             .command_tx
             .send((RCCommand::Connect(ssh_chain), None));

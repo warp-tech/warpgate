@@ -17,7 +17,7 @@ use crate::auth::submit_credential;
 use crate::login_protection::FailedAttemptInfo;
 use crate::{
     AuthorizedIdentity, Services, TargetAuthorization, authorize_for_target_by_name,
-    authorize_ticket, consume_ticket, wait_for_auth_completion,
+    authorize_ticket, wait_for_auth_completion,
 };
 
 /// Proof that the success message has not been sent yet. Exactly one is minted
@@ -111,7 +111,7 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
             .await
         }
         AuthSelector::Ticket { secret } => {
-            let Some((ticket, authorization)) = authorize_ticket(
+            let Some(authorization) = authorize_ticket(
                 &services.db,
                 &services.login_protection,
                 &secret,
@@ -128,7 +128,6 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                 "Authorized for {} with a ticket",
                 authorization.target().name
             );
-            consume_ticket(&services.db, &ticket.id).await?;
             transport.send_auth_ok(AuthOkPermit).await?;
             Ok(Some(authorization))
         }
@@ -223,6 +222,7 @@ async fn authorize_user<T: DbAuthTransport>(
                     &mut *state_arc.lock().await,
                     AuthCredential::Password(password),
                     services.config_provider.as_ref(),
+                    &services.login_protection,
                 )
                 .await?;
 
