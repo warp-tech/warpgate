@@ -686,14 +686,12 @@ impl ServerSession {
                     self.disconnect_server().await;
                     return Ok(());
                 };
-                let (target_session_id, approved, close_signal) = *self
+                let (target_session_id, approved) = self
                     .server_handle
                     .lock()
                     .await
-                    .start_target_session(authorization)
-                    .await?
-                    .admitted()?;
-                close_signal.forget();
+                    .start_sole_target_session(authorization)
+                    .await?;
                 self.target_session_id = Some(target_session_id);
                 self.target = TargetSelection::Found(approved);
                 self.start_recordings_for_pty_channels().await;
@@ -2426,14 +2424,12 @@ impl ServerSession {
             return Ok(());
         };
 
-        let (target_session_id, approved, close_signal) = *self
+        let (target_session_id, approved) = self
             .server_handle
             .lock()
             .await
-            .start_target_session(authorization)
-            .await?
-            .admitted()?;
-        close_signal.forget();
+            .start_sole_target_session(authorization)
+            .await?;
         self.target_session_id = Some(target_session_id);
         self.target = TargetSelection::Found(approved);
         self.start_recordings_for_pty_channels().await;

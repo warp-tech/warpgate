@@ -39,6 +39,7 @@ warpgate-db-entities = { path = "../warpgate-db-entities", default-features = fa
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
 warpgate-web = { path = "../warpgate-web", default-features = false }
+warpgate-web-clients-common = { path = "../warpgate-web-clients-common" }
 warpgate-web-desktop = { path = "../warpgate-web-desktop", default-features = false }
 warpgate-web-ssh = { path = "../warpgate-web-ssh", default-features = false }
 

@@ -10,7 +10,7 @@ use uuid::Uuid;
 use warpgate_common::{TargetOptions, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    DesktopEvent, Services, State, TargetAuthorization, TargetSessionStart, UserSessionStateInit,
+    DesktopEvent, Services, State, TargetAuthorization, UserSessionStateInit,
 };
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
@@ -77,14 +77,12 @@ impl WebDesktopClientManager {
         .await
         .context("registering web-desktop session")?;
 
-        let (target_session_id, approved, close_signal) = *server_handle
+        let (target_session_id, approved) = server_handle
             .lock()
             .await
-            .start_target_session(authorization)
+            .start_sole_target_session(authorization)
             .await
-            .and_then(TargetSessionStart::admitted)
             .context("starting target session")?;
-        close_signal.forget();
 
         let session_id = server_handle.lock().await.id();
 

@@ -82,15 +82,38 @@ pub enum SessionLifecycle {
     /// session ends when that node's registration lapses.
     ConnectionBound,
     /// The session is a database record served by any node behind the load
-    /// balancer; no node owns it (`node_id` is NULL). It ends by its own
-    /// rules — for HTTP, when no stored cookie session references it anymore.
-    Shared,
+    /// balancer; no node owns it (`node_id` is NULL), so no node's death ends
+    /// it. What does end it is named by the backing: whatever holds a
+    /// reference to the session is what keeps it alive.
+    Shared(SharedSessionBacking),
+}
+
+/// What a shared-lifecycle session's liveness is read from. A new variant is a
+/// promise that the reaper knows how to tell whether such a session is still
+/// referenced — without one it would be ended the moment its grace expires.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SharedSessionBacking {
+    /// A stored browser session in `http_sessions`; the session ends when no
+    /// stored cookie session references it anymore.
+    CookieSession,
 }
 
 impl Protocol {
+    /// Every protocol, so a sweep that has to act per protocol can't quietly
+    /// omit one.
+    pub const ALL: [Self; 7] = [
+        Self::Http,
+        Self::Ssh,
+        Self::MySql,
+        Self::Postgres,
+        Self::Kubernetes,
+        Self::Vnc,
+        Self::Rdp,
+    ];
+
     pub const fn lifecycle(self) -> SessionLifecycle {
         match self {
-            Self::Http => SessionLifecycle::Shared,
+            Self::Http => SessionLifecycle::Shared(SharedSessionBacking::CookieSession),
             // Kubernetes traffic is load-balanced too, but a Kubernetes
             // session *is* a runtime object: the request correlator and the
             // pending-approval auth state are in-memory on one node, and the

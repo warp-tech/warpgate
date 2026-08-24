@@ -13,6 +13,7 @@ use warpgate_admin::api::cluster_proxy::{
 };
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::Target::TargetKind;
+use warpgate_web_clients_common::SessionAccess;
 use warpgate_web_ssh::WebSshClientManager;
 
 use crate::api::auth_scheme::AuthedSession;
@@ -131,18 +132,19 @@ impl Api {
     ) -> poem::Result<GetWebSshSessionResponse> {
         let owner = web_client_session_owner(&ctx, *session_id).await?;
         proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(session) = manager.get_session(*session_id).await else {
-                return Ok(GetWebSshSessionResponse::NotFound);
-            };
-
-            if session.user_id() != ctx.auth.user_id() {
-                return Ok(GetWebSshSessionResponse::NotFound);
+            // Someone else's session reads as absent here: a lookup must not
+            // reveal that the id exists.
+            match manager.access(*session_id, ctx.auth.user_id()).await {
+                SessionAccess::Granted(session) => {
+                    Ok(GetWebSshSessionResponse::Ok(Json(WebSshSessionInfo {
+                        target_name: session.target_name().into(),
+                        target_kind: *session.target_kind(),
+                    })))
+                }
+                SessionAccess::NotFound | SessionAccess::Forbidden => {
+                    Ok(GetWebSshSessionResponse::NotFound)
+                }
             }
-
-            Ok(GetWebSshSessionResponse::Ok(Json(WebSshSessionInfo {
-                target_name: session.target_name().into(),
-                target_kind: *session.target_kind(),
-            })))
         })
         .await
     }
@@ -161,16 +163,14 @@ impl Api {
     ) -> poem::Result<DeleteWebSshSessionResponse> {
         let owner = web_client_session_owner(&ctx, *session_id).await?;
         proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(session) = manager.get_session(*session_id).await else {
-                return Ok(DeleteWebSshSessionResponse::NotFound);
-            };
-
-            if session.user_id() != ctx.auth.user_id() {
-                return Ok(DeleteWebSshSessionResponse::Forbidden);
+            match manager.access(*session_id, ctx.auth.user_id()).await {
+                SessionAccess::Granted(_) => {
+                    manager.remove_session(*session_id).await;
+                    Ok(DeleteWebSshSessionResponse::Deleted)
+                }
+                SessionAccess::Forbidden => Ok(DeleteWebSshSessionResponse::Forbidden),
+                SessionAccess::NotFound => Ok(DeleteWebSshSessionResponse::NotFound),
             }
-
-            manager.remove_session(*session_id).await;
-            Ok(DeleteWebSshSessionResponse::Deleted)
         })
         .await
     }

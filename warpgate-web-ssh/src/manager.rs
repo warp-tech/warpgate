@@ -10,7 +10,7 @@ use tracing::{Instrument, debug, error, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::{TargetSSHOptions, WarpgateError};
 use warpgate_core::{
-    Services, State, TargetAuthorization, TargetSessionStart, UserSessionStateInit,
+    Services, State, TargetAuthorization, UserSessionStateInit,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
@@ -76,14 +76,12 @@ impl WebSshClientManager {
         .await
         .context("registering webSSH session")?;
 
-        let (target_session_id, approved, close_signal) = *server_handle
+        let (target_session_id, approved) = server_handle
             .lock()
             .await
-            .start_target_session(authorization)
+            .start_sole_target_session(authorization)
             .await
-            .and_then(TargetSessionStart::admitted)
             .context("starting target session")?;
-        close_signal.forget();
 
         let session_id = server_handle.lock().await.id();
         let rc_handles = RemoteClient::create(session_id, services.clone())

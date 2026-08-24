@@ -8,7 +8,7 @@ use poem::session::{Session, SessionStorage};
 use poem::web::{Data, RemoteAddr};
 use poem::{FromRequest, Request};
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::OnConflict;
+use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -67,10 +67,34 @@ impl SharedSessionStorage {
             .all(&self.0)
             .await?;
         for row in rows {
-            self.end_user_session_of(&row).await?;
+            // One unreadable row must not stop the sweep: aborting here would
+            // leave every expired browser session in place, and the same row
+            // would abort it again on the next pass.
+            if let Err(error) = self.end_user_session_of(&row).await {
+                error!(%error, id = %row.id, "Could not end the user session of an expired browser session");
+            }
         }
         HttpSession::Entity::delete_many()
             .filter(expired)
+            .exec(&self.0)
+            .await?;
+        Ok(())
+    }
+
+    /// Marks the stored browser sessions of `ids` as active. A session whose
+    /// only traffic is a long-lived websocket writes nothing back through the
+    /// session middleware, so without this its row would age out of [`Self::gc`]
+    /// while the connection is still carrying data.
+    pub async fn touch(&self, ids: &[UserSessionId]) -> Result<(), WarpgateError> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        HttpSession::Entity::update_many()
+            .col_expr(
+                HttpSession::Column::Updated,
+                Expr::value(OffsetDateTime::now_utc()),
+            )
+            .filter(HttpSession::Column::UserSessionId.is_in(ids.iter().map(|id| id.0)))
             .exec(&self.0)
             .await?;
         Ok(())
@@ -98,6 +122,26 @@ impl SharedSessionStorage {
         entries
             .get(SESSION_ID_SESSION_KEY)
             .and_then(|value| serde_json::from_value::<UserSessionId>(value.clone()).ok())
+    }
+
+    /// Rotates the browser session's storage id, keeping its contents and the
+    /// user session it references. Called once authentication succeeds, so a
+    /// cookie value known before the login — planted by an attacker, or set by
+    /// a proxied target under the shared cookie domain — is not a cookie value
+    /// that is authenticated after it.
+    ///
+    /// The stored row is deleted here rather than left to the renewal itself:
+    /// [`SessionStorage::remove_session`] ends the user session a row backs,
+    /// which is right when a browser session is being destroyed and wrong when
+    /// it is being re-keyed. With the row already gone, the renewal's removal
+    /// finds nothing to end and only writes the new one.
+    pub async fn rotate_session_id(&self, session: &Session) -> Result<(), WarpgateError> {
+        if let Some(id) = session.get::<String>(POEM_SESSION_ID_SESSION_KEY) {
+            session.remove(POEM_SESSION_ID_SESSION_KEY);
+            HttpSession::Entity::delete_by_id(id).exec(&self.0).await?;
+        }
+        session.renew();
+        Ok(())
     }
 
     /// Cluster-wide logout of one user session: marks it and its target
@@ -202,14 +246,41 @@ impl SessionStorage for SharedSessionStorage {
 #[derive(Clone, Copy)]
 pub(crate) struct TemporaryTicketSession;
 
+/// What consecutive header-ticket requests are recognised by. A ticket
+/// authorizes exactly one user against exactly one target, so this is the
+/// ticket's identity as far as a session is concerned — without keeping the
+/// secret around to key on.
+type TicketSessionKey = (Uuid, Uuid);
+
+/// The ticket identity of a request that carries a header-borne ticket, or
+/// `None` for anything cookie-backed.
+fn ticket_session_key(req: &Request, session: &Session) -> Option<TicketSessionKey> {
+    req.data::<TemporaryTicketSession>()?;
+    match session.get_auth()? {
+        SessionAuthorization::Ticket {
+            user_id, target_id, ..
+        } => Some((user_id, target_id)),
+        SessionAuthorization::User { .. } => None,
+    }
+}
+
+/// The node's view of one user session. This entry holds the last reference
+/// to the handle that requests are served through, so removing it is what
+/// drops the parent state, which drops its target-session slots, which drops
+/// their close senders and aborts the requests and websockets running against
+/// them. Anything that stores a lasting clone of `handle` breaks that chain
+/// and turns an administrative close into a no-op for traffic already in
+/// flight — `close_parent_drops_target_sessions` in `warpgate-core` covers the
+/// core half of it.
 struct SessionEntry {
     handle: Arc<Mutex<WarpgateServerHandle>>,
     close_sender: broadcast::Sender<()>,
     last_activity: Instant,
     keepalive: Weak<()>,
-    /// See [`TemporaryTicketSession`]: expiring this entry must end the user
-    /// session, since no stored browser session references it.
-    temporary: bool,
+    /// Set for a [`TemporaryTicketSession`]: its index key, and the marker
+    /// that expiring this entry must end the user session, since no stored
+    /// browser session references it.
+    ticket_key: Option<TicketSessionKey>,
 }
 
 fn is_session_expired(
@@ -223,6 +294,10 @@ fn is_session_expired(
 
 pub struct SessionStore {
     sessions: HashMap<UserSessionId, SessionEntry>,
+    /// Lets consecutive header-ticket requests share one user session: they
+    /// carry no cookie, so without this index every request would register a
+    /// session (and a target session, and an audit event) of its own.
+    ticket_sessions: HashMap<TicketSessionKey, UserSessionId>,
     this: Weak<Mutex<Self>>,
 }
 
@@ -258,6 +333,7 @@ impl SessionStore {
         Arc::new_cyclic(|me| {
             Mutex::new(Self {
                 sessions: HashMap::new(),
+                ticket_sessions: HashMap::new(),
                 this: me.clone(),
             })
         })
@@ -298,6 +374,22 @@ impl SessionStore {
     ) -> poem::Result<UserBoundHandle> {
         let session = <&Session>::from_request_without_body(req).await?;
 
+        // A header-borne ticket has no cookie to resolve, so it is recognised
+        // by the ticket it presents instead — otherwise every request would
+        // register a session of its own.
+        if let Some(key) = ticket_session_key(req, session) {
+            if let Some(entry) = self
+                .ticket_sessions
+                .get(&key)
+                .copied()
+                .and_then(|id| self.sessions.get_mut(&id))
+            {
+                entry.last_activity = Instant::now();
+                return Ok(UserBoundHandle(entry.handle.clone()));
+            }
+            return Ok(UserBoundHandle(self.create_handle_for(req, ctx).await?));
+        }
+
         if let Some(handle) = self.handle_for(session) {
             // An adopted view's user is stamped lazily, so an unattributed
             // handle passes; once attributed, it is handed out only to its
@@ -318,10 +410,28 @@ impl SessionStore {
             }
             return Ok(UserBoundHandle(handle));
         }
-        if let Some(id) = session.get_session_id()
-            && let Some(handle) = self.adopt_handle_for(req, ctx, id).await?
-        {
-            return Ok(UserBoundHandle(handle));
+        if let Some(id) = session.get_session_id() {
+            if let Some(handle) = self.adopt_handle_for(req, ctx, id).await? {
+                return Ok(UserBoundHandle(handle));
+            }
+            // The cookie names a session that is gone or ended. If it also
+            // carries an authorization, that authorization was issued under
+            // the ended session: deleting the stored browser sessions is what
+            // makes an administrative close cluster-wide, but a request
+            // already in flight when that happened writes its copy back
+            // afterwards, so a revoked cookie can outlive the close.
+            // Registering a replacement session would hand it a fresh login
+            // and undo the close, so the browser session is dropped instead
+            // and the caller has to authenticate again.
+            if request_auth_user_id(session).is_some() {
+                session.purge();
+                return Err(poem::Error::from_status(
+                    poem::http::StatusCode::UNAUTHORIZED,
+                ));
+            }
+            // Unauthenticated, so there is no authority to carry over and
+            // nothing to undo — the id is a leftover (its session reaped while
+            // the cookie lived on) and this is someone arriving to log in.
         }
         Ok(UserBoundHandle(self.create_handle_for(req, ctx).await?))
     }
@@ -410,6 +520,8 @@ impl SessionStore {
         mut session_handle_rx: mpsc::UnboundedReceiver<SessionHandleCommand>,
     ) -> poem::Result<()> {
         let session_storage = Data::<&SharedSessionStorage>::from_request_without_body(req).await?;
+        let session = <&Session>::from_request_without_body(req).await?;
+        let ticket_key = ticket_session_key(req, session);
 
         let (session_close_sender, _) = broadcast::channel(1);
         self.sessions.insert(
@@ -419,9 +531,12 @@ impl SessionStore {
                 close_sender: session_close_sender,
                 last_activity: Instant::now(),
                 keepalive: Weak::new(),
-                temporary: req.data::<TemporaryTicketSession>().is_some(),
+                ticket_key,
             },
         );
+        if let Some(key) = ticket_key {
+            self.ticket_sessions.insert(key, id);
+        }
 
         let Some(this) = self.this.upgrade() else {
             return Err(anyhow::anyhow!("Invalid session state").into());
@@ -497,9 +612,13 @@ impl SessionStore {
             .sessions
             .iter()
             .filter(|(_, entry)| {
-                is_session_expired(entry.last_activity, &entry.keepalive, now, session_max_age)
+                // A handle a request still holds is in use even if the entry
+                // looks idle: a header-ticket request registers no keepalive,
+                // since the token is attached before its session exists.
+                Arc::strong_count(&entry.handle) == 1
+                    && is_session_expired(entry.last_activity, &entry.keepalive, now, session_max_age)
             })
-            .map(|(id, entry)| (*id, entry.temporary))
+            .map(|(id, entry)| (*id, entry.ticket_key.is_some()))
             .collect();
         let mut ended = vec![];
         for (id, temporary) in to_remove {
@@ -512,11 +631,30 @@ impl SessionStore {
         ended
     }
 
+    /// The sessions this node is actively serving, so their stored browser
+    /// sessions can be kept from ageing out under a long-lived connection.
+    pub fn live_session_ids(&self) -> Vec<UserSessionId> {
+        self.sessions
+            .iter()
+            .filter(|(_, entry)| {
+                entry.keepalive.strong_count() > 0 || Arc::strong_count(&entry.handle) > 1
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
     /// Detaches the parent's local handle. Its target sessions are owned by
     /// the parent state and drop with it, which is what aborts the requests
     /// served through them.
     fn remove_session_by_id(&mut self, id: UserSessionId) {
         if let Some(entry) = self.sessions.remove(&id) {
+            // Only if it still points here: the key may already have been
+            // re-registered by a later request.
+            if let Some(key) = entry.ticket_key
+                && self.ticket_sessions.get(&key) == Some(&id)
+            {
+                self.ticket_sessions.remove(&key);
+            }
             let _ = entry.close_sender.send(());
         }
     }

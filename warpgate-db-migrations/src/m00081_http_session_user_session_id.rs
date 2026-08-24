@@ -75,15 +75,14 @@ async fn backfill_user_session_ids(manager: &SchemaManager<'_>) -> Result<(), Db
     let data_col = Alias::new("data");
     let user_session_id_col = Alias::new("user_session_id");
 
-    // Keyset pagination: rows that yield no id stay NULL and would repeat
-    // under an offset over the NULL-filtered set.
+    // Keyset pagination over a stable order, so a batch boundary can't skip a
+    // row the way an offset would once earlier rows are updated.
     let mut last_id: Option<String> = None;
     loop {
         let mut select = Query::select()
             .column(id_col.clone())
             .column(data_col.clone())
             .from(table.clone())
-            .and_where(Expr::col(user_session_id_col.clone()).is_null())
             .order_by(id_col.clone(), Order::Asc)
             .limit(BACKFILL_BATCH)
             .to_owned();

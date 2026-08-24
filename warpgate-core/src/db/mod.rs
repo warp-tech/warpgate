@@ -130,6 +130,39 @@ pub async fn migrate_down(connection: &DatabaseConnection, steps: u32) -> Result
     Ok(())
 }
 
+/// Whether this target session may still serve traffic: its own row is open
+/// and so is the login it belongs to. A node's in-memory view outlives an
+/// ending performed elsewhere — shared-storage expiry, the cluster reaper, an
+/// administrative close on another node — so the rows are the authority
+/// before a request is readmitted onto an existing session. The parent is
+/// checked too because a revoked login is exactly the case a node that missed
+/// the close must stop serving.
+pub async fn target_session_is_servable(
+    db: &DatabaseConnection,
+    id: TargetSessionId,
+) -> Result<bool, WarpgateError> {
+    let Some(child) = TargetSession::Entity::find_by_id(id.0).one(db).await? else {
+        return Ok(false);
+    };
+    if child.ended.is_some() {
+        return Ok(false);
+    }
+    user_session_is_open(db, UserSessionId(child.user_session_id)).await
+}
+
+/// Whether the login is still open. Opening a target session under an ended
+/// one would keep serving a revoked browser session, so this gates creation
+/// the way [`target_session_is_servable`] gates readmission.
+pub async fn user_session_is_open(
+    db: &DatabaseConnection,
+    id: UserSessionId,
+) -> Result<bool, WarpgateError> {
+    Ok(UserSession::Entity::find_by_id(id.0)
+        .one(db)
+        .await?
+        .is_some_and(|row| row.ended.is_none()))
+}
+
 /// Mark a single still-open target session as ended. Idempotent: a no-op if
 /// the session was already ended or has been removed, so it is safe to call
 /// from an admin close even when the session's own teardown will run later.

@@ -10,7 +10,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::{
-    ApprovedTarget, Services, State, TargetSessionStart, UserSessionStateInit, WarpgateServerHandle,
+    ApprovedTarget, Services, State, UserSessionStateInit, WarpgateServerHandle,
 };
 
 use crate::server::auth::{authorize_kubernetes_target, unauthorized};
@@ -121,21 +121,11 @@ pub async fn correlated_authorization(
             .await
         {
             Ok(resolved) => {
-                let admitted = match handle
-                    .lock()
-                    .await
-                    .start_target_session(resolved)
-                    .await
-                    .and_then(TargetSessionStart::admitted)
-                {
-                    Ok(started) => {
-                        let (target_session_id, approved, close_signal) = *started;
-                        close_signal.forget();
-                        AdmittedSession {
-                            target_session_id,
-                            approved: Arc::new(approved),
-                        }
-                    }
+                let admitted = match handle.lock().await.start_sole_target_session(resolved).await {
+                    Ok((target_session_id, approved)) => AdmittedSession {
+                        target_session_id,
+                        approved: Arc::new(approved),
+                    },
                     Err(error) => {
                         *authorization = Authorization::Denied;
                         correlator.lock().await.evict(&key, &slot);

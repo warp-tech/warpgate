@@ -6,9 +6,6 @@ use uuid::Uuid;
 
 use crate::m00002_create_session::session;
 
-/// Login-identity columns that moved from `sessions` to `user_sessions`.
-const MOVED_COLUMNS: [&str; 4] = ["username", "user_id", "remote_address", "protocol"];
-
 const BACKFILL_BATCH: u64 = 1000;
 
 /// The target id for a session that connected before `target_id` existed
@@ -159,8 +156,9 @@ impl MigrationTrait for Migration {
             .execute_unprepared(
                 "INSERT INTO user_sessions \
                  (id, username, user_id, remote_address, started, ended, protocol, node_id) \
-                 SELECT id, username, user_id, remote_address, started, ended, protocol, node_id \
-                 FROM sessions",
+                 SELECT s.id, s.username, s.user_id, s.remote_address, s.started, s.ended, \
+                 s.protocol, s.node_id \
+                 FROM sessions s",
             )
             .await?;
         manager
@@ -228,169 +226,14 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // The login-identity columns now live on `user_sessions`. SQLite
-        // deployments are single-node, so no older node writes `sessions`
-        // concurrently and the columns can be dropped outright. MySQL/Postgres
-        // clusters keep them for one release so nodes still on the previous
-        // version can read session rows during a rolling upgrade; their writes
-        // are rejected once this has run, since they insert sessions without a
-        // target or parent.
-        //
-        // SQLite cannot alter a column's nullability in place; the deletions
-        // and backfill above leave no NULLs there, and the app always writes
-        // these columns.
-        if manager.get_database_backend() == DbBackend::Sqlite {
-            for column in MOVED_COLUMNS {
-                manager
-                    .alter_table(
-                        Table::alter()
-                            .table(session::Entity)
-                            .drop_column(Alias::new(column))
-                            .to_owned(),
-                    )
-                    .await?;
-            }
-        } else {
-            for column in ["remote_address", "protocol"] {
-                manager
-                    .alter_table(
-                        Table::alter()
-                            .table(session::Entity)
-                            .modify_column(
-                                ColumnDef::new(Alias::new(column))
-                                    .string()
-                                    .not_null()
-                                    .default(""),
-                            )
-                            .to_owned(),
-                    )
-                    .await?;
-            }
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(session::Entity)
-                        .modify_column(
-                            ColumnDef::new(Alias::new("user_session_id"))
-                                .uuid()
-                                .not_null(),
-                        )
-                        .to_owned(),
-                )
-                .await?;
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(session::Entity)
-                        .modify_column(ColumnDef::new(Alias::new("target_id")).uuid().not_null())
-                        .to_owned(),
-                )
-                .await?;
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(session::Entity)
-                        // `text()`, matching the m00049 widening on these backends.
-                        .modify_column(
-                            ColumnDef::new(Alias::new("target_snapshot"))
-                                .text()
-                                .not_null(),
-                        )
-                        .to_owned(),
-                )
-                .await?;
-        }
-
         Ok(())
     }
 
+    /// Reverses the schema, not the data: the login identity now lives only in
+    /// `user_sessions`, which this drops, and the login-only `sessions` rows
+    /// `up` deleted are gone for good. Supported for development, not as a
+    /// production downgrade path.
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        if manager.get_database_backend() == DbBackend::Sqlite {
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(session::Entity)
-                        .add_column(ColumnDef::new(Alias::new("username")).string().null())
-                        .to_owned(),
-                )
-                .await?;
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(session::Entity)
-                        .add_column(ColumnDef::new(Alias::new("user_id")).uuid().null())
-                        .to_owned(),
-                )
-                .await?;
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(session::Entity)
-                        .add_column(
-                            ColumnDef::new(Alias::new("remote_address"))
-                                .string()
-                                .not_null()
-                                .default(""),
-                        )
-                        .to_owned(),
-                )
-                .await?;
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(session::Entity)
-                        .add_column(
-                            ColumnDef::new(Alias::new("protocol"))
-                                .string()
-                                .not_null()
-                                .default("SSH"),
-                        )
-                        .to_owned(),
-                )
-                .await?;
-        } else {
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(session::Entity)
-                        .modify_column(
-                            ColumnDef::new(Alias::new("remote_address"))
-                                .string()
-                                .not_null(),
-                        )
-                        .to_owned(),
-                )
-                .await?;
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(session::Entity)
-                        .modify_column(
-                            ColumnDef::new(Alias::new("protocol"))
-                                .string()
-                                .not_null()
-                                .default("SSH"),
-                        )
-                        .to_owned(),
-                )
-                .await?;
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(session::Entity)
-                        .modify_column(ColumnDef::new(Alias::new("target_id")).uuid().null())
-                        .to_owned(),
-                )
-                .await?;
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(session::Entity)
-                        .modify_column(ColumnDef::new(Alias::new("target_snapshot")).text().null())
-                        .to_owned(),
-                )
-                .await?;
-        }
         // Restore m00072's NOT NULL; shared-lifecycle NULLs go back to the nil
         // sentinel it introduced.
         manager
@@ -438,8 +281,8 @@ impl MigrationTrait for Migration {
 mod tests {
     use sea_orm::ActiveValue::Set;
     use sea_orm::{ColumnTrait, Database, EntityTrait, PaginatorTrait, QueryFilter};
-    use sea_orm_migration::MigratorTrait;
     use sea_orm_migration::prelude::*;
+    use sea_orm_migration::{MigrationTrait, MigratorTrait, SchemaManager};
     use time::OffsetDateTime;
     use uuid::Uuid;
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
@@ -492,6 +335,7 @@ mod tests {
             node_id: Set(Uuid::new_v4()),
         }
     }
+
 
     #[tokio::test]
     async fn backfills_existing_sessions_as_one_to_one_parents() {

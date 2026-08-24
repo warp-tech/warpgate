@@ -7,7 +7,7 @@ use poem::{Body, IntoResponse, Request, Response, handler};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{Instrument, debug, info_span};
-use warpgate_common::TargetHTTPOptions;
+use warpgate_common::{TargetHTTPOptions, WarpgateError};
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::{
@@ -64,14 +64,20 @@ pub async fn catchall_endpoint(
 
     // `start_target_session` stamps (or verifies) the session's user from the
     // authorization itself, so there is no separate stamping step to drift.
-    let (target_session_id, approved, close_signal) = match handle
-        .lock()
-        .await
-        .start_target_session(authorization)
-        .await?
-    {
-        TargetSessionStart::Started(started) => *started,
-        TargetSessionStart::NeedsApproval => {
+    let started = handle.lock().await.start_target_session(authorization).await;
+    let (target_session_id, approved, close_signal) = match started {
+        Err(WarpgateError::UserSessionEnded) => {
+            // Revoked between this node resolving its view of the session and
+            // serving the request. Same answer as a cookie naming a session
+            // that is already gone: drop it rather than serve on.
+            session.purge();
+            return Err(poem::Error::from_status(
+                poem::http::StatusCode::UNAUTHORIZED,
+            ));
+        }
+        Ok(TargetSessionStart::Started(started)) => *started,
+        Err(error) => return Err(error.into()),
+        Ok(TargetSessionStart::NeedsApproval) => {
             return Ok(Response::builder()
                 .status(poem::http::StatusCode::SERVICE_UNAVAILABLE)
                 .body("Target approval required"));
@@ -83,7 +89,11 @@ pub async fn catchall_endpoint(
         .ok()
         .map(|keepalive| keepalive.guard());
 
-    let span = info_span!("", session=%target_session_id, target=%approved.target().name);
+    // Named `target_session`, not `session`: the DB log layer merges span
+    // fields from the root down, so reusing `session` here would overwrite the
+    // request span's user-session id and detach these lines from the session
+    // the admin UI looks them up by.
+    let span = info_span!("", target_session=%target_session_id, target=%approved.target().name);
 
     Ok(match ws {
         Some(ws) => proxy_websocket_request(req, ws, &ctx, approved, target_close_rx)

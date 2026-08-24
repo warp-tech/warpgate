@@ -42,6 +42,17 @@ pub enum WarpgateError {
     InconsistentState(String),
     #[error("target session requires administrator approval")]
     TargetSessionRequiresApproval,
+    /// A user session's identity is write-once — see
+    /// `WarpgateServerHandle::set_user_info`. Callers that can start over
+    /// (a browser logging in as someone else) handle this by replacing the
+    /// session rather than propagating it.
+    #[error("user session is already attributed to another user")]
+    UserSessionAlreadyAttributed,
+    /// The login backing this request has been ended — revoked by an
+    /// administrator, or expired — and must not be served any further. The
+    /// HTTP layer turns this into a rejected browser session.
+    #[error("user session is no longer open")]
+    UserSessionEnded,
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
     #[error(transparent)]

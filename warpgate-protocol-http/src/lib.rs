@@ -345,11 +345,19 @@ impl ProtocolServer for HTTPProtocolServer {
         let state = self.services.state.clone();
         tokio::spawn(async move {
             loop {
-                let ended = session_store.lock().await.vacuum(session_max_age);
+                let (ended, live) = {
+                    let mut store = session_store.lock().await;
+                    (store.vacuum(session_max_age), store.live_session_ids())
+                };
                 for id in ended {
                     state.lock().await.remove_session(id).await;
                 }
-                if let Err(error) = session_storage.gc(session_max_age).await {
+                // Before the sweep below, so a session whose only traffic is a
+                // long-lived connection doesn't age out of its stored row.
+                if let Err(error) = session_storage.touch(&live).await {
+                    warn!(%error, "Failed to refresh active HTTP sessions");
+                }
+                if let Err(error) = session_storage.gc(cookie_max_age).await {
                     warn!(%error, "Failed to expire stored HTTP sessions");
                 }
                 http_client_cache.vacuum().await;

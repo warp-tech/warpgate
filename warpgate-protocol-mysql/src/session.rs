@@ -267,14 +267,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             return Ok(());
         };
 
-        let (_, approved, close_signal) = *self
+        let (_, approved) = self
             .server_handle
             .lock()
             .await
-            .start_target_session(authorization)
-            .await?
-            .admitted()?;
-        close_signal.forget();
+            .start_sole_target_session(authorization)
+            .await?;
 
         self.run_authorized_inner(handshake, approved).await
     }

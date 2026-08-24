@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_ca::ClusterTlsIdentity;
-use warpgate_common::{NodeId, WarpgateError};
+use warpgate_common::{NodeId, Protocol, SessionLifecycle, SharedSessionBacking, WarpgateError};
 use warpgate_db_entities::{HttpSession, Node, Parameters, TargetSession, UserSession};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -157,12 +157,33 @@ async fn end_connection_bound_sessions(
 /// such nodes for longer than the grace gets ended here and its browser
 /// re-registers on the next request (the cookie's auth survives).
 async fn end_orphaned_shared_sessions(db: &DatabaseConnection) -> Result<(), WarpgateError> {
+    for protocol in Protocol::ALL {
+        let SessionLifecycle::Shared(backing) = protocol.lifecycle() else {
+            continue;
+        };
+        // Each backing needs its own "still referenced?" test; a protocol
+        // whose backing this reaper couldn't read would be ended the moment
+        // its grace expired, so the match is exhaustive on purpose.
+        match backing {
+            SharedSessionBacking::CookieSession => {
+                end_sessions_without_cookie(db, protocol).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn end_sessions_without_cookie(
+    db: &DatabaseConnection,
+    protocol: Protocol,
+) -> Result<(), WarpgateError> {
     let grace_cutoff = OffsetDateTime::now_utc() - SHARED_SESSION_ORPHAN_GRACE;
     UserSession::Entity::update_many()
         .col_expr(
             UserSession::Column::Ended,
             Expr::value(OffsetDateTime::now_utc()),
         )
+        .filter(UserSession::Column::Protocol.eq(protocol.name()))
         .filter(UserSession::Column::NodeId.is_null())
         .filter(UserSession::Column::Ended.is_null())
         .filter(UserSession::Column::Started.lt(grace_cutoff))

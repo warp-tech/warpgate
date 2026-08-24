@@ -27,7 +27,7 @@ use warpgate_core::{ConfigProvider, vet_credential_bearer};
 use warpgate_db_entities::User;
 use warpgate_sso::WarpgateIdToken;
 
-use crate::session::SessionStore;
+use crate::session::{SessionStore, SharedSessionStorage};
 
 pub const PROTOCOL_NAME: Protocol = Protocol::Http;
 static TARGET_SESSION_KEY: &str = "target_name";
@@ -279,43 +279,53 @@ pub async fn authorize_session(
         .await
         .context("resolving session handle")?;
 
-    // A user session's identity is write-once: a different account logging in
-    // on the same browser session ends the old session (keeping its history
-    // attributed to the old user) and starts a fresh one.
-    let existing_user = server_handle
-        .lock()
-        .await
-        .user_session_state()
-        .lock()
-        .await
-        .user_info
-        .clone();
-    if existing_user.is_some_and(|existing| existing.id != user_info.id) {
-        let old_id = server_handle.lock().await.id();
-        {
-            let mut store = session_middleware.lock().await;
-            store.remove_session(session);
-        }
-        ctx.services()
-            .state
-            .lock()
-            .await
-            .remove_session(old_id)
-            .await;
-        session.clear();
-        server_handle = session_middleware
-            .lock()
-            .await
-            .handle_for_request(req, ctx)
-            .await
-            .context("registering replacement session")?;
-    }
-
-    server_handle
+    // A user session's identity is write-once, and the row is what enforces
+    // it — a node that adopted this session holds no identity of its own to
+    // compare against. A different account logging in on the same browser
+    // session ends the old session (keeping its history attributed to the old
+    // user) and starts a fresh one.
+    let attributed = server_handle
         .lock()
         .await
         .set_user_info(user_info.clone())
+        .await;
+    match attributed {
+        Ok(()) => {}
+        Err(WarpgateError::UserSessionAlreadyAttributed) => {
+            let old_id = server_handle.lock().await.id();
+            {
+                let mut store = session_middleware.lock().await;
+                store.remove_session(session);
+            }
+            ctx.services()
+                .state
+                .lock()
+                .await
+                .remove_session(old_id)
+                .await;
+            session.clear();
+            server_handle = session_middleware
+                .lock()
+                .await
+                .handle_for_request(req, ctx)
+                .await
+                .context("registering replacement session")?;
+            server_handle
+                .lock()
+                .await
+                .set_user_info(user_info.clone())
+                .await?;
+        }
+        Err(error) => return Err(error),
+    }
+    // The cookie value that carries the authenticated session must not be one
+    // that was known before the authentication.
+    Data::<&SharedSessionStorage>::from_request_without_body(req)
+        .await
+        .context("SharedSessionStorage not in request")?
+        .rotate_session_id(session)
         .await?;
+
     session.set_auth(SessionAuthorization::User {
         user_id: user_info.id,
         username: user_info.username,

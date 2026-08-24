@@ -24,6 +24,9 @@ warpgate-ca = { path = "../warpgate-ca", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 
 [features]
-postgres = ["sea-orm/sqlx-postgres"]
-mysql = ["sea-orm/sqlx-mysql"]
-sqlite = ["sea-orm/sqlx-sqlite"]
+# The migration schema-introspection helpers (`has_table`, `has_column`,
+# `has_index`) are gated on the migration crate having the backend enabled
+# too, not just sea-orm.
+postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres"]
+mysql = ["sea-orm/sqlx-mysql", "sea-orm-migration/sqlx-mysql"]
+sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite"]

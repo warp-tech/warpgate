@@ -90,13 +90,11 @@ pub(super) async fn connect_backend(
     authorization: TargetAuthorization<TargetRdpOptions>,
     screen: warpgate_desktop_ui::Screen,
 ) -> Result<BackendBridge> {
-    let (target_session_id, approved, close_signal) = *server_handle
+    let (target_session_id, approved) = server_handle
         .lock()
         .await
-        .start_target_session(authorization)
-        .await?
-        .admitted()?;
-    close_signal.forget();
+        .start_sole_target_session(authorization)
+        .await?;
     info!(target=%approved.target().name, "Authorized");
 
     let recorder = warpgate_desktop_auth::start_recording(services, &target_session_id, "rdp")

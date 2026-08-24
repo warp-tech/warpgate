@@ -13,6 +13,7 @@ use warpgate_admin::api::cluster_proxy::{
 };
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::Target::TargetKind;
+use warpgate_web_clients_common::SessionAccess;
 use warpgate_web_desktop::WebDesktopClientManager;
 
 use crate::api::auth_scheme::AuthedSession;
@@ -142,20 +143,19 @@ impl Api {
     ) -> poem::Result<GetWebDesktopSessionResponse> {
         let owner = web_client_session_owner(&ctx, *session_id).await?;
         proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(session) = manager.get_session(*session_id).await else {
-                return Ok(GetWebDesktopSessionResponse::NotFound);
-            };
-
-            if session.user_id() != ctx.auth.user_id() {
-                return Ok(GetWebDesktopSessionResponse::NotFound);
+            // Someone else's session reads as absent here: a lookup must not
+            // reveal that the id exists.
+            match manager.access(*session_id, ctx.auth.user_id()).await {
+                SessionAccess::Granted(session) => Ok(GetWebDesktopSessionResponse::Ok(Json(
+                    WebDesktopSessionInfo {
+                        target_name: session.target_name().into(),
+                        target_kind: *session.target_kind(),
+                    },
+                ))),
+                SessionAccess::NotFound | SessionAccess::Forbidden => {
+                    Ok(GetWebDesktopSessionResponse::NotFound)
+                }
             }
-
-            Ok(GetWebDesktopSessionResponse::Ok(Json(
-                WebDesktopSessionInfo {
-                    target_name: session.target_name().into(),
-                    target_kind: *session.target_kind(),
-                },
-            )))
         })
         .await
     }
@@ -174,16 +174,14 @@ impl Api {
     ) -> poem::Result<DeleteWebDesktopSessionResponse> {
         let owner = web_client_session_owner(&ctx, *session_id).await?;
         proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(session) = manager.get_session(*session_id).await else {
-                return Ok(DeleteWebDesktopSessionResponse::NotFound);
-            };
-
-            if session.user_id() != ctx.auth.user_id() {
-                return Ok(DeleteWebDesktopSessionResponse::Forbidden);
+            match manager.access(*session_id, ctx.auth.user_id()).await {
+                SessionAccess::Granted(_) => {
+                    manager.remove_session(*session_id).await;
+                    Ok(DeleteWebDesktopSessionResponse::Deleted)
+                }
+                SessionAccess::Forbidden => Ok(DeleteWebDesktopSessionResponse::Forbidden),
+                SessionAccess::NotFound => Ok(DeleteWebDesktopSessionResponse::NotFound),
             }
-
-            manager.remove_session(*session_id).await;
-            Ok(DeleteWebDesktopSessionResponse::Deleted)
         })
         .await
     }

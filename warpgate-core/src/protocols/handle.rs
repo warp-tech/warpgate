@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, broadcast};
 use tracing::{Instrument, info_span};
@@ -115,25 +115,28 @@ impl WarpgateServerHandle {
         if state.user_info.as_ref() == Some(&user_info) {
             return Ok(());
         }
-        if state
-            .user_info
-            .as_ref()
-            .is_some_and(|existing| existing.id != user_info.id)
-        {
-            return Err(WarpgateError::InconsistentState(
-                "user session is already attributed to another user".into(),
-            ));
-        }
 
-        UserSession::Entity::update_many()
+        // The row itself carries the invariant: a node that adopted this
+        // session has no in-memory identity to compare against, so an
+        // unguarded write would let a login on someone else's still-valid
+        // cookie re-attribute their sessions and audit history.
+        let result = UserSession::Entity::update_many()
             .set(UserSession::ActiveModel {
                 username: Set(Some(user_info.username.clone())),
                 user_id: Set(Some(user_info.id)),
                 ..Default::default()
             })
             .filter(UserSession::Column::Id.eq(self.user_session_id.0))
+            .filter(
+                Condition::any()
+                    .add(UserSession::Column::UserId.is_null())
+                    .add(UserSession::Column::UserId.eq(user_info.id)),
+            )
             .exec(&self.db)
             .await?;
+        if result.rows_affected == 0 {
+            return Err(WarpgateError::UserSessionAlreadyAttributed);
+        }
 
         state.user_info = Some(user_info);
         state.emit_change();
@@ -154,6 +157,11 @@ impl WarpgateServerHandle {
     /// Lock order: an existing `UserSessionState` may be locked before the
     /// global `State`, never after — nothing locks an existing session state
     /// while holding `State`.
+    ///
+    /// The parent lock is held only to read and to publish the slot. Every
+    /// database round trip — the liveness checks and, above all, the wait for
+    /// an administrator's approval — happens between those two phases, so one
+    /// pending target never blocks the login's other requests.
     pub async fn start_target_session<O>(
         &mut self,
         authorization: TargetAuthorization<O>,
@@ -167,24 +175,94 @@ impl WarpgateServerHandle {
             ));
         }
 
-        let mut parent = self.user_session_state.lock().await;
-        // The authorization already carries the authenticated user, so a
-        // session whose user was never set explicitly (target-only protocols)
-        // is stamped here; one attributed to a different user is refused.
-        let user_info_stamped = if parent.user_info.is_none() {
-            self.set_user_info_in(&mut parent, authorization.user_info().clone())
-                .await?;
-            true
-        } else {
-            if parent.user_info.as_ref() != Some(authorization.user_info()) {
-                return Err(WarpgateError::InconsistentState(
-                    "target authorization user does not match the user session".into(),
-                ));
-            }
-            false
-        };
+        let lifecycle = self.protocol.lifecycle();
 
-        if let Some(slot) = parent.target_sessions.get(&authorization.target().id) {
+        // Phase 1, under the parent lock: stamp the identity and read the
+        // slot. Nothing slow happens here — see the lock note below.
+        let (existing, user_info_stamped) = {
+            let mut parent = self.user_session_state.lock().await;
+            // The authorization already carries the authenticated user, so a
+            // session whose user was never set explicitly (target-only
+            // protocols) is stamped here; one attributed to a different user
+            // is refused.
+            let user_info_stamped = if parent.user_info.is_none() {
+                self.set_user_info_in(&mut parent, authorization.user_info().clone())
+                    .await?;
+                true
+            } else {
+                if parent.user_info.as_ref() != Some(authorization.user_info()) {
+                    return Err(WarpgateError::InconsistentState(
+                        "target authorization user does not match the user session".into(),
+                    ));
+                }
+                false
+            };
+            let existing = parent
+                .target_sessions
+                .get(&authorization.target().id)
+                .map(|slot| (slot.handle.id(), slot.close_tx.subscribe()));
+            (existing, user_info_stamped)
+        };
+        if user_info_stamped {
+            self.update_user_rate_limiters().await?;
+        }
+
+        // Phase 2, unlocked: the checks that reach the database. A shared
+        // session's row can be ended by another node while this node's slot
+        // survives; readmitting onto it would keep serving requests under a
+        // closed record — or under a revoked login, which is how an
+        // administrative close reaches a node that missed the fan-out. A
+        // connection-bound session's row outlives its parent's state by
+        // construction, and re-opening one would collide on the shared id, so
+        // it is readmitted as-is.
+        let target_id = authorization.target().id;
+        if let Some((id, close_rx)) = existing {
+            if matches!(lifecycle, SessionLifecycle::ConnectionBound)
+                || crate::db::target_session_is_servable(&self.db, id).await?
+            {
+                return Ok(TargetSessionStart::Started(Box::new((
+                    id,
+                    ApprovedTarget::new(authorization),
+                    TargetSessionCloseSignal(close_rx),
+                ))));
+            }
+            // Retire the closed session before opening its replacement, and
+            // only if it is still the one in the slot: a request that raced
+            // this one may already have put a live session there.
+            let mut parent = self.user_session_state.lock().await;
+            if parent
+                .target_sessions
+                .get(&target_id)
+                .is_some_and(|slot| slot.handle.id() == id)
+            {
+                parent.target_sessions.remove(&target_id);
+            }
+        }
+
+        // Admission applies to opening a session; readmission above is onto
+        // one already admitted. Deliberately outside the parent lock: this is
+        // the wait for an administrator, and holding the lock across it would
+        // block every other request on the same login — including the ones
+        // the user needs in order to get the approval answered.
+        if self.needs_target_approval(authorization.target()).await? {
+            return Ok(TargetSessionStart::NeedsApproval);
+        }
+
+        // A shared session outlives the request that opened it, so its login
+        // has to be open for a new one to be worth opening at all.
+        if matches!(lifecycle, SessionLifecycle::Shared(_))
+            && !crate::db::user_session_is_open(&self.db, self.user_session_id).await?
+        {
+            return Err(WarpgateError::UserSessionEnded);
+        }
+
+        // Phase 3, back under the parent lock: creation is serialised here, so
+        // two concurrent requests for the same target cannot each open a
+        // session (and end up with two handles ending one row).
+        let mut parent = self.user_session_state.lock().await;
+        if let Some(slot) = parent.target_sessions.get(&target_id) {
+            // Another request got there during phase 2. It ran the same checks
+            // for the same target, so its session is the one to join.
             return Ok(TargetSessionStart::Started(Box::new((
                 slot.handle.id(),
                 ApprovedTarget::new(authorization),
@@ -192,15 +270,8 @@ impl WarpgateServerHandle {
             ))));
         }
 
-        // Admission applies to opening a session; readmission above is onto
-        // one already admitted.
-        if self.needs_target_approval(authorization.target()).await? {
-            return Ok(TargetSessionStart::NeedsApproval);
-        }
-
-        let lifecycle = self.protocol.lifecycle();
         let id = match lifecycle {
-            SessionLifecycle::Shared => TargetSessionId(Uuid::new_v4()),
+            SessionLifecycle::Shared(_) => TargetSessionId(Uuid::new_v4()),
             SessionLifecycle::ConnectionBound => {
                 // One-to-one protocols reuse the parent id, so a second target
                 // session would collide on the primary key. Refusing here turns
@@ -230,21 +301,36 @@ impl WarpgateServerHandle {
         let close_tx = broadcast::channel(1).0;
         let close_rx = close_tx.subscribe();
         parent.target_sessions.insert(
-            authorization.target().id,
+            target_id,
             TargetSessionSlot {
                 handle: target_session,
                 close_tx,
             },
         );
         drop(parent);
-        if user_info_stamped {
-            self.update_user_rate_limiters().await?;
-        }
         Ok(TargetSessionStart::Started(Box::new((
             id,
             ApprovedTarget::new(authorization),
             TargetSessionCloseSignal(close_rx),
         ))))
+    }
+
+    /// [`Self::start_target_session`] for a protocol whose connection and sole
+    /// target session live and die together: the close signal is redundant
+    /// because the connection's own teardown aborts everything served here,
+    /// and a pending approval cannot be held open, so it becomes an error.
+    ///
+    /// HTTP is the exception and calls [`Self::start_target_session`] directly:
+    /// its requests come and go against a session that outlives them, so it
+    /// needs both the signal and the ability to answer "approval pending".
+    pub async fn start_sole_target_session<O>(
+        &mut self,
+        authorization: TargetAuthorization<O>,
+    ) -> Result<(TargetSessionId, ApprovedTarget<O>), WarpgateError> {
+        let (id, approved, close_signal) =
+            *self.start_target_session(authorization).await?.admitted()?;
+        close_signal.forget();
+        Ok((id, approved))
     }
 
     async fn needs_target_approval(&self, target: &Target) -> Result<bool, WarpgateError> {
@@ -402,7 +488,7 @@ impl Drop for TargetSessionHandle {
                 SessionLifecycle::ConnectionBound => {
                     state.lock().await.remove_target_session(id).await;
                 }
-                SessionLifecycle::Shared => {
+                SessionLifecycle::Shared(_) => {
                     state.lock().await.detach_target_session(id, &session_state);
                 }
             }

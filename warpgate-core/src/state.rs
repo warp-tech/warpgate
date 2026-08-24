@@ -56,6 +56,14 @@ impl State {
         let mut self_ = this.lock().await;
         let id = UserSessionId(Uuid::new_v4());
 
+        // Read before the state is shared: locking a `UserSessionState` while
+        // holding `State` is the reverse of the order everything else takes
+        // (see `WarpgateServerHandle::start_target_session`), and is only safe
+        // here because nothing else can reach this one yet. Not relying on
+        // that keeps the order true without an exception.
+        let remote_address = state
+            .remote_address
+            .map_or_else(String::new, |address| address.to_string());
         let state = Arc::new(Mutex::new(UserSessionState::new(
             state,
             self_.change_sender.clone(),
@@ -67,18 +75,14 @@ impl State {
             let values = UserSession::ActiveModel {
                 id: Set(id.0),
                 started: Set(OffsetDateTime::now_utc()),
-                remote_address: Set(state
-                    .lock()
-                    .await
-                    .remote_address
-                    .map_or_else(String::new, |x| x.to_string())),
+                remote_address: Set(remote_address),
                 protocol: Set(protocol.to_string()),
                 // A shared session is served by any node and owned by none;
                 // recording an owner would make the reaper end it when this
                 // node goes away.
                 node_id: Set(match protocol.lifecycle() {
                     SessionLifecycle::ConnectionBound => Some(self_.node_id.0),
-                    SessionLifecycle::Shared => None,
+                    SessionLifecycle::Shared(_) => None,
                 }),
                 ..Default::default()
             };
@@ -218,86 +222,102 @@ impl State {
 
         let target_state = Arc::new(Mutex::new(TargetSessionState {
             user_session_id,
-            user_info,
+            user_info: user_info.clone(),
             target: target.clone(),
             change_sender: parent.change_sender.clone(),
             rate_limiter_handles: parent.rate_limiter_handles.clone(),
         }));
 
-        let mut self_ = this.lock().await;
-        self_.insert_target_session(this, id, target_state).await
-    }
-
-    async fn insert_target_session(
-        &mut self,
-        owner: &Arc<Mutex<Self>>,
-        id: TargetSessionId,
-        state: Arc<Mutex<TargetSessionState>>,
-    ) -> Result<TargetSessionHandle, WarpgateError> {
-        use sea_orm::ActiveValue::Set;
-
-        let state_guard = state.lock().await;
-        let user_session_id = state_guard.user_session_id;
-        let user_info = state_guard.user_info.clone();
-        let target = state_guard.target.clone();
-        let lifecycle = target.options.protocol().lifecycle();
-        drop(state_guard);
-
-        // A shared target session is an access record with at most one live
-        // row per (parent, target): adopt it if some node already opened it.
-        // ponytail: find-then-insert; two nodes racing the first request can
-        // still each insert — a spare access record, not a correctness issue.
-        // A partial unique index would close it where the backend supports one.
-        let id = if lifecycle == SessionLifecycle::Shared
-            && let Some(row) = TargetSession::Entity::find()
-                .filter(TargetSession::Column::UserSessionId.eq(user_session_id.0))
-                .filter(TargetSession::Column::TargetId.eq(target.id))
-                .filter(TargetSession::Column::Ended.is_null())
-                .one(&self.db)
-                .await?
-        {
-            TargetSessionId(row.id)
-        } else {
-            let mut snapshot = serde_json::to_value(&target)?;
-            warpgate_common::redact_target_secrets(&mut snapshot);
-            TargetSession::ActiveModel {
-                id: Set(id.0),
-                user_session_id: Set(user_session_id.0),
-                target_snapshot: Set(snapshot.to_string()),
-                target_id: Set(target.id),
-                started: Set(OffsetDateTime::now_utc()),
-                ended: Set(None),
-                ticket_id: Set(None),
-                node_id: Set(match lifecycle {
-                    SessionLifecycle::ConnectionBound => Some(self.node_id.0),
-                    SessionLifecycle::Shared => None,
-                }),
-            }
-            .insert(&self.db)
-            .await?;
-
-            AuditEvent::TargetSessionStarted {
-                session_id: id.0,
-                target_id: target.id,
-                target_name: target.name,
-                user_id: user_info.id,
-                username: user_info.username,
-            }
-            .emit();
-            id
+        // The row is opened with no lock held: the global state mutex is
+        // taken only to register the finished session, so one node's DB
+        // latency doesn't serialise every other session starting.
+        let (db, node_id, rate_limiter_registry) = {
+            let self_ = this.lock().await;
+            (
+                self_.db.clone(),
+                self_.node_id,
+                self_.rate_limiter_registry.clone(),
+            )
         };
+        let lifecycle = target.options.protocol().lifecycle();
+        let id =
+            Self::open_target_session_row(&db, node_id, lifecycle, id, user_session_id, target, &user_info)
+                .await?;
 
-        self.target_sessions.insert(id, state.clone());
-        let _ = self.change_sender.send(());
+        {
+            let mut self_ = this.lock().await;
+            self_.target_sessions.insert(id, target_state.clone());
+            let _ = self_.change_sender.send(());
+        }
 
         Ok(TargetSessionHandle::new(
             id,
             user_session_id,
-            owner.clone(),
-            state,
-            self.rate_limiter_registry.clone(),
+            this.clone(),
+            target_state,
+            rate_limiter_registry,
             lifecycle,
         ))
+    }
+
+    /// Adopts the live row for this (parent, target) if one exists, otherwise
+    /// inserts one and announces it. Returns the id the session is known by
+    /// from here on — the adopted row's, not necessarily the proposed one.
+    ///
+    /// A shared target session is an access record with at most one live row
+    /// per (parent, target).
+    /// ponytail: find-then-insert; two nodes racing the first request can
+    /// still each insert — a spare access record, not a correctness issue.
+    /// A partial unique index would close it where the backend supports one.
+    async fn open_target_session_row(
+        db: &DatabaseConnection,
+        node_id: NodeId,
+        lifecycle: SessionLifecycle,
+        id: TargetSessionId,
+        user_session_id: UserSessionId,
+        target: &Target,
+        user_info: &AuthStateUserInfo,
+    ) -> Result<TargetSessionId, WarpgateError> {
+        use sea_orm::ActiveValue::Set;
+
+        if matches!(lifecycle, SessionLifecycle::Shared(_))
+            && let Some(row) = TargetSession::Entity::find()
+                .filter(TargetSession::Column::UserSessionId.eq(user_session_id.0))
+                .filter(TargetSession::Column::TargetId.eq(target.id))
+                .filter(TargetSession::Column::Ended.is_null())
+                .one(db)
+                .await?
+        {
+            return Ok(TargetSessionId(row.id));
+        }
+
+        let mut snapshot = serde_json::to_value(target)?;
+        warpgate_common::redact_target_secrets(&mut snapshot);
+        TargetSession::ActiveModel {
+            id: Set(id.0),
+            user_session_id: Set(user_session_id.0),
+            target_snapshot: Set(snapshot.to_string()),
+            target_id: Set(target.id),
+            started: Set(OffsetDateTime::now_utc()),
+            ended: Set(None),
+            ticket_id: Set(None),
+            node_id: Set(match lifecycle {
+                SessionLifecycle::ConnectionBound => Some(node_id.0),
+                SessionLifecycle::Shared(_) => None,
+            }),
+        }
+        .insert(db)
+        .await?;
+
+        AuditEvent::TargetSessionStarted {
+            session_id: id.0,
+            target_id: target.id,
+            target_name: target.name.clone(),
+            user_id: user_info.id,
+            username: user_info.username.clone(),
+        }
+        .emit();
+        Ok(id)
     }
 
     /// Drops this node's view of a shared target session without ending it —
@@ -348,9 +368,11 @@ impl State {
         // with it, and each handle's teardown clears `target_sessions`. The
         // rows are marked ended here already so the audit trail doesn't wait
         // for those drops.
-        let Some(_session_state) = self.user_sessions.remove(&id) else {
-            return;
-        };
+        //
+        // The row is ended whether or not this node still holds the state: a
+        // handle dropped just before this call detaches the entry without
+        // ending anything, and ending the row is the whole point of the call.
+        self.user_sessions.remove(&id);
 
         if let Err(error) = crate::db::mark_user_session_and_targets_ended(&self.db, id).await {
             error!(%error, %id, "Could not end user session in the DB");
@@ -470,6 +492,130 @@ mod tests {
             ticket_require_approval: false,
             ticket_max_uses: None,
         }
+    }
+
+    /// A revoked login must not keep serving: an administrative close ends the
+    /// row on whichever node runs it, and a node that still holds a view of
+    /// the session has to refuse rather than open something new under it.
+    #[tokio::test]
+    async fn an_ended_login_cannot_open_a_target_session() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
+        let state = State::new(&db, &rate_limiters, NodeId(Uuid::new_v4()));
+        let parent = State::register_user_session(
+            &state,
+            Protocol::Http,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await
+        .unwrap();
+        let user_info = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+        parent
+            .lock()
+            .await
+            .set_user_info(user_info.clone())
+            .await
+            .unwrap();
+        let parent_id = parent.lock().await.user_session_id();
+
+        // Closed elsewhere in the cluster: only the row changes here.
+        crate::db::mark_user_session_and_targets_ended(&db, parent_id)
+            .await
+            .unwrap();
+
+        let refused = parent
+            .lock()
+            .await
+            .start_target_session(crate::TargetAuthorization::for_test(
+                user_info,
+                target(),
+                Protocol::Http,
+            ))
+            .await;
+        assert!(matches!(
+            refused,
+            Err(WarpgateError::UserSessionEnded)
+        ));
+    }
+
+    /// Closing a login is what aborts the traffic running under it, and the
+    /// chain that makes that true is ownership: the last handle reference
+    /// drops the parent state, which drops its target-session slots, which
+    /// drops their close senders. A cached handle clone anywhere in the
+    /// serving path would break this silently, so it is asserted here.
+    #[tokio::test]
+    async fn close_parent_drops_target_sessions() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
+        let state = State::new(&db, &rate_limiters, NodeId(Uuid::new_v4()));
+        let parent = State::register_user_session(
+            &state,
+            Protocol::Http,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await
+        .unwrap();
+        let user_info = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+        parent
+            .lock()
+            .await
+            .set_user_info(user_info.clone())
+            .await
+            .unwrap();
+
+        let (target_session_id, _approved, close_signal) = *parent
+            .lock()
+            .await
+            .start_target_session(crate::TargetAuthorization::for_test(
+                user_info,
+                target(),
+                Protocol::Http,
+            ))
+            .await
+            .unwrap()
+            .admitted()
+            .unwrap();
+        let mut close_rx = close_signal.receiver();
+
+        // The only reference a request would have held.
+        drop(parent);
+
+        // Teardown runs on a spawned task, so this is the wait for it, not a
+        // sleep-and-hope: the receiver resolves as soon as the sender drops.
+        tokio::time::timeout(std::time::Duration::from_secs(5), close_rx.recv())
+            .await
+            .expect("close signal did not fire")
+            .expect_err("the sender is dropped, not fired");
+
+        // And the session is gone from the node's registry, not merely signalled.
+        for _ in 0..50 {
+            if !state
+                .lock()
+                .await
+                .target_sessions
+                .contains_key(&target_session_id)
+            {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("target session was not removed");
     }
 
     #[tokio::test]
