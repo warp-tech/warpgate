@@ -9,7 +9,9 @@ use tracing::{Instrument, debug, info_span, warn};
 use uuid::Uuid;
 use warpgate_common::{TargetOptions, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
-use warpgate_core::{DesktopEvent, Services, SessionStateInit, State, TargetAuthorization};
+use warpgate_core::{
+    DesktopEvent, Services, State, TargetAuthorization, UserSessionStateInit,
+};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
@@ -52,10 +54,10 @@ impl WebDesktopClientManager {
             return Err(WarpgateError::SessionLimitReached);
         }
 
-        let (user_info, target) = authorization.into_parts();
-        let username = user_info.username.clone();
-
-        let protocol_name = match &target.options {
+        let username = authorization.user_info().username.clone();
+        let target_name = authorization.target().name.clone();
+        let target_kind = TargetKind::from(&authorization.target().options);
+        let protocol_name = match &authorization.target().options {
             TargetOptions::Vnc(_) => warpgate_protocol_vnc::PROTOCOL_NAME,
             TargetOptions::Rdp(_) => warpgate_protocol_rdp::PROTOCOL_NAME,
             _ => return Err(WarpgateError::InvalidTarget),
@@ -64,10 +66,10 @@ impl WebDesktopClientManager {
         let (handle_abort_tx, mut handle_abort_rx) = mpsc::unbounded_channel::<()>();
         let session_handle = WebSessionHandle::new(handle_abort_tx);
 
-        let server_handle = State::register_session(
+        let server_handle = State::register_user_session(
             &services.state,
             protocol_name,
-            SessionStateInit {
+            UserSessionStateInit {
                 remote_address,
                 handle: Box::new(session_handle),
             },
@@ -75,39 +77,33 @@ impl WebDesktopClientManager {
         .await
         .context("registering web-desktop session")?;
 
-        {
-            let server_handle = server_handle.lock().await;
-            server_handle
-                .set_user_info(user_info)
-                .await
-                .context("setting user info on server handle")?;
-            server_handle
-                .set_target(&target)
-                .await
-                .context("setting target on server handle")?;
-        }
+        let (target_session_id, approved) = server_handle
+            .lock()
+            .await
+            .start_sole_target_session(authorization)
+            .await
+            .context("starting target session")?;
 
         let session_id = server_handle.lock().await.id();
-        let target_kind = TargetKind::from(&target.options);
 
         // Each backend exposes the same (event_rx, input_tx, abort_tx) handle shape
         // over the shared DesktopEvent/DesktopInput types. The trailing flag asks the
         // event loop to re-encode raw tiles as JPEG for the browser.
-        let (event_rx, input_tx, abort_tx, encode_jpeg) = match target.options.clone() {
-            TargetOptions::Vnc(options) => {
-                let h = warpgate_protocol_vnc::connect(options);
+        let (event_rx, input_tx, abort_tx, encode_jpeg) = match target_kind {
+            TargetKind::Vnc => {
+                let h = warpgate_protocol_vnc::connect(approved.narrow()?)?;
                 // Tight already picks JPEG for photographic tiles and keeps text and UI
                 // lossless, so re-encoding what it deliberately sent as raw would only
                 // degrade it.
                 (h.event_rx, h.input_tx, h.abort_tx, false)
             }
-            TargetOptions::Rdp(options) => {
+            TargetKind::Rdp => {
                 // Connect at the viewer's measured size when known, so the desktop fits the
                 // browser from the first frame; the DVC resize path handles later changes.
                 let h = warpgate_protocol_rdp::connect(
-                    options,
+                    approved.narrow()?,
                     size.unwrap_or(warpgate_protocol_rdp::DEFAULT_SIZE),
-                );
+                )?;
                 // The RDP helper only ever emits raw RGBA.
                 (h.event_rx, h.input_tx, h.abort_tx, true)
             }
@@ -121,7 +117,11 @@ impl WebDesktopClientManager {
             .recordings
             .lock()
             .await
-            .start::<DesktopRecorder, _>(&session_id, None, DesktopRecordingMetadata::Desktop)
+            .start::<DesktopRecorder, _>(
+                &target_session_id,
+                None,
+                DesktopRecordingMetadata::Desktop,
+            )
             .await
         {
             Ok(recorder) => Some(Arc::new(recorder)),
@@ -133,9 +133,9 @@ impl WebDesktopClientManager {
         };
 
         let session = Arc::new(WebDesktopSession::new(
-            session_id,
+            session_id.0,
             user_id,
-            target.name.clone(),
+            target_name.clone(),
             target_kind,
             server_handle,
             input_tx,
@@ -169,9 +169,9 @@ impl WebDesktopClientManager {
             encode_jpeg,
         );
 
-        debug!(session=%session_id, user=%username, target=%target.name, "Web-desktop session created");
+        debug!(session=%session_id, user=%username, target=%target_name, "Web-desktop session created");
 
-        Ok(session_id)
+        Ok(session_id.0)
     }
 }
 

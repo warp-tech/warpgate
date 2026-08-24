@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{Protocol, SessionId, WarpgateError};
+use warpgate_common::{Protocol, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::get_client_ip_addr;
@@ -27,7 +27,7 @@ use warpgate_core::{ConfigProvider, vet_credential_bearer};
 use warpgate_db_entities::User;
 use warpgate_sso::WarpgateIdToken;
 
-use crate::session::SessionStore;
+use crate::session::{SessionStore, SharedSessionStorage};
 
 pub const PROTOCOL_NAME: Protocol = Protocol::Http;
 static TARGET_SESSION_KEY: &str = "target_name";
@@ -46,6 +46,18 @@ pub fn host_is_subdomain_of_or_equal(host: &str, base_domain: &str) -> bool {
     host == base || host.ends_with(&format!(".{base}"))
 }
 
+/// Whether a request may present a session cookie, given the configured base
+/// host: the base host itself, its subdomains, or localhost (for development
+/// against a non-localhost deployment). A request whose host cannot be
+/// determined proves nothing and is refused — this check must not fail open.
+fn session_host_is_authorized(request_host: Option<&str>, base_host: &str) -> bool {
+    let Some(host) = request_host else {
+        return false;
+    };
+    host_is_subdomain_of_or_equal(host, base_host)
+        || (is_localhost_host(host) && base_host != "localhost" && base_host != "127.0.0.1")
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SsoLoginState {
     pub token: WarpgateIdToken,
@@ -61,7 +73,7 @@ pub trait SessionExt {
     /// The Warpgate session id of this browser session, once one has been
     /// registered for it. Unlike [`session_id_for_request`] this never creates
     /// one.
-    fn get_session_id(&self) -> Option<SessionId>;
+    fn get_session_id(&self) -> Option<UserSessionId>;
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState>;
     fn set_sso_login_state(&self, token: SsoLoginState);
@@ -84,7 +96,7 @@ impl SessionExt for Session {
         self.set(AUTH_SESSION_KEY, auth);
     }
 
-    fn get_session_id(&self) -> Option<SessionId> {
+    fn get_session_id(&self) -> Option<UserSessionId> {
         self.get(crate::session::SESSION_ID_SESSION_KEY)
     }
 
@@ -233,7 +245,7 @@ pub async fn get_auth_state_for_request(
 pub async fn session_id_for_request(
     req: &Request,
     ctx: &UnauthenticatedRequestContext,
-) -> Result<SessionId, WarpgateError> {
+) -> Result<UserSessionId, WarpgateError> {
     let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
         .await
         .context("SessionStore not in request")?;
@@ -241,7 +253,7 @@ pub async fn session_id_for_request(
     let server_handle = session_middleware
         .lock()
         .await
-        .create_handle_for(req, ctx)
+        .handle_for_request(req, ctx)
         .await
         .context("creating session handle")?;
 
@@ -260,17 +272,60 @@ pub async fn authorize_session(
         .await
         .context("Session not in request")?;
 
-    let server_handle = session_middleware
+    let mut server_handle = session_middleware
         .lock()
         .await
-        .create_handle_for(req, ctx)
+        .handle_for_request(req, ctx)
         .await
-        .context("create_handle_for")?;
-    server_handle
+        .context("resolving session handle")?;
+
+    // A user session's identity is write-once, and the row is what enforces
+    // it — a node that adopted this session holds no identity of its own to
+    // compare against. A different account logging in on the same browser
+    // session ends the old session (keeping its history attributed to the old
+    // user) and starts a fresh one.
+    let attributed = server_handle
         .lock()
         .await
         .set_user_info(user_info.clone())
+        .await;
+    match attributed {
+        Ok(()) => {}
+        Err(WarpgateError::UserSessionAlreadyAttributed) => {
+            let old_id = server_handle.lock().await.id();
+            {
+                let mut store = session_middleware.lock().await;
+                store.remove_session(session);
+            }
+            ctx.services()
+                .state
+                .lock()
+                .await
+                .remove_session(old_id)
+                .await;
+            session.clear();
+            server_handle = session_middleware
+                .lock()
+                .await
+                .handle_for_request(req, ctx)
+                .await
+                .context("registering replacement session")?;
+            server_handle
+                .lock()
+                .await
+                .set_user_info(user_info.clone())
+                .await?;
+        }
+        Err(error) => return Err(error),
+    }
+    // The cookie value that carries the authenticated session must not be one
+    // that was known before the authentication.
+    Data::<&SharedSessionStorage>::from_request_without_body(req)
+        .await
+        .context("SharedSessionStorage not in request")?
+        .rotate_session_id(session)
         .await?;
+
     session.set_auth(SessionAuthorization::User {
         user_id: user_info.id,
         username: user_info.username,
@@ -358,28 +413,26 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     // A forwarded request's Host is the cluster SNI name by construction, so the
     // origin check below would reject - and clear - a session that is fine.
     if session_auth.is_some() && !is_cluster_peer {
-        let config = ctx.services().config.lock().await;
-        if let Ok(base_url) = construct_external_url(None, &config, None).await
-            && let Some(base_host) = base_url.host_str()
-        {
+        // Host binding only means something when `external_host` pins an
+        // origin. Without it the external URL is derived from the request's
+        // own Host header, so a check would compare the host against itself.
+        let base_host = {
+            let config = ctx.services().config.lock().await;
+            construct_external_url(None, &config, None)
+                .await
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_owned))
+        };
+        if let Some(base_host) = base_host {
             let request_host = ctx.trusted_hostname(&req);
-
-            if let Some(host) = request_host {
-                // Validate request host matches base host or is a subdomain/localhost
-                let is_localhost = is_localhost_host(&host);
-                let is_authorized = host == base_host
-                    || host.ends_with(&format!(".{base_host}"))
-                    || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
-
-                if !is_authorized {
-                    tracing::warn!(
-                        "Session cookie rejected: request host '{}' is not authorized (base host: '{}'). Clearing session.",
-                        host,
-                        base_host
-                    );
-                    session.clear();
-                    session_auth = None;
-                }
+            if !session_host_is_authorized(request_host.as_deref(), &base_host) {
+                tracing::warn!(
+                    "Session cookie rejected: request host {:?} is not authorized (base host: '{}'). Clearing session.",
+                    request_host,
+                    base_host
+                );
+                session.clear();
+                session_auth = None;
             }
         }
     }
@@ -458,6 +511,28 @@ mod tests {
             let resp = gateway_redirect(&req);
             assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         }
+    }
+
+    #[test]
+    fn session_host_check_fails_closed() {
+        use super::session_host_is_authorized;
+
+        assert!(session_host_is_authorized(Some("example.com"), "example.com"));
+        assert!(session_host_is_authorized(
+            Some("app.example.com"),
+            "example.com"
+        ));
+        assert!(session_host_is_authorized(Some("localhost"), "example.com"));
+        assert!(!session_host_is_authorized(
+            Some("evil-example.com"),
+            "example.com"
+        ));
+        assert!(session_host_is_authorized(Some("localhost"), "localhost"));
+        // The localhost exception is for developing against a real deployment,
+        // not a blanket pass when the deployment itself is localhost.
+        assert!(!session_host_is_authorized(Some("127.0.0.5"), "localhost"));
+        // A host that cannot be determined proves nothing.
+        assert!(!session_host_is_authorized(None, "example.com"));
     }
 
     #[test]

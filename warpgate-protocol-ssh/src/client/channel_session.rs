@@ -5,7 +5,7 @@ use russh::client::Msg;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::SessionId;
+use warpgate_common::UserSessionId;
 
 use super::error::SshClientError;
 use crate::{ChannelOperation, RCEvent};
@@ -15,7 +15,7 @@ pub struct SessionChannel {
     channel_id: Uuid,
     ops_rx: UnboundedReceiver<ChannelOperation>,
     events_tx: Sender<RCEvent>,
-    session_id: SessionId,
+    session_id: UserSessionId,
     closed: bool,
 }
 
@@ -25,7 +25,7 @@ impl SessionChannel {
         channel_id: Uuid,
         ops_rx: UnboundedReceiver<ChannelOperation>,
         events_tx: Sender<RCEvent>,
-        session_id: SessionId,
+        session_id: UserSessionId,
     ) -> Self {
         Self {
             client_channel,

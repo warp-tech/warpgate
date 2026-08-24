@@ -191,6 +191,15 @@ pub trait ManagedSession: Send + Sync + 'static {
     fn on_removed(&self);
 }
 
+/// The outcome of resolving a session for a request. Whether a caller reports
+/// `Forbidden` as itself or hides it as `NotFound` is the endpoint's decision;
+/// establishing which one it is, is not.
+pub enum SessionAccess<S> {
+    Granted(Arc<S>),
+    NotFound,
+    Forbidden,
+}
+
 /// In-memory registry of live sessions, keyed by id. Each crate wraps this and adds its own
 /// protocol-specific `create_session`.
 pub struct ClientManager<S> {
@@ -217,6 +226,19 @@ impl<S: ManagedSession> ClientManager<S> {
 
     pub async fn get_session(&self, id: Uuid) -> Option<Arc<S>> {
         self.sessions.lock().await.get(&id).cloned()
+    }
+
+    /// Resolves a session for a request acting as `user_id`. The one place the
+    /// per-session ownership check lives, so an endpoint cannot serve someone
+    /// else's session by forgetting it.
+    pub async fn access(&self, id: Uuid, user_id: Uuid) -> SessionAccess<S> {
+        let Some(session) = self.get_session(id).await else {
+            return SessionAccess::NotFound;
+        };
+        if session.user_id() != user_id {
+            return SessionAccess::Forbidden;
+        }
+        SessionAccess::Granted(session)
     }
 
     pub async fn count_for_user(&self, user_id: Uuid) -> usize {

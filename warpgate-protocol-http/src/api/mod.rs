@@ -3,7 +3,7 @@ use poem_openapi::OpenApi;
 mod api_tokens;
 pub mod auth;
 mod auth_scheme;
-mod common;
+pub(crate) mod common;
 mod credentials;
 pub mod info;
 pub mod sso_provider_detail;

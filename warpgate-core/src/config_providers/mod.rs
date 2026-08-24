@@ -16,7 +16,10 @@ use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialKind, CredentialPolicy,
 };
 use warpgate_common::helpers::hash::hash_secret;
-use warpgate_common::{Protocol, Secret, Target, User, WarpgateError};
+use warpgate_common::{
+    Protocol, Secret, SpecificTarget, Target, TargetOptions, TargetOptionsVariant, User,
+    WarpgateError,
+};
 use warpgate_db_entities as e;
 use warpgate_sso::SsoProviderConfig;
 
@@ -118,11 +121,13 @@ impl AuthorizedIdentity {
         }
     }
 
-    /// For a request already authenticated out of band — an established HTTP
-    /// session (backed by a `FullUserAuthorization`) or a Kubernetes credential
-    /// the caller validated itself. The caller vouches that authentication
-    /// happened; this is the one path that isn't a fresh [`AuthState`], so its
-    /// call sites are the ones to audit when reasoning about the gate.
+    /// For a request already authenticated out of band. Exactly two callers
+    /// are sanctioned — `FullUserAuthorization::identity` (an established
+    /// browser session or API token, vetted by the HTTP auth middleware) and
+    /// the Kubernetes transport-credential check — and any new one extends
+    /// the trust audit surface. Everything backed by a live [`AuthState`]
+    /// must mint through [`Self::from_auth_state`] instead, which cannot be
+    /// reached without a satisfied credential policy.
     pub const fn for_authenticated_session(
         user_info: AuthStateUserInfo,
         protocol: Protocol,
@@ -150,34 +155,129 @@ impl std::ops::Deref for AuthorizedIdentity {
     }
 }
 
-/// Proof that a user is authorized for a specific target. Only
-/// [`authorize_for_target`] and [`authorize_ticket`] construct it, so a
-/// session can't be opened for a target without passing authorization.
-#[derive(Clone)]
-pub struct TargetAuthorization {
+/// Proof that a user is authorized for a specific target. Authorization is not
+/// permission to dial: it must be consumed by target-session creation, which
+/// returns an [`ApprovedTarget`].
+///
+/// The parameter is the protocol's [`TargetOptionsVariant`]; the default is the
+/// un-narrowed form that [`TargetAuthorization::specific`] narrows once, so
+/// downstream code reads `options()` instead of pattern-checking the enum.
+pub struct TargetAuthorization<O = TargetOptions> {
     user_info: AuthStateUserInfo,
-    target: Target,
+    target: SpecificTarget<O>,
     protocol: Protocol,
 }
 
 impl TargetAuthorization {
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        user_info: AuthStateUserInfo,
+        target: Target,
+        protocol: Protocol,
+    ) -> Self {
+        Self {
+            user_info,
+            target: SpecificTarget::any(target),
+            protocol,
+        }
+    }
+
+    /// Authorization for a request on a session established by a ticket. The
+    /// caller must resolve the target by the ticket's pinned row id first.
+    pub fn for_ticket_session(
+        user_info: AuthStateUserInfo,
+        target: Target,
+        ticket_target_id: Uuid,
+        protocol: Protocol,
+    ) -> Result<Self, WarpgateError> {
+        if target.id != ticket_target_id {
+            return Err(WarpgateError::InconsistentState(
+                "ticket session target does not match the ticket's target".into(),
+            ));
+        }
+        Ok(Self {
+            user_info,
+            target: SpecificTarget::any(target),
+            protocol,
+        })
+    }
+
+    /// Narrows the authorization to one protocol's options variant, failing on
+    /// a target of another kind or a protocol mismatch. Dial code downstream
+    /// then reads `options()` with no pattern check left to forget.
+    pub fn narrow<O: TargetOptionsVariant>(self) -> Result<TargetAuthorization<O>, WarpgateError> {
+        if O::PROTOCOL != self.protocol {
+            return Err(WarpgateError::InvalidTarget);
+        }
+        Ok(TargetAuthorization {
+            user_info: self.user_info,
+            target: self.target.narrow()?,
+            protocol: self.protocol,
+        })
+    }
+}
+
+impl<O> TargetAuthorization<O> {
     pub const fn user_info(&self) -> &AuthStateUserInfo {
         &self.user_info
     }
 
     /// The target this authorization was granted for. Carrying it means a dial
     /// site never has to re-resolve — and so can't resolve a *different* one.
-    pub const fn target(&self) -> &Target {
+    pub fn target(&self) -> &Target {
         &self.target
+    }
+
+    pub const fn options(&self) -> &O {
+        self.target.options()
     }
 
     /// The protocol the authorizing authentication ran under.
     pub const fn protocol(&self) -> Protocol {
         self.protocol
     }
+}
 
-    pub fn into_parts(self) -> (AuthStateUserInfo, Target) {
-        (self.user_info, self.target)
+impl ApprovedTarget {
+    /// Narrows the capability to one protocol's options variant. The admission
+    /// is unchanged — only the type gets more precise.
+    pub fn narrow<O: TargetOptionsVariant>(self) -> Result<ApprovedTarget<O>, WarpgateError> {
+        Ok(ApprovedTarget(self.0.narrow()?))
+    }
+}
+
+/// Proof that one target connection passed both authorization and the
+/// target-session approval gate. Dial sites accept this type instead of a
+/// target or authorization proof, making a skipped gate a compile-time error.
+///
+/// This capability is intentionally not cloneable. It is minted only when a
+/// target session starts and is consumed or borrowed by that session's dial
+/// boundary.
+pub struct ApprovedTarget<O = TargetOptions>(TargetAuthorization<O>);
+
+impl<O> ApprovedTarget<O> {
+    pub(crate) const fn new(authorization: TargetAuthorization<O>) -> Self {
+        Self(authorization)
+    }
+
+    pub const fn user_info(&self) -> &AuthStateUserInfo {
+        self.0.user_info()
+    }
+
+    pub fn target(&self) -> &Target {
+        self.0.target()
+    }
+
+    pub const fn options(&self) -> &O {
+        self.0.options()
+    }
+
+    pub const fn protocol(&self) -> Protocol {
+        self.0.protocol()
+    }
+
+    pub fn into_parts(self) -> (AuthStateUserInfo, SpecificTarget<O>) {
+        (self.0.user_info, self.0.target)
     }
 }
 
@@ -196,7 +296,7 @@ pub async fn authorize_for_target<C: ConfigProvider + ?Sized>(
         .await?
         .then(|| TargetAuthorization {
             user_info: identity.user_info.clone(),
-            target,
+            target: SpecificTarget::any(target),
             protocol: identity.protocol,
         }))
 }
@@ -216,13 +316,16 @@ pub async fn authorize_for_target_by_name<C: ConfigProvider + ?Sized>(
 }
 
 //TODO: move this somewhere
+/// Authorizes and spends the ticket in one call: a success has already
+/// decremented `uses_left`, so concurrent presentations of an N-use ticket
+/// yield at most N authorizations.
 pub async fn authorize_ticket(
     db: &DatabaseConnection,
     login_protection: &LoginProtectionService,
     secret: &Secret<String>,
     remote_ip: Option<IpAddr>,
     protocol: Protocol,
-) -> Result<Option<(e::Ticket::Model, TargetAuthorization)>, WarpgateError> {
+) -> Result<Option<TargetAuthorization>, WarpgateError> {
     // Spending a ticket is a login, so a blocked IP can't do it either. Checked ahead of the
     // lookup so a blocked caller can't use this as a ticket-existence oracle.
     if let Some(ip) = remote_ip
@@ -239,11 +342,6 @@ pub async fn authorize_ticket(
             .await?
     };
     if let Some(ticket) = ticket {
-        if ticket.uses_left == Some(0) {
-            warn!("Ticket is used up: {}", &ticket.id);
-            return Ok(None);
-        }
-
         if let Some(datetime) = ticket.expiry
             && datetime < OffsetDateTime::now_utc()
         {
@@ -274,51 +372,175 @@ pub async fn authorize_ticket(
             return Ok(None);
         };
 
+        let target = Target::try_from(ticket_target)?;
+
+        // Spending is the last gate, after every other check, so a denied user
+        // or a broken target does not burn a use. The guarded decrement is
+        // what enforces the use limit: N concurrent presentations race on it
+        // and only the winners with uses left get authorized. A ticket that
+        // loses reads as not-found, preserving the no-existence-oracle
+        // property.
+        if ticket.uses_left.is_some() {
+            let spent = e::Ticket::Entity::update_many()
+                .col_expr(
+                    e::Ticket::Column::UsesLeft,
+                    Expr::col(e::Ticket::Column::UsesLeft).sub(1),
+                )
+                .filter(e::Ticket::Column::Id.eq(ticket.id))
+                .filter(e::Ticket::Column::UsesLeft.gt(0))
+                .exec(db)
+                .await?;
+            if spent.rows_affected == 0 {
+                warn!("Ticket is used up: {}", &ticket.id);
+                return Ok(None);
+            }
+        }
+
         // A ticket binds user↔target directly, so it mints the proof without a
         // role check — that's what makes it a ticket.
-        let authorization = TargetAuthorization {
+        Ok(Some(TargetAuthorization {
             user_info: (&user).into(),
-            target: Target::try_from(ticket_target)?,
+            target: SpecificTarget::any(target),
             protocol,
-        };
-        Ok(Some((ticket, authorization)))
+        }))
     } else {
         warn!("Ticket not found");
         Ok(None)
     }
 }
 
-pub async fn consume_ticket(
-    db: &DatabaseConnection,
-    ticket_id: &Uuid,
-) -> Result<(), WarpgateError> {
-    let ticket = e::Ticket::Entity::find_by_id(*ticket_id).one(db).await?;
-    let Some(ticket) = ticket else {
-        return Err(WarpgateError::InvalidTicket(*ticket_id));
-    };
-
-    // Decrement atomically
-    if ticket.uses_left.is_some() {
-        e::Ticket::Entity::update_many()
-            .col_expr(
-                e::Ticket::Column::UsesLeft,
-                Expr::col(e::Ticket::Column::UsesLeft).sub(1),
-            )
-            .filter(e::Ticket::Column::Id.eq(*ticket_id))
-            .filter(e::Ticket::Column::UsesLeft.gt(0))
-            .exec(db)
-            .await?;
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use tokio::sync::broadcast;
     use warpgate_common::auth::CredentialPolicyResponse;
+    use warpgate_common::{TargetHTTPOptions, TargetSSHOptions, Tls, UserSessionId};
 
     use super::*;
+
+    fn http_target() -> Target {
+        Target {
+            id: Uuid::new_v4(),
+            name: "web".into(),
+            description: String::new(),
+            allow_roles: vec![],
+            options: TargetOptions::Http(TargetHTTPOptions {
+                url: "http://target".into(),
+                tls: Tls::default(),
+                headers: None,
+                external_host: None,
+            }),
+            rate_limit_bytes_per_second: None,
+            group_id: None,
+            ticket_max_duration_seconds: None,
+            ticket_requests_disabled: false,
+            ticket_require_approval: false,
+            ticket_max_uses: None,
+        }
+    }
+
+    #[test]
+    fn specific_narrows_only_matching_kind_and_protocol() {
+        let user = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+
+        let narrowed = TargetAuthorization::for_test(user.clone(), http_target(), Protocol::Http)
+            .narrow::<TargetHTTPOptions>();
+        assert!(narrowed.is_ok_and(|a| a.options().url == "http://target"));
+
+        let wrong_kind = TargetAuthorization::for_test(user.clone(), http_target(), Protocol::Http)
+            .narrow::<TargetSSHOptions>();
+        assert!(wrong_kind.is_err());
+
+        let wrong_protocol = TargetAuthorization::for_test(user, http_target(), Protocol::Ssh)
+            .narrow::<TargetHTTPOptions>();
+        assert!(wrong_protocol.is_err());
+    }
+
+    /// Two presentations of a 1-use ticket race on the spend; only one may be
+    /// authorized, however they interleave.
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn a_ticket_spend_is_atomic_with_its_authorization() {
+        use sea_orm::{ActiveModelTrait, ActiveValue::Set, Database};
+        use warpgate_db_entities::Parameters::{
+            ConfigMigrationValues, set_config_migration_values,
+        };
+
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        warpgate_db_migrations::migrate_database(&db).await.unwrap();
+        let login_protection = LoginProtectionService::new(db.clone()).await.unwrap();
+
+        let target = http_target();
+        let user_id = Uuid::new_v4();
+        e::User::ActiveModel {
+            id: Set(user_id),
+            username: Set("alice".into()),
+            description: Set(String::new()),
+            credential_policy: Set(serde_json::json!({})),
+            rate_limit_bytes_per_second: Set(None),
+            ldap_server_id: Set(None),
+            ldap_object_uuid: Set(None),
+            allowed_ip_ranges: Set(serde_json::Value::Null),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        e::Target::ActiveModel {
+            id: Set(target.id),
+            name: Set(target.name.clone()),
+            description: Set(String::new()),
+            kind: Set(e::Target::TargetKind::Http),
+            options: Set(serde_json::to_value(&target.options).unwrap()),
+            rate_limit_bytes_per_second: Set(None),
+            group_id: Set(None),
+            ticket_max_duration_seconds: Set(None),
+            ticket_requests_disabled: Set(false),
+            ticket_require_approval: Set(false),
+            ticket_max_uses: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let secret = Secret::new("t1cket".to_string());
+        let ticket_id = Uuid::new_v4();
+        e::Ticket::ActiveModel {
+            id: Set(ticket_id),
+            secret_hash: Set(hash_secret("t1cket")),
+            user_id: Set(user_id),
+            description: Set(String::new()),
+            target_id: Set(target.id),
+            uses_left: Set(Some(1)),
+            self_service: Set(false),
+            expiry: Set(None),
+            created: Set(OffsetDateTime::now_utc()),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let first = authorize_ticket(&db, &login_protection, &secret, None, Protocol::Http)
+            .await
+            .unwrap();
+        assert!(first.is_some_and(|authorization| authorization.target().id == target.id));
+
+        let second = authorize_ticket(&db, &login_protection, &secret, None, Protocol::Http)
+            .await
+            .unwrap();
+        assert!(second.is_none());
+
+        assert_eq!(
+            e::Ticket::Entity::find_by_id(ticket_id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .uses_left,
+            Some(0)
+        );
+    }
 
     struct FixedPolicy(bool);
     impl CredentialPolicy for FixedPolicy {
@@ -334,7 +556,7 @@ mod tests {
     fn auth_state(satisfied: bool) -> AuthState {
         let (tx, _rx) = broadcast::channel(1);
         AuthState::new(
-            Uuid::new_v4(),
+            UserSessionId(Uuid::new_v4()),
             None,
             AuthStateUserInfo {
                 id: Uuid::nil(),

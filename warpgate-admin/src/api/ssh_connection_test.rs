@@ -2,8 +2,8 @@ use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient, resolve_ssh_chain};
+use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
+use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient, resolve_ssh_chain_for_admin};
 
 use super::AdminContext;
 
@@ -43,7 +43,8 @@ impl Api {
         admin.require(AdminPermission::TargetsEdit)?;
 
         let ssh_chain =
-            resolve_ssh_chain(admin.services(), body.target_id, admin.auth.username()).await?;
+            resolve_ssh_chain_for_admin(admin.services(), body.target_id, admin.auth.username())
+                .await?;
 
         let Some(target) = ssh_chain.last() else {
             return Err(WarpgateError::InconsistentState(
@@ -57,7 +58,8 @@ impl Api {
             .map(|x| x.ssh_options)
             .collect::<Vec<_>>();
 
-        let mut handles = RemoteClient::create(Uuid::new_v4(), admin.services().clone())?;
+        let mut handles =
+            RemoteClient::create(UserSessionId(Uuid::new_v4()), admin.services().clone())?;
         let _ = handles
             .command_tx
             .send((RCCommand::Connect(ssh_chain), None));

@@ -15,7 +15,7 @@ use super::{
     CredentialPolicyResponse,
 };
 use crate::helpers::logging::format_related_ids;
-use crate::{Protocol, SessionId, User, WarpgateError};
+use crate::{Protocol, User, UserSessionId, WarpgateError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
@@ -126,7 +126,7 @@ impl From<&User> for AuthStateUserInfo {
 }
 
 pub struct AuthState {
-    session_id: SessionId,
+    session_id: UserSessionId,
     user_info: AuthStateUserInfo,
     remote_ip: Option<IpAddr>,
     protocol: Protocol,
@@ -153,7 +153,7 @@ fn generate_identification_string() -> String {
 impl AuthState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        session_id: SessionId,
+        session_id: UserSessionId,
         remote_ip: Option<IpAddr>,
         user_info: AuthStateUserInfo,
         protocol: Protocol,
@@ -180,7 +180,7 @@ impl AuthState {
         this
     }
 
-    pub const fn session_id(&self) -> &SessionId {
+    pub const fn session_id(&self) -> &UserSessionId {
         &self.session_id
     }
 
@@ -190,6 +190,10 @@ impl AuthState {
 
     pub const fn protocol(&self) -> Protocol {
         self.protocol
+    }
+
+    pub const fn remote_ip(&self) -> Option<IpAddr> {
+        self.remote_ip
     }
 
     pub fn target_name(&self) -> &str {
@@ -417,7 +421,7 @@ mod tests {
 
     fn make_state(kinds: &[CredentialKind]) -> AuthState {
         AuthState::new(
-            Uuid::new_v4(),
+            UserSessionId(Uuid::new_v4()),
             None,
             AuthStateUserInfo {
                 id: Uuid::new_v4(),

@@ -92,6 +92,7 @@ impl OtpEntry {
             &mut *state.lock().await,
             credential,
             services.config_provider.as_ref(),
+            &services.login_protection,
         )
         .await
         .is_ok_and(|outcome| outcome.is_valid());

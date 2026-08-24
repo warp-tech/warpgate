@@ -8,16 +8,17 @@ use poem::session::{Session, SessionStorage};
 use poem::web::{Data, RemoteAddr};
 use poem::{FromRequest, Request};
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::OnConflict;
+use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
 use serde_json::Value;
 use time::OffsetDateTime;
-use tokio::sync::{Mutex, broadcast};
-use tracing::info;
-use warpgate_common::{SessionId, WarpgateError};
-use warpgate_common_http::SessionKeepalive;
+use tokio::sync::{Mutex, broadcast, mpsc};
+use tracing::{error, info};
+use uuid::Uuid;
+use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
-use warpgate_core::{SessionStateInit, State, WarpgateServerHandle};
+use warpgate_common_http::{SessionAuthorization, SessionKeepalive};
+use warpgate_core::{State, UserSessionStateInit, WarpgateServerHandle};
 use warpgate_db_entities::HttpSession;
 
 use crate::common::{PROTOCOL_NAME, SessionExt};
@@ -58,15 +59,96 @@ impl SharedSessionStorage {
 
     pub async fn gc(&self, max_age: Duration) -> Result<(), WarpgateError> {
         let now = OffsetDateTime::now_utc();
+        let expired = Condition::any()
+            .add(HttpSession::Column::Expires.lt(now))
+            .add(HttpSession::Column::Updated.lt(now - max_age));
+        let rows = HttpSession::Entity::find()
+            .filter(expired.clone())
+            .all(&self.0)
+            .await?;
+        for row in rows {
+            // One unreadable row must not stop the sweep: aborting here would
+            // leave every expired browser session in place, and the same row
+            // would abort it again on the next pass.
+            if let Err(error) = self.end_user_session_of(&row).await {
+                error!(%error, id = %row.id, "Could not end the user session of an expired browser session");
+            }
+        }
         HttpSession::Entity::delete_many()
-            .filter(
-                Condition::any()
-                    .add(HttpSession::Column::Expires.lt(now))
-                    .add(HttpSession::Column::Updated.lt(now - max_age)),
-            )
+            .filter(expired)
             .exec(&self.0)
             .await?;
         Ok(())
+    }
+
+    /// Marks the stored browser sessions of `ids` as active. A session whose
+    /// only traffic is a long-lived websocket writes nothing back through the
+    /// session middleware, so without this its row would age out of [`Self::gc`]
+    /// while the connection is still carrying data.
+    pub async fn touch(&self, ids: &[UserSessionId]) -> Result<(), WarpgateError> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        HttpSession::Entity::update_many()
+            .col_expr(
+                HttpSession::Column::Updated,
+                Expr::value(OffsetDateTime::now_utc()),
+            )
+            .filter(HttpSession::Column::UserSessionId.is_in(ids.iter().map(|id| id.0)))
+            .exec(&self.0)
+            .await?;
+        Ok(())
+    }
+
+    /// Ends the user session a stored browser session backs. Resolved from the
+    /// mirrored `user_session_id` column; rows written before the column
+    /// existed fall back to the `data` JSON.
+    async fn end_user_session_of(&self, row: &HttpSession::Model) -> Result<(), WarpgateError> {
+        if let Some(id) = row.user_session_id {
+            return warpgate_core::db::mark_user_session_and_targets_ended(
+                &self.0,
+                UserSessionId(id),
+            )
+            .await;
+        }
+        let entries: BTreeMap<String, Value> = serde_json::from_str(&row.data)?;
+        let Some(id) = Self::user_session_id_of(&entries) else {
+            return Ok(());
+        };
+        warpgate_core::db::mark_user_session_and_targets_ended(&self.0, id).await
+    }
+
+    fn user_session_id_of(entries: &BTreeMap<String, Value>) -> Option<UserSessionId> {
+        entries
+            .get(SESSION_ID_SESSION_KEY)
+            .and_then(|value| serde_json::from_value::<UserSessionId>(value.clone()).ok())
+    }
+
+    /// Rotates the browser session's storage id, keeping its contents and the
+    /// user session it references. Called once authentication succeeds, so a
+    /// cookie value known before the login — planted by an attacker, or set by
+    /// a proxied target under the shared cookie domain — is not a cookie value
+    /// that is authenticated after it.
+    ///
+    /// The stored row is deleted here rather than left to the renewal itself:
+    /// [`SessionStorage::remove_session`] ends the user session a row backs,
+    /// which is right when a browser session is being destroyed and wrong when
+    /// it is being re-keyed. With the row already gone, the renewal's removal
+    /// finds nothing to end and only writes the new one.
+    pub async fn rotate_session_id(&self, session: &Session) -> Result<(), WarpgateError> {
+        if let Some(id) = session.get::<String>(POEM_SESSION_ID_SESSION_KEY) {
+            session.remove(POEM_SESSION_ID_SESSION_KEY);
+            HttpSession::Entity::delete_by_id(id).exec(&self.0).await?;
+        }
+        session.renew();
+        Ok(())
+    }
+
+    /// Cluster-wide logout of one user session: marks it and its target
+    /// sessions ended and deletes every stored browser session referencing it,
+    /// so no node keeps accepting its cookie.
+    pub async fn revoke_user_session(&self, id: UserSessionId) -> Result<(), WarpgateError> {
+        warpgate_core::db::revoke_user_session(&self.0, id).await
     }
 }
 
@@ -115,6 +197,9 @@ impl SessionStorage for SharedSessionStorage {
             expires: Set(expires.map(|d| now + d)),
             data: Set(data),
             updated: Set(now),
+            // Mirrored out of the entries so ending, revocation and reaping
+            // query an indexed column instead of parsing JSON.
+            user_session_id: Set(Self::user_session_id_of(entries).map(|id| id.0)),
         };
         // `exec_without_returning` avoids the last-insert-id path, which MySQL
         // upserts of a non-auto-increment PK misbehave on.
@@ -125,6 +210,7 @@ impl SessionStorage for SharedSessionStorage {
                         HttpSession::Column::Expires,
                         HttpSession::Column::Data,
                         HttpSession::Column::Updated,
+                        HttpSession::Column::UserSessionId,
                     ])
                     .to_owned(),
             )
@@ -136,6 +222,15 @@ impl SessionStorage for SharedSessionStorage {
 
     /// Remove a session by session id. Idempotent: removing an absent id is Ok.
     async fn remove_session<'a>(&'a self, session_id: &'a str) -> poem::Result<()> {
+        if let Some(row) = HttpSession::Entity::find_by_id(session_id.to_owned())
+            .one(&self.0)
+            .await
+            .map_err(InternalServerError)?
+        {
+            self.end_user_session_of(&row)
+                .await
+                .map_err(InternalServerError)?;
+        }
         HttpSession::Entity::delete_by_id(session_id.to_owned())
             .exec(&self.0)
             .await
@@ -144,11 +239,48 @@ impl SessionStorage for SharedSessionStorage {
     }
 }
 
+/// Request-data marker set by the ticket middleware for a header-borne ticket:
+/// the request runs on a detached session that is never stored, so the user
+/// session registered for it has no cookie to end it and is ended by `vacuum`
+/// instead.
+#[derive(Clone, Copy)]
+pub(crate) struct TemporaryTicketSession;
+
+/// What consecutive header-ticket requests are recognised by. A ticket
+/// authorizes exactly one user against exactly one target, so this is the
+/// ticket's identity as far as a session is concerned — without keeping the
+/// secret around to key on.
+type TicketSessionKey = (Uuid, Uuid);
+
+/// The ticket identity of a request that carries a header-borne ticket, or
+/// `None` for anything cookie-backed.
+fn ticket_session_key(req: &Request, session: &Session) -> Option<TicketSessionKey> {
+    req.data::<TemporaryTicketSession>()?;
+    match session.get_auth()? {
+        SessionAuthorization::Ticket {
+            user_id, target_id, ..
+        } => Some((user_id, target_id)),
+        SessionAuthorization::User { .. } => None,
+    }
+}
+
+/// The node's view of one user session. This entry holds the last reference
+/// to the handle that requests are served through, so removing it is what
+/// drops the parent state, which drops its target-session slots, which drops
+/// their close senders and aborts the requests and websockets running against
+/// them. Anything that stores a lasting clone of `handle` breaks that chain
+/// and turns an administrative close into a no-op for traffic already in
+/// flight — `close_parent_drops_target_sessions` in `warpgate-core` covers the
+/// core half of it.
 struct SessionEntry {
     handle: Arc<Mutex<WarpgateServerHandle>>,
     close_sender: broadcast::Sender<()>,
     last_activity: Instant,
     keepalive: Weak<()>,
+    /// Set for a [`TemporaryTicketSession`]: its index key, and the marker
+    /// that expiring this entry must end the user session, since no stored
+    /// browser session references it.
+    ticket_key: Option<TicketSessionKey>,
 }
 
 fn is_session_expired(
@@ -161,11 +293,38 @@ fn is_session_expired(
 }
 
 pub struct SessionStore {
-    sessions: HashMap<SessionId, SessionEntry>,
+    sessions: HashMap<UserSessionId, SessionEntry>,
+    /// Lets consecutive header-ticket requests share one user session: they
+    /// carry no cookie, so without this index every request would register a
+    /// session (and a target session, and an audit event) of its own.
+    ticket_sessions: HashMap<TicketSessionKey, UserSessionId>,
     this: Weak<Mutex<Self>>,
 }
 
-pub const SESSION_ID_SESSION_KEY: &str = "session_id";
+/// A server handle vetted against the request's own authorization: minted only
+/// by [`SessionStore::handle_for_request`], after the user check every branch
+/// runs. Request-serving code takes this instead of a bare handle, so a new
+/// code path cannot skip the check.
+pub struct UserBoundHandle(Arc<Mutex<WarpgateServerHandle>>);
+
+impl std::ops::Deref for UserBoundHandle {
+    type Target = Arc<Mutex<WarpgateServerHandle>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// The user the request's browser session is authorized as, if any.
+fn request_auth_user_id(session: &Session) -> Option<Uuid> {
+    match session.get_auth() {
+        Some(SessionAuthorization::User { user_id, .. })
+        | Some(SessionAuthorization::Ticket { user_id, .. }) => Some(user_id),
+        None => None,
+    }
+}
+
+pub const SESSION_ID_SESSION_KEY: &str = HttpSession::SESSION_ID_DATA_KEY;
 const SESSION_TOUCH_SESSION_KEY: &str = "touched_at";
 const SESSION_TOUCH_DEBOUNCE_SECONDS: i64 = 60;
 
@@ -174,6 +333,7 @@ impl SessionStore {
         Arc::new_cyclic(|me| {
             Mutex::new(Self {
                 sessions: HashMap::new(),
+                ticket_sessions: HashMap::new(),
                 this: me.clone(),
             })
         })
@@ -200,58 +360,198 @@ impl SessionStore {
         Ok(req)
     }
 
-    pub async fn create_handle_for(
+    /// The server handle for this request's browser session: the live local
+    /// one, a re-attached view over the still-open session the cookie already
+    /// references (created on another node, or detached here), or a fresh
+    /// registration when the cookie references none. The one refusal is a
+    /// cookie referencing a session attributed to a different user — checked
+    /// here for every branch, which is what the returned [`UserBoundHandle`]
+    /// attests.
+    pub async fn handle_for_request(
+        &mut self,
+        req: &Request,
+        ctx: &UnauthenticatedRequestContext,
+    ) -> poem::Result<UserBoundHandle> {
+        let session = <&Session>::from_request_without_body(req).await?;
+
+        // A header-borne ticket has no cookie to resolve, so it is recognised
+        // by the ticket it presents instead — otherwise every request would
+        // register a session of its own.
+        if let Some(key) = ticket_session_key(req, session) {
+            if let Some(entry) = self
+                .ticket_sessions
+                .get(&key)
+                .copied()
+                .and_then(|id| self.sessions.get_mut(&id))
+            {
+                entry.last_activity = Instant::now();
+                return Ok(UserBoundHandle(entry.handle.clone()));
+            }
+            return Ok(UserBoundHandle(self.create_handle_for(req, ctx).await?));
+        }
+
+        if let Some(handle) = self.handle_for(session) {
+            // An adopted view's user is stamped lazily, so an unattributed
+            // handle passes; once attributed, it is handed out only to its
+            // user — the live-entry equivalent of `adopt_handle_for`'s check.
+            let state_user_id = handle
+                .lock()
+                .await
+                .user_session_state()
+                .lock()
+                .await
+                .user_info
+                .as_ref()
+                .map(|user| user.id);
+            if state_user_id.is_some() && state_user_id != request_auth_user_id(session) {
+                return Err(poem::Error::from_status(
+                    poem::http::StatusCode::UNAUTHORIZED,
+                ));
+            }
+            return Ok(UserBoundHandle(handle));
+        }
+        if let Some(id) = session.get_session_id() {
+            if let Some(handle) = self.adopt_handle_for(req, ctx, id).await? {
+                return Ok(UserBoundHandle(handle));
+            }
+            // The cookie names a session that is gone or ended. If it also
+            // carries an authorization, that authorization was issued under
+            // the ended session: deleting the stored browser sessions is what
+            // makes an administrative close cluster-wide, but a request
+            // already in flight when that happened writes its copy back
+            // afterwards, so a revoked cookie can outlive the close.
+            // Registering a replacement session would hand it a fresh login
+            // and undo the close, so the browser session is dropped instead
+            // and the caller has to authenticate again.
+            if request_auth_user_id(session).is_some() {
+                session.purge();
+                return Err(poem::Error::from_status(
+                    poem::http::StatusCode::UNAUTHORIZED,
+                ));
+            }
+            // Unauthenticated, so there is no authority to carry over and
+            // nothing to undo — the id is a leftover (its session reaped while
+            // the cookie lived on) and this is someone arriving to log in.
+        }
+        Ok(UserBoundHandle(self.create_handle_for(req, ctx).await?))
+    }
+
+    async fn create_handle_for(
         &mut self,
         req: &Request,
         ctx: &UnauthenticatedRequestContext,
     ) -> poem::Result<Arc<Mutex<WarpgateServerHandle>>> {
         let session = <&Session>::from_request_without_body(req).await?;
 
-        if let Some(handle) = self.handle_for(session) {
-            return Ok(handle);
-        }
-
-        let remote_address = <&RemoteAddr>::from_request_without_body(req).await?;
-        let session_storage = Data::<&SharedSessionStorage>::from_request_without_body(req).await?;
-
-        let (session_handle, mut session_handle_rx) = HttpSessionHandle::new();
-
-        let server_handle = State::register_session(
+        let (session_handle, session_handle_rx) = HttpSessionHandle::new();
+        let server_handle = State::register_user_session(
             &ctx.services().state,
             PROTOCOL_NAME,
-            SessionStateInit {
-                remote_address: remote_address.0.as_socket_addr().copied(),
-                handle: Box::new(session_handle),
-            },
+            Self::state_init_for(req, session_handle).await?,
         )
         .await?;
 
         let id = server_handle.lock().await.id();
+        session.set(SESSION_ID_SESSION_KEY, id);
+        self.install_entry(req, id, server_handle.clone(), session_handle_rx)
+            .await?;
+        Ok(server_handle)
+    }
+
+    /// A node-local handle over a still-open user session this node has no
+    /// live entry for: the parent row is validated once here. `None` means the
+    /// row is gone, ended or not an HTTP session — nothing to re-attach to.
+    /// Per-request liveness comes from the cookie-session storage row, which a
+    /// close deletes cluster-wide.
+    async fn adopt_handle_for(
+        &mut self,
+        req: &Request,
+        ctx: &UnauthenticatedRequestContext,
+        id: UserSessionId,
+    ) -> poem::Result<Option<Arc<Mutex<WarpgateServerHandle>>>> {
+        if let Some(entry) = self.sessions.get(&id) {
+            return Ok(Some(entry.handle.clone()));
+        }
+
+        let session = <&Session>::from_request_without_body(req).await?;
+        let Some(row) = warpgate_db_entities::UserSession::Entity::find_by_id(id.0)
+            .one(&ctx.services().db)
+            .await
+            .map_err(WarpgateError::from)?
+            .filter(|row| row.ended.is_none() && row.protocol == PROTOCOL_NAME.to_string())
+        else {
+            return Ok(None);
+        };
+        if row.user_id != request_auth_user_id(session) {
+            return Err(poem::Error::from_status(
+                poem::http::StatusCode::UNAUTHORIZED,
+            ));
+        }
+
+        let (session_handle, session_handle_rx) = HttpSessionHandle::new();
+        let server_handle = State::adopt_user_session(
+            &ctx.services().state,
+            id,
+            PROTOCOL_NAME,
+            Self::state_init_for(req, session_handle).await?,
+        )
+        .await;
+        self.install_entry(req, id, server_handle.clone(), session_handle_rx)
+            .await?;
+        Ok(Some(server_handle))
+    }
+
+    async fn state_init_for(
+        req: &Request,
+        session_handle: HttpSessionHandle,
+    ) -> poem::Result<UserSessionStateInit> {
+        let remote_address = <&RemoteAddr>::from_request_without_body(req).await?;
+        Ok(UserSessionStateInit {
+            remote_address: remote_address.0.as_socket_addr().copied(),
+            handle: Box::new(session_handle),
+        })
+    }
+
+    async fn install_entry(
+        &mut self,
+        req: &Request,
+        id: UserSessionId,
+        server_handle: Arc<Mutex<WarpgateServerHandle>>,
+        mut session_handle_rx: mpsc::UnboundedReceiver<SessionHandleCommand>,
+    ) -> poem::Result<()> {
+        let session_storage = Data::<&SharedSessionStorage>::from_request_without_body(req).await?;
+        let session = <&Session>::from_request_without_body(req).await?;
+        let ticket_key = ticket_session_key(req, session);
+
         let (session_close_sender, _) = broadcast::channel(1);
         self.sessions.insert(
             id,
             SessionEntry {
-                handle: server_handle.clone(),
+                handle: server_handle,
                 close_sender: session_close_sender,
                 last_activity: Instant::now(),
                 keepalive: Weak::new(),
+                ticket_key,
             },
         );
-
-        session.set(SESSION_ID_SESSION_KEY, id);
+        if let Some(key) = ticket_key {
+            self.ticket_sessions.insert(key, id);
+        }
 
         let Some(this) = self.this.upgrade() else {
             return Err(anyhow::anyhow!("Invalid session state").into());
         };
         tokio::spawn({
             let session_storage = (*session_storage).clone();
-            let poem_session_id: Option<String> = session.get(POEM_SESSION_ID_SESSION_KEY);
             async move {
                 while let Some(command) = session_handle_rx.recv().await {
                     match command {
                         SessionHandleCommand::Close => {
-                            if let Some(ref poem_session_id) = poem_session_id {
-                                let _ = session_storage.remove_session(poem_session_id).await;
+                            // A cluster-wide logout, not just a local detach:
+                            // the stored browser sessions are what keep the
+                            // login valid on every node.
+                            if let Err(error) = session_storage.revoke_user_session(id).await {
+                                error!(%id, %error, "Could not revoke the closed HTTP session");
                             }
                             info!(%id, "Removed HTTP session");
                             let mut that = this.lock().await;
@@ -262,8 +562,7 @@ impl SessionStore {
                 Ok::<_, anyhow::Error>(())
             }
         });
-
-        Ok(server_handle)
+        Ok(())
     }
 
     pub fn handle_for(&self, session: &Session) -> Option<Arc<Mutex<WarpgateServerHandle>>> {
@@ -283,7 +582,7 @@ impl SessionStore {
     /// Get a token that prevents the session from getting cleaned up
     /// until it's dropped. For an unknown (already removed) session id the
     /// token is returned unstored — there is nothing left to keep alive.
-    fn keepalive(&mut self, id: SessionId) -> Arc<()> {
+    fn keepalive(&mut self, id: UserSessionId) -> Arc<()> {
         let Some(entry) = self.sessions.get_mut(&id) else {
             return Arc::new(());
         };
@@ -301,36 +600,61 @@ impl SessionStore {
         }
     }
 
-    pub async fn vacuum(&mut self, session_max_age: Duration) {
+    /// Expires idle local entries. Returns the expired *temporary* sessions —
+    /// no stored browser session references those, so the caller must end
+    /// them; the rest are only detached here, since another node may still be
+    /// serving the DB-backed browser session and shared storage GC is the
+    /// authority for global idle expiration.
+    #[must_use]
+    pub fn vacuum(&mut self, session_max_age: Duration) -> Vec<UserSessionId> {
         let now = Instant::now();
-        let to_remove: Vec<SessionId> = self
+        let to_remove: Vec<(UserSessionId, bool)> = self
             .sessions
             .iter()
             .filter(|(_, entry)| {
-                is_session_expired(entry.last_activity, &entry.keepalive, now, session_max_age)
+                // A handle a request still holds is in use even if the entry
+                // looks idle: a header-ticket request registers no keepalive,
+                // since the token is attached before its session exists.
+                Arc::strong_count(&entry.handle) == 1
+                    && is_session_expired(entry.last_activity, &entry.keepalive, now, session_max_age)
             })
-            .map(|(id, _)| *id)
+            .map(|(id, entry)| (*id, entry.ticket_key.is_some()))
             .collect();
-        for id in to_remove {
-            info!(%id, "Expiring idle HTTP session");
-            // Closing the handle also drops the browser-side session, so the client
-            // reauthenticates instead of keeping a cookie whose session no longer exists.
-            if let Some(handle) = self.sessions.get(&id).map(|entry| entry.handle.clone()) {
-                handle
-                    .lock()
-                    .await
-                    .session_state()
-                    .lock()
-                    .await
-                    .handle
-                    .close();
-            }
+        let mut ended = vec![];
+        for (id, temporary) in to_remove {
+            info!(%id, "Detaching idle local HTTP session handle");
             self.remove_session_by_id(id);
+            if temporary {
+                ended.push(id);
+            }
         }
+        ended
     }
 
-    fn remove_session_by_id(&mut self, id: SessionId) {
+    /// The sessions this node is actively serving, so their stored browser
+    /// sessions can be kept from ageing out under a long-lived connection.
+    pub fn live_session_ids(&self) -> Vec<UserSessionId> {
+        self.sessions
+            .iter()
+            .filter(|(_, entry)| {
+                entry.keepalive.strong_count() > 0 || Arc::strong_count(&entry.handle) > 1
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    /// Detaches the parent's local handle. Its target sessions are owned by
+    /// the parent state and drop with it, which is what aborts the requests
+    /// served through them.
+    fn remove_session_by_id(&mut self, id: UserSessionId) {
         if let Some(entry) = self.sessions.remove(&id) {
+            // Only if it still points here: the key may already have been
+            // re-registered by a later request.
+            if let Some(key) = entry.ticket_key
+                && self.ticket_sessions.get(&key) == Some(&id)
+            {
+                self.ticket_sessions.remove(&key);
+            }
             let _ = entry.close_sender.send(());
         }
     }
@@ -385,6 +709,8 @@ mod tests {
 #[cfg(test)]
 mod db_tests {
     use sea_orm::Database;
+    use uuid::Uuid;
+    use warpgate_db_entities::UserSession;
 
     use super::*;
 
@@ -410,6 +736,7 @@ mod db_tests {
             expires: Set(Some(past)),
             data: Set("{}".to_string()),
             updated: Set(past),
+            user_session_id: Set(None),
         }
     }
 
@@ -489,6 +816,95 @@ mod db_tests {
     }
 
     #[tokio::test]
+    async fn removing_http_session_ends_its_user_session() {
+        let s = storage().await;
+        let id = Uuid::new_v4();
+        UserSession::Entity::insert(UserSession::ActiveModel {
+            id: Set(id),
+            username: Set(Some("alice".into())),
+            user_id: Set(Some(Uuid::new_v4())),
+            remote_address: Set("127.0.0.1:443".into()),
+            started: Set(OffsetDateTime::now_utc()),
+            ended: Set(None),
+            protocol: Set("HTTP".into()),
+            node_id: Set(None),
+            auth_state_node_id: Set(None),
+        })
+        .exec(&s.0)
+        .await
+        .unwrap();
+        let mut data = entries("a");
+        data.insert(
+            SESSION_ID_SESSION_KEY.into(),
+            serde_json::to_value(id).unwrap(),
+        );
+        s.update_session("id1", &data, Some(Duration::from_secs(3600)))
+            .await
+            .unwrap();
+
+        s.remove_session("id1").await.unwrap();
+
+        assert!(
+            UserSession::Entity::find_by_id(id)
+                .one(&s.0)
+                .await
+                .unwrap()
+                .unwrap()
+                .ended
+                .is_some()
+        );
+    }
+
+    /// Rows written by nodes predating the `user_session_id` column carry the
+    /// id only inside `data`; ending must still find it there.
+    #[tokio::test]
+    async fn removal_falls_back_to_data_json_for_pre_column_rows() {
+        let s = storage().await;
+        let id = Uuid::new_v4();
+        UserSession::Entity::insert(UserSession::ActiveModel {
+            id: Set(id),
+            username: Set(Some("alice".into())),
+            user_id: Set(Some(Uuid::new_v4())),
+            remote_address: Set("127.0.0.1:443".into()),
+            started: Set(OffsetDateTime::now_utc()),
+            ended: Set(None),
+            protocol: Set("HTTP".into()),
+            node_id: Set(None),
+            auth_state_node_id: Set(None),
+        })
+        .exec(&s.0)
+        .await
+        .unwrap();
+        let mut data = entries("a");
+        data.insert(
+            SESSION_ID_SESSION_KEY.into(),
+            serde_json::to_value(id).unwrap(),
+        );
+        HttpSession::Entity::insert(HttpSession::ActiveModel {
+            id: Set("legacy".into()),
+            expires: Set(None),
+            data: Set(serde_json::to_string(&data).unwrap()),
+            updated: Set(OffsetDateTime::now_utc()),
+            user_session_id: Set(None),
+        })
+        .exec(&s.0)
+        .await
+        .unwrap();
+
+        s.remove_session("legacy").await.unwrap();
+
+        assert!(
+            UserSession::Entity::find_by_id(id)
+                .one(&s.0)
+                .await
+                .unwrap()
+                .unwrap()
+                .ended
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
     async fn expired_row_refused_on_read() {
         let s = storage().await;
         HttpSession::Entity::insert(expired_row("old"))
@@ -529,6 +945,7 @@ mod db_tests {
             expires: Set(None),
             data: Set("{}".to_string()),
             updated: Set(updated),
+            user_session_id: Set(None),
         };
         HttpSession::Entity::insert(null_row("stale", stale))
             .exec(&s.0)

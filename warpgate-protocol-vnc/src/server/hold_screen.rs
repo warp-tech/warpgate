@@ -11,8 +11,8 @@ use anyhow::{Result, bail};
 use tokio::io::AsyncWrite;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
-use uuid::Uuid;
-use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_common::UserSessionId;
+use warpgate_core::AuthorizedIdentity;
 use warpgate_core::Services;
 use warpgate_db_entities::Parameters;
 use warpgate_desktop_auth::{
@@ -99,10 +99,10 @@ pub(super) async fn collect_additional_credentials<W>(
     events_rx: &mut mpsc::UnboundedReceiver<ClientEvent>,
     render: &mut RenderState,
     services: &Services,
-    state_id: Uuid,
+    state_id: UserSessionId,
     username: &str,
     remote_ip: IpAddr,
-) -> Result<AuthStateUserInfo>
+) -> Result<AuthorizedIdentity>
 where
     W: AsyncWrite + Unpin + Send,
 {
@@ -133,7 +133,7 @@ where
 
     *render = shared.lock().await.clone();
     match result? {
-        Some(user_info) => Ok(user_info),
+        Some(identity) => Ok(identity),
         None => bail!("VNC interactive authentication was not completed"),
     }
 }

@@ -40,24 +40,24 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter)]
 pub enum Relation {
-    Session,
+    TargetSession,
 }
 
 impl RelationTrait for Relation {
     fn def(&self) -> RelationDef {
         match self {
-            Self::Session => Entity::belongs_to(super::Session::Entity)
+            Self::TargetSession => Entity::belongs_to(super::TargetSession::Entity)
                 .from(Column::SessionId)
-                .to(super::Session::Column::Id)
+                .to(super::TargetSession::Column::Id)
                 .on_delete(ForeignKeyAction::Cascade)
                 .into(),
         }
     }
 }
 
-impl Related<super::Session::Entity> for Entity {
+impl Related<super::TargetSession::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Session.def()
+        Relation::TargetSession.def()
     }
 }
 

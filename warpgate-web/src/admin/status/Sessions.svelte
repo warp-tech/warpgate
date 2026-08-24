@@ -1,7 +1,7 @@
 <script lang="ts">
     import { faCircleDot as iconActive } from '@fortawesome/free-regular-svg-icons'
     import { Input } from '@sveltestrap/sveltestrap'
-    import { api, type SessionSnapshot } from 'admin/lib/api'
+    import { api, type UserSessionSnapshot } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { autosave } from 'common/autosave'
     import GettingStarted from 'common/GettingStarted.svelte'
@@ -46,7 +46,7 @@
 
     function loadSessions(
         opt: LoadOptions,
-    ): Observable<PaginatedResponse<SessionSnapshot>> {
+    ): Observable<PaginatedResponse<UserSessionSnapshot>> {
         if (!$adminPermissions.sessionsView) {
             // return empty observable
             return from(Promise.resolve({ items: [], offset: 0, total: 0 }))
@@ -82,15 +82,17 @@
         await api.closeAllSessions()
     }
 
-    function describeSession(session: SessionSnapshot): string {
+    function describeSession(session: UserSessionSnapshot): string {
         let user =
             session.username ??
             (session.ended ? '<not logged in>' : '<logging in>')
-        if (!session.target) {
+        let activeTargets = session.targetSessions.filter(
+            target => !target.ended,
+        )
+        if (!activeTargets.length) {
             return user
         }
-        let target = session.target.name
-        return `${user} on ${target}`
+        return `${user} on ${activeTargets.map(x => x.target?.name).join(', ')}`
     }
 
     _reloadSessions()
