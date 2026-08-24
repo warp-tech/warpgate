@@ -483,7 +483,14 @@ impl SessionStore {
             .one(&ctx.services().db)
             .await
             .map_err(WarpgateError::from)?
-            .filter(|row| row.ended.is_none() && row.protocol == PROTOCOL_NAME.to_string())
+            // `node_id` must be NULL: a node-owned (ticket) session lives and
+            // dies with its node and is never re-attached to from a cookie —
+            // the query enforces it rather than the absence of such a cookie.
+            .filter(|row| {
+                row.ended.is_none()
+                    && row.node_id.is_none()
+                    && row.protocol == PROTOCOL_NAME.to_string()
+            })
         else {
             return Ok(None);
         };

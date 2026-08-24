@@ -218,14 +218,19 @@ impl<S> Default for ClientManager<S> {
     }
 }
 
+// Manual: a clone is another handle to the same registry, so `S: Clone` (which
+// a derive would demand) is not required.
+impl<S> Clone for ClientManager<S> {
+    fn clone(&self) -> Self {
+        Self {
+            sessions: self.sessions.clone(),
+        }
+    }
+}
+
 impl<S: ManagedSession> ClientManager<S> {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Shared handle to the session map, for the event loop to remove itself on backend end.
-    pub fn sessions(&self) -> Arc<Mutex<HashMap<UserSessionId, Arc<S>>>> {
-        self.sessions.clone()
     }
 
     /// Private on purpose: a session is only ever resolved for someone, and

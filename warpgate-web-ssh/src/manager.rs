@@ -1,11 +1,10 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
 use russh::keys::PublicKeyBase64;
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use tracing::{Instrument, debug, error, info_span, warn};
 use warpgate_common::{TargetSSHOptions, UserSessionId, WarpgateError};
 use warpgate_core::{Services, State, TargetAuthorization, UserSessionStateInit};
@@ -124,7 +123,7 @@ impl WebSshClientManager {
         spawn_event_loop(
             session.clone(),
             rc_handles.event_rx,
-            self.sessions(),
+            self.0.clone(),
             services.clone(),
         );
 
@@ -137,7 +136,7 @@ impl WebSshClientManager {
 fn spawn_event_loop(
     session: Arc<WebSshSession>,
     mut event_rx: Receiver<RCEvent>,
-    sessions: Arc<Mutex<HashMap<UserSessionId, Arc<WebSshSession>>>>,
+    manager: ClientManager<WebSshSession>,
     services: Services,
 ) {
     let session_id = session.id();
@@ -243,7 +242,7 @@ fn spawn_event_loop(
 
                 // remote client is gone now
                 session.close();
-                sessions.lock().await.remove(&session.id());
+                manager.remove_session(session.id()).await;
                 anyhow::Ok(())
             }
             .instrument(span),

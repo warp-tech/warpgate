@@ -1,10 +1,9 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Context;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use tracing::{Instrument, debug, info_span, warn};
 use warpgate_common::{TargetOptions, UserSessionId, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
@@ -161,7 +160,7 @@ impl WebDesktopClientManager {
         spawn_event_loop(
             session.clone(),
             event_rx,
-            self.sessions(),
+            self.0.clone(),
             recorder,
             encode_jpeg,
         );
@@ -190,7 +189,7 @@ async fn emit(
 fn spawn_event_loop(
     session: Arc<WebDesktopSession>,
     mut event_rx: mpsc::Receiver<warpgate_core::DesktopEvent>,
-    sessions: Arc<Mutex<HashMap<UserSessionId, Arc<WebDesktopSession>>>>,
+    manager: ClientManager<WebDesktopSession>,
     recorder: Option<Arc<DesktopRecorder>>,
     encode_jpeg: bool,
 ) {
@@ -254,7 +253,7 @@ fn spawn_event_loop(
             }
             // Backend ended; dropping `recorder` here finalises the recording.
             session.close();
-            sessions.lock().await.remove(&session_id);
+            manager.remove_session(session_id).await;
         }
         .instrument(span),
     );
