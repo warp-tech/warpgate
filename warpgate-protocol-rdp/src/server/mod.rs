@@ -71,6 +71,13 @@ struct BackendBridge {
     /// Shared with `frame_bridge`; used to record viewer input alongside the
     /// framebuffer. `None` when recording is disabled.
     recorder: Option<Arc<DesktopRecorder>>,
+    /// The size the target was dialed at, until the viewer's own negotiated size has been
+    /// reconciled against it; `None` once that has happened. A viewer whose buffered input
+    /// dials the target before the capability exchange reports its resolution is dialed at
+    /// the advertised default, and this is what lets the resolution that follows still reach
+    /// the target. Only the viewer's *first* size is its own — every later one echoes a
+    /// resize the target itself drove, and re-sending that would fight the target.
+    dialed_at: Option<warpgate_desktop_ui::Screen>,
 }
 
 impl BackendBridge {
@@ -378,10 +385,28 @@ async fn control_loop(
                     screen,
                 )
                 .await?;
+                // A target dialed before this arrived is running at the advertised default,
+                // so bring it to the resolution the viewer actually negotiated. `take` spends
+                // the reconciliation whether or not it resizes anything, so the `Size` a
+                // target-driven resize echoes back here is never bounced at the target.
+                if let Some(backend) = &mut backend
+                    && let Some(dialed_at) = backend.dialed_at.take()
+                    && dialed_at != screen
+                    && backend
+                        .input_tx
+                        .send(DesktopInput::Resize { width, height })
+                        .await
+                        .is_err()
+                {
+                    break;
+                }
                 continue;
             }
             ServerEvent::ResizeRequest { width, height } => {
-                if let Some(backend) = &backend {
+                if let Some(backend) = &mut backend {
+                    // The viewer is driving the size itself now; reconciling the dial size
+                    // afterwards could only replay a stale one.
+                    backend.dialed_at = None;
                     if backend
                         .input_tx
                         .send(DesktopInput::Resize { width, height })
@@ -404,8 +429,11 @@ async fn control_loop(
             ServerEvent::Input(input) => input,
         };
 
-        // A viewer that never negotiates a size won't emit `Size`; dial the pending target
-        // on its first input so the session still connects (at the advertised default).
+        // A viewer that never negotiates a size won't emit `Size`; dial the pending target on
+        // its first input so the session still connects (at the advertised default). Input the
+        // viewer sent during the handshake is delivered ahead of the negotiated size, so this
+        // also fires for viewers that do negotiate one — the `Size` arm resizes the target once
+        // that size arrives.
         dial_if_pending(
             &mut backend,
             &mut pending_dial,
