@@ -20,6 +20,8 @@ Two modes, and the routine one is `--named`. From the repository root:
     ... --named --fail-fast           # stop at the first guard that does not
                                       # discriminate, rather than spending hours
                                       # confirming the rest
+    ... --named --shard 3/8           # this shard's guards only, so a sweep can
+                                      # be split across CI jobs and finish
 
 `PYTHONPATH` is not decoration. The virtualenv lives in `tests/`, so poetry has
 to be pointed there, and `poetry -C tests run` executes with the working
@@ -1197,7 +1199,14 @@ def _check_one_round(mutations, packages, in_flight, round_number, rounds):
             in_flight.pop(str(source), None)
 
 
-def write_artifact(*, partial: bool, results: list, refused: str | None, mode: str = "full"):
+def write_artifact(
+    *,
+    results: list,
+    refused: str | None,
+    selected: int,
+    mode: str = "full",
+    shard: str | None = None,
+):
     """The run's own record, so a claim about coverage can be checked later.
 
     Required by protocol amendment A2. It carries the guards, their named
@@ -1205,6 +1214,14 @@ def write_artifact(*, partial: bool, results: list, refused: str | None, mode: s
     reason when the run refused to produce a number at all. A refusal used to
     leave nothing behind, so "the matrix says 40/40" and "the matrix refused to
     run" were indistinguishable a day later.
+
+    Every count here is a count of *this run*. The first version of this file
+    reported `len(MUTATIONS)` and `len(DISCRIMINATES)` — the height of the guard
+    table and the number of declarations in it — under names that read as
+    results. A four-guard run and a full sweep emitted the same "53 / 53", and
+    `partial` was set from whether a `--named <substring>` filter was passed, so
+    a `--changed` subset called itself complete. An artifact that cannot tell a
+    subset from a sweep is worse than none: it invites the number to be quoted.
     """
     (REPO / "tests" / "mutation-matrix.json").write_text(
         json.dumps(
@@ -1212,9 +1229,18 @@ def write_artifact(*, partial: bool, results: list, refused: str | None, mode: s
                 "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "head": run(["git", "rev-parse", "HEAD"]).stdout.strip(),
                 "mode": mode,
-                "partial": partial,
-                "guards_total": len(MUTATIONS),
-                "guards_with_a_named_discriminator": len(DISCRIMINATES),
+                "shard": shard,
+                "partial": len(results) < len(MUTATIONS),
+                "guards_defined": len(MUTATIONS),
+                "guards_selected": selected,
+                "guards_measured": len(results),
+                "guards_that_discriminate": sum(
+                    1
+                    for r in results
+                    # `--named` calls the verdict "discriminates"; the full
+                    # sweep calls the same verdict "caught".
+                    if r.get("status") in ("discriminates", "caught")
+                ),
                 "refused": refused,
                 "results": results,
             },
@@ -1482,6 +1508,27 @@ def main():
     fail_fast = "--fail-fast" in args
     args = [a for a in args if a != "--fail-fast"]
 
+    # A full sweep is over fourteen hours on one machine, and a GitHub-hosted
+    # job is killed at six. Splitting the guards across jobs is what makes the
+    # sweep something CI can actually finish rather than something CI starts.
+    # Round-robin rather than contiguous blocks: the integration guards rebuild
+    # the gateway and cost minutes each, the unit guards cost seconds, and they
+    # are clustered in the table by subject, so contiguous blocks would hand one
+    # shard every expensive guard.
+    shard = None
+    if "--shard" in args:
+        at = args.index("--shard")
+        if at + 1 >= len(args):
+            sys.exit("--shard needs INDEX/TOTAL, e.g. --shard 3/8")
+        shard = args[at + 1]
+        del args[at : at + 2]
+        try:
+            shard_index, shard_total = (int(part) for part in shard.split("/", 1))
+        except ValueError:
+            sys.exit(f"--shard wants INDEX/TOTAL, got {shard!r}")
+        if shard_total < 1 or not 1 <= shard_index <= shard_total:
+            sys.exit(f"--shard {shard} is out of range: INDEX must be 1..TOTAL")
+
     changed_base = None
     if "--changed" in args:
         at = args.index("--changed")
@@ -1533,6 +1580,20 @@ def main():
     # the replacement check runs two workspace-wide `cargo check` passes — and
     # they used to do it in complete silence. A run that cannot be told apart
     # from a hung one gets killed; that happened three times in one day.
+    if shard is not None:
+        whole = len(selected)
+        selected = [m for i, m in enumerate(selected) if i % shard_total == shard_index - 1]
+        # Named out loud for the same reason `--changed` names its scope: a
+        # shard's green result says nothing about the guards it never held, and
+        # only the collected shards add up to a sweep.
+        print(
+            f"shard {shard}: measuring {len(selected)} of {whole} selected "
+            f"guard(s); this shard alone is not a sweep"
+        )
+        if not selected:
+            print("no guard fell into this shard")
+            raise SystemExit(0)
+
     print(f"checking {len(selected)} guard(s) before measuring anything", flush=True)
     print("  anchors...", flush=True)
     check_anchors(selected + [CANARY])
@@ -1551,7 +1612,13 @@ def main():
         # measured against its own baseline.
         selected = sorted(selected, key=lambda m: m[0] not in RECENT_GUARDS)
         results = verify_named(selected, fail_fast=fail_fast)
-        write_artifact(partial=bool(only), results=results, refused=None, mode="named")
+        write_artifact(
+            results=results,
+            refused=None,
+            selected=len(selected),
+            mode="named",
+            shard=shard,
+        )
         good = [r for r in results if r["status"] == "discriminates"]
         print(
             f"\n{len(good)}/{len(results)} guards discriminate: the test named "
@@ -1580,7 +1647,9 @@ def main():
         # A refusal is a result and gets written out like one. Amendment A2:
         # every coverage number this project published was checkable only by
         # repeating the run, and two of them were wrong.
-        write_artifact(partial=bool(only), results=[], refused=refused)
+        write_artifact(
+            results=[], refused=refused, selected=len(selected), shard=shard
+        )
         sys.exit(refused)
     print(f"{'ok':>9}  canary survived, so a 'caught' verdict means something\n")
 
@@ -1595,7 +1664,9 @@ def main():
             print(f"           last output: {result['tail']}")
 
     run(["cargo", "build", "--bin", "warpgate"])
-    write_artifact(partial=bool(only), results=results, refused=None)
+    write_artifact(
+        results=results, refused=None, selected=len(selected), shard=shard
+    )
 
     caught = [r for r in results if r["status"] == "caught"]
     print(
