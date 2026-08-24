@@ -1,6 +1,7 @@
 // https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpeclip/
 
 use std::any::Any;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use ironrdp::cliprdr::backend::{ClipboardMessage, CliprdrBackend};
@@ -69,13 +70,29 @@ impl ClipboardText {
 #[derive(Clone, Debug)]
 pub(crate) struct Clipboard<S> {
     store: ClipboardText,
+    ready: Arc<AtomicBool>,
     sink: S,
 }
 
 impl<S: ClipboardSink + Clone> Clipboard<S> {
+    /// A clipboard that may advertise from the moment it exists — the cliprdr *server* role,
+    /// which opens the channel itself and is free to announce formats at any time.
     pub(crate) fn new(sink: S) -> Self {
+        Self::with_readiness(sink, true)
+    }
+
+    /// A clipboard that holds offers back until [`CliprdrBackend::on_ready`] — the cliprdr
+    /// *client* role, whose format list is only legal once the remote's initialization
+    /// sequence has run ([MS-RDPECLIP] 3.1.5.1). Text offered before then seeds the store and
+    /// rides the initialization batch instead of racing ahead of it.
+    pub(crate) fn deferred(sink: S) -> Self {
+        Self::with_readiness(sink, false)
+    }
+
+    fn with_readiness(sink: S, ready: bool) -> Self {
         Self {
             store: ClipboardText::default(),
+            ready: Arc::new(AtomicBool::new(ready)),
             sink,
         }
     }
@@ -87,6 +104,7 @@ impl<S: ClipboardSink + Clone> Clipboard<S> {
     pub(crate) fn backend(&self) -> TextClipboard<S> {
         TextClipboard {
             store: self.store.clone(),
+            ready: Arc::clone(&self.ready),
             sink: self.sink.clone(),
             paste_format: None,
         }
@@ -96,7 +114,9 @@ impl<S: ClipboardSink + Clone> Clipboard<S> {
     pub(crate) fn offer(&self, mut text: String) {
         truncate_for_wire(&mut text, MAX_CLIPBOARD_BYTES);
         self.store.set(text);
-        advertise_text(&self.sink);
+        if self.ready.load(Ordering::SeqCst) {
+            advertise_text(&self.sink);
+        }
     }
 }
 
@@ -104,6 +124,7 @@ impl<S: ClipboardSink + Clone> Clipboard<S> {
 #[derive(Debug)]
 pub(crate) struct TextClipboard<S> {
     store: ClipboardText,
+    ready: Arc<AtomicBool>,
     sink: S,
     paste_format: Option<ClipboardFormatId>,
 }
@@ -127,11 +148,26 @@ impl<S: ClipboardSink> CliprdrBackend for TextClipboard<S> {
         ClipboardGeneralCapabilityFlags::empty()
     }
 
-    fn on_ready(&mut self) {}
+    fn on_ready(&mut self) {
+        // Text offered while the channel was coming up was stored but not announced; announce
+        // it now. If it was already carried by the initialization batch this repeats one format
+        // list of identical content, which is legal and cheap — unlike an offer that outruns
+        // the initialization sequence, which wedges the remote's clipboard for the session.
+        if !self.ready.swap(true, Ordering::SeqCst) && !self.store.get().is_empty() {
+            advertise_text(&self.sink);
+        }
+    }
 
-    // Remote asks to advertise available contents
+    /// Remote asks to advertise available contents. Answered unconditionally: this is the
+    /// remote's Monitor Ready, and the format list replying to it is what carries our
+    /// capabilities and completes the initialization sequence. Staying silent because there is
+    /// nothing to offer leaves the channel unusable in both directions, so an empty clipboard
+    /// answers with an empty format list — the standard "nothing to offer" announcement.
     fn on_request_format_list(&mut self) {
-        if !self.store.get().is_empty() {
+        if self.store.get().is_empty() {
+            self.sink
+                .request(ClipboardMessage::SendInitiateCopy(vec![]));
+        } else {
             advertise_text(&self.sink);
         }
     }
@@ -211,17 +247,36 @@ mod tests {
         }
     }
 
-    fn fixture() -> (
+    type Fixture = (
         Clipboard<TestSink>,
         TextClipboard<TestSink>,
         std::sync::mpsc::Receiver<ClipboardMessage>,
         std::sync::mpsc::Receiver<String>,
-    ) {
+    );
+
+    fn fixture() -> Fixture {
+        build_fixture(Clipboard::new)
+    }
+
+    fn deferred_fixture() -> Fixture {
+        build_fixture(Clipboard::deferred)
+    }
+
+    fn build_fixture(make: fn(TestSink) -> Clipboard<TestSink>) -> Fixture {
         let (requests, requests_rx) = channel();
         let (texts, texts_rx) = channel();
-        let clipboard = Clipboard::new(TestSink { requests, texts });
+        let clipboard = make(TestSink { requests, texts });
         let backend = clipboard.backend();
         (clipboard, backend, requests_rx, texts_rx)
+    }
+
+    fn offered_formats(message: ClipboardMessage) -> Vec<ClipboardFormatId> {
+        match message {
+            ClipboardMessage::SendInitiateCopy(formats) => {
+                formats.iter().map(ClipboardFormat::id).collect()
+            }
+            _ => panic!("expected a format list"),
+        }
     }
 
     /// A remote copy has to be pulled: the format list only names what is available.
@@ -308,21 +363,79 @@ mod tests {
         assert!(stored.ends_with('🦀'));
     }
 
-    /// A rebuilt channel asks for a fresh format list; text copied through the previous
-    /// channel generation must be re-advertised, an empty store must not be.
+    /// A channel asking for a format list is running its initialization sequence, and the
+    /// reply is what completes it — so an empty store answers with an empty list rather than
+    /// staying silent. Text copied through a previous channel generation is re-advertised.
     #[test]
-    fn channel_bringup_readvertises_stored_text() {
+    fn channel_bringup_always_answers_with_a_format_list() {
         let (clipboard, mut backend, requests, _texts) = fixture();
         backend.on_request_format_list();
-        assert!(requests.try_recv().is_err());
+        assert_eq!(offered_formats(requests.try_recv().unwrap()), []);
 
         clipboard.offer("kept".to_owned());
         let _ = requests.try_recv();
         let mut next = clipboard.backend();
         next.on_request_format_list();
+        assert_eq!(
+            offered_formats(requests.try_recv().unwrap()),
+            [ClipboardFormatId::CF_UNICODETEXT]
+        );
+    }
+
+    /// A deferred clipboard belongs to a channel that may not announce formats before the
+    /// remote's initialization sequence has run: text offered early is stored silently and
+    /// announced once the channel reports itself ready.
+    #[test]
+    fn a_deferred_clipboard_holds_offers_until_ready() {
+        let (clipboard, mut backend, requests, _texts) = deferred_fixture();
+
+        clipboard.offer("early".to_owned());
+        assert!(requests.try_recv().is_err());
+
+        backend.on_ready();
+        assert_eq!(
+            offered_formats(requests.try_recv().unwrap()),
+            [ClipboardFormatId::CF_UNICODETEXT]
+        );
+        backend.on_format_data_request(FormatDataRequest {
+            format: ClipboardFormatId::CF_UNICODETEXT,
+        });
         assert!(matches!(
             requests.try_recv(),
-            Ok(ClipboardMessage::SendInitiateCopy(_))
+            Ok(ClipboardMessage::SendFormatData(_))
         ));
+
+        clipboard.offer("later".to_owned());
+        assert_eq!(
+            offered_formats(requests.try_recv().unwrap()),
+            [ClipboardFormatId::CF_UNICODETEXT]
+        );
+    }
+
+    /// Nothing was offered while the channel came up, so becoming ready has nothing to
+    /// announce — the initialization reply already said as much.
+    #[test]
+    fn an_idle_deferred_clipboard_announces_nothing_when_ready() {
+        let (_clipboard, mut backend, requests, _texts) = deferred_fixture();
+
+        backend.on_request_format_list();
+        assert_eq!(offered_formats(requests.try_recv().unwrap()), []);
+
+        backend.on_ready();
+        assert!(requests.try_recv().is_err());
+    }
+
+    /// Text offered before the remote asked for a format list rides that reply, which is the
+    /// earliest legal moment to announce it.
+    #[test]
+    fn early_text_rides_the_initialization_format_list() {
+        let (clipboard, mut backend, requests, _texts) = deferred_fixture();
+
+        clipboard.offer("early".to_owned());
+        backend.on_request_format_list();
+        assert_eq!(
+            offered_formats(requests.try_recv().unwrap()),
+            [ClipboardFormatId::CF_UNICODETEXT]
+        );
     }
 }

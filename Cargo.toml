@@ -190,7 +190,6 @@ debug = "line-tables-only"
 
 [profile.release]
 lto = true
-panic = "abort"
 strip = "debuginfo"
 
 [profile.release-no-lto]

@@ -1,5 +1,5 @@
 use std::collections::hash_map::Entry::Vacant;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::str::FromStr;
@@ -53,6 +53,12 @@ use crate::{
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
+
+/// Cap on how deep [`ServerSession::send_command_and_wait`] may re-enter itself
+/// before it stops dispatching events and buffers them instead. Ordinary
+/// traffic stays at a depth of one or two; the cap only exists so a flood of
+/// concurrent channel requests can't grow the stack without bound.
+const MAX_NESTED_COMMAND_WAITS: usize = 16;
 
 #[derive(Clone)]
 #[allow(clippy::large_enum_variant)]
@@ -117,6 +123,13 @@ pub struct ServerSession {
     /// the client id (and thus the owning channel) is unknown, so unlike
     /// target-side events they can't be held on the channel itself.
     deferred_server_events: Vec<ServerHandlerEvent>,
+    /// Events taken off the queue past [`MAX_NESTED_COMMAND_WAITS`], replayed by
+    /// the main event loop once the nesting unwinds.
+    pending_events: VecDeque<Event>,
+    /// Nesting depth of [`Self::send_command_and_wait`]. A handler dispatched
+    /// from a wait can await a command of its own, so the pump re-enters itself
+    /// one stack level deeper per concurrent request.
+    command_wait_depth: usize,
     rc_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
     rc_abort_tx: UnboundedSender<()>,
     rc_state: RCState,
@@ -225,6 +238,8 @@ impl ServerSession {
             session_handle: None,
             channels: ChannelRegistry::new(),
             deferred_server_events: vec![],
+            pending_events: VecDeque::new(),
+            command_wait_depth: 0,
             rc_tx: rc_handles.command_tx.clone(),
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
@@ -305,6 +320,12 @@ impl ServerSession {
 
         Ok(async move {
             let result = loop {
+                if let Some(event) = this.pending_events.pop_front() {
+                    if let Err(error) = this.handle_event(event).await {
+                        break Err(error);
+                    }
+                    continue;
+                }
                 let next_event_fut = this.get_next_event();
                 match tokio::time::timeout(inactivity_timeout, next_event_fut).await {
                     Ok(Some(event)) => {
@@ -2449,6 +2470,15 @@ impl ServerSession {
         self.rc_tx.send((command, None)).map_err(|e| e.0.0)
     }
 
+    /// Send a command to the target and pump the event loop until its reply
+    /// arrives on the oneshot.
+    ///
+    /// Pumping is not optional: the reply can depend on an event of our own —
+    /// the target's unknown-host-key prompt is answered from
+    /// [`Self::handle_unknown_host_key`], off this very queue — so merely
+    /// draining the queue would deadlock. Past [`MAX_NESTED_COMMAND_WAITS`]
+    /// events are buffered instead of dispatched, bounding the stack that the
+    /// re-entrant handlers build up.
     async fn send_command_and_wait(&mut self, command: RCCommand) -> Result<(), SshClientError> {
         let (tx, rx) = oneshot::channel();
         let mut cmd = match self.rc_tx.send((command, Some(tx))) {
@@ -2456,21 +2486,28 @@ impl ServerSession {
             Err(_) => PendingCommand::Failed,
         };
 
-        loop {
+        self.command_wait_depth += 1;
+        let result = loop {
             tokio::select! {
                 result = &mut cmd => {
-                    return result
+                    break result
                 }
                 event = self.get_next_event() => {
                     match event {
                         Some(event) => {
-                            self.handle_event(event).await.map_err(SshClientError::from)?;
+                            if self.command_wait_depth > MAX_NESTED_COMMAND_WAITS {
+                                self.pending_events.push_back(event);
+                            } else if let Err(error) = self.handle_event(event).await {
+                                break Err(error.into());
+                            }
                         }
-                        None => {Err(SshClientError::MpscError)?}
+                        None => break Err(SshClientError::MpscError),
                     }
                 }
             }
-        }
+        };
+        self.command_wait_depth -= 1;
+        result
     }
 
     pub fn _disconnect(&self) {
