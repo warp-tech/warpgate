@@ -1,5 +1,5 @@
 use std::collections::hash_map::Entry::Vacant;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::str::FromStr;
@@ -115,6 +115,12 @@ pub struct ServerSession {
     /// the client id (and thus the owning channel) is unknown, so unlike
     /// target-side events they can't be held on the channel itself.
     deferred_server_events: Vec<ServerHandlerEvent>,
+    /// Events consumed off the queue while a command reply was being awaited
+    /// (see [`Self::send_command_and_wait`]), replayed by the main event loop.
+    /// Handling them at the point of consumption would recurse: the handler
+    /// can await a command of its own, consuming the next event one stack
+    /// level deeper — unboundedly, under sustained traffic.
+    pending_events: VecDeque<Event>,
     rc_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
     rc_abort_tx: UnboundedSender<()>,
     rc_state: RCState,
@@ -223,6 +229,7 @@ impl ServerSession {
             session_handle: None,
             channels: ChannelRegistry::new(),
             deferred_server_events: vec![],
+            pending_events: VecDeque::new(),
             rc_tx: rc_handles.command_tx.clone(),
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
@@ -303,6 +310,14 @@ impl ServerSession {
 
         Ok(async move {
             let result = loop {
+                // Events a nested command wait consumed are handled here, at
+                // the top level, so their handlers never stack.
+                if let Some(event) = this.pending_events.pop_front() {
+                    if let Err(error) = this.handle_event(event).await {
+                        break Err(error);
+                    }
+                    continue;
+                }
                 let next_event_fut = this.get_next_event();
                 match tokio::time::timeout(inactivity_timeout, next_event_fut).await {
                     Ok(Some(event)) => {
@@ -2433,9 +2448,12 @@ impl ServerSession {
                 }
                 event = self.get_next_event() => {
                     match event {
-                        Some(event) => {
-                            self.handle_event(event).await.map_err(SshClientError::from)?;
-                        }
+                        // Consuming (rather than handling) keeps the queue
+                        // drained so the reply can't deadlock on backpressure,
+                        // without recursing into handlers that may wait on
+                        // commands of their own. The reply itself arrives on
+                        // the oneshot, never through the queue.
+                        Some(event) => self.pending_events.push_back(event),
                         None => {Err(SshClientError::MpscError)?}
                     }
                 }
