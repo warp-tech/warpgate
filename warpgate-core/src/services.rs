@@ -25,7 +25,7 @@ use crate::{
 #[derive(Clone)]
 pub struct Services {
     pub db: DatabaseConnection,
-    pub recordings: Arc<Mutex<SessionRecordings>>,
+    pub recordings: Arc<SessionRecordings>,
     pub config: Arc<Mutex<WarpgateConfig>>,
     pub cluster: Arc<Cluster>,
     pub state: Arc<Mutex<State>>,
@@ -99,8 +99,7 @@ impl Services {
         with_vault: bool,
     ) -> Result<Self> {
         let db = connect_to_db_and_migrate(&config, &params).await?;
-        let recordings = SessionRecordings::new(db.clone(), &params);
-        let recordings = Arc::new(Mutex::new(recordings));
+        let recordings = Arc::new(SessionRecordings::new(db.clone(), &params));
 
         let cluster = Arc::new(Cluster::new(db.clone(), config.store.http.listen.port()).await?);
 

@@ -270,10 +270,9 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 let retention = { services.config.lock().await.store.log.retention };
                 let audit_retention = { services.config.lock().await.store.log.audit_retention };
                 let interval = std::cmp::min(retention, audit_retention) / 10;
-                #[allow(clippy::explicit_auto_deref)]
                 match cleanup_db(
                     &services.db,
-                    &*services.recordings.lock().await,
+                    &services.recordings,
                     &retention,
                     &audit_retention,
                 )
@@ -335,7 +334,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     }
 
     let cleanup = async {
-        services.recordings.lock().await.shutdown().await;
+        services.recordings.shutdown().await;
         if let Err(error) = services.cluster.shutdown().await {
             warn!(%error, "Failed to deregister cluster node");
         }
