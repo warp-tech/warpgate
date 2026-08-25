@@ -271,8 +271,6 @@ pub async fn start_recording(
 ) -> Option<DesktopRecorder> {
     match services
         .recordings
-        .lock()
-        .await
         .start::<DesktopRecorder, _>(session_id, None, DesktopRecordingMetadata::Desktop)
         .await
     {
