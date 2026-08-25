@@ -5,6 +5,7 @@
         applyDesktopFrame,
         type DesktopFrame,
         ensureCanvasSize,
+        isDesktopFrameType,
     } from 'common/desktopCanvas'
     import {
         type Click,
@@ -28,16 +29,6 @@
     const DATA_URL = `/@warpgate/admin/api/recordings/${recording.id}/data`
     const INDEX_URL = `/@warpgate/admin/api/recordings/${recording.id}/index`
     const STREAM_URL = `wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/stream`
-
-    // Framebuffer message types (everything else on the stream is a viewer-input item).
-    const FRAME_TYPES = new Set([
-        'resize',
-        'raw_image',
-        'png_image',
-        'jpeg_image',
-        'copy_rect',
-        'cursor',
-    ])
 
     type Frame = DesktopFrame & { time: number }
     type InputItem =
@@ -93,7 +84,7 @@
 
     // Apply one item: framebuffer frames to the canvas, viewer input to the overlay.
     async function applyItem(item: Frame | InputItem) {
-        if (!FRAME_TYPES.has(item.type)) {
+        if (!isDesktopFrameType(item.type)) {
             recordInput(item)
             return
         }

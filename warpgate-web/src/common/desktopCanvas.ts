@@ -1,9 +1,11 @@
 // Shared framebuffer rendering for desktop (RDP/VNC) sessions.
 //
-// Used by the live in-browser client (gateway/WebDesktop.svelte, synchronous) and the
-// admin recording player (admin/player/DesktopRecordingPlayer.svelte, async + ordered so
-// image decodes don't race). gen-2 recordings encode framebuffer rects as PNG (`png_image`,
-// with `keyframe` full-canvas snapshots); the live interactive client still sends raw BGRA.
+// Used by the live in-browser client (gateway/WebDesktop.svelte) and the admin recording
+// player (admin/player/DesktopRecordingPlayer.svelte). Both paint strictly in arrival
+// order; the live client additionally starts each image decode as the frame arrives, so a
+// burst still decodes in parallel. gen-2 recordings encode framebuffer rects as PNG
+// (`png_image`, with `keyframe` full-canvas snapshots); the live stream mixes raw BGRA
+// tiles with the JPEG/PNG the backend re-encodes larger ones to.
 
 export interface Rect {
     x: number
@@ -29,6 +31,27 @@ export type DesktopFrame =
     | { type: 'jpeg_image'; rect: Rect; data: FrameImageData }
     | { type: 'copy_rect'; dst: Rect; src_x: number; src_y: number }
     | { type: 'cursor'; rect: Rect; data: FrameImageData }
+
+/** A frame whose image decode, if it has one, is already running. */
+export type PreparedFrame = DesktopFrame & {
+    bitmap?: Promise<ImageBitmap | null>
+}
+
+// Exhaustive over DesktopFrame['type'], so adding a frame kind fails compilation here
+// instead of leaving a hand-kept list stale.
+const FRAME_TYPES: Record<DesktopFrame['type'], true> = {
+    resize: true,
+    raw_image: true,
+    png_image: true,
+    jpeg_image: true,
+    copy_rect: true,
+    cursor: true,
+}
+
+/** Whether a stream item type is a framebuffer frame, as opposed to a viewer-input item. */
+export function isDesktopFrameType(type: string): type is DesktopFrame['type'] {
+    return Object.hasOwn(FRAME_TYPES, type)
+}
 
 /**
  * A frame that only touches part of the surface and can be dropped to catch up
@@ -103,24 +126,67 @@ function drawRaw(
     )
 }
 
-async function drawImageBlob(
-    ctx: CanvasRenderingContext2D,
-    rect: Rect,
-    bytes: Uint8Array<ArrayBuffer>,
+function decodeBlob(
+    data: FrameImageData,
     mime: string,
-): Promise<void> {
-    const bitmap = await createImageBitmap(new Blob([bytes], { type: mime }))
-    ctx.drawImage(bitmap, rect.x, rect.y)
-    bitmap.close()
+): Promise<ImageBitmap | null> {
+    // A decode that fails resolves to `null`: dropping one tile beats wedging the paint
+    // loop waiting on it, and beats an unhandled rejection surfacing frames later.
+    return createImageBitmap(new Blob([toBytes(data)], { type: mime })).catch(
+        () => null,
+    )
 }
 
-/** Apply one framebuffer message. Awaiting the result renders frames strictly in order
- * (recording player: a keyframe must fully paint before the deltas that follow it); the
- * live client fire-and-forgets it (`void`), matching single-frame-at-a-time streaming. */
-export async function applyDesktopFrame(
+function startDecode(
+    msg: DesktopFrame,
+): Promise<ImageBitmap | null> | undefined {
+    switch (msg.type) {
+        case 'png_image':
+            return decodeBlob(msg.data, 'image/png')
+        case 'jpeg_image':
+            return decodeBlob(msg.data, 'image/jpeg')
+        default:
+            return undefined
+    }
+}
+
+/**
+ * Start a frame's image decode ahead of painting it, so a queued burst decodes in
+ * parallel while still being painted in arrival order.
+ */
+export function decodeDesktopFrame(msg: DesktopFrame): PreparedFrame {
+    const bitmap = startDecode(msg)
+    return bitmap ? { ...msg, bitmap } : msg
+}
+
+// Serializes paints per canvas: `createImageBitmap` does not resolve in issue order on
+// every engine — Chromium resolves roughly by completion time, so a large tile lands
+// after the small ones queued behind it — and painting as decodes land would leave stale
+// pixels on top of newer ones, permanently, until that region is repainted again.
+const paintChains = new WeakMap<HTMLCanvasElement, Promise<void>>()
+
+/**
+ * Apply one framebuffer message. Frames for the same canvas paint strictly in call
+ * order, even if the caller doesn't await; awaiting is only needed for completion or
+ * backpressure.
+ */
+export function applyDesktopFrame(
     canvas: HTMLCanvasElement,
     ctx: CanvasRenderingContext2D,
-    msg: DesktopFrame,
+    msg: PreparedFrame,
+): Promise<void> {
+    const previous = paintChains.get(canvas) ?? Promise.resolve()
+    const result = previous.then(() => paintFrame(canvas, ctx, msg))
+    // The stored tail swallows the failure so one bad frame can't wedge every later
+    // one; the caller still sees its own frame's rejection.
+    paintChains.set(canvas, result.catch(() => undefined))
+    return result
+}
+
+async function paintFrame(
+    canvas: HTMLCanvasElement,
+    ctx: CanvasRenderingContext2D,
+    msg: PreparedFrame,
 ): Promise<void> {
     switch (msg.type) {
         case 'resize':
@@ -131,13 +197,17 @@ export async function applyDesktopFrame(
             drawRaw(ctx, msg.rect, toBytes(msg.data))
             break
         case 'png_image':
-            ensureForRect(canvas, msg.rect)
-            await drawImageBlob(ctx, msg.rect, toBytes(msg.data), 'image/png')
+        case 'jpeg_image': {
+            const bitmap = await (msg.bitmap ?? startDecode(msg))
+            if (bitmap) {
+                // Growing the canvas clears it, so grow only once there are pixels to put
+                // back — never for a decode that turned out to be unusable.
+                ensureForRect(canvas, msg.rect)
+                ctx.drawImage(bitmap, msg.rect.x, msg.rect.y)
+                bitmap.close()
+            }
             break
-        case 'jpeg_image':
-            ensureForRect(canvas, msg.rect)
-            await drawImageBlob(ctx, msg.rect, toBytes(msg.data), 'image/jpeg')
-            break
+        }
         case 'copy_rect':
             ctx.drawImage(
                 canvas,
@@ -153,5 +223,8 @@ export async function applyDesktopFrame(
             break
         case 'cursor':
             break
+        default:
+            // Compile-time exhaustiveness: a new frame kind must be handled above.
+            return msg satisfies never
     }
 }
