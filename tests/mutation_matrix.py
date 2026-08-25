@@ -900,14 +900,25 @@ def run_named_only(
                 name = _test_name_from_summary_line(line, head)
                 if name:
                     outcome[name] = head
+        # A skip is the one outcome pytest's short summary does not attribute:
+        # the line is `SKIPPED [1] <file>:<line>: <reason>`, with no nodeid in
+        # it. So a name that goes unreported while skips were printed is named
+        # as probably skipped rather than as a blank.
+        skips = [
+            line for line in result.stdout.splitlines() if line.startswith("SKIPPED")
+        ]
         for name in python:
             verdict = outcome.get(name)
             if verdict == "FAILED":
                 failed.add(name)
             elif verdict == "PASSED":
                 passed.add(name)
+            elif verdict:
+                unclear[name] = verdict
+            elif skips:
+                unclear[name] = f"not reported; the run skipped {len(skips)}: {skips[0][:90]}"
             else:
-                unclear[name] = verdict or "never reported by pytest"
+                unclear[name] = "never reported by pytest"
         if unclear:
             # Kept because the reason a test did not report is in pytest's own
             # output, and every run so far has thrown that output away.
