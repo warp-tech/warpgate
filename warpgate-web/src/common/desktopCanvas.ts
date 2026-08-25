@@ -179,7 +179,10 @@ export function applyDesktopFrame(
     const result = previous.then(() => paintFrame(canvas, ctx, msg))
     // The stored tail swallows the failure so one bad frame can't wedge every later
     // one; the caller still sees its own frame's rejection.
-    paintChains.set(canvas, result.catch(() => undefined))
+    paintChains.set(
+        canvas,
+        result.catch(() => undefined),
+    )
     return result
 }
 
