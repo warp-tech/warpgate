@@ -801,7 +801,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="update_user_role",
-        permission=None,
+        permission="access_roles_assign",
         call=lambda api, r: api.update_user_role_with_http_info(
             r["user_id"],
             r["role_id"],
