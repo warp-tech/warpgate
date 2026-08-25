@@ -225,13 +225,7 @@ async fn _handle_normal_request_inner(
 
     // Record the request if recording is enabled
     let mut recorder_opt = {
-        let enabled = services
-            .recordings
-            .lock()
-            .await
-            .is_enabled()
-            .await
-            .unwrap_or(false);
+        let enabled = services.recordings.is_enabled().await.unwrap_or(false);
         if enabled {
             match start_recording_api(&session_id, &services.recordings).await {
                 Ok(recorder) => Some(recorder),
@@ -438,13 +432,7 @@ async fn _handle_websocket_request_inner(
 
     let (recorder_tx, recorder_rx) = mpsc::channel::<Vec<u8>>(1000);
     {
-        let enabled = services
-            .recordings
-            .lock()
-            .await
-            .is_enabled()
-            .await
-            .unwrap_or(false);
+        let enabled = services.recordings.is_enabled().await.unwrap_or(false);
         if enabled && let Some(metadata) = deduce_exec_recording_metadata(&full_url) {
             match start_recording_exec(&session_id, &services.recordings, metadata).await {
                 Err(e) => {

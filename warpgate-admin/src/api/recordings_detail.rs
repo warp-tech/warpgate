@@ -139,8 +139,6 @@ async fn serve_recording_file(
     let access = ctx
         .services()
         .recordings
-        .lock()
-        .await
         .access(recording, file)
         .await
         .map_err(InternalServerError)?;
@@ -372,7 +370,7 @@ pub async fn api_get_recording_stream(
     let owner = recording_owner(&ctx, &recording).await?;
 
     proxy_or_serve_websocket(&ctx, req, ws, owner, async move |ws| {
-        let recordings = ctx.services().recordings.lock().await;
+        let recordings = &ctx.services().recordings;
         let live = match recordings.subscribe_live(&id).await {
             Some(receiver) => {
                 // An in-progress recording is always a local file on the owner

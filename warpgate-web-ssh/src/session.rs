@@ -38,7 +38,7 @@ pub struct WebSshSession {
     command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
 
     channel_counter: Arc<AtomicUsize>,
-    recordings: Arc<Mutex<SessionRecordings>>,
+    recordings: Arc<SessionRecordings>,
     channel_audits: Arc<Mutex<HashMap<Uuid, ChannelAudit>>>,
     pending_host_key: Arc<Mutex<Option<PendingHostKey>>>,
 }
@@ -53,7 +53,7 @@ impl WebSshSession {
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
         abort_tx: UnboundedSender<()>,
-        recordings: Arc<Mutex<SessionRecordings>>,
+        recordings: Arc<SessionRecordings>,
     ) -> Self {
         Self {
             core: WebSession::new(
@@ -88,8 +88,6 @@ impl WebSshSession {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         match self
             .recordings
-            .lock()
-            .await
             .start::<TerminalRecorder, _>(
                 &self.id(),
                 None,
