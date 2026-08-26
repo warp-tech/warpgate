@@ -35,7 +35,7 @@ use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{debug, warn};
-use warpgate_common::{RdpTargetAuth, TargetRdpOptions};
+use warpgate_common::{RdpTargetAuth, RdpTargetCompression, TargetRdpOptions};
 use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
 
 use crate::clipboard::{Clipboard, ClipboardSink, TextClipboard};
@@ -608,6 +608,10 @@ fn build_config(
     width: u16,
     height: u16,
 ) -> connector::Config {
+    let (codec_overrides, lossy_compression): (&[&str], bool) = match options.compression {
+        RdpTargetCompression::RemoteFX => (&[], true),
+        RdpTargetCompression::Lossless => (&["remotefx:off"], false),
+    };
     connector::Config {
         credentials: Credentials::UsernamePassword {
             username: options.username.clone(),
@@ -625,11 +629,13 @@ fn build_config(
         desktop_size: connector::DesktopSize { width, height },
         // The default codec set advertises RemoteFX; `lossy_compression` additionally lets
         // the target use dynamic color fidelity / subsampling on legacy bitmap updates,
-        // like desktop clients do. (`&[]` never fails; `None` would just drop the flags.)
-        bitmap: client_codecs_capabilities(&[])
+        // like desktop clients do. A `lossless` target advertises neither, so it sends
+        // losslessly-compressed 32bpp bitmap updates instead. (`client_codecs_capabilities`
+        // never fails for these inputs; `None` would just drop the flags.)
+        bitmap: client_codecs_capabilities(codec_overrides)
             .ok()
             .map(|codecs| connector::BitmapConfig {
-                lossy_compression: true,
+                lossy_compression,
                 color_depth: 32,
                 codecs,
             }),

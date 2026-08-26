@@ -1,6 +1,7 @@
 <script lang="ts">
     import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import {
+        RdpTargetCompression,
         RdpTlsSecurity,
         type TargetOptionsTargetRdpOptions,
     } from 'admin/lib/api'
@@ -63,11 +64,13 @@
 
 <FormGroup floating label="Security level">
     <Input type="select" bind:value={options.tlsSecurity}>
-        <option value="Tls12">Windows 2016 / 10+ (TLS 1.2)</option>
-        <option value="Tls12WithLegacyCiphers">
+        <option value={RdpTlsSecurity.Tls12}>
+            Windows 2016 / 10+ (TLS 1.2)
+        </option>
+        <option value={RdpTlsSecurity.Tls12WithLegacyCiphers}>
             Windows 2012 / 8+ (TLS 1.2 with legacy ciphers)
         </option>
-        <option value="Tls10Unsafe">
+        <option value={RdpTlsSecurity.Tls10Unsafe}>
             Windows 2008 R2 or older (TLS 1.0 with unsafe ciphers)
         </option>
     </Input>
@@ -81,4 +84,15 @@
 <HelpText>
     Typically, RDP servers use self-signed certificates, so this is off by
     default.
+</HelpText>
+
+<h4 class="mt-4">Quality</h4>
+<FormGroup floating label="Compression between Warpgate and target">
+    <Input type="select" bind:value={options.compression}>
+        <option value={RdpTargetCompression.Lossless}>Lossless</option>
+        <option value={RdpTargetCompression.Remotefx}>RemoteFX</option>
+    </Input>
+</FormGroup>
+<HelpText>
+    If Warpgate and the RDP server are in the same network, lossless compression will significantly improve image quality, even if the client is connecting remotely.
 </HelpText>

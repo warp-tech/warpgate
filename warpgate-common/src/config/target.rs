@@ -293,6 +293,17 @@ impl Default for VncTargetAuth {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Enum, Default)]
+pub enum RdpTargetCompression {
+    #[default]
+    #[serde(rename = "remotefx")]
+    #[oai(rename = "remotefx")]
+    RemoteFX,
+    #[serde(rename = "lossless")]
+    #[oai(rename = "lossless")]
+    Lossless,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct TargetRdpOptions {
     #[serde(default = "_default_empty_string")]
@@ -314,6 +325,9 @@ pub struct TargetRdpOptions {
     /// RDP servers commonly use self-signed certificates, so this is off by default.
     #[serde(default)]
     pub verify_tls: bool,
+
+    #[serde(default)]
+    pub compression: RdpTargetCompression,
 
     // TLS compatibility/security profile used for the target-facing RDP connection.
     // Kept as a plain comment so OpenAPI emits a direct enum reference. A field
