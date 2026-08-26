@@ -416,6 +416,38 @@ impl DesktopRecorder {
         Ok(())
     }
 
+    /// Record a JPEG tile whose source pixels are still at hand (a tile the gateway itself
+    /// re-encoded from raw): composites the keyframe surface from the BGRA directly, with
+    /// no decode round-trip, and passes the JPEG through to the stream unchanged.
+    pub async fn write_jpeg_with_raw(
+        &self,
+        rect: DesktopRect,
+        jpeg: &Bytes,
+        raw_bgra: &[u8],
+    ) -> Result<()> {
+        let time = self.get_time();
+        let mut st = self.state.lock().await;
+        st.duration = st.duration.max(time);
+
+        // Ordered before this JPEG in the stream: flush any pending raw pixels.
+        self.flush_delta(&mut st, time).await?;
+        let rect: RecordingRect = rect.into();
+        st.fb.blit_bgra(
+            u32::from(rect.x),
+            u32::from(rect.y),
+            u32::from(rect.width),
+            u32::from(rect.height),
+            raw_bgra,
+        );
+        let item = DesktopRecordingItem::JpegImage {
+            time,
+            rect,
+            data: jpeg.clone(),
+        };
+        self.write_data_item(&mut st, &item).await?;
+        self.maybe_keyframe(&mut st, time).await
+    }
+
     /// Inject a full-frame keyframe between packets when enough has changed, and flush the
     /// index (keyframes are its only seek anchors, so flushing here bounds crash tail-loss).
     async fn maybe_keyframe(&self, st: &mut RecorderState, time: f32) -> Result<()> {
