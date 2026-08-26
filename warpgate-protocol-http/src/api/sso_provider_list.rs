@@ -356,10 +356,17 @@ impl Api {
 
         let mut state = state_arc.lock().await;
 
-        let outcome =
-            submit_credential(&mut state, cred, ctx.services().config_provider.as_ref()).await?;
+        let outcome = submit_credential(
+            &mut state,
+            cred,
+            ctx.services().config_provider.as_ref(),
+            &ctx.services().login_protection,
+        )
+        .await?;
 
         if !outcome.is_valid() {
+            crate::api::auth::record_failed_login_attempt(services, client_ip, &username, "sso")
+                .await;
             return Ok(Err(format!(
                 "Failed to validate SSO credential for {username}"
             )));
@@ -368,6 +375,12 @@ impl Api {
         if let Ok(user_info) = outcome.into_accepted() {
             authorize_session(req, &ctx, user_info).await?;
             state.emit_authenticated_event_once();
+            if let Some(ip) = client_ip {
+                let _ = services
+                    .login_protection
+                    .clear_failed_attempts(&ip, &username)
+                    .await;
+            }
             drop(state);
             session.set_sso_login_state(SsoLoginState {
                 provider: context.provider,

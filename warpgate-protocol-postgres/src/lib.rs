@@ -20,7 +20,7 @@ use socket2::{Socket, TcpKeepalive};
 use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::net::accept_loop;
-use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
+use warpgate_core::{ProtocolServer, Services, State, UserSessionStateInit};
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
 pub struct PostgresProtocolServer {
@@ -94,20 +94,17 @@ impl ProtocolServer for PostgresProtocolServer {
 
                         let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
 
-                        let server_handle = State::register_session(
-                            &services.state,
-                            crate::common::PROTOCOL_NAME,
-                            SessionStateInit {
-                                remote_address: Some(remote_address),
-                                handle: Box::new(session_handle),
-                            },
-                        )
-                        .await?;
-
-                        let wrapped_stream = {
-                            let guard = server_handle.lock().await;
-                            guard.wrap_stream(stream).await?
-                        };
+                        let (server_handle, wrapped_stream) =
+                            State::register_user_session_with_stream(
+                                &services.state,
+                                crate::common::PROTOCOL_NAME,
+                                UserSessionStateInit {
+                                    remote_address: Some(remote_address),
+                                    handle: Box::new(session_handle),
+                                },
+                                stream,
+                            )
+                            .await?;
 
                         let session = PostgresSession::new(
                             server_handle,

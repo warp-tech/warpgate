@@ -17,10 +17,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use tokio::time::{MissedTickBehavior, Sleep, interval, sleep};
 use tracing::warn;
-use uuid::Uuid;
-use warpgate_common::Protocol;
-use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
-use warpgate_core::{Services, TIMEOUT};
+use warpgate_common::auth::AuthResult;
+use warpgate_common::{Protocol, UserSessionId};
+use warpgate_core::{AuthorizedIdentity, Services, TIMEOUT};
 use warpgate_desktop_ui::AuthPrompt;
 
 use crate::{OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt};
@@ -103,14 +102,14 @@ impl Deadline {
 #[allow(clippy::too_many_arguments)]
 pub async fn run_hold_screen<I, P>(
     services: &Services,
-    state_id: Uuid,
+    state_id: UserSessionId,
     protocol: Protocol,
     username: &str,
     remote_ip: IpAddr,
     input: &mut I,
     painter: &mut P,
     mut deadline: Deadline,
-) -> Result<Option<AuthStateUserInfo>>
+) -> Result<Option<AuthorizedIdentity>>
 where
     I: HoldInputSource,
     P: HoldPainter,
@@ -130,19 +129,23 @@ where
     'next_prompt: loop {
         // Bind to a local so the `state` guard drops here — the arms below re-lock the same
         // mutex (`auth_prompt`, OTP validation).
-        let verification = state.lock().await.verify();
-        let need = match verification {
-            AuthResult::Accepted { user_info } => {
-                let _ = services
-                    .login_protection
-                    .clear_failed_attempts(&remote_ip, &user_info.username)
-                    .await;
-                // Feedback before the caller blocks on the backend connect.
-                let _ = painter.paint(HoldFrame::Connecting).await;
-                return Ok(Some(user_info));
+        let need = {
+            let state = state.lock().await;
+            match state.verify() {
+                AuthResult::Accepted { user_info } => {
+                    let identity = AuthorizedIdentity::from_auth_state(&state);
+                    drop(state);
+                    let _ = services
+                        .login_protection
+                        .clear_failed_attempts(&remote_ip, &user_info.username)
+                        .await;
+                    // Feedback before the caller blocks on the backend connect
+                    let _ = painter.paint(HoldFrame::Connecting).await;
+                    return Ok(identity);
+                }
+                AuthResult::Rejected => return Ok(None),
+                AuthResult::Need(need) => need,
             }
-            AuthResult::Rejected => return Ok(None),
-            AuthResult::Need(need) => need,
         };
 
         let Some(mut prompt) = auth_prompt(services, &state, &need, otp.entered()).await else {

@@ -17,6 +17,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
+use warpgate_common::UserSessionId;
 use warpgate_core::{SessionHandle, WarpgateServerHandle};
 use warpgate_db_entities::Target::TargetKind;
 
@@ -55,14 +56,14 @@ pub trait Sheddable {
 /// Something the disconnect timer can hand a session back to for reaping — implemented by each
 /// crate's client manager.
 pub trait SessionRemover: Send + Sync + 'static {
-    fn remove_session(&self, id: Uuid) -> impl Future<Output = ()> + Send;
+    fn remove_session(&self, id: UserSessionId) -> impl Future<Output = ()> + Send;
 }
 
 /// Protocol-agnostic session core: identity, a bounded replayable outbound buffer, a liveness
 /// flag, and the disconnect grace timer. Each crate wraps this with its protocol-specific
 /// backend handles and input methods (and `Deref`s to it for the shared surface).
 pub struct WebSession<M> {
-    id: Uuid,
+    id: UserSessionId,
     user_id: Uuid,
     target_name: String,
     target_kind: TargetKind,
@@ -85,7 +86,7 @@ pub struct WebSession<M> {
 impl<M: Sheddable> WebSession<M> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: Uuid,
+        id: UserSessionId,
         user_id: Uuid,
         target_name: String,
         target_kind: TargetKind,
@@ -135,7 +136,7 @@ impl<M: Sheddable> WebSession<M> {
         self.output_notify.notified()
     }
 
-    pub const fn id(&self) -> Uuid {
+    pub const fn id(&self) -> UserSessionId {
         self.id
     }
 
@@ -185,16 +186,22 @@ impl<M: Sheddable> WebSession<M> {
 
 /// A live session held by a [`ClientManager`].
 pub trait ManagedSession: Send + Sync + 'static {
-    fn id(&self) -> Uuid;
+    fn id(&self) -> UserSessionId;
     fn user_id(&self) -> Uuid;
     /// Invoked when the manager drops this session (abort the backend; mark dead if needed).
     fn on_removed(&self);
 }
 
+pub enum SessionAccess<S> {
+    Granted(Arc<S>),
+    NotFound,
+    Forbidden,
+}
+
 /// In-memory registry of live sessions, keyed by id. Each crate wraps this and adds its own
 /// protocol-specific `create_session`.
 pub struct ClientManager<S> {
-    sessions: Arc<Mutex<HashMap<Uuid, Arc<S>>>>,
+    sessions: Arc<Mutex<HashMap<UserSessionId, Arc<S>>>>,
 }
 
 impl<S> Default for ClientManager<S> {
@@ -205,18 +212,34 @@ impl<S> Default for ClientManager<S> {
     }
 }
 
+// avoid S: Clone
+impl<S> Clone for ClientManager<S> {
+    fn clone(&self) -> Self {
+        Self {
+            sessions: self.sessions.clone(),
+        }
+    }
+}
+
 impl<S: ManagedSession> ClientManager<S> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Shared handle to the session map, for the event loop to remove itself on backend end.
-    pub fn sessions(&self) -> Arc<Mutex<HashMap<Uuid, Arc<S>>>> {
-        self.sessions.clone()
+    /// private, use Self::access
+    async fn get_session(&self, id: UserSessionId) -> Option<Arc<S>> {
+        self.sessions.lock().await.get(&id).cloned()
     }
 
-    pub async fn get_session(&self, id: Uuid) -> Option<Arc<S>> {
-        self.sessions.lock().await.get(&id).cloned()
+    /// resolves a session for a request acting as user_id
+    pub async fn access(&self, id: UserSessionId, user_id: Uuid) -> SessionAccess<S> {
+        let Some(session) = self.get_session(id).await else {
+            return SessionAccess::NotFound;
+        };
+        if session.user_id() != user_id {
+            return SessionAccess::Forbidden;
+        }
+        SessionAccess::Granted(session)
     }
 
     pub async fn count_for_user(&self, user_id: Uuid) -> usize {
@@ -232,7 +255,7 @@ impl<S: ManagedSession> ClientManager<S> {
         self.sessions.lock().await.insert(session.id(), session);
     }
 
-    pub async fn remove_session(&self, id: Uuid) {
+    pub async fn remove_session(&self, id: UserSessionId) {
         if let Some(session) = self.sessions.lock().await.remove(&id) {
             session.on_removed();
         }

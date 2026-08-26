@@ -1,6 +1,4 @@
-use sea_orm::ActiveEnum;
 use sea_orm_migration::prelude::*;
-use warpgate_db_entities::Parameters::OpenTargetsInNewTabMode;
 
 use crate::m00010_parameters::parameters;
 
@@ -18,7 +16,7 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Alias::new("open_targets_in_new_tab"))
                             .string_len(32)
                             .not_null()
-                            .default(OpenTargetsInNewTabMode::DefaultOn.to_value()),
+                            .default("DefaultOn"),
                     )
                     .to_owned(),
             )

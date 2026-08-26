@@ -8,8 +8,9 @@ use poem::session::Session;
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
 use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_common::{Protocol, WarpgateError};
+use warpgate_core::AuthorizedIdentity;
 use warpgate_db_entities::Parameters;
 
 use crate::request::{trusted_host_header, trusted_proto};
@@ -64,6 +65,8 @@ pub enum SessionAuthorization {
         /// The row the ticket was issued for. Pinned by id so a rename — or a
         /// new target claiming the old name — can't redirect the session.
         target_id: Uuid,
+        #[serde(default)]
+        ticket_id: Option<Uuid>,
     },
 }
 
@@ -216,6 +219,10 @@ impl FullUserAuthorization {
     pub fn username(&self) -> &str {
         &self.0.username
     }
+
+    pub fn identity(&self, protocol: Protocol) -> AuthorizedIdentity {
+        AuthorizedIdentity::for_authenticated_session(self.0.clone(), protocol)
+    }
 }
 
 impl RequestAuthorization {
@@ -237,7 +244,8 @@ impl RequestAuthorization {
         }
     }
 
-    /// Ticket requests cannot grant access to user-scoped functions such as cred management
+    /// Ticket requests cannot grant access to user-scoped functions such as cred management.
+    /// Type safety chokepoint - only this produces [FullUserAuthorization]
     pub fn as_full_user(&self) -> Option<FullUserAuthorization> {
         match self {
             Self::Session(SessionAuthorization::User { user_id, username })
@@ -274,6 +282,7 @@ mod tests {
             user_id: Uuid::nil(),
             username: "alice".into(),
             target_id: Uuid::nil(),
+            ticket_id: None,
         });
         assert!(ticket.as_full_user().is_none());
 

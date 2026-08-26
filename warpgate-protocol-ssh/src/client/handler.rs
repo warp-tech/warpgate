@@ -4,7 +4,7 @@ use russh::keys::{PublicKey, PublicKeyBase64, PublicKeyOrCertificate};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
-use warpgate_common::{SessionId, TargetSSHOptions};
+use warpgate_common::{TargetSSHOptions, UserSessionId};
 use warpgate_core::Services;
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
@@ -27,7 +27,7 @@ pub struct ClientHandler {
     pub ssh_options: TargetSSHOptions,
     pub event_tx: UnboundedSender<ClientHandlerEvent>,
     pub services: Services,
-    pub session_id: SessionId,
+    pub session_id: UserSessionId,
 }
 
 #[derive(Debug, thiserror::Error)]

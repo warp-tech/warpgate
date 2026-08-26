@@ -40,6 +40,13 @@ pub enum WarpgateError {
     NoHostInUrl,
     #[error("Inconsistent state: {0}")]
     InconsistentState(String),
+    #[error("target session requires administrator approval")]
+    TargetSessionRequiresApproval,
+    /// Somebody called WarpgateServerHandle::set_user_info twice
+    #[error("user session is already attributed to another user")]
+    UserSessionAlreadyAttributed,
+    #[error("user session is no longer open")]
+    UserSessionEnded,
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
     #[error(transparent)]
@@ -76,8 +83,6 @@ pub enum WarpgateError {
     InvalidNetworkAddress(String),
     #[error("session limit reached")]
     SessionLimitReached,
-    #[error("the node ID {0} is gone from the cluster")]
-    NodeGone(Uuid),
     #[error(transparent)]
     Encryption(#[from] crate::encryption::EncryptionError),
 }

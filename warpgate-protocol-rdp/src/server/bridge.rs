@@ -87,20 +87,18 @@ pub(super) async fn connect_backend(
     services: &Services,
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     server_in_tx: &Sender<ServerInput>,
-    authorization: TargetAuthorization,
-    options: TargetRdpOptions,
+    authorization: TargetAuthorization<TargetRdpOptions>,
     screen: warpgate_desktop_ui::Screen,
 ) -> Result<BackendBridge> {
-    let (user_info, target) = authorization.into_parts();
-    {
-        let handle = server_handle.lock().await;
-        handle.set_user_info(user_info).await?;
-        handle.set_target(&target).await?;
-    }
-    info!(target=%target.name, "Authorized");
+    let (target_session_id, approved) = server_handle
+        .lock()
+        .await
+        .start_target_session(authorization)
+        .await?
+        .admitted()?;
+    info!(target=%approved.target().name, "Authorized");
 
-    let session_id = server_handle.lock().await.id();
-    let recorder = warpgate_desktop_auth::start_recording(services, &session_id, "rdp")
+    let recorder = warpgate_desktop_auth::start_recording(services, &target_session_id, "rdp")
         .await
         .map(Arc::new);
 
@@ -108,7 +106,7 @@ pub(super) async fn connect_backend(
         event_rx,
         input_tx,
         abort_tx,
-    } = crate::connect(options, (screen.width, screen.height));
+    } = crate::connect(approved, (screen.width, screen.height))?;
     let frame_bridge = tokio::spawn(frame_bridge(
         event_rx,
         server_in_tx.clone(),

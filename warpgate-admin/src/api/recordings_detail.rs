@@ -20,7 +20,7 @@ use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::recordings::{LiveChunk, RecordingFile};
 use warpgate_db_entities::Recording::{self, RecordingKind};
-use warpgate_db_entities::Session;
+use warpgate_db_entities::TargetSession;
 
 use super::ClusterOrAdminContext;
 use crate::api::cluster_proxy::{Owner, proxy_or_serve, proxy_or_serve_websocket, session_owner};
@@ -403,7 +403,7 @@ pub async fn recording_owner(
     if recording.ended.is_some() {
         return Ok(Owner::Local);
     }
-    let Some(session) = Session::Entity::find_by_id(recording.session_id)
+    let Some(session) = TargetSession::Entity::find_by_id(recording.session_id)
         .one(&ctx.services().db)
         .await?
     else {

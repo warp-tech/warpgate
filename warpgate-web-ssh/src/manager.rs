@@ -1,19 +1,19 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
 use russh::keys::PublicKeyBase64;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, error, info_span, warn};
-use uuid::Uuid;
-use warpgate_common::{TargetOptions, WarpgateError};
-use warpgate_core::{Services, SessionStateInit, State, TargetAuthorization};
+use warpgate_common::{TargetSSHOptions, UserSessionId, WarpgateError};
+use warpgate_core::{Services, State, TargetAuthorization, UserSessionStateInit};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient, resolve_ssh_chain};
+use warpgate_protocol_ssh::{
+    RCCommand, RCEvent, RCState, RemoteClient, resolve_approved_ssh_chain,
+};
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
 use crate::protocol::ServerMessage;
@@ -32,7 +32,7 @@ impl std::ops::Deref for WebSshClientManager {
 }
 
 impl SessionRemover for WebSshClientManager {
-    async fn remove_session(&self, id: Uuid) {
+    async fn remove_session(&self, id: UserSessionId) {
         self.0.remove_session(id).await;
     }
 }
@@ -47,26 +47,24 @@ impl WebSshClientManager {
         services: &Services,
         authorization: TargetAuthorization,
         remote_address: Option<SocketAddr>,
-    ) -> Result<Uuid, WarpgateError> {
+    ) -> Result<UserSessionId, WarpgateError> {
         let user_id = authorization.user_info().id;
         if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
             return Err(WarpgateError::SessionLimitReached);
         }
 
-        let (user_info, target) = authorization.into_parts();
-        let username = user_info.username.clone();
-
-        let TargetOptions::Ssh(_) = &target.options else {
-            return Err(WarpgateError::InvalidTarget);
-        };
+        let authorization = authorization.narrow::<TargetSSHOptions>()?;
+        let username = authorization.user_info().username.clone();
+        let target_name = authorization.target().name.clone();
+        let target_kind = TargetKind::from(&authorization.target().options);
 
         let (abort_tx, mut abort_rx) = mpsc::unbounded_channel::<()>();
         let session_handle = WebSessionHandle::new(abort_tx);
 
-        let server_handle = State::register_session(
+        let server_handle = State::register_node_local_user_session(
             &services.state,
             warpgate_protocol_ssh::PROTOCOL_NAME,
-            SessionStateInit {
+            UserSessionStateInit {
                 remote_address,
                 handle: Box::new(session_handle),
             },
@@ -74,29 +72,24 @@ impl WebSshClientManager {
         .await
         .context("registering webSSH session")?;
 
-        {
-            let server_handle = server_handle.lock().await;
+        let (target_session_id, approved) = server_handle
+            .lock()
+            .await
+            .start_target_session(authorization)
+            .await
+            .context("starting target session")?
+            .admitted()?;
 
-            server_handle
-                .set_user_info(user_info)
-                .await
-                .context("setting user info on server handle")?;
-
-            server_handle
-                .set_target(&target)
-                .await
-                .context("setting target on server handle")?;
-        }
-
-        let session_id = server_handle.lock().await.id();
+        let session_id = server_handle.lock().await.user_session_id();
         let rc_handles = RemoteClient::create(session_id, services.clone())
             .context("creating SSH remote client")?;
 
         let session = Arc::new(WebSshSession::new(
             session_id,
             user_id,
-            target.name.clone(),
-            TargetKind::from(&target.options),
+            target_name.clone(),
+            target_kind,
+            target_session_id,
             server_handle,
             rc_handles.command_tx.clone(),
             rc_handles.abort_tx.clone(),
@@ -118,7 +111,7 @@ impl WebSshClientManager {
 
         self.insert(session.clone()).await;
 
-        let ssh_chain = resolve_ssh_chain(services, target.id, Some(&username))
+        let ssh_chain = resolve_approved_ssh_chain(services, approved)
             .await?
             .into_iter()
             .map(|x| x.ssh_options)
@@ -131,11 +124,11 @@ impl WebSshClientManager {
         spawn_event_loop(
             session.clone(),
             rc_handles.event_rx,
-            self.sessions(),
+            self.0.clone(),
             services.clone(),
         );
 
-        debug!(session=%session_id, user=%username, target=%target.name, "Web-SSH session created");
+        debug!(session=%session_id, user=%username, target=%target_name, "Web-SSH session created");
 
         Ok(session_id)
     }
@@ -144,7 +137,7 @@ impl WebSshClientManager {
 fn spawn_event_loop(
     session: Arc<WebSshSession>,
     mut event_rx: Receiver<RCEvent>,
-    sessions: Arc<Mutex<HashMap<Uuid, Arc<WebSshSession>>>>,
+    manager: ClientManager<WebSshSession>,
     services: Services,
 ) {
     let session_id = session.id();
@@ -250,7 +243,7 @@ fn spawn_event_loop(
 
                 // remote client is gone now
                 session.close();
-                sessions.lock().await.remove(&session.id());
+                manager.remove_session(session.id()).await;
                 anyhow::Ok(())
             }
             .instrument(span),

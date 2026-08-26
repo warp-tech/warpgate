@@ -5,7 +5,7 @@ pub mod logging;
 mod request;
 
 pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization};
-pub use keepalive::SessionKeepalive;
+pub use keepalive::{SessionKeepalive, SessionKeepaliveGuard};
 use poem::Request;
 use poem::http::HeaderName;
 use subtle::ConstantTimeEq;

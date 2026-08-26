@@ -11,13 +11,13 @@ use std::net::IpAddr;
 use tracing::{error, info, warn};
 use url::Url;
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
-use warpgate_common::{Protocol, Secret, SessionId, WarpgateError};
+use warpgate_common::{Protocol, Secret, UserSessionId, WarpgateError};
 
 use crate::auth::submit_credential;
 use crate::login_protection::FailedAttemptInfo;
 use crate::{
-    AuthorizedIdentity, Services, TargetAuthorization, authorize_for_target_by_name,
-    authorize_ticket, consume_ticket, wait_for_auth_completion,
+    AuthorizedIdentity, Services, TargetAuthorization, authorize_and_spend_ticket,
+    authorize_for_target_by_name, wait_for_auth_completion,
 };
 
 /// Proof that the success message has not been sent yet. Exactly one is minted
@@ -73,7 +73,7 @@ pub trait DbAuthTransport {
 pub async fn run_db_authorization<T: DbAuthTransport>(
     transport: &mut T,
     services: &Services,
-    session_id: SessionId,
+    session_id: UserSessionId,
     selector: AuthSelector,
     remote_ip: IpAddr,
 ) -> Result<Option<TargetAuthorization>, T::Error> {
@@ -111,7 +111,7 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
             .await
         }
         AuthSelector::Ticket { secret } => {
-            let Some((ticket, authorization)) = authorize_ticket(
+            let Some(authorization) = authorize_and_spend_ticket(
                 &services.db,
                 &services.login_protection,
                 &secret,
@@ -128,7 +128,6 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                 "Authorized for {} with a ticket",
                 authorization.target().name
             );
-            consume_ticket(&services.db, &ticket.id).await?;
             transport.send_auth_ok(AuthOkPermit).await?;
             Ok(Some(authorization))
         }
@@ -138,7 +137,7 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
 async fn authorize_user<T: DbAuthTransport>(
     transport: &mut T,
     services: &Services,
-    session_id: SessionId,
+    session_id: UserSessionId,
     username: &str,
     target_name: &str,
     remote_ip: IpAddr,
@@ -223,6 +222,7 @@ async fn authorize_user<T: DbAuthTransport>(
                     &mut *state_arc.lock().await,
                     AuthCredential::Password(password),
                     services.config_provider.as_ref(),
+                    &services.login_protection,
                 )
                 .await?;
 
