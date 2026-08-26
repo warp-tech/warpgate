@@ -229,7 +229,8 @@ impl Storage {
         match tokio::fs::metadata(&path).await {
             Ok(meta) if meta.is_dir() => tokio::fs::remove_dir_all(&path).await?,
             Ok(_) => tokio::fs::remove_file(&path).await?,
-            Err(_) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.into()),
         }
         if let Some(parent) = path.parent()
             && tokio::fs::read_dir(parent)

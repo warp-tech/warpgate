@@ -1657,8 +1657,6 @@ impl ServerSession {
             let recorder = self
                 .services
                 .recordings
-                .lock()
-                .await
                 .start::<TerminalRecorder, _>(&self.id, None, metadata)
                 .await?;
             if let Some(request) = self
@@ -1745,14 +1743,13 @@ impl ServerSession {
             match self
                 .services
                 .recordings
-                .lock()
-                .await
                 .start(&self.id, None, metadata)
                 .await
             {
                 Ok(recorder) => {
                     e.insert(recorder);
                 }
+                Err(recordings::Error::Disabled) => (),
                 Err(error) => {
                     error!(?key, ?error, "Failed to start recording");
                 }
