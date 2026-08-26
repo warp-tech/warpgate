@@ -94,5 +94,7 @@
     </Input>
 </FormGroup>
 <HelpText>
-    If Warpgate and the RDP server are in the same network, lossless compression will significantly improve image quality, even if the client is connecting remotely.
+    If Warpgate and the RDP server are in the same network, lossless compression
+    will significantly improve image quality, even if the client is connecting
+    remotely.
 </HelpText>
