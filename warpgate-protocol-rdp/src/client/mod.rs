@@ -608,10 +608,11 @@ fn build_config(
     width: u16,
     height: u16,
 ) -> connector::Config {
-    let (codec_overrides, lossy_compression): (&[&str], bool) = match options.compression {
-        RdpTargetCompression::RemoteFX => (&[], true),
-        RdpTargetCompression::Lossless => (&["remotefx:off"], false),
-    };
+    let (codec_overrides, lossy_compression): (&[&str], bool) =
+        match options.compression.unwrap_or_default() {
+            RdpTargetCompression::RemoteFX => (&[], true),
+            RdpTargetCompression::Lossless => (&["remotefx:off"], false),
+        };
     connector::Config {
         credentials: Credentials::UsernamePassword {
             username: options.username.clone(),

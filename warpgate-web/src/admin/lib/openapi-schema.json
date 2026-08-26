@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.4-modified"
+    "version": "v0.28.4-2-gb3262271-modified"
   },
   "servers": [
     {
@@ -7135,8 +7135,7 @@
           "port",
           "username",
           "auth",
-          "verify_tls",
-          "compression"
+          "verify_tls"
         ],
         "properties": {
           "host": {

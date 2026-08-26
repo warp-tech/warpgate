@@ -293,7 +293,7 @@ impl Default for VncTargetAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Enum, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Enum, Default)]
 pub enum RdpTargetCompression {
     #[default]
     #[serde(rename = "remotefx")]
@@ -327,7 +327,7 @@ pub struct TargetRdpOptions {
     pub verify_tls: bool,
 
     #[serde(default)]
-    pub compression: RdpTargetCompression,
+    pub compression: Option<RdpTargetCompression>,
 
     // TLS compatibility/security profile used for the target-facing RDP connection.
     // Kept as a plain comment so OpenAPI emits a direct enum reference. A field
