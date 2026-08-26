@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.0-beta.3-modified"
+    "version": "v0.28.2-1-g250f869b-modified"
   },
   "servers": [
     {
@@ -4419,10 +4419,247 @@
         ],
         "operationId": "revoke_certificate_credential"
       }
+    },
+    "/web-approvals": {
+      "get": {
+        "summary": "List currently active (unexpired) cached web-approval bypasses across\nthe whole cluster.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActiveWebApprovalInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
+          }
+        ],
+        "operationId": "list_web_approvals"
+      },
+      "delete": {
+        "summary": "Clear every cached web-approval bypass, on this node and the rest of\nthe cluster, immediately requiring re-approval for anything that was\nrelying on one.",
+        "parameters": [
+          {
+            "name": "local_only",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "description": "Clear only this node's own cache instead of the whole cluster's.\nSet on cluster-forwarded copies of the request.",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearWebApprovalsResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
+          }
+        ],
+        "operationId": "clear_web_approvals"
+      }
+    },
+    "/web-approvals/{username}": {
+      "delete": {
+        "summary": "Clear cached web-approval bypasses for a single user, on this node and\nthe rest of the cluster.",
+        "parameters": [
+          {
+            "name": "username",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "local_only",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "description": "Clear only this node's own cache instead of the whole cluster's.\nSet on cluster-forwarded copies of the request.",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearWebApprovalsResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
+          }
+        ],
+        "operationId": "clear_web_approvals_for_user"
+      }
+    },
+    "/web-approvals/{username}/scope": {
+      "delete": {
+        "summary": "Clear cached web-approval bypasses for a single user, restricted to one\nscope (a target, or every target via `all_targets`) — for revoking a\nsingle row of the admin approvals list rather than the whole user.",
+        "parameters": [
+          {
+            "name": "username",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "target",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "description": "Target name to revoke. Ignored when `all_targets` is set; omitted\ntogether with `all_targets: false` for the untargeted (sign-in)\nscope.",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "all_targets",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "description": "Revoke the all-targets grant instead of a single target.",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "local_only",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "description": "Clear only this node's own cache instead of the whole cluster's.\nSet on cluster-forwarded copies of the request.",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearWebApprovalsResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
+          }
+        ],
+        "operationId": "clear_web_approval_scope_for_user"
+      }
     }
   },
   "components": {
     "schemas": {
+      "ActiveWebApprovalInfo": {
+        "type": "object",
+        "title": "ActiveWebApprovalInfo",
+        "required": [
+          "username",
+          "remote_ip",
+          "protocol",
+          "scope",
+          "all_targets",
+          "granted_at"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "remote_ip": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Human-readable summary of what the approval covers: a target name,\n`*` for all targets, or `sign-in` for an untargeted portal/menu login."
+          },
+          "scope_target": {
+            "type": "string",
+            "description": "The target name when this approval is scoped to one target — echo\nthis back (with `all_targets: false`) to revoke just this row via\n`clear_web_approval_scope_for_user`."
+          },
+          "all_targets": {
+            "type": "boolean",
+            "description": "Whether this approval covers every target — echo this back to revoke\njust this row."
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "AddSshKnownHostRequest": {
         "type": "object",
         "title": "AddSshKnownHostRequest",
@@ -4740,6 +4977,19 @@
           },
           "remote_key_base64": {
             "type": "string"
+          }
+        }
+      },
+      "ClearWebApprovalsResult": {
+        "type": "object",
+        "title": "ClearWebApprovalsResult",
+        "required": [
+          "cleared_count"
+        ],
+        "properties": {
+          "cleared_count": {
+            "type": "integer",
+            "format": "uint64"
           }
         }
       },

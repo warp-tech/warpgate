@@ -7,7 +7,7 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use tracing::warn;
-use warpgate_common::auth::{AuthState, CredentialKind};
+use warpgate_common::auth::{AuthState, CredentialKind, WebApprovalMatchKey, WebApprovalScopeKey};
 use warpgate_common::{GlobalParams, Protocol, Secret, SessionId, WarpgateConfig, WarpgateError};
 use warpgate_db_entities::Parameters;
 
@@ -191,5 +191,51 @@ impl Services {
             .await
             .try_web_approval_bypass(state_arc, grace)
             .await
+    }
+
+    /// Clears every remembered web approval on this node, immediately revoking
+    /// all of its outstanding auth-bypass grants. Returns the number of
+    /// entries cleared.
+    pub async fn clear_web_approvals(&self) -> usize {
+        self.auth_state_store.lock().await.clear_recent_approvals()
+    }
+
+    /// Clears remembered web approvals for a single user, immediately revoking
+    /// that user's outstanding bypass grants. Returns the number cleared.
+    pub async fn clear_web_approvals_for_user(&self, username: &str) -> usize {
+        self.auth_state_store
+            .lock()
+            .await
+            .clear_recent_approvals_for_user(username)
+    }
+
+    /// Clears remembered web approvals for a single user and scope,
+    /// immediately revoking just that target's — or, for
+    /// [`WebApprovalScopeKey::AllTargets`], every target's — bypass grant.
+    /// Returns the number cleared.
+    pub async fn clear_web_approvals_for_user_and_scope(
+        &self,
+        username: &str,
+        scope: &WebApprovalScopeKey,
+    ) -> usize {
+        self.auth_state_store
+            .lock()
+            .await
+            .clear_recent_approvals_for_user_and_scope(username, scope)
+    }
+
+    /// Active (still-within-grace) remembered web approvals, for admin
+    /// visibility. Empty if web-approval caching is disabled.
+    pub async fn list_active_web_approvals(
+        &self,
+    ) -> Result<Vec<(WebApprovalMatchKey, Duration)>, WarpgateError> {
+        let Some(grace) = self.web_approval_grace_period().await? else {
+            return Ok(vec![]);
+        };
+        Ok(self
+            .auth_state_store
+            .lock()
+            .await
+            .list_active_approvals(grace))
     }
 }
