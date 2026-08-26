@@ -4,7 +4,9 @@
     import {
         applyDesktopFrame,
         type DesktopFrame,
+        decodeDesktopFrame,
         isIncrementalFrame,
+        type PreparedFrame,
         type Rect,
     } from 'common/desktopCanvas'
     import { DesktopClipboard } from 'common/desktopClipboard'
@@ -58,7 +60,10 @@
     // burst of updates (e.g. dragging a window) can never block the main thread. Beyond
     // this cap we drop the oldest incremental frames to stay near the live edge.
     const MAX_PENDING_FRAMES = 360
-    let pendingFrames: DesktopFrame[] = []
+    let pendingFrames: PreparedFrame[] = []
+    // Exactly one drain runs at a time, so `pendingFrames` is a true backlog rather than
+    // an unbounded pile of in-flight decodes.
+    let draining = false
     let rafHandle: number | null = null
     // Latest pointer position, flushed at most once per frame (mousemove fires far faster
     // than we need to forward); button presses/releases are sent immediately.
@@ -180,7 +185,8 @@
             case 2:
                 return { type: 'jpeg_image', rect, data }
             case 3:
-                return { type: 'cursor', rect, data }
+                // Cursor sprites aren't composited onto the canvas.
+                return null
             case 4:
                 // Full-canvas base image sent on attach; never shed from the queue.
                 return { type: 'png_image', rect, data, keyframe: true }
@@ -196,25 +202,45 @@
     // oldest droppable frame so the backlog (and per-frame work) stays bounded; structural
     // frames (resize / keyframes) are kept.
     function queueFrame(frame: DesktopFrame) {
-        pendingFrames.push(frame)
+        pendingFrames.push(decodeDesktopFrame(frame))
         if (pendingFrames.length > MAX_PENDING_FRAMES) {
             const idx = pendingFrames.findIndex(isIncrementalFrame)
-            pendingFrames.splice(idx === -1 ? 0 : idx, 1)
+            const [dropped] = pendingFrames.splice(idx === -1 ? 0 : idx, 1)
+            // Its decode is already running; nothing else will free the bitmap.
+            void dropped?.bitmap?.then(bitmap => bitmap?.close())
         }
     }
 
-    // Single rAF loop: paint whatever has arrived, then forward the latest pointer.
-    function tick() {
-        if (ctx && canvas && pendingFrames.length) {
-            const batch = pendingFrames
-            pendingFrames = []
-            for (const frame of batch) {
-                void applyDesktopFrame(canvas, ctx, frame)
-            }
-            // Reveal only once there's something to show, so the canvas fades in with the
-            // first real content instead of flashing an empty surface.
-            painted = true
+    // Paint queued frames. Ordering is owned by applyDesktopFrame; awaiting here keeps
+    // the backlog honest so shedding in queueFrame measures real lag, and costs no
+    // throughput since decodes were started at arrival. A burst can span several frames.
+    async function drain() {
+        if (draining || !canvas || !ctx) {
+            return
         }
+        draining = true
+        try {
+            // Only what had arrived when this drain started: whatever lands mid-drain is
+            // the next frame's work, so a backgrounded tab (no rAF) backs up and sheds
+            // instead of painting a surface nobody is looking at.
+            for (let budget = pendingFrames.length; budget > 0; budget--) {
+                const frame = pendingFrames.shift()
+                if (!frame) {
+                    break
+                }
+                await applyDesktopFrame(canvas, ctx, frame)
+                // Reveal only once there's something to show, so the canvas fades in with
+                // the first real content instead of flashing an empty surface.
+                painted = true
+            }
+        } finally {
+            draining = false
+        }
+    }
+
+    // Single rAF loop: keep the painter fed, then forward the latest pointer.
+    function tick() {
+        void drain()
         if (pendingPointer) {
             send({ type: 'pointer_event', ...pendingPointer })
             pendingPointer = null
@@ -395,7 +421,8 @@
 
     onMount(async () => {
         if (canvas) {
-            ctx = canvas.getContext('2d')
+            // Every tile is opaque (the backends force alpha to 255), so skip blending.
+            ctx = canvas.getContext('2d', { alpha: false })
         }
         if (canvasArea) {
             resizeObserver = new ResizeObserver(() => {

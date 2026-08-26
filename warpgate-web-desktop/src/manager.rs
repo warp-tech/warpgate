@@ -1,9 +1,13 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Context;
+use bytes::Bytes;
+use futures::stream::{FuturesOrdered, StreamExt};
 use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, info_span, warn};
 use uuid::Uuid;
@@ -174,18 +178,45 @@ impl WebDesktopClientManager {
 }
 
 /// Record an event, then send it. Both the live stream and refinements go out this way, so
-/// a recording plays back at the same progressive quality the viewer saw.
+/// a recording plays back at the same progressive quality the viewer saw. `raw` carries a
+/// re-encoded tile's original pixels, letting the recorder composite without a decode.
 async fn emit(
     session: &WebDesktopSession,
     recorder: Option<&DesktopRecorder>,
     event: DesktopEvent,
+    raw: Option<&Bytes>,
 ) {
-    if let Some(recorder) = recorder
-        && let Err(error) = recorder.write_event(&event).await
-    {
-        warn!(%error, "Failed to record desktop event");
+    if let Some(recorder) = recorder {
+        let result = match (&event, raw) {
+            (DesktopEvent::JpegImage { rect, data }, Some(raw)) => {
+                recorder.write_jpeg_with_raw(*rect, data, raw).await
+            }
+            _ => recorder.write_event(&event).await,
+        };
+        if let Err(error) = result {
+            warn!(%error, "Failed to record desktop event");
+        }
     }
     session.push(ServerMessage::from(event)).await;
+}
+
+/// How many events may sit between receipt and emission. Tiles inside this window JPEG-
+/// encode concurrently on the blocking pool while emission stays in arrival order; past
+/// it, receiving pauses so a slow encoder or recorder backpressures the backend.
+const MAX_PIPELINED_EVENTS: usize = 8;
+
+/// An event ready to emit, with the original pixels of a re-encoded tile (see [`emit`]).
+type PreparedEvent = (DesktopEvent, Option<Bytes>);
+
+fn prepare(
+    event: DesktopEvent,
+    encode_jpeg: bool,
+) -> Pin<Box<dyn Future<Output = PreparedEvent> + Send>> {
+    if encode_jpeg {
+        Box::pin(crate::jpeg::encode_raw_images(event))
+    } else {
+        Box::pin(std::future::ready((event, None)))
+    }
 }
 
 fn spawn_event_loop(
@@ -201,7 +232,14 @@ fn spawn_event_loop(
         async move {
             // Only the JPEG path loses detail, so only it has anything to refine.
             let mut dirty = DirtyTracker::new();
+            // Events between receipt and emission. Composited immediately, JPEG-encoded
+            // concurrently, emitted strictly in arrival order.
+            let mut pipeline: FuturesOrdered<_> = FuturesOrdered::new();
+            let mut backend_done = false;
             loop {
+                if backend_done && pipeline.is_empty() {
+                    break;
+                }
                 // No pending regions means nothing to wake up for; park on the far future
                 // rather than spinning, and let an incoming event arm the timer.
                 let next_due = dirty.next_due();
@@ -213,20 +251,19 @@ fn spawn_event_loop(
                 };
 
                 tokio::select! {
-                    event = event_rx.recv() => {
-                        let Some(event) = event else { break };
+                    event = event_rx.recv(), if !backend_done && pipeline.len() < MAX_PIPELINED_EVENTS => {
+                        let Some(event) = event else {
+                            backend_done = true;
+                            continue;
+                        };
                         // Composite before any re-encoding, so this is a plain blit rather
                         // than a JPEG decode round-trip. Gives a viewer attaching later a
                         // base image, and is the source the refinement reads back from.
                         session.composite(&event).await;
-
                         // Ahead of the recorder, so recordings shrink along with the wire.
-                        let event = if encode_jpeg {
-                            crate::jpeg::encode_raw_images(event).await
-                        } else {
-                            event
-                        };
-
+                        pipeline.push_back(prepare(event, encode_jpeg));
+                    }
+                    Some((event, raw)) = pipeline.next(), if !pipeline.is_empty() => {
                         match &event {
                             DesktopEvent::Resize { width, height } => {
                                 dirty.resize(*width, *height);
@@ -236,14 +273,18 @@ fn spawn_event_loop(
                             }
                             _ => {}
                         }
-                        emit(&session, recorder.as_deref(), event).await;
+                        emit(&session, recorder.as_deref(), event, raw.as_ref()).await;
                     }
-                    () = refine => {
+                    // Gated on an empty pipeline: a refinement snapshots the composited
+                    // surface, which is ahead of anything still awaiting emission — sent
+                    // sooner, its newer pixels would be overwritten by the older tiles
+                    // behind it.
+                    () = refine, if pipeline.is_empty() => {
                         for rect in dirty.take_settled(Instant::now()) {
                             match session.refinement(rect).await {
                                 Some(event) => {
                                     debug!(?rect, "Refining settled region");
-                                    emit(&session, recorder.as_deref(), event).await;
+                                    emit(&session, recorder.as_deref(), event, None).await;
                                 }
                                 // The region left the surface (resize)
                                 // or failed to encode

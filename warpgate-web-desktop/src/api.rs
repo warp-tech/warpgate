@@ -72,16 +72,24 @@ pub async fn ws_handler(
             // floods us with pointer events, and if sending frames only happened in a
             // `select!` branch, that branch would be starved for the whole drag — frames
             // would pile up unsent and only burst out once the input stopped.
+            //
+            // Messages are fed into the sink and flushed once per batch: a burst of small
+            // tiles becomes one write instead of a write+flush per tile.
             let mut closed = false;
-            for msg in session.drain_buffer().await {
+            let batch = session.drain_buffer().await;
+            let had_messages = !batch.is_empty();
+            for msg in batch {
                 let sent = match msg.ws_payload() {
-                    WsPayload::Binary(bytes) => sink.send(Message::Binary(bytes)).await,
-                    WsPayload::Text(json) => sink.send(Message::Text(json)).await,
+                    WsPayload::Binary(bytes) => sink.feed(Message::Binary(bytes)).await,
+                    WsPayload::Text(json) => sink.feed(Message::Text(json)).await,
                 };
                 if sent.is_err() {
                     closed = true;
                     break;
                 }
+            }
+            if !closed && had_messages && sink.flush().await.is_err() {
+                closed = true;
             }
             if closed || session.is_dead() {
                 break;
