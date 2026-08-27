@@ -334,15 +334,20 @@ pub async fn authorize_session(
         Err(error) => return Err(error),
     }
 
-    // sec: authenticated session needs a fresh cookie value
-    let jar = <&CookieJar>::from_request_without_body(req)
-        .await
-        .context("CookieJar not in request")?;
-    Data::<&SharedSessionStorage>::from_request_without_body(req)
-        .await
-        .context("SharedSessionStorage not in request")?
-        .rotate_session_id(storage_session_id(jar), session)
-        .await?;
+    // when auth is completed, we must rotate the cookie *on the first hop*
+    // since cookies set by a forwarded request are not passed back to the client
+    if !warpgate_common_http::is_cluster_peer_request(req, &ctx.services().cluster_token) {
+        // we are the first hop
+
+        let jar = <&CookieJar>::from_request_without_body(req)
+            .await
+            .context("CookieJar not in request")?;
+        Data::<&SharedSessionStorage>::from_request_without_body(req)
+            .await
+            .context("SharedSessionStorage not in request")?
+            .rotate_session_id(storage_session_id(jar), session)
+            .await?;
+    }
 
     session.set_auth(SessionAuthorization::User {
         user_id: user_info.id,

@@ -682,6 +682,7 @@ where
 {
     let owner = auth_state_owner(ctx, session.get_session_id()).await?;
     let forwarded = matches!(owner, Owner::Remote(_));
+    let authed_before_hop = session.get_auth().is_some();
     let result = proxy_or_serve_pending_login(ctx, req, owner, body, serve_local).await;
 
     if forwarded {
@@ -689,10 +690,18 @@ where
         // authorization into it - so take its version over the copy this node
         // has been holding since before the hop.
         let jar = <&CookieJar>::from_request_without_body(req).await?;
-        Data::<&SharedSessionStorage>::from_request_without_body(req)
-            .await?
+        let storage = Data::<&SharedSessionStorage>::from_request_without_body(req).await?;
+        storage
             .adopt_stored(crate::common::storage_session_id(jar), session)
             .await?;
+
+        if !authed_before_hop && session.get_auth().is_some() {
+            // the forwarded request just got us logged in
+            // now we must rotate the cookie _here_ since cookies set by a forwarded request are not passed back to the client
+            storage
+                .rotate_session_id(crate::common::storage_session_id(jar), session)
+                .await?;
+        }
     }
 
     result

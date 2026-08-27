@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -8,7 +7,7 @@ use std::time::Instant;
 use anyhow::Context;
 use bytes::Bytes;
 use futures::stream::{FuturesOrdered, StreamExt};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use tracing::{Instrument, debug, info_span, warn};
 use warpgate_common::{TargetOptions, UserSessionId, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};

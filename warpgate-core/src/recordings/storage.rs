@@ -273,7 +273,7 @@ mod tests {
             name: "0.ndjson".into(),
             started: time::OffsetDateTime::UNIX_EPOCH,
             ended: None,
-            session_id: uuid!("00000000-0000-0000-0000-00000000000a"),
+            session_id: TargetSessionId(uuid!("00000000-0000-0000-0000-00000000000a")),
             kind: RecordingKind::Terminal,
             metadata: "{}".into(),
             generation,
