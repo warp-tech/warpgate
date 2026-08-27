@@ -2,7 +2,6 @@ mod channel_audit;
 mod client;
 mod command_detector;
 mod common;
-mod compat;
 mod keys;
 pub mod known_hosts;
 mod server;

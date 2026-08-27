@@ -1,5 +1,6 @@
 from uuid import uuid4
 import os
+import paramiko
 import requests
 import socket
 import subprocess
@@ -264,6 +265,60 @@ class Test:
                 checked += 1
             finally:
                 ssh_client.kill()
+
+    # https://github.com/warp-tech/warpgate/issues/2494
+    def test_output_survives_a_stalled_client_window(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+        timeout,
+    ):
+        # A client that stops draining a channel shuts its receive window, so
+        # Warpgate's writes towards it queue up. If the session event loop parks
+        # on one of those writes it can no longer answer the russh handler — and
+        # the russh reader, blocked inside that handler, is the only thing that
+        # can process the window update that would release the write. What parks
+        # the reader is client->server traffic while the window is shut, so the
+        # test sends some before draining.
+        #
+        # paramiko only replenishes the window from recv(), which gives the
+        # precise control over draining that OpenSSH does not.
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
+
+        transport = paramiko.Transport(("localhost", shared_wg.ssh_port))
+        try:
+            transport.connect(
+                username=f"{user.username}:{ssh_target.name}", password="123"
+            )
+            channel = transport.open_session()
+            channel.settimeout(timeout)
+            # More than everything in the path can hold: the client window, the
+            # window Warpgate advertises to the target, and Warpgate's queues.
+            channel.exec_command("head -c 67108864 /dev/zero")
+
+            time.sleep(3)
+            for _ in range(10):
+                channel.sendall(b"x" * 4096)
+                time.sleep(0.2)
+
+            # Past the 2 MB paramiko had already buffered, so this can only be
+            # satisfied by a session that is still moving data.
+            wanted = 4 * 1024 * 1024
+            received = 0
+            while received < wanted:
+                try:
+                    chunk = channel.recv(65536)
+                except socket.timeout:
+                    raise AssertionError(
+                        f"transfer stalled after {received} of {wanted} bytes"
+                    )
+                assert chunk, f"channel closed after {received} of {wanted} bytes"
+                received += len(chunk)
+        finally:
+            transport.close()
 
     def test_agent_forwarding_parallel(
         self,
