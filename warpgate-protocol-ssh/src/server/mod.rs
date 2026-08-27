@@ -1,5 +1,6 @@
 mod channel_registry;
 mod channel_writer;
+mod event_intake;
 mod russh_handler;
 mod service_output;
 mod session;
