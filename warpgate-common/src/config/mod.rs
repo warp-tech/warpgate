@@ -906,6 +906,13 @@ pub struct WarpgateConfigStore {
 
     #[serde(default)]
     pub log: LogConfig,
+
+    /// Seeds the `allow_own_credential_management` Parameters row on first boot (existing
+    /// installs are unaffected — this only sets the value when the row doesn't exist yet,
+    /// same seeding semantics as `ssh.host_key_verification`/`recordings.enable`). Unset
+    /// (`None`) preserves today's default of `true`.
+    #[serde(default)]
+    pub allow_own_credential_management: Option<bool>,
 }
 
 impl Default for WarpgateConfigStore {
@@ -923,6 +930,7 @@ impl Default for WarpgateConfigStore {
             vnc: <_>::default(),
             rdp: <_>::default(),
             log: <_>::default(),
+            allow_own_credential_management: None,
         }
     }
 }

@@ -9,6 +9,7 @@ use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_db_entities::ApiToken;
 
 use super::common::get_user;
+use super::credentials::parameters_based_auth;
 use crate::api::auth_scheme::AuthedSession;
 
 pub struct Api;
@@ -77,7 +78,8 @@ impl Api {
     #[oai(
         path = "/profile/api-tokens",
         method = "get",
-        operation_id = "get_my_api_tokens"
+        operation_id = "get_my_api_tokens",
+        transform = "parameters_based_auth"
     )]
     async fn api_get_api_tokens(
         &self,
@@ -103,7 +105,8 @@ impl Api {
     #[oai(
         path = "/profile/api-tokens",
         method = "post",
-        operation_id = "create_api_token"
+        operation_id = "create_api_token",
+        transform = "parameters_based_auth"
     )]
     async fn api_create_api_token(
         &self,
@@ -152,7 +155,8 @@ impl Api {
     #[oai(
         path = "/profile/api-tokens/:id",
         method = "delete",
-        operation_id = "delete_my_api_token"
+        operation_id = "delete_my_api_token",
+        transform = "parameters_based_auth"
     )]
     async fn api_delete_api_token(
         &self,

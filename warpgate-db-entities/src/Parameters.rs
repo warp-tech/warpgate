@@ -128,6 +128,7 @@ pub struct ConfigMigrationValues {
     pub recordings_enable: bool,
     pub recordings_path: String,
     pub ssh_host_key_verification: SshHostKeyVerificationMode,
+    pub allow_own_credential_management: bool,
 }
 
 impl ConfigMigrationValues {
@@ -137,6 +138,10 @@ impl ConfigMigrationValues {
             recordings_enable: recordings.enable,
             recordings_path: recordings.path,
             ssh_host_key_verification: config.store.ssh.host_key_verification.into(),
+            allow_own_credential_management: config
+                .store
+                .allow_own_credential_management
+                .unwrap_or(true),
         }
     }
 }
@@ -269,7 +274,9 @@ impl Entity {
                 #[allow(clippy::unwrap_used, reason = "can't fail")]
                 ActiveModel {
                     id: Set(Uuid::new_v4()),
-                    allow_own_credential_management: Set(true),
+                    allow_own_credential_management: Set(
+                        get_config_migration_values().allow_own_credential_management,
+                    ),
                     rate_limit_bytes_per_second: Set(None),
                     ca_certificate_pem: Set("".into()),
                     ca_private_key_pem: Set("".into()),
