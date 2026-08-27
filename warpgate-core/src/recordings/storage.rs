@@ -191,7 +191,7 @@ impl Storage {
             Backend::S3(s3) => RecordingSink::S3 {
                 scratch: local_file,
                 scratch_path: local_path,
-                upload: Some(s3.start_multipart(&object_path(recording, file)).await?),
+                upload: Some(s3.start_multipart(&relative_path(recording, file)).await?),
             },
             Backend::Disk => RecordingSink::Disk(local_file),
         })
@@ -201,12 +201,10 @@ impl Storage {
     /// recordings and the disk backend, S3 for completed recordings on S3.
     pub(crate) fn access(&self, recording: &Recording::Model, file: RecordingFile) -> FileAccess {
         match &self.backend {
-            Backend::S3(s3) if recording.ended.is_some() && recording.generation >= 2 => {
-                FileAccess::S3 {
-                    s3: s3.clone(),
-                    key: object_path(recording, file),
-                }
-            }
+            Backend::S3(s3) if recording.ended.is_some() => FileAccess::S3 {
+                s3: s3.clone(),
+                key: relative_path(recording, file),
+            },
             _ => FileAccess::Local(local_path_in(&self.local_root, recording, file)),
         }
     }
@@ -215,13 +213,14 @@ impl Storage {
     /// and the local folder (best-effort; on S3 the scratch is already gone).
     pub(crate) async fn remove(&self, session_id: &SessionId, name: &str) -> Result<()> {
         if let Backend::S3(s3) = &self.backend {
-            for file in [
-                RecordingFile::NDJsonData,
-                RecordingFile::Index,
-                RecordingFile::TcpDumpData,
+            for key in [
+                format!("{session_id}/{name}/{}", RecordingFile::NDJsonData.filename()),
+                format!("{session_id}/{name}/{}", RecordingFile::Index.filename()),
+                format!("{session_id}/{name}/{}", RecordingFile::TcpDumpData.filename()),
+                // Gen-1 recordings are a single object named after the recording.
+                format!("{session_id}/{name}"),
             ] {
-                s3.delete(&format!("{session_id}/{name}/{}", file.filename()))
-                    .await?;
+                s3.delete(&key).await?;
             }
         }
 
@@ -245,26 +244,57 @@ impl Storage {
     }
 }
 
-/// Local path of a recording file under `root` (generation-aware): gen 1 is a
-/// single file, gen 2 is multiple files inside the recording folder.
-fn local_path_in(root: &Path, recording: &Recording::Model, file: RecordingFile) -> PathBuf {
-    let base = root
-        .join(recording.session_id.to_string())
-        .join(&recording.name);
+/// Path of a recording file relative to a storage root, shared by the local
+/// filesystem and S3 so the two layouts stay identical: gen 1 is a single file,
+/// gen 2 is multiple files inside the recording folder.
+fn relative_path(recording: &Recording::Model, file: RecordingFile) -> String {
+    let base = format!("{}/{}", recording.session_id, recording.name);
     if recording.generation >= 2 {
-        base.join(file.filename())
+        format!("{base}/{}", file.filename())
     } else {
         base
     }
 }
 
-/// S3 object path (before the configured prefix) of a recording file. Only
-/// gen-2 recordings are ever stored on S3.
-fn object_path(recording: &Recording::Model, file: RecordingFile) -> String {
-    format!(
-        "{}/{}/{}",
-        recording.session_id,
-        recording.name,
-        file.filename()
-    )
+fn local_path_in(root: &Path, recording: &Recording::Model, file: RecordingFile) -> PathBuf {
+    root.join(relative_path(recording, file))
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::uuid;
+    use warpgate_db_entities::Recording::RecordingKind;
+
+    use super::*;
+
+    fn recording(generation: i32) -> Recording::Model {
+        Recording::Model {
+            id: uuid!("00000000-0000-0000-0000-0000000000ff"),
+            name: "0.ndjson".into(),
+            started: time::OffsetDateTime::UNIX_EPOCH,
+            ended: None,
+            session_id: uuid!("00000000-0000-0000-0000-00000000000a"),
+            kind: RecordingKind::Terminal,
+            metadata: "{}".into(),
+            generation,
+        }
+    }
+
+    /// Gen-1 recordings copied verbatim from a filesystem backend into a bucket
+    /// must resolve to the same key S3 as they did paths on disk.
+    #[test]
+    fn relative_path_is_generation_aware() {
+        assert_eq!(
+            relative_path(&recording(1), RecordingFile::NDJsonData),
+            "00000000-0000-0000-0000-00000000000a/0.ndjson"
+        );
+        assert_eq!(
+            relative_path(&recording(2), RecordingFile::NDJsonData),
+            "00000000-0000-0000-0000-00000000000a/0.ndjson/data.ndjson"
+        );
+        assert_eq!(
+            local_path_in(Path::new("/data"), &recording(1), RecordingFile::NDJsonData),
+            PathBuf::from("/data/00000000-0000-0000-0000-00000000000a/0.ndjson")
+        );
+    }
 }
