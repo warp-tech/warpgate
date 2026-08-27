@@ -112,7 +112,7 @@ impl RateLimiterRegistry {
                     .await?;
                 self.update_target_rate_limiter(state.target.as_ref(), handle)
                     .await?;
-                self.update_global_rate_limiter(handle).await?;
+                self.update_global_rate_limiter(handle)?;
             }
             Ok(())
         }
@@ -157,7 +157,7 @@ impl RateLimiterRegistry {
         Ok(())
     }
 
-    async fn update_global_rate_limiter(
+    fn update_global_rate_limiter(
         &mut self,
         handle: &RateLimiterStackHandle,
     ) -> Result<(), WarpgateError> {

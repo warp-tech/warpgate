@@ -28,12 +28,6 @@ macro_rules! uuid_newtype {
             }
         }
 
-        impl From<$name> for Uuid {
-            fn from(id: $name) -> Self {
-                id.0
-            }
-        }
-
         impl From<$name> for sea_orm::Value {
             fn from(id: $name) -> Self {
                 id.0.into()
@@ -103,16 +97,6 @@ pub enum Protocol {
 }
 
 impl Protocol {
-    pub const ALL: [Self; 7] = [
-        Self::Http,
-        Self::Ssh,
-        Self::MySql,
-        Self::Postgres,
-        Self::Kubernetes,
-        Self::Vnc,
-        Self::Rdp,
-    ];
-
     pub const fn name(self) -> &'static str {
         match self {
             Self::Http => "HTTP",

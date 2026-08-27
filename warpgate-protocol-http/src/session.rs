@@ -19,14 +19,11 @@ use crate::common::{PROTOCOL_NAME, SessionExt};
 use crate::middleware::ticket::{TicketSessionKey, ticket_session_key};
 use crate::session_handle::{HttpSessionHandle, SessionHandleCommand};
 
-/// The node's view of one user session. This entry holds the last reference
-/// to the handle that requests are served through, so removing it is what
-/// drops the parent state, which drops its target-session slots, which drops
-/// their close senders and aborts the requests and websockets running against
-/// them. Anything that stores a lasting clone of `handle` breaks that chain
-/// and turns an administrative close into a no-op for traffic already in
-/// flight — `close_parent_drops_target_sessions` in `warpgate-core` covers the
-/// core half of it.
+/// The node's view of one user session. Removing the entry fires its
+/// `close_sender`, aborting the requests and websockets served through it, and
+/// drops the last reference to `handle`, whose teardown detaches a
+/// cookie-backed session and ends a node-owned (header-ticket) one. Anything
+/// that stores a lasting clone of `handle` keeps that teardown from running.
 struct SessionEntry {
     handle: Arc<Mutex<WarpgateServerHandle>>,
     close_sender: broadcast::Sender<()>,
@@ -191,9 +188,9 @@ impl SessionStore {
         let (session_handle, session_handle_rx) = HttpSessionHandle::new();
         let init = Self::state_init_for(req, session_handle).await?;
         // A header-ticket session is held open by this node's entry alone: it
-        // has no stored browser session, so the shared-lifecycle reaper would
-        // see it as an orphan and end it while it is still serving. Its
-        // lifetime is this node's, and it registers as such.
+        // has no stored browser session, so the orphan sweep would end it
+        // while it is still serving. Its lifetime is this node's, and it
+        // registers as such.
         let server_handle = if ticket_session_key(req, session).is_some() {
             State::register_node_local_user_session(&ctx.services().state, PROTOCOL_NAME, init)
                 .await?

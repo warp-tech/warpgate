@@ -174,10 +174,3 @@ pub async fn revoke_all(db: &DatabaseConnection) -> Result<(), WarpgateError> {
     Ok(())
 }
 
-/// Whether the user session is still not ended
-pub async fn is_open(db: &DatabaseConnection, id: UserSessionId) -> Result<bool, WarpgateError> {
-    Ok(Entity::find_by_id(id)
-        .one(db)
-        .await?
-        .is_some_and(|row| row.ended.is_none()))
-}

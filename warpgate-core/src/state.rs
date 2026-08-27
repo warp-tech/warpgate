@@ -191,9 +191,6 @@ impl State {
     /// while still provisional (Kubernetes confirms only after admission) are
     /// part of the attempt and are discarded with it.
     pub async fn discard_session(&mut self, id: UserSessionId) {
-        // Target sessions are owned by the removed state: their slots drop
-        // with it, and each handle's teardown then no-ops on the rows deleted
-        // here.
         self.user_sessions.remove(&id);
 
         if let Err(error) = TargetSession::Entity::delete_many()
@@ -583,8 +580,9 @@ mod tests {
     }
 
     /// A node adopting a shared session (created elsewhere, or detached here)
-    /// starts with an empty in-memory slot map; the live target-session row
-    /// must be adopted, not duplicated.
+    /// has no memory of the row another node already recorded for this target;
+    /// the unique (user session, target) pair makes it reuse that row rather
+    /// than record a duplicate.
     #[tokio::test]
     async fn adopted_user_session_reuses_the_live_target_session_row() {
         set_config_migration_values(ConfigMigrationValues::default());
