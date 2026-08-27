@@ -176,6 +176,7 @@ impl DatabaseConfigProvider {
         credential: UserSsoCredential,
         preferred_username: String,
         default_credential_policy: Option<serde_json::Value>,
+        default_allowed_ip_ranges: Option<Vec<String>>,
     ) -> Result<Option<String>, WarpgateError> {
         // Check for LDAP servers with auto-linking enabled
         let ldap_servers: Vec<entities::LdapServer::Model> = entities::LdapServer::Entity::find()
@@ -243,7 +244,11 @@ impl DatabaseConfigProvider {
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(ldap_server_id),
             ldap_object_uuid: Set(ldap_object_uuid),
-            allowed_ip_ranges: Set(serde_json::Value::Null),
+            allowed_ip_ranges: Set(
+                default_allowed_ip_ranges
+                    .map(|ranges| serde_json::to_value(ranges).unwrap_or(serde_json::Value::Null))
+                    .unwrap_or(serde_json::Value::Null),
+            ),
         }
         .insert(db)
         .await?;
@@ -518,6 +523,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     },
                     preferred_username,
                     sso_config.default_credential_policy.clone(),
+                    sso_config.default_allowed_ip_ranges.clone(),
                 )
                 .await;
         }
