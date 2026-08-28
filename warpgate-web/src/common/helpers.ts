@@ -9,6 +9,28 @@ export function routeQueryParams(): URLSearchParams {
     return new URLSearchParams(router.querystring ?? '')
 }
 
+/**
+ * Navigate to a URL that originates outside Warpgate - currently the
+ * `authorization_endpoint` / `end_session_endpoint` an OIDC provider
+ * advertises in its discovery document.
+ *
+ * Assigning e.g. a `javascript:` URL to `location.href` runs it on our own
+ * origin, so only http(s) is allowed through. The backend rejects such
+ * endpoints at discovery time; this is the second line of defence.
+ */
+export function navigateToExternalUrl(url: string): void {
+    let parsed: URL
+    try {
+        parsed = new URL(url, location.href)
+    } catch {
+        throw new Error(`Refusing to navigate to a malformed URL: ${url}`)
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(`Refusing to navigate to a non-HTTP URL: ${url}`)
+    }
+    location.href = url
+}
+
 export function downloadBlob(content: string, filename: string): void {
     const blob = new Blob([content], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
