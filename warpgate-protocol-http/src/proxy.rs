@@ -64,6 +64,9 @@ trait SomeRequestBuilder {
     where
         HeaderValue: TryFrom<V>,
         <HeaderValue as TryFrom<V>>::Error: Into<http::Error>;
+
+    /// Set a target-configured header, replacing values copied or generated earlier.
+    fn set_header(self, k: HeaderName, v: HeaderValue) -> Self;
 }
 
 impl SomeRequestBuilder for reqwest::RequestBuilder {
@@ -74,6 +77,12 @@ impl SomeRequestBuilder for reqwest::RequestBuilder {
     {
         self.header(k, v)
     }
+
+    fn set_header(self, k: HeaderName, v: HeaderValue) -> Self {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(k, v);
+        self.headers(headers)
+    }
 }
 
 impl SomeRequestBuilder for http::request::Builder {
@@ -83,6 +92,13 @@ impl SomeRequestBuilder for http::request::Builder {
         <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
     {
         self.header(k, v)
+    }
+
+    fn set_header(mut self, k: HeaderName, v: HeaderValue) -> Self {
+        if let Some(headers) = self.headers_mut() {
+            headers.insert(k, v);
+        }
+        self
     }
 }
 
@@ -168,7 +184,7 @@ fn copy_client_response<R: SomeResponse>(
 fn rewrite_request<B: SomeRequestBuilder>(mut req: B, options: &TargetHTTPOptions) -> Result<B> {
     if let Some(ref headers) = options.headers {
         for (k, v) in headers {
-            req = req.header(HeaderName::try_from(k)?, v);
+            req = req.set_header(HeaderName::try_from(k)?, HeaderValue::try_from(v)?);
         }
     }
     Ok(req)
@@ -660,6 +676,31 @@ mod tests {
             headers: None,
             external_host: None,
         }
+    }
+
+    #[test]
+    fn rewrite_request_replaces_websocket_host() {
+        let mut options = make_options("http://ingress.internal");
+        options.headers = Some(std::collections::HashMap::from([(
+            "Host".to_string(),
+            "backend.example.com".to_string(),
+        )]));
+
+        let request = rewrite_request(
+            http::Request::builder().header(http::header::HOST, "ingress.internal"),
+            &options,
+        )
+        .unwrap()
+        .body(())
+        .unwrap();
+
+        let hosts = request
+            .headers()
+            .get_all(http::header::HOST)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(hosts, ["backend.example.com"]);
     }
 
     #[test]
