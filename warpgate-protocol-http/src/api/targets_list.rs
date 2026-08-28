@@ -6,7 +6,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::EntityTrait;
 use serde::Serialize;
 use uuid::Uuid;
-use warpgate_common::{Target as TargetConfig, TargetOptions, WarpgateError};
+use warpgate_common::{Target as TargetConfig, WarpgateError};
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
@@ -101,15 +101,11 @@ impl Api {
                     name: t.name.clone(),
                     description: t.description.clone(),
                     kind: (&t.options).into(),
-                    external_host: match t.options {
-                        TargetOptions::Http(ref opt) => opt.external_host.clone(),
-                        _ => None,
-                    },
-                    default_database_name: match t.options {
-                        TargetOptions::Postgres(ref opt) => opt.default_database_name.clone(),
-                        TargetOptions::MySql(ref opt) => opt.default_database_name.clone(),
-                        _ => None,
-                    },
+                    external_host: t.options.external_host().map(ToString::to_string),
+                    default_database_name: t
+                        .options
+                        .default_database_name()
+                        .map(ToString::to_string),
                     group,
                 }
             })

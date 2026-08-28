@@ -18,7 +18,14 @@ use crate::{ConfigProvider, ConfigProviderEnum};
 
 pub struct TicketRequestResult {
     pub request: TicketRequest::Model,
+    pub target: Target::Model,
     pub auto_approved_secret: Option<Secret<String>>,
+}
+
+pub struct ActivatedTicket {
+    pub request: TicketRequest::Model,
+    pub target: Target::Model,
+    pub secret: Secret<String>,
 }
 
 pub struct CreateTicketRequestParams {
@@ -188,6 +195,7 @@ pub async fn create_ticket_request(
 
         Ok(TicketRequestResult {
             request: request_model,
+            target,
             auto_approved_secret: Some(secret),
         })
     } else {
@@ -214,6 +222,7 @@ pub async fn create_ticket_request(
 
         Ok(TicketRequestResult {
             request: request_model,
+            target,
             auto_approved_secret: None,
         })
     }
@@ -318,7 +327,7 @@ pub async fn activate_ticket_request(
     db: &sea_orm::DatabaseConnection,
     request_id: Uuid,
     user_id: Uuid,
-) -> Result<(TicketRequest::Model, Secret<String>), ActivateTicketRequestError> {
+) -> Result<ActivatedTicket, ActivateTicketRequestError> {
     let db_conn = db;
 
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
@@ -381,7 +390,11 @@ pub async fn activate_ticket_request(
         request_id, ticket_id
     );
 
-    Ok((updated, secret))
+    Ok(ActivatedTicket {
+        request: updated,
+        target,
+        secret,
+    })
 }
 
 pub async fn deny_ticket_request(

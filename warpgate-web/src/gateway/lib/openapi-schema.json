@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.4-2-gb3262271-modified"
+    "version": "v0.28.4-4-gb1f007e5-modified"
   },
   "servers": [
     {
@@ -1593,13 +1593,40 @@
         "type": "object",
         "title": "ActivatedTicketModel",
         "required": [
-          "request"
+          "request",
+          "target"
         ],
         "properties": {
           "request": {
             "$ref": "#/components/schemas/TicketRequest"
           },
+          "target": {
+            "$ref": "#/components/schemas/ActivatedTicketTargetInfo"
+          },
           "secret": {
+            "type": "string"
+          }
+        }
+      },
+      "ActivatedTicketTargetInfo": {
+        "type": "object",
+        "title": "ActivatedTicketTargetInfo",
+        "description": "Just the slim view of fields that the UI needs to show connection instructions\nsince the user might not have full role based access to the target",
+        "required": [
+          "name",
+          "kind"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TargetKind"
+          },
+          "external_host": {
+            "type": "string"
+          },
+          "default_database_name": {
             "type": "string"
           }
         }
@@ -1832,11 +1859,15 @@
         "type": "object",
         "title": "CreatedRequest",
         "required": [
-          "request"
+          "request",
+          "target"
         ],
         "properties": {
           "request": {
             "$ref": "#/components/schemas/TicketRequest"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ActivatedTicketTargetInfo"
           },
           "auto_approved_ticket_secret": {
             "type": "string"
