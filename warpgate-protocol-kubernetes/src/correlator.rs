@@ -9,9 +9,10 @@ use warpgate_common::{
     TargetKubernetesOptions, TargetSessionId, User, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::logging::get_client_ip;
-use warpgate_core::approvals::{AdminApprovalContext, GateOutcome, TicketStake};
+use warpgate_core::approvals::{GatedConnection, TicketStake, admit_target_session};
 use warpgate_core::{
-    ApprovedTarget, Services, State, TargetSessionStart, UserSessionStateInit, WarpgateServerHandle,
+    ApprovedTarget, Services, State, TargetAuthorization, UserSessionStateInit,
+    WarpgateServerHandle,
 };
 
 use crate::server::auth::{authorize_kubernetes_target, unauthorized};
@@ -121,7 +122,7 @@ pub async fn correlated_authorization(
         {
             Ok(resolved) => {
                 let admitted =
-                    match admit_target_session(request, services, &handle, resolved).await {
+                    match admit_kubernetes_session(request, services, &handle, resolved).await {
                         Ok((target_session_id, approved)) => AdmittedSession {
                             target_session_id,
                             approved: Arc::new(approved),
@@ -156,50 +157,30 @@ pub async fn correlated_authorization(
 /// `kubectl` has no channel for a "waiting" notice, so the command's requests
 /// simply hold — exactly as they already do on the correlator's slot for a
 /// pending web approval — and the rest of the fan-out waits on the slot.
-async fn admit_target_session(
+async fn admit_kubernetes_session(
     request: &Request,
     services: &Services,
     handle: &Arc<Mutex<WarpgateServerHandle>>,
-    resolved: warpgate_core::TargetAuthorization<TargetKubernetesOptions>,
+    resolved: TargetAuthorization<TargetKubernetesOptions>,
 ) -> Result<(TargetSessionId, ApprovedTarget<TargetKubernetesOptions>), WarpgateError> {
-    let started = handle.lock().await.start_target_session(resolved).await?;
-    let authorization = match started {
-        TargetSessionStart::Started(started) => return Ok(started),
-        TargetSessionStart::NeedsApproval(authorization) => authorization,
-    };
-
-    let session_id = handle.lock().await.user_session_id();
-    let outcome: GateOutcome<TargetKubernetesOptions> = services
-        .require_admin_approval(
-            authorization,
-            AdminApprovalContext {
-                session_id,
-                remote_ip: get_client_ip(request, services)
-                    .await
-                    .and_then(|ip| ip.parse().ok()),
-                // Client certificates and tokens are re-presented per request
-                // rather than settled into an auth state, so a Kubernetes
-                // session neither contributes nor consumes a remembered
-                // approval.
-                credentials: RememberedBy::Nothing,
-                // Kubernetes authenticates with certificates and tokens, never
-                // a ticket.
-                ticket: TicketStake::None,
-            },
-            std::future::pending(),
-            || async { Ok::<_, WarpgateError>(()) },
-        )
-        .await?;
-
-    let Some(approved) = outcome.approved() else {
-        return Err(WarpgateError::SessionNotApproved);
-    };
-    let target_session_id = handle
-        .lock()
-        .await
-        .register_approved_target_session(&approved)
-        .await?;
-    Ok((target_session_id, approved))
+    admit_target_session(
+        services,
+        handle,
+        resolved,
+        GatedConnection {
+            remote_ip: get_client_ip(request, services)
+                .await
+                .and_then(|ip| ip.parse().ok()),
+            // Client certificates and tokens are re-presented per request
+            // rather than settled into an auth state, so a Kubernetes session
+            // neither contributes nor consumes a remembered approval.
+            credentials: RememberedBy::Nothing,
+            // Kubernetes authenticates with certificates and tokens, never a
+            // ticket.
+            ticket: TicketStake::None,
+        },
+    )
+    .await
 }
 
 /// Waits for the request that opened this session to resolve its authorization.

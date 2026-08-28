@@ -563,16 +563,21 @@ mod tests {
     #[test]
     fn a_digest_is_keyed_to_its_salt() {
         #[allow(clippy::unwrap_used)]
-        let set =
-            CredentialFingerprints::new(vec![AuthCredentialFingerprint::Password { hash: [3; 32] }])
-                .unwrap();
+        let set = CredentialFingerprints::new(vec![AuthCredentialFingerprint::Password {
+            hash: [3; 32],
+        }])
+        .unwrap();
         #[allow(clippy::unwrap_used)]
         let one = CredentialDigestSalt::from_stored("salt-one").unwrap();
         #[allow(clippy::unwrap_used)]
         let other = CredentialDigestSalt::from_stored("salt-two").unwrap();
 
         assert_ne!(set.digest(&one), set.digest(&other));
-        assert_eq!(set.digest(&one), set.digest(&one), "and is stable under one");
+        assert_eq!(
+            set.digest(&one),
+            set.digest(&one),
+            "and is stable under one"
+        );
     }
 
     /// A blank salt reads as configured while keying on nothing.

@@ -271,42 +271,21 @@ async fn negotiate_and_authorize(
         DesktopAuthOutcome::Failed => return Ok(None),
     };
 
-    let started = server_handle
-        .lock()
-        .await
-        .start_target_session(authorization)
-        .await?;
-    let (target_session_id, approved) = match started {
-        TargetSessionStart::Started(started) => started,
-        // The viewer is held under the hold screen for the whole gate: VNC only paints when
-        // asked, so without it the viewer's frame requests would go unanswered and its screen
-        // would sit frozen for as long as the administrator takes to decide.
-        TargetSessionStart::NeedsApproval(authorization) => {
-            let session_id = server_handle.lock().await.user_session_id();
-            let approved = render_while(
-                &mut viewer_wr,
-                &mut events_rx,
-                &mut render,
-                warpgate_desktop_auth::approve_session(
-                    services,
-                    &session_id,
-                    authorization,
-                    Some(remote_address.ip()),
-                ),
-            )
-            .await??;
-            let Some(approved) = approved else {
-                warn!("Session was not approved by an administrator");
-                return Ok(None);
-            };
-            let target_session_id = server_handle
-                .lock()
-                .await
-                .register_approved_target_session(&approved)
-                .await?;
-            (target_session_id, approved)
-        }
-    };
+    // The viewer is held under the hold screen for the whole gate: VNC only paints when
+    // asked, so without it the viewer's frame requests would go unanswered and its screen
+    // would sit frozen for as long as the administrator takes to decide.
+    let (target_session_id, approved) = render_while(
+        &mut viewer_wr,
+        &mut events_rx,
+        &mut render,
+        warpgate_desktop_auth::admit_desktop_session(
+            services,
+            server_handle,
+            authorization,
+            Some(remote_address.ip()),
+        ),
+    )
+    .await??;
 
     info!(target=%approved.target().name, "Authorized");
 

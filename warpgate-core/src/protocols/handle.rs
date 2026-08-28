@@ -265,14 +265,17 @@ pub enum TargetSessionStart<O> {
     NeedsApproval(TargetAuthorization<O>),
 }
 
+#[cfg(test)]
 impl<O> TargetSessionStart<O> {
-    /// For callers that gate before starting the session — the gate has already
-    /// admitted the connection, so being asked to approve here is an internal
-    /// inconsistency, not a user-facing wait.
-    pub fn admitted(self) -> Result<(TargetSessionId, ApprovedTarget<O>), WarpgateError> {
+    /// For tests that set up an ungated target and only care about the row.
+    ///
+    /// Deliberately test-only: in production every caller answers
+    /// `NeedsApproval` by holding the connection at the gate, and a shorthand
+    /// for turning it into an error is a shorthand for skipping the gate.
+    pub(crate) fn started(self) -> (TargetSessionId, ApprovedTarget<O>) {
         match self {
-            Self::Started(started) => Ok(started),
-            Self::NeedsApproval(_) => Err(WarpgateError::TargetSessionRequiresApproval),
+            Self::Started(started) => started,
+            Self::NeedsApproval(_) => panic!("the test target should not require approval"),
         }
     }
 }

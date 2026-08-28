@@ -40,8 +40,6 @@ pub enum WarpgateError {
     NoHostInUrl,
     #[error("Inconsistent state: {0}")]
     InconsistentState(String),
-    #[error("target session requires administrator approval")]
-    TargetSessionRequiresApproval,
     /// Somebody called WarpgateServerHandle::set_user_info twice
     #[error("user session is already attributed to another user")]
     UserSessionAlreadyAttributed,

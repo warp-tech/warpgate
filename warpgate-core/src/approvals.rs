@@ -51,12 +51,13 @@ use warpgate_common::auth::{
 };
 use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{NodeId, Protocol, UserSessionId, WarpgateError};
+use warpgate_common::{NodeId, Protocol, TargetSessionId, UserSessionId, WarpgateError};
 use warpgate_db_entities::{Parameters, SessionApprovalRequest};
 
 use crate::auth_state_store::TIMEOUT;
 use crate::config_providers::{ApprovedTarget, TargetAuthorization, TicketRefund, consume_ticket};
 use crate::services::Services;
+use crate::{TargetSessionStart, WarpgateServerHandle};
 
 /// How an approval should be remembered for later bypass.
 ///
@@ -787,6 +788,82 @@ pub struct AdminApprovalContext {
     /// the refund rule unforgettable: a wait site states its ticket story to
     /// build the context at all.
     pub ticket: TicketStake,
+}
+
+/// How a connection presents itself to the gate, minus the session it belongs
+/// to — [`admit_target_session`] reads that off the handle, so the two can't
+/// disagree about which session is being held.
+pub struct GatedConnection {
+    pub remote_ip: Option<IpAddr>,
+    /// See [`AdminApprovalContext::credentials`].
+    pub credentials: RememberedBy,
+    /// See [`AdminApprovalContext::ticket`].
+    pub ticket: TicketStake,
+}
+
+/// Starts a target session, holding the connection at the administrator gate
+/// when the target requires one, and registers what the gate mints.
+///
+/// The single path from "authorized" to "admitted" for every protocol that can
+/// simply park on the gate: the connection is already established and there is
+/// nothing to tell the client while it waits, so the wait is silent and ends
+/// only with a decision, the window running out, or the session going away.
+/// Protocols that must say something meanwhile (SSH's notice, HTTP's
+/// interstitial) drive [`Services::require_admin_approval`] or
+/// [`Services::poll_admin_approval`] themselves.
+///
+/// A refused connection is [`WarpgateError::SessionNotApproved`]. The order —
+/// hold, and only then register — is the point of gathering this in one place:
+/// the target session is recorded from the proof the gate returned, never from
+/// the authorization that went in.
+pub async fn admit_target_session<O: Send + Sync>(
+    services: &Services,
+    handle: &Arc<Mutex<WarpgateServerHandle>>,
+    authorization: TargetAuthorization<O>,
+    connection: GatedConnection,
+) -> Result<(TargetSessionId, ApprovedTarget<O>), WarpgateError> {
+    let started = handle
+        .lock()
+        .await
+        .start_target_session(authorization)
+        .await?;
+    let authorization = match started {
+        TargetSessionStart::Started(started) => return Ok(started),
+        TargetSessionStart::NeedsApproval(authorization) => authorization,
+    };
+
+    let GatedConnection {
+        remote_ip,
+        credentials,
+        ticket,
+    } = connection;
+    let session_id = handle.lock().await.user_session_id();
+
+    let outcome: GateOutcome<O> = services
+        .require_admin_approval(
+            authorization,
+            AdminApprovalContext {
+                session_id,
+                remote_ip,
+                credentials,
+                ticket,
+            },
+            std::future::pending(),
+            || async { Ok::<_, WarpgateError>(()) },
+        )
+        .await?;
+
+    let Some(approved) = outcome.approved() else {
+        warn!(%session_id, "Session was not approved by an administrator");
+        return Err(WarpgateError::SessionNotApproved);
+    };
+
+    let target_session_id = handle
+        .lock()
+        .await
+        .register_approved_target_session(&approved)
+        .await?;
+    Ok((target_session_id, approved))
 }
 
 impl Services {
@@ -1910,9 +1987,14 @@ mod tests {
         );
         // A zero grace is never fresh, so approval is required again.
         assert!(
-            !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), Duration::ZERO, &test_salt())
-                .await
-                .unwrap()
+            !approval_is_remembered(
+                &db,
+                &lookup_key("prod", [7u8; 32]),
+                Duration::ZERO,
+                &test_salt()
+            )
+            .await
+            .unwrap()
         );
         // The other approval kind is a different question entirely.
         let mut other_kind = lookup_key("prod", [7u8; 32]);

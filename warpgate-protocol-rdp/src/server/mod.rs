@@ -27,11 +27,10 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unb
 use tokio::time::{Instant, timeout_at};
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::accept_loop;
-use warpgate_common::{ListenEndpoint, TargetRdpOptions};
+use warpgate_common::{ListenEndpoint, TargetRdpOptions, WarpgateError};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{
-    DesktopInput, Services, State, TargetAuthorization, TargetSessionStart, UserSessionStateInit,
-    WarpgateServerHandle,
+    DesktopInput, Services, State, TargetAuthorization, UserSessionStateInit, WarpgateServerHandle,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_desktop_ui::{DEFAULT_SCREEN_H, DEFAULT_SCREEN_W};
@@ -49,7 +48,7 @@ use bridge::connect_backend;
 use hold_screen::{run_banner_screen, run_hold_screen};
 use protocol::{AuthVerdict, Event as ServerEvent, Input as ServerInput};
 use warpgate_desktop_auth::{
-    DesktopAuthOutcome, approve_session, authenticate, finalize_user_auth,
+    DesktopAuthOutcome, admit_desktop_session, authenticate, finalize_user_auth,
 };
 
 /// Depth of the feed into the viewer-facing RDP server. Bounded so a slow viewer
@@ -525,36 +524,23 @@ async fn dial_if_pending(
     if backend.is_none()
         && let Some(authorization) = pending.take()
     {
-        let started = server_handle
-            .lock()
-            .await
-            .start_target_session(authorization)
-            .await?;
-        let (target_session_id, approved) = match started {
-            TargetSessionStart::Started(started) => started,
-            // Held inline: the viewer keeps its last frame while the
-            // administrator decides, exactly as it does for the 2FA hold.
-            TargetSessionStart::NeedsApproval(authorization) => {
-                let session_id = server_handle.lock().await.user_session_id();
-                let Some(approved) = approve_session(
-                    services,
-                    &session_id,
-                    authorization,
-                    Some(remote_address.ip()),
-                )
-                .await?
-                else {
-                    warn!("Session was not approved by an administrator");
-                    let _ = server_in_tx.send(ServerInput::Shutdown).await;
-                    return Ok(false);
-                };
-                let target_session_id = server_handle
-                    .lock()
-                    .await
-                    .register_approved_target_session(&approved)
-                    .await?;
-                (target_session_id, approved)
+        // Held inline: the viewer keeps its last frame while the administrator
+        // decides, exactly as it does for the 2FA hold.
+        let admitted = admit_desktop_session(
+            services,
+            server_handle,
+            authorization,
+            Some(remote_address.ip()),
+        )
+        .await;
+        let (target_session_id, approved) = match admitted {
+            Ok(admitted) => admitted,
+            Err(WarpgateError::SessionNotApproved) => {
+                warn!("Session was not approved by an administrator");
+                let _ = server_in_tx.send(ServerInput::Shutdown).await;
+                return Ok(false);
             }
+            Err(error) => return Err(error.into()),
         };
         *backend = Some(
             connect_backend(services, server_in_tx, target_session_id, approved, screen).await?,

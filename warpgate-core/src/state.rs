@@ -511,8 +511,7 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started();
 
         // The only reference the connection would have held.
         drop(parent);
@@ -573,8 +572,7 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started();
         let (second_id, _) = parent
             .lock()
             .await
@@ -585,8 +583,7 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started();
         assert_eq!(first_id, second_id);
         assert_eq!(
             TargetSession::Entity::find()
@@ -607,8 +604,7 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started();
         assert_ne!(first_id, other_id);
         assert_eq!(
             TargetSession::Entity::find()
@@ -658,8 +654,7 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started();
 
         let adopted = State::adopt_user_session(
             &state,
@@ -681,8 +676,7 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started();
 
         assert_eq!(first_id, adopted_id);
         assert_eq!(
@@ -760,8 +754,7 @@ mod tests {
                 .start_target_session(first_authorization)
                 .await
                 .unwrap()
-                .admitted()
-                .unwrap()
+                .started()
                 .0
         };
         let second = async {
@@ -771,8 +764,7 @@ mod tests {
                 .start_target_session(second_authorization)
                 .await
                 .unwrap()
-                .admitted()
-                .unwrap()
+                .started()
                 .0
         };
         let (first_id, second_id) = tokio::join!(first, second);
@@ -894,8 +886,7 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started();
         assert_eq!(approved.target(), &target);
         let row = TargetSession::Entity::find_by_id(target_session_id)
             .one(&db)
@@ -917,8 +908,7 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started();
         assert_eq!(again_id, target_session_id);
     }
 }

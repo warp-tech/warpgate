@@ -18,14 +18,12 @@ use tokio::sync::futures::Notified;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
-use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::RememberedBy;
 use warpgate_common::{TargetSessionId, UserSessionId, WarpgateError};
-use warpgate_core::approvals::{AdminApprovalContext, TicketStake};
+use warpgate_core::approvals::{GatedConnection, TicketStake, admit_target_session};
 use warpgate_core::{
-    ApprovedTarget, Services, SessionHandle, TargetAuthorization, TargetSessionStart,
-    WarpgateServerHandle,
+    ApprovedTarget, Services, SessionHandle, TargetAuthorization, WarpgateServerHandle,
 };
 use warpgate_db_entities::Target::TargetKind;
 
@@ -212,55 +210,34 @@ pub enum SessionAccess<S> {
 /// The session is registered before the gate so an administrator can see (and
 /// close) the attempt while it waits, but marked provisional until it is let
 /// through: one that never becomes a session leaves no session behind, only
-/// its approval request. A browser session carries no credential fingerprints
-/// of its own, so it neither contributes nor consumes a remembered approval.
+/// its approval request.
 pub async fn gate_web_client_session<O: Send + Sync>(
     services: &Services,
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,
     remote_address: Option<SocketAddr>,
 ) -> Result<(TargetSessionId, ApprovedTarget<O>), WarpgateError> {
-    let started = server_handle
-        .lock()
-        .await
-        .start_target_session(authorization)
-        .await?;
-    let authorization = match started {
-        TargetSessionStart::Started(started) => return Ok(started),
-        TargetSessionStart::NeedsApproval(authorization) => authorization,
-    };
+    server_handle.lock().await.mark_provisional();
 
-    let session_id = {
-        let mut handle = server_handle.lock().await;
-        handle.mark_provisional();
-        handle.user_session_id()
-    };
+    let admitted = admit_target_session(
+        services,
+        server_handle,
+        authorization,
+        GatedConnection {
+            remote_ip: remote_address.map(|address| address.ip()),
+            // A browser session's own login credentials aren't carried on the
+            // client connection, so it neither contributes nor consumes a
+            // remembered approval.
+            credentials: RememberedBy::Nothing,
+            // A browser client session is opened from an already established
+            // portal login, never by a ticket.
+            ticket: TicketStake::None,
+        },
+    )
+    .await?;
 
-    let Some(approved) = services
-        .require_admin_approval(
-            authorization,
-            AdminApprovalContext {
-                session_id,
-                remote_ip: remote_address.map(|address| address.ip()),
-                credentials: RememberedBy::Nothing,
-                // A browser client session is opened from an already
-                // established portal login, never by a ticket.
-                ticket: TicketStake::None,
-            },
-            std::future::pending(),
-            || async { Ok::<_, WarpgateError>(()) },
-        )
-        .await?
-        .approved()
-    else {
-        warn!("Session was not approved by an administrator");
-        return Err(WarpgateError::SessionNotApproved);
-    };
-
-    let mut handle = server_handle.lock().await;
-    handle.confirm();
-    let target_session_id = handle.register_approved_target_session(&approved).await?;
-    Ok((target_session_id, approved))
+    server_handle.lock().await.confirm();
+    Ok(admitted)
 }
 
 /// A user's claim on one session slot, held from before the session exists until

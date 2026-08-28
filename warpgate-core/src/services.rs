@@ -14,12 +14,12 @@ use warpgate_common::{
 use warpgate_db_entities::{Parameters, UserSession};
 
 use crate::approvals::SessionGates;
+use crate::auth_state_store::ApprovalRequestSink;
 use crate::cluster::Cluster;
 use crate::db::connect_to_db_and_migrate;
 use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
-use crate::auth_state_store::ApprovalRequestSink;
 use crate::{
     AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry, State,
 };
