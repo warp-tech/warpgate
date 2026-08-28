@@ -2,18 +2,19 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use openidconnect::core::{
-    CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreErrorResponseType,
-    CoreGenderClaim, CoreJsonWebKey, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm,
-    CoreRevocableToken, CoreRevocationErrorResponse, CoreTokenIntrospectionResponse, CoreTokenType,
+    CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreClientAuthMethod,
+    CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey, CoreJweContentEncryptionAlgorithm,
+    CoreJwsSigningAlgorithm, CoreRevocableToken, CoreRevocationErrorResponse,
+    CoreTokenIntrospectionResponse, CoreTokenType,
 };
 use openidconnect::url::Url;
 use openidconnect::{
-    AccessTokenHash, AdditionalClaims, Audience, AuthorizationCode, Client, CsrfToken,
-    EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet, HttpClientError, IdToken,
-    IdTokenClaims, IdTokenFields, LogoutRequest, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
-    PkceCodeVerifier, PostLogoutRedirectUrl, RedirectUrl, RequestTokenError, Scope,
-    StandardErrorResponse, StandardTokenResponse, TokenResponse, UserInfoClaims, UserInfoError,
-    reqwest,
+    AccessTokenHash, AdditionalClaims, Audience, AuthType, AuthorizationCode, Client, ClientSecret,
+    CsrfToken, EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet,
+    HttpClientError, IdToken, IdTokenClaims, IdTokenFields, LogoutRequest, Nonce,
+    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl,
+    ProviderMetadataWithLogout, RedirectUrl, RequestTokenError, Scope, StandardErrorResponse,
+    StandardTokenResponse, TokenResponse, UserInfoClaims, UserInfoError, reqwest,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
@@ -160,18 +161,61 @@ fn describe_userinfo_error(err: &UserInfoError<HttpClientError<reqwest::Error>>)
     }
 }
 
+/// Whether HTTP Basic client authentication would transmit this secret intact.
+///
+/// RFC 6749 section 2.3.1 requires the client secret to be form-urlencoded before it
+/// is base64'd into the `Authorization: Basic` credentials, and `oauth2` does
+/// exactly that. Providers are supposed to decode it again, but several
+/// (Authentik among them) compare the raw header value against the stored
+/// secret, so a secret containing `+`, `=` or `/` arrives as its percent-encoded
+/// form and is rejected as `invalid_client`.
+fn secret_survives_basic_auth(secret: &ClientSecret) -> bool {
+    let raw = secret.secret();
+    form_urlencoded::byte_serialize(raw.as_bytes()).collect::<String>() == *raw
+}
+
+/// A provider that omits `token_endpoint_auth_methods_supported` defaults to
+/// `client_secret_basic` alone (OIDC Discovery section 3), so an absent list is a no.
+fn advertises_secret_post(metadata: &ProviderMetadataWithLogout) -> bool {
+    metadata
+        .token_endpoint_auth_methods_supported()
+        .is_some_and(|methods| methods.contains(&CoreClientAuthMethod::ClientSecretPost))
+}
+
+/// Pick the client authentication method for the token endpoint.
+///
+/// Basic auth is the RFC's recommendation and stays the default, but it is only
+/// unambiguous for secrets that form-urlencoding leaves alone. For the rest,
+/// `client_secret_post` carries the secret verbatim and both sides agree on it.
+fn resolve_auth_type(
+    configured: AuthType,
+    secret: &ClientSecret,
+    metadata: &ProviderMetadataWithLogout,
+) -> AuthType {
+    if !matches!(configured, AuthType::BasicAuth) || secret_survives_basic_auth(secret) {
+        return configured;
+    }
+    if advertises_secret_post(metadata) {
+        debug!("Client secret needs escaping for basic auth; using client_secret_post instead");
+        return AuthType::RequestBody;
+    }
+    warn!(
+        "Client secret contains characters that must be escaped for basic auth, and the provider does not advertise client_secret_post. If authentication fails with invalid_client, rotate the secret to one made up of letters, digits and `-._*`."
+    );
+    configured
+}
+
 async fn make_client(
     config: &SsoInternalProviderConfig,
     http_client: &reqwest::Client,
 ) -> Result<WarpgateClient, SsoError> {
     let metadata = discover_metadata(config, http_client).await?;
+    let secret = config.client_secret()?;
+    let auth_type = resolve_auth_type(config.auth_type(), &secret, &metadata);
 
-    let client = WarpgateClient::from_provider_metadata(
-        metadata,
-        config.client_id().clone(),
-        Some(config.client_secret()?),
-    )
-    .set_auth_type(config.auth_type());
+    let client =
+        WarpgateClient::from_provider_metadata(metadata, config.client_id().clone(), Some(secret))
+            .set_auth_type(auth_type);
 
     Ok(client)
 }
@@ -408,7 +452,68 @@ impl SsoClient {
 mod tests {
     use serde_json::json;
 
-    use super::{GroupClaim, flatten_group_claim};
+    use super::{
+        AuthType, ClientSecret, GroupClaim, advertises_secret_post, flatten_group_claim,
+        resolve_auth_type, secret_survives_basic_auth,
+    };
+    use crate::metadata::tests::metadata;
+
+    fn survives(secret: &str) -> bool {
+        secret_survives_basic_auth(&ClientSecret::new(secret.to_owned()))
+    }
+
+    #[test]
+    fn url_safe_secrets_survive_basic_auth() {
+        assert!(survives(""));
+        assert!(survives("abcXYZ0189"));
+        assert!(survives("a-b_c.d*e"));
+    }
+
+    #[test]
+    fn secrets_needing_escaping_do_not() {
+        // The characters from issue #1815, plus the rest of base64's alphabet
+        // and a few that form-urlencoding also rewrites.
+        for secret in ["a+b", "ab==", "a/b", "a b", "a:b", "a%b", "pä"] {
+            assert!(!survives(secret), "{secret} was considered safe");
+        }
+    }
+
+    #[test]
+    fn secret_post_is_taken_from_the_discovery_document() {
+        assert!(!advertises_secret_post(&metadata(&json!({}))));
+        assert!(!advertises_secret_post(&metadata(&json!({
+            "token_endpoint_auth_methods_supported": ["client_secret_basic"],
+        }))));
+        assert!(advertises_secret_post(&metadata(&json!({
+            "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        }))));
+    }
+
+    fn resolved(secret: &str, extra: &serde_json::Value) -> AuthType {
+        resolve_auth_type(
+            AuthType::BasicAuth,
+            &ClientSecret::new(secret.to_owned()),
+            &metadata(extra),
+        )
+    }
+
+    #[test]
+    fn only_an_unsafe_secret_switches_to_secret_post() {
+        let both = json!({
+            "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        });
+
+        assert!(matches!(resolved("urlsafe", &both), AuthType::BasicAuth));
+        assert!(matches!(
+            resolved("has+plus=", &both),
+            AuthType::RequestBody
+        ));
+        // Nothing to switch to: basic auth is attempted and the admin is warned.
+        assert!(matches!(
+            resolved("has+plus=", &json!({})),
+            AuthType::BasicAuth
+        ));
+    }
 
     fn flat(j: serde_json::Value) -> Vec<String> {
         flatten_group_claim(serde_json::from_value::<GroupClaim>(j).unwrap())
