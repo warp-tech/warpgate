@@ -106,7 +106,8 @@ struct ParameterValues {
 #[derive(Serialize, Object)]
 struct ParameterUpdate {
     pub allow_own_credential_management: Option<bool>,
-    pub rate_limit_bytes_per_second: Option<u32>,
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
+    pub rate_limit_bytes_per_second: Option<Option<u32>>,
     pub ssh_client_auth_publickey: Option<bool>,
     pub ssh_client_auth_password: Option<bool>,
     pub ssh_client_auth_keyboard_interactive: Option<bool>,
@@ -114,9 +115,9 @@ struct ParameterUpdate {
     pub password_login_mode: Option<Parameters::PasswordLoginMode>,
     pub ticket_self_service_enabled: Option<bool>,
     pub ticket_auto_approve_existing_access: Option<bool>,
-    #[oai(deserialize_with = "parse_nullable")]
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub ticket_max_duration_seconds: Option<Option<i64>>,
-    #[oai(deserialize_with = "parse_nullable")]
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub ticket_max_uses: Option<Option<i16>>,
     pub ticket_require_description: Option<bool>,
     pub ticket_request_show_all_targets: Option<bool>,
@@ -124,27 +125,37 @@ struct ParameterUpdate {
     pub open_targets_in_new_tab: Option<Parameters::OpenTargetsInNewTabMode>,
     pub show_session_menu: Option<bool>,
     pub password_policy: Option<PasswordPolicy>,
-    #[oai(deserialize_with = "parse_nullable")]
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub max_api_token_duration_seconds: Option<Option<i64>>,
     pub record_scp: Option<bool>,
     pub login_protection_enabled: Option<bool>,
+    #[oai(validator(minimum(value = "1")))]
     pub login_protection_retention_seconds: Option<i32>,
+    #[oai(validator(minimum(value = "1")))]
     pub lp_ip_max_attempts: Option<i32>,
+    #[oai(validator(minimum(value = "1")))]
     pub lp_ip_time_window_seconds: Option<i32>,
+    #[oai(validator(minimum(value = "1")))]
     pub lp_ip_base_block_duration_seconds: Option<i32>,
+    #[oai(validator(minimum(value = "1.0")))]
     pub lp_ip_block_duration_multiplier: Option<f64>,
+    #[oai(validator(minimum(value = "1")))]
     pub lp_ip_max_block_duration_seconds: Option<i32>,
+    #[oai(validator(minimum(value = "1")))]
     pub lp_ip_cooldown_reset_seconds: Option<i32>,
+    #[oai(validator(minimum(value = "1")))]
     pub lp_user_max_attempts: Option<i32>,
+    #[oai(validator(minimum(value = "1")))]
     pub lp_user_time_window_seconds: Option<i32>,
     pub lp_user_auto_unlock: Option<bool>,
+    #[oai(validator(minimum(value = "1")))]
     pub lp_user_lockout_duration_seconds: Option<i32>,
     pub lp_user_exempt_admins: Option<bool>,
     pub banner: Option<String>,
     pub web_clients_enabled: Option<bool>,
-    #[oai(deserialize_with = "parse_nullable")]
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub web_auth_max_age_seconds: Option<Option<i64>>,
-    #[oai(deserialize_with = "parse_nullable")]
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub web_approval_grace_period_seconds: Option<Option<i64>>,
     pub analytics_consent: Option<Parameters::AnalyticsConsent>,
     pub analytics_normal: Option<bool>,
@@ -293,8 +304,9 @@ impl Api {
 
         parameters.allow_own_credential_management =
             body.allow_own_credential_management.map_or(NotSet, Set);
-        parameters.rate_limit_bytes_per_second =
-            Set(body.rate_limit_bytes_per_second.map(i64::from));
+        parameters.rate_limit_bytes_per_second = body
+            .rate_limit_bytes_per_second
+            .map_or(NotSet, |v| Set(v.map(i64::from)));
         parameters.ssh_client_auth_publickey = body.ssh_client_auth_publickey.map_or(NotSet, Set);
         parameters.ssh_client_auth_password = body.ssh_client_auth_password.map_or(NotSet, Set);
         parameters.ssh_client_auth_keyboard_interactive = body
@@ -411,10 +423,45 @@ mod tests {
 
     use super::ParameterUpdate;
 
+    fn parse_rate_limit(value: serde_json::Value) -> Option<Option<u32>> {
+        match ParameterUpdate::parse_from_json(Some(value)) {
+            Ok(v) => v.rate_limit_bytes_per_second,
+            Err(e) => panic!("{}", e.into_message()),
+        }
+    }
+
+    #[test]
+    fn omitted_rate_limit_is_not_cleared() {
+        assert_eq!(parse_rate_limit(json!({})), None);
+        assert_eq!(
+            parse_rate_limit(json!({ "rate_limit_bytes_per_second": null })),
+            Some(None)
+        );
+        assert_eq!(
+            parse_rate_limit(json!({ "rate_limit_bytes_per_second": 1024 })),
+            Some(Some(1024))
+        );
+    }
+
     fn parse(value: serde_json::Value) -> Option<Option<i64>> {
         match ParameterUpdate::parse_from_json(Some(value)) {
             Ok(v) => v.web_approval_grace_period_seconds,
             Err(e) => panic!("{}", e.into_message()),
+        }
+    }
+
+    #[test]
+    fn negative_values_are_rejected() {
+        for body in [
+            json!({ "ticket_max_uses": -1 }),
+            json!({ "ticket_max_duration_seconds": 0 }),
+            json!({ "lp_ip_max_attempts": -5 }),
+            json!({ "lp_ip_block_duration_multiplier": 0.5 }),
+        ] {
+            assert!(
+                ParameterUpdate::parse_from_json(Some(body.clone())).is_err(),
+                "{body} was accepted"
+            );
         }
     }
 

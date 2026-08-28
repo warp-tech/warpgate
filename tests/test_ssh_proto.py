@@ -320,6 +320,77 @@ class Test:
         finally:
             transport.close()
 
+    # https://github.com/warp-tech/warpgate/issues/2498
+    def test_direct_tcpip_stuck_open_does_not_block_siblings(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+        timeout,
+    ):
+        # A direct-tcpip destination that never answers leaves the target's
+        # sshd blocked in connect() with no timeout, so warpgate never gets a
+        # CHANNEL_OPEN reply. That open used to be awaited on the per-session
+        # command loop, freezing every other channel of the session (#2498).
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
+
+        blackhole_port = alloc_port()
+        good_port = alloc_port()
+        ssh_client = processes.start_ssh_client(
+            f"{user.username}:{ssh_target.name}@localhost",
+            "-p",
+            str(shared_wg.ssh_port),
+            *common_args,
+            # TEST-NET-1: routable-looking, answered by nobody
+            "-L",
+            f"{blackhole_port}:192.0.2.1:80",
+            "-L",
+            f"{good_port}:localhost:22",
+            "-N",
+            password="123",
+        )
+        try:
+            deadline = time.time() + timeout
+            stuck = None
+            while time.time() < deadline and ssh_client.poll() is None:
+                try:
+                    stuck = socket.create_connection(
+                        ("localhost", blackhole_port), timeout=5
+                    )
+                    break
+                except socket.error:
+                    time.sleep(0.1)
+            assert stuck is not None, "forwarded port never came up"
+
+            # Confirm 192.0.2.1 really is a black hole here: if the network
+            # answers with an RST or an ICMP unreachable, the open resolves and
+            # there is nothing to be blocked by.
+            stuck.settimeout(5)
+            try:
+                if stuck.recv(1) == b"":
+                    pytest.skip("192.0.2.1 is not a black hole on this network")
+            except socket.timeout:
+                pass
+
+            # The stuck open is now in flight. A sibling channel to a
+            # known-good destination must still open and deliver bytes.
+            sibling = socket.create_connection(("localhost", good_port), timeout=10)
+            try:
+                sibling.settimeout(10)
+                banner = sibling.recv(100)
+            finally:
+                sibling.close()
+            stuck.close()
+
+            assert banner.startswith(b"SSH-2.0"), (
+                f"sibling channel got {banner!r} — a stuck direct-tcpip open "
+                f"is blocking the rest of the session"
+            )
+        finally:
+            ssh_client.kill()
+
     def test_agent_forwarding_parallel(
         self,
         processes: ProcessManager,

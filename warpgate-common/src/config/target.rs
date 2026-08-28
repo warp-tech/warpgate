@@ -469,6 +469,23 @@ impl TargetOptions {
             TargetOptions::Rdp(_) => Protocol::Rdp,
         }
     }
+
+    // both used for connection instructions
+
+    pub fn external_host(&self) -> Option<&str> {
+        match self {
+            Self::Http(options) => options.external_host.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub fn default_database_name(&self) -> Option<&str> {
+        match self {
+            Self::MySql(options) => options.default_database_name.as_deref(),
+            Self::Postgres(options) => options.default_database_name.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 /// JSON path towards every possible credential within *serialized* TargetOptions

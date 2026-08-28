@@ -22,10 +22,9 @@
     import RelativeDate from 'common/RelativeDate.svelte'
     import { statusColor, statusIcon } from 'common/ticketRequestStatus'
     import {
+        type ActivatedTicketTargetInfo,
         api,
         type MyTicketModel,
-        TargetKind,
-        type TargetSnapshot,
         type TicketRequestModel,
         TicketRequestStatus,
         type TicketRequestTarget,
@@ -48,11 +47,10 @@
     let error: string | undefined = $state()
     let success: string | undefined = $state()
     let lastSecret: string | undefined = $state()
-    let lastTargetName: string | undefined = $state()
+    let lastTarget: ActivatedTicketTargetInfo | undefined = $state()
     let requests: TicketRequestModel[] | undefined = $state()
     let tickets: MyTicketModel[] | undefined = $state()
     let ticketRequestTargets: TicketRequestTarget[] | undefined = $state()
-    let targets: TargetSnapshot[] | undefined = $state()
     let showForm = $state(!!paramTarget)
     let showAllRequests = $state(false)
 
@@ -112,16 +110,14 @@
     )
 
     async function load() {
-        const [r, t, trt, tgts] = await Promise.all([
+        const [r, t, trt] = await Promise.all([
             api.getMyTicketRequests(),
             api.getMyTickets(),
             api.getTicketRequestTargets(),
-            api.getTargets({ search: '' }),
         ])
         requests = r
         tickets = t
         ticketRequestTargets = trt
-        targets = tgts
         // Never override an explicit selection
         if (ticketRequestTargets[0] && !selectedTarget) {
             selectedTarget = ticketRequestTargets[0].name
@@ -137,7 +133,7 @@
         error = undefined
         success = undefined
         lastSecret = undefined
-        lastTargetName = undefined
+        lastTarget = undefined
         try {
             const result = await api.createTicketRequest({
                 createTicketRequestBody: {
@@ -149,7 +145,7 @@
             if (result.autoApprovedTicketSecret) {
                 success = 'Ticket was auto-approved'
                 lastSecret = result.autoApprovedTicketSecret
-                lastTargetName = selectedTarget
+                lastTarget = result.target
             } else {
                 success = 'Request submitted and is pending admin approval'
             }
@@ -168,7 +164,7 @@
         error = undefined
         success = undefined
         lastSecret = undefined
-        lastTargetName = undefined
+        lastTarget = undefined
         descriptionTouched = false
     }
 
@@ -176,13 +172,13 @@
         error = undefined
         success = undefined
         lastSecret = undefined
-        lastTargetName = undefined
+        lastTarget = undefined
         try {
             const result = await api.activateTicketRequest({ id: request.id })
             if (result.secret) {
                 success = 'Ticket activated'
                 lastSecret = result.secret
-                lastTargetName = request.targetName
+                lastTarget = result.target
             }
             showForm = false
             await load()
@@ -221,30 +217,26 @@
     <Alert color="success" fade={false}>
         {success}
     </Alert>
-    {#if lastSecret && lastTargetName}
-        {@const targetData = targets?.find(t => t.name === lastTargetName)}
-        {#if targetData}
-            <div class="my-5">
-                <InfoBox class="mb-2" variant="warning">
-                    <strong>Personal use only</strong>
-                    &mdash; do not share this secret. It grants access as your
-                    account.
-                </InfoBox>
-                <InfoBox class="mb-3" icon={faEyeSlash}>
-                    The secret is only shown once &mdash; you won't be able to
-                    see it again.
-                </InfoBox>
-                <ConnectionInstructions
-                    targetName={lastTargetName}
-                    targetKind={targetData.kind}
-                    username={$serverInfo?.username}
-                    ticketSecret={lastSecret}
-                    targetExternalHost={targetData.kind === TargetKind.Http ? targetData.externalHost : undefined}
-                    targetDefaultDatabaseName={(targetData.kind === TargetKind.MySql || targetData.kind === TargetKind.Postgres)
-                        ? targetData.defaultDatabaseName : undefined}
-                />
-            </div>
-        {/if}
+    {#if lastSecret && lastTarget}
+        <div class="my-5">
+            <InfoBox class="mb-2" variant="warning">
+                <strong>Personal use only</strong>
+                &mdash; do not share this secret. It grants access as your
+                account.
+            </InfoBox>
+            <InfoBox class="mb-3" icon={faEyeSlash}>
+                The secret is only shown once &mdash; you won't be able to see
+                it again.
+            </InfoBox>
+            <ConnectionInstructions
+                targetName={lastTarget.name}
+                targetKind={lastTarget.kind}
+                username={$serverInfo?.username}
+                ticketSecret={lastSecret}
+                targetExternalHost={lastTarget.externalHost}
+                targetDefaultDatabaseName={lastTarget.defaultDatabaseName}
+            />
+        </div>
     {/if}
 {/if}
 

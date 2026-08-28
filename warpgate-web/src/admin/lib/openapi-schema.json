@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.4-3-g121002b2-modified"
+    "version": "v0.28.4-7-gaf79537e-modified"
   },
   "servers": [
     {
@@ -5643,7 +5643,8 @@
           },
           "rate_limit_bytes_per_second": {
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 1.0
           },
           "ssh_client_auth_publickey": {
             "type": "boolean"
@@ -5668,11 +5669,13 @@
           },
           "ticket_max_duration_seconds": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "minimum": 1.0
           },
           "ticket_max_uses": {
             "type": "integer",
-            "format": "int16"
+            "format": "int16",
+            "minimum": 1.0
           },
           "ticket_require_description": {
             "type": "boolean"
@@ -5694,7 +5697,8 @@
           },
           "max_api_token_duration_seconds": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "minimum": 1.0
           },
           "record_scp": {
             "type": "boolean"
@@ -5704,46 +5708,56 @@
           },
           "login_protection_retention_seconds": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "minimum": 1.0
           },
           "lp_ip_max_attempts": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "minimum": 1.0
           },
           "lp_ip_time_window_seconds": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "minimum": 1.0
           },
           "lp_ip_base_block_duration_seconds": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "minimum": 1.0
           },
           "lp_ip_block_duration_multiplier": {
             "type": "number",
-            "format": "double"
+            "format": "double",
+            "minimum": 1.0
           },
           "lp_ip_max_block_duration_seconds": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "minimum": 1.0
           },
           "lp_ip_cooldown_reset_seconds": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "minimum": 1.0
           },
           "lp_user_max_attempts": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "minimum": 1.0
           },
           "lp_user_time_window_seconds": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "minimum": 1.0
           },
           "lp_user_auto_unlock": {
             "type": "boolean"
           },
           "lp_user_lockout_duration_seconds": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "minimum": 1.0
           },
           "lp_user_exempt_admins": {
             "type": "boolean"
@@ -5756,11 +5770,13 @@
           },
           "web_auth_max_age_seconds": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "minimum": 1.0
           },
           "web_approval_grace_period_seconds": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "minimum": 1.0
           },
           "analytics_consent": {
             "$ref": "#/components/schemas/AnalyticsConsent"

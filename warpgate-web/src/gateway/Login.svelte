@@ -7,7 +7,7 @@
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Button, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import { routeQueryParams } from 'common/helpers'
+    import { navigateToExternalUrl, routeQueryParams } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
 
     import {
@@ -165,7 +165,7 @@
         busy = true
         try {
             const p = await api.startSso({ name: provider.name, next: nextURL })
-            location.href = p.url
+            navigateToExternalUrl(p.url)
         } catch (err) {
             error = await stringifyError(err)
             busy = false
