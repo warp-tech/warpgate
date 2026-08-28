@@ -57,7 +57,15 @@ fn aws_binding_advice(auth: &VaultAuth) -> Option<&'static str> {
     }
 }
 
-fn validate_address(address: &str) -> Result<()> {
+/// The address to talk to, or a refusal — the two are not separable.
+///
+/// Returns the parsed URL rather than `()` so that the only way to obtain
+/// something this client will send a request to is to have come through here.
+/// It used to return `()` and leave `config.address` as the string every
+/// request was built from, which made the guarantee a property of call order:
+/// safe only while `new` remained the sole constructor and kept calling this
+/// first. That is the kind of invariant a later refactor drops silently.
+fn validate_address(address: &str) -> Result<url::Url> {
     let parsed = url::Url::parse(address).map_err(|e| VaultError::InvalidAddress(e.to_string()))?;
     if parsed.scheme() != "https" {
         // Matched on the parsed host rather than on `host_str`, which renders an
@@ -73,7 +81,7 @@ fn validate_address(address: &str) -> Result<()> {
             return Err(VaultError::InsecureAddress);
         }
     }
-    Ok(())
+    Ok(parsed)
 }
 
 fn validate_segment(name: &str) -> Result<()> {
@@ -365,6 +373,9 @@ pub(crate) async fn read_bounded_json<T: serde::de::DeserializeOwned>(
 
 pub struct VaultClient {
     config: VaultConfig,
+    /// The validated address every request is built from. Not read back out of
+    /// `config`, which holds the unvalidated string the operator wrote.
+    base: url::Url,
     http: reqwest::Client,
     metadata_http: reqwest::Client,
     token: Mutex<Option<CachedToken>>,
@@ -373,7 +384,7 @@ pub struct VaultClient {
 
 impl VaultClient {
     pub fn new(config: VaultConfig) -> Result<Self> {
-        validate_address(&config.address)?;
+        let base = validate_address(&config.address)?;
         validate_segment(&config.mount)?;
         validate_segment(&config.default_role)?;
 
@@ -396,7 +407,7 @@ impl VaultClient {
             warn!("{advice}");
         }
 
-        if !config.address.starts_with("https://") {
+        if base.scheme() != "https" {
             // Only reachable for a loopback address, which validation allows so
             // a development Vault does not need a certificate. Said out loud
             // because the token crosses this connection in a header.
@@ -448,6 +459,7 @@ impl VaultClient {
 
         Ok(Self {
             config,
+            base,
             http,
             metadata_http,
             token: Mutex::new(None),
@@ -856,7 +868,7 @@ impl VaultClient {
     }
 
     fn url(&self, path: &str) -> String {
-        format!("{}/v1/{path}", self.config.address.trim_end_matches('/'))
+        format!("{}/v1/{path}", self.base.as_str().trim_end_matches('/'))
     }
 
     /// Parses a successful response, refusing one larger than any Vault answer
