@@ -57,11 +57,11 @@ pub async fn span_for_request(
         .unwrap_or_else(|| "<unknown>".into());
 
     Ok(if let Some(handle) = handle {
-        let ss = handle.session_state().lock().await;
+        let ss = handle.user_session_state().lock().await;
         if let Some(ref user_info) = ss.user_info.clone() {
-            info_span!("HTTP", session=%handle.id(), session_username=%user_info.username, %client_ip)
+            info_span!("HTTP", session=%handle.user_session_id(), session_username=%user_info.username, %client_ip)
         } else {
-            info_span!("HTTP", session=%handle.id(), %client_ip)
+            info_span!("HTTP", session=%handle.user_session_id(), %client_ip)
         }
     } else {
         info_span!("HTTP")

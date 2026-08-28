@@ -6,35 +6,37 @@ use poem::http::StatusCode;
 use poem::web::websocket::{Message, WebSocket};
 use poem::web::{Data, Path};
 use poem::{IntoResponse, handler};
-use uuid::Uuid;
+use warpgate_common::UserSessionId;
 use warpgate_common_http::SessionKeepalive;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_core::DesktopInput;
+use warpgate_web_clients_common::SessionAccess;
 
 use crate::manager::WebDesktopClientManager;
 use crate::protocol::{ClientMessage, WsPayload};
 
 #[handler]
 pub async fn ws_handler(
-    Path(session_id): Path<Uuid>,
+    Path(session_id): Path<UserSessionId>,
     ctx: Data<&AuthenticatedRequestContext>,
     manager: Data<&Arc<WebDesktopClientManager>>,
     session_keepalive: Option<Data<&SessionKeepalive>>,
     ws: WebSocket,
 ) -> poem::Result<impl IntoResponse> {
-    let requesting_user_id = ctx.auth.user_id();
-
-    let session = manager
-        .get_session(session_id)
+    // Someone else's session reads as absent: a stream request must not
+    // reveal that the id exists.
+    let session = match manager
+        .access(session_id, ctx.auth.user_id())
         .await
-        .ok_or_else(|| poem::Error::from_string("Session not found", StatusCode::NOT_FOUND))?;
-
-    if session.user_id() != requesting_user_id {
-        return Err(poem::Error::from_string(
-            "Session not found",
-            StatusCode::NOT_FOUND,
-        ));
-    }
+    {
+        SessionAccess::Granted(session) => session,
+        SessionAccess::NotFound | SessionAccess::Forbidden => {
+            return Err(poem::Error::from_string(
+                "Session not found",
+                StatusCode::NOT_FOUND,
+            ));
+        }
+    };
 
     session.cancel_disconnect_timer().await;
 

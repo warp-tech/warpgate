@@ -8,8 +8,7 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
-use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_core::{DesktopInput, Scancode, Services};
+use warpgate_core::{AuthorizedIdentity, DesktopInput, Scancode, Services};
 use warpgate_desktop_auth::{
     Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter as HoldPainterExt,
     InteractiveAuth, OtpAction, run_hold_screen as run_hold_screen_driver,
@@ -32,7 +31,7 @@ pub(super) async fn run_hold_screen(
     events: &mut UnboundedReceiver<ServerEvent>,
     server_in_tx: &Sender<ServerInput>,
     screen: &mut ui::Screen,
-) -> Result<Option<AuthStateUserInfo>> {
+) -> Result<Option<AuthorizedIdentity>> {
     // A resize can arrive mid-hold (a viewer window drag, or mstsc's initial Display Control
     // layout): the input reader records it here and the painter follows it. Shared behind a
     // lock because the reader and the painter are separate objects (so the driver can await

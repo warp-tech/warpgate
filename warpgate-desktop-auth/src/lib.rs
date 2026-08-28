@@ -3,8 +3,9 @@
 //! Both collect a username + password up front and then, when the credential policy needs
 //! more, gather an interactive second factor (TOTP / web approval) on a per-protocol holding
 //! screen. The up-front evaluation, target resolution, brute-force wiring, and web-approval
-//! URL are identical between them and live here once; each protocol supplies only its name,
-//! audit label, and target-options extractor via [`DesktopProtocol`].
+//! URL are identical between them and live here once; each protocol supplies only its
+//! options-variant type (`TargetVncOptions` / `TargetRdpOptions`), which carries the
+//! protocol name and narrows the target.
 
 mod hold_screen;
 mod otp;
@@ -20,34 +21,21 @@ pub use hold_screen::{
 pub use otp::{MAX_OTP_ATTEMPTS, OtpAction, OtpActionApplyOutcome, OtpEntry};
 use tokio::sync::Mutex;
 use tracing::warn;
-use uuid::Uuid;
-use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
-};
-use warpgate_common::{Protocol, Secret, Target};
+use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind};
+use warpgate_common::{Secret, TargetOptionsVariant, TargetSessionId, UserSessionId};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
     AuthorizedIdentity, Services, TargetAuthorization, WarpgateServerHandle,
-    authorize_for_target_by_name, authorize_ticket, consume_ticket,
+    authorize_for_target_by_name, authorize_and_spend_ticket,
 };
 use warpgate_desktop_ui::AuthPrompt;
 
-/// The per-protocol specifics the shared auth flow needs.
-pub trait DesktopProtocol {
-    /// The protocol's target-options type (`TargetRdpOptions` / `TargetVncOptions`).
-    type Options;
-    /// Warpgate protocol, recorded on the auth state.
-    const NAME: Protocol;
-    /// Clone out this protocol's options from a target, or `None` if it's a different kind.
-    fn options(target: &Target) -> Option<Self::Options>;
-}
-
 /// A session awaiting its interactive second factor after a valid password.
 pub struct InteractiveAuth {
-    pub state_id: Uuid,
+    pub state_id: UserSessionId,
     pub username: String,
     pub target_name: String,
     pub remote_ip: IpAddr,
@@ -57,10 +45,9 @@ pub struct InteractiveAuth {
 #[allow(clippy::large_enum_variant)]
 pub enum DesktopAuthOutcome<O> {
     /// Fully authenticated (password-only policy, or ticket auth). The target
-    /// travels inside the authorization.
+    /// and its protocol-specific options travel inside the authorization.
     Authorized {
-        authorization: TargetAuthorization,
-        options: O,
+        authorization: TargetAuthorization<O>,
     },
     /// Password accepted, but the policy needs an interactive second factor — collected on
     /// the per-protocol holding screen.
@@ -70,18 +57,19 @@ pub enum DesktopAuthOutcome<O> {
     Failed,
 }
 
-/// Evaluate the viewer's submitted credentials for protocol `P`.
+/// Evaluate the viewer's submitted credentials for the protocol whose options
+/// variant is `O`.
 ///
 /// A password-only policy (or a ticket) authorises immediately; a policy that additionally
 /// needs a factor the holding screen can collect (TOTP / web approval) — and *only* such
 /// factors — returns [`DesktopAuthOutcome::NeedsInteractive`]. Anything else fails.
-pub async fn authenticate<P: DesktopProtocol>(
+pub async fn authenticate<O: TargetOptionsVariant>(
     services: &Services,
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     selector: &str,
     password: String,
     remote_address: SocketAddr,
-) -> Result<DesktopAuthOutcome<P::Options>> {
+) -> Result<DesktopAuthOutcome<O>> {
     let selector: AuthSelector = selector.into();
 
     match selector {
@@ -99,7 +87,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                 .await?
                 .is_some()
             {
-                warn!(ip = %remote_ip, protocol = %P::NAME, "Desktop auth attempt from blocked IP");
+                warn!(ip = %remote_ip, protocol = %O::PROTOCOL, "Desktop auth attempt from blocked IP");
                 return Ok(DesktopAuthOutcome::Failed);
             }
             if services
@@ -108,17 +96,17 @@ pub async fn authenticate<P: DesktopProtocol>(
                 .await?
                 .is_some()
             {
-                warn!(username = %username, protocol = %P::NAME, "Desktop auth attempt for locked user");
+                warn!(username = %username, protocol = %O::PROTOCOL, "Desktop auth attempt for locked user");
                 return Ok(DesktopAuthOutcome::Failed);
             }
 
-            let session_id = server_handle.lock().await.id();
+            let session_id = server_handle.lock().await.user_session_id();
 
             let state_arc = services
                 .create_auth_state(
                     &session_id,
                     &username,
-                    P::NAME,
+                    O::PROTOCOL,
                     &target_name,
                     &[
                         CredentialKind::Password,
@@ -137,6 +125,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                     &mut state,
                     AuthCredential::Password(Secret::new(password)),
                     services.config_provider.as_ref(),
+                    &services.login_protection,
                 )
                 .await?;
                 if !outcome.is_valid() {
@@ -145,7 +134,7 @@ pub async fn authenticate<P: DesktopProtocol>(
                         .record_failed_attempt(FailedAttemptInfo {
                             username: username.clone(),
                             remote_ip,
-                            protocol: P::NAME,
+                            protocol: O::PROTOCOL,
                             credential_type: "password".to_string(),
                         })
                         .await;
@@ -170,12 +159,16 @@ pub async fn authenticate<P: DesktopProtocol>(
                         .login_protection
                         .clear_failed_attempts(&remote_ip, &user_info.username)
                         .await;
-                    let (authorization, options) =
-                        finalize_user_auth::<P>(services, &user_info, &target_name).await?;
-                    Ok(DesktopAuthOutcome::Authorized {
-                        authorization,
-                        options,
-                    })
+                    // Verified `Accepted` a moment ago; a state that no longer
+                    // is means the login was concurrently rejected — deny.
+                    let Some(identity) =
+                        AuthorizedIdentity::from_auth_state(&*state_arc.lock().await)
+                    else {
+                        return Ok(DesktopAuthOutcome::Failed);
+                    };
+                    let authorization =
+                        finalize_user_auth::<O>(services, &identity, &target_name).await?;
+                    Ok(DesktopAuthOutcome::Authorized { authorization })
                 }
                 // Go interactive only when *every* still-needed factor is one the holding
                 // screen can collect; otherwise the session could never complete.
@@ -195,28 +188,21 @@ pub async fn authenticate<P: DesktopProtocol>(
             }
         }
         AuthSelector::Ticket { secret } => {
-            match authorize_ticket(
+            match authorize_and_spend_ticket(
                 &services.db,
                 &services.login_protection,
                 &secret,
                 Some(remote_address.ip()),
-                P::NAME,
+                O::PROTOCOL,
             )
             .await?
             {
-                Some((ticket, authorization)) => {
-                    consume_ticket(&services.db, &ticket.id).await?;
-                    let Some(options) = P::options(authorization.target()) else {
-                        bail!(
-                            "Target {} is not a {} target",
-                            authorization.target().name,
-                            P::NAME
-                        );
+                Some(authorization) => {
+                    let target_name = authorization.target().name.clone();
+                    let Ok(authorization) = authorization.narrow::<O>() else {
+                        bail!("Target {target_name} is not a {} target", O::PROTOCOL);
                     };
-                    Ok(DesktopAuthOutcome::Authorized {
-                        authorization,
-                        options,
-                    })
+                    Ok(DesktopAuthOutcome::Authorized { authorization })
                 }
                 None => Ok(DesktopAuthOutcome::Failed),
             }
@@ -224,28 +210,28 @@ pub async fn authenticate<P: DesktopProtocol>(
     }
 }
 
-/// Authorise a fully-authenticated user against a target and resolve its options. Used after
-/// the holding screen completes the interactive factor.
-pub async fn finalize_user_auth<P: DesktopProtocol>(
+/// Authorise an authenticated identity against a target and narrow it to the
+/// protocol's options variant. Used after the holding screen completes the
+/// interactive factor; taking the sealed [`AuthorizedIdentity`] means the
+/// authentication behind it happened by construction.
+pub async fn finalize_user_auth<O: TargetOptionsVariant>(
     services: &Services,
-    user_info: &AuthStateUserInfo,
+    identity: &AuthorizedIdentity,
     target_name: &str,
-) -> Result<(TargetAuthorization, P::Options)> {
-    // Reached only after the holding screen drove the auth state to `Accepted`.
-    let identity = AuthorizedIdentity::for_authenticated_session(user_info.clone(), P::NAME);
+) -> Result<TargetAuthorization<O>> {
     let Some(authorization) =
         authorize_for_target_by_name(services.config_provider.as_ref(), &identity, target_name)
             .await?
     else {
         bail!(
             "Target {target_name} not authorized for {}",
-            user_info.username
+            identity.username
         );
     };
-    let Some(options) = P::options(authorization.target()) else {
-        bail!("Target {target_name} is not a {} target", P::NAME);
+    let Ok(authorization) = authorization.narrow::<O>() else {
+        bail!("Target {target_name} is not a {} target", O::PROTOCOL);
     };
-    Ok((authorization, options))
+    Ok(authorization)
 }
 
 /// Build the browser web-approval URL for the current auth state, or `None` if the external
@@ -266,12 +252,12 @@ async fn web_approval_url(services: &Services, state: &Arc<Mutex<AuthState>>) ->
 /// recording is disabled, or fails to start (logged against `protocol_label`).
 pub async fn start_recording(
     services: &Services,
-    session_id: &Uuid,
+    target_session_id: &TargetSessionId,
     protocol_label: &str,
 ) -> Option<DesktopRecorder> {
     match services
         .recordings
-        .start::<DesktopRecorder, _>(session_id, None, DesktopRecordingMetadata::Desktop)
+        .start::<DesktopRecorder, _>(target_session_id, None, DesktopRecordingMetadata::Desktop)
         .await
     {
         Ok(recorder) => Some(recorder),

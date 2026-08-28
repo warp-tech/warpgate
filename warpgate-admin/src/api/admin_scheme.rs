@@ -167,6 +167,11 @@ impl ClusterOrAdminContext {
         }
     }
 
+    /// true if the request came in via intra-cluster forwarding
+    pub(crate) const fn is_intra_cluster_request(&self) -> bool {
+        matches!(self, Self::ClusterToken(_))
+    }
+
     pub(crate) const fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {
         self.access().require(permission)
     }

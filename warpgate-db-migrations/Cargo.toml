@@ -23,6 +23,9 @@ uuid.workspace = true
 warpgate-ca = { path = "../warpgate-ca", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 
+[dev-dependencies]
+warpgate-common = { path = "../warpgate-common" }
+
 [features]
 postgres = ["sea-orm/sqlx-postgres"]
 mysql = ["sea-orm/sqlx-mysql"]

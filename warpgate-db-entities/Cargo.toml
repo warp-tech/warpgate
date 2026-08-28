@@ -14,6 +14,7 @@ serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 time.workspace = true
+tracing.workspace = true
 uuid.workspace = true
 warpgate-aws = { path = "../warpgate-aws" }
 warpgate-common = { path = "../warpgate-common", default-features = false }

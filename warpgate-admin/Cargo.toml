@@ -41,3 +41,6 @@ warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-protocol-kubernetes = { path = "../warpgate-protocol-kubernetes" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-tls = { path = "../warpgate-tls" }
+
+[dev-dependencies]
+warpgate-db-migrations = { path = "../warpgate-db-migrations", features = ["sqlite"] }

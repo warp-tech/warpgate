@@ -15,15 +15,14 @@ use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{debug, error, info, info_span, warn};
 use url::Url;
-use uuid::Uuid;
 use warpgate_common::auth::AuthSelector;
 use warpgate_common::{
-    PostgresProtocolVersion, Protocol, Secret, TargetOptions, TargetPostgresOptions,
+    PostgresProtocolVersion, Protocol, Secret, TargetPostgresOptions, UserSessionId,
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    AuthOkPermit, DbAuthTransport, Services, TargetAuthorization, WarpgateServerHandle,
-    run_db_authorization,
+    ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, TargetAuthorization,
+    WarpgateServerHandle, run_db_authorization,
 };
 use warpgate_tls::ServerTlsStream;
 
@@ -40,7 +39,7 @@ pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     username: Option<String>,
     database: Option<String>,
     server_handle: Arc<Mutex<WarpgateServerHandle>>,
-    id: Uuid,
+    id: UserSessionId,
     services: Services,
     remote_address: SocketAddr,
     decode_context: DecodeContext,
@@ -144,7 +143,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         tls_config: ServerConfig,
         remote_address: SocketAddr,
     ) -> Self {
-        let id = server_handle.lock().await.id();
+        let id = server_handle.lock().await.user_session_id();
 
         Self {
             services,
@@ -258,7 +257,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     ) -> Result<(), PostgresError> {
         let selector: AuthSelector = username.into();
         let remote_ip = self.remote_address.ip();
-        let session_id = self.server_handle.lock().await.id();
+        let session_id = self.server_handle.lock().await.user_session_id();
 
         let services = self.services.clone();
         let Some(authorization) =
@@ -291,26 +290,29 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
         self.stream.flush().await?;
 
-        let (user_info, target) = authorization.into_parts();
-
-        let TargetOptions::Postgres(ref postgres_options) = target.options else {
-            warn!("Selected target is not a PostgreSQL target");
-            self.send_error_response(
-                "0W001".into(),
-                format!("Warpgate target {} not found", target.name),
-            )
-            .await?;
-            return Ok(());
+        let target_name = authorization.target().name.clone();
+        let authorization = match authorization.narrow::<TargetPostgresOptions>() {
+            Ok(authorization) => authorization,
+            Err(_) => {
+                warn!("Selected target is not a PostgreSQL target");
+                self.send_error_response(
+                    "0W001".into(),
+                    format!("Warpgate target {target_name} not found"),
+                )
+                .await?;
+                return Ok(());
+            }
         };
-        let postgres_options = postgres_options.clone();
 
-        {
-            let handle = self.server_handle.lock().await;
-            handle.set_user_info(user_info).await?;
-            handle.set_target(&target).await?;
-        }
+        let (_, approved) = self
+            .server_handle
+            .lock()
+            .await
+            .start_target_session(authorization)
+            .await?
+            .admitted()?;
 
-        self.run_authorized_inner(startup, postgres_options).await
+        self.run_authorized_inner(startup, approved).await
     }
 
     async fn send_error_response(
@@ -328,15 +330,16 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     async fn run_authorized_inner(
         mut self,
         startup: pgwire::messages::startup::Startup,
-        options: TargetPostgresOptions,
+        approved: ApprovedTarget<TargetPostgresOptions>,
     ) -> Result<(), PostgresError> {
+        let options = approved.options().clone();
         let target_protocol_version = match options.protocol_version.unwrap_or_default() {
             PostgresProtocolVersion::V3_0 => ProtocolVersion::PROTOCOL3_0,
             PostgresProtocolVersion::V3_2 => ProtocolVersion::PROTOCOL3_2,
         };
 
         let mut client = match PostgresClient::connect(
-            &options,
+            approved,
             ConnectionOptions {
                 protocol_version: target_protocol_version,
                 parameters: startup.parameters,

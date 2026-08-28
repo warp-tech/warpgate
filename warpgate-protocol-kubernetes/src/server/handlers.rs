@@ -12,10 +12,9 @@ use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::tungstenite;
 use tracing::{Instrument, debug, error, warn};
 use url::Url;
-use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
-use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, WarpgateError};
+use warpgate_common::{TargetKubernetesOptions, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
@@ -23,7 +22,7 @@ use warpgate_common_http::logging::{
 use warpgate_core::Services;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 
-use crate::correlator::{RequestCorrelator, correlated_authorization};
+use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
 use crate::recording::{deduce_exec_recording_metadata, start_recording_api, start_recording_exec};
 use crate::server::auth::{authenticate_kubernetes_user, create_authenticated_client};
 
@@ -90,55 +89,26 @@ pub async fn handle_api_request(
     // command's fan-out of requests only prompts for approval once.
     let user = authenticate_kubernetes_user(req, ctx.services()).await?;
 
-    let (handle, authorization) =
+    let (handle, admitted) =
         correlated_authorization(correlator.0, req, &user, &target_name, ctx.services()).await?;
 
-    let (user_info, target) = authorization.into_parts();
-
-    let TargetOptions::Kubernetes(k8s_options) = &target.options else {
-        return Err(poem::Error::from_string(
-            "Invalid target type",
-            poem::http::StatusCode::BAD_REQUEST,
-        ));
-    };
-
-    let (session_id, log_span) = {
+    let log_span = {
         // The user info is already on the session: it is set when the session is
         // registered, before its authorization is resolved.
         let handle = handle.lock().await;
-        handle.set_target(&target).await?;
-        (
-            handle.id(),
-            span_for_request(req, ctx.services(), Some(&*handle)).await?,
-        )
+        span_for_request(req, ctx.services(), Some(&*handle)).await?
     };
 
     async {
         let response = if let Some(ws) = ws {
-            _handle_websocket_request_inner(
-                ws,
-                req,
-                k8s_options,
-                &path,
-                user_info,
-                session_id,
-                ctx.services(),
-            )
-            .await
-            .map(IntoResponse::into_response)
+            _handle_websocket_request_inner(ws, req, admitted, &path, ctx.services())
+                .await
+                .map(IntoResponse::into_response)
         } else {
-            _handle_normal_request_inner(
-                req,
-                body,
-                k8s_options,
-                &path,
-                user_info,
-                session_id,
-                ctx.services(),
-            )
-            .await
-            .map(IntoResponse::into_response)
-            .context("handling Kubernetes API request")
+            _handle_normal_request_inner(req, body, admitted, &path, ctx.services())
+                .await
+                .map(IntoResponse::into_response)
+                .context("handling Kubernetes API request")
         };
 
         let client_ip = get_client_ip(req, ctx.services()).await;
@@ -163,12 +133,12 @@ pub async fn handle_api_request(
 async fn _handle_normal_request_inner(
     req: &Request,
     body: Body,
-    k8s_options: &TargetKubernetesOptions,
+    admitted: AdmittedSession,
     path: &str,
-    user_info: AuthStateUserInfo,
-    session_id: SessionId,
     services: &Services,
 ) -> Result<Response, WarpgateError> {
+    let user_info = admitted.approved.user_info();
+    let k8s_options = admitted.approved.options();
     let client = create_authenticated_client(k8s_options, Some(&user_info.username), services)
         .await?
         .build()
@@ -227,7 +197,7 @@ async fn _handle_normal_request_inner(
     let mut recorder_opt = {
         let enabled = services.recordings.is_enabled().await.unwrap_or(false);
         if enabled {
-            match start_recording_api(&session_id, &services.recordings).await {
+            match start_recording_api(&admitted.target_session_id, &services.recordings).await {
                 Ok(recorder) => Some(recorder),
                 Err(e) => {
                     warn!("Failed to start recording: {}", e);
@@ -412,12 +382,12 @@ async fn run_websocket_recording(recorder: TerminalRecorder, mut rx: mpsc::Recei
 async fn _handle_websocket_request_inner(
     ws: WebSocket,
     req: &Request,
-    k8s_options: &TargetKubernetesOptions,
+    admitted: AdmittedSession,
     path: &str,
-    user_info: AuthStateUserInfo,
-    session_id: SessionId,
     services: &Services,
 ) -> anyhow::Result<impl IntoResponse> {
+    let user_info = admitted.approved.user_info();
+    let k8s_options = admitted.approved.options();
     let mut full_url = construct_target_url(req, path, k8s_options)?;
     if full_url.scheme() == "https" {
         let _ = full_url.set_scheme("wss");
@@ -434,7 +404,9 @@ async fn _handle_websocket_request_inner(
     {
         let enabled = services.recordings.is_enabled().await.unwrap_or(false);
         if enabled && let Some(metadata) = deduce_exec_recording_metadata(&full_url) {
-            match start_recording_exec(&session_id, &services.recordings, metadata).await {
+            match start_recording_exec(&admitted.target_session_id, &services.recordings, metadata)
+                .await
+            {
                 Err(e) => {
                     error!("Failed to start recording: {}", e);
                 }

@@ -3,7 +3,7 @@ use std::fmt::Display;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::logging::format_related_ids;
+use crate::helpers::logging::format_related_ids;
 
 #[derive(Clone)]
 pub enum CredentialChangedVia {

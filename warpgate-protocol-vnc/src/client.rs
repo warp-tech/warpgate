@@ -6,9 +6,10 @@ use tokio::sync::mpsc::{
 };
 use tracing::{Instrument, debug, error, info_span, warn};
 use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncEvent, X11Event};
-use warpgate_common::{TargetVncOptions, VncTargetAuth};
+use warpgate_common::{TargetVncOptions, VncTargetAuth, WarpgateError};
 use warpgate_core::{
-    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
+    ApprovedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect,
+    DesktopState,
 };
 
 /// Handles for driving a backend VNC client running on its own task.
@@ -99,16 +100,29 @@ const PROXY_ENCODINGS: &[VncEncoding] = &[
 
 /// Connect to a VNC target and spawn a task that proxies it as normalised
 /// [`DesktopEvent`]/[`DesktopInput`] streams.
-pub fn connect(options: TargetVncOptions) -> VncClientHandles {
-    spawn_client(options, BROWSER_ENCODINGS)
+pub fn connect(
+    approved: ApprovedTarget<TargetVncOptions>,
+) -> Result<VncClientHandles, WarpgateError> {
+    spawn_approved_client(approved, BROWSER_ENCODINGS)
 }
 
 /// Like [`connect`], but negotiates the encodings ([`PROXY_ENCODINGS`]) used by the
 /// native VNC proxy's single decode-and-re-encode path, where every backend update is
 /// decoded (Tight/JPEG included) and re-encoded through a minimal RFB server encoder
 /// toward the viewer, and optionally recorded.
-pub fn connect_for_proxy(options: TargetVncOptions) -> VncClientHandles {
-    spawn_client(options, PROXY_ENCODINGS)
+pub fn connect_for_proxy(
+    approved: ApprovedTarget<TargetVncOptions>,
+) -> Result<VncClientHandles, WarpgateError> {
+    spawn_approved_client(approved, PROXY_ENCODINGS)
+}
+
+fn spawn_approved_client(
+    approved: ApprovedTarget<TargetVncOptions>,
+    encodings: &'static [VncEncoding],
+) -> Result<VncClientHandles, WarpgateError> {
+    let (_, target) = approved.into_parts();
+    let (_, options) = target.into_parts();
+    Ok(spawn_client(options, encodings))
 }
 
 fn spawn_client(options: TargetVncOptions, encodings: &'static [VncEncoding]) -> VncClientHandles {

@@ -5,6 +5,7 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 use tracing::warn;
 use uuid::Uuid;
+use warpgate_common::UserSessionId;
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, Framebuffer, Rect};
 use warpgate_web_clients_common::{ManagedSession, Sheddable, WebSession};
@@ -49,7 +50,7 @@ struct RefineScratch {
 
 impl WebDesktopSession {
     pub fn new(
-        id: Uuid,
+        id: UserSessionId,
         user_id: Uuid,
         target_name: String,
         target_kind: warpgate_db_entities::Target::TargetKind,
@@ -147,7 +148,7 @@ impl std::ops::Deref for WebDesktopSession {
 }
 
 impl ManagedSession for WebDesktopSession {
-    fn id(&self) -> Uuid {
+    fn id(&self) -> UserSessionId {
         self.core.id()
     }
 

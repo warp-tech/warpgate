@@ -4,13 +4,12 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{Mutex, broadcast};
-use uuid::Uuid;
 use warpgate_common::auth::{
     AuthResult, AuthState, CredentialKind, CredentialPolicy, WebApprovalMatchKey,
 };
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{Protocol, SessionId, User, WarpgateError};
+use warpgate_common::{Protocol, User, UserSessionId, WarpgateError};
 
 use crate::login_protection::{FailedAttemptInfo, LoginProtectionService};
 use crate::{ConfigProvider, ConfigProviderEnum};
@@ -165,8 +164,8 @@ async fn wait_for_auth_completion_within(
 }
 
 pub struct AuthStateStore {
-    store: HashMap<Uuid, (Arc<Mutex<AuthState>>, Instant)>,
-    web_auth_request_signal: broadcast::Sender<Uuid>,
+    store: HashMap<UserSessionId, (Arc<Mutex<AuthState>>, Instant)>,
+    web_auth_request_signal: broadcast::Sender<UserSessionId>,
     recent_approvals: HashMap<WebApprovalMatchKey, Instant>,
 }
 
@@ -185,7 +184,7 @@ impl AuthStateStore {
         }
     }
 
-    pub fn contains_key(&self, id: &Uuid) -> bool {
+    pub fn contains_key(&self, id: &UserSessionId) -> bool {
         self.store.contains_key(id)
     }
 
@@ -199,11 +198,11 @@ impl AuthStateStore {
         self.store.values().map(|auth| auth.0.clone()).collect()
     }
 
-    pub fn get(&self, id: &Uuid) -> Option<Arc<Mutex<AuthState>>> {
+    pub fn get(&self, id: &UserSessionId) -> Option<Arc<Mutex<AuthState>>> {
         self.store.get(id).map(|x| x.0.clone())
     }
 
-    pub fn subscribe_web_auth_request(&self) -> broadcast::Receiver<Uuid> {
+    pub fn subscribe_web_auth_request(&self) -> broadcast::Receiver<UserSessionId> {
         self.web_auth_request_signal.subscribe()
     }
 
@@ -275,7 +274,7 @@ impl AuthStateStore {
     /// session id.
     pub(crate) fn create(
         &mut self,
-        session_id: &SessionId,
+        session_id: &UserSessionId,
         user: &User,
         protocol: Protocol,
         target_name: &str,
@@ -283,7 +282,7 @@ impl AuthStateStore {
         remote_ip: Option<IpAddr>,
     ) -> Arc<Mutex<AuthState>> {
         // The auth state is identified by its session id, so a cross-node web
-        // approval can resolve the owning node straight from the `sessions`
+        // approval can resolve the owning node straight from the `user_sessions`
         // table (which records `node_id`).
         let id = *session_id;
 
@@ -316,14 +315,14 @@ impl AuthStateStore {
 
     /// Drops a session's auth state, so a cancelled login stops being reachable
     /// by session id.
-    pub fn remove(&mut self, session_id: &SessionId) {
+    pub fn remove(&mut self, session_id: &UserSessionId) {
         self.store.remove(session_id);
     }
 
     /// Drops a session's auth state only if it is still `state`: a concurrent
     /// attempt may have superseded it, and the newer attempt must not be torn
     /// down by the older one's cleanup.
-    pub fn remove_if_same(&mut self, session_id: &SessionId, state: &Arc<Mutex<AuthState>>) {
+    pub fn remove_if_same(&mut self, session_id: &UserSessionId, state: &Arc<Mutex<AuthState>>) {
         if self
             .get(session_id)
             .is_some_and(|current| Arc::ptr_eq(&current, state))
@@ -390,6 +389,7 @@ mod tests {
     use std::str::FromStr;
 
     use ipnet::IpNet;
+    use uuid::Uuid;
     use warpgate_common::auth::{
         AuthCredential, AuthCredentialFingerprint, AuthStateUserInfo, CredentialPolicyResponse,
         WebApprovalScopeKey,
@@ -420,7 +420,7 @@ mod tests {
 
     fn interactive_state() -> Arc<Mutex<AuthState>> {
         Arc::new(Mutex::new(AuthState::new(
-            Uuid::new_v4(),
+            UserSessionId(Uuid::new_v4()),
             None,
             AuthStateUserInfo {
                 id: Uuid::new_v4(),
@@ -448,7 +448,7 @@ mod tests {
     fn create_for(
         store: &mut AuthStateStore,
         user: &User,
-        session_id: &SessionId,
+        session_id: &UserSessionId,
     ) -> Arc<Mutex<AuthState>> {
         store.create(
             session_id,
@@ -461,12 +461,12 @@ mod tests {
     }
 
     // Cross-node web-approval routing keys on this: an auth state is identified
-    // by its session id, so the owning node resolves from the `sessions` table.
+    // by its session id, so the owning node resolves from `user_sessions`.
     #[tokio::test]
     async fn create_keys_auth_state_by_session_id() {
         let mut store = AuthStateStore::new();
         let user = test_user();
-        let session_id = Uuid::new_v4();
+        let session_id = UserSessionId(Uuid::new_v4());
 
         let state = create_for(&mut store, &user, &session_id);
         assert!(Arc::ptr_eq(&store.get(&session_id).unwrap(), &state));
@@ -476,7 +476,7 @@ mod tests {
     async fn a_new_attempt_supersedes_the_session_s_previous_state() {
         let mut store = AuthStateStore::new();
         let user = test_user();
-        let session_id = Uuid::new_v4();
+        let session_id = UserSessionId(Uuid::new_v4());
 
         let first = create_for(&mut store, &user, &session_id);
         let second = create_for(&mut store, &user, &session_id);

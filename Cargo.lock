@@ -8994,6 +8994,7 @@ dependencies = [
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-db-migrations",
  "warpgate-ldap",
  "warpgate-protocol-kubernetes",
  "warpgate-protocol-ssh",
@@ -9198,6 +9199,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "time",
+ "tracing",
  "uuid",
  "warpgate-aws",
  "warpgate-common",
@@ -9222,6 +9224,7 @@ dependencies = [
  "tracing",
  "uuid",
  "warpgate-ca",
+ "warpgate-common",
  "warpgate-db-entities",
 ]
 
@@ -9304,6 +9307,7 @@ dependencies = [
  "warpgate-sso",
  "warpgate-tls",
  "warpgate-web",
+ "warpgate-web-clients-common",
  "warpgate-web-desktop",
  "warpgate-web-ssh",
 ]
@@ -9559,6 +9563,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
 ]

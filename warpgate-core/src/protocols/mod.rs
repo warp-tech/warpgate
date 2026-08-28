@@ -17,7 +17,9 @@ pub use desktop::{
     truncate_clipboard_contents_in_place,
 };
 pub use framebuffer::{Framebuffer, PngEncodeError, Rect, decode_png_rgba};
-pub use handle::{SessionHandle, WarpgateServerHandle};
+pub use handle::{
+    SessionHandle, TargetSessionStart, WarpgateServerHandle, target_session_needs_approval,
+};
 pub use terminal_screen::{TerminalScreen, sane_terminal_size};
 
 #[derive(Debug, thiserror::Error)]

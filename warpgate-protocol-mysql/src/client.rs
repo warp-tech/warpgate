@@ -8,6 +8,7 @@ use tokio::net::TcpStream;
 use tracing::{debug, info};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{TargetMySqlOptions, WarpgateError};
+use warpgate_core::ApprovedTarget;
 use warpgate_database_protocols::io::Decode;
 use warpgate_database_protocols::mysql::protocol::Capabilities;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
@@ -38,9 +39,11 @@ pub struct ConnectionOptions {
 
 impl MySqlClient {
     pub async fn connect(
-        target: &TargetMySqlOptions,
+        approved: ApprovedTarget<TargetMySqlOptions>,
         mut options: ConnectionOptions,
     ) -> Result<Self, MySqlError> {
+        let (_, target) = approved.into_parts();
+        let (_, target) = target.into_parts();
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
 
