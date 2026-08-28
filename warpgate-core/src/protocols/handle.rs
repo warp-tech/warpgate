@@ -134,7 +134,37 @@ impl WarpgateServerHandle {
     pub async fn start_target_session<O>(
         &mut self,
         authorization: TargetAuthorization<O>,
-    ) -> Result<TargetSessionStart<(TargetSessionId, ApprovedTarget<O>)>, WarpgateError> {
+    ) -> Result<TargetSessionStart<O>, WarpgateError> {
+        self.stamp_target_session_identity(&authorization).await?;
+
+        if self.needs_target_approval(authorization.target()).await? {
+            return Ok(TargetSessionStart::NeedsApproval(authorization));
+        }
+
+        let id = self.open_target_session_row(&authorization).await?;
+        Ok(TargetSessionStart::Started((
+            id,
+            ApprovedTarget::new(authorization),
+        )))
+    }
+
+    /// Starts a target session for a proof the administrator gate minted.
+    ///
+    /// The gate is the only other source of [`ApprovedTarget`], so between this
+    /// and [`Self::start_target_session`] every admission — gated or not — goes
+    /// through the same row and the same audit event.
+    pub async fn register_approved_target_session<O>(
+        &self,
+        approved: &ApprovedTarget<O>,
+    ) -> Result<TargetSessionId, WarpgateError> {
+        self.stamp_target_session_identity(approved).await?;
+        self.open_target_session_row(approved).await
+    }
+
+    async fn stamp_target_session_identity<O>(
+        &self,
+        authorization: &TargetAuthorization<O>,
+    ) -> Result<(), WarpgateError> {
         if authorization.protocol() != self.protocol {
             return Err(WarpgateError::InconsistentState(
                 "target authorization protocol does not match the user session".into(),
@@ -153,13 +183,13 @@ impl WarpgateServerHandle {
             }
             parent.target = Some(authorization.target().clone());
         }
-        self.update_rate_limiters().await?;
+        self.update_rate_limiters().await
+    }
 
-        if self.needs_target_approval(authorization.target()).await? {
-            // TODO
-            return Ok(TargetSessionStart::NeedsApproval);
-        }
-
+    async fn open_target_session_row<O>(
+        &self,
+        authorization: &TargetAuthorization<O>,
+    ) -> Result<TargetSessionId, WarpgateError> {
         let outcome = TargetSession::open_or_lookup(
             &self.db,
             TargetSessionId(Uuid::new_v4()),
@@ -179,14 +209,18 @@ impl WarpgateServerHandle {
             }
             TargetSessionOpenOutcome::AlreadyExists(model) => model,
         };
-        Ok(TargetSessionStart::Started((
-            target_session.id,
-            ApprovedTarget::new(authorization),
-        )))
+        Ok(target_session.id)
     }
 
+    /// Whether the target's administrator gate stands between this session and
+    /// the target. An open target-session row is the durable record of a prior
+    /// admission — the gate was already passed for it on some node — so its
+    /// presence answers no without re-asking.
     async fn needs_target_approval(&self, target: &Target) -> Result<bool, WarpgateError> {
-        target_session_needs_approval(&self.db, self.user_session_id, target).await
+        if !target.require_approval {
+            return Ok(false);
+        }
+        Ok(!TargetSession::is_open(&self.db, self.user_session_id, target.id).await?)
     }
 
     /// Wraps a client stream, adding rate limiters. Wrapping happens at connection time
@@ -217,27 +251,28 @@ impl WarpgateServerHandle {
     }
 }
 
-pub async fn target_session_needs_approval(
-    _db: &DatabaseConnection,
-    _user_session_id: UserSessionId,
-    _target: &Target,
-) -> Result<bool, WarpgateError> {
-    // TODO
-    Ok(false)
+/// Target session start outcome.
+///
+/// `NeedsApproval` hands the authorization back: the caller takes it to the
+/// administrator gate ([`Services::require_admin_approval`] or
+/// [`Services::poll_admin_approval`]), and registers the proof the gate mints
+/// via [`WarpgateServerHandle::register_approved_target_session`].
+///
+/// [`Services::require_admin_approval`]: crate::Services::require_admin_approval
+/// [`Services::poll_admin_approval`]: crate::Services::poll_admin_approval
+pub enum TargetSessionStart<O> {
+    Started((TargetSessionId, ApprovedTarget<O>)),
+    NeedsApproval(TargetAuthorization<O>),
 }
 
-/// Target session start outcome
-pub enum TargetSessionStart<T> {
-    Started(T),
-    NeedsApproval,
-}
-
-impl<T> TargetSessionStart<T> {
-    /// TODO For protocols that cannot hold their session open while an approval is decided
-    pub fn admitted(self) -> Result<T, WarpgateError> {
+impl<O> TargetSessionStart<O> {
+    /// For callers that gate before starting the session — the gate has already
+    /// admitted the connection, so being asked to approve here is an internal
+    /// inconsistency, not a user-facing wait.
+    pub fn admitted(self) -> Result<(TargetSessionId, ApprovedTarget<O>), WarpgateError> {
         match self {
             Self::Started(started) => Ok(started),
-            Self::NeedsApproval => Err(WarpgateError::TargetSessionRequiresApproval),
+            Self::NeedsApproval(_) => Err(WarpgateError::TargetSessionRequiresApproval),
         }
     }
 }

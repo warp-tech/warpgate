@@ -4,6 +4,7 @@ use std::future::Future;
 use std::net::IpAddr;
 
 use rand::RngExt;
+use sha2::Digest;
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use tracing::{debug, info};
@@ -11,7 +12,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{
-    AuthCredential, AuthCredentialFingerprint, CredentialKind, CredentialPolicy,
+    ApprovalKind, AuthCredential, AuthCredentialFingerprint, CredentialKind, CredentialPolicy,
     CredentialPolicyResponse,
 };
 use crate::helpers::logging::format_related_ids;
@@ -81,10 +82,9 @@ pub struct AuthStateUserInfo {
     pub username: String,
 }
 
-/// Cache matching key for web approval bypass.
-/// What a remembered web approval covers — and, on the lookup side, what a login
-/// is asking for. Kept as three explicit states because "no target yet" and
-/// "every target" are different things that a single `Option` would conflate.
+/// What a login is asking a remembered approval for. Explicit rather than an
+/// `Option`, because "no target yet" is a real bucket of its own: an untargeted
+/// grant must not stand in for approval of an actual target.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WebApprovalScopeKey {
     /// The flow isn't target-scoped: an HTTP portal sign-in, or SSH before the
@@ -92,28 +92,125 @@ pub enum WebApprovalScopeKey {
     Untargeted,
     /// Bound to a single target.
     Target(String),
-    /// Granted for every target.
-    AllTargets,
 }
 
+/// A non-empty, sorted, deduplicated set of credential fingerprints: the part of
+/// a remembered-approval key that says *how* the session authenticated.
+///
+/// Non-empty by construction, because a key built on no credentials matches on
+/// origin and username alone — it would replay a grant for any later session
+/// from the same place, whatever it authenticated with.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CredentialFingerprints(Vec<AuthCredentialFingerprint>);
+
+impl CredentialFingerprints {
+    /// The only way to build a set: sorts and deduplicates, so two attempts
+    /// presenting the same credentials in a different order key the same, and
+    /// answers `None` for an empty one rather than a set that matches on
+    /// nothing.
+    #[must_use]
+    pub fn new(mut fingerprints: Vec<AuthCredentialFingerprint>) -> Option<Self> {
+        fingerprints.sort_unstable();
+        fingerprints.dedup();
+        (!fingerprints.is_empty()).then_some(Self(fingerprints))
+    }
+
+    /// A stable digest of the set, for matching a session's credentials
+    /// against a stored approval record. Order-independent because the set is
+    /// sorted on construction.
+    #[must_use]
+    pub fn digest(&self) -> String {
+        let mut bytes = Vec::new();
+        for fingerprint in &self.0 {
+            fingerprint.write_canonical_bytes(&mut bytes);
+        }
+        let mut out = String::new();
+        for byte in sha2::Sha256::digest(&bytes) {
+            let _ = write!(&mut out, "{byte:02x}");
+        }
+        out
+    }
+}
+
+/// Whether an approval granted to a session may be remembered for a later one,
+/// and on what.
+///
+/// Separate variants rather than an `Option<Vec<_>>`: "nothing to key a grant
+/// on" and "keyed on nothing" are the same situation but read as opposites, and
+/// only one of them is safe. Building the set is the only way to find out which
+/// you have, so [`Self::from_fingerprints`] decides it once.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RememberedBy {
+    /// Replayable for a later session presenting the same credentials.
+    Credentials(CredentialFingerprints),
+    /// Nothing stable to pin a grant to — ticket auth, or a protocol that
+    /// doesn't carry the authenticating credentials on its requests.
+    Nothing,
+}
+
+impl RememberedBy {
+    /// Collapses a set that turns out to be empty to [`Self::Nothing`].
+    #[must_use]
+    pub fn from_fingerprints(fingerprints: Vec<AuthCredentialFingerprint>) -> Self {
+        CredentialFingerprints::new(fingerprints).map_or(Self::Nothing, Self::Credentials)
+    }
+
+    /// The set to key a grant on, or `None` when there is nothing to key it on.
+    #[must_use]
+    pub const fn credentials(&self) -> Option<&CredentialFingerprints> {
+        match self {
+            Self::Credentials(fingerprints) => Some(fingerprints),
+            Self::Nothing => None,
+        }
+    }
+}
+
+/// What a login must match in a stored approval record for the grace-period
+/// bypass to fire.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebApprovalMatchKey {
+    /// Which approval kind is being asked about. Part of the key so an
+    /// administrator's grant can never satisfy a request for the user's own
+    /// approval, or the other way round.
+    pub kind: ApprovalKind,
     pub remote_ip: IpAddr,
     pub protocol: Protocol,
     pub username: String,
     pub scope: WebApprovalScopeKey,
-    pub other_credentials: Vec<AuthCredentialFingerprint>,
+    pub other_credentials: CredentialFingerprints,
 }
 
 impl WebApprovalMatchKey {
-    /// A copy of this key that matches an approval remembered for all targets.
+    /// The one place a lookup key is normalised, shared by every approval
+    /// kind. `None` without a remote IP or without known credentials, so a
+    /// remembered approval is never replayed for a session that can't be
+    /// pinned to the same origin and the same credentials.
     #[must_use]
-    pub fn for_all_targets(&self) -> Self {
-        Self {
-            scope: WebApprovalScopeKey::AllTargets,
-            ..self.clone()
-        }
+    pub fn build(
+        kind: ApprovalKind,
+        remote_ip: Option<IpAddr>,
+        protocol: Protocol,
+        username: &str,
+        target_name: &str,
+        credentials: &RememberedBy,
+    ) -> Option<Self> {
+        Some(Self {
+            kind,
+            remote_ip: remote_ip?,
+            protocol,
+            username: username.to_lowercase(),
+            // An empty target name means the flow hasn't picked one (HTTP
+            // sign-in, SSH menu) — which is not the same as an approval
+            // covering all targets.
+            scope: if target_name.is_empty() {
+                WebApprovalScopeKey::Untargeted
+            } else {
+                WebApprovalScopeKey::Target(target_name.to_string())
+            },
+            other_credentials: credentials.credentials()?.clone(),
+        })
     }
+
 }
 
 impl From<&User> for AuthStateUserInfo {
@@ -200,36 +297,33 @@ impl AuthState {
         &self.target_name
     }
 
+    /// What an approval granted to this attempt could be remembered on.
+    ///
+    /// `WebUserApproval` itself is excluded, so the answer describes the *other*
+    /// credentials presented and is identical whether taken before an approval
+    /// is added (check) or after (save).
+    #[must_use]
+    pub fn remembered_by(&self) -> RememberedBy {
+        RememberedBy::from_fingerprints(
+            self.valid_credentials
+                .iter()
+                .filter(|c| c.kind() != CredentialKind::WebUserApproval)
+                .map(Into::into)
+                .collect(),
+        )
+    }
+
     /// Builds the key used to match this attempt against a remembered web
     /// approval.
     pub fn web_approval_match_key(&self) -> Option<WebApprovalMatchKey> {
-        let remote_ip = self.remote_ip?;
-
-        // `WebUserApproval` itself is excluded so the key describes the
-        // *other* credentials presented, and is identical whether computed before
-        // the approval is added (check) or after (save)
-        let mut other_credentials: Vec<AuthCredentialFingerprint> = self
-            .valid_credentials
-            .iter()
-            .filter(|c| c.kind() != CredentialKind::WebUserApproval)
-            .map(Into::into)
-            .collect();
-        other_credentials.sort_unstable();
-        other_credentials.dedup();
-
-        Some(WebApprovalMatchKey {
-            remote_ip,
-            protocol: self.protocol,
-            username: self.user_info.username.to_lowercase(),
-            // An empty target name means the flow hasn't picked one (HTTP sign-in,
-            // SSH menu) — which is not the same as an approval covering all targets.
-            scope: if self.target_name.is_empty() {
-                WebApprovalScopeKey::Untargeted
-            } else {
-                WebApprovalScopeKey::Target(self.target_name.clone())
-            },
-            other_credentials,
-        })
+        WebApprovalMatchKey::build(
+            ApprovalKind::User,
+            self.remote_ip,
+            self.protocol,
+            &self.user_info.username,
+            &self.target_name,
+            &self.remembered_by(),
+        )
     }
 
     pub const fn started(&self) -> &OffsetDateTime {
@@ -399,6 +493,30 @@ impl AuthState {
 mod tests {
     use super::*;
     use crate::Secret;
+
+    /// The whole point of the type: a session with nothing to pin a grant to
+    /// must produce no key, not a key that matches on origin and username
+    /// alone. A policy whose only factor is the approval itself lands here.
+    #[test]
+    fn an_empty_credential_set_is_not_remembered() {
+        assert_eq!(
+            RememberedBy::from_fingerprints(vec![]),
+            RememberedBy::Nothing
+        );
+        assert!(CredentialFingerprints::new(vec![]).is_none());
+    }
+
+    /// Order and repetition are presentation details of one attempt, not part
+    /// of what it authenticated with.
+    #[test]
+    fn credential_sets_key_the_same_whatever_the_order() {
+        let a = AuthCredentialFingerprint::Password { hash: [1u8; 32] };
+        let b = AuthCredentialFingerprint::Password { hash: [2u8; 32] };
+        assert_eq!(
+            CredentialFingerprints::new(vec![a.clone(), b.clone(), a.clone()]),
+            CredentialFingerprints::new(vec![b, a]),
+        );
+    }
 
     struct RequireAll(HashSet<CredentialKind>);
 

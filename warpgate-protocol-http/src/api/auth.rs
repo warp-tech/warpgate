@@ -11,26 +11,31 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::types::ToJSON;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{
-    Owner, ReparseForwardedResponse, fan_out_to_peers, forwarded_error, node_owner,
-    parse_forwarded_body, proxy_or_serve, proxy_or_serve_pending_login,
+    Owner, ReparseForwardedResponse, forwarded_error, node_owner, parse_forwarded_body,
+    proxy_or_serve_pending_login,
+};
+use warpgate_admin::approvals::{
+    ApprovalResolution, Approver, acting_approver, find_pending_user_approval,
+    find_user_approval_row, resolve_pending_approval,
 };
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::logging::get_client_ip_addr;
-use warpgate_common_http::{RequestAuthorization, SessionAuthorization, is_cluster_peer_request};
+use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::Services;
+use warpgate_core::approvals::{ApprovalDecision, ApprovalScope};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_db_entities::{Parameters, UserSession};
+use warpgate_db_entities::{Parameters, SessionApprovalRequest, UserSession};
 
 use super::common::{emit_unknown_authentication_failed_event, logout};
 use crate::api::auth_scheme::AuthedSession;
@@ -125,17 +130,19 @@ struct AuthStateResponseInternal {
     pub web_approval_caching_grace_seconds: Option<i64>,
 }
 
-/// How an web approval should be remembered for bypass
-#[derive(Enum, Clone, Copy)]
-enum WebApprovalScope {
-    Once,
-    Target,
-    AllTargets,
-}
-
+/// The outcome of acting on an approval request. The decision is applied by the
+/// node holding the login, so there is no updated state to hand back here.
 #[derive(Object)]
 struct ApproveAuthRequest {
-    scope: WebApprovalScope,
+    scope: ApprovalScope,
+}
+
+#[derive(ApiResponse)]
+enum ApprovalActionResponse {
+    #[oai(status = 200)]
+    Ok,
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -296,7 +303,6 @@ impl Api {
     )]
     async fn get_web_auth_requests(
         &self,
-        req: &Request,
         ctx: AuthedSession,
     ) -> poem::Result<AuthStateListResponse> {
         let services = ctx.services();
@@ -306,12 +312,29 @@ impl Api {
             return Ok(AuthStateListResponse::NotFound);
         };
 
-        let mut results = local_web_auth_requests(&ctx, username).await?;
+        // A login waiting on the user's approval may be held by any node, so the
+        // requests are read from the shared request table rather than this
+        // node's in-memory store. A row that already carries a decision is
+        // awaiting pickup by its owner, so it is no longer something to act on.
+        let requests = SessionApprovalRequest::Entity::find()
+            .filter(
+                SessionApprovalRequest::Column::Kind
+                    .eq(SessionApprovalRequest::ApprovalRequestKind::User),
+            )
+            .filter(
+                SessionApprovalRequest::Column::Status
+                    .eq(SessionApprovalRequest::ApprovalRequestStatus::Pending),
+            )
+            .order_by_asc(SessionApprovalRequest::Column::Started)
+            .all(&services.db)
+            .await
+            .map_err(WarpgateError::from)?;
 
-        // An auth state lives only on the node that created it, so the pending
-        // approvals of a login that started elsewhere are only visible there.
-        if !is_cluster_peer_request(req, &services.cluster_token) {
-            results.extend(web_auth_requests_from_peers(&ctx, req).await);
+        let mut results = vec![];
+        for request in requests {
+            if username_eq_ci(&request.username, username) {
+                results.push(request_to_auth_state(services, request).await?);
+            }
         }
 
         Ok(AuthStateListResponse::Ok(Json(results)))
@@ -324,20 +347,26 @@ impl Api {
     )]
     async fn api_auth_state(
         &self,
-        req: &Request,
         ctx: AuthedSession,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
-        proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
-                return Ok(AuthStateResponse::NotFound);
-            };
-            Ok(AuthStateResponse::Ok(Json(
-                serialize_auth_state_inner(state_arc, ctx.services()).await?,
-            )))
-        })
-        .await
+        // The live state exists only on the node that created it; anywhere else
+        // the request row stands in, and it carries everything the approval page
+        // shows, which is why this needs no hop to the owner.
+        if let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await {
+            return serialize_auth_state_inner(state_arc, ctx.services())
+                .await
+                .map(Json)
+                .map(AuthStateResponse::Ok);
+        }
+
+        match find_user_approval_row(&ctx, UserSessionId(*id)).await? {
+            Some(row) => request_to_auth_state(ctx.services(), row)
+                .await
+                .map(Json)
+                .map(AuthStateResponse::Ok),
+            None => Ok(AuthStateResponse::NotFound),
+        }
     }
 
     #[oai(
@@ -347,42 +376,11 @@ impl Api {
     )]
     async fn api_approve_auth(
         &self,
-        req: &Request,
         ctx: AuthedSession,
         id: Path<Uuid>,
         body: Json<ApproveAuthRequest>,
-    ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
-        proxy_or_serve(&ctx, req, owner, Some(&body.to_json()), || async {
-            let services = ctx.services();
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
-                return Ok(AuthStateResponse::NotFound);
-            };
-
-            let match_key = {
-                let mut state = state_arc.lock().await;
-                state.add_web_user_approval();
-                state.web_approval_match_key()
-            };
-
-            // Remembered so matching attempts can be bypassed within the grace period.
-            if let Some(match_key) = match body.scope {
-                WebApprovalScope::Once => None,
-                WebApprovalScope::Target => match_key,
-                WebApprovalScope::AllTargets => match_key.map(|k| k.for_all_targets()),
-            } {
-                services
-                    .auth_state_store
-                    .lock()
-                    .await
-                    .record_web_approval(match_key);
-            }
-
-            Ok(AuthStateResponse::Ok(Json(
-                serialize_auth_state_inner(state_arc, services).await?,
-            )))
-        })
-        .await
+    ) -> poem::Result<ApprovalActionResponse> {
+        resolve_own_approval(&ctx, UserSessionId(*id), ApprovalDecision::Approved(body.scope)).await
     }
 
     #[oai(
@@ -392,26 +390,49 @@ impl Api {
     )]
     async fn api_reject_auth(
         &self,
-        req: &Request,
         ctx: AuthedSession,
         id: Path<Uuid>,
-    ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
-        proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
-                return Ok(AuthStateResponse::NotFound);
-            };
+    ) -> poem::Result<ApprovalActionResponse> {
+        resolve_own_approval(&ctx, UserSessionId(*id), ApprovalDecision::Rejected).await
+    }
+}
+
+/// Records the user's decision on their own pending approval.
+///
+/// The decision is written to the request row and the node holding the login
+/// reads it back, so this is served wherever it lands. `find_pending_user_approval`
+/// is what enforces that the request belongs to the user asking.
+async fn resolve_own_approval(
+    ctx: &AuthenticatedRequestContext,
+    session_id: UserSessionId,
+    decision: ApprovalDecision,
+) -> poem::Result<ApprovalActionResponse> {
+    // The auth state is what the approval actually satisfies, so the node
+    // holding it settles the decision itself. The request row exists to reach
+    // the *other* nodes, and it is written from the same signal that tells the
+    // user a request is waiting — so acting on that notification immediately
+    // can outrun it. Going to the state first makes that race unobservable.
+    if local_auth_state_for_user(ctx, &session_id).await.is_some() {
+        let actor = acting_approver(ctx);
+        return Ok(
+            if ctx
+                .services()
+                .apply_user_approval(session_id, decision, &actor)
+                .await?
             {
-                let mut state = state_arc.lock().await;
-                let credential = AuthCredential::WebUserApproval;
-                state.emit_authentication_failed_event(Some(&credential), "rejected by user");
-                state.reject();
-            }
-            Ok(AuthStateResponse::Ok(Json(
-                serialize_auth_state_inner(state_arc, ctx.services()).await?,
-            )))
-        })
-        .await
+                ApprovalActionResponse::Ok
+            } else {
+                ApprovalActionResponse::NotFound
+            },
+        );
+    }
+
+    let Some(pending) = find_pending_user_approval(ctx, session_id).await? else {
+        return Ok(ApprovalActionResponse::NotFound);
+    };
+    match resolve_pending_approval(ctx, Approver::TheUserThemselves, pending, decision).await? {
+        ApprovalResolution::Resolved => Ok(ApprovalActionResponse::Ok),
+        ApprovalResolution::NotFound => Ok(ApprovalActionResponse::NotFound),
     }
 }
 
@@ -729,65 +750,27 @@ impl ReparseForwardedResponse for AuthStateResponse {
     }
 }
 
-/// This node's own logins waiting on a web approval from `username`.
-async fn local_web_auth_requests(
-    ctx: &AuthenticatedRequestContext,
-    username: &str,
-) -> poem::Result<Vec<AuthStateResponseInternal>> {
-    let services = ctx.services();
-
-    // Snapshot the state handles while briefly holding the store lock, then
-    // release it before inspecting/serialising each state. Inspecting a
-    // state locks its inner mutex (and `serialize_auth_state_inner` locks
-    // the session state store), so doing that work under the auth state
-    // store lock would serialise every login against this endpoint.
-    let state_arcs = {
-        let store = services.auth_state_store.lock().await;
-        store.snapshot_states()
-    };
-
-    let mut results = vec![];
-
-    for state_arc in state_arcs {
-        let is_pending_web_approval = {
-            let state = state_arc.lock().await;
-            username_eq_ci(&state.user_info().username, username)
-                && matches!(
-                    state.verify(),
-                    AuthResult::Need(need) if need.contains(&CredentialKind::WebUserApproval)
-                )
-        };
-        if is_pending_web_approval {
-            results.push(serialize_auth_state_inner(state_arc, services).await?);
-        }
-    }
-
-    Ok(results)
-}
-
-/// The same list from every other node, so the approvals UI sees the whole
-/// cluster. Best effort: a peer that fails or answers unexpectedly contributes
-/// nothing rather than failing the request, since the user can still approve
-/// from the direct link the waiting login printed.
-async fn web_auth_requests_from_peers(
-    ctx: &AuthenticatedRequestContext,
-    req: &Request,
-) -> Vec<AuthStateResponseInternal> {
-    let mut results = vec![];
-    for (hostname, response) in fan_out_to_peers(ctx, req, req.original_uri().path()).await {
-        if response.status() != http::StatusCode::OK {
-            let status = response.status();
-            warn!(node = %hostname, %status, "Failed to list web auth requests on a cluster node");
-            continue;
-        }
-        match parse_forwarded_body::<Vec<AuthStateResponseInternal>>(response).await {
-            Ok(states) => results.extend(states),
-            Err(error) => {
-                warn!(node = %hostname, %error, "Malformed web auth request list from a cluster node");
-            }
-        }
-    }
-    results
+/// Renders an approval request row into the approval-page response, purely from
+/// row fields, so any node can serve it without holding the login.
+async fn request_to_auth_state(
+    services: &Services,
+    request: SessionApprovalRequest::Model,
+) -> poem::Result<AuthStateResponseInternal> {
+    let web_approval_caching_grace_seconds = services
+        .web_approval_grace_period()
+        .await?
+        .and_then(|d| i64::try_from(d.as_secs()).ok());
+    Ok(AuthStateResponseInternal {
+        id: request.session_id.to_string(),
+        protocol: request.protocol,
+        address: request.remote_address,
+        started: request.started,
+        state: ApiAuthState::WebUserApprovalNeeded,
+        // Only user-approval rows reach here (both lookups filter on the kind),
+        // and those always carry the code the user reads back.
+        identification_string: request.identification_string.unwrap_or_default(),
+        web_approval_caching_grace_seconds,
+    })
 }
 
 /// Looks up a locally-held auth state, enforcing that it belongs to the

@@ -10,6 +10,9 @@
         '/sessions/:id': wrap({
             asyncComponent: () => import('./Session.svelte'),
         }),
+        '/requests': wrap({
+            asyncComponent: () => import('./Requests.svelte'),
+        }),
         '/login-protection': wrap({
             asyncComponent: () => import('./LoginProtection.svelte'),
         }),
@@ -27,6 +30,14 @@
             title="Sessions"
             description="Active and past connections"
             href="/status/sessions"
+        />
+
+        <NavListItem
+            small
+            class="mb-2"
+            title="Requests"
+            description="Sessions and tickets awaiting your action"
+            href="/status/requests"
         />
 
         <NavListItem

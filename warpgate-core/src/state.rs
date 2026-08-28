@@ -13,6 +13,7 @@ use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{NodeId, Protocol, Target, UserSessionId, WarpgateError};
 use warpgate_db_entities::{TargetSession, UserSession};
 
+use crate::approvals::SessionGates;
 use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
 use crate::{SessionHandle, WarpgateServerHandle};
 
@@ -22,6 +23,10 @@ pub struct State {
     node_id: NodeId,
     rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     change_sender: broadcast::Sender<()>,
+    /// Administrator-gate ledger for sessions that observe the gate rather
+    /// than parking on it. Kept here because an entry describes one connection
+    /// and must be dropped with it, which is what this type already tracks.
+    admin_approval_gates: Arc<SessionGates>,
 }
 
 impl State {
@@ -37,7 +42,14 @@ impl State {
             node_id,
             rate_limiter_registry: rate_limiter_registry.clone(),
             change_sender: sender,
+            admin_approval_gates: Arc::default(),
         }))
+    }
+
+    /// Handle to the administrator-gate ledger, for the wait sites that
+    /// record into it.
+    pub fn admin_approval_gates(&self) -> Arc<SessionGates> {
+        self.admin_approval_gates.clone()
     }
 
     /// Registers a session with no owning node: it is a DB record any node
@@ -204,6 +216,8 @@ impl State {
             error!(%error, %id, "Could not delete user session from the DB");
         }
 
+        self.drop_session_approvals(id).await;
+
         let _ = self.change_sender.send(());
     }
 
@@ -221,6 +235,22 @@ impl State {
         }
     }
 
+    /// Forgets everything an approval decision could still be applied to once a
+    /// session is over. The connection is gone, so a decision can never reach
+    /// it — but a pending request left behind would keep sitting in the
+    /// approval queues, where approving it would still stamp a grace-period
+    /// bypass, and a gate outcome left behind describes a connection a later
+    /// session must not inherit.
+    ///
+    /// The requests are closed, not removed: they stay as the record of what
+    /// was asked, and are pruned with the rest of the audit trail.
+    async fn drop_session_approvals(&self, id: UserSessionId) {
+        if let Err(error) = crate::approvals::abandon_requests_for_session(&self.db, id).await {
+            error!(%error, %id, "Could not close the session's approval requests");
+        }
+        self.admin_approval_gates.forget_session(&id).await;
+    }
+
     pub async fn remove_session(&mut self, id: UserSessionId) {
         // The row is ended whether or not this node still holds the state: a
         // handle dropped just before this call detaches the entry without
@@ -230,6 +260,8 @@ impl State {
         if let Err(error) = UserSession::mark_ended_including_target_sessions(&self.db, id).await {
             error!(%error, %id, "Could not end user session in the DB");
         }
+
+        self.drop_session_approvals(id).await;
 
         let _ = self.change_sender.send(());
     }
@@ -321,6 +353,7 @@ mod tests {
             ticket_max_duration_seconds: None,
             ticket_requests_disabled: false,
             ticket_require_approval: false,
+            require_approval: false,
             ticket_max_uses: None,
         }
     }

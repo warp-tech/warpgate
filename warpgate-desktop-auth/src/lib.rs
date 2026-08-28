@@ -21,15 +21,18 @@ pub use hold_screen::{
 pub use otp::{MAX_OTP_ATTEMPTS, OtpAction, OtpActionApplyOutcome, OtpEntry};
 use tokio::sync::Mutex;
 use tracing::warn;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind};
-use warpgate_common::{Secret, TargetOptionsVariant, TargetSessionId, UserSessionId};
+use warpgate_common::auth::{
+    AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind, RememberedBy,
+};
+use warpgate_common::{Secret, TargetOptionsVariant, TargetSessionId, UserSessionId, WarpgateError};
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::approvals::{AdminApprovalContext, GateOutcome, TicketStake};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    AuthorizedIdentity, Services, TargetAuthorization, WarpgateServerHandle,
-    authorize_for_target_by_name, authorize_and_spend_ticket,
+    ApprovedTarget, AuthorizedIdentity, Services, TargetAuthorization, TicketRefund, TicketSpend,
+    WarpgateServerHandle, authorize_and_spend_ticket, authorize_for_target_by_name,
 };
 use warpgate_desktop_ui::AuthPrompt;
 
@@ -194,6 +197,7 @@ pub async fn authenticate<O: TargetOptionsVariant>(
                 &secret,
                 Some(remote_address.ip()),
                 O::PROTOCOL,
+                TicketSpend::Immediate,
             )
             .await?
             {
@@ -232,6 +236,55 @@ pub async fn finalize_user_auth<O: TargetOptionsVariant>(
         bail!("Target {target_name} is not a {} target", O::PROTOCOL);
     };
     Ok(authorization)
+}
+
+/// Hold an authenticated desktop session at the administrator-approval gate.
+/// `Ok(None)` means the session may not proceed.
+///
+/// Call this after authentication and before dialing the target — it takes the
+/// authorization and hands back the proof the dial sites need, so there is no way to reach
+/// a target around it. The gate itself decides whether this session needs holding at all
+/// (the target's setting, a remembered approval). Both desktop protocols hold their viewer
+/// connection inline while it waits.
+///
+/// The ticket guard arrives armed from [`authenticate`] and rides on the gate's outcome,
+/// which refunds it on everything but an approval — a refusal is not the user's doing.
+/// Every other way the session can end, before or after this call, spends it through the
+/// guard's drop.
+pub async fn approve_session<O: Send + Sync>(
+    services: &Services,
+    session_id: &UserSessionId,
+    authorization: TargetAuthorization<O>,
+    remote_ip: Option<IpAddr>,
+) -> Result<Option<ApprovedTarget<O>>> {
+    // The auth state is keyed by the session id. A ticket-authorised session has none, and
+    // so no credential fingerprints to key a remembered approval on.
+    let state = services.auth_state_store.lock().await.get(session_id);
+    let credentials = match state {
+        Some(state) => state.lock().await.remembered_by(),
+        None => RememberedBy::Nothing,
+    };
+    // The spend happened at authentication; the guard rides on the gate's
+    // outcome, which refunds it on everything but an approval.
+    let ticket = TicketRefund::new(services.db.clone(), authorization.ticket_id());
+
+    let outcome: GateOutcome<O> = services
+        .require_admin_approval(
+            authorization,
+            AdminApprovalContext {
+                session_id: *session_id,
+                remote_ip,
+                credentials,
+                ticket: TicketStake::Held(ticket),
+            },
+            // The viewer connection is held on this call itself; there is no separate
+            // signal to cancel the wait on.
+            std::future::pending(),
+            || async { Ok::<_, WarpgateError>(()) },
+        )
+        .await?;
+
+    Ok(outcome.approved())
 }
 
 /// Build the browser web-approval URL for the current auth state, or `None` if the external

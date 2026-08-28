@@ -70,6 +70,7 @@ pub struct AdminPermissions {
 
     sessions_view: bool,
     sessions_terminate: bool,
+    approve_sessions: bool,
 
     recordings_view: bool,
 
@@ -96,6 +97,7 @@ impl From<AdminPermissionSet> for AdminPermissions {
             access_roles_assign: set.contains(AdminPermission::AccessRolesAssign),
             sessions_view: set.contains(AdminPermission::SessionsView),
             sessions_terminate: set.contains(AdminPermission::SessionsTerminate),
+            approve_sessions: set.contains(AdminPermission::ApproveSessions),
             recordings_view: set.contains(AdminPermission::RecordingsView),
             tickets_create: set.contains(AdminPermission::TicketsCreate),
             tickets_delete: set.contains(AdminPermission::TicketsDelete),

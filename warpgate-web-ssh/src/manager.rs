@@ -14,7 +14,9 @@ use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
     RCCommand, RCEvent, RCState, RemoteClient, resolve_approved_ssh_chain,
 };
-use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
+use warpgate_web_clients_common::{
+    ClientManager, SessionRemover, WebSessionHandle, gate_web_client_session,
+};
 
 use crate::protocol::ServerMessage;
 use crate::session::WebSshSession;
@@ -49,9 +51,9 @@ impl WebSshClientManager {
         remote_address: Option<SocketAddr>,
     ) -> Result<UserSessionId, WarpgateError> {
         let user_id = authorization.user_info().id;
-        if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
-            return Err(WarpgateError::SessionLimitReached);
-        }
+        // Held until the session is in the registry, so the attempts waiting on
+        // the approval gate count against the limit too.
+        let _slot = self.reserve_slot(user_id, MAX_SESSIONS_PER_USER).await?;
 
         let authorization = authorization.narrow::<TargetSSHOptions>()?;
         let username = authorization.user_info().username.clone();
@@ -72,13 +74,9 @@ impl WebSshClientManager {
         .await
         .context("registering webSSH session")?;
 
-        let (target_session_id, approved) = server_handle
-            .lock()
-            .await
-            .start_target_session(authorization)
-            .await
-            .context("starting target session")?
-            .admitted()?;
+        let (target_session_id, approved) =
+            gate_web_client_session(services, &server_handle, authorization, remote_address)
+                .await?;
 
         let session_id = server_handle.lock().await.user_session_id();
         let rc_handles = RemoteClient::create(session_id, services.clone())

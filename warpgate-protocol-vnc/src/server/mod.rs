@@ -22,7 +22,7 @@ use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::accept_loop;
 use warpgate_common::{ListenEndpoint, TargetVncOptions};
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{Services, State, UserSessionStateInit, WarpgateServerHandle};
+use warpgate_core::{Services, State, TargetSessionStart, UserSessionStateInit, WarpgateServerHandle};
 use warpgate_desktop_auth::{DesktopAuthOutcome, authenticate, finalize_user_auth};
 use warpgate_desktop_ui as ui;
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
@@ -269,12 +269,42 @@ async fn negotiate_and_authorize(
         DesktopAuthOutcome::Failed => return Ok(None),
     };
 
-    let (target_session_id, approved) = server_handle
+    let started = server_handle
         .lock()
         .await
         .start_target_session(authorization)
-        .await?
-        .admitted()?;
+        .await?;
+    let (target_session_id, approved) = match started {
+        TargetSessionStart::Started(started) => started,
+        // The viewer is held under the hold screen for the whole gate: VNC only paints when
+        // asked, so without it the viewer's frame requests would go unanswered and its screen
+        // would sit frozen for as long as the administrator takes to decide.
+        TargetSessionStart::NeedsApproval(authorization) => {
+            let session_id = server_handle.lock().await.user_session_id();
+            let approved = render_while(
+                &mut viewer_wr,
+                &mut events_rx,
+                &mut render,
+                warpgate_desktop_auth::approve_session(
+                    services,
+                    &session_id,
+                    authorization,
+                    Some(remote_address.ip()),
+                ),
+            )
+            .await??;
+            let Some(approved) = approved else {
+                warn!("Session was not approved by an administrator");
+                return Ok(None);
+            };
+            let target_session_id = server_handle
+                .lock()
+                .await
+                .register_approved_target_session(&approved)
+                .await?;
+            (target_session_id, approved)
+        }
+    };
 
     info!(target=%approved.target().name, "Authorized");
 

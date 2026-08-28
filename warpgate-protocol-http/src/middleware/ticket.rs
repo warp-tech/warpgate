@@ -9,7 +9,7 @@ use warpgate_common::Secret;
 use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
-use warpgate_core::authorize_and_spend_ticket;
+use warpgate_core::{TicketSpend, authorize_and_spend_ticket};
 
 use crate::common::SessionExt;
 
@@ -101,12 +101,17 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
             let client_ip: Option<IpAddr> = get_client_ip(&req, ctx.services())
                 .await
                 .and_then(|s| s.parse().ok());
+            // A ticket for a gated target is spent by the administrator's
+            // approval, not by establishing the session — a refusal must not
+            // burn a use. The gate reads the deferral off the session auth to
+            // know its approval consumes the ticket.
             if let Some(authorization) = authorize_and_spend_ticket(
                 &ctx.services().db,
                 &ctx.services().login_protection,
                 &ticket_secret,
                 client_ip,
                 crate::common::PROTOCOL_NAME,
+                TicketSpend::DeferredIfApprovalGated,
             )
             .await?
             {
@@ -115,6 +120,7 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                     username: authorization.user_info().username.clone(),
                     target_id: authorization.target().id,
                     ticket_id: authorization.ticket_id(),
+                    ticket_spend_deferred: authorization.target().require_approval,
                 });
             }
         }
@@ -141,6 +147,7 @@ mod tests {
             username: "alice".into(),
             target_id,
             ticket_id: Some(first_ticket_id),
+            ticket_spend_deferred: false,
         });
         let first_key = ticket_session_key(&req, &session);
 
@@ -149,6 +156,7 @@ mod tests {
             username: "alice".into(),
             target_id,
             ticket_id: Some(second_ticket_id),
+            ticket_spend_deferred: false,
         });
 
         assert_ne!(first_key, ticket_session_key(&req, &session));

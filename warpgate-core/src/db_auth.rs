@@ -10,14 +10,17 @@ use std::net::IpAddr;
 
 use tracing::{error, info, warn};
 use url::Url;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, CredentialKind};
+use warpgate_common::auth::{
+    AuthCredential, AuthResult, AuthSelector, CredentialKind, RememberedBy,
+};
 use warpgate_common::{Protocol, Secret, UserSessionId, WarpgateError};
 
+use crate::approvals::{AdminApprovalContext, GateOutcome, TicketStake};
 use crate::auth::submit_credential;
 use crate::login_protection::FailedAttemptInfo;
 use crate::{
-    AuthorizedIdentity, Services, TargetAuthorization, authorize_and_spend_ticket,
-    authorize_for_target_by_name, wait_for_auth_completion,
+    ApprovedTarget, AuthorizedIdentity, Services, TargetAuthorization, TicketRefund, TicketSpend,
+    authorize_and_spend_ticket, authorize_for_target_by_name, wait_for_auth_completion,
 };
 
 /// Proof that the success message has not been sent yet. Exactly one is minted
@@ -63,20 +66,58 @@ pub trait DbAuthTransport {
 
     /// Tell the client the login was denied.
     async fn send_denied(&mut self) -> Result<(), Self::Error>;
+
+    /// Announce that the session is being held for administrator approval.
+    /// Called only while it actually is held, so a session that passes the gate
+    /// straight through says nothing.
+    ///
+    /// A protocol whose notice needs an authenticated connection spends
+    /// `auth_ok` on it; what it leaves behind is what the flow sends once the
+    /// session is approved. The default says nothing, for protocols with no
+    /// in-band channel for it at this point in their handshake.
+    async fn notify_awaiting_admin_approval(
+        &mut self,
+        _auth_ok: &mut Option<AuthOkPermit>,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+/// Holds an otherwise-complete login on the administrator-approval gate.
+///
+/// The wait isn't cancelled when the client goes away — neither protocol can
+/// cheaply observe a disconnect — which only delays cleanup, since session
+/// teardown closes the request row regardless.
+async fn hold_for_admin_approval<T: DbAuthTransport>(
+    transport: &mut T,
+    services: &Services,
+    authorization: TargetAuthorization,
+    context: AdminApprovalContext,
+    auth_ok: &mut Option<AuthOkPermit>,
+) -> Result<GateOutcome, T::Error> {
+    services
+        .require_admin_approval(
+            authorization,
+            context,
+            std::future::pending(),
+            || async move { transport.notify_awaiting_admin_approval(auth_ok).await },
+        )
+        .await
 }
 
 /// Authorizes a database-protocol login end to end.
 ///
 /// `Ok(None)` means the login was denied and the client has already been told;
-/// the caller only has to stop. A returned [`TargetAuthorization`] is proof the
-/// user may open the target it names.
+/// the caller only has to stop. A returned [`ApprovedTarget`] is proof the user
+/// may open the target it names *and* that any administrator gate on it let this
+/// connection through.
 pub async fn run_db_authorization<T: DbAuthTransport>(
     transport: &mut T,
     services: &Services,
     session_id: UserSessionId,
     selector: AuthSelector,
     remote_ip: IpAddr,
-) -> Result<Option<TargetAuthorization>, T::Error> {
+) -> Result<Option<ApprovedTarget>, T::Error> {
     // A lookup error must fail closed: propagate it rather than letting a
     // possibly-blocked IP through.
     if let Some(block_info) = services
@@ -117,6 +158,7 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                 &secret,
                 Some(remote_ip),
                 T::PROTOCOL,
+                TicketSpend::Immediate,
             )
             .await?
             else {
@@ -128,8 +170,38 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                 "Authorized for {} with a ticket",
                 authorization.target().name
             );
-            transport.send_auth_ok(AuthOkPermit).await?;
-            Ok(Some(authorization))
+            let mut auth_ok = Some(AuthOkPermit);
+
+            let ticket_id = authorization.ticket_id();
+            let outcome = hold_for_admin_approval(
+                transport,
+                services,
+                authorization,
+                AdminApprovalContext {
+                    session_id,
+                    remote_ip: Some(remote_ip),
+                    // A ticket is not a stable credential fingerprint.
+                    credentials: RememberedBy::Nothing,
+                    // Armed for the whole hold: the client dropping
+                    // mid-approval cancels this future, so the ticket has to
+                    // be settled by the gate and the guard rather than by any
+                    // statement below.
+                    ticket: TicketStake::Held(TicketRefund::new(services.db.clone(), ticket_id)),
+                },
+                &mut auth_ok,
+            )
+            .await;
+
+            let Some(approved) = outcome?.approved() else {
+                warn!("Session was not approved by an administrator");
+                transport.send_denied().await?;
+                return Ok(None);
+            };
+
+            if let Some(permit) = auth_ok.take() {
+                transport.send_auth_ok(permit).await?;
+            }
+            Ok(Some(approved))
         }
     }
 }
@@ -142,7 +214,7 @@ async fn authorize_user<T: DbAuthTransport>(
     target_name: &str,
     remote_ip: IpAddr,
     auth_ok: AuthOkPermit,
-) -> Result<Option<TargetAuthorization>, T::Error> {
+) -> Result<Option<ApprovedTarget>, T::Error> {
     // As with the IP check above, a lookup error fails closed.
     if services
         .login_protection
@@ -200,6 +272,26 @@ async fn authorize_user<T: DbAuthTransport>(
                     return Ok(None);
                 };
 
+                let credentials = state_arc.lock().await.remembered_by();
+                let Some(approved) = hold_for_admin_approval(
+                    transport,
+                    services,
+                    authorization,
+                    AdminApprovalContext {
+                        session_id,
+                        remote_ip: Some(remote_ip),
+                        credentials,
+                        ticket: TicketStake::None,
+                    },
+                    &mut auth_ok,
+                )
+                .await?
+                .approved() else {
+                    warn!("Session was not approved by an administrator");
+                    transport.send_denied().await?;
+                    return Ok(None);
+                };
+
                 if let Some(permit) = auth_ok.take() {
                     transport.send_auth_ok(permit).await?;
                 }
@@ -209,7 +301,7 @@ async fn authorize_user<T: DbAuthTransport>(
                     .clear_failed_attempts(&remote_ip, &user_info.username)
                     .await;
 
-                return Ok(Some(authorization));
+                return Ok(Some(approved));
             }
 
             AuthResult::Need(kinds) if kinds.contains(&CredentialKind::Password) => {

@@ -87,6 +87,12 @@ export const ADMIN_PERMISSIONS = [
         deps: ['sessionsView'] as AdminRolePermissionKey[],
     },
     {
+        key: 'approveSessions' as const,
+        label: 'Approve',
+        category: 'Sessions' as const,
+        deps: ['sessionsView'] as AdminRolePermissionKey[],
+    },
+    {
         key: 'recordingsView' as const,
         label: 'View',
         category: 'Recordings' as const,

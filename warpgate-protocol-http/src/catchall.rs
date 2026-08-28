@@ -17,6 +17,7 @@ use warpgate_core::{
     ConfigProvider, TargetAuthorization, TargetSessionStart, authorize_for_target,
 };
 
+use crate::approval_gate::resolve_admin_approval;
 use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
@@ -82,10 +83,14 @@ pub async fn catchall_endpoint(
         }
         Ok(TargetSessionStart::Started(started)) => started,
         Err(error) => return Err(error.into()),
-        Ok(TargetSessionStart::NeedsApproval) => {
-            return Ok(Response::builder()
-                .status(poem::http::StatusCode::SERVICE_UNAVAILABLE)
-                .body("Target approval required"));
+        // Gated ahead of the protocol branch so the WebSocket upgrade is held
+        // too — an upgrade has nowhere to render an interstitial, and letting
+        // it through would leave the gate applying only to plain requests.
+        Ok(TargetSessionStart::NeedsApproval(authorization)) => {
+            match resolve_admin_approval(req, &ctx, &handle, authorization).await? {
+                Ok(started) => started,
+                Err(response) => return Ok(response),
+            }
         }
     };
     let keepalive_guard = Data::<&SessionKeepalive>::from_request_without_body(req)
@@ -137,6 +142,7 @@ async fn get_target_for_request(
         username,
         target_id,
         ticket_id,
+        ..
     }) = &ctx.auth
     {
         let Some(target) = config_provider.get_target_by_id(*target_id).await? else {

@@ -86,6 +86,7 @@ mod m00079_unique_target_and_group_names;
 mod m00080_user_and_target_sessions;
 mod m00081_http_session_user_session_id;
 mod m00082_target_session_columns;
+mod m00083_jit_session_approval;
 
 pub(crate) mod helpers;
 
@@ -177,6 +178,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00080_user_and_target_sessions::Migration),
             Box::new(m00081_http_session_user_session_id::Migration),
             Box::new(m00082_target_session_columns::Migration),
+            Box::new(m00083_jit_session_approval::Migration),
         ]
     }
 }
@@ -250,4 +252,60 @@ pub async fn migrate_database_down(
     steps: u32,
 ) -> Result<(), DbErr> {
     Migrator::down(connection, Some(steps)).await
+}
+#[cfg(all(test, feature = "sqlite"))]
+mod tests {
+    use sea_orm::{ConnectionTrait, Database, Statement};
+    use warpgate_db_entities::Parameters::{
+        ConfigMigrationValues, SshHostKeyVerificationMode, set_config_migration_values,
+    };
+
+    use super::*;
+
+    async fn count(db: &DatabaseConnection, sql: &str) -> i64 {
+        let backend = db.get_database_backend();
+        db.query_one(Statement::from_string(backend, sql.to_owned()))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get_by("n")
+            .unwrap()
+    }
+
+    /// The whole chain has to apply cleanly, and `m00080`'s backfill has to
+    /// actually grant the new permission to roles that could already see
+    /// sessions — it is raw SQL with a backend-specific boolean literal, so
+    /// nothing else would catch it being wrong.
+    #[tokio::test]
+    async fn migrations_apply_and_backfill_approve_sessions() {
+        // An early migration reads these from config; any values will do here.
+        set_config_migration_values(ConfigMigrationValues {
+            recordings_enable: false,
+            recordings_path: "/tmp/warpgate-test-recordings".to_owned(),
+            ssh_host_key_verification: SshHostKeyVerificationMode::default(),
+        });
+
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+
+        assert_eq!(
+            count(
+                &db,
+                "SELECT COUNT(*) AS n FROM admin_roles \
+                 WHERE sessions_view = 1 AND approve_sessions = 0",
+            )
+            .await,
+            0,
+            "every sessions_view role should have been granted approve_sessions",
+        );
+        assert!(
+            count(
+                &db,
+                "SELECT COUNT(*) AS n FROM admin_roles WHERE approve_sessions = 1"
+            )
+            .await
+                > 0,
+            "the built-in admin role should have been backfilled",
+        );
+    }
 }

@@ -21,8 +21,8 @@ use warpgate_common::{
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, TargetAuthorization,
-    WarpgateServerHandle, run_db_authorization,
+    ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, WarpgateServerHandle,
+    run_db_authorization,
 };
 use warpgate_tls::ServerTlsStream;
 
@@ -120,6 +120,29 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for PostgresSessi
             ]))?;
         self.stream.flush().await?;
         Ok(true)
+    }
+
+    /// The notice needs an authenticated connection to travel on, so the
+    /// `Authentication::Ok` goes out ahead of it when it hasn't already.
+    async fn notify_awaiting_admin_approval(
+        &mut self,
+        auth_ok: &mut Option<AuthOkPermit>,
+    ) -> Result<(), PostgresError> {
+        if let Some(permit) = auth_ok.take() {
+            self.send_auth_ok(permit).await?;
+        }
+        self.stream
+            .push(pgwire::messages::response::NoticeResponse::new(vec![
+                (b'S', "NOTICE".into()),
+                (b'V', "NOTICE".into()),
+                (b'C', "WG002".into()),
+                (
+                    b'M',
+                    "Warpgate: waiting for an administrator to approve this session...".into(),
+                ),
+            ]))?;
+        self.stream.flush().await?;
+        Ok(())
     }
 
     async fn send_denied(&mut self) -> Result<(), PostgresError> {
@@ -260,19 +283,19 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         let session_id = self.server_handle.lock().await.user_session_id();
 
         let services = self.services.clone();
-        let Some(authorization) =
+        let Some(approved) =
             run_db_authorization(&mut self, &services, session_id, selector, remote_ip).await?
         else {
             return Ok(());
         };
 
-        self.run_authorized(startup, authorization).await
+        self.run_authorized(startup, approved).await
     }
 
     async fn run_authorized(
         mut self,
         startup: pgwire::messages::startup::Startup,
-        authorization: TargetAuthorization,
+        approved: ApprovedTarget,
     ) -> Result<(), PostgresError> {
         if let Some(banner) = warpgate_db_entities::Parameters::Entity::get(&self.services.db)
             .await
@@ -290,9 +313,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
         self.stream.flush().await?;
 
-        let target_name = authorization.target().name.clone();
-        let authorization = match authorization.narrow::<TargetPostgresOptions>() {
-            Ok(authorization) => authorization,
+        let target_name = approved.target().name.clone();
+        let approved = match approved.narrow::<TargetPostgresOptions>() {
+            Ok(approved) => approved,
             Err(_) => {
                 warn!("Selected target is not a PostgreSQL target");
                 self.send_error_response(
@@ -304,13 +327,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             }
         };
 
-        let (_, approved) = self
-            .server_handle
+        self.server_handle
             .lock()
             .await
-            .start_target_session(authorization)
-            .await?
-            .admitted()?;
+            .register_approved_target_session(&approved)
+            .await?;
 
         self.run_authorized_inner(startup, approved).await
     }

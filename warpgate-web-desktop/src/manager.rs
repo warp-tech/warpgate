@@ -13,7 +13,9 @@ use warpgate_common::{TargetOptions, UserSessionId, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{DesktopEvent, Services, State, TargetAuthorization, UserSessionStateInit};
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
+use warpgate_web_clients_common::{
+    ClientManager, SessionRemover, WebSessionHandle, gate_web_client_session,
+};
 
 use crate::dirty::DirtyTracker;
 use crate::protocol::ServerMessage;
@@ -50,9 +52,9 @@ impl WebDesktopClientManager {
         size: Option<(u16, u16)>,
     ) -> Result<UserSessionId, WarpgateError> {
         let user_id = authorization.user_info().id;
-        if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
-            return Err(WarpgateError::SessionLimitReached);
-        }
+        // Held until the session is in the registry, so the attempts waiting on
+        // the approval gate count against the limit too.
+        let _slot = self.reserve_slot(user_id, MAX_SESSIONS_PER_USER).await?;
 
         let username = authorization.user_info().username.clone();
         let target_name = authorization.target().name.clone();
@@ -77,13 +79,9 @@ impl WebDesktopClientManager {
         .await
         .context("registering web-desktop session")?;
 
-        let (target_session_id, approved) = server_handle
-            .lock()
-            .await
-            .start_target_session(authorization)
-            .await
-            .context("starting target session")?
-            .admitted()?;
+        let (target_session_id, approved) =
+            gate_web_client_session(services, &server_handle, authorization, remote_address)
+                .await?;
 
         let session_id = server_handle.lock().await.user_session_id();
 

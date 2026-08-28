@@ -199,6 +199,7 @@ pub struct AdminRole {
 
     pub sessions_view: bool,
     pub sessions_terminate: bool,
+    pub approve_sessions: bool,
 
     pub recordings_view: bool,
 
@@ -227,6 +228,7 @@ pub enum AdminPermission {
     AccessRolesAssign,
     SessionsView,
     SessionsTerminate,
+    ApproveSessions,
     RecordingsView,
     TicketsCreate,
     TicketsDelete,
@@ -250,6 +252,7 @@ impl AdminRole {
             AdminPermission::AccessRolesAssign => self.access_roles_assign,
             AdminPermission::SessionsView => self.sessions_view,
             AdminPermission::SessionsTerminate => self.sessions_terminate,
+            AdminPermission::ApproveSessions => self.approve_sessions,
             AdminPermission::RecordingsView => self.recordings_view,
             AdminPermission::TicketsCreate => self.tickets_create,
             AdminPermission::TicketsDelete => self.tickets_delete,
@@ -341,6 +344,7 @@ mod admin_permission_set_tests {
             access_roles_assign: false,
             sessions_view: false,
             sessions_terminate: false,
+            approve_sessions: false,
             recordings_view: false,
             tickets_create: false,
             tickets_delete: false,

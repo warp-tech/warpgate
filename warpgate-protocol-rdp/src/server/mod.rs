@@ -30,7 +30,8 @@ use warpgate_common::helpers::net::accept_loop;
 use warpgate_common::{ListenEndpoint, TargetRdpOptions};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{
-    DesktopInput, Services, State, TargetAuthorization, UserSessionStateInit, WarpgateServerHandle,
+    DesktopInput, Services, State, TargetAuthorization, TargetSessionStart, UserSessionStateInit,
+    WarpgateServerHandle,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_desktop_ui::{DEFAULT_SCREEN_H, DEFAULT_SCREEN_W};
@@ -47,7 +48,7 @@ mod rdp;
 use bridge::connect_backend;
 use hold_screen::{run_banner_screen, run_hold_screen};
 use protocol::{AuthVerdict, Event as ServerEvent, Input as ServerInput};
-use warpgate_desktop_auth::{DesktopAuthOutcome, authenticate, finalize_user_auth};
+use warpgate_desktop_auth::{DesktopAuthOutcome, approve_session, authenticate, finalize_user_auth};
 
 /// Depth of the feed into the viewer-facing RDP server. Bounded so a slow viewer
 /// backpressures `frame_bridge` (and through it the target) rather than letting delta
@@ -272,15 +273,19 @@ async fn control_loop(
                         {
                             BannerOutcome::NotShown => (),
                             BannerOutcome::Acknowledged => {
-                                dial_if_pending(
+                                if !dial_if_pending(
                                     &mut backend,
                                     &mut pending_dial,
                                     &services,
                                     &server_handle,
                                     &server_in_tx,
+                                    remote_address,
                                     screen,
                                 )
-                                .await?;
+                                .await?
+                                {
+                                    break;
+                                }
                             }
                             BannerOutcome::Disconnected => break,
                         }
@@ -325,15 +330,19 @@ async fn control_loop(
                                         ) {
                                             break;
                                         }
-                                        dial_if_pending(
+                                        if !dial_if_pending(
                                             &mut backend,
                                             &mut pending_dial,
                                             &services,
                                             &server_handle,
                                             &server_in_tx,
+                                            remote_address,
                                             screen,
                                         )
-                                        .await?;
+                                        .await?
+                                        {
+                                            break;
+                                        }
                                     }
                                     Err(error) => {
                                         warn!(%error, "Authorization failed after second factor");
@@ -367,15 +376,19 @@ async fn control_loop(
             }
             ServerEvent::Size { width, height } => {
                 screen = warpgate_desktop_ui::Screen { width, height };
-                dial_if_pending(
+                if !dial_if_pending(
                     &mut backend,
                     &mut pending_dial,
                     &services,
                     &server_handle,
                     &server_in_tx,
+                    remote_address,
                     screen,
                 )
-                .await?;
+                .await?
+                {
+                    break;
+                }
                 // A target dialed before this arrived is running at the advertised default,
                 // so bring it to the resolution the viewer actually negotiated. `take` spends
                 // the reconciliation whether or not it resizes anything, so the `Size` a
@@ -425,15 +438,19 @@ async fn control_loop(
         // viewer sent during the handshake is delivered ahead of the negotiated size, so this
         // also fires for viewers that do negotiate one — the `Size` arm resizes the target once
         // that size arrives.
-        dial_if_pending(
+        if !dial_if_pending(
             &mut backend,
             &mut pending_dial,
             &services,
             &server_handle,
             &server_in_tx,
+            remote_address,
             screen,
         )
-        .await?;
+        .await?
+        {
+            break;
+        }
 
         // Reached only for the viewer-input variants above.
         let Some(backend) = &backend else {
@@ -490,20 +507,56 @@ async fn acknowledge_banner(
 }
 
 /// Dial the pending target, if there is one and it hasn't been dialed yet, at `screen`.
+///
+/// The single point where a session reaches its target, and so where it is held for
+/// administrator approval. Returns `false` when an administrator denied it, leaving the
+/// session torn down and nothing dialed.
 async fn dial_if_pending(
     backend: &mut Option<BackendBridge>,
     pending: &mut Option<PendingDial>,
     services: &Services,
     server_handle: &Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
     server_in_tx: &Sender<ServerInput>,
+    remote_address: SocketAddr,
     screen: warpgate_desktop_ui::Screen,
-) -> Result<()> {
+) -> Result<bool> {
     if backend.is_none()
         && let Some(authorization) = pending.take()
     {
+        let started = server_handle
+            .lock()
+            .await
+            .start_target_session(authorization)
+            .await?;
+        let (target_session_id, approved) = match started {
+            TargetSessionStart::Started(started) => started,
+            // Held inline: the viewer keeps its last frame while the
+            // administrator decides, exactly as it does for the 2FA hold.
+            TargetSessionStart::NeedsApproval(authorization) => {
+                let session_id = server_handle.lock().await.user_session_id();
+                let Some(approved) = approve_session(
+                    services,
+                    &session_id,
+                    authorization,
+                    Some(remote_address.ip()),
+                )
+                .await?
+                else {
+                    warn!("Session was not approved by an administrator");
+                    let _ = server_in_tx.send(ServerInput::Shutdown).await;
+                    return Ok(false);
+                };
+                let target_session_id = server_handle
+                    .lock()
+                    .await
+                    .register_approved_target_session(&approved)
+                    .await?;
+                (target_session_id, approved)
+            }
+        };
         *backend = Some(
-            connect_backend(services, server_handle, server_in_tx, authorization, screen).await?,
+            connect_backend(services, server_in_tx, target_session_id, approved, screen).await?,
         );
     }
-    Ok(())
+    Ok(true)
 }

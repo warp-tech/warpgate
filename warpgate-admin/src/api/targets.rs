@@ -43,6 +43,8 @@ struct TargetDataRequest {
     ticket_max_duration_seconds: Option<i64>,
     ticket_requests_disabled: Option<bool>,
     ticket_require_approval: Option<bool>,
+    /// Whether connections to this target must be approved by an administrator.
+    require_approval: Option<bool>,
     ticket_max_uses: Option<i16>,
 }
 
@@ -140,6 +142,7 @@ impl ListApi {
             ticket_requests_disabled: Set(body.ticket_requests_disabled.unwrap_or(false)),
             ticket_require_approval: Set(body.ticket_require_approval.unwrap_or(false)),
             ticket_max_uses: Set(body.ticket_max_uses),
+            require_approval: Set(body.require_approval.unwrap_or(false)),
         };
 
         let target = match values.insert(db).await {
@@ -253,6 +256,7 @@ impl DetailApi {
         model.ticket_max_duration_seconds = Set(body.ticket_max_duration_seconds);
         model.ticket_requests_disabled = Set(body.ticket_requests_disabled.unwrap_or(false));
         model.ticket_require_approval = Set(body.ticket_require_approval.unwrap_or(false));
+        model.require_approval = Set(body.require_approval.unwrap_or(false));
         model.ticket_max_uses = Set(body.ticket_max_uses);
         let target = match model.update(db).await {
             Ok(target) => target,

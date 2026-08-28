@@ -11,7 +11,7 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 pub use sso_user::resolve_and_map_sso_user;
 use time::OffsetDateTime;
-use tracing::warn;
+use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialKind, CredentialPolicy,
@@ -241,6 +241,15 @@ impl ApprovedTarget {
 /// Proof that user is both authorized for a target and has approval, if needed. This is the final pre-connection green light. Not cloneable because one instance = one connection
 pub struct ApprovedTarget<O = TargetOptions>(TargetAuthorization<O>);
 
+impl<O> std::fmt::Debug for ApprovedTarget<O> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApprovedTarget")
+            .field("target", &self.0.target().name)
+            .field("user", &self.0.user_info().username)
+            .finish()
+    }
+}
+
 impl<O> ApprovedTarget<O> {
     pub(crate) const fn new(authorization: TargetAuthorization<O>) -> Self {
         Self(authorization)
@@ -294,6 +303,21 @@ pub async fn authorize_for_target_by_name<C: ConfigProvider + ?Sized>(
     }
 }
 
+/// When [`authorize_and_spend_ticket`] takes the ticket's use.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TicketSpend {
+    /// With the authorization, atomically — two presentations of a one-use
+    /// ticket can never both authenticate. For protocols whose connection is
+    /// refused outright when the administrator gate says no; the gate refunds
+    /// the spend on a refusal.
+    Immediate,
+    /// Deferred to the administrator approval when the target is gated: the
+    /// session establishes unspent, the request row carries the ticket, and
+    /// whichever node records an approval consumes it. For HTTP, whose ticket
+    /// session outlives any one request and must not burn a use on a refusal.
+    DeferredIfApprovalGated,
+}
+
 //TODO: move this somewhere
 pub async fn authorize_and_spend_ticket(
     db: &DatabaseConnection,
@@ -301,6 +325,7 @@ pub async fn authorize_and_spend_ticket(
     secret: &Secret<String>,
     remote_ip: Option<IpAddr>,
     protocol: Protocol,
+    spend: TicketSpend,
 ) -> Result<Option<TargetAuthorization>, WarpgateError> {
     // Spending a ticket is a login, so a blocked IP can't do it either. Checked ahead of the
     // lookup so a blocked caller can't use this as a ticket-existence oracle.
@@ -351,7 +376,8 @@ pub async fn authorize_and_spend_ticket(
         let target = Target::try_from(ticket_target)?;
 
         // Spend the ticket
-        if ticket.uses_left.is_some() {
+        let defer_spend = spend == TicketSpend::DeferredIfApprovalGated && target.require_approval;
+        if !defer_spend && ticket.uses_left.is_some() {
             let spent = e::Ticket::Entity::update_many()
                 .col_expr(
                     e::Ticket::Column::UsesLeft,
@@ -381,6 +407,96 @@ pub async fn authorize_and_spend_ticket(
     }
 }
 
+/// Decrements a ticket's remaining uses. Only called for a consumption that was
+/// deferred past [`authorize_and_spend_ticket`] — an HTTP ticket session whose
+/// target is gated spends its ticket through the approval that admits it.
+pub async fn consume_ticket(
+    db: &DatabaseConnection,
+    ticket_id: &Uuid,
+) -> Result<(), WarpgateError> {
+    let ticket = e::Ticket::Entity::find_by_id(*ticket_id).one(db).await?;
+    let Some(ticket) = ticket else {
+        return Err(WarpgateError::InvalidTicket(*ticket_id));
+    };
+
+    // Decrement atomically
+    if ticket.uses_left.is_some() {
+        e::Ticket::Entity::update_many()
+            .col_expr(
+                e::Ticket::Column::UsesLeft,
+                Expr::col(e::Ticket::Column::UsesLeft).sub(1),
+            )
+            .filter(e::Ticket::Column::Id.eq(*ticket_id))
+            .filter(e::Ticket::Column::UsesLeft.gt(0))
+            .exec(db)
+            .await?;
+    }
+
+    Ok(())
+}
+
+/// Gives a spent ticket its use back.
+///
+/// [`authorize_and_spend_ticket`] spends atomically with the authorization, so
+/// two presentations of a one-use ticket can never both authenticate. The
+/// administrator gate is the one thing that may still turn an authenticated
+/// session away, and the user should not lose their use to someone else's
+/// refusal — so a refusal refunds what the spend took.
+async fn refund_ticket(db: &DatabaseConnection, ticket_id: Uuid) -> Result<(), WarpgateError> {
+    e::Ticket::Entity::update_many()
+        .col_expr(
+            e::Ticket::Column::UsesLeft,
+            Expr::col(e::Ticket::Column::UsesLeft).add(1),
+        )
+        .filter(e::Ticket::Column::Id.eq(ticket_id))
+        .filter(e::Ticket::Column::UsesLeft.is_not_null())
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+/// Refunds a session's already-spent ticket unless disarmed, for holding across
+/// the administrator gate: armed when the hold begins, disarmed only by an
+/// approval, so a refusal, a timeout, or the client vanishing mid-wait — which
+/// drops the holding future — all give the use back.
+///
+/// Refunding on drop rather than at a call site is what makes this hold: a
+/// protocol that parks on the approval gate is dropped mid-await when its
+/// client disconnects, so any code placed after the wait simply never runs.
+pub struct TicketRefund {
+    ticket_id: Option<Uuid>,
+    db: DatabaseConnection,
+}
+
+impl TicketRefund {
+    /// `None` for a session that didn't authenticate with a ticket, which makes
+    /// the guard inert and lets callers hold one unconditionally.
+    pub const fn new(db: DatabaseConnection, ticket_id: Option<Uuid>) -> Self {
+        Self { ticket_id, db }
+    }
+
+    /// The session was approved, so the spend stands.
+    pub const fn disarm(&mut self) {
+        self.ticket_id = None;
+    }
+}
+
+impl Drop for TicketRefund {
+    fn drop(&mut self) {
+        // Drop can't await, and the refund must happen even when the task is
+        // being torn down, so it outlives this future.
+        let Some(ticket_id) = self.ticket_id.take() else {
+            return;
+        };
+        let db = self.db.clone();
+        tokio::spawn(async move {
+            if let Err(error) = refund_ticket(&db, ticket_id).await {
+                error!(%error, %ticket_id, "Failed to refund the ticket");
+            }
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tokio::sync::broadcast;
@@ -406,6 +522,7 @@ mod tests {
             ticket_max_duration_seconds: None,
             ticket_requests_disabled: false,
             ticket_require_approval: false,
+            require_approval: false,
             ticket_max_uses: None,
         }
     }
@@ -473,6 +590,7 @@ mod tests {
             ticket_requests_disabled: Set(false),
             ticket_require_approval: Set(false),
             ticket_max_uses: Set(None),
+            require_approval: Set(false),
         }
         .insert(&db)
         .await
@@ -495,7 +613,14 @@ mod tests {
         .unwrap();
 
         let first =
-            authorize_and_spend_ticket(&db, &login_protection, &secret, None, Protocol::Http)
+            authorize_and_spend_ticket(
+                &db,
+                &login_protection,
+                &secret,
+                None,
+                Protocol::Http,
+                TicketSpend::Immediate,
+            )
                 .await
                 .unwrap();
         // The ticket travels with the authorization so the target session it
@@ -506,7 +631,14 @@ mod tests {
         );
 
         let second =
-            authorize_and_spend_ticket(&db, &login_protection, &secret, None, Protocol::Http)
+            authorize_and_spend_ticket(
+                &db,
+                &login_protection,
+                &secret,
+                None,
+                Protocol::Http,
+                TicketSpend::Immediate,
+            )
                 .await
                 .unwrap();
         assert!(second.is_none());

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.4-7-gaf79537e-modified"
+    "version": "v0.28.5-1-geb38ff18-modified"
   },
   "servers": [
     {
@@ -224,14 +224,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -268,14 +261,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -1647,6 +1633,7 @@
           "access_roles_assign",
           "sessions_view",
           "sessions_terminate",
+          "approve_sessions",
           "recordings_view",
           "tickets_create",
           "tickets_delete",
@@ -1691,6 +1678,9 @@
           "sessions_terminate": {
             "type": "boolean"
           },
+          "approve_sessions": {
+            "type": "boolean"
+          },
           "recordings_view": {
             "type": "boolean"
           },
@@ -1727,15 +1717,25 @@
           "IpRejected"
         ]
       },
+      "ApprovalScope": {
+        "type": "string",
+        "description": "How an approval should be remembered for later bypass.\n\nDerives the OpenAPI enum directly so both the administrator and the\nself-approval endpoints can take it as-is; a per-API copy would be three\nidentical enums and two conversions that only exist to satisfy the derive.",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
+      },
       "ApproveAuthRequest": {
         "type": "object",
         "title": "ApproveAuthRequest",
+        "description": "The outcome of acting on an approval request. The decision is applied by the\nnode holding the login, so there is no updated state to hand back here.",
         "required": [
           "scope"
         ],
         "properties": {
           "scope": {
-            "$ref": "#/components/schemas/WebApprovalScope"
+            "$ref": "#/components/schemas/ApprovalScope"
           }
         }
       },
@@ -2859,15 +2859,6 @@
             }
           }
         }
-      },
-      "WebApprovalScope": {
-        "type": "string",
-        "description": "How an web approval should be remembered for bypass",
-        "enum": [
-          "Once",
-          "Target",
-          "AllTargets"
-        ]
       },
       "WebDesktopSessionCreated": {
         "type": "object",

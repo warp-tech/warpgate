@@ -145,6 +145,23 @@ pub async fn open_or_lookup(
     Ok(TargetSessionOpenOutcome::AlreadyExists(row))
 }
 
+/// Whether the user session already holds an open access record for the
+/// target. The row is written on admission, so its presence means any
+/// administrator gate on the target was already passed — on whichever node.
+pub async fn is_open(
+    db: &DatabaseConnection,
+    user_session_id: UserSessionId,
+    target_id: Uuid,
+) -> Result<bool, WarpgateError> {
+    Ok(Entity::find()
+        .filter(Column::UserSessionId.eq(user_session_id))
+        .filter(Column::TargetId.eq(target_id))
+        .filter(Column::Ended.is_null())
+        .one(db)
+        .await?
+        .is_some())
+}
+
 /// Emits the end-of-access audit event for one row; the login identity comes
 /// from the parent, which the caller has already loaded.
 pub fn emit_ended(session: &TargetSession::Model, user_id: Uuid, username: &str) {

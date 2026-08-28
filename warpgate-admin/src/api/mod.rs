@@ -8,7 +8,7 @@ pub mod cluster_proxy;
 // module are intentionally unused.
 #[allow(dead_code)]
 mod admin_scheme;
-mod common;
+pub(crate) mod common;
 pub(crate) use admin_scheme::{AdminContext, ClusterOrAdminContext};
 pub use common::admin_permission_set;
 mod known_hosts_detail;
@@ -24,6 +24,7 @@ mod password_credentials;
 mod public_key_credentials;
 pub mod recordings_detail;
 mod roles;
+pub mod session_approvals;
 mod sessions_detail;
 pub mod sessions_list;
 mod ssh_connection_test;
@@ -31,6 +32,7 @@ mod ssh_keys;
 mod sso_credentials;
 mod target_groups;
 mod targets;
+pub mod ticket_request_details;
 mod ticket_requests_detail;
 mod ticket_requests_list;
 mod tickets_detail;
@@ -81,6 +83,7 @@ pub fn get() -> impl OpenApi {
                 login_protection::Api,
                 network_status::Api,
             ),
+            session_approvals::Api,
         ),
         (
             certificate_credentials::ListApi,

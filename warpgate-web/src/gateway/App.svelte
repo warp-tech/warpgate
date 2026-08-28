@@ -7,6 +7,7 @@
     import Brand from 'common/Brand.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import RequestsButton from 'common/RequestsButton.svelte'
     import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { get } from 'svelte/store'
@@ -140,6 +141,8 @@
             </div>
 
             {#if !doNotShowAuthRequests}
+                <RequestsButton class="mb-4" />
+
                 {#each webAuthRequests as authRequest (authRequest.id)}
                     <Button
                         color="success"
