@@ -614,6 +614,7 @@ impl RemoteClient {
                         hash: Some(russh::keys::HashAlg::Sha512),
                     },
                     russh::keys::Algorithm::Rsa { hash: None },
+                    russh::keys::Algorithm::Dsa,
                 ]),
                 cipher: Cow::Borrowed(&[
                     russh::cipher::CHACHA20_POLY1305,
