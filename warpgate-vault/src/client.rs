@@ -1230,6 +1230,17 @@ mod tests {
         );
     }
 
+    /// The same, with no `ca_bundle`, for the one test whose subject is what
+    /// happens when a certificate is *not* trusted. Handing that test the shared
+    /// bundle would have it verify against a root store instead of the platform
+    /// verifier — a different mechanism from the one it means to exercise.
+    fn approle_config_without_bundle(address: String, secret_id_path: PathBuf) -> VaultConfig {
+        VaultConfig {
+            ca_bundle: None,
+            ..approle_config(address, secret_id_path)
+        }
+    }
+
     fn approle_config(address: String, secret_id_path: PathBuf) -> VaultConfig {
         VaultConfig {
             address,
@@ -1468,9 +1479,12 @@ mod tests {
     }
 
     /// Nothing else in the crate would notice if certificate verification were
-    /// turned off — the loopback tests all speak plain HTTP, and Warpgate does
-    /// disable it deliberately elsewhere (`warpgate-protocol-http`'s client
-    /// cache). The token crosses this connection, so it must not happen here.
+    /// turned off: every other test here trusts the stand-in server through
+    /// `ca_bundle`, and Warpgate does disable verification deliberately
+    /// elsewhere (`warpgate-protocol-http`'s client cache). The token crosses
+    /// this connection, so it must not happen here. Configured without a bundle
+    /// on purpose — the subject is the default trust decision, not a root store
+    /// the test itself supplied.
     #[tokio::test]
     async fn test_an_untrusted_vault_certificate_is_refused() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -1502,7 +1516,7 @@ mod tests {
         let secret_id_path = tmp.path().join("secret-id");
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
-        let client = VaultClient::new(approle_config(
+        let client = VaultClient::new(approle_config_without_bundle(
             format!("https://localhost:{port}"),
             secret_id_path,
         ))
