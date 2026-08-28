@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 bytes.workspace = true
 data-encoding.workspace = true
+form_urlencoded = "1.2"
 jsonwebtoken = { version = "10", default-features = false, features = [
     "use_pem",
     "aws_lc_rs",

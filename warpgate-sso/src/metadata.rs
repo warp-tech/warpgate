@@ -135,13 +135,13 @@ pub async fn discover_metadata(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use serde_json::{Value, json};
 
     use super::{ProviderMetadataWithLogout, SsoError, describe_error, validate_endpoint_schemes};
 
     /// A minimal discovery document, with `extra` merged over the defaults.
-    fn metadata(extra: &Value) -> ProviderMetadataWithLogout {
+    pub fn metadata(extra: &Value) -> ProviderMetadataWithLogout {
         let mut doc = json!({
             "issuer": "https://idp.example.com",
             "authorization_endpoint": "https://idp.example.com/authorize",
