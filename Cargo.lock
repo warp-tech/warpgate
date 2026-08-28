@@ -9568,6 +9568,7 @@ version = "0.28.4"
 dependencies = [
  "bytes",
  "data-encoding",
+ "form_urlencoded",
  "jsonwebtoken",
  "openidconnect",
  "reqwest 0.12.28",

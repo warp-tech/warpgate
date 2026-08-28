@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt::Write;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use openidconnect::url::Url;
-use openidconnect::{DiscoveryError, ProviderMetadataWithLogout, reqwest};
+use openidconnect::{ProviderMetadataWithLogout, reqwest};
 
 use crate::SsoError;
 use crate::config::SsoInternalProviderConfig;
@@ -30,6 +32,22 @@ fn store_metadata(issuer: String, metadata: &ProviderMetadataWithLogout) {
     if let Ok(mut cache) = METADATA_CACHE.lock() {
         cache.insert(issuer, (Instant::now(), metadata.clone()));
     }
+}
+
+/// Render an error together with its whole `source` chain.
+///
+/// `DiscoveryError`'s own `Display` is a bare summary — `Parse` renders as
+/// "Failed to parse server response" and keeps the serde path (e.g. `missing
+/// field `keys``) only in its source, which is usually the sole clue as to
+/// which document the provider served badly.
+fn describe_error(err: &(dyn Error + 'static)) -> String {
+    let mut out = err.to_string();
+    let mut source = err.source();
+    while let Some(err) = source {
+        let _ = write!(out, ": {err}");
+        source = err.source();
+    }
+    out
 }
 
 fn check_endpoint_scheme(endpoint: &str, url: &Url) -> Result<(), SsoError> {
@@ -106,12 +124,7 @@ pub async fn discover_metadata(
 
     let metadata = ProviderMetadataWithLogout::discover_async(issuer, http_client)
         .await
-        .map_err(|e| {
-            SsoError::Discovery(match e {
-                DiscoveryError::Request(inner) => format!("Request error: {inner:?}"),
-                e => format!("{e}"),
-            })
-        })?;
+        .map_err(|e| SsoError::Discovery(describe_error(&e)))?;
 
     // Validate before caching, so a hostile document is never served from the
     // cache and never reaches a caller.
@@ -122,13 +135,13 @@ pub async fn discover_metadata(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use serde_json::{Value, json};
 
-    use super::{ProviderMetadataWithLogout, SsoError, validate_endpoint_schemes};
+    use super::{ProviderMetadataWithLogout, SsoError, describe_error, validate_endpoint_schemes};
 
     /// A minimal discovery document, with `extra` merged over the defaults.
-    fn metadata(extra: &Value) -> ProviderMetadataWithLogout {
+    pub fn metadata(extra: &Value) -> ProviderMetadataWithLogout {
         let mut doc = json!({
             "issuer": "https://idp.example.com",
             "authorization_endpoint": "https://idp.example.com/authorize",
@@ -153,6 +166,26 @@ mod tests {
             Err(SsoError::UnsupportedEndpointScheme { endpoint, .. }) => Some(endpoint),
             _ => None,
         }
+    }
+
+    /// `DiscoveryError` keeps the actionable half of a failure (e.g. the JWKS
+    /// body Authentik serves for a provider with no signing key, which is
+    /// missing its `keys` member) in the source rather than the summary.
+    #[derive(Debug, thiserror::Error)]
+    #[error("missing field `keys`")]
+    struct Detail;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("Failed to parse server response")]
+    struct Summary(#[source] Detail);
+
+    #[test]
+    fn error_sources_are_reported_alongside_the_summary() {
+        let described = describe_error(&Summary(Detail));
+        assert_eq!(
+            described,
+            "Failed to parse server response: missing field `keys`"
+        );
     }
 
     #[test]
