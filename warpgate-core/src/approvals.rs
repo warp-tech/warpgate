@@ -46,8 +46,8 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
-    ApprovalKind, AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialKind,
-    RememberedBy, WebApprovalMatchKey, WebApprovalScopeKey,
+    ApprovalKind, AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialDigestSalt,
+    CredentialKind, RememberedBy, WebApprovalMatchKey, WebApprovalScopeKey,
 };
 use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::helpers::username::username_eq_ci;
@@ -130,8 +130,8 @@ impl ApprovalSubject {
     /// What the request row stores to match this session's credentials against
     /// a later connection. `None` mirrors [`Self::match_key`]'s: a row without
     /// a digest can never serve as a remembered approval.
-    fn credentials_digest(&self) -> Option<String> {
-        self.credentials.credentials().map(|c| c.digest())
+    fn credentials_digest(&self, salt: &CredentialDigestSalt) -> Option<String> {
+        self.credentials.credentials().map(|c| c.digest(salt))
     }
 
     fn client_ip_for_logging(&self) -> String {
@@ -271,6 +271,7 @@ impl PendingApproval {
     async fn begin(
         db: DatabaseConnection,
         node_id: NodeId,
+        salt: &CredentialDigestSalt,
         subject: &ApprovalSubject,
     ) -> Result<Self, WarpgateError> {
         let guard = Self {
@@ -279,7 +280,7 @@ impl PendingApproval {
             db,
             close_as: Some(SessionApprovalRequest::ApprovalRequestStatus::Abandoned),
         };
-        advertise_admin_request(&guard.db, node_id, subject).await?;
+        advertise_admin_request(&guard.db, node_id, salt, subject).await?;
         Ok(guard)
     }
 
@@ -301,6 +302,7 @@ impl PendingApproval {
 async fn advertise_admin_request(
     db: &DatabaseConnection,
     node_id: NodeId,
+    salt: &CredentialDigestSalt,
     subject: &ApprovalSubject,
 ) -> Result<(), WarpgateError> {
     upsert_request(
@@ -314,7 +316,7 @@ async fn advertise_admin_request(
             target: Set(subject.target_name.clone()),
             remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
             identification_string: Set(None),
-            credentials_digest: Set(subject.credentials_digest()),
+            credentials_digest: Set(subject.credentials_digest(salt)),
             consumes_ticket_id: Set(subject.consumes_ticket_id),
             started: Set(OffsetDateTime::now_utc()),
             status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
@@ -890,8 +892,13 @@ impl Services {
             return Ok(GateOutcome::Approved(ApprovedTarget::new(authorization)));
         }
 
-        let mut guard =
-            PendingApproval::begin(self.db.clone(), self.cluster.node_id, &subject).await?;
+        let mut guard = PendingApproval::begin(
+            self.db.clone(),
+            self.cluster.node_id,
+            &self.credential_digest_salt,
+            &subject,
+        )
+        .await?;
 
         subject.emit_requested_event();
         let _ = self.admin_approval_request_tx.send(session_id);
@@ -1082,7 +1089,7 @@ impl Services {
         let Some(key) = subject.match_key() else {
             return Ok(false);
         };
-        approval_is_remembered(&self.db, &key, grace).await
+        approval_is_remembered(&self.db, &key, grace, &self.credential_digest_salt).await
     }
 
     /// Advertises that an auth state is waiting for the user's own in-browser
@@ -1188,6 +1195,7 @@ pub(crate) async fn approval_is_remembered(
     db: &DatabaseConnection,
     key: &WebApprovalMatchKey,
     grace: Duration,
+    salt: &CredentialDigestSalt,
 ) -> Result<bool, WarpgateError> {
     use SessionApprovalRequest::{ApprovalRequestScope, ApprovalRequestStatus, Column};
 
@@ -1215,7 +1223,7 @@ pub(crate) async fn approval_is_remembered(
         .all(db)
         .await?;
 
-    let digest = key.other_credentials.digest();
+    let digest = key.other_credentials.digest(salt);
     let protocol = key.protocol.to_string();
     Ok(rows.into_iter().any(|row| {
         row.protocol == protocol
@@ -1237,6 +1245,7 @@ pub(crate) async fn approval_is_remembered(
 pub(crate) async fn advertise_user_request(
     db: &DatabaseConnection,
     node_id: NodeId,
+    salt: &CredentialDigestSalt,
     state_arc: &Arc<Mutex<AuthState>>,
 ) -> Result<(), WarpgateError> {
     // Snapshot under the state lock and release it before the insert, so
@@ -1256,7 +1265,7 @@ pub(crate) async fn advertise_user_request(
             credentials_digest: Set(state
                 .remembered_by()
                 .credentials()
-                .map(|credentials| credentials.digest())),
+                .map(|credentials| credentials.digest(salt))),
             consumes_ticket_id: Set(None),
             started: Set(*state.started()),
             status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
@@ -1452,6 +1461,14 @@ mod tests {
 
     use super::*;
 
+    /// The tests share one salt: a digest is only ever compared against another
+    /// digest from the same installation, so the value is irrelevant — that it
+    /// is the *same* one on both sides is the whole point.
+    fn test_salt() -> CredentialDigestSalt {
+        #[allow(clippy::expect_used)]
+        CredentialDigestSalt::from_stored("test-salt").expect("non-empty")
+    }
+
     async fn migrated_db() -> DatabaseConnection {
         set_config_migration_values(ConfigMigrationValues::default());
         let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -1475,7 +1492,7 @@ mod tests {
                 target: Set(subject.target_name.clone()),
                 remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
                 identification_string: Set(None),
-                credentials_digest: Set(subject.credentials_digest()),
+                credentials_digest: Set(subject.credentials_digest(&test_salt())),
                 consumes_ticket_id: Set(subject.consumes_ticket_id),
                 started: Set(OffsetDateTime::now_utc()),
                 status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
@@ -1875,25 +1892,25 @@ mod tests {
         remembered_approval(&db, "prod", [7u8; 32], ApprovalScope::Target).await;
 
         assert!(
-            approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
+            approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
                 .await
                 .unwrap()
         );
         // Another target is not covered.
         assert!(
-            !approval_is_remembered(&db, &lookup_key("staging", [7u8; 32]), GRACE)
+            !approval_is_remembered(&db, &lookup_key("staging", [7u8; 32]), GRACE, &test_salt())
                 .await
                 .unwrap()
         );
         // Different credentials are not covered.
         assert!(
-            !approval_is_remembered(&db, &lookup_key("prod", [9u8; 32]), GRACE)
+            !approval_is_remembered(&db, &lookup_key("prod", [9u8; 32]), GRACE, &test_salt())
                 .await
                 .unwrap()
         );
         // A zero grace is never fresh, so approval is required again.
         assert!(
-            !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), Duration::ZERO)
+            !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), Duration::ZERO, &test_salt())
                 .await
                 .unwrap()
         );
@@ -1901,7 +1918,7 @@ mod tests {
         let mut other_kind = lookup_key("prod", [7u8; 32]);
         other_kind.kind = ApprovalKind::User;
         assert!(
-            !approval_is_remembered(&db, &other_kind, GRACE)
+            !approval_is_remembered(&db, &other_kind, GRACE, &test_salt())
                 .await
                 .unwrap()
         );
@@ -1913,19 +1930,19 @@ mod tests {
         remembered_approval(&db, "prod", [7u8; 32], ApprovalScope::AllTargets).await;
 
         assert!(
-            approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
+            approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
                 .await
                 .unwrap()
         );
         assert!(
-            approval_is_remembered(&db, &lookup_key("staging", [7u8; 32]), GRACE)
+            approval_is_remembered(&db, &lookup_key("staging", [7u8; 32]), GRACE, &test_salt())
                 .await
                 .unwrap()
         );
         // Approving every target is strictly broader than approving a portal
         // sign-in, so it subsumes an untargeted ask too.
         assert!(
-            approval_is_remembered(&db, &lookup_key("", [7u8; 32]), GRACE)
+            approval_is_remembered(&db, &lookup_key("", [7u8; 32]), GRACE, &test_salt())
                 .await
                 .unwrap()
         );
@@ -1940,12 +1957,12 @@ mod tests {
         remembered_approval(&db, "", [7u8; 32], ApprovalScope::Target).await;
 
         assert!(
-            approval_is_remembered(&db, &lookup_key("", [7u8; 32]), GRACE)
+            approval_is_remembered(&db, &lookup_key("", [7u8; 32]), GRACE, &test_salt())
                 .await
                 .unwrap()
         );
         assert!(
-            !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
+            !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
                 .await
                 .unwrap()
         );
@@ -1957,7 +1974,7 @@ mod tests {
         remembered_approval(&db, "prod", [7u8; 32], ApprovalScope::Once).await;
 
         assert!(
-            !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
+            !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
                 .await
                 .unwrap()
         );
@@ -1972,7 +1989,7 @@ mod tests {
         let pending = UserSessionId(Uuid::new_v4());
         advertise_row(&db, pending, &remembered_subject("prod", [7u8; 32])).await;
         assert!(
-            !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
+            !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
                 .await
                 .unwrap()
         );
@@ -1990,7 +2007,7 @@ mod tests {
             .unwrap()
         );
         assert!(
-            !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
+            !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
                 .await
                 .unwrap()
         );

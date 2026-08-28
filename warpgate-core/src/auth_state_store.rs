@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 use sea_orm::DatabaseConnection;
 use tokio::sync::{Mutex, broadcast};
 use tracing::error;
-use warpgate_common::auth::{AuthResult, AuthState, CredentialKind, CredentialPolicy};
+use warpgate_common::auth::{
+    AuthResult, AuthState, CredentialDigestSalt, CredentialKind, CredentialPolicy,
+};
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{NodeId, Protocol, User, UserSessionId, WarpgateError};
@@ -160,12 +162,22 @@ async fn wait_for_auth_completion_within(
     .unwrap_or(AuthResult::Rejected)
 }
 
+/// Everything the store needs to record a self-approval request where the rest
+/// of the cluster can see it. One value rather than three parameters, so a
+/// caller can't assemble a sink out of pieces that don't belong together.
+#[derive(Clone)]
+pub struct ApprovalRequestSink {
+    pub db: DatabaseConnection,
+    pub node_id: NodeId,
+    pub salt: Arc<CredentialDigestSalt>,
+}
+
 pub struct AuthStateStore {
     store: HashMap<UserSessionId, (Arc<Mutex<AuthState>>, Instant)>,
     web_auth_request_signal: broadcast::Sender<UserSessionId>,
     /// Where a self-approval request is recorded so other nodes can see it.
     /// Unset in unit tests, which run the state machine without a database.
-    request_sink: Option<(DatabaseConnection, NodeId)>,
+    request_sink: Option<ApprovalRequestSink>,
 }
 
 impl Default for AuthStateStore {
@@ -185,8 +197,8 @@ impl AuthStateStore {
 
     /// Points the store at the database that records self-approval requests.
     /// Set once at startup; until then requests are only signalled locally.
-    pub fn set_request_sink(&mut self, db: DatabaseConnection, node_id: NodeId) {
-        self.request_sink = Some((db, node_id));
+    pub fn set_request_sink(&mut self, sink: ApprovalRequestSink) {
+        self.request_sink = Some(sink);
     }
 
     pub fn contains_key(&self, id: &UserSessionId) -> bool {
@@ -326,9 +338,14 @@ impl AuthStateStore {
                 // Recorded before it is announced, so a user acting on the
                 // notification the moment it arrives always finds the request —
                 // including from another node, which has only the record to go on.
-                if let Some((db, node_id)) = &request_sink
-                    && let Err(error) =
-                        crate::approvals::advertise_user_request(db, *node_id, &watched).await
+                if let Some(sink) = &request_sink
+                    && let Err(error) = crate::approvals::advertise_user_request(
+                        &sink.db,
+                        sink.node_id,
+                        &sink.salt,
+                        &watched,
+                    )
+                    .await
                 {
                     error!(%error, "Failed to record a session approval request");
                 }

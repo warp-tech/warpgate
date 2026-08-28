@@ -16,7 +16,7 @@ use super::{
     CredentialPolicyResponse,
 };
 use crate::helpers::logging::format_related_ids;
-use crate::{Protocol, User, UserSessionId, WarpgateError};
+use crate::{Protocol, Secret, User, UserSessionId, WarpgateError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
@@ -94,6 +94,49 @@ pub enum WebApprovalScopeKey {
     Target(String),
 }
 
+/// The cluster-global secret mixed into every credential digest.
+///
+/// Digests are stored, and the fingerprints behind them are derived from the
+/// secret the user typed. An unkeyed hash of them would mean a copy of the
+/// database is enough to test password guesses offline against every user who
+/// ever reached an approval — the work factor on the stored credentials buys
+/// nothing there, because a digest is a *different*, cheap hash of the same
+/// secret. Mixing in a value that isn't derivable from the row makes those
+/// guesses untestable without it.
+///
+/// One value for the whole cluster, because an approval remembered on one node
+/// has to match a connection arriving at another.
+#[derive(Clone)]
+pub struct CredentialDigestSalt(Secret<String>);
+
+impl CredentialDigestSalt {
+    /// A fresh salt, for the migration that introduces one and for the
+    /// parameter row of a new installation.
+    #[must_use]
+    pub fn random() -> Self {
+        Self(Secret::random())
+    }
+
+    /// The stored salt, or `None` when there isn't one. Blank counts as absent:
+    /// a digest keyed on nothing is exactly what this type exists to prevent,
+    /// and it would look configured.
+    #[must_use]
+    pub fn from_stored(stored: &str) -> Option<Self> {
+        (!stored.trim().is_empty()).then(|| Self(Secret::new(stored.to_owned())))
+    }
+
+    #[must_use]
+    pub fn expose_secret(&self) -> &str {
+        self.0.expose_secret()
+    }
+}
+
+impl std::fmt::Debug for CredentialDigestSalt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CredentialDigestSalt(***)")
+    }
+}
+
 /// A non-empty, sorted, deduplicated set of credential fingerprints: the part of
 /// a remembered-approval key that says *how* the session authenticated.
 ///
@@ -118,9 +161,17 @@ impl CredentialFingerprints {
     /// A stable digest of the set, for matching a session's credentials
     /// against a stored approval record. Order-independent because the set is
     /// sorted on construction.
+    ///
+    /// The salt is a parameter rather than something this reaches for, so a
+    /// digest that isn't keyed to the installation cannot be written at all.
     #[must_use]
-    pub fn digest(&self) -> String {
+    pub fn digest(&self, salt: &CredentialDigestSalt) -> String {
         let mut bytes = Vec::new();
+        // Length-framed like every other field, so no set of fingerprints can
+        // reproduce the bytes of a different salt-and-set pair.
+        let salt = salt.expose_secret();
+        bytes.extend_from_slice(&(salt.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(salt.as_bytes());
         for fingerprint in &self.0 {
             fingerprint.write_canonical_bytes(&mut bytes);
         }
@@ -507,6 +558,30 @@ mod tests {
 
     /// Order and repetition are presentation details of one attempt, not part
     /// of what it authenticated with.
+    /// The salt is what stops a stored digest being an offline-testable hash
+    /// of the user's password, so it has to actually reach the hash.
+    #[test]
+    fn a_digest_is_keyed_to_its_salt() {
+        #[allow(clippy::unwrap_used)]
+        let set =
+            CredentialFingerprints::new(vec![AuthCredentialFingerprint::Password { hash: [3; 32] }])
+                .unwrap();
+        #[allow(clippy::unwrap_used)]
+        let one = CredentialDigestSalt::from_stored("salt-one").unwrap();
+        #[allow(clippy::unwrap_used)]
+        let other = CredentialDigestSalt::from_stored("salt-two").unwrap();
+
+        assert_ne!(set.digest(&one), set.digest(&other));
+        assert_eq!(set.digest(&one), set.digest(&one), "and is stable under one");
+    }
+
+    /// A blank salt reads as configured while keying on nothing.
+    #[test]
+    fn a_blank_salt_is_no_salt() {
+        assert!(CredentialDigestSalt::from_stored("").is_none());
+        assert!(CredentialDigestSalt::from_stored("   ").is_none());
+    }
+
     #[test]
     fn credential_sets_key_the_same_whatever_the_order() {
         let a = AuthCredentialFingerprint::Password { hash: [1u8; 32] };
