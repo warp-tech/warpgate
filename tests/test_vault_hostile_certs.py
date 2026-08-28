@@ -37,6 +37,7 @@ def cert_wg(processes: ProcessManager, ctx, stub_vault):
         config_patch={
             "vault": {
                 "address": stub_vault.url,
+                "ca_bundle": stub_vault.ca_bundle,
                 "default_role": "warpgate",
                 "auth": {
                     "kind": "kubernetes",
@@ -363,6 +364,7 @@ class TestTheCredentialFileItself:
             config_patch={
                 "vault": {
                     "address": stub_vault.url,
+                    "ca_bundle": stub_vault.ca_bundle,
                     "default_role": "warpgate",
                     "auth": {
                         "kind": "kubernetes",

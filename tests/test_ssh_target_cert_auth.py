@@ -52,6 +52,7 @@ def cert_wg(processes: ProcessManager, ctx, stub_vault: StubVault):
             config_patch={
                 "vault": {
                     "address": stub_vault.url,
+                    "ca_bundle": stub_vault.ca_bundle,
                     "default_role": "warpgate",
                     "auth": {
                         "kind": "kubernetes",
@@ -233,6 +234,7 @@ class TestHappyPath:
             config_patch={
                 "vault": {
                     "address": stub_vault.url,
+                    "ca_bundle": stub_vault.ca_bundle,
                     "default_role": "warpgate",
                     "certificate_ttl": "90s",
                     "auth": {
@@ -782,6 +784,7 @@ class TestAuthMethods:
             config_patch={
                 "vault": {
                     "address": stub_vault.url,
+                    "ca_bundle": stub_vault.ca_bundle,
                     "default_role": "warpgate",
                     "auth": {
                         "kind": "app_role",
@@ -815,6 +818,7 @@ class TestCloudAuthMethods:
             config_patch={
                 "vault": {
                     "address": stub_vault.url,
+                    "ca_bundle": stub_vault.ca_bundle,
                     "default_role": "warpgate",
                     "auth": auth,
                 }
@@ -834,7 +838,7 @@ class TestCloudAuthMethods:
             {
                 "kind": "azure",
                 "role": "warpgate",
-                "metadata_address": stub_vault.url,
+                "metadata_address": stub_vault.metadata_url,
             },
         )
         with admin_client(f"https://localhost:{wg.http_port}") as api:
@@ -861,7 +865,7 @@ class TestCloudAuthMethods:
             {
                 "kind": "gcp",
                 "role": "warpgate",
-                "metadata_address": stub_vault.url,
+                "metadata_address": stub_vault.metadata_url,
             },
         )
         with admin_client(f"https://localhost:{wg.http_port}") as api:
@@ -1060,6 +1064,7 @@ class TestConfigReload:
                 config_patch={
                     "vault": {
                         "address": stub_vault.url,
+                        "ca_bundle": stub_vault.ca_bundle,
                         "default_role": "warpgate",
                         "auth": {
                             "kind": "kubernetes",
@@ -1081,6 +1086,7 @@ class TestConfigReload:
 
             config = yaml.safe_load(wg.config_path.read_text())
             config["vault"]["address"] = second.url
+            config["vault"]["ca_bundle"] = second.ca_bundle
             wg.config_path.write_text(yaml.dump(config))
 
             # The watcher debounces for 500ms before reloading once.
@@ -1332,6 +1338,7 @@ class TestSecrets:
                 config_patch={
                     "vault": {
                         "address": stub_vault.url,
+                        "ca_bundle": stub_vault.ca_bundle,
                         "default_role": "warpgate",
                         "auth": {
                             "kind": "kubernetes",

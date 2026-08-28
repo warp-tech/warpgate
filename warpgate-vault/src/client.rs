@@ -67,19 +67,15 @@ fn aws_binding_advice(auth: &VaultAuth) -> Option<&'static str> {
 /// first. That is the kind of invariant a later refactor drops silently.
 fn validate_address(address: &str) -> Result<url::Url> {
     let parsed = url::Url::parse(address).map_err(|e| VaultError::InvalidAddress(e.to_string()))?;
+    // No exception for loopback. Every login sends a credential — a projected
+    // service account token, an AppRole secret ID, a signed cloud identity — so
+    // an address this client will talk to is one it can talk to in confidence,
+    // or it is refused. The exception used to exist so a development Vault
+    // needed no certificate; it bought that at the price of a real path along
+    // which a secret crosses the wire in the clear, which is the thing this
+    // feature exists to stop.
     if parsed.scheme() != "https" {
-        // Matched on the parsed host rather than on `host_str`, which renders an
-        // IPv6 address with its brackets — `[::1]` never equalled `::1`, so a
-        // loopback Vault over IPv6 was refused as though it were remote.
-        let is_loopback = match parsed.host() {
-            Some(url::Host::Domain(domain)) => domain == "localhost",
-            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-            None => false,
-        };
-        if !is_loopback {
-            return Err(VaultError::InsecureAddress);
-        }
+        return Err(VaultError::InsecureAddress);
     }
     Ok(parsed)
 }
@@ -405,16 +401,6 @@ impl VaultClient {
 
         if let Some(advice) = aws_binding_advice(&config.auth) {
             warn!("{advice}");
-        }
-
-        if base.scheme() != "https" {
-            // Only reachable for a loopback address, which validation allows so
-            // a development Vault does not need a certificate. Said out loud
-            // because the token crosses this connection in a header.
-            warn!(
-                address = config.address,
-                "The Vault address is not HTTPS; the client token is sent in clear text"
-            );
         }
 
         // Redirects are refused rather than followed: reqwest strips
@@ -951,16 +937,61 @@ mod tests {
     ///
     /// `login` answers the authentication endpoint, `other` everything else, so
     /// a test can let the client reach the point where it holds a token.
+    /// One self-signed certificate for every stand-in Vault in this module.
+    ///
+    /// These tests talk over TLS because the client refuses anything else,
+    /// loopback included. Shared rather than per-server so adding a test needs
+    /// no ceremony, and so the bundle path is a constant `approle_config` can
+    /// reach without threading it through nine call sites.
+    fn test_tls() -> &'static (Vec<rustls::pki_types::CertificateDer<'static>>, Vec<u8>, PathBuf) {
+        static TLS: std::sync::OnceLock<(
+            Vec<rustls::pki_types::CertificateDer<'static>>,
+            Vec<u8>,
+            PathBuf,
+        )> = std::sync::OnceLock::new();
+        TLS.get_or_init(|| {
+            let cert =
+                rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_owned()]).unwrap();
+            let dir = std::env::temp_dir().join("warpgate-vault-test-tls");
+            std::fs::create_dir_all(&dir).unwrap();
+            let bundle = dir.join("ca.pem");
+            std::fs::write(&bundle, cert.cert.pem()).unwrap();
+            (
+                vec![cert.cert.der().clone()],
+                cert.signing_key.serialize_der(),
+                bundle,
+            )
+        })
+    }
+
+    fn test_ca_bundle() -> PathBuf {
+        test_tls().2.clone()
+    }
+
+    fn test_tls_acceptor() -> tokio_rustls::TlsAcceptor {
+        let (chain, key_der, _) = test_tls();
+        let key = rustls::pki_types::PrivateKeyDer::Pkcs8(key_der.clone().into());
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(chain.clone(), key)
+            .unwrap();
+        tokio_rustls::TlsAcceptor::from(Arc::new(config))
+    }
+
     async fn spawn_server(
         login: String,
         other: String,
         log: Arc<StdMutex<Vec<String>>>,
     ) -> Result<String> {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = format!("http://{}", listener.local_addr().unwrap());
+        let address = format!("https://{}", listener.local_addr().unwrap());
+        let acceptor = test_tls_acceptor();
 
         tokio::spawn(async move {
-            while let Ok((mut socket, _)) = listener.accept().await {
+            while let Ok((stream, _)) = listener.accept().await {
+                let Ok(mut socket) = acceptor.accept(stream).await else {
+                    continue;
+                };
                 let mut buf = vec![0u8; 8192];
                 let read = socket.read(&mut buf).await.unwrap_or(0);
                 let request = String::from_utf8_lossy(&buf[..read]).into_owned();
@@ -982,10 +1013,14 @@ mod tests {
     /// never ends — the shape of a hostile or broken endpoint.
     async fn spawn_endless_error_server(login: String) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = format!("http://{}", listener.local_addr().unwrap());
+        let address = format!("https://{}", listener.local_addr().unwrap());
+        let acceptor = test_tls_acceptor();
 
         tokio::spawn(async move {
-            while let Ok((mut socket, _)) = listener.accept().await {
+            while let Ok((stream, _)) = listener.accept().await {
+                let Ok(mut socket) = acceptor.accept(stream).await else {
+                    continue;
+                };
                 let mut buf = vec![0u8; 8192];
                 let read = socket.read(&mut buf).await.unwrap_or(0);
                 let request = String::from_utf8_lossy(&buf[..read]).into_owned();
@@ -1207,7 +1242,7 @@ mod tests {
             },
             certificate_ttl: None,
             timeout: Duration::from_secs(5),
-            ca_bundle: None,
+            ca_bundle: Some(test_ca_bundle()),
         }
     }
 
@@ -1599,25 +1634,20 @@ mod tests {
 
     fn test_address_validation() {
         assert!(validate_address("https://vault.internal:8200").is_ok());
-        assert!(validate_address("http://localhost:8200").is_ok());
-        assert!(validate_address("http://127.0.0.1:8200").is_ok());
-        assert!(matches!(
-            validate_address("http://vault.internal:8200"),
-            Err(VaultError::InsecureAddress)
-        ));
-    }
-
-    /// `host_str` renders an IPv6 host with its brackets, so a string
-    /// comparison against "::1" never matched and a loopback Vault over IPv6
-    /// was refused as though it were a remote plaintext endpoint.
-    #[test]
-    fn test_ipv6_loopback_is_recognised() {
-        assert!(validate_address("http://[::1]:8200").is_ok());
-        assert!(validate_address("http://[0:0:0:0:0:0:0:1]:8200").is_ok());
-        assert!(matches!(
-            validate_address("http://[2001:db8::1]:8200"),
-            Err(VaultError::InsecureAddress)
-        ));
+        for plaintext in [
+            "http://vault.internal:8200",
+            // Loopback included. A local Vault is still a Vault the client
+            // sends a credential to, and the exception that used to let these
+            // through is what CodeQL reported as a cleartext transmission.
+            "http://localhost:8200",
+            "http://127.0.0.1:8200",
+            "http://[::1]:8200",
+        ] {
+            assert!(
+                matches!(validate_address(plaintext), Err(VaultError::InsecureAddress)),
+                "{plaintext} was accepted"
+            );
+        }
     }
 
     /// `test_segment_validation` proves the rule; this proves someone applies
@@ -1734,21 +1764,15 @@ mod properties {
     use super::*;
 
     proptest! {
-        /// The whole purpose of the check: nothing that is accepted may be both
-        /// plaintext and off-host. The earlier string comparison passed this for
-        /// every address anyone tried and still let `http://[::1]:8200` through
-        /// to the wrong branch.
+        /// The whole purpose of the check: nothing accepted is plaintext.
+        /// Stated over arbitrary input rather than over the handful of
+        /// addresses anyone thought to write down, because the version of this
+        /// rule that compared strings passed every example and still admitted
+        /// `http://[::1]:8200`.
         #[test]
-        fn an_accepted_address_is_https_or_loopback(address in "\\PC{0,64}") {
-            if validate_address(&address).is_ok() {
-                let parsed = url::Url::parse(&address).unwrap();
-                let loopback = match parsed.host() {
-                    Some(url::Host::Domain(d)) => d == "localhost",
-                    Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-                    Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-                    None => false,
-                };
-                prop_assert!(parsed.scheme() == "https" || loopback);
+        fn an_accepted_address_is_https(address in "\\PC{0,64}") {
+            if let Ok(parsed) = validate_address(&address) {
+                prop_assert_eq!(parsed.scheme(), "https");
             }
         }
 

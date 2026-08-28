@@ -412,10 +412,10 @@ MUTATIONS = [
         "        VaultAuth::Aws {\n            server_id: None, ..\n        } if false => Some(",
     ),
     (
-        "vault: address must be HTTPS or loopback",
+        "vault: address must be HTTPS",
         "warpgate-vault/src/client.rs",
-        "if !is_loopback {",
-        "if false {",
+        'if parsed.scheme() != "https" {',
+        'if false {',
     ),
     (
         "vault: redirects are refused",
@@ -651,7 +651,7 @@ DISCRIMINATES = {
         "test_break_glass_user_creation_does_not_depend_on_vault"
     ],
     "vault: an unbound AWS login is called out": ["an_unbound_aws_login_is_called_out"],
-    "vault: address must be HTTPS or loopback": ["test_address_validation"],
+    "vault: address must be HTTPS": ["test_address_validation"],
     "vault: redirects are refused": [
         "test_a_redirect_never_carries_the_token_to_another_host"
     ],

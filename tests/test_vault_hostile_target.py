@@ -47,6 +47,7 @@ def cert_wg(processes: ProcessManager, ctx, stub_vault):
             
             "vault": {
                 "address": stub_vault.url,
+                "ca_bundle": stub_vault.ca_bundle,
                 "default_role": "warpgate",
                 "auth": {
                     "kind": "kubernetes",
@@ -369,6 +370,7 @@ def test_break_glass_user_creation_does_not_depend_on_vault(
 
     config["vault"] = {
         "address": stub_vault.url,
+        "ca_bundle": stub_vault.ca_bundle,
         "default_role": "warpgate",
         # Rejected by `validate_segment`: a mount is one path segment.
         "mount": "ssh/../../sys",

@@ -7,6 +7,7 @@ assert on what Warpgate actually asked for.
 """
 
 import json
+import ssl
 import subprocess
 import tempfile
 import threading
@@ -330,8 +331,40 @@ class StubVault:
             ["ssh-keygen", "-q", "-t", "ed25519", "-f", str(self.ca_key), "-N", ""],
             check=True,
         )
+        # TLS, because Warpgate refuses a Vault address that is not HTTPS — a
+        # secret crosses this connection on every login, and the refusal is the
+        # point rather than an inconvenience to work around in tests.
+        self.tls_cert = directory / "vault-tls.pem"
+        self.tls_key = directory / "vault-tls.key"
+        subprocess.run(
+            [
+                "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                "-keyout", str(self.tls_key), "-out", str(self.tls_cert),
+                "-days", "1", "-subj", "/CN=127.0.0.1",
+                "-addext", "subjectAltName=IP:127.0.0.1",
+                # rustls refuses a server certificate without it — `EkuError`,
+                # which reads as a plain verification failure and says nothing
+                # about the missing extension.
+                "-addext", "extendedKeyUsage=serverAuth",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        # A second listener, in plain HTTP, for the cloud metadata endpoints.
+        # Those are not Vault: a real one answers on a link-local address over
+        # HTTP, and Warpgate reads them with a separate client. Serving them
+        # over TLS here would have tested a shape that does not exist.
+        self._metadata_server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        self._metadata_server.stub = self
+        self._metadata_thread = threading.Thread(
+            target=self._metadata_server.serve_forever, daemon=True
+        )
+
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         self._server.stub = self
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(str(self.tls_cert), str(self.tls_key))
+        self._server.socket = context.wrap_socket(self._server.socket, server_side=True)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self.logins = []
         self.signs = []
@@ -367,16 +400,31 @@ class StubVault:
 
     def start(self):
         self._thread.start()
+        self._metadata_thread.start()
 
     def stop(self):
         self._server.shutdown()
         self._thread.join(timeout=5)
         self._server.server_close()
+        self._metadata_server.shutdown()
+        self._metadata_thread.join(timeout=5)
+        self._metadata_server.server_close()
 
     @property
     def url(self):
         host, port = self._server.server_address[:2]
+        return f"https://{host}:{port}"
+
+    @property
+    def metadata_url(self):
+        """Plain HTTP, as a cloud metadata service actually answers."""
+        host, port = self._metadata_server.server_address[:2]
         return f"http://{host}:{port}"
+
+    @property
+    def ca_bundle(self) -> str:
+        """The self-signed certificate, for the target's `vault.ca_bundle`."""
+        return str(self.tls_cert)
 
     @property
     def ca_public_key(self) -> str:
