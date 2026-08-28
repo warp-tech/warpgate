@@ -564,6 +564,12 @@ MUTATIONS = [
         "    check_target.is_none_or(|asked_about| hops.contains(&asked_about))",
         "    check_target.is_none_or(|asked_about| asked_about == asked_about)",
     ),
+    (
+        "certificate: a refused option name is escaped before it reaches the terminal",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        "carrying the critical option {name:?}, which this target does not allow",
+        "carrying the critical option {name}, which this target does not allow",
+    ),
 ]
 
 # A mutation nothing can possibly catch: the text of a debug log line no test
@@ -603,6 +609,9 @@ RUST_CRATES = _crates_from_mutations()
 # A guard with no entry here is reported, not skipped. Not knowing which test
 # discriminates a guard is the same state as not having one.
 DISCRIMINATES = {
+    "certificate: a refused option name is escaped before it reaches the terminal": [
+        "test_a_hostile_option_name_cannot_write_to_the_terminal"
+    ],
     "certificate: key ID must match": ["test_a_certificate_with_a_different_key_id_is_refused"],
     "connection: the handshake deadline resumes after a host key answer": [
         "answering_a_host_key_question_puts_the_targets_own_bound_back"
