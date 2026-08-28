@@ -118,6 +118,8 @@
             // is dropped by JSON.stringify, so the server keeps the old value.
             const parameterUpdate = {
                 ...parameters,
+                rateLimitBytesPerSecond:
+                    parameters.rateLimitBytesPerSecond ?? null,
                 ticketMaxDurationSeconds:
                     parameters.ticketMaxDurationSeconds ?? null,
                 ticketMaxUses: parameters.ticketMaxUses ?? null,
