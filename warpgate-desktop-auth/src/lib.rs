@@ -24,7 +24,9 @@ use tracing::warn;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind, RememberedBy,
 };
-use warpgate_common::{Secret, TargetOptionsVariant, TargetSessionId, UserSessionId, WarpgateError};
+use warpgate_common::{
+    Secret, TargetOptionsVariant, TargetSessionId, UserSessionId, WarpgateError,
+};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::approvals::{AdminApprovalContext, GateOutcome, TicketStake};
 use warpgate_core::auth::submit_credential;

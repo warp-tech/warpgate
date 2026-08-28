@@ -85,8 +85,6 @@ pub enum WarpgateError {
     SessionLimitReached,
     #[error("an administrator did not approve this session")]
     SessionNotApproved,
-    #[error("the node ID {0} is gone from the cluster")]
-    NodeGone(Uuid),
     #[error(transparent)]
     Encryption(#[from] crate::encryption::EncryptionError),
 }

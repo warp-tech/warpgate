@@ -377,7 +377,16 @@ pub async fn authorize_and_spend_ticket(
 
         // Spend the ticket
         let defer_spend = spend == TicketSpend::DeferredIfApprovalGated && target.require_approval;
-        if !defer_spend && ticket.uses_left.is_some() {
+        if defer_spend {
+            // Deferring *when* the use is taken must not defer *whether* there
+            // is one to take: a used-up ticket authorizes nothing, and the
+            // approval that would eventually spend it cannot refuse a session
+            // that has already been let in.
+            if ticket.uses_left.is_some_and(|uses| uses <= 0) {
+                warn!("Ticket is used up: {}", &ticket.id);
+                return Ok(None);
+            }
+        } else if ticket.uses_left.is_some() {
             let spent = e::Ticket::Entity::update_many()
                 .col_expr(
                     e::Ticket::Column::UsesLeft,
@@ -421,7 +430,7 @@ pub async fn consume_ticket(
 
     // Decrement atomically
     if ticket.uses_left.is_some() {
-        e::Ticket::Entity::update_many()
+        let spent = e::Ticket::Entity::update_many()
             .col_expr(
                 e::Ticket::Column::UsesLeft,
                 Expr::col(e::Ticket::Column::UsesLeft).sub(1),
@@ -430,6 +439,13 @@ pub async fn consume_ticket(
             .filter(e::Ticket::Column::UsesLeft.gt(0))
             .exec(db)
             .await?;
+        // Nothing left to take: the ticket was exhausted elsewhere between the
+        // session being established and the approval landing. Reported rather
+        // than passed over, so the deferral can never launder a use that was
+        // never available.
+        if spent.rows_affected == 0 {
+            return Err(WarpgateError::InvalidTicket(*ticket_id));
+        }
     }
 
     Ok(())
@@ -547,11 +563,19 @@ mod tests {
         assert!(wrong_protocol.is_err());
     }
 
-    /// Two presentations of a 1-use ticket race on the spend; only one may be
-    /// authorized, however they interleave.
+    /// A migrated database holding one user, one HTTP target and one ticket for
+    /// it, so the ticket tests differ only in what they set up differently.
     #[cfg(feature = "sqlite")]
-    #[tokio::test]
-    async fn a_ticket_spend_is_atomic_with_its_authorization() {
+    async fn ticket_fixture(
+        require_approval: bool,
+        uses_left: Option<i16>,
+    ) -> (
+        DatabaseConnection,
+        LoginProtectionService,
+        Target,
+        Uuid,
+        Secret<String>,
+    ) {
         use sea_orm::ActiveValue::Set;
         use sea_orm::{ActiveModelTrait, Database};
         use warpgate_db_entities::Parameters::{
@@ -590,12 +614,11 @@ mod tests {
             ticket_requests_disabled: Set(false),
             ticket_require_approval: Set(false),
             ticket_max_uses: Set(None),
-            require_approval: Set(false),
+            require_approval: Set(require_approval),
         }
         .insert(&db)
         .await
         .unwrap();
-        let secret = Secret::new("t1cket".to_string());
         let ticket_id = Uuid::new_v4();
         e::Ticket::ActiveModel {
             id: Set(ticket_id),
@@ -603,7 +626,7 @@ mod tests {
             user_id: Set(user_id),
             description: Set(String::new()),
             target_id: Set(target.id),
-            uses_left: Set(Some(1)),
+            uses_left: Set(uses_left),
             self_service: Set(false),
             expiry: Set(None),
             created: Set(OffsetDateTime::now_utc()),
@@ -612,17 +635,98 @@ mod tests {
         .await
         .unwrap();
 
-        let first =
+        (
+            db,
+            login_protection,
+            target,
+            ticket_id,
+            Secret::new("t1cket".to_string()),
+        )
+    }
+
+    /// Deferring *when* a gated target's ticket is spent must not defer
+    /// *whether* there is a use to spend: an exhausted ticket would otherwise
+    /// establish an unlimited number of sessions, each merely needing an
+    /// administrator to approve it.
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn a_used_up_ticket_is_refused_even_when_its_spend_is_deferred() {
+        let (db, login_protection, _target, _ticket_id, secret) =
+            ticket_fixture(true, Some(0)).await;
+
+        let authorization = authorize_and_spend_ticket(
+            &db,
+            &login_protection,
+            &secret,
+            None,
+            Protocol::Http,
+            TicketSpend::DeferredIfApprovalGated,
+        )
+        .await
+        .unwrap();
+        assert!(authorization.is_none());
+
+        // A ticket that does have a use still establishes the session without
+        // spending it — that is what the gate consumes on approval.
+        let (db, login_protection, _target, ticket_id, secret) =
+            ticket_fixture(true, Some(1)).await;
+        assert!(
             authorize_and_spend_ticket(
                 &db,
                 &login_protection,
                 &secret,
                 None,
                 Protocol::Http,
-                TicketSpend::Immediate,
+                TicketSpend::DeferredIfApprovalGated,
             )
+            .await
+            .unwrap()
+            .is_some()
+        );
+        assert_eq!(
+            e::Ticket::Entity::find_by_id(ticket_id)
+                .one(&db)
                 .await
-                .unwrap();
+                .unwrap()
+                .unwrap()
+                .uses_left,
+            Some(1),
+        );
+
+        // ...and the approval is what takes it.
+        consume_ticket(&db, &ticket_id).await.unwrap();
+        assert_eq!(
+            e::Ticket::Entity::find_by_id(ticket_id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .uses_left,
+            Some(0),
+        );
+        // A second consumption has nothing left to take and says so, rather
+        // than passing silently.
+        assert!(consume_ticket(&db, &ticket_id).await.is_err());
+    }
+
+    /// Two presentations of a 1-use ticket race on the spend; only one may be
+    /// authorized, however they interleave.
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn a_ticket_spend_is_atomic_with_its_authorization() {
+        let (db, login_protection, target, ticket_id, secret) =
+            ticket_fixture(false, Some(1)).await;
+
+        let first = authorize_and_spend_ticket(
+            &db,
+            &login_protection,
+            &secret,
+            None,
+            Protocol::Http,
+            TicketSpend::Immediate,
+        )
+        .await
+        .unwrap();
         // The ticket travels with the authorization so the target session it
         // opens can record which ticket opened it.
         assert!(
@@ -630,17 +734,16 @@ mod tests {
                 && authorization.ticket_id() == Some(ticket_id))
         );
 
-        let second =
-            authorize_and_spend_ticket(
-                &db,
-                &login_protection,
-                &secret,
-                None,
-                Protocol::Http,
-                TicketSpend::Immediate,
-            )
-                .await
-                .unwrap();
+        let second = authorize_and_spend_ticket(
+            &db,
+            &login_protection,
+            &secret,
+            None,
+            Protocol::Http,
+            TicketSpend::Immediate,
+        )
+        .await
+        .unwrap();
         assert!(second.is_none());
 
         assert_eq!(

@@ -93,10 +93,16 @@
 
     /// Swallows the error so a failed background refresh leaves the last known
     /// list on screen instead of blanking the inbox; actions surface their own.
-    async function refresh() {
+    ///
+    /// `keepError` is for the refresh that follows a failed action: the list
+    /// needs reloading either way, but the message saying why the action failed
+    /// is the only thing telling the admin anything happened at all.
+    async function refresh(keepError = false) {
         try {
             await reload()
-            error = undefined
+            if (!keepError) {
+                error = undefined
+            }
         } catch (err) {
             error = await stringifyError(err)
         }
@@ -116,12 +122,14 @@
     /// up waiting — the entry is simply gone, so reload either way.
     async function resolveSession(action: () => Promise<void>) {
         error = undefined
+        let failed = false
         try {
             await action()
         } catch (err) {
             error = await stringifyError(err)
+            failed = true
         }
-        await refresh()
+        await refresh(failed)
     }
 
     // The target is echoed with the decision so it lands on the question this
@@ -132,12 +140,14 @@
         scope: ApprovalScope,
     ) {
         await resolveSession(() =>
-            api.approveSession({ id: item.id, scope, target: item.target }))
+            api.approveSession({ id: item.id, scope, target: item.target }),
+        )
     }
 
     async function rejectSession(item: SessionApprovalItem) {
         await resolveSession(() =>
-            api.rejectSession({ id: item.id, target: item.target }))
+            api.rejectSession({ id: item.id, target: item.target }),
+        )
     }
 
     async function approveTicket(request: TicketRequest) {
@@ -348,7 +358,8 @@
                 to
                 <strong>
                     {denyModalRequest.targetName ?? denyModalRequest.targetId}
-                </strong>?
+                </strong
+                >?
             </p>
             <FormGroup floating label="Reason (optional)">
                 <input

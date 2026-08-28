@@ -120,20 +120,19 @@ pub async fn correlated_authorization(
             .await
         {
             Ok(resolved) => {
-                let admitted = match admit_target_session(request, services, &handle, resolved)
-                    .await
-                {
-                    Ok((target_session_id, approved)) => AdmittedSession {
-                        target_session_id,
-                        approved: Arc::new(approved),
-                    },
-                    Err(error) => {
-                        *authorization = Authorization::Denied;
-                        correlator.lock().await.evict(&key, &slot);
-                        settle_failed_attempt(services, &handle, session_id).await;
-                        return Err(error.into());
-                    }
-                };
+                let admitted =
+                    match admit_target_session(request, services, &handle, resolved).await {
+                        Ok((target_session_id, approved)) => AdmittedSession {
+                            target_session_id,
+                            approved: Arc::new(approved),
+                        },
+                        Err(error) => {
+                            *authorization = Authorization::Denied;
+                            correlator.lock().await.evict(&key, &slot);
+                            settle_failed_attempt(services, &handle, session_id).await;
+                            return Err(error.into());
+                        }
+                    };
                 handle.lock().await.confirm();
                 *authorization = Authorization::Authorized(admitted.clone());
                 Ok((handle, admitted))
@@ -162,10 +161,7 @@ async fn admit_target_session(
     services: &Services,
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     resolved: warpgate_core::TargetAuthorization<TargetKubernetesOptions>,
-) -> Result<
-    (TargetSessionId, ApprovedTarget<TargetKubernetesOptions>),
-    WarpgateError,
-> {
+) -> Result<(TargetSessionId, ApprovedTarget<TargetKubernetesOptions>), WarpgateError> {
     let started = handle.lock().await.start_target_session(resolved).await?;
     let authorization = match started {
         TargetSessionStart::Started(started) => return Ok(started),

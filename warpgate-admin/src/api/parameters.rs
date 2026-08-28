@@ -163,7 +163,9 @@ struct ParameterUpdate {
     pub web_auth_max_age_seconds: Option<Option<i64>>,
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub web_approval_grace_period_seconds: Option<Option<i64>>,
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub admin_approval_timeout_seconds: Option<Option<i64>>,
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub admin_approval_grace_period_seconds: Option<Option<i64>>,
     pub analytics_consent: Option<Parameters::AnalyticsConsent>,
     pub analytics_normal: Option<bool>,

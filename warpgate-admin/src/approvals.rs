@@ -8,13 +8,10 @@
 //! dependency on the owner being reachable at the moment of the click.
 
 use sea_orm::EntityTrait;
-use warpgate_common::UserSessionId;
 use warpgate_common::auth::ApprovalKind;
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_common_http::{
-    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-};
+use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::approvals::{ApprovalActor, ApprovalDecision, close_request, record_decision};
 use warpgate_db_entities::{Node, SessionApprovalRequest};
 
@@ -94,10 +91,10 @@ pub async fn find_user_approval_row(
     ctx: &AuthenticatedRequestContext,
     session_id: UserSessionId,
 ) -> Result<Option<SessionApprovalRequest::Model>, WarpgateError> {
-    let RequestAuthorization::Session(SessionAuthorization::User { username, .. }) = &ctx.auth
-    else {
+    let Some(user) = ctx.auth.as_full_user() else {
         return Ok(None);
     };
+    let username = user.username();
     let row = SessionApprovalRequest::Entity::find_by_id((
         session_id,
         SessionApprovalRequest::ApprovalRequestKind::User,

@@ -1,6 +1,7 @@
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
+use sea_orm::ActiveValue::NotSet;
 use sea_orm::prelude::Expr;
 use sea_orm::sea_query::{Func, SimpleExpr};
 use sea_orm::{
@@ -256,7 +257,11 @@ impl DetailApi {
         model.ticket_max_duration_seconds = Set(body.ticket_max_duration_seconds);
         model.ticket_requests_disabled = Set(body.ticket_requests_disabled.unwrap_or(false));
         model.ticket_require_approval = Set(body.ticket_require_approval.unwrap_or(false));
-        model.require_approval = Set(body.require_approval.unwrap_or(false));
+        // Absent means "leave it as it is", not "off": every other field here
+        // is a plain replace, but a client that doesn't know about the
+        // administrator gate must not be able to take it off a target by
+        // saving the rest of it.
+        model.require_approval = body.require_approval.map_or(NotSet, Set);
         model.ticket_max_uses = Set(body.ticket_max_uses);
         let target = match model.update(db).await {
             Ok(target) => target,

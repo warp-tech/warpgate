@@ -233,6 +233,14 @@ impl State {
         {
             self.user_sessions.remove(&id);
         }
+
+        // The gate ledger is this node's view of the session, so it goes with
+        // the view. The session itself lives on in the database and may next be
+        // served elsewhere; anything it reaches this node for again is gated
+        // afresh, which is the safe direction. The requests are left alone —
+        // they belong to the session, not to this node's view of it.
+        let gates = self.admin_approval_gates.clone();
+        tokio::spawn(async move { gates.forget_session(&id).await });
     }
 
     /// Forgets everything an approval decision could still be applied to once a

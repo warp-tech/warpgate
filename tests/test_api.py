@@ -68,6 +68,7 @@ def make_limited_admin_role_payload(**overrides):
         "access_roles_assign": False,
         "sessions_view": False,
         "sessions_terminate": False,
+        "approve_sessions": False,
         "recordings_view": False,
         "tickets_create": False,
         "tickets_delete": False,
@@ -108,6 +109,28 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         permission="sessions_terminate",
         call=lambda api, r: api.close_all_sessions_with_http_info(),
         expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_session_approvals",
+        permission="approve_sessions",
+        call=lambda api, r: api.get_session_approvals_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="approve_session",
+        permission="approve_sessions",
+        call=lambda api, r: api.approve_session_with_http_info(
+            r["session_id"], sdk.ApprovalScope.ONCE, "no-such-target"
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="reject_session",
+        permission="approve_sessions",
+        call=lambda api, r: api.reject_session_with_http_info(
+            r["session_id"], "no-such-target"
+        ),
+        expected_statuses={200, 404},
     ),
     AdminApiTestCase(
         id="get_recording",

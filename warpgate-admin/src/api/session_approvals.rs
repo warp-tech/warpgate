@@ -9,9 +9,8 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use uuid::Uuid;
-use warpgate_common::UserSessionId;
 use warpgate_common::auth::ApprovalKind;
-use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::approvals::{ApprovalDecision, ApprovalScope};
 use warpgate_db_entities::SessionApprovalRequest;
@@ -144,7 +143,13 @@ impl Api {
         target: Query<String>,
     ) -> poem::Result<ActionResponse> {
         admin.require(AdminPermission::ApproveSessions)?;
-        resolve(&admin, UserSessionId(id.0), &target.0, ApprovalDecision::Approved(scope.0)).await
+        resolve(
+            &admin,
+            UserSessionId(id.0),
+            &target.0,
+            ApprovalDecision::Approved(scope.0),
+        )
+        .await
     }
 
     #[oai(
@@ -160,7 +165,13 @@ impl Api {
         target: Query<String>,
     ) -> poem::Result<ActionResponse> {
         admin.require(AdminPermission::ApproveSessions)?;
-        resolve(&admin, UserSessionId(id.0), &target.0, ApprovalDecision::Rejected).await
+        resolve(
+            &admin,
+            UserSessionId(id.0),
+            &target.0,
+            ApprovalDecision::Rejected,
+        )
+        .await
     }
 }
 

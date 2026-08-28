@@ -210,7 +210,6 @@ impl WebApprovalMatchKey {
             other_credentials: credentials.credentials()?.clone(),
         })
     }
-
 }
 
 impl From<&User> for AuthStateUserInfo {

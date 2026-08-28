@@ -5925,11 +5925,13 @@
           },
           "admin_approval_timeout_seconds": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "minimum": 1.0
           },
           "admin_approval_grace_period_seconds": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "minimum": 1.0
           },
           "analytics_consent": {
             "$ref": "#/components/schemas/AnalyticsConsent"

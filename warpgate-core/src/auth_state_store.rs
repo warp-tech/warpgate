@@ -617,5 +617,4 @@ mod tests {
         // No restriction configured.
         assert!(ip_allowed(None, Some("192.168.0.1".parse().unwrap())));
     }
-
 }

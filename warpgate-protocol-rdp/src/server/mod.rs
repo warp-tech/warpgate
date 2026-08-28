@@ -48,7 +48,9 @@ mod rdp;
 use bridge::connect_backend;
 use hold_screen::{run_banner_screen, run_hold_screen};
 use protocol::{AuthVerdict, Event as ServerEvent, Input as ServerInput};
-use warpgate_desktop_auth::{DesktopAuthOutcome, approve_session, authenticate, finalize_user_auth};
+use warpgate_desktop_auth::{
+    DesktopAuthOutcome, approve_session, authenticate, finalize_user_auth,
+};
 
 /// Depth of the feed into the viewer-facing RDP server. Bounded so a slow viewer
 /// backpressures `frame_bridge` (and through it the target) rather than letting delta

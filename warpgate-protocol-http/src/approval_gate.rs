@@ -33,9 +33,7 @@ pub async fn resolve_admin_approval(
     ctx: &AuthenticatedRequestContext,
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<TargetHTTPOptions>,
-) -> poem::Result<
-    Result<(TargetSessionId, ApprovedTarget<TargetHTTPOptions>), Response>,
-> {
+) -> poem::Result<Result<(TargetSessionId, ApprovedTarget<TargetHTTPOptions>), Response>> {
     let services = ctx.services();
     let target_name = authorization.target().name.clone();
     let session_id = handle.lock().await.user_session_id();

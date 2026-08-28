@@ -4,12 +4,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 use tracing::{info, warn};
 use warpgate_common::{TargetRdpOptions, TargetSessionId};
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{ApprovedTarget, DesktopEvent, DesktopState, Services, WarpgateServerHandle};
+use warpgate_core::{ApprovedTarget, DesktopEvent, DesktopState, Services};
 
 use super::BackendBridge;
 use super::protocol::Input as ServerInput;

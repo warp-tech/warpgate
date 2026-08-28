@@ -1459,7 +1459,11 @@ mod tests {
         db
     }
 
-    async fn advertise_row(db: &DatabaseConnection, session_id: UserSessionId, subject: &ApprovalSubject) {
+    async fn advertise_row(
+        db: &DatabaseConnection,
+        session_id: UserSessionId,
+        subject: &ApprovalSubject,
+    ) {
         upsert_request(
             db,
             SessionApprovalRequest::ActiveModel {
@@ -1896,7 +1900,11 @@ mod tests {
         // The other approval kind is a different question entirely.
         let mut other_kind = lookup_key("prod", [7u8; 32]);
         other_kind.kind = ApprovalKind::User;
-        assert!(!approval_is_remembered(&db, &other_kind, GRACE).await.unwrap());
+        assert!(
+            !approval_is_remembered(&db, &other_kind, GRACE)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]

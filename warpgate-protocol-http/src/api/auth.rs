@@ -380,7 +380,12 @@ impl Api {
         id: Path<Uuid>,
         body: Json<ApproveAuthRequest>,
     ) -> poem::Result<ApprovalActionResponse> {
-        resolve_own_approval(&ctx, UserSessionId(*id), ApprovalDecision::Approved(body.scope)).await
+        resolve_own_approval(
+            &ctx,
+            UserSessionId(*id),
+            ApprovalDecision::Approved(body.scope),
+        )
+        .await
     }
 
     #[oai(
@@ -781,7 +786,12 @@ async fn local_auth_state_for_user(
     ctx: &AuthenticatedRequestContext,
     id: &UserSessionId,
 ) -> Option<Arc<Mutex<AuthState>>> {
-    let username = ctx.auth.username().cloned()?;
+    // Answering a login's out-of-band request is a user-scoped act, so it takes
+    // the same authority as the rest of them — a ticket names a user but does
+    // not act as one. This is also the predicate `find_user_approval_row`
+    // applies, and the two must agree: which of them serves a request is
+    // decided by which node the load balancer picked.
+    let username = ctx.auth.as_full_user()?.username().to_owned();
     let state_arc = {
         let store = ctx.services().auth_state_store.lock().await;
         store.get(id)?

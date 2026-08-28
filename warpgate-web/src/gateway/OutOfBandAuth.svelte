@@ -30,12 +30,20 @@
     let cachingEnabled = $derived(cachingGrace > 0)
     let graceLabel = $derived(formatDurationAsHumantime(cachingGrace))
 
-    async function reload() {
+    async function init() {
         authState = await api.getAuthState({ id: params.stateId })
     }
 
-    async function init() {
-        await reload()
+    // The endpoints return only whether the decision was recorded, and the
+    // request is no longer pending afterwards, so re-reading it would 404 on
+    // any node that isn't holding the login. `window.close()` is a courtesy —
+    // a browser that refuses it for a page the user opened themselves leaves
+    // this showing the outcome.
+    function resolved(state: ApiAuthState) {
+        if (authState) {
+            authState = { ...authState, state }
+        }
+        window.close()
     }
 
     async function approve(scope: ApprovalScope) {
@@ -43,14 +51,12 @@
             id: params.stateId,
             approveAuthRequest: { scope },
         })
-        await reload()
-        window.close()
+        resolved(ApiAuthState.Success)
     }
 
     async function reject() {
         await api.rejectAuth({ id: params.stateId })
-        await reload()
-        window.close()
+        resolved(ApiAuthState.Failed)
     }
 </script>
 

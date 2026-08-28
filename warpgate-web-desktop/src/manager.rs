@@ -114,7 +114,11 @@ impl WebDesktopClientManager {
         // which records framebuffer updates; the recording finalises when both drop.
         let recorder: Option<Arc<DesktopRecorder>> = match services
             .recordings
-            .start::<DesktopRecorder, _>(&target_session_id, None, DesktopRecordingMetadata::Desktop)
+            .start::<DesktopRecorder, _>(
+                &target_session_id,
+                None,
+                DesktopRecordingMetadata::Desktop,
+            )
             .await
         {
             Ok(recorder) => Some(Arc::new(recorder)),

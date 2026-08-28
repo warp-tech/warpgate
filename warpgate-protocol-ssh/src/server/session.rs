@@ -1951,9 +1951,17 @@ impl ServerSession {
             // what the gate is watching. Dropping the claim here also tells the
             // resolution that arrives afterwards it has nothing to report: the
             // user left, they were not refused.
-            self.awaiting_approval = false;
+            let was_held = std::mem::take(&mut self.awaiting_approval);
             self.disconnect_token.cancel();
             self.request_disconnect();
+            // A dial in progress ends the session by reporting its abort back
+            // through the remote client. A hold has no such connection, so
+            // nothing would report anything and the terminal would sit there;
+            // the session is torn down here instead.
+            if was_held {
+                self.emit_service_message("Session closed")?;
+                self.disconnect_server().await;
+            }
             return Ok(());
         }
 
