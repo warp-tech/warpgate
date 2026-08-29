@@ -31,7 +31,7 @@
     } from 'common/approvalRequests'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { formatDurationAsHumantime } from 'common/duration'
-    import { stringifyError } from 'common/errors'
+    import { errorStatus, stringifyError } from 'common/errors'
     import RelativeDate from 'common/RelativeDate.svelte'
     import Fa from 'svelte-fa'
 
@@ -119,14 +119,19 @@
     )
 
     /// A 404 means someone else already resolved it, or the held session gave
-    /// up waiting — the entry is simply gone, so reload either way.
+    /// up waiting — the entry is simply gone, so reload either way. It answers
+    /// with no body, so it needs saying here; a shared queue produces it
+    /// routinely and "API error:" with nothing after it explains nothing.
     async function resolveSession(action: () => Promise<void>) {
         error = undefined
         let failed = false
         try {
             await action()
         } catch (err) {
-            error = await stringifyError(err)
+            error =
+                errorStatus(err) === 404
+                    ? 'This request is no longer waiting — someone else answered it, or the session gave up.'
+                    : await stringifyError(err)
             failed = true
         }
         await refresh(failed)
