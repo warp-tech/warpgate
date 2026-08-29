@@ -14,5 +14,10 @@ export async function stringifyError(err: unknown): Promise<string> {
     if (err instanceof admin.ResponseError) {
         return admin.stringifyError(err)
     }
+    // A message thrown deliberately is already written for the reader; the
+    // `Error:` prefix `String()` adds is noise.
+    if (err instanceof Error) {
+        return err.message
+    }
     return String(err)
 }

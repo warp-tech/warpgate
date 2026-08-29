@@ -9,6 +9,7 @@
     } from '@sveltestrap/sveltestrap'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { formatDurationAsHumantime } from 'common/duration'
+    import { errorStatus } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
     import {
@@ -31,7 +32,19 @@
     let graceLabel = $derived(formatDurationAsHumantime(cachingGrace))
 
     async function init() {
-        authState = await api.getAuthState({ id: params.stateId })
+        try {
+            authState = await api.getAuthState({ id: params.stateId })
+        } catch (err) {
+            // The link is printed by a client and followed later, in whatever
+            // browser session the user happens to have — so landing on a
+            // request that has finished, or on someone else's, is ordinary.
+            if (errorStatus(err) === 404) {
+                throw new Error(
+                    'This request is no longer waiting. It may have been answered already, timed out, or belong to a different account than the one you are signed in as.',
+                )
+            }
+            throw err
+        }
     }
 
     // The endpoints return only whether the decision was recorded, and the
