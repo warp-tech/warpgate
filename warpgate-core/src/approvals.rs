@@ -33,7 +33,7 @@
 //! auditor reads is the record the bypass ran on. The corollary is that a
 //! grace period only reaches as far as the audit retention keeps the rows.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -444,17 +444,19 @@ async fn await_row_decision(
     }
 }
 
+/// The request of one kind on a session, where only one can exist: a login has
+/// a single target name fixed when its auth state is built, so its own approval
+/// is unambiguous. Administrator gates name their target — see
+/// [`find_question`].
 async fn find_request(
     db: &DatabaseConnection,
     session_id: UserSessionId,
     kind: ApprovalKind,
 ) -> Result<Option<SessionApprovalRequest::Model>, WarpgateError> {
-    Ok(SessionApprovalRequest::Entity::find_by_id((
-        session_id,
-        SessionApprovalRequest::ApprovalRequestKind::from(kind),
-    ))
-    .one(db)
-    .await?)
+    Ok(SessionApprovalRequest::Entity::find()
+        .filter(one_request(session_id, kind))
+        .one(db)
+        .await?)
 }
 
 /// [`find_request`], narrowed to one question: `None` also when the slot has
@@ -661,11 +663,6 @@ pub enum PolledGate<O = warpgate_common::TargetOptions> {
     Approved(ApprovedTarget<O>),
     /// An administrator has been asked and has yet to answer.
     Pending,
-    /// Nothing has been asked about this target yet: the session is already
-    /// holding a question about another one, and asks about this one once
-    /// that is answered. Telling a caller this is `Pending` would have it
-    /// report that somebody is looking at a request nobody has seen.
-    Queued,
     Denied,
 }
 
@@ -680,16 +677,17 @@ enum SettledGate {
     Denied,
 }
 
-/// One session's gates, for the non-blocking path: at most one wait running —
-/// the session has a single request slot — and the outcomes already settled,
-/// kept per target because a gate answers a question about one target and a
-/// session is not confined to one. Without the per-target ledger, a session
-/// reaching two gated targets would let each ask supersede the other's
-/// answer, and every approval would be consumed and immediately re-asked.
+/// One session's gates, for the non-blocking path: which targets have a wait
+/// running, and what has already settled for which target. Both are keyed by
+/// target because a gate answers a question about one target and a session is
+/// not confined to one — a session reaching two gated targets asks about both,
+/// and each answer belongs to the target it was given for.
 #[derive(Debug, Default)]
 struct SessionGateState {
-    /// The target whose wait currently holds the session's request slot.
-    running: Option<String>,
+    /// Targets whose waits are running. One per target: a second request for a
+    /// target already being waited on joins that wait rather than starting a
+    /// duplicate.
+    running: HashSet<String>,
     settled: HashMap<String, SettledGate>,
 }
 
@@ -709,38 +707,26 @@ pub struct SessionGates {
 enum SlotPoll {
     /// This target's gate already settled for this session.
     Settled(SettledGate),
-    /// This target's own wait is running: the question has been put to an
-    /// administrator and is waiting on them.
+    /// A wait for this target is already running, so the question is already
+    /// in front of an administrator.
     Waiting,
-    /// Another target's wait holds the session's single request slot, so
-    /// nothing has been asked about this one yet. Kept apart from
-    /// [`Self::Waiting`] because only one of the two means an administrator
-    /// has been shown anything.
-    Queued,
-    /// The caller claimed the slot and must start the wait.
+    /// The caller took on this target's wait and must start it.
     Claimed,
 }
 
 impl SessionGates {
-    /// Answers from the ledger, or claims the slot — under one lock, so
-    /// concurrent requests for one session start exactly one wait between
-    /// them, and a settle landing between a lookup and a claim cannot be
-    /// missed.
+    /// Answers from the ledger, or takes on the wait — under one lock, so
+    /// concurrent requests for one target start exactly one wait between them,
+    /// and a settle landing between a lookup and a claim cannot be missed.
     async fn poll(&self, session_id: UserSessionId, target: &str) -> SlotPoll {
         let mut sessions = self.sessions.lock().await;
-        if let Some(state) = sessions.get(&session_id) {
-            if let Some(settled) = state.settled.get(target) {
-                return SlotPoll::Settled(*settled);
-            }
-            if let Some(running) = state.running.as_deref() {
-                return if running == target {
-                    SlotPoll::Waiting
-                } else {
-                    SlotPoll::Queued
-                };
-            }
+        let state = sessions.entry(session_id).or_default();
+        if let Some(settled) = state.settled.get(target) {
+            return SlotPoll::Settled(*settled);
         }
-        sessions.entry(session_id).or_default().running = Some(target.to_string());
+        if !state.running.insert(target.to_string()) {
+            return SlotPoll::Waiting;
+        }
         SlotPoll::Claimed
     }
 
@@ -753,9 +739,7 @@ impl SessionGates {
         let Some(state) = sessions.get_mut(&session_id) else {
             return;
         };
-        if state.running.as_deref() == Some(target) {
-            state.running = None;
-        }
+        state.running.remove(target);
         if let Some(outcome) = outcome {
             state.settled.insert(target.to_string(), outcome);
         }
@@ -1077,7 +1061,6 @@ impl Services {
             }
             SlotPoll::Settled(SettledGate::Denied) => return Ok(PolledGate::Denied),
             SlotPoll::Waiting => return Ok(PolledGate::Pending),
-            SlotPoll::Queued => return Ok(PolledGate::Queued),
             SlotPoll::Claimed => {}
         }
 
@@ -1373,37 +1356,29 @@ pub(crate) async fn advertise_user_request(
     upsert_request(db, row).await
 }
 
-/// Rows are keyed by `(session_id, kind)`, so a wait site that runs twice for
-/// the same session updates its own request instead of queueing a duplicate.
+/// Rows are keyed by `(session_id, kind, target)`, so a wait site that runs
+/// twice for the same question updates its own row instead of queueing a
+/// duplicate, and a question about another target is simply another row.
 ///
-/// A decision nobody has picked up yet is deliberately left alone. Re-advertising
-/// is the same session asking the same question again — a request/response
-/// protocol re-enters its gate on every request — and an answer given between
-/// two of those is the answer to *this* question. Rewriting it would silently
-/// discard a decision an administrator has already made.
+/// A decision nobody has picked up yet is deliberately left alone.
+/// Re-advertising is the same session asking the same question again — a
+/// request/response protocol re-enters its gate on every request — and an
+/// answer given between two of those is the answer to *this* question.
+/// Rewriting it would silently discard a decision an administrator has already
+/// made.
 ///
-/// A row whose gate has *finished* is a previous question, and so is a row
-/// about a *different target* whatever its state: a session that gates for a
-/// new target asks a new question, and the slot is taken over — decision and
-/// all. Reopening is what stops a leftover answer being read as this
-/// question's; the superseded question's waiter finds its row gone and
-/// expires, which is the honest outcome for a gate that was asked past.
+/// A row whose gate has *finished* is a previous asking of the same question,
+/// and is reopened: the session is asking again about the same target, and the
+/// stale answer must not be read as this asking's.
 async fn upsert_request(
     db: &DatabaseConnection,
     row: SessionApprovalRequest::ActiveModel,
 ) -> Result<(), WarpgateError> {
     use SessionApprovalRequest::ApprovalRequestStatus as Status;
 
-    let Set(ref target) = row.target else {
-        return Err(WarpgateError::InconsistentState(
-            "approval request advertised without a target".into(),
-        ));
-    };
-    let target = target.clone();
-
     // The whole row is rewritten, so this writes its status through
     // `Entity::update` rather than a `StatusTransition` — but under the same
-    // rule: the states it may take over are named, not assumed.
+    // rule: the states it may leave are named, not assumed.
     let mut reopened = row.clone();
     reopened.status = Set(Status::Pending);
     reopened.scope = Set(None);
@@ -1413,11 +1388,7 @@ async fn upsert_request(
     reopened.consumed_at = Set(None);
 
     match SessionApprovalRequest::Entity::update(reopened)
-        .filter(
-            Condition::any()
-                .add(question_is_over())
-                .add(SessionApprovalRequest::Column::Target.ne(target)),
-        )
+        .filter(question_is_over())
         .exec(db)
         .await
     {
@@ -1432,6 +1403,7 @@ async fn upsert_request(
             OnConflict::columns([
                 SessionApprovalRequest::Column::SessionId,
                 SessionApprovalRequest::Column::Kind,
+                SessionApprovalRequest::Column::Target,
             ])
             .update_columns(SessionApprovalRequest::Column::IDENTITY)
             .to_owned(),
@@ -1652,8 +1624,9 @@ mod tests {
     async fn status_of(
         db: &DatabaseConnection,
         session_id: UserSessionId,
+        target: &str,
     ) -> SessionApprovalRequest::ApprovalRequestStatus {
-        find_request(db, session_id, ApprovalKind::Admin)
+        find_question(db, session_id, ApprovalKind::Admin, target)
             .await
             .unwrap()
             .expect("the request should still exist")
@@ -1693,9 +1666,9 @@ mod tests {
 
         reap_stale(&db).await.unwrap();
 
-        assert_eq!(status_of(&db, stale).await, Status::Abandoned);
+        assert_eq!(status_of(&db, stale, "a-target").await, Status::Abandoned);
         assert_eq!(
-            status_of(&db, recent).await,
+            status_of(&db, recent, "a-target").await,
             Status::Pending,
             "a request still inside its window is still a live question",
         );
@@ -1717,7 +1690,10 @@ mod tests {
 
         reap_stale(&db).await.unwrap();
 
-        assert_eq!(status_of(&db, session_id).await, Status::Approved);
+        assert_eq!(
+            status_of(&db, session_id, "a-target").await,
+            Status::Approved
+        );
     }
 
     /// A request/response protocol re-enters its gate on every request, so the
@@ -1763,7 +1739,7 @@ mod tests {
             pending_row(&db, session_id, "a-target").await;
 
             assert_eq!(
-                status_of(&db, session_id).await,
+                status_of(&db, session_id, "a-target").await,
                 SessionApprovalRequest::ApprovalRequestStatus::Pending,
                 "a request left {finished:?} must be reopened, not reused",
             );
@@ -1814,39 +1790,55 @@ mod tests {
             "a decision about a different target must not be recorded",
         );
         assert_eq!(
-            status_of(&db, session_id).await,
+            status_of(&db, session_id, "a-target").await,
             SessionApprovalRequest::ApprovalRequestStatus::Pending,
         );
     }
 
-    /// Gating for a new target asks a new question, and takes the slot over
-    /// whatever the previous question's state — including an answer nobody
-    /// picked up, which would otherwise be read as this question's.
+    /// Gating for a second target asks a second question. It gets its own row,
+    /// and the answer already given about the first stays exactly as the
+    /// administrator left it — the record of who approved what is the table,
+    /// and a session reaching two targets must not cost it one of them.
     #[tokio::test]
-    async fn advertising_a_new_target_takes_over_the_slot() {
+    async fn a_second_target_asks_alongside_the_first() {
         let db = migrated_db().await;
         let session_id = UserSessionId(Uuid::new_v4());
         pending_row(&db, session_id, "a-target").await;
-        assert!(approve(&db, session_id, "a-target").await);
+        assert!(approve_with_scope(&db, session_id, "a-target", ApprovalScope::Target).await);
 
         pending_row(&db, session_id, "b-target").await;
 
-        let row = find_request(&db, session_id, ApprovalKind::Admin)
+        let first = find_question(&db, session_id, ApprovalKind::Admin, "a-target")
             .await
             .unwrap()
-            .expect("the request should still exist");
-        assert_eq!(row.target, "b-target");
+            .expect("the answered question must still be on record");
         assert_eq!(
-            row.status,
-            SessionApprovalRequest::ApprovalRequestStatus::Pending,
-            "the previous question's answer must not carry over",
+            first.status,
+            SessionApprovalRequest::ApprovalRequestStatus::Approved,
         );
-        assert!(row.scope.is_none());
-        assert!(row.resolved_by_username.is_none());
+        assert_eq!(
+            first.scope,
+            Some(SessionApprovalRequest::ApprovalRequestScope::Target),
+            "the grant the administrator gave must survive the next question",
+        );
+        assert_eq!(first.resolved_by_username.as_deref(), Some("admin"));
+
+        let second = find_question(&db, session_id, ApprovalKind::Admin, "b-target")
+            .await
+            .unwrap()
+            .expect("the new question should exist");
+        assert_eq!(
+            second.status,
+            SessionApprovalRequest::ApprovalRequestStatus::Pending,
+        );
+        assert!(second.scope.is_none());
+        assert!(second.resolved_by_username.is_none());
     }
 
-    /// The superseded question's waiter must find its question gone — not the
-    /// successor's row, and least of all the successor's answer.
+    /// A session's questions are answered one at a time and in any order, so a
+    /// waiter must read only its own row: admitting a connection on the
+    /// strength of an approval given for a different target would let one
+    /// decision open two doors.
     #[tokio::test]
     async fn a_waiter_only_sees_answers_to_its_own_question() {
         let db = migrated_db().await;
@@ -1860,20 +1852,20 @@ mod tests {
             session_id,
             ApprovalKind::Admin,
             "a-target",
-            Duration::from_secs(5),
+            Duration::from_millis(1500),
             std::future::pending(),
         )
         .await;
         assert!(
-            matches!(outcome, RowOutcome::Ended),
-            "a superseded wait must end, not adopt the successor's decision",
+            matches!(outcome, RowOutcome::TimedOut),
+            "a wait must not adopt an answer given about another target",
         );
     }
 
     /// Closing is what replaces deleting: a waiter that gives up must leave the
     /// row behind as the record, must not overwrite an answer that landed
-    /// while it was giving up, and must not touch a successor question that has
-    /// taken its slot over.
+    /// while it was giving up, and must not touch the session's other
+    /// questions.
     #[tokio::test]
     async fn closing_keeps_the_row_and_never_overwrites_an_answer() {
         let db = migrated_db().await;
@@ -1882,7 +1874,7 @@ mod tests {
         pending_row(&db, abandoned, "a-target").await;
         abandon_requests_for_session(&db, abandoned).await.unwrap();
         assert_eq!(
-            status_of(&db, abandoned).await,
+            status_of(&db, abandoned, "a-target").await,
             SessionApprovalRequest::ApprovalRequestStatus::Abandoned,
         );
 
@@ -1899,16 +1891,16 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            status_of(&db, answered).await,
+            status_of(&db, answered, "a-target").await,
             SessionApprovalRequest::ApprovalRequestStatus::Approved,
         );
 
-        let superseded = UserSessionId(Uuid::new_v4());
-        pending_row(&db, superseded, "a-target").await;
-        pending_row(&db, superseded, "b-target").await;
+        let two_targets = UserSessionId(Uuid::new_v4());
+        pending_row(&db, two_targets, "a-target").await;
+        pending_row(&db, two_targets, "b-target").await;
         close_request(
             &db,
-            superseded,
+            two_targets,
             ApprovalKind::Admin,
             "a-target",
             SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
@@ -1916,15 +1908,19 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            status_of(&db, superseded).await,
+            status_of(&db, two_targets, "a-target").await,
+            SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+        );
+        assert_eq!(
+            status_of(&db, two_targets, "b-target").await,
             SessionApprovalRequest::ApprovalRequestStatus::Pending,
-            "a straggling close must not end the successor question",
+            "closing one question must not end the session's others",
         );
     }
 
     /// Every column belongs to the key, the question or the answer — the
-    /// reopen/takeover paths rewrite by these sets, so an unclassified column
-    /// would silently keep stale data across a takeover.
+    /// reopen path rewrites by these sets, so an unclassified column would
+    /// silently keep stale data when a question is asked again.
     #[test]
     fn every_column_is_classified() {
         use std::collections::HashSet;
@@ -1932,7 +1928,7 @@ mod tests {
         use SessionApprovalRequest::Column;
         use sea_orm::Iterable;
 
-        let classified: HashSet<String> = [Column::SessionId, Column::Kind]
+        let classified: HashSet<String> = [Column::SessionId, Column::Kind, Column::Target]
             .iter()
             .chain(&Column::IDENTITY)
             .chain(&Column::DECISION)

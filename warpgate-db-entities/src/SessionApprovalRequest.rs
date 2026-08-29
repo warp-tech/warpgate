@@ -79,10 +79,15 @@ pub enum ApprovalRequestScope {
 /// and I missed it" from "no longer a live question"; a vanishing row could
 /// only ever be read as the latter.
 ///
-/// Keyed by `(session_id, kind)`: a session waits on at most one approval of
-/// each kind at a time, which makes creation idempotent — a wait site that runs
-/// twice upserts the same row instead of queueing a duplicate. A row left over
-/// from an earlier, finished gate on the same session is reopened rather than
+/// Keyed by `(session_id, kind, target)`: a question is about one session
+/// reaching one target, and a session that reaches several holds one row each.
+/// The target is part of the key rather than a column so that asking about a
+/// second target cannot overwrite the answer given about the first — the two
+/// are different questions and each keeps its own record.
+///
+/// Within one key, creation is idempotent: a wait site that runs twice upserts
+/// its own row instead of queueing a duplicate, and a row left over from an
+/// earlier, finished gate on the same target is reopened rather than
 /// duplicated.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "session_approval_requests")]
@@ -95,6 +100,8 @@ pub struct Model {
     pub node_id: NodeId,
     pub protocol: String,
     pub username: String,
+    /// Part of the key: see the type docs.
+    #[sea_orm(primary_key, auto_increment = false)]
     pub target: String,
     pub remote_address: Option<String>,
     /// The short code the user is shown, for confirming they are approving
@@ -129,17 +136,17 @@ pub struct Model {
 }
 
 impl Column {
-    /// The question: who is asking, from where, about what. Rewritten wholesale
-    /// whenever the row is re-advertised or a finished request is reopened.
+    /// The question: who is asking, from where, and what they are asking with.
+    /// Rewritten wholesale whenever the row is re-advertised or a finished
+    /// request is reopened. *What* is being asked about is the key, not this.
     ///
     /// Every non-key column belongs to exactly this set or [`Self::DECISION`] —
-    /// a new column must be added to one of them so the reopen/takeover paths
-    /// handle it (enforced by a test in `warpgate_core::approvals`).
-    pub const IDENTITY: [Self; 9] = [
+    /// a new column must be added to one of them so the reopen path handles it
+    /// (enforced by a test in `warpgate_core::approvals`).
+    pub const IDENTITY: [Self; 8] = [
         Self::NodeId,
         Self::Protocol,
         Self::Username,
-        Self::Target,
         Self::RemoteAddress,
         Self::IdentificationString,
         Self::CredentialsDigest,
@@ -148,7 +155,7 @@ impl Column {
     ];
 
     /// The answer: how the question ended, who ended it, and whether the owner
-    /// picked it up. Reset when a row is reopened for a new question, and never
+    /// picked it up. Reset when a finished row is reopened, and never
     /// overwritten while the question stands.
     pub const DECISION: [Self; 6] = [
         Self::Status,

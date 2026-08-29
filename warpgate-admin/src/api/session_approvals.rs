@@ -66,7 +66,8 @@ async fn resolve(
     target: &str,
     decision: ApprovalDecision,
 ) -> poem::Result<ActionResponse> {
-    let Some(pending) = find_pending_approval(ctx, session_id, ApprovalKind::Admin).await? else {
+    let Some(pending) = find_pending_approval(ctx, session_id, ApprovalKind::Admin, target).await?
+    else {
         return Ok(ActionResponse::NotFound);
     };
     if pending.target != target {

@@ -88,6 +88,7 @@ mod m00081_http_session_user_session_id;
 mod m00082_target_session_columns;
 mod m00083_jit_session_approval;
 mod m00084_credential_digest_salt;
+mod m00085_approval_request_per_target;
 
 pub(crate) mod helpers;
 
@@ -181,6 +182,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00082_target_session_columns::Migration),
             Box::new(m00083_jit_session_approval::Migration),
             Box::new(m00084_credential_digest_salt::Migration),
+            Box::new(m00085_approval_request_per_target::Migration),
         ]
     }
 }
@@ -258,6 +260,7 @@ pub async fn migrate_database_down(
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
     use sea_orm::{ConnectionTrait, Database, Statement};
+    use uuid::Uuid;
     use warpgate_db_entities::Parameters::{
         ConfigMigrationValues, SshHostKeyVerificationMode, set_config_migration_values,
     };
@@ -308,6 +311,42 @@ mod tests {
             .await
                 > 0,
             "the built-in admin role should have been backfilled",
+        );
+    }
+
+    /// A session reaching two gated targets holds a question about each, so the
+    /// re-key has to survive rows that were only unique under the old key —
+    /// and the rebuild has to carry every column across, which a mistyped
+    /// column list would silently get wrong.
+    #[tokio::test]
+    async fn approval_requests_are_keyed_per_target() {
+        set_config_migration_values(ConfigMigrationValues {
+            recordings_enable: false,
+            recordings_path: "/tmp/warpgate-test-recordings".to_owned(),
+            ssh_host_key_verification: SshHostKeyVerificationMode::default(),
+        });
+
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+
+        let session = Uuid::new_v4();
+        let backend = db.get_database_backend();
+        for target in ["a-target", "b-target"] {
+            db.execute(Statement::from_sql_and_values(
+                backend,
+                "INSERT INTO session_approval_requests \
+                 (session_id, kind, target, node_id, protocol, username, started, status) \
+                 VALUES (?, 'admin', ?, ?, 'SSH', 'someone', CURRENT_TIMESTAMP, 'pending')",
+                [session.into(), target.into(), Uuid::new_v4().into()],
+            ))
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(
+            count(&db, "SELECT COUNT(*) AS n FROM session_approval_requests",).await,
+            2,
+            "one session must be able to hold a question about each target",
         );
     }
 

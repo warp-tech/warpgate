@@ -7,7 +7,7 @@
 //! is served wherever it lands: no forwarding, no cluster token, and no
 //! dependency on the owner being reachable at the moment of the click.
 
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use warpgate_common::auth::ApprovalKind;
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
@@ -59,10 +59,12 @@ pub async fn find_pending_approval(
     ctx: &AuthenticatedRequestContext,
     session_id: UserSessionId,
     kind: ApprovalKind,
+    target: &str,
 ) -> Result<Option<PendingApproval>, WarpgateError> {
     let key = (
         session_id,
         SessionApprovalRequest::ApprovalRequestKind::from(kind),
+        target.to_owned(),
     );
 
     let Some(row) = SessionApprovalRequest::Entity::find_by_id(key)
@@ -95,12 +97,16 @@ pub async fn find_user_approval_row(
         return Ok(None);
     };
     let username = user.username();
-    let row = SessionApprovalRequest::Entity::find_by_id((
-        session_id,
-        SessionApprovalRequest::ApprovalRequestKind::User,
-    ))
-    .one(&ctx.services().db)
-    .await?;
+    // A login has one target name, fixed when its auth state is built, so its
+    // own request is unambiguous without naming it.
+    let row = SessionApprovalRequest::Entity::find()
+        .filter(SessionApprovalRequest::Column::SessionId.eq(session_id))
+        .filter(
+            SessionApprovalRequest::Column::Kind
+                .eq(SessionApprovalRequest::ApprovalRequestKind::User),
+        )
+        .one(&ctx.services().db)
+        .await?;
     Ok(row.filter(|row| is_pending(row) && username_eq_ci(&row.username, username)))
 }
 

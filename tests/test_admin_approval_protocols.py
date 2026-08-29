@@ -127,17 +127,16 @@ class Test:
             time.sleep(0.25)
         assert response.status_code == 200, "approved session should reach the target"
 
-    def test_two_gated_targets_in_one_session_are_asked_one_at_a_time(
+    def test_two_gated_targets_in_one_session_are_asked_separately(
         self,
         echo_server_port,
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
     ):
-        # A session holds one question at a time, so reaching a second gated
-        # target while the first is undecided raises nothing — and must not
-        # claim otherwise: the page for the second target would be telling the
-        # user an administrator is looking at a request nobody has been shown.
+        # A question is about one session reaching one target, so a session
+        # reaching two holds one of each: both are asked, either can be
+        # answered first, and answering one says nothing about the other.
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
             user, role = create_password_user(api)
@@ -152,35 +151,59 @@ class Test:
         )
 
         assert session.get(f"{url}/?warpgate-target={first.name}").status_code == 202
-        with admin_client(url) as api:
-            wait_for_pending_approval(api, first.name, user.username)
+        assert session.get(f"{url}/?warpgate-target={second.name}").status_code == 202
 
-        queued = session.get(f"{url}/?warpgate-target={second.name}")
-        assert queued.status_code == 202
-        assert queued.headers.get("retry-after")
-        assert "earlier request" in queued.text, (
-            "the second target must not claim an administrator was asked about it"
+        with admin_client(url) as api:
+            for target in (first, second):
+                wait_for_pending_approval(api, target.name, user.username)
+
+            # Answer the second one first: the two are independent questions.
+            approval = wait_for_pending_approval(api, second.name, user.username)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+
+        _get_until(session, f"{url}/?warpgate-target={second.name}", 200)
+        assert session.get(f"{url}/?warpgate-target={first.name}").status_code == 202, (
+            "approving one target must not admit the other"
         )
-        with admin_client(url) as api:
-            assert not [
-                a for a in api.get_session_approvals() if a.target == second.name
-            ], "the second target must not raise a question of its own yet"
 
-        # Answering the first frees the slot, and the second asks in its turn.
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, first.name, user.username)
             api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
         _get_until(session, f"{url}/?warpgate-target={first.name}", 200)
-
-        _get_until(session, f"{url}/?warpgate-target={second.name}", 202)
-        with admin_client(url) as api:
-            approval = wait_for_pending_approval(api, second.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
-        _get_until(session, f"{url}/?warpgate-target={second.name}", 200)
-
-        # Both admissions stand: each target keeps its own.
-        assert session.get(f"{url}/?warpgate-target={first.name}").status_code == 200
         assert session.get(f"{url}/?warpgate-target={second.name}").status_code == 200
+
+    def test_one_targets_refusal_does_not_answer_for_another(
+        self,
+        echo_server_port,
+        processes: ProcessManager,
+        timeout,
+        shared_wg: WarpgateProcess,
+    ):
+        # The failure the per-target key exists to prevent: one decision must
+        # never stand in for a question it was not asked about.
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            user, role = create_password_user(api)
+            refused = create_http_target(api, role, echo_server_port)
+            allowed = create_http_target(api, role, echo_server_port)
+
+        session = requests.Session()
+        session.verify = False
+        session.post(
+            f"{url}/@warpgate/api/auth/login",
+            json={"username": user.username, "password": "123"},
+        )
+        assert session.get(f"{url}/?warpgate-target={refused.name}").status_code == 202
+        assert session.get(f"{url}/?warpgate-target={allowed.name}").status_code == 202
+
+        with admin_client(url) as api:
+            rejection = wait_for_pending_approval(api, refused.name, user.username)
+            api.reject_session(rejection.id, rejection.target)
+            approval = wait_for_pending_approval(api, allowed.name, user.username)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+
+        _get_until(session, f"{url}/?warpgate-target={refused.name}", 403)
+        _get_until(session, f"{url}/?warpgate-target={allowed.name}", 200)
 
     def test_http_request_is_forbidden_after_rejection(
         self,

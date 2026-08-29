@@ -80,17 +80,6 @@ pub async fn resolve_admin_approval(
              continue automatically once they do.",
             true,
         )),
-        // Saying "an administrator has been asked" here would be untrue: this
-        // session is already holding one question, and only asks about this
-        // target once that one is answered.
-        PolledGate::Queued => Err(gate_response(
-            &target_name,
-            "Waiting for an earlier request",
-            "Another connection in this session is already waiting for an \
-             administrator. This one will be submitted once that is decided, and \
-             this page will continue automatically.",
-            true,
-        )),
         PolledGate::Denied => Err(gate_response(
             &target_name,
             "Session not approved",
