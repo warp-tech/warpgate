@@ -21,7 +21,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, WarpgateServerHandle,
+    AdmittedTarget, ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, WarpgateServerHandle,
     run_db_authorization,
 };
 use warpgate_tls::ServerTlsStream;
@@ -327,13 +327,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             }
         };
 
-        self.server_handle
+        let admitted = self
+            .server_handle
             .lock()
             .await
-            .register_approved_target_session(&approved)
+            .register_approved_target_session(approved)
             .await?;
 
-        self.run_authorized_inner(startup, approved).await
+        self.run_authorized_inner(startup, admitted).await
     }
 
     async fn send_error_response(
@@ -351,16 +352,16 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     async fn run_authorized_inner(
         mut self,
         startup: pgwire::messages::startup::Startup,
-        approved: ApprovedTarget<TargetPostgresOptions>,
+        admitted: AdmittedTarget<TargetPostgresOptions>,
     ) -> Result<(), PostgresError> {
-        let options = approved.options().clone();
+        let options = admitted.options().clone();
         let target_protocol_version = match options.protocol_version.unwrap_or_default() {
             PostgresProtocolVersion::V3_0 => ProtocolVersion::PROTOCOL3_0,
             PostgresProtocolVersion::V3_2 => ProtocolVersion::PROTOCOL3_2,
         };
 
         let mut client = match PostgresClient::connect(
-            approved,
+            admitted,
             ConnectionOptions {
                 protocol_version: target_protocol_version,
                 parameters: startup.parameters,

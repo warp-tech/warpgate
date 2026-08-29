@@ -11,14 +11,14 @@ use std::sync::Arc;
 use http::StatusCode;
 use poem::{IntoResponse, Request, Response};
 use tokio::sync::Mutex;
+use warpgate_common::TargetHTTPOptions;
 use warpgate_common::auth::RememberedBy;
-use warpgate_common::{TargetHTTPOptions, TargetSessionId};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
 use warpgate_core::approvals::{AdminApprovalContext, PolledGate, TicketStake};
-use warpgate_core::{ApprovedTarget, TargetAuthorization, WarpgateServerHandle};
+use warpgate_core::{AdmittedTarget, TargetAuthorization, WarpgateServerHandle};
 
 use crate::internal_page::internal_page;
 
@@ -34,7 +34,7 @@ pub async fn resolve_admin_approval(
     ctx: &AuthenticatedRequestContext,
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<TargetHTTPOptions>,
-) -> poem::Result<Result<(TargetSessionId, ApprovedTarget<TargetHTTPOptions>), Response>> {
+) -> poem::Result<Result<AdmittedTarget<TargetHTTPOptions>, Response>> {
     let services = ctx.services();
     let target_name = authorization.target().name.clone();
     let session_id = handle.lock().await.user_session_id();
@@ -66,14 +66,11 @@ pub async fn resolve_admin_approval(
         .await?;
 
     Ok(match gate {
-        PolledGate::Approved(approved) => {
-            let target_session_id = handle
-                .lock()
-                .await
-                .register_approved_target_session(&approved)
-                .await?;
-            Ok((target_session_id, approved))
-        }
+        PolledGate::Approved(approved) => Ok(handle
+            .lock()
+            .await
+            .register_approved_target_session(approved)
+            .await?),
         PolledGate::Pending => Err(gate_response(
             &target_name,
             "Waiting for approval",

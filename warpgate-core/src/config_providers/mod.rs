@@ -215,6 +215,10 @@ impl<O> TargetAuthorization<O> {
         &self.target
     }
 
+    pub fn specific_target(&self) -> &SpecificTarget<O> {
+        &self.target
+    }
+
     pub const fn options(&self) -> &O {
         self.target.options()
     }

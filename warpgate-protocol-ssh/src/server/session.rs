@@ -35,8 +35,8 @@ use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
 use warpgate_core::{
-    ApprovedTarget, AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization,
-    TargetSessionStart, TicketRefund, TicketSpend, WarpgateServerHandle,
+    AdmittedTarget, ApprovedTarget, AuthorizedIdentity, ConfigProvider, Services,
+    TargetAuthorization, TargetSessionStart, TicketRefund, TicketSpend, WarpgateServerHandle,
     authorize_and_spend_ticket, authorize_for_target, authorize_for_target_by_name,
 };
 use warpgate_db_entities::Parameters;
@@ -80,7 +80,7 @@ enum TargetSelection {
     PendingApproval(TargetAuthorization<TargetSSHOptions>),
     /// Carries the capability minted for the target session, so being in this
     /// state means every pre-dial gate ran for exactly the host to be dialed.
-    Found(ApprovedTarget<TargetSSHOptions>),
+    Found(AdmittedTarget<TargetSSHOptions>),
     Connected,
 }
 
@@ -665,7 +665,7 @@ impl ServerSession {
             return Ok(());
         }
 
-        let target = match std::mem::replace(&mut self.target, TargetSelection::None) {
+        let admitted = match std::mem::replace(&mut self.target, TargetSelection::None) {
             TargetSelection::None => {
                 anyhow::bail!("Invalid session state (target not set)")
             }
@@ -686,14 +686,14 @@ impl ServerSession {
                 self.spawn_admin_approval_gate(authorization);
                 return Ok(());
             }
-            TargetSelection::Found(approved) => approved,
+            TargetSelection::Found(admitted) => admitted,
             TargetSelection::Connected => {
                 self.target = TargetSelection::Connected;
                 return Ok(());
             }
         };
 
-        self.connect_remote(target).await?;
+        self.connect_remote(admitted).await?;
         self.target = TargetSelection::Connected;
         Ok(())
     }
@@ -765,8 +765,8 @@ impl ServerSession {
     }
 
     /// The dial consumes the capability minted when the target session started.
-    async fn connect_remote(&mut self, approved: ApprovedTarget<TargetSSHOptions>) -> Result<()> {
-        let ssh_chain = resolve_approved_ssh_chain(&self.services, approved).await?;
+    async fn connect_remote(&mut self, admitted: AdmittedTarget<TargetSSHOptions>) -> Result<()> {
+        let ssh_chain = resolve_approved_ssh_chain(&self.services, admitted).await?;
 
         let visual_chain = self.make_visual_connection_chain(&ssh_chain[..]).await?;
         self.rc_state = RCState::Connecting;
@@ -853,10 +853,8 @@ impl ServerSession {
                     .start_target_session(authorization)
                     .await?;
                 match started {
-                    TargetSessionStart::Started((target_session_id, approved)) => {
-                        self.target_session_id = Some(target_session_id);
-                        self.target = TargetSelection::Found(approved);
-                        self.start_recordings_for_pty_channels().await;
+                    TargetSessionStart::Started(admitted) => {
+                        self.stamp_approved_target(admitted).await;
                     }
                     TargetSessionStart::NeedsApproval(authorization) => {
                         self.target = TargetSelection::PendingApproval(authorization);
@@ -959,15 +957,14 @@ impl ServerSession {
                         self.disconnect_server().await;
                         return Ok(());
                     };
-                    let target_session_id = self
+                    let admitted = self
                         .server_handle
                         .lock()
                         .await
-                        .register_approved_target_session(&approved)
+                        .register_approved_target_session(approved)
                         .await?;
 
-                    self.stamp_approved_target(approved, target_session_id)
-                        .await;
+                    self.stamp_approved_target(admitted).await;
                     self.maybe_connect_remote().await?;
                 }
                 Event::ServerChannelOpenResult(id, result) => {
@@ -1000,13 +997,9 @@ impl ServerSession {
         .boxed()
     }
 
-    async fn stamp_approved_target(
-        &mut self,
-        approved: ApprovedTarget<TargetSSHOptions>,
-        target_session_id: TargetSessionId,
-    ) {
-        self.target_session_id = Some(target_session_id);
-        self.target = TargetSelection::Found(approved);
+    async fn stamp_approved_target(&mut self, admitted: AdmittedTarget<TargetSSHOptions>) {
+        self.target_session_id = Some(admitted.id());
+        self.target = TargetSelection::Found(admitted);
         self.start_recordings_for_pty_channels().await;
     }
 
@@ -2596,9 +2589,8 @@ impl ServerSession {
             .start_target_session(authorization)
             .await?;
         match started {
-            TargetSessionStart::Started((target_session_id, approved)) => {
-                self.stamp_approved_target(approved, target_session_id)
-                    .await;
+            TargetSessionStart::Started(admitted) => {
+                self.stamp_approved_target(admitted).await;
             }
             // The gate can't hold the auth exchange; it runs off the event
             // loop once the client opens its channels.

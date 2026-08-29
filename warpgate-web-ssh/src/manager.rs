@@ -74,7 +74,7 @@ impl WebSshClientManager {
         .await
         .context("registering webSSH session")?;
 
-        let (target_session_id, approved) =
+        let admitted =
             gate_web_client_session(services, &server_handle, authorization, remote_address)
                 .await?;
 
@@ -87,7 +87,7 @@ impl WebSshClientManager {
             user_id,
             target_name.clone(),
             target_kind,
-            target_session_id,
+            admitted.id(),
             server_handle,
             rc_handles.command_tx.clone(),
             rc_handles.abort_tx.clone(),
@@ -109,7 +109,7 @@ impl WebSshClientManager {
 
         self.insert(session.clone()).await;
 
-        let ssh_chain = resolve_approved_ssh_chain(services, approved)
+        let ssh_chain = resolve_approved_ssh_chain(services, admitted)
             .await?
             .into_iter()
             .map(|x| x.ssh_options)

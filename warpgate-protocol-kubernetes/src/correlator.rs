@@ -5,13 +5,11 @@ use std::time::{Duration, Instant};
 use poem::Request;
 use tokio::sync::Mutex;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberedBy};
-use warpgate_common::{
-    TargetKubernetesOptions, TargetSessionId, User, UserSessionId, WarpgateError,
-};
+use warpgate_common::{TargetKubernetesOptions, User, UserSessionId, WarpgateError};
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::approvals::{GatedConnection, TicketStake, admit_target_session};
 use warpgate_core::{
-    ApprovedTarget, Services, State, TargetAuthorization, UserSessionStateInit,
+    AdmittedTarget, Services, State, TargetAuthorization, UserSessionStateInit,
     WarpgateServerHandle,
 };
 
@@ -29,11 +27,9 @@ type CorrelationKey = (String, String, Option<String>); // (username, target_nam
 /// starts afterwards is a new question.
 const REFUSAL_MEMORY: Duration = Duration::from_secs(5);
 
-#[derive(Clone)]
-pub struct AdmittedSession {
-    pub target_session_id: TargetSessionId,
-    pub approved: Arc<ApprovedTarget<TargetKubernetesOptions>>,
-}
+/// One admitted Kubernetes session, shared by every request that joins it: a
+/// `kubectl` command's fan-out all connects through the one admission.
+pub type AdmittedSession = Arc<AdmittedTarget<TargetKubernetesOptions>>;
 
 /// The outcome of the request that opened one correlated session. Requests that
 /// join a session in flight wait on the mutex, so a `kubectl` command's fan-out
@@ -141,10 +137,7 @@ pub async fn correlated_authorization(
             Ok(resolved) => {
                 let admitted =
                     match admit_kubernetes_session(request, services, &handle, resolved).await {
-                        Ok((target_session_id, approved)) => AdmittedSession {
-                            target_session_id,
-                            approved: Arc::new(approved),
-                        },
+                        Ok(admitted) => Arc::new(admitted),
                         Err(error) => {
                             *authorization = Authorization::Denied;
                             {
@@ -192,7 +185,7 @@ async fn admit_kubernetes_session(
     services: &Services,
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     resolved: TargetAuthorization<TargetKubernetesOptions>,
-) -> Result<(TargetSessionId, ApprovedTarget<TargetKubernetesOptions>), WarpgateError> {
+) -> Result<AdmittedTarget<TargetKubernetesOptions>, WarpgateError> {
     admit_target_session(
         services,
         handle,

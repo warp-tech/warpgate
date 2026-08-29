@@ -20,10 +20,10 @@ use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 use warpgate_common::auth::RememberedBy;
-use warpgate_common::{TargetSessionId, UserSessionId, WarpgateError};
+use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_core::approvals::{GatedConnection, TicketStake, admit_target_session};
 use warpgate_core::{
-    ApprovedTarget, Services, SessionHandle, TargetAuthorization, WarpgateServerHandle,
+    AdmittedTarget, Services, SessionHandle, TargetAuthorization, WarpgateServerHandle,
 };
 use warpgate_db_entities::Target::TargetKind;
 
@@ -216,7 +216,7 @@ pub async fn gate_web_client_session<O: Send + Sync>(
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,
     remote_address: Option<SocketAddr>,
-) -> Result<(TargetSessionId, ApprovedTarget<O>), WarpgateError> {
+) -> Result<AdmittedTarget<O>, WarpgateError> {
     server_handle.lock().await.mark_provisional();
 
     let admitted = admit_target_session(

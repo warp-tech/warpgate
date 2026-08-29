@@ -6,7 +6,9 @@ use tokio::sync::Mutex;
 use tracing::{Instrument, info_span};
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{NodeId, Protocol, Target, TargetSessionId, UserSessionId, WarpgateError};
+use warpgate_common::{
+    NodeId, Protocol, Target, TargetOptionsVariant, TargetSessionId, UserSessionId, WarpgateError,
+};
 use warpgate_db_entities::TargetSession::TargetSessionOpenOutcome;
 use warpgate_db_entities::{TargetSession, UserSession};
 
@@ -142,10 +144,10 @@ impl WarpgateServerHandle {
         }
 
         let id = self.open_target_session_row(&authorization).await?;
-        Ok(TargetSessionStart::Started((
+        Ok(TargetSessionStart::Started(AdmittedTarget {
             id,
-            ApprovedTarget::new(authorization),
-        )))
+            approved: ApprovedTarget::new(authorization),
+        }))
     }
 
     /// Starts a target session for a proof the administrator gate minted.
@@ -153,12 +155,16 @@ impl WarpgateServerHandle {
     /// The gate is the only other source of [`ApprovedTarget`], so between this
     /// and [`Self::start_target_session`] every admission — gated or not — goes
     /// through the same row and the same audit event.
+    ///
+    /// Takes the proof by value and hands it back inside the [`AdmittedTarget`]:
+    /// the row and the proof it was opened from are only ever held together.
     pub async fn register_approved_target_session<O>(
         &self,
-        approved: &ApprovedTarget<O>,
-    ) -> Result<TargetSessionId, WarpgateError> {
-        self.stamp_target_session_identity(approved).await?;
-        self.open_target_session_row(approved).await
+        approved: ApprovedTarget<O>,
+    ) -> Result<AdmittedTarget<O>, WarpgateError> {
+        self.stamp_target_session_identity(&approved).await?;
+        let id = self.open_target_session_row(&approved).await?;
+        Ok(AdmittedTarget { id, approved })
     }
 
     async fn stamp_target_session_identity<O>(
@@ -258,8 +264,53 @@ impl WarpgateServerHandle {
 /// [`Services::require_admin_approval`]: crate::Services::require_admin_approval
 /// [`Services::poll_admin_approval`]: crate::Services::poll_admin_approval
 pub enum TargetSessionStart<O> {
-    Started((TargetSessionId, ApprovedTarget<O>)),
+    Started(AdmittedTarget<O>),
     NeedsApproval(TargetAuthorization<O>),
+}
+
+/// An admitted target session: the open access row, and the proof it was opened
+/// from.
+///
+/// The two are produced together and every consumer wants both — the id to
+/// record against, the proof to connect with — so they travel as one rather
+/// than as a pair a caller could mismatch. There is no way to hold the id
+/// without the proof that earned it, which is what makes an admission
+/// unforgeable rather than merely conventional.
+///
+/// Derefs to the proof, so reading the target or the user reads through.
+pub struct AdmittedTarget<O = warpgate_common::TargetOptions> {
+    id: TargetSessionId,
+    approved: ApprovedTarget<O>,
+}
+
+impl<O> AdmittedTarget<O> {
+    /// The row this admission opened, to record sessions and recordings against.
+    pub const fn id(&self) -> TargetSessionId {
+        self.id
+    }
+
+    /// Hands the proof to whatever makes the connection it authorises, for a
+    /// consumer that has no use for the row id.
+    pub fn into_approved(self) -> ApprovedTarget<O> {
+        self.approved
+    }
+}
+
+impl AdmittedTarget {
+    pub fn narrow<O: TargetOptionsVariant>(self) -> Result<AdmittedTarget<O>, WarpgateError> {
+        Ok(AdmittedTarget {
+            id: self.id,
+            approved: self.approved.narrow()?,
+        })
+    }
+}
+
+impl<O> std::ops::Deref for AdmittedTarget<O> {
+    type Target = ApprovedTarget<O>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.approved
+    }
 }
 
 #[cfg(test)]
@@ -269,7 +320,7 @@ impl<O> TargetSessionStart<O> {
     /// Deliberately test-only: in production every caller answers
     /// `NeedsApproval` by holding the connection at the gate, and a shorthand
     /// for turning it into an error is a shorthand for skipping the gate.
-    pub(crate) fn started(self) -> (TargetSessionId, ApprovedTarget<O>) {
+    pub(crate) fn started(self) -> AdmittedTarget<O> {
         match self {
             Self::Started(started) => started,
             Self::NeedsApproval(_) => panic!("the test target should not require approval"),

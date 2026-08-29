@@ -33,7 +33,7 @@ use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    ApprovedTarget, AuthorizedIdentity, Services, TargetAuthorization, TicketRefund, TicketSpend,
+    AdmittedTarget, AuthorizedIdentity, Services, TargetAuthorization, TicketRefund, TicketSpend,
     WarpgateServerHandle, authorize_and_spend_ticket, authorize_for_target_by_name,
 };
 use warpgate_desktop_ui::AuthPrompt;
@@ -252,7 +252,7 @@ pub async fn admit_desktop_session<O: Send + Sync>(
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,
     remote_ip: Option<IpAddr>,
-) -> Result<(TargetSessionId, ApprovedTarget<O>), WarpgateError> {
+) -> Result<AdmittedTarget<O>, WarpgateError> {
     // The auth state is keyed by the session id. A ticket-authorised session has none, and
     // so no credential fingerprints to key a remembered approval on.
     let session_id = server_handle.lock().await.user_session_id();

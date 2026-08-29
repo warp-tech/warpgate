@@ -6,10 +6,11 @@ use tokio::sync::Mutex;
 use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{ApprovalKind, RememberedBy};
-use warpgate_common::{TargetSessionId, UserSessionId, WarpgateError};
+use warpgate_common::{UserSessionId, WarpgateError};
 
 use super::*;
 use crate::config_providers::{ApprovedTarget, TargetAuthorization, TicketRefund};
+use crate::protocols::AdmittedTarget;
 use crate::services::Services;
 use crate::{TargetSessionStart, WarpgateServerHandle};
 
@@ -214,7 +215,7 @@ pub async fn admit_target_session<O: Send + Sync>(
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,
     connection: GatedConnection,
-) -> Result<(TargetSessionId, ApprovedTarget<O>), WarpgateError> {
+) -> Result<AdmittedTarget<O>, WarpgateError> {
     let started = handle
         .lock()
         .await
@@ -250,12 +251,11 @@ pub async fn admit_target_session<O: Send + Sync>(
         return Err(WarpgateError::SessionNotApproved);
     };
 
-    let target_session_id = handle
+    handle
         .lock()
         .await
-        .register_approved_target_session(&approved)
-        .await?;
-    Ok((target_session_id, approved))
+        .register_approved_target_session(approved)
+        .await
 }
 
 impl Services {

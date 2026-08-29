@@ -502,7 +502,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (target_session_id, _approved) = parent
+        let target_session_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -512,7 +512,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .started();
+            .started()
+            .id();
 
         // The only reference the connection would have held.
         drop(parent);
@@ -563,7 +564,7 @@ mod tests {
         let other_target = target();
         let target = target();
 
-        let (first_id, _) = parent
+        let first_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -573,8 +574,9 @@ mod tests {
             ))
             .await
             .unwrap()
-            .started();
-        let (second_id, _) = parent
+            .started()
+            .id();
+        let second_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -584,7 +586,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .started();
+            .started()
+            .id();
         assert_eq!(first_id, second_id);
         assert_eq!(
             TargetSession::Entity::find()
@@ -595,7 +598,7 @@ mod tests {
             1
         );
 
-        let (other_id, _) = parent
+        let other_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -605,7 +608,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .started();
+            .started()
+            .id();
         assert_ne!(first_id, other_id);
         assert_eq!(
             TargetSession::Entity::find()
@@ -645,7 +649,7 @@ mod tests {
         let parent_id: UserSessionId = parent.lock().await.user_session_id();
         let target = target();
 
-        let (first_id, _) = parent
+        let first_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -655,7 +659,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .started();
+            .started()
+            .id();
 
         let adopted = State::adopt_user_session(
             &state,
@@ -667,7 +672,7 @@ mod tests {
             },
         )
         .await;
-        let (adopted_id, _) = adopted
+        let adopted_id = adopted
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -677,7 +682,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .started();
+            .started()
+            .id();
 
         assert_eq!(first_id, adopted_id);
         assert_eq!(
@@ -756,7 +762,7 @@ mod tests {
                 .await
                 .unwrap()
                 .started()
-                .0
+                .id()
         };
         let second = async {
             second_parent
@@ -766,7 +772,7 @@ mod tests {
                 .await
                 .unwrap()
                 .started()
-                .0
+                .id()
         };
         let (first_id, second_id) = tokio::join!(first, second);
 
@@ -877,7 +883,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        let (target_session_id, approved) = parent
+        let admitted = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -888,6 +894,10 @@ mod tests {
             .await
             .unwrap()
             .started();
+
+        let target_session_id = admitted.id();
+        let approved = admitted.into_approved();
+
         assert_eq!(approved.target(), &target);
         let row = TargetSession::Entity::find_by_id(target_session_id)
             .one(&db)
@@ -899,7 +909,7 @@ mod tests {
         // parent's UUID.
         assert_ne!(target_session_id.0, parent_id.0);
 
-        let (again_id, _) = parent
+        let again_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -909,7 +919,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .started();
+            .started()
+            .id();
         assert_eq!(again_id, target_session_id);
     }
 }

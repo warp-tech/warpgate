@@ -79,18 +79,19 @@ impl WebDesktopClientManager {
         .await
         .context("registering web-desktop session")?;
 
-        let (target_session_id, approved) =
+        let admitted =
             gate_web_client_session(services, &server_handle, authorization, remote_address)
                 .await?;
 
         let session_id = server_handle.lock().await.user_session_id();
+        let target_session_id = admitted.id();
 
         // Each backend exposes the same (event_rx, input_tx, abort_tx) handle shape
         // over the shared DesktopEvent/DesktopInput types. The trailing flag asks the
         // event loop to re-encode raw tiles as JPEG for the browser.
         let (event_rx, input_tx, abort_tx, encode_jpeg) = match target_kind {
             TargetKind::Vnc => {
-                let h = warpgate_protocol_vnc::connect(approved.narrow()?)?;
+                let h = warpgate_protocol_vnc::connect(admitted.narrow()?)?;
                 // Tight already picks JPEG for photographic tiles and keeps text and UI
                 // lossless, so re-encoding what it deliberately sent as raw would only
                 // degrade it.
@@ -100,7 +101,7 @@ impl WebDesktopClientManager {
                 // Connect at the viewer's measured size when known, so the desktop fits the
                 // browser from the first frame; the DVC resize path handles later changes.
                 let h = warpgate_protocol_rdp::connect(
-                    approved.narrow()?,
+                    admitted.narrow()?,
                     size.unwrap_or(warpgate_protocol_rdp::DEFAULT_SIZE),
                 )?;
                 // The RDP helper only ever emits raw RGBA.

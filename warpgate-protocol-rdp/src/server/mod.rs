@@ -533,7 +533,7 @@ async fn dial_if_pending(
             Some(remote_address.ip()),
         )
         .await;
-        let (target_session_id, approved) = match admitted {
+        let admitted = match admitted {
             Ok(admitted) => admitted,
             Err(WarpgateError::SessionNotApproved) => {
                 warn!("Session was not approved by an administrator");
@@ -542,9 +542,7 @@ async fn dial_if_pending(
             }
             Err(error) => return Err(error.into()),
         };
-        *backend = Some(
-            connect_backend(services, server_in_tx, target_session_id, approved, screen).await?,
-        );
+        *backend = Some(connect_backend(services, server_in_tx, admitted, screen).await?);
     }
     Ok(true)
 }

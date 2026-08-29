@@ -73,7 +73,7 @@ pub async fn catchall_endpoint(
         .await
         .start_target_session(authorization)
         .await;
-    let (target_session_id, approved) = match started {
+    let admitted = match started {
         Err(WarpgateError::UserSessionEnded) => {
             // got revoked in the meantime
             session.purge();
@@ -99,10 +99,10 @@ pub async fn catchall_endpoint(
         .map(|keepalive| keepalive.guard());
 
     // `session` field is UserSession, not this
-    let span = info_span!("", target_session=%target_session_id, target=%approved.target().name);
+    let span = info_span!("", target_session=%admitted.id(), target=%admitted.target().name);
 
     Ok(match ws {
-        Some(ws) => proxy_websocket_request(req, ws, &ctx, approved, close_rx)
+        Some(ws) => proxy_websocket_request(req, ws, &ctx, admitted, close_rx)
             .instrument(span)
             .await?
             .into_response(),
@@ -111,7 +111,7 @@ pub async fn catchall_endpoint(
             *ctx,
             body,
             *http_client_cache,
-            approved,
+            admitted,
             close_rx,
             keepalive_guard,
         )

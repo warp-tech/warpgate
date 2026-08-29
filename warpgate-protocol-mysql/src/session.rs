@@ -14,7 +14,7 @@ use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Protocol, Secret, TargetMySqlOptions, UserSessionId};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, WarpgateServerHandle,
+    AdmittedTarget, ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, WarpgateServerHandle,
     run_db_authorization,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
@@ -267,19 +267,20 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             return Ok(());
         };
 
-        self.server_handle
+        let admitted = self
+            .server_handle
             .lock()
             .await
-            .register_approved_target_session(&approved)
+            .register_approved_target_session(approved)
             .await?;
 
-        self.run_authorized_inner(handshake, approved).await
+        self.run_authorized_inner(handshake, admitted).await
     }
 
     async fn run_authorized_inner(
         mut self,
         handshake: HandshakeResponse,
-        approved: ApprovedTarget<TargetMySqlOptions>,
+        admitted: AdmittedTarget<TargetMySqlOptions>,
     ) -> Result<(), MySqlError> {
         self.database = handshake.database.clone();
         self.username = Some(handshake.username);
@@ -288,7 +289,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         }
 
         let mut client = match MySqlClient::connect(
-            approved,
+            admitted,
             ConnectionOptions {
                 collation: handshake.collation,
                 database: handshake.database,

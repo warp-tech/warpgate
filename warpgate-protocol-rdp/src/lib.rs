@@ -18,7 +18,7 @@ use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender, channel, unbounded_ch
 use tracing::{Instrument, error, info_span};
 use warpgate_common::{ListenEndpoint, Protocol, TargetRdpOptions, WarpgateError};
 use warpgate_core::{
-    ApprovedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopState,
+    AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopState,
     ProtocolServer, Services,
 };
 use warpgate_tls::TlsCertificateAndPrivateKey;
@@ -80,11 +80,10 @@ pub struct RdpClientHandles {
 
 /// Start an RDP client for a target and bridge it to normalised desktop streams.
 pub fn connect(
-    approved: ApprovedTarget<TargetRdpOptions>,
+    admitted: AdmittedTarget<TargetRdpOptions>,
     size: (u16, u16),
 ) -> Result<RdpClientHandles, WarpgateError> {
-    let (_, target) = approved.into_parts();
-    let (_, options) = target.into_parts();
+    let options = admitted.specific_target().options().clone();
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
     let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);
     let (abort_tx, abort_rx) = unbounded_channel::<()>();
