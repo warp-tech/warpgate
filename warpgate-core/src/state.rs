@@ -11,7 +11,7 @@ use tracing::error;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{NodeId, Protocol, Target, UserSessionId, WarpgateError};
-use warpgate_db_entities::{TargetSession, UserSession};
+use warpgate_db_entities::{SessionApprovalRequest, TargetSession, UserSession};
 
 use crate::approvals::SessionGates;
 use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
@@ -253,7 +253,8 @@ impl State {
     /// The requests are closed, not removed: they stay as the record of what
     /// was asked, and are pruned with the rest of the audit trail.
     async fn drop_session_approvals(&self, id: UserSessionId) {
-        if let Err(error) = crate::approvals::abandon_requests_for_session(&self.db, id).await {
+        if let Err(error) = SessionApprovalRequest::abandon_requests_for_session(&self.db, id).await
+        {
             error!(%error, %id, "Could not close the session's approval requests");
         }
         self.admin_approval_gates.forget_session(&id).await;

@@ -212,14 +212,11 @@ impl WarpgateServerHandle {
         Ok(target_session.id)
     }
 
-    /// Whether the target's administrator gate stands between this session and
-    /// the target. An open target-session row is the durable record of a prior
-    /// admission — the gate was already passed for it on some node — so its
-    /// presence answers no without re-asking.
     async fn needs_target_approval(&self, target: &Target) -> Result<bool, WarpgateError> {
         if !target.require_approval {
             return Ok(false);
         }
+        // skip the check if there is already a matching open target session in this user session
         Ok(!TargetSession::is_open(&self.db, self.user_session_id, target.id).await?)
     }
 

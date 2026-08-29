@@ -96,12 +96,9 @@ async fn hold_for_admin_approval<T: DbAuthTransport>(
     auth_ok: &mut Option<AuthOkPermit>,
 ) -> Result<GateOutcome, T::Error> {
     services
-        .require_admin_approval(
-            authorization,
-            context,
-            std::future::pending(),
-            || async move { transport.notify_awaiting_admin_approval(auth_ok).await },
-        )
+        .require_admin_approval(authorization, context, || async move {
+            transport.notify_awaiting_admin_approval(auth_ok).await
+        })
         .await
 }
 

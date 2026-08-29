@@ -1,0 +1,999 @@
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
+use sea_orm::ActiveValue::Set;
+use sea_orm::{Database, DatabaseConnection, EntityTrait, QueryFilter};
+use time::OffsetDateTime;
+use uuid::Uuid;
+use warpgate_common::auth::{
+    ApprovalKind, ApprovalScope, AuthCredentialFingerprint, AuthStateUserInfo,
+    CredentialDigestSalt, RememberedBy, WebApprovalMatchKey,
+};
+use warpgate_common::{NodeId, Protocol, UserSessionId};
+use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+use warpgate_db_entities::SessionApprovalRequest;
+use warpgate_db_entities::SessionApprovalRequest::{
+    DecidedRow, close_request, find_question, find_request, mark_consumed, one_request,
+    upsert_request,
+};
+use warpgate_db_migrations::migrate_database;
+
+use super::*;
+
+/// The tests share one salt: a digest is only ever compared against another
+/// digest from the same installation, so the value is irrelevant — that it
+/// is the *same* one on both sides is the whole point.
+fn test_salt() -> CredentialDigestSalt {
+    #[allow(clippy::expect_used)]
+    CredentialDigestSalt::from_stored("test-salt").expect("non-empty")
+}
+
+async fn migrated_db() -> DatabaseConnection {
+    set_config_migration_values(ConfigMigrationValues::default());
+    let db = Database::connect("sqlite::memory:").await.unwrap();
+    migrate_database(&db).await.unwrap();
+    db
+}
+
+async fn advertise_row(
+    db: &DatabaseConnection,
+    session_id: UserSessionId,
+    subject: &ApprovalSubject,
+) {
+    // The administrator half goes through the real advertiser, so the reuse
+    // policy under test is the one production passes.
+    if matches!(subject.kind, ApprovalKind::Admin) {
+        let mut subject = subject.clone();
+        subject.session_id = session_id;
+        super::wait::advertise_admin_request(db, NodeId(Uuid::new_v4()), &test_salt(), &subject)
+            .await
+            .unwrap();
+        return;
+    }
+    upsert_request(
+        db,
+        SessionApprovalRequest::ActiveModel {
+            session_id: Set(session_id),
+            kind: Set(subject.kind.into()),
+            node_id: Set(NodeId(Uuid::new_v4())),
+            protocol: Set(subject.protocol.to_string()),
+            username: Set(subject.user_info.username.clone()),
+            user_id: Set(subject.user_info.id),
+            target: Set(subject.target_name.clone()),
+            remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
+            identification_string: Set(None),
+            credentials_digest: Set(subject.credentials_digest(&test_salt())),
+            consumes_ticket_id: Set(subject.consumes_ticket_id),
+            started: Set(OffsetDateTime::now_utc()),
+            status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
+            scope: Set(None),
+            resolved_by_username: Set(None),
+            resolved_by_user_id: Set(None),
+            resolved_at: Set(None),
+            consumed_at: Set(None),
+        },
+        DecidedRow::Reopen,
+    )
+    .await
+    .unwrap();
+}
+
+fn plain_subject(target: &str) -> ApprovalSubject {
+    ApprovalSubject {
+        kind: ApprovalKind::Admin,
+        session_id: UserSessionId(Uuid::new_v4()),
+        user_info: AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "someone".into(),
+        },
+        protocol: Protocol::Ssh,
+        target_name: target.into(),
+        remote_ip: None,
+        credentials: RememberedBy::Nothing,
+        consumes_ticket_id: None,
+    }
+}
+
+async fn pending_row(db: &DatabaseConnection, session_id: UserSessionId, target: &str) {
+    advertise_row(db, session_id, &plain_subject(target)).await;
+}
+
+fn admin_actor() -> ApprovalActor {
+    ApprovalActor {
+        username: "admin".into(),
+        user_id: None,
+    }
+}
+
+async fn approve(db: &DatabaseConnection, session_id: UserSessionId, target: &str) -> bool {
+    approve_with_scope(db, session_id, target, ApprovalScope::Once).await
+}
+
+async fn approve_with_scope(
+    db: &DatabaseConnection,
+    session_id: UserSessionId,
+    target: &str,
+    scope: ApprovalScope,
+) -> bool {
+    record_decision(
+        db,
+        session_id,
+        ApprovalKind::Admin,
+        target,
+        ApprovalDecision::Approved(scope),
+        &admin_actor(),
+    )
+    .await
+    .unwrap()
+}
+
+async fn status_of(
+    db: &DatabaseConnection,
+    session_id: UserSessionId,
+    target: &str,
+) -> SessionApprovalRequest::ApprovalRequestStatus {
+    find_question(db, session_id, ApprovalKind::Admin, target)
+        .await
+        .unwrap()
+        .expect("the request should still exist")
+        .status
+}
+
+/// Moves a request's start time into the past, so the reaper sees it as
+/// older than the window anything could still be waiting for.
+async fn backdate(db: &DatabaseConnection, session_id: UserSessionId, by: Duration) {
+    SessionApprovalRequest::Entity::update_many()
+        .col_expr(
+            SessionApprovalRequest::Column::Started,
+            (OffsetDateTime::now_utc() - time::Duration::seconds(by.as_secs() as i64)).into(),
+        )
+        .filter(one_request(session_id, ApprovalKind::Admin))
+        .exec(db)
+        .await
+        .unwrap();
+}
+
+/// Nothing else ends a request whose owning node died mid-hold: the guard's
+/// `Drop` never ran, and no waiter is left to time out. Without the reaper
+/// the row sits in the inbox forever, offering an administrator a session
+/// that no longer exists.
+#[tokio::test]
+async fn reaping_ends_requests_nobody_can_still_be_waiting_on() {
+    use SessionApprovalRequest::ApprovalRequestStatus as Status;
+
+    let db = migrated_db().await;
+    let stale = UserSessionId(Uuid::new_v4());
+    let recent = UserSessionId(Uuid::new_v4());
+    pending_row(&db, stale, "a-target").await;
+    pending_row(&db, recent, "a-target").await;
+    // Past any window: the lifetime is the approval timeout, never shorter
+    // than the auth-state timeout.
+    backdate(&db, stale, Duration::from_secs(24 * 3600)).await;
+
+    reap_stale(&db).await.unwrap();
+
+    assert_eq!(status_of(&db, stale, "a-target").await, Status::Abandoned);
+    assert_eq!(
+        status_of(&db, recent, "a-target").await,
+        Status::Pending,
+        "a request still inside its window is still a live question",
+    );
+}
+
+/// The reaper runs on a timer against every row in the table, so it meets
+/// answered ones too. An answer outranks the reaper: the owning node may
+/// not have picked it up yet, and overwriting it would deny a session an
+/// administrator approved.
+#[tokio::test]
+async fn reaping_never_erases_an_answer() {
+    use SessionApprovalRequest::ApprovalRequestStatus as Status;
+
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    pending_row(&db, session_id, "a-target").await;
+    assert!(approve(&db, session_id, "a-target").await);
+    backdate(&db, session_id, Duration::from_secs(24 * 3600)).await;
+
+    reap_stale(&db).await.unwrap();
+
+    assert_eq!(
+        status_of(&db, session_id, "a-target").await,
+        Status::Approved
+    );
+}
+
+/// A request/response protocol re-enters its gate on every request, so the
+/// same session re-advertises constantly. If that overwrote the decision
+/// columns it would erase an administrator's answer, and the session would
+/// wait forever while the inbox kept offering it again.
+#[tokio::test]
+async fn re_advertising_keeps_a_recorded_decision() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    pending_row(&db, session_id, "a-target").await;
+    assert!(approve(&db, session_id, "a-target").await);
+
+    pending_row(&db, session_id, "a-target").await;
+
+    let row = find_request(&db, session_id, ApprovalKind::Admin)
+        .await
+        .unwrap()
+        .expect("the request should still exist");
+    assert!(
+        matches!(row_state(&row).unwrap(), RowState::Decided(..)),
+        "re-advertising must not erase the recorded decision",
+    );
+}
+
+/// The identity columns are what an approver decided about — and what the
+/// grace-period bypass later matches a connection against. Re-advertising
+/// while an answer stands must therefore leave them exactly as they were:
+/// rewriting them would re-key a standing grant to credentials and an
+/// address nobody approved, and corrupt the record of what was asked.
+#[tokio::test]
+async fn re_advertising_does_not_rewrite_what_was_approved() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+
+    let mut asked = plain_subject("a-target");
+    asked.session_id = session_id;
+    asked.remote_ip = Some("10.0.0.1".parse().unwrap());
+    advertise_row(&db, session_id, &asked).await;
+    assert!(approve(&db, session_id, "a-target").await);
+
+    let approved = find_question(&db, session_id, ApprovalKind::Admin, "a-target")
+        .await
+        .unwrap()
+        .expect("the request should still exist");
+
+    // The same question asked again, by a connection presenting different
+    // credentials from a different address, before the owner picks the
+    // answer up.
+    let mut asked_again = asked.clone();
+    asked_again.remote_ip = Some("10.0.0.2".parse().unwrap());
+    asked_again.credentials = password_credentials([7; 32]);
+    advertise_row(&db, session_id, &asked_again).await;
+
+    let after = find_question(&db, session_id, ApprovalKind::Admin, "a-target")
+        .await
+        .unwrap()
+        .expect("the request should still exist");
+    assert_eq!(
+        after.remote_address, approved.remote_address,
+        "an answered request must keep the address it was approved for",
+    );
+    assert_eq!(
+        after.credentials_digest, approved.credentials_digest,
+        "an answered request must keep the credentials it was approved for",
+    );
+    assert_eq!(after.node_id, approved.node_id);
+    assert_eq!(after.started, approved.started);
+}
+
+/// Rows outlive their gate now, so a session that gates again — a new
+/// target, or a retry after a timeout — would otherwise read the previous
+/// gate's answer as this one's and walk straight through.
+#[tokio::test]
+async fn re_advertising_reopens_a_finished_request() {
+    let db = migrated_db().await;
+
+    for finished in [
+        SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+        SessionApprovalRequest::ApprovalRequestStatus::Abandoned,
+    ] {
+        let session_id = UserSessionId(Uuid::new_v4());
+        pending_row(&db, session_id, "a-target").await;
+        close_request(&db, session_id, ApprovalKind::Admin, "a-target", finished)
+            .await
+            .unwrap();
+
+        pending_row(&db, session_id, "a-target").await;
+
+        assert_eq!(
+            status_of(&db, session_id, "a-target").await,
+            SessionApprovalRequest::ApprovalRequestStatus::Pending,
+            "a request left {finished:?} must be reopened, not reused",
+        );
+    }
+}
+
+/// A delivered administrator decision stands. `(user_session_id, target_id)` is
+/// unique and a target session only ends with its parent, so an admitted
+/// session keeps its access row and cannot reach the gate again — and if it
+/// somehow did, the answer already on the row is the right one. Reopening would
+/// put a settled question to an administrator a second time and destroy the
+/// record of the first answer in the process.
+#[tokio::test]
+async fn re_advertising_reuses_a_consumed_admin_decision() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    pending_row(&db, session_id, "a-target").await;
+    assert!(approve_with_scope(&db, session_id, "a-target", ApprovalScope::Target).await);
+    mark_consumed(&db, one_request(session_id, ApprovalKind::Admin))
+        .await
+        .unwrap();
+
+    pending_row(&db, session_id, "a-target").await;
+
+    let row = find_request(&db, session_id, ApprovalKind::Admin)
+        .await
+        .unwrap()
+        .expect("the request should still exist");
+    assert_eq!(
+        row.status,
+        SessionApprovalRequest::ApprovalRequestStatus::Approved,
+        "the decision must stand, to be reused rather than re-asked",
+    );
+    assert_eq!(row.scope, Some(ApprovalScope::Target));
+    assert_eq!(row.resolved_by_username.as_deref(), Some("admin"));
+    assert!(
+        row.consumed_at.is_some(),
+        "and the record of it having been delivered",
+    );
+}
+
+/// Self approval is the other way round: the question is whether a login is
+/// really the user, a retried login reuses the session id it failed under, and
+/// the approval the last attempt was given must not admit the next one.
+#[tokio::test]
+async fn re_advertising_reopens_a_consumed_user_approval() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    let mut subject = plain_subject("");
+    subject.kind = ApprovalKind::User;
+    advertise_row(&db, session_id, &subject).await;
+    assert!(
+        record_decision(
+            &db,
+            session_id,
+            ApprovalKind::User,
+            "",
+            ApprovalDecision::Approved(ApprovalScope::Once),
+            &admin_actor(),
+        )
+        .await
+        .unwrap()
+    );
+    mark_consumed(&db, one_request(session_id, ApprovalKind::User))
+        .await
+        .unwrap();
+
+    advertise_row(&db, session_id, &subject).await;
+
+    let row = find_request(&db, session_id, ApprovalKind::User)
+        .await
+        .unwrap()
+        .expect("the request should still exist");
+    assert_eq!(
+        row.status,
+        SessionApprovalRequest::ApprovalRequestStatus::Pending,
+        "a fresh login must be asked again",
+    );
+    assert!(row.consumed_at.is_none(), "the stamp must be cleared too");
+    assert!(row.scope.is_none(), "the previous answer must be cleared");
+    assert!(
+        row.resolved_by_username.is_none(),
+        "the previous resolver must be cleared",
+    );
+}
+
+/// A decision names the question it answers. A request reopened for a
+/// different target between the approver's screen and their click is a
+/// question they were never shown, and their answer must not land on it.
+#[tokio::test]
+async fn a_decision_names_its_question() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    pending_row(&db, session_id, "a-target").await;
+
+    assert!(
+        !approve(&db, session_id, "another-target").await,
+        "a decision about a different target must not be recorded",
+    );
+    assert_eq!(
+        status_of(&db, session_id, "a-target").await,
+        SessionApprovalRequest::ApprovalRequestStatus::Pending,
+    );
+}
+
+/// Gating for a second target asks a second question. It gets its own row,
+/// and the answer already given about the first stays exactly as the
+/// administrator left it — the record of who approved what is the table,
+/// and a session reaching two targets must not cost it one of them.
+#[tokio::test]
+async fn a_second_target_asks_alongside_the_first() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    pending_row(&db, session_id, "a-target").await;
+    assert!(approve_with_scope(&db, session_id, "a-target", ApprovalScope::Target).await);
+
+    pending_row(&db, session_id, "b-target").await;
+
+    let first = find_question(&db, session_id, ApprovalKind::Admin, "a-target")
+        .await
+        .unwrap()
+        .expect("the answered question must still be on record");
+    assert_eq!(
+        first.status,
+        SessionApprovalRequest::ApprovalRequestStatus::Approved,
+    );
+    assert_eq!(
+        first.scope,
+        Some(ApprovalScope::Target),
+        "the grant the administrator gave must survive the next question",
+    );
+    assert_eq!(first.resolved_by_username.as_deref(), Some("admin"));
+
+    let second = find_question(&db, session_id, ApprovalKind::Admin, "b-target")
+        .await
+        .unwrap()
+        .expect("the new question should exist");
+    assert_eq!(
+        second.status,
+        SessionApprovalRequest::ApprovalRequestStatus::Pending,
+    );
+    assert!(second.scope.is_none());
+    assert!(second.resolved_by_username.is_none());
+}
+
+/// A session's questions are answered one at a time and in any order, so a
+/// waiter must read only its own row: admitting a connection on the
+/// strength of an approval given for a different target would let one
+/// decision open two doors.
+#[tokio::test]
+async fn a_waiter_only_sees_answers_to_its_own_question() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    pending_row(&db, session_id, "a-target").await;
+    pending_row(&db, session_id, "b-target").await;
+    assert!(approve(&db, session_id, "b-target").await);
+
+    let outcome = await_row_decision(
+        &db,
+        session_id,
+        ApprovalKind::Admin,
+        "a-target",
+        Duration::from_millis(1500),
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(outcome, RowOutcome::TimedOut),
+        "a wait must not adopt an answer given about another target",
+    );
+}
+
+/// Closing is what replaces deleting: a waiter that gives up must leave the
+/// row behind as the record, must not overwrite an answer that landed
+/// while it was giving up, and must not touch the session's other
+/// questions.
+#[tokio::test]
+async fn closing_keeps_the_row_and_never_overwrites_an_answer() {
+    let db = migrated_db().await;
+
+    let abandoned = UserSessionId(Uuid::new_v4());
+    pending_row(&db, abandoned, "a-target").await;
+    SessionApprovalRequest::abandon_requests_for_session(&db, abandoned)
+        .await
+        .unwrap();
+    assert_eq!(
+        status_of(&db, abandoned, "a-target").await,
+        SessionApprovalRequest::ApprovalRequestStatus::Abandoned,
+    );
+
+    let answered = UserSessionId(Uuid::new_v4());
+    pending_row(&db, answered, "a-target").await;
+    assert!(approve(&db, answered, "a-target").await);
+    close_request(
+        &db,
+        answered,
+        ApprovalKind::Admin,
+        "a-target",
+        SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        status_of(&db, answered, "a-target").await,
+        SessionApprovalRequest::ApprovalRequestStatus::Approved,
+    );
+
+    let two_targets = UserSessionId(Uuid::new_v4());
+    pending_row(&db, two_targets, "a-target").await;
+    pending_row(&db, two_targets, "b-target").await;
+    close_request(
+        &db,
+        two_targets,
+        ApprovalKind::Admin,
+        "a-target",
+        SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        status_of(&db, two_targets, "a-target").await,
+        SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+    );
+    assert_eq!(
+        status_of(&db, two_targets, "b-target").await,
+        SessionApprovalRequest::ApprovalRequestStatus::Pending,
+        "closing one question must not end the session's others",
+    );
+}
+
+/// Every column belongs to the key, the question or the answer — the
+/// reopen path rewrites by these sets, so an unclassified column would
+/// silently keep stale data when a question is asked again.
+#[test]
+fn every_column_is_classified() {
+    use std::collections::HashSet;
+
+    use SessionApprovalRequest::Column;
+    use sea_orm::Iterable;
+
+    let classified: HashSet<String> = [Column::SessionId, Column::Kind, Column::Target]
+        .iter()
+        .chain(&Column::IDENTITY)
+        .chain(&Column::DECISION)
+        .map(|column| format!("{column:?}"))
+        .collect();
+    let all: HashSet<String> = Column::iter().map(|column| format!("{column:?}")).collect();
+    assert_eq!(
+        classified, all,
+        "add the new column to Column::IDENTITY or Column::DECISION",
+    );
+}
+
+/// The waiting side has to notice a decision written by *another* task —
+/// that hand-off is the whole substrate, and a wait that only ever reads the
+/// row once would hold the session open forever.
+#[tokio::test]
+async fn a_decision_written_later_is_picked_up() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    pending_row(&db, session_id, "a-target").await;
+
+    let writer = {
+        let db = db.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            record_decision(
+                &db,
+                session_id,
+                ApprovalKind::Admin,
+                "a-target",
+                ApprovalDecision::Approved(ApprovalScope::Once),
+                &ApprovalActor {
+                    username: "admin".into(),
+                    user_id: None,
+                },
+            )
+            .await
+            .unwrap()
+        })
+    };
+
+    let outcome = await_row_decision(
+        &db,
+        session_id,
+        ApprovalKind::Admin,
+        "a-target",
+        Duration::from_secs(20),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        writer.await.unwrap(),
+        "the decision should have been recorded"
+    );
+    assert!(
+        matches!(
+            outcome,
+            RowOutcome::Decided(ApprovalDecision::Approved(ApprovalScope::Once))
+        ),
+        "the wait should have seen the recorded decision",
+    );
+}
+
+fn password_credentials(hash: [u8; 32]) -> RememberedBy {
+    RememberedBy::from_fingerprints(vec![AuthCredentialFingerprint::Password { hash }])
+}
+
+fn remembered_subject(target: &str, hash: [u8; 32]) -> ApprovalSubject {
+    ApprovalSubject {
+        remote_ip: Some("10.0.0.5".parse().unwrap()),
+        credentials: password_credentials(hash),
+        ..plain_subject(target)
+    }
+}
+
+fn lookup_key(target: &str, hash: [u8; 32]) -> WebApprovalMatchKey {
+    WebApprovalMatchKey::build(
+        ApprovalKind::Admin,
+        Some("10.0.0.5".parse().unwrap()),
+        Protocol::Ssh,
+        // Case differs from the stored row's "someone" on purpose:
+        // usernames compare case-insensitively across the auth stack.
+        "Someone",
+        target,
+        &password_credentials(hash),
+    )
+    .expect("a subject with an origin and credentials is keyable")
+}
+
+async fn remembered_approval(
+    db: &DatabaseConnection,
+    target: &str,
+    hash: [u8; 32],
+    scope: ApprovalScope,
+) -> UserSessionId {
+    let session_id = UserSessionId(Uuid::new_v4());
+    advertise_row(db, session_id, &remembered_subject(target, hash)).await;
+    assert!(approve_with_scope(db, session_id, target, scope).await);
+    session_id
+}
+
+const GRACE: Duration = Duration::from_secs(3600);
+
+/// The bypass answers from the stored rows, so it must demand the full
+/// match: the kind, the target, the credentials, and a fresh resolution.
+#[tokio::test]
+async fn a_remembered_approval_requires_a_full_match() {
+    let db = migrated_db().await;
+    remembered_approval(&db, "prod", [7u8; 32], ApprovalScope::Target).await;
+
+    assert!(
+        approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+    // Another target is not covered.
+    assert!(
+        !approval_is_remembered(&db, &lookup_key("staging", [7u8; 32]), GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+    // Different credentials are not covered.
+    assert!(
+        !approval_is_remembered(&db, &lookup_key("prod", [9u8; 32]), GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+    // A zero grace is never fresh, so approval is required again.
+    assert!(
+        !approval_is_remembered(
+            &db,
+            &lookup_key("prod", [7u8; 32]),
+            Duration::ZERO,
+            &test_salt()
+        )
+        .await
+        .unwrap()
+    );
+    // The other approval kind is a different question entirely.
+    let mut other_kind = lookup_key("prod", [7u8; 32]);
+    other_kind.kind = ApprovalKind::User;
+    assert!(
+        !approval_is_remembered(&db, &other_kind, GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn an_all_targets_grant_covers_every_target() {
+    let db = migrated_db().await;
+    remembered_approval(&db, "prod", [7u8; 32], ApprovalScope::AllTargets).await;
+
+    assert!(
+        approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+    assert!(
+        approval_is_remembered(&db, &lookup_key("staging", [7u8; 32]), GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+    // Approving every target is strictly broader than approving a portal
+    // sign-in, so it subsumes an untargeted ask too.
+    assert!(
+        approval_is_remembered(&db, &lookup_key("", [7u8; 32]), GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+}
+
+/// An HTTP sign-in / SSH menu login carries no target. A grant given to
+/// one must not stand in for approval of an actual target, nor a target's
+/// grant for it.
+#[tokio::test]
+async fn an_untargeted_grant_is_its_own_bucket() {
+    let db = migrated_db().await;
+    remembered_approval(&db, "", [7u8; 32], ApprovalScope::Target).await;
+
+    assert!(
+        approval_is_remembered(&db, &lookup_key("", [7u8; 32]), GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+    assert!(
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn a_once_approval_is_not_remembered() {
+    let db = migrated_db().await;
+    remembered_approval(&db, "prod", [7u8; 32], ApprovalScope::Once).await;
+
+    assert!(
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+}
+
+/// Only an approval grants; a question still open, or one answered with a
+/// refusal, remembers nothing.
+#[tokio::test]
+async fn only_an_approval_is_remembered() {
+    let db = migrated_db().await;
+
+    let pending = UserSessionId(Uuid::new_v4());
+    advertise_row(&db, pending, &remembered_subject("prod", [7u8; 32])).await;
+    assert!(
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+
+    assert!(
+        record_decision(
+            &db,
+            pending,
+            ApprovalKind::Admin,
+            "prod",
+            ApprovalDecision::Rejected,
+            &admin_actor(),
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+            .await
+            .unwrap()
+    );
+}
+
+async fn ticket_with_uses(db: &DatabaseConnection, uses: i16) -> Uuid {
+    use warpgate_db_entities::Target::TargetKind;
+    use warpgate_db_entities::{Target, Ticket, User};
+
+    let user_id = Uuid::new_v4();
+    User::Entity::insert(User::ActiveModel {
+        id: Set(user_id),
+        username: Set(format!("user-{user_id}")),
+        credential_policy: Set(serde_json::Value::Null),
+        description: Set(String::new()),
+        rate_limit_bytes_per_second: Set(None),
+        ldap_server_id: Set(None),
+        ldap_object_uuid: Set(None),
+        allowed_ip_ranges: Set(serde_json::Value::Null),
+    })
+    .exec(db)
+    .await
+    .unwrap();
+
+    let target_id = Uuid::new_v4();
+    Target::Entity::insert(Target::ActiveModel {
+        id: Set(target_id),
+        name: Set(format!("target-{target_id}")),
+        description: Set(String::new()),
+        kind: Set(TargetKind::Ssh),
+        options: Set(serde_json::Value::Null),
+        rate_limit_bytes_per_second: Set(None),
+        group_id: Set(None),
+        ticket_max_duration_seconds: Set(None),
+        ticket_requests_disabled: Set(false),
+        ticket_require_approval: Set(false),
+        ticket_max_uses: Set(None),
+        require_approval: Set(true),
+    })
+    .exec(db)
+    .await
+    .unwrap();
+
+    let id = Uuid::new_v4();
+    Ticket::Entity::insert(Ticket::ActiveModel {
+        id: Set(id),
+        secret_hash: Set("hash".into()),
+        user_id: Set(user_id),
+        description: Set(String::new()),
+        target_id: Set(target_id),
+        uses_left: Set(Some(uses)),
+        self_service: Set(false),
+        expiry: Set(None),
+        created: Set(OffsetDateTime::now_utc()),
+    })
+    .exec(db)
+    .await
+    .unwrap();
+    id
+}
+
+async fn uses_left(db: &DatabaseConnection, id: Uuid) -> Option<i16> {
+    use warpgate_db_entities::Ticket;
+
+    Ticket::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .unwrap()
+        .expect("the ticket should exist")
+        .uses_left
+}
+
+/// A deferred ticket is spent by the pending→approved transition, which is
+/// one-shot — so however many gates across the cluster watch the row, an
+/// approval spends exactly one use, and nothing else spends any.
+#[tokio::test]
+async fn a_deferred_ticket_is_consumed_exactly_once_by_an_approval() {
+    let db = migrated_db().await;
+    let ticket_id = ticket_with_uses(&db, 2).await;
+
+    let session_id = UserSessionId(Uuid::new_v4());
+    let mut subject = plain_subject("a-target");
+    subject.consumes_ticket_id = Some(ticket_id);
+    advertise_row(&db, session_id, &subject).await;
+
+    // A decision about a different target moves nothing and spends nothing.
+    assert!(!approve(&db, session_id, "another-target").await);
+    assert_eq!(uses_left(&db, ticket_id).await, Some(2));
+
+    assert!(approve(&db, session_id, "a-target").await);
+    assert_eq!(uses_left(&db, ticket_id).await, Some(1));
+
+    // A second decision finds the question already answered.
+    assert!(!approve(&db, session_id, "a-target").await);
+    assert_eq!(uses_left(&db, ticket_id).await, Some(1));
+}
+
+/// Deferring *when* a use is taken must not defer *whether* there is one to
+/// take: a ticket exhausted between the session being established and the
+/// approval landing fails the approval, and the question stays open rather
+/// than admitting a session its ticket could no longer pay for.
+#[tokio::test]
+async fn an_approval_cannot_spend_a_use_that_is_not_there() {
+    let db = migrated_db().await;
+    let ticket_id = ticket_with_uses(&db, 0).await;
+
+    let session_id = UserSessionId(Uuid::new_v4());
+    let mut subject = plain_subject("a-target");
+    subject.consumes_ticket_id = Some(ticket_id);
+    advertise_row(&db, session_id, &subject).await;
+
+    assert!(
+        record_decision(
+            &db,
+            session_id,
+            ApprovalKind::Admin,
+            "a-target",
+            ApprovalDecision::Approved(ApprovalScope::Once),
+            &admin_actor(),
+        )
+        .await
+        .is_err(),
+        "an approval that cannot take its deferred use must fail",
+    );
+    assert_eq!(
+        status_of(&db, session_id, "a-target").await,
+        SessionApprovalRequest::ApprovalRequestStatus::Pending,
+        "the failed approval must not have been recorded",
+    );
+    assert_eq!(uses_left(&db, ticket_id).await, Some(0));
+}
+
+/// Every audit event this test binary emits, so an assertion can pick out
+/// its own by session id.
+///
+/// Installed once and globally rather than per-test with `set_default`:
+/// `tracing` caches a callsite first reached with no subscriber listening
+/// as never-interested for the whole process, so a thread-local subscriber
+/// set afterwards sees nothing whenever another test thread got there
+/// first — which passes alone and fails in the suite.
+fn audit_events() -> &'static Mutex<Vec<HashMap<&'static str, String>>> {
+    use tracing_subscriber::layer::SubscriberExt;
+
+    use crate::logging::layer::ValuesLogLayer;
+
+    static EVENTS: OnceLock<Mutex<Vec<HashMap<&'static str, String>>>> = OnceLock::new();
+    let events = EVENTS.get_or_init(|| Mutex::new(Vec::new()));
+    static INSTALLED: OnceLock<()> = OnceLock::new();
+    INSTALLED.get_or_init(|| {
+        let subscriber =
+            tracing_subscriber::registry().with(ValuesLogLayer::new(|values, _target| {
+                if let Ok(mut events) = events.lock() {
+                    events.push(values.into_values());
+                }
+            }));
+        let _ = tracing::subscriber::set_global_default(subscriber);
+    });
+    events
+}
+
+/// The audit events of one `_type` recorded for one session.
+fn audited_for(session_id: UserSessionId, event_type: &str) -> Vec<HashMap<&'static str, String>> {
+    let session = session_id.0.to_string();
+    audit_events()
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|values| {
+            values.get("session") == Some(&session)
+                && values.get("_type").map(String::as_str) == Some(event_type)
+        })
+        .cloned()
+        .collect()
+}
+
+/// The administrator acted, so the audit trail must say so regardless of
+/// who was listening — a session that gave up, or an owning node that died
+/// mid-wait, would otherwise erase an approval from the record entirely.
+/// Captured through the same layer the audit sink uses, since an event
+/// without a parseable `session` is dropped there and never reaches the
+/// session log.
+#[tokio::test]
+async fn a_decision_is_audited_with_nobody_waiting() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    audit_events();
+    pending_row(&db, session_id, "a-target").await;
+
+    assert!(approve(&db, session_id, "a-target").await);
+    // Answering a question that is already over is not this call's to
+    // audit, so a straggling second click must not log a second time.
+    assert!(!approve(&db, session_id, "a-target").await);
+
+    let resolved = audited_for(session_id, "SessionApprovalResolved1");
+
+    assert_eq!(
+        resolved.len(),
+        1,
+        "the decision must be audited exactly once, with nobody waiting on it",
+    );
+    let event = &resolved[0];
+    assert_eq!(event.get("approved").map(String::as_str), Some("true"));
+    assert_eq!(event.get("resolved_by").map(String::as_str), Some("admin"));
+    assert_eq!(event.get("target").map(String::as_str), Some("a-target"));
+}
+
+/// A refusal is not the user's doing, so the ticket keeps its use.
+#[tokio::test]
+async fn a_refused_deferred_ticket_keeps_its_use() {
+    let db = migrated_db().await;
+    let ticket_id = ticket_with_uses(&db, 1).await;
+
+    let session_id = UserSessionId(Uuid::new_v4());
+    let mut subject = plain_subject("a-target");
+    subject.consumes_ticket_id = Some(ticket_id);
+    advertise_row(&db, session_id, &subject).await;
+
+    assert!(
+        record_decision(
+            &db,
+            session_id,
+            ApprovalKind::Admin,
+            "a-target",
+            ApprovalDecision::Rejected,
+            &admin_actor(),
+        )
+        .await
+        .unwrap()
+    );
+    assert_eq!(uses_left(&db, ticket_id).await, Some(1));
+}

@@ -706,7 +706,7 @@ impl ServerSession {
     /// is lost: blocking the event loop also blocks russh, which is inside a
     /// channel handler awaiting our reply and would stop reading the socket.
     /// A client that left mid-hold would go unnoticed. Off the loop, the
-    /// terminal stays live, Ctrl-C works, and a disconnect cancels the hold.
+    /// terminal stays live, Ctrl-C works, and a disconnect drops the hold.
     ///
     /// The gate itself decides whether this session actually needs holding
     /// (remembered approval); it says so by calling `notify_waiting`, which is
@@ -731,29 +731,33 @@ impl ServerSession {
                 Some(state) => state.lock().await.remembered_by(),
                 None => RememberedBy::Nothing,
             };
-            let approved = services
-                .require_admin_approval(
-                    authorization,
-                    AdminApprovalContext {
-                        session_id,
-                        remote_ip: Some(remote_ip),
-                        credentials,
-                        ticket: TicketStake::Held(ticket),
-                    },
-                    cancel.cancelled_owned(),
-                    || async move {
-                        let _ = notify_sender.send_once(Event::AdminApprovalPending).await;
-                        Ok::<_, WarpgateError>(())
-                    },
-                )
-                .await
-                .map_or_else(
+            let gate = services.require_admin_approval(
+                authorization,
+                AdminApprovalContext {
+                    session_id,
+                    remote_ip: Some(remote_ip),
+                    credentials,
+                    ticket: TicketStake::Held(ticket),
+                },
+                || async move {
+                    let _ = notify_sender.send_once(Event::AdminApprovalPending).await;
+                    Ok::<_, WarpgateError>(())
+                },
+            );
+
+            // A disconnect ends the hold by dropping the gate: the row is
+            // closed and the ticket refunded by the guards it carries, which
+            // is the same way an inline gate ends when its connection drops.
+            let approved = tokio::select! {
+                () = cancel.cancelled() => None,
+                outcome = gate => outcome.map_or_else(
                     |error| {
                         error!(%error, "Failed to hold the session for administrator approval");
                         None
                     },
                     GateOutcome::approved,
-                );
+                ),
+            };
             let _ = event_sender
                 .send_once(Event::AdminApprovalResolved { approved })
                 .await;
@@ -961,9 +965,9 @@ impl ServerSession {
                         .await
                         .register_approved_target_session(&approved)
                         .await?;
-                    self.target_session_id = Some(target_session_id);
-                    self.target = TargetSelection::Found(approved);
-                    self.start_recordings_for_pty_channels().await;
+
+                    self.start_approved_session(approved, target_session_id)
+                        .await;
                     self.maybe_connect_remote().await?;
                 }
                 Event::ServerChannelOpenResult(id, result) => {
@@ -994,6 +998,16 @@ impl ServerSession {
             Ok(())
         }
         .boxed()
+    }
+
+    async fn start_approved_session(
+        &mut self,
+        approved: ApprovedTarget<TargetSSHOptions>,
+        target_session_id: TargetSessionId,
+    ) {
+        self.target_session_id = Some(target_session_id);
+        self.target = TargetSelection::Found(approved);
+        self.start_recordings_for_pty_channels().await;
     }
 
     /// Confirm `channel` as open and re-dispatch everything held back while its
@@ -2583,9 +2597,8 @@ impl ServerSession {
             .await?;
         match started {
             TargetSessionStart::Started((target_session_id, approved)) => {
-                self.target_session_id = Some(target_session_id);
-                self.target = TargetSelection::Found(approved);
-                self.start_recordings_for_pty_channels().await;
+                self.start_approved_session(approved, target_session_id)
+                    .await;
             }
             // The gate can't hold the auth exchange; it runs off the event
             // loop once the client opens its channels.

@@ -12,7 +12,7 @@ use warpgate_common::auth::ApprovalKind;
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::approvals::{ApprovalActor, ApprovalDecision, close_request, record_decision};
+use warpgate_core::approvals::{ApprovalActor, ApprovalDecision, record_decision};
 use warpgate_db_entities::{Node, SessionApprovalRequest};
 
 use crate::api::common::has_admin_permission;
@@ -132,7 +132,7 @@ async fn pending_approval_from_row(
             .await?
             .is_none()
     {
-        close_request(
+        SessionApprovalRequest::close_request(
             &services.db,
             row.session_id,
             kind,

@@ -22,9 +22,7 @@ use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::accept_loop;
 use warpgate_common::{ListenEndpoint, TargetVncOptions};
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{
-    Services, State, TargetSessionStart, UserSessionStateInit, WarpgateServerHandle,
-};
+use warpgate_core::{Services, State, UserSessionStateInit, WarpgateServerHandle};
 use warpgate_desktop_auth::{DesktopAuthOutcome, authenticate, finalize_user_auth};
 use warpgate_desktop_ui as ui;
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
