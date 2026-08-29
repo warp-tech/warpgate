@@ -39,9 +39,8 @@ pub struct PendingApproval {
     pub kind: ApprovalKind,
     /// The user whose session is being held — the one an approver must not be.
     pub username: String,
-    /// The target the question was about when the row was read. Echoed into
-    /// the decision, so a request reopened for a different target in the
-    /// meantime cannot be resolved by a click meant for this one.
+    /// The target the question is about — part of the row's key, echoed into
+    /// the decision so a click can only resolve the question it was shown for.
     pub target: String,
 }
 
@@ -214,8 +213,8 @@ async fn check_self_approval(
 /// Records a decision on a pending request, wherever the approver is talking to
 /// the cluster. The owning node picks it up from the row.
 ///
-/// Rows are keyed by `(session_id, kind)`, so a stale click for one kind can
-/// never resolve the other — a user's own approval cannot satisfy an
+/// Rows are keyed by `(session_id, kind, target)`, so a stale click for one
+/// kind can never resolve the other — a user's own approval cannot satisfy an
 /// administrator requirement.
 pub async fn resolve_pending_approval(
     ctx: &AuthenticatedRequestContext,

@@ -88,7 +88,6 @@ mod m00081_http_session_user_session_id;
 mod m00082_target_session_columns;
 mod m00083_jit_session_approval;
 mod m00084_credential_digest_salt;
-mod m00085_approval_request_per_target;
 
 pub(crate) mod helpers;
 
@@ -182,7 +181,6 @@ impl MigratorTrait for Migrator {
             Box::new(m00082_target_session_columns::Migration),
             Box::new(m00083_jit_session_approval::Migration),
             Box::new(m00084_credential_digest_salt::Migration),
-            Box::new(m00085_approval_request_per_target::Migration),
         ]
     }
 }
@@ -314,10 +312,8 @@ mod tests {
         );
     }
 
-    /// A session reaching two gated targets holds a question about each, so the
-    /// re-key has to survive rows that were only unique under the old key —
-    /// and the rebuild has to carry every column across, which a mistyped
-    /// column list would silently get wrong.
+    /// A session reaching two gated targets holds a question about each, which
+    /// only the target being part of the key makes room for.
     #[tokio::test]
     async fn approval_requests_are_keyed_per_target() {
         set_config_migration_values(ConfigMigrationValues {
@@ -376,3 +372,4 @@ mod tests {
         );
     }
 }
+

@@ -5,18 +5,18 @@
 //! *credential* — it satisfies a pending [`CredentialKind::WebUserApproval`] on
 //! an in-memory auth state, held by the node that keyed it under the same
 //! session id the row is keyed by. Administrator approval is a *gate on the
-//! connection*,
-//! decided once the target is known and after the credentials are settled; it
-//! touches no auth state at all.
+//! connection*, decided once the target is known and after the credentials are
+//! settled; it touches no auth state at all.
 //!
 //! What they share is the record, and the record is the whole substrate: a
-//! `session_approval_requests` row keyed by `(session_id, kind)` carries both
-//! the question and its answer. Any node can list the rows and any node can
-//! resolve one by writing the decision to it — there is no cross-node delivery,
-//! because nothing has to reach the owner. The owner instead reads the decision
-//! back off the row: an administrator gate polls its own row while it holds the
-//! connection, and self approvals are applied by a node-wide sweep, since only
-//! the node holding an auth state can satisfy a credential on it.
+//! `session_approval_requests` row keyed by `(session_id, kind, target)`
+//! carries both the question and its answer. Any node can list the rows and
+//! any node can resolve one by writing the decision to it — there is no
+//! cross-node delivery, because nothing has to reach the owner. The owner
+//! instead reads the decision back off the row: an administrator gate polls its
+//! own row while it holds the connection, and self approvals are applied by a
+//! node-wide sweep, since only the node holding an auth state can satisfy a
+//! credential on it.
 //!
 //! No row is ever deleted while it still means something. A request that ends —
 //! consumed, timed out, given up on, torn down with its session, or aged out
@@ -55,7 +55,9 @@ use warpgate_common::{NodeId, Protocol, TargetSessionId, UserSessionId, Warpgate
 use warpgate_db_entities::{Parameters, SessionApprovalRequest};
 
 use crate::auth_state_store::TIMEOUT;
-use crate::config_providers::{ApprovedTarget, TargetAuthorization, TicketRefund, consume_ticket};
+use crate::config_providers::{
+    ApprovedTarget, TargetAuthorization, TicketRefund, consume_ticket, refund_ticket,
+};
 use crate::services::Services;
 use crate::{TargetSessionStart, WarpgateServerHandle};
 
@@ -226,13 +228,12 @@ impl ApprovalSubject {
     }
 }
 
-/// The request row an administrator gate is waiting on, removed when the wait
+/// The request row an administrator gate is waiting on, closed when the wait
 /// ends however it ends — resolved, timed out, cancelled, or the future dropped.
 ///
-/// The guard names the target its question was about, and only touches the row
-/// while it still says so: a slot taken over by a later question — the same
-/// session gating for another target — is that question's row now, and a
-/// straggling close from this guard must not end it.
+/// The guard names the whole question — session, kind and target — so a
+/// straggling close can only ever land on its own row, never on one of the
+/// session's other questions.
 struct PendingApproval {
     session_id: UserSessionId,
     target: String,
@@ -394,11 +395,6 @@ fn row_state(row: &SessionApprovalRequest::Model) -> RowState {
 /// Waits for a decision to be written to this question's row, giving up at
 /// `timeout` or when `cancel` fires.
 ///
-/// The wait reads its row by question — session, kind, *and target* — not by
-/// key alone: the slot can be taken over by a later question on the same
-/// session, and an answer written after that is the successor's, not this
-/// one's. To this wait a taken-over slot reads as the row being gone.
-///
 /// A read failure keeps the wait going rather than ending it: a database blip
 /// must not deny a connection an administrator is in the middle of approving,
 /// and the timeout still bounds the wait.
@@ -431,9 +427,8 @@ async fn await_row_decision(
                         // left to wait for.
                         RowState::Ended => return RowOutcome::Ended,
                     },
-                    // The row is gone (retention never prunes one this young)
-                    // or the slot now carries a different question — either
-                    // way, this one is no longer being asked.
+                    // The row is gone (retention never prunes one this young),
+                    // so the question is no longer being asked.
                     Ok(None) => return RowOutcome::Ended,
                     Err(error) => {
                         warn!(%error, "Failed to read a session approval request");
@@ -533,11 +528,11 @@ impl StatusTransition {
 
 /// Rows whose question is over: they ended without an answer, or the owning node
 /// has already taken the one they had. Nothing is waiting on either, so a later
-/// gate on the same session may take the row over.
+/// gate asking the same question may reopen the row.
 ///
 /// The counterpart to [`StatusTransition::from_pending`]. Together with the
-/// different-target takeover in [`upsert_request`], these name every source
-/// state any write in this module is allowed to leave.
+/// reopen in [`upsert_request`], these name every source state any write in
+/// this module is allowed to leave.
 fn question_is_over() -> Condition {
     SessionApprovalRequest::Column::Status
         .is_in(SessionApprovalRequest::ApprovalRequestStatus::UNANSWERED)
@@ -545,7 +540,7 @@ fn question_is_over() -> Condition {
         .into_condition()
 }
 
-/// The rows of one request slot: a session's approval of a given kind.
+/// Every request of one kind on a session, across its targets.
 fn one_request(session_id: UserSessionId, kind: ApprovalKind) -> Condition {
     SessionApprovalRequest::Column::SessionId
         .eq(session_id)
@@ -556,10 +551,9 @@ fn one_request(session_id: UserSessionId, kind: ApprovalKind) -> Condition {
         .into_condition()
 }
 
-/// The rows of one *question*: [`one_request`] narrowed to the target it asks
-/// about. The key alone names the slot; the same slot can be reused by a later
-/// question when the session gates for another target, and everything that
-/// answers, consumes or closes a question must say which one it means.
+/// One *question*: [`one_request`] narrowed to the target it asks about — the
+/// full key, which everything that answers, consumes or closes a question must
+/// name so it cannot touch the session's other questions.
 fn one_question(session_id: UserSessionId, kind: ApprovalKind, target: &str) -> Condition {
     one_request(session_id, kind).add(SessionApprovalRequest::Column::Target.eq(target))
 }
@@ -570,9 +564,9 @@ fn one_question(session_id: UserSessionId, kind: ApprovalKind, target: &str) -> 
 /// closed it.
 ///
 /// `target` is the question the approver believes they are answering — what
-/// their screen said, or what the row said when it was looked up. A request
-/// that has since been reopened for a different target is not moved, so a
-/// stale click can never resolve a question nobody was shown.
+/// their screen said, or what the row said when it was looked up. A stale
+/// click can only ever land on the question it was shown for, never on
+/// another of the session's questions.
 pub async fn record_decision(
     db: &DatabaseConnection,
     session_id: UserSessionId,
@@ -595,34 +589,44 @@ pub async fn record_decision(
         ApprovalDecision::Rejected => (ApprovalRequestStatus::Rejected, None),
     };
 
-    // Read ahead of the transition: the columns are stable while the row is
-    // pending, and only the pending row this call itself moves is acted on.
+    // Read ahead of the transition, off the pending row only: a question that
+    // is already answered or closed has no spend riding on this decision, and
+    // the transition below moves nothing but a pending row.
     let consumes_ticket_id = if matches!(decision, ApprovalDecision::Approved(_)) {
         find_question(db, session_id, kind, target)
             .await?
+            .filter(|row| row.status == ApprovalRequestStatus::Pending)
             .and_then(|row| row.consumes_ticket_id)
     } else {
         None
     };
+
+    // The deferred ticket is spent before the approval is recorded: an
+    // exhausted ticket must fail the approval, and once the row says approved
+    // the waiting gate admits the session — there is no turning it away for a
+    // spend that turns out not to be there. The pending→approved transition is
+    // still what makes the spend one-shot across the cluster: a concurrent
+    // approver's use is given back below when its transition finds the
+    // question already answered.
+    if let Some(ticket_id) = consumes_ticket_id {
+        consume_ticket(db, &ticket_id).await?;
+    }
 
     let moved = StatusTransition::from_pending(status)
         .set(Column::Scope, scope)
         .set(Column::ResolvedByUsername, actor.username.clone())
         .set(Column::ResolvedByUserId, actor.user_id)
         .apply(db, one_question(session_id, kind, target))
-        .await?;
+        .await;
 
-    // The pending→approved transition is one-shot, so whichever node records
-    // the approval consumes the deferred ticket exactly once — however many
-    // gates across the cluster are watching the row.
-    if moved > 0
+    if !matches!(moved, Ok(n) if n > 0)
         && let Some(ticket_id) = consumes_ticket_id
-        && let Err(error) = consume_ticket(db, &ticket_id).await
+        && let Err(error) = refund_ticket(db, ticket_id).await
     {
-        warn!(%error, %ticket_id, "Failed to consume the ticket for an approved session");
+        warn!(%error, %ticket_id, "Failed to refund the ticket of an unrecorded approval");
     }
 
-    Ok(moved > 0)
+    Ok(moved? > 0)
 }
 
 /// How a gate ended for a connection that was waiting on it.
@@ -694,7 +698,7 @@ struct SessionGateState {
 /// The administrator-gate ledger for sessions that observe the gate rather
 /// than parking on it, owned by [`State`] so a session's entries are dropped
 /// with the session. All access goes through the poll/settle/forget methods:
-/// the one-wait-per-session rule and the only-while-the-session-lives rule
+/// the one-wait-per-target rule and the only-while-the-session-lives rule
 /// live here, not at the call sites.
 ///
 /// [`State`]: crate::State
@@ -742,6 +746,12 @@ impl SessionGates {
         state.running.remove(target);
         if let Some(outcome) = outcome {
             state.settled.insert(target.to_string(), outcome);
+        }
+        // An entry holding nothing means nothing — and for a session already
+        // torn down (a poll can race the teardown and re-create its entry),
+        // dropping it here is the only removal it will ever get.
+        if state.running.is_empty() && state.settled.is_empty() {
+            sessions.remove(&session_id);
         }
     }
 
@@ -1026,10 +1036,9 @@ impl Services {
     /// identically to the connection-holding protocols — the only thing that
     /// differs is who does the waiting.
     ///
-    /// A session has one request slot, so its gates run one at a time: a
-    /// request for a second gated target while another target's wait runs is
-    /// told to come back, and starts its own wait once the slot frees up.
-    /// Settled outcomes are kept per target for the life of the session.
+    /// A session's targets gate independently: each gets its own wait,
+    /// concurrent requests for one target share the wait already running, and
+    /// settled outcomes are kept per target for the life of the session.
     ///
     /// A ticket rides through here as [`TicketStake::ConsumedOnApproval`]. A
     /// [`TicketStake::Held`] guard belongs to the blocking form, whose return
@@ -2257,6 +2266,41 @@ mod tests {
         // A second decision finds the question already answered.
         assert!(!approve(&db, session_id, "a-target").await);
         assert_eq!(uses_left(&db, ticket_id).await, Some(1));
+    }
+
+    /// Deferring *when* a use is taken must not defer *whether* there is one to
+    /// take: a ticket exhausted between the session being established and the
+    /// approval landing fails the approval, and the question stays open rather
+    /// than admitting a session its ticket could no longer pay for.
+    #[tokio::test]
+    async fn an_approval_cannot_spend_a_use_that_is_not_there() {
+        let db = migrated_db().await;
+        let ticket_id = ticket_with_uses(&db, 0).await;
+
+        let session_id = UserSessionId(Uuid::new_v4());
+        let mut subject = plain_subject("a-target");
+        subject.consumes_ticket_id = Some(ticket_id);
+        advertise_row(&db, session_id, &subject).await;
+
+        assert!(
+            record_decision(
+                &db,
+                session_id,
+                ApprovalKind::Admin,
+                "a-target",
+                ApprovalDecision::Approved(ApprovalScope::Once),
+                &admin_actor(),
+            )
+            .await
+            .is_err(),
+            "an approval that cannot take its deferred use must fail",
+        );
+        assert_eq!(
+            status_of(&db, session_id, "a-target").await,
+            SessionApprovalRequest::ApprovalRequestStatus::Pending,
+            "the failed approval must not have been recorded",
+        );
+        assert_eq!(uses_left(&db, ticket_id).await, Some(0));
     }
 
     /// A refusal is not the user's doing, so the ticket keeps its use.

@@ -457,8 +457,12 @@ pub async fn consume_ticket(
 /// two presentations of a one-use ticket can never both authenticate. The
 /// administrator gate is the one thing that may still turn an authenticated
 /// session away, and the user should not lose their use to someone else's
-/// refusal — so a refusal refunds what the spend took.
-async fn refund_ticket(db: &DatabaseConnection, ticket_id: Uuid) -> Result<(), WarpgateError> {
+/// refusal — so anything that takes a use without admitting the session gives
+/// it back.
+pub(crate) async fn refund_ticket(
+    db: &DatabaseConnection,
+    ticket_id: Uuid,
+) -> Result<(), WarpgateError> {
     e::Ticket::Entity::update_many()
         .col_expr(
             e::Ticket::Column::UsesLeft,
