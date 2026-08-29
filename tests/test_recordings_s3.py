@@ -82,12 +82,14 @@ def _find_completed_terminal_recording(api):
 
 
 def _find_in_progress_terminal_session(api):
+    """The recording's own session id: recordings are stored (and keyed in S3)
+    under the target session id, which is distinct from the API session id."""
     for session in sorted(
         api.get_sessions().items, key=lambda s: s.started, reverse=True
     ):
         for rec in api.get_session_recordings(session.id):
             if rec.kind == sdk.RecordingKind.TERMINAL and rec.ended is None:
-                return session.id
+                return rec.session_id
     return None
 
 

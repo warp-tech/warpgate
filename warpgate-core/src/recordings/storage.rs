@@ -8,7 +8,7 @@ use tokio::io::{AsyncRead, AsyncWriteExt};
 use tracing::error;
 use warpgate_aws::{S3MultipartUpload, S3Storage};
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{GlobalParams, SessionId};
+use warpgate_common::{GlobalParams, TargetSessionId};
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 use warpgate_db_entities::{Parameters, Recording};
 
@@ -163,7 +163,7 @@ impl Storage {
     }
 
     /// Local folder holding a recording's files (final on disk, scratch on S3).
-    pub(crate) fn recording_folder(&self, session_id: &SessionId, name: &str) -> PathBuf {
+    pub(crate) fn recording_folder(&self, session_id: &TargetSessionId, name: &str) -> PathBuf {
         self.local_root.join(session_id.to_string()).join(name)
     }
 
@@ -211,7 +211,7 @@ impl Storage {
 
     /// Delete a recording's files from this storage — its S3 objects (if any)
     /// and the local folder (best-effort; on S3 the scratch is already gone).
-    pub(crate) async fn remove(&self, session_id: &SessionId, name: &str) -> Result<()> {
+    pub(crate) async fn remove(&self, session_id: &TargetSessionId, name: &str) -> Result<()> {
         if let Backend::S3(s3) = &self.backend {
             for key in [
                 format!("{session_id}/{name}/{}", RecordingFile::NDJsonData.filename()),
@@ -273,7 +273,7 @@ mod tests {
             name: "0.ndjson".into(),
             started: time::OffsetDateTime::UNIX_EPOCH,
             ended: None,
-            session_id: uuid!("00000000-0000-0000-0000-00000000000a"),
+            session_id: TargetSessionId(uuid!("00000000-0000-0000-0000-00000000000a")),
             kind: RecordingKind::Terminal,
             metadata: "{}".into(),
             generation,

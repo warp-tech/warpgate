@@ -9,14 +9,13 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, trace, warn};
 use url::Url;
-use uuid::Uuid;
 use warpgate_common::auth::AuthSelector;
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{Protocol, Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_common::{Protocol, Secret, TargetMySqlOptions, UserSessionId};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    AuthOkPermit, DbAuthTransport, Services, TargetAuthorization, WarpgateServerHandle,
-    run_db_authorization,
+    ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, TargetAuthorization,
+    WarpgateServerHandle, run_db_authorization,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
 use warpgate_database_protocols::mysql::protocol::Capabilities;
@@ -41,7 +40,7 @@ pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     database: Option<String>,
     tls_config: Arc<ServerConfig>,
     server_handle: Arc<Mutex<WarpgateServerHandle>>,
-    id: Uuid,
+    id: UserSessionId,
     services: Services,
     remote_address: SocketAddr,
     /// MySQL carries the password in the handshake, so the shared auth flow can
@@ -103,7 +102,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         tls_config: ServerConfig,
         remote_address: SocketAddr,
     ) -> Self {
-        let id = server_handle.lock().await.id();
+        let id = server_handle.lock().await.user_session_id();
         Self {
             services,
             stream: MySqlStream::new(stream),
@@ -235,7 +234,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
     ) -> Result<(), MySqlError> {
         let selector: AuthSelector = handshake.username.deref().into();
         let remote_ip = self.remote_address.ip();
-        let session_id = self.server_handle.lock().await.id();
+        let session_id = self.server_handle.lock().await.user_session_id();
 
         self.handshake_password = Some(password);
 
@@ -254,9 +253,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         handshake: HandshakeResponse,
         authorization: TargetAuthorization,
     ) -> Result<(), MySqlError> {
-        let (user_info, target) = authorization.into_parts();
-
-        let TargetOptions::MySql(ref mysql_options) = target.options else {
+        let Ok(authorization) = authorization.narrow::<TargetMySqlOptions>() else {
             warn!("Selected target is not a MySQL target");
             self.stream.push(
                 &ErrPacket {
@@ -270,21 +267,21 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             return Ok(());
         };
 
-        let mysql_options = mysql_options.clone();
+        let (_, approved) = self
+            .server_handle
+            .lock()
+            .await
+            .start_target_session(authorization)
+            .await?
+            .admitted()?;
 
-        {
-            let handle = self.server_handle.lock().await;
-            handle.set_user_info(user_info).await?;
-            handle.set_target(&target).await?;
-        }
-
-        self.run_authorized_inner(handshake, mysql_options).await
+        self.run_authorized_inner(handshake, approved).await
     }
 
     async fn run_authorized_inner(
         mut self,
         handshake: HandshakeResponse,
-        options: TargetMySqlOptions,
+        approved: ApprovedTarget<TargetMySqlOptions>,
     ) -> Result<(), MySqlError> {
         self.database = handshake.database.clone();
         self.username = Some(handshake.username);
@@ -293,7 +290,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         }
 
         let mut client = match MySqlClient::connect(
-            &options,
+            approved,
             ConnectionOptions {
                 collation: handshake.collation,
                 database: handshake.database,

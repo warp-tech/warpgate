@@ -24,14 +24,17 @@ use warpgate_common::auth::{
 };
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{Secret, SessionId, TargetOptions, WarpgateError};
+use warpgate_common::{
+    Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserSessionId, WarpgateError,
+};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
 use warpgate_core::{
-    AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, WarpgateServerHandle,
-    authorize_for_target, authorize_for_target_by_name, authorize_ticket, consume_ticket,
+    ApprovedTarget, AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization,
+    WarpgateServerHandle, authorize_and_spend_ticket, authorize_for_target,
+    authorize_for_target_by_name,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
@@ -50,7 +53,7 @@ use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
-    SshRecordingMetadata, X11Request, client_error_message, resolve_ssh_chain,
+    SshRecordingMetadata, X11Request, client_error_message, resolve_approved_ssh_chain,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
@@ -65,16 +68,15 @@ const MAX_NESTED_COMMAND_WAITS: usize = 16;
 /// giving up on them.
 const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Clone)]
 #[allow(clippy::large_enum_variant)]
 enum TargetSelection {
     None,
     Menu,
     NotFound(String),
-    /// Carries the proof of authorization, which carries the target — so being
-    /// in this state at all means authorization was checked for exactly the
-    /// host we're about to dial.
-    Found(TargetAuthorization),
+    /// Carries the capability minted for the target session, so being in this
+    /// state means every pre-dial gate ran for exactly the host to be dialed.
+    Found(ApprovedTarget<TargetSSHOptions>),
+    Connected,
 }
 
 #[derive(Debug)]
@@ -118,8 +120,13 @@ pub enum TrafficRecorderKey {
 }
 
 pub struct ServerSession {
-    pub id: SessionId,
+    pub id: UserSessionId,
     user_info: Option<AuthStateUserInfo>,
+    /// The sealed account-wide proof from the completed [`AuthState`], for the
+    /// menu's re-authorization on selection. Deliberately absent for ticket
+    /// sessions: a ticket binds one target and grants no account-wide
+    /// authorization, so a ticket session reaching the menu fails closed.
+    authorized_identity: Option<AuthorizedIdentity>,
     session_handle: Option<russh::server::Handle>,
     channels: ChannelRegistry,
     /// Client-side events for channel ids no registered channel carries yet.
@@ -142,6 +149,10 @@ pub struct ServerSession {
     services: Services,
     server_handle: Arc<Mutex<WarpgateServerHandle>>,
     target: TargetSelection,
+    /// The child session minted by `start_target_session`. Recordings key on
+    /// it; shells opened before it exists (the target-selection menu) are
+    /// picked up by [`Self::start_recordings_for_pty_channels`] on selection.
+    target_session_id: Option<TargetSessionId>,
     traffic_recorders: HashMap<TrafficRecorderKey, TrafficRecorder>,
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
@@ -159,8 +170,15 @@ pub struct ServerSession {
     probe: ProbeState,
 }
 
-fn session_debug_tag(id: &SessionId, remote_address: &SocketAddr) -> String {
+fn session_debug_tag(id: &UserSessionId, remote_address: &SocketAddr) -> String {
     format!("[{id} - {remote_address}]")
+}
+
+fn shell_recording_metadata(server_channel_id: ServerChannelId) -> SshRecordingMetadata {
+    SshRecordingMetadata::Shell {
+        // HACK russh ChannelId is opaque except via Display
+        channel: server_channel_id.0.to_string().parse().unwrap_or_default(),
+    }
 }
 
 fn format_web_auth_instructions(login_url: Option<Url>, identification_string: &str) -> String {
@@ -225,7 +243,7 @@ impl ServerSession {
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
         mut handler_event_rx: UnboundedReceiver<ServerHandlerEvent>,
     ) -> Result<impl Future<Output = Result<()>> + use<>> {
-        let id = server_handle.lock().await.id();
+        let id = server_handle.lock().await.user_session_id();
 
         let span_ = info_span!("SSH", session=%id);
         let _enter = span_.enter();
@@ -243,6 +261,7 @@ impl ServerSession {
         let mut this = Self {
             id,
             user_info: None,
+            authorized_identity: None,
             session_handle: None,
             channels: ChannelRegistry::new(),
             deferred_server_events: vec![],
@@ -255,6 +274,7 @@ impl ServerSession {
             services: services.clone(),
             server_handle,
             target: TargetSelection::None,
+            target_session_id: None,
             traffic_recorders: HashMap::new(),
             hub,
             event_sender: event_sender.clone(),
@@ -590,39 +610,38 @@ impl ServerSession {
     /// where a PTY channel is required for the host key prompt, but we've connected
     /// faster than the client could open one.
     pub async fn maybe_connect_remote(&mut self) -> Result<()> {
-        let target = match &self.target {
+        if self.rc_state != RCState::NotInitialized {
+            return Ok(());
+        }
+
+        let target = match std::mem::replace(&mut self.target, TargetSelection::None) {
             TargetSelection::None => {
                 anyhow::bail!("Invalid session state (target not set)")
             }
-            TargetSelection::Menu => return Ok(()),
+            TargetSelection::Menu => {
+                self.target = TargetSelection::Menu;
+                return Ok(());
+            }
             TargetSelection::NotFound(name) => {
-                let name = name.clone();
                 self.emit_service_message(&format!("Selected target not found: {name}"))?;
                 self.disconnect_server().await;
                 anyhow::bail!("Target not found: {name}");
             }
-            TargetSelection::Found(authorization) => Some(authorization.clone()),
+            TargetSelection::Found(approved) => approved,
+            TargetSelection::Connected => {
+                self.target = TargetSelection::Connected;
+                return Ok(());
+            }
         };
 
-        if let Some(authorization) = target
-            && self.rc_state == RCState::NotInitialized
-        {
-            self.connect_remote(&authorization).await?;
-        }
-
+        self.connect_remote(target).await?;
+        self.target = TargetSelection::Connected;
         Ok(())
     }
 
-    /// Dialling takes the authorization proof rather than a bare target, so the host we
-    /// connect to is necessarily the one that was authorized, for the user it was
-    /// authorized for.
-    async fn connect_remote(&mut self, authorization: &TargetAuthorization) -> Result<()> {
-        let ssh_chain = resolve_ssh_chain(
-            &self.services,
-            authorization.target().id,
-            Some(&authorization.user_info().username),
-        )
-        .await?;
+    /// The dial consumes the capability minted when the target session started.
+    async fn connect_remote(&mut self, approved: ApprovedTarget<TargetSSHOptions>) -> Result<()> {
+        let ssh_chain = resolve_approved_ssh_chain(&self.services, approved).await?;
 
         let visual_chain = self.make_visual_connection_chain(&ssh_chain[..]).await?;
         self.rc_state = RCState::Connecting;
@@ -668,37 +687,48 @@ impl ServerSession {
                 self.disconnect_server().await;
             }
             MenuEvent::Selected(target) => {
-                let user_info = self
-                    .user_info
-                    .clone()
-                    .ok_or(WarpgateError::InconsistentState("No user info".into()))?;
+                // The proof stored when the login's auth state was accepted;
+                // absent for ticket sessions, which never reach the menu.
+                let identity =
+                    self.authorized_identity
+                        .clone()
+                        .ok_or(WarpgateError::InconsistentState(
+                            "No authorized identity".into(),
+                        ))?;
                 // The menu list was authorized when it was built; permissions
                 // may have changed while it was open, so re-check on selection.
                 let target_name = target.name.clone();
-                let identity = AuthorizedIdentity::for_authenticated_session(
-                    user_info.clone(),
-                    crate::PROTOCOL_NAME,
-                );
                 let Some(authorization) =
                     authorize_for_target(self.services.config_provider.as_ref(), &identity, target)
                         .await?
                 else {
                     warn!(
                         "Target {} not authorized for user {}",
-                        target_name, user_info.username
+                        target_name, identity.username
                     );
                     self.emit_service_message(&format!("Access to {target_name} denied"))?;
                     self.request_disconnect();
                     self.disconnect_server().await;
                     return Ok(());
                 };
-                let _ = self
+                // The menu only lists SSH targets, so this can't refuse a
+                // selection it offered.
+                let Ok(authorization) = authorization.narrow::<TargetSSHOptions>() else {
+                    self.emit_service_message(&format!("Access to {target_name} denied"))?;
+                    self.request_disconnect();
+                    self.disconnect_server().await;
+                    return Ok(());
+                };
+                let (target_session_id, approved) = self
                     .server_handle
                     .lock()
                     .await
-                    .set_target(authorization.target())
-                    .await;
-                self.target = TargetSelection::Found(authorization);
+                    .start_target_session(authorization)
+                    .await?
+                    .admitted()?;
+                self.target_session_id = Some(target_session_id);
+                self.target = TargetSelection::Found(approved);
+                self.start_recordings_for_pty_channels().await;
                 // clear screen ; cursor to 1;1
                 self.emit_pty_output(b"\x1b[2J\x1b[H")?;
                 self.maybe_connect_remote().await?;
@@ -973,10 +1003,7 @@ impl ServerSession {
 
                 self.start_terminal_recording(
                     channel_id,
-                    SshRecordingMetadata::Shell {
-                        // HACK russh ChannelId is opaque except via Display
-                        channel: server_channel_id.0.to_string().parse().unwrap_or_default(),
-                    },
+                    shell_recording_metadata(server_channel_id),
                 )
                 .await;
                 self.maybe_start_command_detector(channel_id);
@@ -1633,11 +1660,18 @@ impl ServerSession {
     }
 
     async fn start_terminal_recording(&mut self, channel_id: Uuid, metadata: SshRecordingMetadata) {
+        // A recording row must reference a target session. Before one exists
+        // (the target-selection menu is open) nothing is recorded; the menu's
+        // shell channels are swept up by `start_recordings_for_pty_channels`
+        // when a target is selected.
+        let Some(target_session_id) = self.target_session_id else {
+            return;
+        };
         let recorder = async {
             let recorder = self
                 .services
                 .recordings
-                .start::<TerminalRecorder, _>(&self.id, None, metadata)
+                .start::<TerminalRecorder, _>(&target_session_id, None, metadata)
                 .await?;
             if let Some(request) = self
                 .channels
@@ -1665,6 +1699,22 @@ impl ServerSession {
                 recordings::Error::Disabled => (),
                 error => error!(channel=%channel_id, ?error, "Failed to start recording"),
             },
+        }
+    }
+
+    /// Starts terminal recordings for the shells opened while no target
+    /// session existed yet — the target-selection menu runs in a PTY shell,
+    /// so PTY presence identifies them. Called wherever a target session
+    /// starts; channels opening later record via their own shell request.
+    async fn start_recordings_for_pty_channels(&mut self) {
+        let channels: Vec<(Uuid, SshRecordingMetadata)> = self
+            .channels
+            .iter()
+            .filter(|(_, channel)| channel.has_pty())
+            .filter_map(|(id, channel)| Some((*id, shell_recording_metadata(channel.server_id()?))))
+            .collect();
+        for (channel_id, metadata) in channels {
+            self.start_terminal_recording(channel_id, metadata).await;
         }
     }
 
@@ -1719,11 +1769,17 @@ impl ServerSession {
         key: TrafficRecorderKey,
         metadata: SshRecordingMetadata,
     ) -> Option<&mut TrafficRecorder> {
+        // Traffic flows only through a connected target, so the target session
+        // always exists by now.
+        let Some(target_session_id) = self.target_session_id else {
+            error!(?key, "No target session for traffic recording");
+            return None;
+        };
         if let Vacant(e) = self.traffic_recorders.entry(key.clone()) {
             match self
                 .services
                 .recordings
-                .start(&self.id, None, metadata)
+                .start(&target_session_id, None, metadata)
                 .await
             {
                 Ok(recorder) => {
@@ -2244,6 +2300,7 @@ impl ServerSession {
                         &mut state,
                         credential,
                         self.services.config_provider.as_ref(),
+                        &self.services.login_protection,
                     )
                     .await?;
 
@@ -2272,13 +2329,13 @@ impl ServerSession {
                             .login_protection
                             .clear_failed_attempts(&remote_ip, &user_info.username)
                             .await;
+                        // The state is `Accepted` here, so this yields the sealed proof.
+                        let Some(identity) = AuthorizedIdentity::from_auth_state(&state) else {
+                            return Ok(AuthResult::Rejected);
+                        };
                         let authorization = if target_name.is_empty() {
                             None
                         } else {
-                            // The state is `Accepted` here, so this yields the sealed proof.
-                            let Some(identity) = AuthorizedIdentity::from_auth_state(&state) else {
-                                return Ok(AuthResult::Rejected);
-                            };
                             let Some(authorization) = authorize_for_target_by_name(
                                 self.services.config_provider.as_ref(),
                                 &identity,
@@ -2294,6 +2351,7 @@ impl ServerSession {
                             };
                             Some(authorization)
                         };
+                        self.authorized_identity = Some(identity);
                         self._auth_accept(user_info.clone(), authorization).await?;
                         Ok(AuthResult::Accepted { user_info })
                     }
@@ -2301,7 +2359,7 @@ impl ServerSession {
                 }
             }
             AuthSelector::Ticket { secret } => {
-                match authorize_ticket(
+                match authorize_and_spend_ticket(
                     &self.services.db,
                     &self.services.login_protection,
                     secret,
@@ -2310,12 +2368,11 @@ impl ServerSession {
                 )
                 .await?
                 {
-                    Some((ticket, authorization)) => {
+                    Some(authorization) => {
                         info!(
                             "Authorized for {} with a ticket",
                             authorization.target().name
                         );
-                        consume_ticket(&self.services.db, &ticket.id).await?;
                         let user_info = authorization.user_info().clone();
                         self._auth_accept(user_info.clone(), Some(authorization))
                             .await?;
@@ -2334,12 +2391,11 @@ impl ServerSession {
         authorization: Option<TargetAuthorization>,
     ) -> Result<(), WarpgateError> {
         self.user_info = Some(user_info.clone());
-        let _ = self
-            .server_handle
+        self.server_handle
             .lock()
             .await
             .set_user_info(user_info.clone())
-            .await;
+            .await?;
 
         let Some(authorization) = authorization else {
             self.target = TargetSelection::Menu;
@@ -2348,19 +2404,23 @@ impl ServerSession {
 
         // The authorization already carries the resolved target; all that's left is
         // that it be reachable over SSH.
-        if !matches!(authorization.target().options, TargetOptions::Ssh(_)) {
-            self.target = TargetSelection::NotFound(authorization.target().name.clone());
+        let target_name = authorization.target().name.clone();
+        let Ok(authorization) = authorization.narrow::<TargetSSHOptions>() else {
+            self.target = TargetSelection::NotFound(target_name);
             warn!("Selected target is not an SSH target");
             return Ok(());
-        }
+        };
 
-        let _ = self
+        let (target_session_id, approved) = self
             .server_handle
             .lock()
             .await
-            .set_target(authorization.target())
-            .await;
-        self.target = TargetSelection::Found(authorization);
+            .start_target_session(authorization)
+            .await?
+            .admitted()?;
+        self.target_session_id = Some(target_session_id);
+        self.target = TargetSelection::Found(approved);
+        self.start_recordings_for_pty_channels().await;
         Ok(())
     }
 

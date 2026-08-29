@@ -32,7 +32,7 @@ use uuid::Uuid;
 use warpgate_ca::CLUSTER_TLS_SNI_NAME;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
-use warpgate_common::{Secret, WarpgateError};
+use warpgate_common::{NodeId, Secret, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_common_http::{
@@ -40,7 +40,7 @@ use warpgate_common_http::{
     X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN, is_cluster_peer_request,
 };
 use warpgate_core::Services;
-use warpgate_db_entities::{Node, Parameters, Session};
+use warpgate_db_entities::{Node, Parameters, TargetSession};
 use warpgate_tls::configure_cluster_tls_connector;
 
 pub struct RemoteNode {
@@ -75,26 +75,29 @@ impl Owner {
     }
 }
 
-/// Resolves an owning node id to an [`Owner`]. The nil UUID (no owning node),
-/// or this node's own id, is [`Owner::Local`]; a foreign id is looked up in the
-/// registry and yields [`WarpgateError::NodeGone`] if it is no longer there.
+/// resolve a node UUID into an [Owner::Local]/[Owner::Remote],
+/// handling invalid IDs (warn and fall back to local)
 pub async fn node_owner(
     ctx: &UnauthenticatedRequestContext,
-    node_id: Uuid,
+    node_id: Option<NodeId>,
 ) -> Result<Owner, WarpgateError> {
     let services = ctx.services();
-    if node_id.is_nil() || node_id == services.cluster.node_id {
+    let Some(node_id) = node_id else {
+        return Ok(Owner::Local);
+    };
+    if node_id.0.is_nil() || node_id == services.cluster.node_id {
         return Ok(Owner::Local);
     }
     let Some(node) = Node::Entity::find_by_id(node_id).one(&services.db).await? else {
-        return Err(WarpgateError::NodeGone(node_id));
+        warn!(%node_id, "Owner node is gone from the cluster; serving locally");
+        return Ok(Owner::Local);
     };
     Ok(Owner::remote(node))
 }
 
 pub async fn session_owner(
     ctx: &UnauthenticatedRequestContext,
-    session: &Session::Model,
+    session: &TargetSession::Model,
 ) -> Result<Owner, WarpgateError> {
     node_owner(ctx, session.node_id).await
 }
@@ -228,6 +231,21 @@ where
 /// unreachable must not hold up the rest of a fan-out.
 const PEER_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// [fan_out_to_peers] but expect a specific HTTP response code
+/// and return a list of (hostname, code) of responses that did not match
+pub async fn fan_out_to_peers_expecting(
+    ctx: &AuthenticatedRequestContext,
+    req: &Request,
+    expected: StatusCode,
+) -> Vec<(String, StatusCode)> {
+    fan_out_to_peers(ctx, req, req.original_uri().path())
+        .await
+        .into_iter()
+        .map(|(hostname, response)| (hostname, response.status()))
+        .filter(|(_, status)| *status != expected)
+        .collect()
+}
+
 /// Forwards `req` as `path` to every other registered node and collects what
 /// they answer, paired with the node's hostname for logging.
 ///
@@ -326,7 +344,9 @@ fn peer_port(addrs: &[SocketAddr]) -> poem::Result<u16> {
 }
 
 /// Connect to the first reachable resolved address.
-async fn connect_any(addrs: &[SocketAddr]) -> poem::Result<tokio::net::TcpStream> {
+async fn connect_any(
+    addrs: &[SocketAddr],
+) -> Result<tokio::net::TcpStream, Option<std::io::Error>> {
     let mut last_error = None;
     for addr in addrs {
         match tokio::net::TcpStream::connect(addr).await {
@@ -334,9 +354,7 @@ async fn connect_any(addrs: &[SocketAddr]) -> poem::Result<tokio::net::TcpStream
             Err(error) => last_error = Some(error),
         }
     }
-    Err(poem::error::BadGateway(
-        last_error.unwrap_or_else(|| std::io::Error::other("no peer address")),
-    ))
+    Err(last_error)
 }
 
 /// Forwards `req` to `path` on the peer rather than the request's own path - for
@@ -420,7 +438,7 @@ async fn forward_http_inner(
     )))
 }
 
-async fn forward_websocket(
+pub async fn forward_websocket(
     ctx: &AuthenticatedRequestContext,
     req: &Request,
     ws: WebSocket,
@@ -448,7 +466,10 @@ async fn forward_websocket(
     }
     let request = builder.body(()).map_err(poem::error::InternalServerError)?;
 
-    let stream = connect_any(&addrs).await?;
+    let stream = connect_any(&addrs).await.map_err(|e| {
+        poem::error::BadGateway(e.unwrap_or_else(|| std::io::Error::other("no peer address")))
+    })?;
+
     let (peer, _) = client_async_tls_with_config(
         request,
         stream,

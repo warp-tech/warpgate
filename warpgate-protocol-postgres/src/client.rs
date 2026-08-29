@@ -9,6 +9,7 @@ use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
 use tracing::{debug, info, warn};
 use warpgate_common::{TargetPostgresOptions, WarpgateError};
+use warpgate_core::ApprovedTarget;
 use warpgate_tls::{ClientTlsStream, TlsMode, configure_tls_connector};
 
 use crate::error::PostgresError;
@@ -56,9 +57,11 @@ impl PostgresClient {
     }
 
     pub async fn connect(
-        target: &TargetPostgresOptions,
+        approved: ApprovedTarget<TargetPostgresOptions>,
         options: ConnectionOptions,
     ) -> Result<Self, PostgresError> {
+        let (_, target) = approved.into_parts();
+        let (_, target) = target.into_parts();
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
 

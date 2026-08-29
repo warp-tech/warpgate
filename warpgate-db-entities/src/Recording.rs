@@ -4,6 +4,7 @@ use sea_orm::sea_query::ForeignKeyAction;
 use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
+use warpgate_common::TargetSessionId;
 
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter, Enum, DeriveActiveEnum, Serialize)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
@@ -27,7 +28,7 @@ pub struct Model {
     pub name: String,
     pub started: OffsetDateTime,
     pub ended: Option<OffsetDateTime>,
-    pub session_id: Uuid,
+    pub session_id: TargetSessionId,
     pub kind: RecordingKind,
     #[sea_orm(column_type = "Text")]
     pub metadata: String,
@@ -40,24 +41,24 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter)]
 pub enum Relation {
-    Session,
+    TargetSession,
 }
 
 impl RelationTrait for Relation {
     fn def(&self) -> RelationDef {
         match self {
-            Self::Session => Entity::belongs_to(super::Session::Entity)
+            Self::TargetSession => Entity::belongs_to(super::TargetSession::Entity)
                 .from(Column::SessionId)
-                .to(super::Session::Column::Id)
+                .to(super::TargetSession::Column::Id)
                 .on_delete(ForeignKeyAction::Cascade)
                 .into(),
         }
     }
 }
 
-impl Related<super::Session::Entity> for Entity {
+impl Related<super::TargetSession::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Session.def()
+        Relation::TargetSession.def()
     }
 }
 

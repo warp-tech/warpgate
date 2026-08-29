@@ -12,7 +12,7 @@ use tokio_util::task::TaskTracker;
 use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_directory;
-use warpgate_common::{GlobalParams, SessionId};
+use warpgate_common::{GlobalParams, TargetSessionId};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Recording::{self, RecordingKind};
 mod desktop;
@@ -203,7 +203,12 @@ impl SessionRecordings {
     }
 
     /// Starting a recording with the same name again will append to it
-    pub async fn start<T, M>(&self, id: &SessionId, name: Option<String>, metadata: M) -> Result<T>
+    pub async fn start<T, M>(
+        &self,
+        id: &TargetSessionId,
+        name: Option<String>,
+        metadata: M,
+    ) -> Result<T>
     where
         T: Recorder,
         M: Serialize + Debug,
@@ -229,7 +234,7 @@ impl SessionRecordings {
             let existing = Recording::Entity::find()
                 .filter(
                     Recording::Column::SessionId
-                        .eq(*id)
+                        .eq(id.0)
                         .and(Recording::Column::Name.eq(name.clone()))
                         .and(Recording::Column::Kind.eq(T::kind())),
                 )
@@ -272,7 +277,7 @@ impl SessionRecordings {
         live.get(id).map(broadcast::Sender::subscribe)
     }
 
-    pub async fn remove(&self, session_id: &SessionId, name: &str) -> Result<()> {
+    pub async fn remove(&self, session_id: &TargetSessionId, name: &str) -> Result<()> {
         self.storage().await?.remove(session_id, name).await
     }
 

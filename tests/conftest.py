@@ -851,6 +851,7 @@ class ProcessManager:
             return self.start(
                 [
                     os.path.join(cargo_root, binary_path),
+                    "--debug",
                     "--config",
                     str(config_path),
                     *args,
@@ -861,7 +862,6 @@ class ProcessManager:
                     "LLVM_PROFILE_FILE": f"{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw",
                     "WARPGATE_ADMIN_TOKEN": "token-value",
                     "WARPGATE_UNDER_TEST": "1",
-                    "RUST_LOG": "debug",
                     **env,
                 },
                 stop_signal=signal.SIGINT,

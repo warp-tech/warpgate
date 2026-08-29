@@ -1,4 +1,5 @@
 mod defaults;
+mod specific_target;
 mod target;
 mod warnings;
 
@@ -18,6 +19,7 @@ use defaults::{
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+pub use specific_target::*;
 pub use target::*;
 use uuid::Uuid;
 pub use warnings::{clear_config_warnings, emit_config_warning, emit_runtime_warning, warnings};

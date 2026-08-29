@@ -24,7 +24,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::net::accept_loop;
-use warpgate_core::{Services, SessionStateInit, State};
+use warpgate_core::{Services, State, UserSessionStateInit};
 use warpgate_db_entities::Parameters;
 
 use crate::keys::load_keys;
@@ -76,18 +76,19 @@ async fn _handle_connection(
 ) -> Result<()> {
     let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
-    let server_handle = State::register_session(
+    let (server_handle, wrapped_stream) = State::register_user_session_with_stream(
         &services.state,
         crate::PROTOCOL_NAME,
-        SessionStateInit {
+        UserSessionStateInit {
             remote_address: Some(remote_address),
             handle: Box::new(session_handle),
         },
+        stream,
     )
     .await
     .context("registering session")?;
 
-    let id = server_handle.lock().await.id();
+    let id = server_handle.lock().await.user_session_id();
 
     let (event_tx, event_rx) = unbounded_channel();
 
@@ -101,10 +102,6 @@ async fn _handle_connection(
     };
 
     let handler = ServerHandler { event_tx, banner };
-    let wrapped_stream = {
-        let guard = server_handle.lock().await;
-        guard.wrap_stream(stream).await?
-    };
 
     let session = match ServerSession::start(
         remote_address,

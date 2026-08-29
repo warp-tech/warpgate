@@ -26,7 +26,7 @@ def _live_session_node(config_path):
     """(session_id, node_id) of the most recent still-open session, or None."""
     with _db(config_path) as db:
         row = db.execute(
-            "SELECT id, node_id FROM sessions"
+            "SELECT id, node_id FROM user_sessions"
             " WHERE ended IS NULL ORDER BY started DESC LIMIT 1"
         ).fetchone()
     return row
@@ -43,7 +43,7 @@ def _node_exists(config_path, node_id):
 def _session_ended(config_path, session_id):
     with _db(config_path) as db:
         row = db.execute(
-            "SELECT ended FROM sessions WHERE id = ?", (session_id,)
+            "SELECT ended FROM user_sessions WHERE id = ?", (session_id,)
         ).fetchone()
     return row is not None and row[0] is not None
 

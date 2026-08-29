@@ -4,6 +4,7 @@ use anyhow::bail;
 use futures::{SinkExt, StreamExt};
 use poem::session::Session;
 use poem::web::Data;
+use poem::web::cookie::CookieJar;
 use poem::web::websocket::{Message, WebSocket};
 use poem::{FromRequest, IntoResponse, Request, handler};
 use poem_openapi::param::Path;
@@ -14,22 +15,22 @@ use sea_orm::EntityTrait;
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
-use tracing::{error, warn};
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{
-    Owner, ReparseForwardedResponse, fan_out_to_peers, forwarded_error, parse_forwarded_body,
-    proxy_or_serve, proxy_or_serve_pending_login, session_owner,
+    Owner, ReparseForwardedResponse, fan_out_to_peers, forwarded_error, node_owner,
+    parse_forwarded_body, proxy_or_serve, proxy_or_serve_pending_login,
 };
 use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{Secret, WarpgateError};
+use warpgate_common::{Secret, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization, is_cluster_peer_request};
 use warpgate_core::Services;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_db_entities::{Parameters, Session as SessionEntity};
+use warpgate_db_entities::{Parameters, UserSession};
 
 use super::common::{emit_unknown_authentication_failed_event, logout};
 use crate::api::auth_scheme::AuthedSession;
@@ -37,7 +38,8 @@ use crate::common::{
     SessionExt, authorize_session, get_auth_state_for_request,
     get_or_create_auth_state_for_request, session_id_for_request,
 };
-use crate::session::{SessionStore, SharedSessionStorage};
+use crate::session::SessionStore;
+use crate::session_storage::SharedSessionStorage;
 pub struct Api;
 
 #[derive(Object)]
@@ -326,9 +328,9 @@ impl Api {
         ctx: AuthedSession,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(*id)).await?;
+        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
         proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &id).await else {
+            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
                 return Ok(AuthStateResponse::NotFound);
             };
             Ok(AuthStateResponse::Ok(Json(
@@ -350,10 +352,10 @@ impl Api {
         id: Path<Uuid>,
         body: Json<ApproveAuthRequest>,
     ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(*id)).await?;
+        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
         proxy_or_serve(&ctx, req, owner, Some(&body.to_json()), || async {
             let services = ctx.services();
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &id).await else {
+            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
                 return Ok(AuthStateResponse::NotFound);
             };
 
@@ -394,9 +396,9 @@ impl Api {
         ctx: AuthedSession,
         id: Path<Uuid>,
     ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(*id)).await?;
+        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
         proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &id).await else {
+            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
                 return Ok(AuthStateResponse::NotFound);
             };
             {
@@ -413,7 +415,7 @@ impl Api {
     }
 }
 
-async fn record_failed_login_attempt(
+pub(crate) async fn record_failed_login_attempt(
     services: &Services,
     client_ip: Option<std::net::IpAddr>,
     username: &str,
@@ -515,11 +517,37 @@ async fn serve_login(
         x => x,
     }?;
     let mut state = state_arc.lock().await;
-
-    let outcome = submit_credential(
+    submit_and_finalize(
+        req,
+        ctx,
         &mut state,
         AuthCredential::Password(Secret::new(body.password.clone())),
-        ctx.services().config_provider.as_ref(),
+        "password",
+    )
+    .await
+}
+
+/// The shared tail of every login step: submits the credential and applies the
+/// one login-outcome policy — authorize the browser session and clear failed
+/// attempts on success; record a failed attempt when the credential itself was
+/// rejected (a valid credential that merely needs another factor is not a
+/// failure); and mask an overall-`Accepted` state left by an invalid extra
+/// credential as a failure to the client.
+async fn submit_and_finalize(
+    req: &Request,
+    ctx: &UnauthenticatedRequestContext,
+    state: &mut warpgate_common::auth::AuthState,
+    credential: AuthCredential,
+    credential_type: &str,
+) -> poem::Result<LoginResponse> {
+    let services = ctx.services();
+    let client_ip = get_client_ip_addr(req, services).await;
+
+    let outcome = submit_credential(
+        state,
+        credential,
+        services.config_provider.as_ref(),
+        &services.login_protection,
     )
     .await?;
 
@@ -528,7 +556,6 @@ async fn serve_login(
             let username = user_info.username.clone();
             authorize_session(req, ctx, user_info).await?;
             state.emit_authenticated_event_once();
-            // Clear failed attempts on successful login
             if let Some(ip) = client_ip {
                 let _ = services
                     .login_protection
@@ -538,22 +565,16 @@ async fn serve_login(
             Ok(LoginResponse::Success)
         }
         Err(rejection) => {
-            // Only an invalid password counts as a failed attempt; a valid
-            // password that merely needs a second factor is not a failure.
             if rejection.credential_rejected {
-                error!("Password authentication failed");
                 record_failed_login_attempt(
                     services,
                     client_ip,
                     &state.user_info().username,
-                    "password",
+                    credential_type,
                 )
                 .await;
             }
             Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                // An invalid extra credential can leave the overall state
-                // `Accepted`; the attempt was still rejected, so it must
-                // report a failure rather than `Success` to the client.
                 state: match rejection.state {
                     AuthResult::Accepted { .. } => ApiAuthState::Failed,
                     other => other.into(),
@@ -610,78 +631,39 @@ async fn serve_otp_login(
         ))));
     }
 
-    let outcome = submit_credential(
+    submit_and_finalize(
+        req,
+        ctx,
         &mut state,
         AuthCredential::Otp(otp.to_owned().into()),
-        services.config_provider.as_ref(),
+        "otp",
     )
-    .await?;
-
-    match outcome.into_accepted() {
-        Ok(user_info) => {
-            let username = user_info.username.clone();
-            authorize_session(req, ctx, user_info).await?;
-            state.emit_authenticated_event_once();
-            // Clear failed attempts on successful login
-            if let Some(ip) = client_ip {
-                let _ = services
-                    .login_protection
-                    .clear_failed_attempts(&ip, &username)
-                    .await;
-            }
-            Ok(LoginResponse::Success)
-        }
-        Err(rejection) => {
-            // Only an invalid OTP counts as a failed attempt.
-            if rejection.credential_rejected {
-                record_failed_login_attempt(
-                    services,
-                    client_ip,
-                    &state.user_info().username,
-                    "otp",
-                )
-                .await;
-            }
-            Ok(LoginResponse::Failure(Json(LoginFailureResponse {
-                // An invalid extra credential can leave the overall state
-                // `Accepted`; the attempt was still rejected, so it must
-                // report a failure rather than `Success` to the client.
-                state: match rejection.state {
-                    AuthResult::Accepted { .. } => ApiAuthState::Failed,
-                    other => other.into(),
-                },
-                credential_rejected: rejection.credential_rejected,
-            })))
-        }
-    }
+    .await
 }
 
-/// The owner of an auth state: auth states are keyed by session id and held only
-/// in memory on the node that created them, but the `sessions` row records that
-/// node, so the owner is the session's node. An unknown session or a gone owner
-/// node both resolve to `Local`, where the store lookup then reports not-found
-/// and the caller retries.
+/// The owner of an auth state: auth states are keyed by session id and held
+/// only in memory on the node that created them, and the `user_sessions` row
+/// records that node (`auth_state_node_id`, stamped at state creation). Rows
+/// written before the stamp existed fall back to the session's lifecycle node.
+/// An unknown session or a gone owner node both resolve to `Local`, where the
+/// store lookup then reports not-found and the caller retries.
 async fn auth_state_owner(
     ctx: &UnauthenticatedRequestContext,
-    id: Option<Uuid>,
+    id: Option<UserSessionId>,
 ) -> poem::Result<Owner> {
     let Some(id) = id else {
         return Ok(Owner::local());
     };
-    let Some(session) = SessionEntity::Entity::find_by_id(id)
+    let Some(session) = UserSession::Entity::find_by_id(id)
         .one(&ctx.services().db)
         .await
         .map_err(poem::error::InternalServerError)?
     else {
         return Ok(Owner::local());
     };
-    match session_owner(ctx, &session).await {
-        Err(WarpgateError::NodeGone(node_id)) => {
-            warn!(%node_id, "Auth state owner node is gone; reporting not found");
-            Ok(Owner::local())
-        }
-        owner => owner.map_err(Into::into),
-    }
+    node_owner(ctx, session.auth_state_node_id.or(session.node_id))
+        .await
+        .map_err(Into::into)
 }
 
 /// Runs a login step (OTP submit, state poll, cancel) for this request's own
@@ -700,16 +682,26 @@ where
 {
     let owner = auth_state_owner(ctx, session.get_session_id()).await?;
     let forwarded = matches!(owner, Owner::Remote(_));
+    let authed_before_hop = session.get_auth().is_some();
     let result = proxy_or_serve_pending_login(ctx, req, owner, body, serve_local).await;
 
     if forwarded {
         // The peer acts on the same browser session - and on success writes the
         // authorization into it - so take its version over the copy this node
         // has been holding since before the hop.
-        Data::<&SharedSessionStorage>::from_request_without_body(req)
-            .await?
-            .adopt_stored(session)
+        let jar = <&CookieJar>::from_request_without_body(req).await?;
+        let storage = Data::<&SharedSessionStorage>::from_request_without_body(req).await?;
+        storage
+            .adopt_stored(crate::common::storage_session_id(jar), session)
             .await?;
+
+        if !authed_before_hop && session.get_auth().is_some() {
+            // the forwarded request just got us logged in
+            // now we must rotate the cookie _here_ since cookies set by a forwarded request are not passed back to the client
+            storage
+                .rotate_session_id(crate::common::storage_session_id(jar), session)
+                .await?;
+        }
     }
 
     result
@@ -719,9 +711,9 @@ impl ReparseForwardedResponse for LoginResponse {
     async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
         match response.status() {
             http::StatusCode::CREATED => Ok(Self::Success),
-            http::StatusCode::UNAUTHORIZED => Ok(Self::Failure(Json(
-                parse_forwarded_body(response).await?,
-            ))),
+            http::StatusCode::UNAUTHORIZED => {
+                Ok(Self::Failure(Json(parse_forwarded_body(response).await?)))
+            }
             _ => Err(forwarded_error(response).await),
         }
     }
@@ -731,9 +723,7 @@ impl ReparseForwardedResponse for AuthStateResponse {
     async fn reparse_forwarded_response(response: poem::Response) -> poem::Result<Self> {
         match response.status() {
             http::StatusCode::NOT_FOUND => Ok(Self::NotFound),
-            http::StatusCode::OK => Ok(Self::Ok(Json(
-                parse_forwarded_body(response).await?,
-            ))),
+            http::StatusCode::OK => Ok(Self::Ok(Json(parse_forwarded_body(response).await?))),
             _ => Err(forwarded_error(response).await),
         }
     }
@@ -806,7 +796,7 @@ async fn web_auth_requests_from_peers(
 /// request (carrying the origin's user identity) is re-checked here.
 async fn local_auth_state_for_user(
     ctx: &AuthenticatedRequestContext,
-    id: &Uuid,
+    id: &UserSessionId,
 ) -> Option<Arc<Mutex<AuthState>>> {
     let username = ctx.auth.username().cloned()?;
     let state_arc = {
@@ -831,7 +821,7 @@ async fn serialize_auth_state_inner(
     let session_state = {
         let session_state_store = services.state.lock().await;
         session_state_store
-            .sessions
+            .user_sessions
             .get(state.session_id())
             .cloned()
     };

@@ -14,7 +14,7 @@ use ratatui::{Terminal, TerminalOptions, Viewport};
 use termwiz::input::{InputEvent, InputParser, KeyCode, Modifiers};
 use tui_input::{Input, InputRequest};
 use warpgate_common::eventhub::{EventSender, EventSubscription};
-use warpgate_common::{SessionId, Target, TargetSSHOptions, WarpgateError};
+use warpgate_common::{Target, TargetSSHOptions, UserSessionId, WarpgateError};
 
 use crate::server::session::Event;
 
@@ -468,7 +468,7 @@ impl<T: Clone> TargetMenu<T> {
 }
 
 pub fn spawn_target_menu_loop(
-    id: SessionId,
+    id: UserSessionId,
     username: String,
     entries: Vec<(Target, TargetSSHOptions)>,
     mut subscription: EventSubscription<Event>,

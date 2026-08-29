@@ -14,7 +14,7 @@ use poem::session::Session;
 use poem::web::Data;
 use poem::web::websocket::WebSocket;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
-use tokio::sync::Mutex;
+use tokio::sync::broadcast;
 use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
 use tracing::{debug, error, warn};
 use url::{Url, form_urlencoded};
@@ -24,13 +24,15 @@ use warpgate_common::http_headers::{
 };
 use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
 use warpgate_common_http::logging::{get_client_ip, log_request_result};
-use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization, SessionKeepalive};
+use warpgate_common_http::{
+    AuthenticatedRequestContext, SessionAuthorization, SessionKeepalive, SessionKeepaliveGuard,
+};
+use warpgate_core::ApprovedTarget;
 use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
 use crate::client_cache::HttpClientCache;
 use crate::common::{SESSION_COOKIE_NAME, SessionExt};
-use crate::session::SessionStore;
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
 static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
@@ -64,6 +66,9 @@ trait SomeRequestBuilder {
     where
         HeaderValue: TryFrom<V>,
         <HeaderValue as TryFrom<V>>::Error: Into<http::Error>;
+
+    /// Set a target-configured header, replacing values copied or generated earlier.
+    fn set_header(self, k: HeaderName, v: HeaderValue) -> Self;
 }
 
 impl SomeRequestBuilder for reqwest::RequestBuilder {
@@ -74,6 +79,12 @@ impl SomeRequestBuilder for reqwest::RequestBuilder {
     {
         self.header(k, v)
     }
+
+    fn set_header(self, k: HeaderName, v: HeaderValue) -> Self {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(k, v);
+        self.headers(headers)
+    }
 }
 
 impl SomeRequestBuilder for http::request::Builder {
@@ -83,6 +94,13 @@ impl SomeRequestBuilder for http::request::Builder {
         <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
     {
         self.header(k, v)
+    }
+
+    fn set_header(mut self, k: HeaderName, v: HeaderValue) -> Self {
+        if let Some(headers) = self.headers_mut() {
+            headers.insert(k, v);
+        }
+        self
     }
 }
 
@@ -168,7 +186,7 @@ fn copy_client_response<R: SomeResponse>(
 fn rewrite_request<B: SomeRequestBuilder>(mut req: B, options: &TargetHTTPOptions) -> Result<B> {
     if let Some(ref headers) = options.headers {
         for (k, v) in headers {
-            req = req.header(HeaderName::try_from(k)?, v);
+            req = req.set_header(HeaderName::try_from(k)?, HeaderValue::try_from(v)?);
         }
     }
     Ok(req)
@@ -296,19 +314,23 @@ async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B)
     Ok(target)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn proxy_normal_request(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
     body: Body,
-    target_name: &str,
-    options: &TargetHTTPOptions,
     client_cache: &HttpClientCache,
+    approved: ApprovedTarget<TargetHTTPOptions>,
+    mut close_rx: broadcast::Receiver<()>,
+    keepalive_guard: Option<SessionKeepaliveGuard>,
 ) -> poem::Result<Response> {
-    let uri = construct_uri(req, options, false)?;
+    let (_, target) = approved.into_parts();
+    let (target, options) = target.into_parts();
+    let uri = construct_uri(req, &options, false)?;
 
     tracing::debug!("URI: {:?}", uri);
 
-    let client = client_cache.client_for(target_name, options).await?;
+    let client = client_cache.client_for(&target.name, &options).await?;
 
     let (authorization_header, uri) = extract_basic_auth(uri)?;
 
@@ -317,7 +339,7 @@ pub async fn proxy_normal_request(
     client_request = copy_server_request(req, client_request)?;
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
-    client_request = rewrite_request(client_request, options)?;
+    client_request = rewrite_request(client_request, &options)?;
     if let Some(authorization_header) = authorization_header {
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
@@ -329,10 +351,14 @@ pub async fn proxy_normal_request(
     }
 
     let client_request = client_request.build().context("Could not build request")?;
-    let client_response = client
-        .execute(client_request)
-        .await
-        .map_err(|e| anyhow::anyhow!("Could not execute request: {e}"))?;
+    let client_response = tokio::select! {
+        result = client.execute(client_request) => {
+            result.map_err(|e| anyhow::anyhow!("Could not execute request: {e}"))?
+        }
+        _ = close_rx.recv() => {
+            return Err(poem::Error::from_status(StatusCode::GONE));
+        }
+    };
     let status = client_response.status();
 
     let mut response: Response = "".into();
@@ -350,7 +376,14 @@ pub async fn proxy_normal_request(
             .parameters()
             .await
             .map_or(true, |p| p.show_session_menu || p.banner_text().is_some());
-    copy_client_body(client_response, &mut response, embed_ui).await?;
+    copy_client_body(
+        client_response,
+        &mut response,
+        embed_ui,
+        close_rx,
+        keepalive_guard,
+    )
+    .await?;
 
     log_request_result(
         req.method(),
@@ -359,7 +392,7 @@ pub async fn proxy_normal_request(
         status,
     );
 
-    rewrite_response(&mut response, options, &uri)?;
+    rewrite_response(&mut response, &options, &uri)?;
     Ok(response)
 }
 
@@ -367,17 +400,32 @@ async fn copy_client_body(
     client_response: reqwest::Response,
     response: &mut Response,
     embed_ui: bool,
+    close_rx: broadcast::Receiver<()>,
+    keepalive_guard: Option<SessionKeepaliveGuard>,
 ) -> Result<()> {
     if embed_ui {
         copy_client_body_and_embed(client_response, response).await?;
+        drop(keepalive_guard);
         return Ok(());
     }
 
-    response.set_body(Body::from_bytes_stream(
+    let body = Box::pin(
         client_response
             .bytes_stream()
             .map_err(std::io::Error::other),
-    ));
+    );
+    let guarded = futures::stream::unfold(
+        (body, close_rx, keepalive_guard),
+        |(mut body, mut close_rx, keepalive_guard)| async move {
+            tokio::select! {
+                item = body.next() => item.map(|item| {
+                    (item, (body, close_rx, keepalive_guard))
+                }),
+                _ = close_rx.recv() => None,
+            }
+        },
+    );
+    response.set_body(Body::from_bytes_stream(guarded));
     Ok(())
 }
 
@@ -423,10 +471,13 @@ pub async fn proxy_websocket_request(
     req: &Request,
     ws: WebSocket,
     ctx: &AuthenticatedRequestContext,
-    options: &TargetHTTPOptions,
+    approved: ApprovedTarget<TargetHTTPOptions>,
+    close_rx: broadcast::Receiver<()>,
 ) -> poem::Result<impl IntoResponse> {
-    let uri = construct_uri(req, options, true)?;
-    proxy_ws_inner(req, ws, uri.clone(), ctx, options)
+    let (_, target) = approved.into_parts();
+    let (_, options) = target.into_parts();
+    let uri = construct_uri(req, &options, true)?;
+    proxy_ws_inner(req, ws, uri.clone(), ctx, options, close_rx)
         .await
         .map_err(|error| {
             tracing::error!(?uri, ?error, "WebSocket proxy failed");
@@ -469,14 +520,9 @@ async fn proxy_ws_inner(
     ws: WebSocket,
     uri: Uri,
     ctx: &AuthenticatedRequestContext,
-    options: &TargetHTTPOptions,
+    options: TargetHTTPOptions,
+    mut close_rx: broadcast::Receiver<()>,
 ) -> poem::Result<impl IntoResponse> {
-    let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
-        .await?
-        .clone();
-    let session = <&Session>::from_request_without_body(req).await?;
-    let mut close_rx = session_middleware.lock().await.close_receiver_for(session);
-
     let keepalive_guard = Data::<&SessionKeepalive>::from_request_without_body(req)
         .await
         .ok()
@@ -508,23 +554,27 @@ async fn proxy_ws_inner(
     client_request = copy_server_request(req, client_request)?;
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
-    client_request = rewrite_request(client_request, options)?;
+    client_request = rewrite_request(client_request, &options)?;
 
     let tls_config = configure_tls_connector(!options.tls.verify, false, None)
         .await
         .map_err(poem::error::InternalServerError)?;
     let connector = Connector::Rustls(Arc::new(tls_config));
 
-    let (client, client_response) = connect_async_tls_with_config(
+    let connect = connect_async_tls_with_config(
         client_request
             .body(())
             .map_err(poem::error::InternalServerError)?,
         None,
         true,
         Some(connector),
-    )
-    .await
-    .map_err(poem::error::BadGateway)?;
+    );
+    let (client, client_response) = tokio::select! {
+        result = connect => result.map_err(poem::error::BadGateway)?,
+        _ = close_rx.recv() => {
+            return Err(poem::Error::from_status(StatusCode::GONE));
+        }
+    };
 
     tracing::info!("{:?} {:?} - WebSocket", client_response.status(), uri);
 
@@ -560,14 +610,7 @@ async fn proxy_ws_inner(
                     result = &mut client_to_server => {
                         (false, Some(result))
                     }
-                    () = async {
-                        match close_rx.as_mut() {
-                            Some(close_rx) => {
-                                let _ = close_rx.recv().await;
-                            }
-                            None => std::future::pending::<()>().await,
-                        }
-                    } => {
+                    _ = close_rx.recv() => {
                         (false, None)
                     }
                 };
@@ -605,7 +648,7 @@ async fn proxy_ws_inner(
         .into_response();
 
     copy_client_response(&client_response, &mut response);
-    rewrite_response(&mut response, options, &uri)?;
+    rewrite_response(&mut response, &options, &uri)?;
     Ok(response)
 }
 
@@ -660,6 +703,31 @@ mod tests {
             headers: None,
             external_host: None,
         }
+    }
+
+    #[test]
+    fn rewrite_request_replaces_websocket_host() {
+        let mut options = make_options("http://ingress.internal");
+        options.headers = Some(std::collections::HashMap::from([(
+            "Host".to_string(),
+            "backend.example.com".to_string(),
+        )]));
+
+        let request = rewrite_request(
+            http::Request::builder().header(http::header::HOST, "ingress.internal"),
+            &options,
+        )
+        .unwrap()
+        .body(())
+        .unwrap();
+
+        let hosts = request
+            .headers()
+            .get_all(http::header::HOST)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(hosts, ["backend.example.com"]);
     }
 
     #[test]

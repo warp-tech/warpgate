@@ -2185,6 +2185,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
+name = "dsa"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c8573b60d07b5b5cecadc1f978c9b71d5504151e703cbb0439ee4ad301338f3"
+dependencies = [
+ "crypto-bigint 0.7.5",
+ "crypto-common 0.2.2",
+ "crypto-primes",
+ "der 0.8.0",
+ "digest 0.11.3",
+ "rfc6979 0.6.0",
+ "sha2 0.11.0",
+ "signature 3.0.0",
+ "zeroize",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7847,6 +7864,7 @@ dependencies = [
  "argon2 0.6.0-rc.8",
  "bcrypt-pbkdf",
  "ctutils",
+ "dsa",
  "ed25519-dalek 3.0.0",
  "hex",
  "hmac 0.13.0",
@@ -8967,7 +8985,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9020,7 +9038,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9053,6 +9071,7 @@ dependencies = [
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-db-migrations",
  "warpgate-ldap",
  "warpgate-protocol-kubernetes",
  "warpgate-protocol-ssh",
@@ -9088,7 +9107,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ca"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "aws-lc-rs",
  "const-oid 0.9.6",
@@ -9107,7 +9126,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "aes-gcm 0.11.0",
  "anyhow",
@@ -9164,7 +9183,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common-http"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "poem",
  "poem-openapi",
@@ -9181,7 +9200,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -9235,7 +9254,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -9248,7 +9267,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "bytes",
  "ipnet",
@@ -9258,6 +9277,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "time",
+ "tracing",
  "uuid",
  "warpgate-aws",
  "warpgate-common",
@@ -9267,7 +9287,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "data-encoding",
  "regex",
@@ -9282,6 +9302,7 @@ dependencies = [
  "tracing",
  "uuid",
  "warpgate-ca",
+ "warpgate-common",
  "warpgate-db-entities",
 ]
 
@@ -9311,7 +9332,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ldap"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "anyhow",
  "ldap3",
@@ -9327,7 +9348,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9364,13 +9385,14 @@ dependencies = [
  "warpgate-sso",
  "warpgate-tls",
  "warpgate-web",
+ "warpgate-web-clients-common",
  "warpgate-web-desktop",
  "warpgate-web-ssh",
 ]
 
 [[package]]
 name = "warpgate-protocol-kubernetes"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9411,7 +9433,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9441,7 +9463,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-postgres"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9498,7 +9520,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9564,7 +9586,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9584,7 +9606,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-tls"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "bytes",
  "poem",
@@ -9629,7 +9651,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.28.4"
+version = "0.28.5"
 dependencies = [
  "rust-embed",
  "serde",
@@ -9644,6 +9666,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
 ]

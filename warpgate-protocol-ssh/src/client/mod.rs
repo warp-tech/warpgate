@@ -33,11 +33,11 @@ use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
-    MAX_CERTIFICATE_LIFETIME, SSHTargetAuth, SessionId, SshCertificateCriticalOption,
-    TargetOptions, TargetSSHOptions, WarpgateError,
+    MAX_CERTIFICATE_LIFETIME, SSHTargetAuth, SshCertificateCriticalOption, TargetOptionsVariant,
+    TargetSSHOptions, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::auth::TOKEN_ATTRIBUTIONS;
-use warpgate_core::{ConfigProvider, Services};
+use warpgate_core::{ApprovedTarget, ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
@@ -783,7 +783,7 @@ fn resolve_chain_ids(
 /// Resolve the full ordered SSH jump chain for a target
 /// `logged_in_username` is used to substitute empty dynamic usernames
 /// in targets' configs
-pub async fn resolve_ssh_chain(
+async fn resolve_ssh_chain(
     services: &Services,
     target_id: Uuid,
     logged_in_username: Option<&String>,
@@ -794,10 +794,7 @@ pub async fn resolve_ssh_chain(
         targets
             .iter()
             .find(|t| t.id == id)
-            .and_then(|t| match &t.options {
-                TargetOptions::Ssh(opts) => Some(opts.jump_host),
-                _ => None,
-            })
+            .and_then(|t| TargetSSHOptions::extract(&t.options).map(|opts| opts.jump_host))
     })?;
 
     let mut jumps = vec![];
@@ -805,7 +802,7 @@ pub async fn resolve_ssh_chain(
         let Some(t) = targets.iter().find(|t| t.id == id) else {
             return Err(unresolvable_jump_host(id));
         };
-        let TargetOptions::Ssh(opts) = &t.options else {
+        let Some(opts) = TargetSSHOptions::extract(&t.options) else {
             return Err(unresolvable_jump_host(id));
         };
         let mut opts = opts.clone();
@@ -825,6 +822,26 @@ pub async fn resolve_ssh_chain(
     }
     jumps.reverse();
     Ok(jumps)
+}
+
+/// Resolve a chain for the administrator-only host-key diagnostic. User
+/// connection paths must use [`resolve_approved_ssh_chain`] instead.
+pub async fn resolve_ssh_chain_for_admin(
+    services: &Services,
+    target_id: Uuid,
+    admin_username: Option<&String>,
+) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
+    resolve_ssh_chain(services, target_id, admin_username).await
+}
+
+/// Resolve the target-side connection plan while consuming the capability
+/// minted for this target session.
+pub async fn resolve_approved_ssh_chain(
+    services: &Services,
+    approved: ApprovedTarget<TargetSSHOptions>,
+) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
+    let (user_info, target) = approved.into_parts();
+    resolve_ssh_chain(services, target.id, Some(&user_info.username)).await
 }
 
 #[derive(Debug)]
@@ -960,7 +977,7 @@ enum InnerEvent {
 }
 
 pub struct RemoteClient {
-    id: SessionId,
+    id: UserSessionId,
     tx: Sender<RCEvent>,
     session: Option<Arc<Handle<ClientHandler>>>,
     channel_pipes: Arc<Mutex<HashMap<Uuid, UnboundedSender<ChannelOperation>>>>,
@@ -992,7 +1009,7 @@ pub struct RemoteClientHandles {
 }
 
 impl RemoteClient {
-    pub fn create(id: SessionId, services: Services) -> io::Result<RemoteClientHandles> {
+    pub fn create(id: UserSessionId, services: Services) -> io::Result<RemoteClientHandles> {
         let (event_tx, event_rx) = channel(1024);
         let (command_tx, mut command_rx) = unbounded_channel();
         let (abort_tx, abort_rx) = unbounded_channel();
@@ -1346,6 +1363,7 @@ impl RemoteClient {
                         hash: Some(russh::keys::HashAlg::Sha512),
                     },
                     russh::keys::Algorithm::Rsa { hash: None },
+                    russh::keys::Algorithm::Dsa,
                 ]),
                 cipher: Cow::Borrowed(&[
                     russh::cipher::CHACHA20_POLY1305,
@@ -1793,7 +1811,7 @@ impl RemoteClient {
             .state
             .lock()
             .await
-            .sessions
+            .user_sessions
             .get(&self.id)
             .cloned();
 

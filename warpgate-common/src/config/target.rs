@@ -11,7 +11,7 @@ use super::defaults::{
     _default_ssh_port, _default_username, _default_vnc_port,
 };
 use crate::encryption::EncryptionError;
-use crate::{Secret, StoredSecret};
+use crate::{Protocol, Secret, StoredSecret};
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct KubernetesTargetCertificateAuth {
@@ -534,6 +534,18 @@ pub enum TargetOptions {
 }
 
 impl TargetOptions {
+    pub fn protocol(&self) -> Protocol {
+        match self {
+            TargetOptions::Ssh(_) => Protocol::Ssh,
+            TargetOptions::Http(_) => Protocol::Http,
+            TargetOptions::Kubernetes(_) => Protocol::Kubernetes,
+            TargetOptions::MySql(_) => Protocol::MySql,
+            TargetOptions::Postgres(_) => Protocol::Postgres,
+            TargetOptions::Vnc(_) => Protocol::Vnc,
+            TargetOptions::Rdp(_) => Protocol::Rdp,
+        }
+    }
+
     // both used for connection instructions
 
     pub fn external_host(&self) -> Option<&str> {

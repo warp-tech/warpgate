@@ -4,13 +4,41 @@ use poem::session::Session;
 use poem::web::{Data, FromRequest};
 use poem::{Endpoint, Middleware, Request};
 use serde::Deserialize;
+use uuid::Uuid;
 use warpgate_common::Secret;
 use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
-use warpgate_core::{authorize_ticket, consume_ticket};
+use warpgate_core::authorize_and_spend_ticket;
 
 use crate::common::SessionExt;
+
+/// Request-data marker for a header-borne ticket: the request runs on a
+/// detached session that is never stored, so the user session registered for
+/// it is kept alive by the node's `SessionStore` entry rather than by a
+/// stored cookie.
+#[derive(Clone, Copy)]
+pub(crate) struct TemporaryTicketSession;
+
+/// What consecutive header-ticket requests are recognised by. The database id
+/// distinguishes separate tickets issued to the same user for the same target
+/// without keeping the secret around to key on.
+pub(crate) type TicketSessionKey = (Uuid, Uuid, Option<Uuid>);
+
+/// The ticket identity of a request that carries a header-borne ticket, or
+/// `None` for anything cookie-backed.
+pub(crate) fn ticket_session_key(req: &Request, session: &Session) -> Option<TicketSessionKey> {
+    req.data::<TemporaryTicketSession>()?;
+    match session.get_auth()? {
+        SessionAuthorization::Ticket {
+            user_id,
+            target_id,
+            ticket_id,
+            ..
+        } => Some((user_id, target_id, ticket_id)),
+        SessionAuthorization::User { .. } => None,
+    }
+}
 
 pub struct TicketMiddleware {}
 
@@ -41,65 +69,88 @@ struct QueryParams {
 impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
     type Output = E::Output;
 
-    async fn call(&self, req: Request) -> poem::Result<Self::Output> {
+    async fn call(&self, mut req: Request) -> poem::Result<Self::Output> {
         let mut session_is_temporary = false;
-        let session = <&Session>::from_request_without_body(&req).await?;
-        let session = session.clone();
+        let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req)
+            .await?
+            .clone();
 
-        let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await?;
+        let params: QueryParams = req.params()?;
+        let mut ticket_value = params.ticket;
 
-        {
-            let params: QueryParams = req.params()?;
-
-            let mut ticket_value = params.ticket;
-
-            for h in req.headers().get_all(http::header::AUTHORIZATION) {
-                let header_value = h.to_str().unwrap_or("").to_string();
-                if let Some((token_type, token_value)) = header_value.split_once(' ')
-                    && &token_type.to_lowercase() == "warpgate"
-                {
-                    ticket_value = Some(token_value.to_string());
-                    session_is_temporary = true;
-                }
-            }
-
-            if let Some(ticket) = ticket_value
-                && let Some(authorization) = {
-                    let ticket_secret = Secret::new(ticket);
-                    let client_ip: Option<IpAddr> = get_client_ip(&req, ctx.services())
-                        .await
-                        .and_then(|s| s.parse().ok());
-                    if let Some((ticket, authorization)) = authorize_ticket(
-                        &ctx.services().db,
-                        &ctx.services().login_protection,
-                        &ticket_secret,
-                        client_ip,
-                        crate::common::PROTOCOL_NAME,
-                    )
-                    .await?
-                    {
-                        consume_ticket(&ctx.services().db, &ticket.id).await?;
-                        Some(authorization)
-                    } else {
-                        None
-                    }
-                }
+        for h in req.headers().get_all(http::header::AUTHORIZATION) {
+            let header_value = h.to_str().unwrap_or("").to_string();
+            if let Some((token_type, token_value)) = header_value.split_once(' ')
+                && &token_type.to_lowercase() == "warpgate"
             {
-                let (user_info, target) = authorization.into_parts();
+                ticket_value = Some(token_value.to_string());
+                session_is_temporary = true;
+            }
+        }
+
+        if session_is_temporary {
+            // ticket/token requests get a fake temp session
+            // which is never persisted into the store
+            req.extensions_mut().insert(Session::default());
+            req.set_data(TemporaryTicketSession);
+        }
+        let session = <&Session>::from_request_without_body(&req).await?.clone();
+
+        if let Some(ticket) = ticket_value {
+            let ticket_secret = Secret::new(ticket);
+            let client_ip: Option<IpAddr> = get_client_ip(&req, ctx.services())
+                .await
+                .and_then(|s| s.parse().ok());
+            if let Some(authorization) = authorize_and_spend_ticket(
+                &ctx.services().db,
+                &ctx.services().login_protection,
+                &ticket_secret,
+                client_ip,
+                crate::common::PROTOCOL_NAME,
+            )
+            .await?
+            {
                 session.set_auth(SessionAuthorization::Ticket {
-                    user_id: user_info.id,
-                    username: user_info.username,
-                    target_id: target.id,
+                    user_id: authorization.user_info().id,
+                    username: authorization.user_info().username.clone(),
+                    target_id: authorization.target().id,
+                    ticket_id: authorization.ticket_id(),
                 });
             }
         }
 
-        let resp = self.inner.call(req).await;
+        self.inner.call(req).await
+    }
+}
 
-        if session_is_temporary {
-            session.clear();
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        resp
+    #[test]
+    fn temporary_ticket_sessions_are_keyed_by_ticket_id() {
+        let user_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+        let first_ticket_id = Uuid::new_v4();
+        let second_ticket_id = Uuid::new_v4();
+        let mut req = Request::builder().finish();
+        req.set_data(TemporaryTicketSession);
+        let session = Session::default();
+        session.set_auth(SessionAuthorization::Ticket {
+            user_id,
+            username: "alice".into(),
+            target_id,
+            ticket_id: Some(first_ticket_id),
+        });
+        let first_key = ticket_session_key(&req, &session);
+
+        session.set_auth(SessionAuthorization::Ticket {
+            user_id,
+            username: "alice".into(),
+            target_id,
+            ticket_id: Some(second_ticket_id),
+        });
+
+        assert_ne!(first_key, ticket_session_key(&req, &session));
     }
 }

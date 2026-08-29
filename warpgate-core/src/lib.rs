@@ -28,5 +28,5 @@ pub use db_auth::*;
 pub use listener_status::*;
 pub use protocols::*;
 pub use services::*;
-pub use state::{SessionState, SessionStateInit, State};
+pub use state::{SharedSessionHandle, State, UserSessionState, UserSessionStateInit};
 pub use vault_cell::VaultCell;

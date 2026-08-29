@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-db-migrations"
-version = "0.28.4"
+version = "0.28.5"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -22,6 +22,9 @@ tracing.workspace = true
 uuid.workspace = true
 warpgate-ca = { path = "../warpgate-ca", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
+
+[dev-dependencies]
+warpgate-common = { path = "../warpgate-common" }
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]

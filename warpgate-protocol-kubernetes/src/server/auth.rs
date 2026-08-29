@@ -12,7 +12,7 @@ use uuid::Uuid;
 use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
-use warpgate_common::{SessionId, TargetKubernetesOptions, TargetOptions, User};
+use warpgate_common::{TargetKubernetesOptions, User, UserSessionId};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
@@ -137,9 +137,9 @@ pub async fn authorize_kubernetes_target(
     req: &Request,
     user: &User,
     target_name: &str,
-    session_id: SessionId,
+    session_id: UserSessionId,
     services: &Services,
-) -> poem::Result<TargetAuthorization> {
+) -> poem::Result<TargetAuthorization<TargetKubernetesOptions>> {
     let client_ip = get_client_ip_addr(req, services).await;
 
     // When the user has a Kubernetes credential policy, enforce its web-approval
@@ -168,7 +168,7 @@ async fn authorize_kubernetes_identity(
     user: &User,
     client_ip: Option<IpAddr>,
     target_name: &str,
-    session_id: SessionId,
+    session_id: UserSessionId,
 ) -> poem::Result<AuthorizedIdentity> {
     let policy_configured = user
         .credential_policy
@@ -346,18 +346,18 @@ async fn lookup_authorized_k8s_target<C: ConfigProvider + Send>(
     config_provider: &C,
     target_name: &str,
     identity: &AuthorizedIdentity,
-) -> poem::Result<TargetAuthorization> {
+) -> poem::Result<TargetAuthorization<TargetKubernetesOptions>> {
+    let not_found = || {
+        poem::Error::from_string(
+            format!("Kubernetes target not found: {target_name}"),
+            poem::http::StatusCode::NOT_FOUND,
+        )
+    };
     let target = config_provider
         .get_target_by_name(target_name)
         .await
         .context("looking up target")?
-        .filter(|t| matches!(t.options, TargetOptions::Kubernetes(_)))
-        .ok_or_else(|| {
-            poem::Error::from_string(
-                format!("Kubernetes target not found: {target_name}"),
-                poem::http::StatusCode::NOT_FOUND,
-            )
-        })?;
+        .ok_or_else(not_found)?;
 
     authorize_for_target(config_provider, identity, target)
         .await?
@@ -366,7 +366,9 @@ async fn lookup_authorized_k8s_target<C: ConfigProvider + Send>(
                 format!("Access denied to target: {target_name}"),
                 poem::http::StatusCode::FORBIDDEN,
             )
-        })
+        })?
+        .narrow()
+        .map_err(|_| not_found())
 }
 
 /// Load a resolved SSO user by username.

@@ -2,9 +2,9 @@ use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
 use warpgate_protocol_ssh::{
-    ConnectionError, IdentityHint, RCCommand, RCEvent, RemoteClient, resolve_ssh_chain,
+    ConnectionError, IdentityHint, RCCommand, RCEvent, RemoteClient, resolve_ssh_chain_for_admin,
 };
 
 use super::AdminContext;
@@ -45,9 +45,11 @@ impl Api {
         admin.require(AdminPermission::TargetsEdit)?;
 
         let ssh_chain =
-            resolve_ssh_chain(admin.services(), body.target_id, admin.auth.username()).await?;
+            resolve_ssh_chain_for_admin(admin.services(), body.target_id, admin.auth.username())
+                .await?;
 
-        let mut handles = RemoteClient::create(Uuid::new_v4(), admin.services().clone())?;
+        let mut handles =
+            RemoteClient::create(UserSessionId(Uuid::new_v4()), admin.services().clone())?;
         // Not `Connect`: that would carry on into authenticating to the target
         // once the key had been reported, opening a session nothing is attached
         // to — and, for a certificate target, minting a real certificate to do

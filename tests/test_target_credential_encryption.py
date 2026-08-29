@@ -72,7 +72,7 @@ def _snapshot_passwords(config_path):
     """The MySQL target password of every stored session snapshot."""
     with open_wg_sqlite_db(config_path) as db:
         rows = db.execute(
-            "SELECT target_snapshot FROM sessions WHERE target_snapshot IS NOT NULL"
+            "SELECT target_snapshot FROM target_sessions WHERE target_snapshot IS NOT NULL"
         ).fetchall()
     return [json.loads(row[0])["mysql"]["auth"]["password"] for row in rows]
 

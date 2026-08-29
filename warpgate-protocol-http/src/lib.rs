@@ -7,6 +7,7 @@ mod middleware;
 pub mod proxy;
 mod session;
 mod session_handle;
+mod session_storage;
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -20,7 +21,7 @@ use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{AcceptorExt, Listener, RustlsConfig};
 use poem::middleware::SetHeader;
-use poem::session::{CookieConfig, ServerSession};
+use poem::session::ServerSession;
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
@@ -45,15 +46,17 @@ use warpgate_web_desktop::api::ws_handler as desktop_web_client_ws_handler;
 use warpgate_web_ssh::WebSshClientManager;
 use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 
+use crate::api::common::forward_ws_to_session_owner;
 use crate::client_cache::{HTTP_CLIENT_CACHE_VACUUM_INTERVAL, HttpClientCache};
-use crate::common::{SESSION_COOKIE_NAME, endpoint_auth, page_auth};
+use crate::common::{endpoint_auth, page_auth};
 use crate::error::error_page;
 use crate::middleware::{
     ContentSecurityPolicyMiddleware, CookieHostMiddleware, TicketMiddleware,
     WARPGATE_PLAYGROUND_CSP,
 };
-use crate::session::{SessionStore, SharedSessionStorage};
+use crate::session::SessionStore;
 use crate::session_handle::warpgate_server_handle_for_request;
+use crate::session_storage::SharedSessionStorage;
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -120,7 +123,7 @@ impl ProtocolServer for HTTPProtocolServer {
             });
         }
 
-        let session_storage = SharedSessionStorage(self.services.db.clone());
+        let session_storage = SharedSessionStorage::new(self.services.db.clone());
         let session_store = SessionStore::new();
         let http_client_cache = HttpClientCache::default();
 
@@ -251,11 +254,11 @@ impl ProtocolServer for HTTPProtocolServer {
                 )
                 .at(
                     "/api/web-ssh/sessions/:session_id/stream",
-                    endpoint_auth(ssh_web_client_ws_handler),
+                    endpoint_auth(forward_ws_to_session_owner(ssh_web_client_ws_handler)),
                 )
                 .at(
                     "/api/web-desktop/sessions/:session_id/stream",
-                    endpoint_auth(desktop_web_client_ws_handler),
+                    endpoint_auth(forward_ws_to_session_owner(desktop_web_client_ws_handler)),
                 )
                 .at(
                     "",
@@ -329,10 +332,7 @@ impl ProtocolServer for HTTPProtocolServer {
             )
             .with(TicketMiddleware::new())
             .with(ServerSession::new(
-                CookieConfig::default()
-                    .secure(false)
-                    .max_age(cookie_max_age)
-                    .name(SESSION_COOKIE_NAME),
+                crate::common::session_cookie_config().max_age(cookie_max_age),
                 session_storage.clone(),
             ))
             .with(CookieHostMiddleware::new(base_cookie_domain))
@@ -343,7 +343,16 @@ impl ProtocolServer for HTTPProtocolServer {
 
         tokio::spawn(async move {
             loop {
-                session_store.lock().await.vacuum(session_max_age).await;
+                let live = {
+                    let mut store = session_store.lock().await;
+                    store.vacuum(session_max_age);
+                    store.live_session_ids()
+                };
+                // Before the sweep below, so a session whose only traffic is a
+                // long-lived connection doesn't age out of its stored row.
+                if let Err(error) = session_storage.touch(&live).await {
+                    warn!(%error, "Failed to refresh active HTTP sessions");
+                }
                 if let Err(error) = session_storage.gc(cookie_max_age).await {
                     warn!(%error, "Failed to expire stored HTTP sessions");
                 }

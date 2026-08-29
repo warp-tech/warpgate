@@ -8,8 +8,10 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use tracing::warn;
 use warpgate_common::auth::{AuthState, CredentialKind};
-use warpgate_common::{GlobalParams, Protocol, Secret, SessionId, WarpgateConfig, WarpgateError};
-use warpgate_db_entities::Parameters;
+use warpgate_common::{
+    GlobalParams, Protocol, Secret, UserSessionId, WarpgateConfig, WarpgateError,
+};
+use warpgate_db_entities::{Parameters, UserSession};
 use warpgate_vault::VaultClient;
 
 use crate::cluster::Cluster;
@@ -182,7 +184,7 @@ impl Services {
     #[allow(clippy::too_many_arguments)]
     pub async fn create_auth_state(
         &self,
-        session_id: &SessionId,
+        session_id: &UserSessionId,
         username: &str,
         protocol: Protocol,
         target_name: &str,
@@ -200,6 +202,17 @@ impl Services {
             rate_limit_credential_type,
         )
         .await?;
+
+        // Link user session to this node which is gonna hold the auth state
+        UserSession::Entity::update_many()
+            .col_expr(
+                UserSession::Column::AuthStateNodeId,
+                Expr::value(self.cluster.node_id),
+            )
+            .filter(UserSession::Column::Id.eq(*session_id))
+            .exec(&self.db)
+            .await?;
+
         Ok(self.auth_state_store.lock().await.create(
             session_id,
             &user,
