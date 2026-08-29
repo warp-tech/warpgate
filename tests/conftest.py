@@ -1115,3 +1115,49 @@ logging.basicConfig(level=logging.DEBUG)
 requests.packages.urllib3.disable_warnings()
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 subprocess.call("chmod 600 ssh-keys/id*", shell=True)
+
+
+_NOISE = (
+    "sqlx",
+    "rows_affected",
+    "runtime.resource",
+    "runtime.spawn",
+    "runtime::resource",
+    "tokio::task",
+)
+
+
+def _is_noise(line: str) -> bool:
+    return any(marker in line for marker in _NOISE)
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """On failure, show the tail of every gateway log the run produced.
+
+    The gateway's stdout goes to a file so a test can assert on it, which also
+    means a failure in CI arrives with the reason absent: the assertion says the
+    connection did not succeed and nothing says why. Twice in one day that cost
+    an hour of guessing at a message already written down.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if report.when != "call" or not report.failed:
+        return
+    ctx = item.funcargs.get("ctx")
+    if ctx is None:
+        return
+    for log in sorted(Path(ctx.tmpdir).glob("*.log")):
+        try:
+            lines = log.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        # Filter first, then take the tail. Taking the tail first spends the
+        # whole budget on whatever the runtime happened to be doing: a session
+        # that hung for two minutes ends with tokio bookkeeping, and the last
+        # thing the session itself did scrolls out of reach.
+        interesting = [line for line in lines if not _is_noise(line)][-25:]
+        if interesting:
+            report.sections.append(
+                (f"gateway log {log.name} (last lines)", "\n".join(interesting))
+            )

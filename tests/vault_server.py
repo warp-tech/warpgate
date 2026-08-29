@@ -13,6 +13,8 @@ request as the *server* received it rather than as our stub chose to remember it
 """
 
 import json
+import ssl
+import tempfile
 import subprocess
 import time
 import urllib.error
@@ -70,12 +72,25 @@ class RealVault:
         self.port = alloc_port()
         self.container = f"warpgate-e2e-vault-{uuid.uuid4().hex[:8]}"
         self.config_dir = config_dir
+        self._tls_dir: Path | None = None
+        self._ca_path: Path | None = None
         self.role_id: str | None = None
         self.secret_id: str | None = None
 
     @property
     def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}"
+        return f"https://127.0.0.1:{self.port}"
+
+    @property
+    def ca_bundle(self) -> str:
+        """The certificate the dev server generated, for `vault.ca_bundle`.
+
+        Dev mode serves plain HTTP unless asked otherwise, and Warpgate refuses
+        a plaintext Vault address — a credential crosses this connection. So the
+        server is started with `-dev-tls` and its self-signed certificate copied
+        out of the container for the client to trust.
+        """
+        return str(self._ca_path)
 
     def ensure_image(self):
         """Fails, rather than skips, when the image cannot be had.
@@ -99,8 +114,57 @@ class RealVault:
                 f"nothing: {pull.stderr.decode()[-300:]}"
             )
 
+    def _make_tls(self):
+        """A CA and a leaf for the server, generated here rather than by it.
+
+        `-dev-tls` mints a fresh certificate on every start, so a restart would
+        present an identity the client has never trusted — and the restart test
+        exists to watch the gateway recover from exactly that restart. Ours
+        survives, because it is ours.
+        """
+        if self._tls_dir is not None:
+            return
+        self._tls_dir = Path(tempfile.mkdtemp(prefix="warpgate-vault-tls-"))
+        self._tls_dir.chmod(0o755)
+        ca_key = self._tls_dir / "ca.key"
+        self._ca_path = self._tls_dir / "ca.pem"
+        ext = self._tls_dir / "leaf.ext"
+        ext.write_text(
+            "basicConstraints=critical,CA:FALSE\n"
+            "extendedKeyUsage=serverAuth\n"
+            "subjectAltName=IP:127.0.0.1\n"
+        )
+        run = lambda a: subprocess.run(a, check=True, capture_output=True)
+        run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+             "-keyout", str(ca_key), "-out", str(self._ca_path),
+             "-days", "1", "-subj", "/CN=warpgate-contract-ca",
+             # OpenSSL 3 refuses a CA that never claimed the right to sign
+             # certificates, so state it. curl on macOS accepts the cert
+             # without this and Python does not, which makes the omission
+             # look like a container that failed to start.
+             "-addext", "basicConstraints=critical,CA:TRUE",
+             "-addext", "keyUsage=critical,keyCertSign,cRLSign"])
+        run(["openssl", "req", "-newkey", "rsa:2048", "-nodes",
+             "-keyout", str(self._tls_dir / "server.key"),
+             "-out", str(self._tls_dir / "server.csr"),
+             "-subj", "/CN=127.0.0.1"])
+        run(["openssl", "x509", "-req", "-in", str(self._tls_dir / "server.csr"),
+             "-CA", str(self._ca_path), "-CAkey", str(ca_key), "-CAcreateserial",
+             "-out", str(self._tls_dir / "server.pem"), "-days", "1",
+             "-extfile", str(ext)])
+        for f in self._tls_dir.iterdir():
+            f.chmod(0o644)
+        (self._tls_dir / "tls.hcl").write_text(
+            'listener "tcp" {\n'
+            '  address = "0.0.0.0:8200"\n'
+            '  tls_cert_file = "/warpgate-tls/server.pem"\n'
+            '  tls_key_file = "/warpgate-tls/server.key"\n'
+            "}\n"
+        )
+
     def start(self):
         self.ensure_image()
+        self._make_tls()
         token_env = "BAO_DEV_ROOT_TOKEN_ID" if self.is_openbao else "VAULT_DEV_ROOT_TOKEN_ID"
         listen_env = (
             "BAO_DEV_LISTEN_ADDRESS" if self.is_openbao else "VAULT_DEV_LISTEN_ADDRESS"
@@ -111,7 +175,12 @@ class RealVault:
             "--cap-add", "IPC_LOCK",
             "-p", f"{self.port}:8200",
             "-e", f"{token_env}={ROOT_TOKEN}",
-            "-e", f"{listen_env}=0.0.0.0:8200",
+            # Dev mode binds its own plaintext listener. Moved off 8200 so the
+            # TLS listener below can have the port the tests talk to; leaving
+            # both on it fails with `address already in use` before the server
+            # ever listens.
+            "-e", f"{listen_env}=127.0.0.1:8300",
+            "-v", f"{self._tls_dir}:/warpgate-tls",
         ]
 
         # OpenBao refuses `sys/audit/*` over the API — "use declarative,
@@ -138,9 +207,13 @@ class RealVault:
             )
             self.config_dir.chmod(0o755)
             command += ["-v", f"{self.config_dir}:/openbao/testconfig"]
-            command += [self.image, "server", "-dev", "-config=/openbao/testconfig"]
+            command += [
+                self.image, "server", "-dev",
+                "-config=/warpgate-tls/tls.hcl",
+                "-config=/openbao/testconfig",
+            ]
         else:
-            command += [self.image]
+            command += [self.image, "server", "-dev", "-config=/warpgate-tls/tls.hcl"]
 
         subprocess.run(command, check=True, capture_output=True)
         self._wait_until_up()
@@ -171,7 +244,11 @@ class RealVault:
             request.add_header("X-Vault-Token", token)
         if payload is not None:
             request.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(request, timeout=10) as response:
+        # The dev server's certificate is self-signed, so this trusts it
+        # explicitly rather than turning verification off — the same
+        # certificate Warpgate is given through `ca_bundle`.
+        context = ssl.create_default_context(cafile=str(self._ca_path))
+        with urllib.request.urlopen(request, timeout=10, context=context) as response:
             body = response.read()
             return json.loads(body) if body else {}
 
@@ -253,13 +330,21 @@ class RealVault:
         request.add_header("X-Vault-Token", ROOT_TOKEN)
         request.add_header("X-Vault-Wrap-TTL", ttl)
         request.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(request, timeout=10) as response:
+        # The dev server's certificate is self-signed, so this trusts it
+        # explicitly rather than turning verification off — the same
+        # certificate Warpgate is given through `ca_bundle`.
+        context = ssl.create_default_context(cafile=str(self._ca_path))
+        with urllib.request.urlopen(request, timeout=10, context=context) as response:
             return json.load(response)["wrap_info"]["token"]
 
     @property
     def ca_public_key(self) -> str:
         request = urllib.request.Request(f"{self.url}/v1/{MOUNT}/public_key")
-        with urllib.request.urlopen(request, timeout=10) as response:
+        # The dev server's certificate is self-signed, so this trusts it
+        # explicitly rather than turning verification off — the same
+        # certificate Warpgate is given through `ca_bundle`.
+        context = ssl.create_default_context(cafile=str(self._ca_path))
+        with urllib.request.urlopen(request, timeout=10, context=context) as response:
             return response.read().decode().strip()
 
     def write_secret_id(self, path: Path, wrapped=False) -> Path:

@@ -49,6 +49,7 @@ def start_warpgate(processes: ProcessManager, ctx, server: RealVault, *, wrapped
         config_patch={
             "vault": {
                 "address": server.url,
+                "ca_bundle": server.ca_bundle,
                 "default_role": "warpgate",
                 "auth": {
                     "kind": "app_role",

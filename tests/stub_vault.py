@@ -334,22 +334,34 @@ class StubVault:
         # TLS, because Warpgate refuses a Vault address that is not HTTPS — a
         # secret crosses this connection on every login, and the refusal is the
         # point rather than an inconvenience to work around in tests.
+        #
+        # A CA and a leaf it signs, not one self-signed certificate doing both
+        # jobs. `openssl req -x509` produces `CA:TRUE`, and rustls refuses that
+        # as a server certificate — `CaUsedAsEndEntity`. macOS's verifier
+        # accepts it, so the shortcut passed here and failed on Linux in CI.
+        self.tls_ca = directory / "vault-ca.pem"
+        ca_key = directory / "vault-ca.key"
         self.tls_cert = directory / "vault-tls.pem"
         self.tls_key = directory / "vault-tls.key"
-        subprocess.run(
-            [
-                "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-                "-keyout", str(self.tls_key), "-out", str(self.tls_cert),
-                "-days", "1", "-subj", "/CN=127.0.0.1",
-                "-addext", "subjectAltName=IP:127.0.0.1",
-                # rustls refuses a server certificate without it — `EkuError`,
-                # which reads as a plain verification failure and says nothing
-                # about the missing extension.
-                "-addext", "extendedKeyUsage=serverAuth",
-            ],
-            check=True,
-            capture_output=True,
+        csr = directory / "vault-tls.csr"
+        ext = directory / "vault-tls.ext"
+        ext.write_text(
+            "basicConstraints=critical,CA:FALSE\n"
+            "extendedKeyUsage=serverAuth\n"
+            "subjectAltName=IP:127.0.0.1\n"
         )
+        run = lambda args: subprocess.run(args, check=True, capture_output=True)
+        run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+             "-keyout", str(ca_key), "-out", str(self.tls_ca),
+             "-days", "1", "-subj", "/CN=warpgate-test-ca"])
+        run(["openssl", "req", "-newkey", "rsa:2048", "-nodes",
+             "-keyout", str(self.tls_key), "-out", str(csr),
+             "-subj", "/CN=127.0.0.1"])
+        run(["openssl", "x509", "-req", "-in", str(csr),
+             "-CA", str(self.tls_ca), "-CAkey", str(ca_key), "-CAcreateserial",
+             "-out", str(self.tls_cert), "-days", "1",
+             "-extfile", str(ext)])
+
         # A second listener, in plain HTTP, for the cloud metadata endpoints.
         # Those are not Vault: a real one answers on a link-local address over
         # HTTP, and Warpgate reads them with a separate client. Serving them
@@ -423,8 +435,8 @@ class StubVault:
 
     @property
     def ca_bundle(self) -> str:
-        """The self-signed certificate, for the target's `vault.ca_bundle`."""
-        return str(self.tls_cert)
+        """The CA, for `vault.ca_bundle` — not the leaf the server presents."""
+        return str(self.tls_ca)
 
     @property
     def ca_public_key(self) -> str:

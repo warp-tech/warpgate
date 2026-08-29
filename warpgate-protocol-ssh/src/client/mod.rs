@@ -2516,7 +2516,7 @@ mod tests {
                 .expect("a certificate far longer than requested");
             assert!(
                 reason.contains("longer than the 90s this target asked for"),
-                "refused for the wrong reason: {reason}"
+                "refused for the wrong reason"
             );
         }
 
@@ -2572,7 +2572,7 @@ mod tests {
             let reason = verdict(now() - 60, u64::MAX).expect("a never-expiring certificate");
             assert!(
                 reason.contains("never expires"),
-                "refused for the wrong reason: {reason}"
+                "refused for the wrong reason"
             );
         }
 
@@ -2584,7 +2584,7 @@ mod tests {
             let reason = verdict(now() - 60, u64::MAX - 1).expect("an unrepresentable expiry");
             assert!(
                 reason.contains("unrepresentable"),
-                "refused for the wrong reason: {reason}"
+                "refused for the wrong reason"
             );
         }
 
@@ -2593,7 +2593,7 @@ mod tests {
             let reason = verdict(now() - 600, now() - 300).expect("an expired certificate");
             assert!(
                 reason.contains("already expired"),
-                "refused for the wrong reason: {reason}"
+                "refused for the wrong reason"
             );
         }
 
@@ -2604,7 +2604,7 @@ mod tests {
                 verdict(now() - 60, now() + over.as_secs()).expect("an overlong certificate");
             assert!(
                 reason.contains("far longer"),
-                "refused for the wrong reason: {reason}"
+                "refused for the wrong reason"
             );
         }
 
@@ -2735,7 +2735,7 @@ mod tests {
                     .expect("a certificate whose command is not the pinned one");
                 assert!(
                     reason.contains("does not match the value"),
-                    "refused for the wrong reason: {reason}"
+                    "refused for the wrong reason"
                 );
             }
         }
@@ -2764,7 +2764,7 @@ mod tests {
                 .expect("a certificate without the pinned option");
             assert!(
                 reason.contains("without the critical option") && reason.contains("force-command"),
-                "refused for the wrong reason: {reason}"
+                "refused for the wrong reason"
             );
         }
 
@@ -2777,7 +2777,7 @@ mod tests {
             .expect("a certificate with the wrong value");
             assert!(
                 reason.contains("does not match the value"),
-                "refused for the wrong reason: {reason}"
+                "refused for the wrong reason"
             );
         }
 
@@ -3154,7 +3154,7 @@ mod tests {
             .expect("an unexpected extension");
             assert!(
                 reason.contains("permit-port-forwarding") && reason.contains("does not allow"),
-                "refused for the wrong reason: {reason}"
+                "refused for the wrong reason"
             );
         }
 
@@ -3204,7 +3204,7 @@ mod tests {
                 .expect("an unexpected critical option");
             assert!(
                 reason.contains("does not allow"),
-                "refused for the wrong reason: {reason}"
+                "refused for the wrong reason"
             );
         }
     }

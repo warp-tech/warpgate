@@ -77,6 +77,12 @@ fn validate_address(address: &str) -> Result<url::Url> {
     if parsed.scheme() != "https" {
         return Err(VaultError::InsecureAddress);
     }
+    // A trailing slash so `Url::join` extends the address instead of replacing
+    // its last segment: an address behind a reverse proxy at /vault must keep
+    // that prefix, and without the slash `join` would drop it.
+    let mut parsed = parsed;
+    let path = format!("{}/", parsed.path().trim_end_matches('/'));
+    parsed.set_path(&path);
     Ok(parsed)
 }
 
@@ -529,10 +535,16 @@ impl VaultClient {
             Ok(t) => t,
             Err(err) => return (0, Err(err)),
         };
+        // The token id rides along so the caller can tell a stale token from a
+        // refused one, which is why this returns a tuple and cannot use `?`.
+        let endpoint = match self.url(&format!("{}/sign/{role}", self.config.mount)) {
+            Ok(url) => url,
+            Err(err) => return (token_id, Err(err)),
+        };
 
         let response = self
             .http
-            .post(self.url(&format!("{}/sign/{role}", self.config.mount)))
+            .post(endpoint)
             .header("X-Vault-Token", token.as_str())
             .json(&SignRequest {
                 public_key,
@@ -603,7 +615,7 @@ impl VaultClient {
 
         let response = self
             .http
-            .post(self.url(path))
+            .post(self.url(path)?)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body.to_vec())
             .send()
@@ -751,7 +763,7 @@ impl VaultClient {
     async fn unwrap_secret_id(&self, wrapping_token: &str) -> Result<Zeroizing<String>> {
         let response = self
             .http
-            .post(self.url("sys/wrapping/unwrap"))
+            .post(self.url("sys/wrapping/unwrap")?)
             .header("X-Vault-Token", wrapping_token)
             .send()
             .await?;
@@ -853,8 +865,14 @@ impl VaultClient {
         Ok(Zeroizing::new(raw.trim().to_owned()))
     }
 
-    fn url(&self, path: &str) -> String {
-        format!("{}/v1/{path}", self.base.as_str().trim_end_matches('/'))
+    /// Joins onto the parsed base rather than formatting a string, so the URL
+    /// that reaches the HTTP client still carries the scheme `validate_address`
+    /// insisted on. Built by `format!` it is only text, and nothing downstream —
+    /// a reader, or an analyser — can tell it was ever checked.
+    fn url(&self, path: &str) -> Result<url::Url> {
+        self.base
+            .join(&format!("v1/{path}"))
+            .map_err(|e| VaultError::InvalidAddress(e.to_string()))
     }
 
     /// Parses a successful response, refusing one larger than any Vault answer
@@ -914,6 +932,24 @@ impl VaultClient {
 
 #[cfg(test)]
 mod tests {
+    /// `Url::join` replaces the last path segment unless the base ends in a
+    /// slash, so a Vault reached through a reverse proxy at /vault would have
+    /// had that prefix silently dropped from every request.
+    #[test]
+    fn a_path_prefix_on_the_address_survives_into_every_request() {
+        let base = super::validate_address("https://vault.example:8200/vault").unwrap();
+        assert_eq!(
+            base.join("v1/ssh/sign/role").unwrap().as_str(),
+            "https://vault.example:8200/vault/v1/ssh/sign/role"
+        );
+
+        let bare = super::validate_address("https://vault.example:8200").unwrap();
+        assert_eq!(
+            bare.join("v1/ssh/sign/role").unwrap().as_str(),
+            "https://vault.example:8200/v1/ssh/sign/role"
+        );
+    }
+
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex as StdMutex};
 
