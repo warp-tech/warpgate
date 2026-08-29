@@ -22,12 +22,10 @@
 //! does with the block afterwards, so a genuine regression guard would need the
 //! allocator to record freed blocks rather than sample them.
 //!
-//! The measurements do go through `login_payload` itself rather than a copy of
-//! its shape written beside it — a test that rebuilds the safe pattern inline
-//! stays green when the shipped one is reverted. That is worth having and is
-//! why the function is `pub`; it is not the same thing as a guarantee that
-//! reverting it fails here. This paragraph previously claimed the first while
-//! the file did the second, which is the failure it now describes.
+//! The measurements go through `login_payload` itself rather than a copy of its
+//! shape written beside it — a test that rebuilds the safe pattern inline stays
+//! green when the shipped one is reverted. That is why the function is `pub`,
+//! and it is not the same thing as a guarantee that reverting it fails here.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -154,22 +152,16 @@ fn the_primitives_that_leak_are_the_ones_that_grow_a_buffer() {
 /// between the two grows the buffer. Every caller of it carries a credential:
 /// the Vault token, an AppRole secret ID, a cloud identity JWT.
 ///
-/// The review said so. It was disputed on the grounds that the reservation was
-/// a deliberate trade, and upheld on the same grounds. Neither side measured
-/// it, which is the failure this project spent a week finding in its own tests
-/// and then committed while judging someone else's finding.
-///
-/// Measured now, through the function the reader actually calls rather than a
-/// copy of its shape — that distinction is the whole reason `login_payload` is
-/// public, and the mistake the first draft of this test repeated by growing a
-/// bare `Vec` and reporting on it.
+/// Measured through the function the reader actually calls rather than a copy
+/// of its shape, which is why `login_payload` is public: a test that grows a
+/// bare `Vec` and reports on that measures itself.
 ///
 /// **What this does not cover, named rather than implied.** It drives
 /// `grown_without_leaving_a_copy`, which is the helper. It does not drive
 /// `read_bounded`, which is the call site — so a `read_bounded` that stopped
 /// calling the helper, or called it on the wrong branch, would leave this test
-/// green. Raised externally, and the reviewer offered two ways out: exercise
-/// `read_bounded` here, or say plainly which one is covered.
+/// green. Two ways out of that: exercise `read_bounded` here, or say plainly
+/// which one is covered.
 ///
 /// This is the second. Driving `read_bounded` needs a `reqwest::Response`, so
 /// an HTTP server, hyper's own buffering and reqwest's own copies — all of them
@@ -189,8 +181,8 @@ fn growing_the_response_buffer_leaves_nothing_in_freed_memory() {
             c
         };
 
-        // The control. A plain `Vec` doing what `read_bounded` used to do, so a
-        // clean result below means the fix works and not that the detector is
+        // The control: a plain `Vec` that grows by reallocating, so a clean
+        // result below means the buffer is wiped and not that the detector is
         // blind. Without this the whole test could pass by measuring nothing.
         let control = w.sightings_while(|| {
             let mut buf = Zeroizing::new(Vec::<u8>::with_capacity(RESERVE));

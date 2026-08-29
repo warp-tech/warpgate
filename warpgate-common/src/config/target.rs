@@ -74,8 +74,8 @@ pub struct SshTargetPublicKeyAuth {
 ///
 /// The rule lives here rather than in `warpgate-vault` because two crates need
 /// it and only one of them can hold a Vault client: the admin API accepts a
-/// role at save time, and used to accept one the signing path would reject at
-/// connect time — an operator learning of the typo from a broken session
+/// role at save time, and accepting one the signing path would reject at
+/// connect time leaves the operator to learn of the typo from a broken session
 /// rather than from the form that took it.
 #[must_use]
 pub fn vault_name_is_well_formed(name: &str) -> bool {

@@ -533,8 +533,8 @@ mod tests {
         }))
     }
 
-    /// The admin API used to take a role the signing path would refuse, so the
-    /// operator learned of the typo from a broken session rather than from the
+    /// An admin API that takes a role the signing path would refuse leaves the
+    /// operator to learn of the typo from a broken session rather than from the
     /// form that accepted it.
     #[test]
     fn a_role_the_signing_path_would_refuse_is_refused_at_save_time() {

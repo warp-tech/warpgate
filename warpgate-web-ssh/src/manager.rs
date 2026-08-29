@@ -21,13 +21,10 @@ use warpgate_protocol_ssh::{
 /// A named function rather than a method call inside the event loop, because
 /// the guard here is the *choice* — `client_message()` and not `Display`. The
 /// raw form carries the issuer's own words, mounts, policies and hostnames,
-/// which the SSH path has kept from users since it was first reported; this
-/// entry point renders the same errors and was missed.
+/// which the SSH path keeps from users and this entry point renders alike.
 ///
 /// A call inside an async loop cannot be reached by a test without driving a
-/// browser session, and the integration test that was credited with covering
-/// this one turned out to exercise the SSH path instead — measured, not
-/// suspected. Named here, the boundary has somewhere a test can stand.
+/// browser session. Named here, the boundary has somewhere a test can stand.
 #[must_use]
 pub fn shown_to_the_browser(error: &ConnectionError) -> String {
     error.client_message()

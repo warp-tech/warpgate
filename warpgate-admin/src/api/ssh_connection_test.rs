@@ -106,8 +106,8 @@ impl Api {
 
         // Sanitised, like every other place a connection error is shown to a
         // person. Reaching a target behind a jump host authenticates that hop,
-        // so a Vault failure is reachable here and used to be rendered with its
-        // whole source chain — mount, policy and all.
+        // so a Vault failure is reachable here, and its whole source chain —
+        // mount, policy and all — must not be rendered with it.
         match result {
             Ok(key) => Ok(CheckSshHostKeyResponse::Ok(Json(
                 CheckSshHostKeyResponseBody {

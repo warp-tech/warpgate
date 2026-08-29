@@ -63,10 +63,10 @@ enum HopRole {
 
 /// Which role a hop plays, given which target was asked about.
 ///
-/// By identity, not by position. It used to take "is this the last hop", which
-/// is the same answer for every chain built today and a different question: the
-/// resolver knows which target was named and threw that away, leaving
-/// correctness resting on the chain always happening to terminate there.
+/// By identity, not by position. "Is this the last hop" gives the same answer
+/// for every chain built today and asks a different question: the resolver
+/// knows which target was named, and resting on the chain always happening to
+/// terminate there is not the same thing.
 fn role(check_target: Option<Uuid>, hop_id: Uuid) -> HopRole {
     match check_target {
         None => HopRole::Connecting,
@@ -105,10 +105,9 @@ const fn while_a_host_key_answer_is_outstanding() -> Duration {
 /// is the target's again, so it gets the target's bound.
 ///
 /// A separate function from the constant because this is the thing that can be
-/// got wrong. The first version of this pause never ended — the deadline was
-/// pushed out and nothing brought it back — and a target that answered with a
-/// host key and then went quiet held the session, the ephemeral key and a live
-/// certificate until russh's inactivity timeout.
+/// got wrong. A pause that is pushed out and never brought back lets a target
+/// answer with a host key, go quiet, and hold the session, the ephemeral key
+/// and a live certificate until russh's inactivity timeout.
 const fn once_the_host_key_is_answered() -> Duration {
     HANDSHAKE_TIMEOUT
 }
@@ -373,12 +372,10 @@ fn resume_after_host_key_answer(deadline: Pin<&mut tokio::time::Sleep>) {
 /// The formatting is fallible and that is handled, which is not fussiness.
 /// `humantime`'s `Display` returns `Err` rather than truncating for any time at
 /// or after the year 9999, and `to_string()` **panics** when a `Display`
-/// errors. A certificate marked never-expiring lands exactly there — so
-/// building this diagnostic killed the session's task before
-/// `certificate_mismatch` could run the check that refuses such a certificate,
-/// and the client was left holding a connection nobody would ever answer.
-/// Found by unskipping the integration test that had been parked on "holds the
-/// session open for a reason not yet isolated". This was the reason.
+/// errors. A certificate marked never-expiring lands exactly there, so
+/// building this diagnostic kills the session's task before
+/// `certificate_mismatch` can run the check that refuses such a certificate,
+/// and leaves the client holding a connection nobody will ever answer.
 fn describe_certificate_time(at: Option<std::time::SystemTime>) -> String {
     use std::fmt::Write as _;
 
@@ -436,10 +433,8 @@ const CERTIFICATE_TTL_SLACK: Duration = Duration::from_secs(60);
 /// reason an attribution is: otherwise a session driven by a real person reads
 /// in the target's log exactly like one with no user recorded at all.
 ///
-/// The comment here used to say `key_id_field` rejected a colon, so nothing
-/// could collide. It rejected nothing — it substituted — and the collision that
-/// threatens this constant is a username equal to it, which colons have no part
-/// in. Two wrong statements holding each other up.
+/// The collision that threatens this constant is a username equal to it, which
+/// colons have no part in.
 const UNATTRIBUTED: &str = "unattributed";
 
 /// A username as it may appear in a key ID field.
@@ -478,9 +473,8 @@ fn key_id_field(name: &str) -> String {
 /// indistinguishable from the gateway in the target's sshd log and in Vault's.
 ///
 /// Only for names that came from a person. The gateway's own attribution goes
-/// through `key_id_field` untouched — substituting it renames the thing it
-/// identifies, which is exactly what the first version of this did: two guards
-/// failed their baseline because `admin-token` had become `admin-token_`.
+/// through `key_id_field` untouched: substituting it would rename the thing it
+/// identifies.
 fn user_key_id_field(name: &str) -> String {
     let field = key_id_field(name);
     if is_reserved_key_id_field(&field) {
@@ -582,8 +576,6 @@ fn certificate_mismatch(
     // to be worth stealing. Nothing checked it, so a role with a `max_ttl` of
     // years — or one quietly edited to have one — produced a certificate good
     // for years, and every layer downstream accepted it.
-    // Every way this can be wrong, because the first version handled only the
-    // ordinary one and let the other three past.
     //
     // `u64::MAX` is OpenSSH's "never expires" sentinel (PROTOCOL.certkeys), and
     // it is what `ssh-keygen -V always:forever` and a Vault role with no TTL
@@ -734,9 +726,9 @@ pub struct ResolvedSshChainHost {
     /// Which target this hop is.
     ///
     /// Carried past resolution because the connection code needs to know which
-    /// hop was asked about, and used to infer it from position: the last one.
-    /// That is true of every chain built today and is an assumption rather than
-    /// a fact — the identity exists here and was thrown away one line later.
+    /// hop was asked about. Inferring it from position — the last one — holds
+    /// for every chain built today, but that is an assumption rather than a
+    /// fact, and the identity is right here.
     pub id: Uuid,
     pub name: String,
     pub ssh_options: TargetSSHOptions,
@@ -1611,14 +1603,13 @@ impl RemoteClient {
         // handed a substitute sender, and the real one is held here until the
         // answer arrives on `host_key_answers`.
         //
-        // The first version disarmed the deadline unconditionally and never
-        // re-armed it, on the reasoning that "from here the wait is a person's".
-        // That reasoning is not available at this point in the code: the
-        // verification mode is read in `handle_unknown_host_key`, which answers
-        // instantly under `AutoAccept` and `AutoReject`. A target could present
-        // an unknown host key under auto-accept, cancel the deadline for good,
-        // and then go silent — the exact hold this bound exists to catch,
-        // reintroduced by the fix for a different problem.
+        // Not disarmed outright on the reasoning that "from here the wait is a
+        // person's": that reasoning is not available at this point in the code,
+        // because the verification mode is read in `handle_unknown_host_key`,
+        // which answers instantly under `AutoAccept` and `AutoReject`. A target
+        // could present an unknown host key under auto-accept, cancel the
+        // deadline for good, and then go silent — the exact hold this bound
+        // exists to catch.
         let (host_key_answer_tx, mut host_key_answers) = tokio::sync::mpsc::channel::<bool>(1);
         let mut outstanding_host_key: Option<oneshot::Sender<bool>> = None;
 
@@ -1712,12 +1703,8 @@ impl RemoteClient {
                     error!(host = ?ssh_options.host, "Target did not finish the SSH handshake in time");
                     // No `set_disconnected()` here: `handle_command` calls it
                     // immediately after sending the error, so doing it first
-                    // only reorders `Done` ahead of the reason. A review argued
-                    // that ordering discards the message, since both session
-                    // loops treat `Done` as terminal — I could not reproduce
-                    // that, the reason arrives either way, so this is tidiness
-                    // rather than a fix. The test below pins the message
-                    // regardless of which explanation is right.
+                    // would only reorder `Done` ahead of the reason. The test
+                    // below pins the message either way.
                     return Err(ConnectionError::HandshakeTimeout);
                 }
                 // `None` means every sender is gone, so the owner has dropped
@@ -2852,9 +2839,9 @@ mod tests {
         }
 
         /// The field count was the only thing checked, and it is satisfied by a
-        /// substitution that maps two different people onto one name. Raised
-        /// externally: `root:admin` and `root_admin` both used to read as
-        /// `root_admin` in the target's sshd log and in Vault's audit log.
+        /// substitution that maps two different people onto one name: without
+        /// this, `root:admin` and `root_admin` both read as `root_admin` in the
+        /// target's sshd log and in Vault's audit log.
         #[test]
         fn two_usernames_cannot_collide_in_a_key_id() {
             assert_ne!(
@@ -2871,10 +2858,9 @@ mod tests {
             );
         }
 
-        /// `UNATTRIBUTED` stands in this field when no user is recorded. A user
-        /// of that name read identically, which is the same defect as the
-        /// attribution one beside it and was missed because the reserved names
-        /// lived in two places.
+        /// `UNATTRIBUTED` stands in this field when no user is recorded, so a
+        /// user of that name would read identically — the same defect as the
+        /// attribution one beside it.
         #[test]
         fn a_username_cannot_impersonate_the_unattributed_placeholder() {
             assert_ne!(
@@ -2906,11 +2892,9 @@ mod tests {
             }
         }
 
-        /// And the other direction, which the first version of this fix did not
-        /// have. The gateway's own attribution must pass through unchanged:
-        /// substituting it renames the thing it identifies, and two guards
-        /// caught that by failing their baseline — the key ID had become
-        /// `warpgate:admin-token_:<session>`.
+        /// And the other direction. The gateway's own attribution must pass
+        /// through unchanged: substituting it renames the thing it identifies,
+        /// turning the key ID into `warpgate:admin-token_:<session>`.
         #[test]
         fn the_gateways_own_attribution_is_left_alone() {
             for reserved in warpgate_common_http::auth::TOKEN_ATTRIBUTIONS {
@@ -2923,15 +2907,15 @@ mod tests {
         }
 
         /// A chain that does not contain the host being asked about cannot
-        /// answer the question, and used to be walked to the end anyway —
-        /// every hop traversed, no key reported, a live session handed back.
-        /// The property the integration test was believed to hold and does
-        /// not: measured twice, the stalling fixture never reaches this code.
-        /// It delivers the host key on the wire, but russh does not call
-        /// `check_server_key` until the key exchange completes, and the fixture
-        /// mutes before `NEWKEYS`. Letting `NEWKEYS` through instead trips
-        /// strict-kex and the client disconnects in three seconds. So what that
-        /// test measures is the plain handshake bound, which has its own guard.
+        /// answer the question, and walking it to the end anyway traverses
+        /// every hop, reports no key, and hands back a live session.
+        ///
+        /// Covered here rather than by the integration fixture, which never
+        /// reaches this code: it delivers the host key on the wire, but russh
+        /// does not call `check_server_key` until the key exchange completes,
+        /// and the fixture mutes before `NEWKEYS`. Letting `NEWKEYS` through
+        /// instead trips strict-kex and the client disconnects in three
+        /// seconds, so that test measures the plain handshake bound.
         ///
         /// What is left to state is the property itself: whatever the pause is,
         /// the answer has to bring the bound back to the target's own, and not
@@ -2993,18 +2977,13 @@ mod tests {
             );
         }
 
-        /// The budget for authentication is not the budget for the transport
-        /// handshake, and used to be.
-        ///
-        /// Five calls at the default 10s `vault.timeout` is fifty seconds
         /// A certificate marked never-expiring reports a `valid_before` beyond
         /// the year 9999, and `humantime`'s `Display` returns `Err` there
         /// rather than truncating — so `to_string()` panicked, in a tokio
         /// worker, while building the message that describes the window. The
-        /// check that refuses such a certificate sits *after* that line and
-        /// never ran; the client was left holding a connection nobody would
-        /// answer, which is what the integration test had been parked on for a
-        /// week as "holds the session open for a reason not yet isolated".
+        /// check that refuses such a certificate sits *after* that line, so it
+        /// never runs and the client is left holding a connection nobody will
+        /// answer.
         #[test]
         fn a_far_future_expiry_is_described_rather_than_panicked_on() {
             use std::time::{Duration, UNIX_EPOCH};

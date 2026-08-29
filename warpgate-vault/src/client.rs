@@ -61,19 +61,17 @@ fn aws_binding_advice(auth: &VaultAuth) -> Option<&'static str> {
 ///
 /// Returns the parsed URL rather than `()` so that the only way to obtain
 /// something this client will send a request to is to have come through here.
-/// It used to return `()` and leave `config.address` as the string every
-/// request was built from, which made the guarantee a property of call order:
-/// safe only while `new` remained the sole constructor and kept calling this
-/// first. That is the kind of invariant a later refactor drops silently.
+/// Left as a check, with `config.address` still the string every request is
+/// built from, the guarantee would be a property of call order — and that is
+/// the kind of invariant a later refactor drops silently.
 fn validate_address(address: &str) -> Result<url::Url> {
     let parsed = url::Url::parse(address).map_err(|e| VaultError::InvalidAddress(e.to_string()))?;
     // No exception for loopback. Every login sends a credential — a projected
     // service account token, an AppRole secret ID, a signed cloud identity — so
     // an address this client will talk to is one it can talk to in confidence,
-    // or it is refused. The exception used to exist so a development Vault
-    // needed no certificate; it bought that at the price of a real path along
-    // which a secret crosses the wire in the clear, which is the thing this
-    // feature exists to stop.
+    // or it is refused. An exception for a development Vault without a
+    // certificate would buy that convenience with a real path along which a
+    // secret crosses the wire in the clear.
     if parsed.scheme() != "https" {
         return Err(VaultError::InsecureAddress);
     }
@@ -199,16 +197,12 @@ pub fn login_payload<T: Serialize>(value: &T) -> Result<Zeroizing<Vec<u8>>> {
 /// them.
 ///
 /// They carry the SigV4 signature and, on an instance role, the session token.
-/// The wipe used to be a loop at the end, after a fallible serialization — so
-/// the one path where something had already gone wrong was the path that
-/// skipped it. Ordering is not a property worth relying on for this; `Drop` is.
+/// A wipe at the end of the function is skipped by the one path where
+/// something has already gone wrong. `Drop` is not.
 ///
-/// Not covered by a test, deliberately rather than by omission. Once `Drop` has
-/// run the values are gone, so there is nothing left to assert against; a test
-/// that wipes a map itself and then reads it proves only that `zeroize` works,
-/// which is the shape this crate has already been caught writing once. The
-/// change here is that the wipe cannot be skipped, and that is a property of
-/// `Drop` rather than of anything a test can observe.
+/// Not covered by a test, and cannot be: once `Drop` has run there is nothing
+/// left to assert against, and a test that wipes a map itself proves only that
+/// `zeroize` works.
 struct WipedHeaders(warpgate_aws::StsIdentityRequest);
 
 impl Drop for WipedHeaders {
@@ -298,9 +292,7 @@ struct UnwrapData {
 ///
 /// At module level and `pub(crate)` because the metadata calls answer to the
 /// same argument as the Vault ones: an endpoint named in the configuration is
-/// not a trusted party, and what it returns is a credential. This bound was
-/// added for the Vault client and not mirrored there, which is the kind of
-/// half-applied fix this file has produced before.
+/// not a trusted party, and what it returns is a credential.
 /// Makes room for `incoming` more bytes without leaving the old buffer behind.
 ///
 /// `Vec` grows by allocating, copying and freeing, and it frees the old block
@@ -309,16 +301,13 @@ struct UnwrapData {
 /// copy in freed memory, which reserving up front was supposed to prevent and
 /// only made less likely.
 ///
-/// That was raised in review, disputed on the grounds that the reservation was
-/// a deliberate trade, and upheld on the same grounds. Neither side measured it.
-/// `zeroization.rs` does, and finds the canary in a freed block.
+/// `zeroization.rs` finds the canary in the freed block.
 ///
 /// Moving to a new buffer by hand keeps the old one ours until it is dropped,
 /// so its own `Zeroizing` wipes it before the allocator takes it back.
 ///
 /// Public so the test exercises this function rather than a copy of its shape
-/// written beside it — the same reason `login_payload` is public, and the
-/// mistake the first version of that test made.
+/// written beside it, which is also why `login_payload` is public.
 #[must_use]
 pub fn grown_without_leaving_a_copy(
     buf: Zeroizing<Vec<u8>>,
@@ -832,11 +821,10 @@ impl VaultClient {
         // One handle, opened once, and a bound on the stream rather than on
         // what a separate `stat` claimed.
         //
-        // It used to call `metadata(path)` and then `read_to_string(path)`,
-        // which opens the path a second time: the file can be replaced between
-        // the two, and a FIFO reports a length of zero and then delivers as much
-        // as it likes — while the token mutex is held across login, so blocking
-        // here stalls every session at once rather than one.
+        // Opening the path twice — `metadata` then `read_to_string` — lets the
+        // file be replaced between the two, and a FIFO reports a length of zero
+        // and then delivers as much as it likes. The token mutex is held across
+        // login, so blocking here stalls every session at once rather than one.
         let file = tokio::fs::File::open(path).await.map_err(describe)?;
         let size = file.metadata().await.map_err(describe)?.len();
         if size > MAX_CREDENTIAL_FILE {
@@ -960,11 +948,11 @@ mod tests {
 
     /// A directory that goes away when the test does.
     ///
-    /// These paths used to be `wg-<label>-<pid>` under the system temp
-    /// directory: one name per test, reused by every run of that test, and
-    /// several of them holding real credential material. Two runs at once
-    /// clobber each other, a crashed run leaves the file behind, and on a
-    /// shared machine the name is guessable by anyone who read this file.
+    /// A fixed name under the system temp directory would be shared by every
+    /// run of the test, and several of these hold real credential material: two
+    /// runs at once clobber each other, a crashed run leaves the file behind,
+    /// and on a shared machine the name is guessable by anyone who read this
+    /// file.
     fn scratch() -> tempfile::TempDir {
         tempfile::tempdir().expect("could not create a temporary directory")
     }
@@ -1155,22 +1143,13 @@ mod tests {
 
     /// A FIFO reports a length of zero and then delivers whatever it likes.
     ///
-    /// The cap used to be a `stat` on the path followed by a second open, so it
-    /// bounded what the filesystem claimed rather than what arrived — and the
-    /// token mutex is held across login, so a credential path that never ends
-    /// stalls every session rather than one.
+    /// The token mutex is held across login, so a credential path that never
+    /// ends stalls every session rather than one.
     ///
-    /// A real FIFO, because an oversized *regular* file is refused by either
-    /// half on its own: the `stat` early-out and the stream bound both see it,
-    /// so a test using one cannot say which is doing the work. Measured rather
-    /// than argued — the earlier version of this test used a regular file, and
-    /// `verify_named_rust` reported both guards as undiscriminated because
-    /// disabling either left the other to refuse it. The reviewer had said so
-    /// in prose a round earlier and it was registered with a comment claiming
-    /// otherwise.
-    ///
-    /// A FIFO separates them: `stat` reports zero, so the early-out passes it
-    /// through, and only the bound on what actually arrives can refuse it.
+    /// A FIFO and not an oversized regular file: that is refused by the `stat`
+    /// early-out and by the stream bound alike, and a test both guards answer
+    /// cannot say which one is working. A FIFO separates them — `stat` reports
+    /// zero, so only the bound on what actually arrives can refuse it.
     #[tokio::test]
     async fn only_the_stream_bound_can_refuse_a_source_that_lies_about_its_size() {
         let tmp = scratch();
@@ -1295,10 +1274,10 @@ mod tests {
                 secret_id_path,
             },
             certificate_ttl: None,
-            // Not a latency assertion. Five seconds was one by accident: the
-            // tests that care about the timeout set their own, and for the
-            // rest it only decided how slow a machine had to be before a login
-            // over TLS was reported as the behaviour under test failing.
+            // Not a latency assertion: the tests that care about the timeout set
+            // their own, and for the rest this only decides how slow a machine
+            // has to be before a login over TLS is reported as the behaviour
+            // under test failing.
             timeout: Duration::from_secs(30),
             ca_bundle: Some(test_ca_bundle()),
         }
@@ -1398,9 +1377,8 @@ mod tests {
             VaultError::Api { status, body } => {
                 assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
                 assert!(body.len() <= MAX_ERROR_BODY + "... (truncated)".len());
-                // Both halves, deliberately. An upper bound alone is satisfied
-                // by a reader that returns nothing at all, and that mutant
-                // survived until `cargo mutants` pointed at it.
+                // Both halves, deliberately: an upper bound alone is satisfied
+                // by a reader that returns nothing at all.
                 assert_eq!(body.len(), MAX_ERROR_BODY + "... (truncated)".len());
                 assert!(body.starts_with("aaaa"), "the body was not read: {body:?}");
                 assert!(body.ends_with("... (truncated)"), "no truncation marker");
@@ -1413,7 +1391,6 @@ mod tests {
         );
     }
 
-    /// The error path was bounded in an earlier round; the success path was not.
     /// A body is a body whatever the status code on it says, and this one is
     /// parsed for every session that asks for a certificate.
     #[tokio::test]
@@ -1628,10 +1605,9 @@ mod tests {
 
     /// The truncation marker has to mean something.
     ///
-    /// `cargo mutants` showed that inverting the "is there more?" poll, or the
-    /// `truncated` accumulation, or the loop condition itself, changed nothing
-    /// any test could see — the assertions were all upper bounds, which an
-    /// empty answer satisfies. These pin the boundary from both sides.
+    /// Upper bounds alone are satisfied by an empty answer, so inverting the
+    /// "is there more?" poll, the `truncated` accumulation or the loop
+    /// condition changes nothing they can see. These pin both sides.
     #[tokio::test]
     async fn test_a_body_is_marked_truncated_exactly_when_it_is() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -1703,9 +1679,8 @@ mod tests {
         assert!(validate_address("https://vault.internal:8200").is_ok());
         for plaintext in [
             "http://vault.internal:8200",
-            // Loopback included. A local Vault is still a Vault the client
-            // sends a credential to, and the exception that used to let these
-            // through is what CodeQL reported as a cleartext transmission.
+            // Loopback included: a local Vault is still a Vault the client
+            // sends a credential to.
             "http://localhost:8200",
             "http://127.0.0.1:8200",
             "http://[::1]:8200",
@@ -1720,12 +1695,10 @@ mod tests {
     /// `test_segment_validation` proves the rule; this proves someone applies
     /// it before the socket is opened.
     ///
-    /// The integration test that used to prove this composition end to end is
-    /// gone: validating the role when a target is saved means the admin API
-    /// refuses to create such a target at all, so the connect path can no
-    /// longer be reached with one (W-118). Reading the code and seeing
-    /// `validate_segment` at the top of `sign_ssh_key` is not the same as
-    /// watching nothing leave the process, so this watches.
+    /// It cannot be proved end to end: the admin API refuses to save a target
+    /// with such a role, so the connect path cannot be reached with one. Reading
+    /// the code and seeing `validate_segment` at the top of `sign_ssh_key` is
+    /// not the same as watching nothing leave the process, so this watches.
     #[tokio::test]
     async fn a_role_that_climbs_out_of_the_mount_sends_nothing() {
         let log = Arc::new(StdMutex::new(vec![]));

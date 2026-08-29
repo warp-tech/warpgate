@@ -144,8 +144,7 @@ pub async fn sign_sts_identity_request(
     // returned below *is* wiped, by the caller in `warpgate-vault`, so the copy
     // that travels furthest is the one that is handled.
     //
-    // Say it here rather than fixing it silently: an earlier round recorded
-    // this as closed on the strength of a fix to a different copy.
+    // Stated rather than left implied: a fix to one copy does not close this.
     drop(identity);
     drop(request);
 

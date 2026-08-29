@@ -44,11 +44,10 @@ pub enum VisualConnectionChainItem {
 /// in the frame Warpgate itself is printing, which is where a user has most
 /// reason to trust what they see.
 ///
-/// This is the same bug class as the certificate-derived text in the client,
-/// found by going back over the other places that write toward a PTY once the
-/// class had been named there. Lower severity: a target name needs
-/// `TargetsEdit`, so this is not a privilege boundary, and the audience is
-/// whoever connects rather than whoever configures. Same fix regardless.
+/// The same class as the certificate-derived text in the client, at lower
+/// severity: a target name needs `TargetsEdit`, so this is not a privilege
+/// boundary, and the audience is whoever connects rather than whoever
+/// configures. Same fix regardless.
 fn without_control_characters(text: &str) -> Cow<'_, str> {
     if text.chars().any(char::is_control) {
         Cow::Owned(text.chars().filter(|c| !c.is_control()).collect())

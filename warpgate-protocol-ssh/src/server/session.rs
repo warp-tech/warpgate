@@ -560,13 +560,11 @@ impl ServerSession {
 
     /// Escaping happens here, at the sink, and not in the callers.
     ///
-    /// It used to happen in the callers. Every round of review since found
-    /// another one that had been missed — a target name in one message, a
-    /// certificate's principals in another — because a fix applied at the point
-    /// of use only ever covers the points somebody went looking at. Both PTY
-    /// sinks now escape unconditionally, so a new call site cannot reopen the
-    /// hole by forgetting, and Warpgate's own colour codes are added after the
-    /// text has been through it.
+    /// A fix applied at the point of use only ever covers the points somebody
+    /// went looking at — a target name in one message, a certificate's
+    /// principals in another. Both PTY sinks escape unconditionally, so a new
+    /// call site cannot reopen the hole by forgetting, and Warpgate's own
+    /// colour codes are added after the text has been through it.
     pub fn emit_service_message(&self, msg: &str) -> Result<()> {
         // Before the escaping below, not after: this logs the raw message,
         // so a `\n` in a certificate's option name or a Vault error body forges
@@ -1187,8 +1185,8 @@ impl ServerSession {
                         // The reason is what tells a wrong credential apart from
                         // a target whose clock disagrees, which is the most
                         // common cause of a short-lived certificate being
-                        // refused. It used to reach the server log and stop
-                        // there.
+                        // refused, so it must reach the user and not stop at
+                        // the server log.
                         let _ = self.emit_pty_error(&format!(
                             "SSH target rejected Warpgate's authentication request: {reason}"
                         ));

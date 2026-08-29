@@ -58,11 +58,11 @@ pub async fn azure_login_material(
     let token: AzureAccessToken = read_bounded_json(token).await?;
     // Wrapped here, not at the return.
     //
-    // It used to be wrapped only once the instance-metadata call below had also
-    // succeeded — and that call is three fallible steps. Any of them returning
-    // early dropped the access token as a plain `String`, unwiped, on exactly
-    // the paths where something has already gone wrong. GCP's equivalent has no
-    // such window: nothing fallible sits between reading and wrapping there.
+    // The instance-metadata call below is three fallible steps, and wrapping
+    // after it would drop the access token as a plain `String`, unwiped, on
+    // exactly the paths where something has already gone wrong. GCP's
+    // equivalent has no such window: nothing fallible sits between reading and
+    // wrapping there.
     let access_token = Zeroizing::new(token.access_token);
 
     let instance = http
