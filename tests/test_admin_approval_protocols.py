@@ -26,6 +26,17 @@ from .util import mysql_client_opts, mysql_client_ssl_opt, wait_mysql_port, wait
 from .vnc_client import VncClient
 
 
+def _get_until(session, url, status, attempts=60):
+    """Poll like a client honouring Retry-After: the gate learns of a decision
+    through its own row poll, so the next request is not instantly different."""
+    for _ in range(attempts):
+        response = session.get(url)
+        if response.status_code == status:
+            return response
+        time.sleep(0.25)
+    raise AssertionError(f"{url} never answered {status}, last was {response.status_code}")
+
+
 class Test:
     def test_mysql_session_is_held(
         self,
@@ -115,6 +126,61 @@ class Test:
             # so pace the retries the way a client honoring Retry-After would.
             time.sleep(0.25)
         assert response.status_code == 200, "approved session should reach the target"
+
+    def test_two_gated_targets_in_one_session_are_asked_one_at_a_time(
+        self,
+        echo_server_port,
+        processes: ProcessManager,
+        timeout,
+        shared_wg: WarpgateProcess,
+    ):
+        # A session holds one question at a time, so reaching a second gated
+        # target while the first is undecided raises nothing — and must not
+        # claim otherwise: the page for the second target would be telling the
+        # user an administrator is looking at a request nobody has been shown.
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            user, role = create_password_user(api)
+            first = create_http_target(api, role, echo_server_port)
+            second = create_http_target(api, role, echo_server_port)
+
+        session = requests.Session()
+        session.verify = False
+        session.post(
+            f"{url}/@warpgate/api/auth/login",
+            json={"username": user.username, "password": "123"},
+        )
+
+        assert session.get(f"{url}/?warpgate-target={first.name}").status_code == 202
+        with admin_client(url) as api:
+            wait_for_pending_approval(api, first.name, user.username)
+
+        queued = session.get(f"{url}/?warpgate-target={second.name}")
+        assert queued.status_code == 202
+        assert queued.headers.get("retry-after")
+        assert "earlier request" in queued.text, (
+            "the second target must not claim an administrator was asked about it"
+        )
+        with admin_client(url) as api:
+            assert not [
+                a for a in api.get_session_approvals() if a.target == second.name
+            ], "the second target must not raise a question of its own yet"
+
+        # Answering the first frees the slot, and the second asks in its turn.
+        with admin_client(url) as api:
+            approval = wait_for_pending_approval(api, first.name, user.username)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+        _get_until(session, f"{url}/?warpgate-target={first.name}", 200)
+
+        _get_until(session, f"{url}/?warpgate-target={second.name}", 202)
+        with admin_client(url) as api:
+            approval = wait_for_pending_approval(api, second.name, user.username)
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+        _get_until(session, f"{url}/?warpgate-target={second.name}", 200)
+
+        # Both admissions stand: each target keeps its own.
+        assert session.get(f"{url}/?warpgate-target={first.name}").status_code == 200
+        assert session.get(f"{url}/?warpgate-target={second.name}").status_code == 200
 
     def test_http_request_is_forbidden_after_rejection(
         self,

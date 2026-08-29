@@ -659,7 +659,13 @@ impl<O> GateOutcome<O> {
 #[must_use = "a polled gate that is dropped is a gate that was never applied"]
 pub enum PolledGate<O = warpgate_common::TargetOptions> {
     Approved(ApprovedTarget<O>),
+    /// An administrator has been asked and has yet to answer.
     Pending,
+    /// Nothing has been asked about this target yet: the session is already
+    /// holding a question about another one, and asks about this one once
+    /// that is answered. Telling a caller this is `Pending` would have it
+    /// report that somebody is looking at a request nobody has seen.
+    Queued,
     Denied,
 }
 
@@ -703,9 +709,14 @@ pub struct SessionGates {
 enum SlotPoll {
     /// This target's gate already settled for this session.
     Settled(SettledGate),
-    /// A wait is already running — for this target, or for another one holding
-    /// the session's single request slot. Either way: come back.
-    Busy,
+    /// This target's own wait is running: the question has been put to an
+    /// administrator and is waiting on them.
+    Waiting,
+    /// Another target's wait holds the session's single request slot, so
+    /// nothing has been asked about this one yet. Kept apart from
+    /// [`Self::Waiting`] because only one of the two means an administrator
+    /// has been shown anything.
+    Queued,
     /// The caller claimed the slot and must start the wait.
     Claimed,
 }
@@ -721,8 +732,12 @@ impl SessionGates {
             if let Some(settled) = state.settled.get(target) {
                 return SlotPoll::Settled(*settled);
             }
-            if state.running.is_some() {
-                return SlotPoll::Busy;
+            if let Some(running) = state.running.as_deref() {
+                return if running == target {
+                    SlotPoll::Waiting
+                } else {
+                    SlotPoll::Queued
+                };
             }
         }
         sessions.entry(session_id).or_default().running = Some(target.to_string());
@@ -1061,7 +1076,8 @@ impl Services {
                 return Ok(PolledGate::Approved(ApprovedTarget::new(authorization)));
             }
             SlotPoll::Settled(SettledGate::Denied) => return Ok(PolledGate::Denied),
-            SlotPoll::Busy => return Ok(PolledGate::Pending),
+            SlotPoll::Waiting => return Ok(PolledGate::Pending),
+            SlotPoll::Queued => return Ok(PolledGate::Queued),
             SlotPoll::Claimed => {}
         }
 
