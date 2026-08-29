@@ -6,6 +6,7 @@ import subprocess
 import aiohttp
 import pytest
 import requests
+import yarl
 
 from .api_client import admin_client, sdk
 from .approval_util import (
@@ -140,6 +141,111 @@ class Test:
         assert client.returncode == 0
         await ws.close()
         await session.close()
+
+    @pytest.mark.asyncio
+    async def test_a_ticket_cannot_answer_its_users_login_approval(
+        self,
+        processes: ProcessManager,
+        timeout,
+        shared_wg: WarpgateProcess,
+    ):
+        # A ticket names a user but does not act as one: it is scoped to a
+        # single target and is often handed to someone who is not that user at
+        # all. Letting it answer their pending login would turn a ticket into
+        # the second factor for every session they start.
+        db_port = processes.start_postgres_server()
+        url = f"https://localhost:{shared_wg.http_port}"
+        user, target = create_user_and_postgres_target(
+            url, db_port, require_approval=False
+        )
+        with admin_client(url) as api:
+            api.update_user(
+                user.id,
+                sdk.UserDataRequest(
+                    username=user.username,
+                    credential_policy=sdk.UserRequireCredentialsPolicy(
+                        postgres=[
+                            sdk.CredentialKind.PASSWORD,
+                            sdk.CredentialKind.WEBUSERAPPROVAL,
+                        ],
+                    ),
+                ),
+            )
+            ticket = api.create_ticket(
+                sdk.CreateTicketRequest(
+                    target_name=target.name, username=user.username
+                )
+            ).secret
+        wait_port(db_port, recv=False)
+
+        session = aiohttp.ClientSession()
+        headers = {"Host": f"localhost:{shared_wg.http_port}"}
+        await session.post(
+            f"{url}/@warpgate/api/auth/login",
+            json={"username": user.username, "password": "123"},
+            headers=headers,
+            ssl=False,
+        )
+        ws = await session.ws_connect(
+            url.replace("https:", "wss:")
+            + "/@warpgate/api/auth/web-auth-requests/stream",
+            ssl=False,
+        )
+
+        client = psql_held(processes, shared_wg.postgres_port, user, target)
+        try:
+            auth_id = (await ws.receive(15)).data
+
+            # A ticket presented as a query parameter authorizes the browser
+            # session it arrives on, so it reaches this endpoint the way a
+            # logged-in user would. It belongs to this very user, and the
+            # request it is answering is theirs.
+            async with aiohttp.ClientSession() as ticket_session:
+                seeded = await ticket_session.get(
+                    f"{url}/?warpgate-ticket={ticket}",
+                    ssl=False,
+                    allow_redirects=False,
+                )
+                assert "warpgate-http-session" in ticket_session.cookie_jar.filter_cookies(
+                    yarl.URL(url)
+                ), "the ticket should have authorized a session to act on"
+                read = await ticket_session.get(
+                    f"{url}/@warpgate/api/auth/state/{auth_id}", ssl=False
+                )
+                assert read.status == 404, (
+                    "a ticket must not read its user's pending login either"
+                )
+
+                refused = await ticket_session.post(
+                    f"{url}/@warpgate/api/auth/state/{auth_id}/approve",
+                    json={"scope": "Once"},
+                    ssl=False,
+                )
+                assert refused.status != 200, (
+                    "a ticket must not resolve its user's login approval"
+                )
+
+            # Still pending, so the refusal didn't quietly approve it either.
+            r = await session.get(
+                f"{url}/@warpgate/api/auth/state/{auth_id}", ssl=False
+            )
+            assert r.status == 200
+            assert (await r.json())["state"] == "WebUserApprovalNeeded"
+
+            # The user themselves still can, over their own browser session.
+            approved = await session.post(
+                f"{url}/@warpgate/api/auth/state/{auth_id}/approve",
+                json={"scope": "Once"},
+                ssl=False,
+            )
+            assert approved.status == 200
+            assert b"tbl" in client.communicate(b"\\dt\n", timeout=timeout)[0]
+        finally:
+            if client.poll() is None:
+                client.kill()
+                client.communicate()
+            await ws.close()
+            await session.close()
 
     @pytest.mark.asyncio
     async def test_pending_count_readable_with_session_cookie(
