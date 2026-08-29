@@ -36,15 +36,18 @@
     import Fa from 'svelte-fa'
 
     /// One inbox entry, whichever kind of request produced it. `at` is the
-    /// shared sort key so both kinds interleave chronologically.
+    /// shared sort key so both kinds interleave chronologically, and `key`
+    /// identifies the entry in the list: a session holds a question per gated
+    /// target it reaches, so its id alone does not distinguish them.
     type Entry =
         | {
               kind: 'session'
+              key: string
               id: string
               at: Date
               session: SessionApprovalItem
           }
-        | { kind: 'ticket'; id: string; at: Date; ticket: TicketRequest }
+        | { kind: 'ticket'; key: string; id: string; at: Date; ticket: TicketRequest }
 
     let sessions: SessionApprovalItem[] = $state([])
     let tickets: TicketRequest[] = $state([])
@@ -65,6 +68,7 @@
                 session =>
                     ({
                         kind: 'session',
+                        key: `session:${session.id}:${session.target}`,
                         id: session.id,
                         at: session.started,
                         session,
@@ -74,6 +78,7 @@
                 ticket =>
                     ({
                         kind: 'ticket',
+                        key: `ticket:${ticket.id}`,
                         id: ticket.id,
                         at: ticket.created,
                         ticket,
@@ -205,7 +210,7 @@
         {/if}
 
         <div class="list-group list-group-flush">
-            {#each entries as entry (entry.id)}
+            {#each entries as entry (entry.key)}
                 <div class="list-group-item d-flex align-items-center gap-4">
                     {#if entry.kind === 'session'}
                         <Fa icon={faComputer} fw />
