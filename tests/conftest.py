@@ -1117,18 +1117,19 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 subprocess.call("chmod 600 ssh-keys/id*", shell=True)
 
 
-_NOISE = (
-    "sqlx",
-    "rows_affected",
-    "runtime.resource",
-    "runtime.spawn",
-    "runtime::resource",
-    "tokio::task",
-)
+# What the gateway itself said, as opposed to what its dependencies said.
+#
+# This was a list of things to drop, and it lost three times running: first the
+# tokio runtime tracing, then the config watcher's inotify events, then rustls
+# dumping every handshake. Each new dependency brings its own chatter and the
+# tail is only twenty-five lines, so excluding by name is a race that cannot be
+# won. Selecting by name can be: a failure is explained by what warpgate and
+# the SSH library did, and by anything that called itself a warning.
+_SIGNAL = ("warpgate", "russh", " WARN ", "ERROR")
 
 
-def _is_noise(line: str) -> bool:
-    return any(marker in line for marker in _NOISE)
+def _is_signal(line: str) -> bool:
+    return any(marker in line for marker in _SIGNAL)
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
@@ -1156,7 +1157,7 @@ def pytest_runtest_makereport(item, call):
         # whole budget on whatever the runtime happened to be doing: a session
         # that hung for two minutes ends with tokio bookkeeping, and the last
         # thing the session itself did scrolls out of reach.
-        interesting = [line for line in lines if not _is_noise(line)][-25:]
+        interesting = [line for line in lines if _is_signal(line)][-25:]
         if interesting:
             report.sections.append(
                 (f"gateway log {log.name} (last lines)", "\n".join(interesting))

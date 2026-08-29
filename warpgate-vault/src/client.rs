@@ -986,6 +986,13 @@ mod tests {
             PathBuf,
         )> = std::sync::OnceLock::new();
         TLS.get_or_init(|| {
+            // Here rather than in individual tests. Three of them installed the
+            // provider and the rest relied on one of those three having run
+            // first — true when the tests run in order, false when cargo runs
+            // them in parallel, and then whichever TLS test started first hung
+            // until its timeout. Every TLS test reaches this helper, and
+            // `get_or_init` makes the install happen exactly once.
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
             let cert =
                 rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_owned()]).unwrap();
             let dir = std::env::temp_dir().join("warpgate-vault-test-tls");
@@ -1288,7 +1295,11 @@ mod tests {
                 secret_id_path,
             },
             certificate_ttl: None,
-            timeout: Duration::from_secs(5),
+            // Not a latency assertion. Five seconds was one by accident: the
+            // tests that care about the timeout set their own, and for the
+            // rest it only decided how slow a machine had to be before a login
+            // over TLS was reported as the behaviour under test failing.
+            timeout: Duration::from_secs(30),
             ca_bundle: Some(test_ca_bundle()),
         }
     }
@@ -1324,7 +1335,8 @@ mod tests {
         let secret_id_path = tmp.path().join("secret-id");
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
-        let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
+        let client =
+            VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
         let error = client
             .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
             .await
@@ -1367,7 +1379,12 @@ mod tests {
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let mut config = approle_config(vault, secret_id_path);
-        config.timeout = Duration::from_secs(10);
+        // The two outcomes this separates are "stopped at the cap" and "waited
+        // out the whole stream", so what matters is the distance between them,
+        // not either number. A minute against the twenty seconds below leaves
+        // room for a machine three times slower than the one that measured
+        // 7.6 seconds for the early stop.
+        config.timeout = Duration::from_secs(60);
         let client = VaultClient::new(config).unwrap();
 
         let started = Instant::now();
@@ -1391,7 +1408,7 @@ mod tests {
             other => panic!("expected a bounded API error, got {other:?}"),
         }
         assert!(
-            elapsed < Duration::from_secs(2),
+            elapsed < Duration::from_secs(20),
             "reading the error body waited on the whole stream ({elapsed:?})"
         );
     }

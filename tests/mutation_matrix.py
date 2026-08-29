@@ -48,6 +48,7 @@ import ast
 import atexit
 import hashlib
 import json
+import os
 import pathlib
 import signal
 import subprocess
@@ -895,6 +896,13 @@ def run_named_only(
             cwd=REPO / "tests",
             capture_output=True,
             text=True,
+            # The suites' `timeout` fixture defaults to 10 seconds and CI sets
+            # 120. Left at the default, a loaded machine times a test out
+            # before the mutation is even applied, and the guard is reported
+            # `already failing` — an accusation against the guard for what is
+            # only the harness being impatient. Measured: two guards reported
+            # that way in a full run both discriminate when run alone.
+            env={**os.environ, "TIMEOUT": os.environ.get("TIMEOUT", "120")},
         )
         # Classify explicitly. Reading only the `FAILED` lines and calling
         # everything else passed made a skipped, errored, deselected or
