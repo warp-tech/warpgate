@@ -9,8 +9,7 @@ use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    DecidedRow, StatusTransition, close_request, find_question, mark_consumed, one_question,
-    upsert_request,
+    StatusTransition, close_request, find_question, mark_consumed, one_question, upsert_request,
 };
 
 use super::*;
@@ -117,7 +116,6 @@ pub(super) async fn advertise_admin_request(
             resolved_at: Set(None),
             consumed_at: Set(None),
         },
-        DecidedRow::Reuse,
     )
     .await
 }

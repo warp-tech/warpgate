@@ -9,7 +9,6 @@
 use std::sync::Arc;
 
 use http::StatusCode;
-use poem::web::Html;
 use poem::{IntoResponse, Request, Response};
 use tokio::sync::Mutex;
 use warpgate_common::auth::RememberedBy;
@@ -20,6 +19,8 @@ use warpgate_common_http::{
 };
 use warpgate_core::approvals::{AdminApprovalContext, PolledGate, TicketStake};
 use warpgate_core::{ApprovedTarget, TargetAuthorization, WarpgateServerHandle};
+
+use crate::internal_page::internal_page;
 
 /// How often the interstitial re-checks. Short enough to feel immediate, long
 /// enough not to hammer the gateway while a session waits.
@@ -93,48 +94,18 @@ pub async fn resolve_admin_approval(
 /// 202 with `Retry-After` while pending, 403 once denied — so a client that
 /// never renders the body still knows what happened.
 fn gate_response(target_name: &str, heading: &str, message: &str, pending: bool) -> Response {
-    let refresh = if pending {
-        format!(r#"<meta http-equiv="refresh" content="{RETRY_AFTER_SECONDS}">"#)
-    } else {
-        String::new()
-    };
-    let heading = html_escape::encode_text(heading);
-    let message = html_escape::encode_text(message);
-    let target_name = html_escape::encode_text(target_name);
-    let page = format!(
-        r#"<!DOCTYPE html>
-        {refresh}
-        <style>
-            body {{
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-            }}
-
-            img {{
-                width: 100px;
-            }}
-
-            main {{
-                width: 400px;
-                margin: 200px auto;
-            }}
-        </style>
-        <main>
-            <img src="/@warpgate/assets/brand.svg" />
-            <h1>{heading}</h1>
-            <p>{message}</p>
-            <p><small>{target_name}</small></p>
-        </main>
-        "#
+    let page = internal_page(
+        heading,
+        message,
+        Some(target_name),
+        pending.then_some(RETRY_AFTER_SECONDS),
     );
 
     if pending {
-        Html(page)
-            .with_status(StatusCode::ACCEPTED)
+        page.with_status(StatusCode::ACCEPTED)
             .with_header(http::header::RETRY_AFTER, RETRY_AFTER_SECONDS)
             .into_response()
     } else {
-        Html(page)
-            .with_status(StatusCode::FORBIDDEN)
-            .into_response()
+        page.with_status(StatusCode::FORBIDDEN).into_response()
     }
 }

@@ -966,7 +966,7 @@ impl ServerSession {
                         .register_approved_target_session(&approved)
                         .await?;
 
-                    self.start_approved_session(approved, target_session_id)
+                    self.stamp_approved_target(approved, target_session_id)
                         .await;
                     self.maybe_connect_remote().await?;
                 }
@@ -1000,7 +1000,7 @@ impl ServerSession {
         .boxed()
     }
 
-    async fn start_approved_session(
+    async fn stamp_approved_target(
         &mut self,
         approved: ApprovedTarget<TargetSSHOptions>,
         target_session_id: TargetSessionId,
@@ -2597,7 +2597,7 @@ impl ServerSession {
             .await?;
         match started {
             TargetSessionStart::Started((target_session_id, approved)) => {
-                self.start_approved_session(approved, target_session_id)
+                self.stamp_approved_target(approved, target_session_id)
                     .await;
             }
             // The gate can't hold the auth exchange; it runs off the event

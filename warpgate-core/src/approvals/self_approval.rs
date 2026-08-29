@@ -9,7 +9,7 @@ use warpgate_common::auth::{
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    DecidedRow, find_request, mark_consumed, one_request, upsert_request,
+    find_request, mark_consumed, one_request, upsert_request,
 };
 
 use super::*;
@@ -192,5 +192,5 @@ pub(crate) async fn advertise_user_request(
         }
     };
 
-    upsert_request(db, row, DecidedRow::Reopen).await
+    upsert_request(db, row).await
 }

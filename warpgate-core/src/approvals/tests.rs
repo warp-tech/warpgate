@@ -14,8 +14,7 @@ use warpgate_common::{NodeId, Protocol, UserSessionId};
 use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    DecidedRow, close_request, find_question, find_request, mark_consumed, one_request,
-    upsert_request,
+    close_request, find_question, find_request, mark_consumed, one_request, upsert_request,
 };
 use warpgate_db_migrations::migrate_database;
 
@@ -73,7 +72,6 @@ async fn advertise_row(
             resolved_at: Set(None),
             consumed_at: Set(None),
         },
-        DecidedRow::Reopen,
     )
     .await
     .unwrap();
@@ -290,22 +288,36 @@ async fn re_advertising_reopens_a_finished_request() {
 
         pending_row(&db, session_id, "a-target").await;
 
+        let row = find_question(&db, session_id, ApprovalKind::Admin, "a-target")
+            .await
+            .unwrap()
+            .expect("the request should still exist");
         assert_eq!(
-            status_of(&db, session_id, "a-target").await,
+            row.status,
             SessionApprovalRequest::ApprovalRequestStatus::Pending,
             "a request left {finished:?} must be reopened, not reused",
         );
+        // Closing stamps `resolved_at`, so a reopening that left it behind
+        // would read as a question that had already been answered.
+        assert!(
+            row.resolved_at.is_none(),
+            "reopening must leave nothing of how the previous asking ended",
+        );
+        assert!(row.consumed_at.is_none());
+        assert!(row.scope.is_none());
+        assert!(row.resolved_by_username.is_none());
     }
 }
 
-/// A delivered administrator decision stands. `(user_session_id, target_id)` is
-/// unique and a target session only ends with its parent, so an admitted
-/// session keeps its access row and cannot reach the gate again — and if it
-/// somehow did, the answer already on the row is the right one. Reopening would
-/// put a settled question to an administrator a second time and destroy the
-/// record of the first answer in the process.
+/// A delivered decision stands, whatever asks next. No protocol can put a second
+/// question under one key anyway — `(user_session_id, target_id)` is unique and
+/// a target session only ends with its parent, so an admitted session keeps its
+/// access row and never reaches the gate again; and every protocol that can be
+/// self-approved takes a fresh session id per attempt. Were one to, the answer
+/// already on the row is the right one: rewriting it would put a settled
+/// question to an approver again and destroy the record of the first answer.
 #[tokio::test]
-async fn re_advertising_reuses_a_consumed_admin_decision() {
+async fn re_advertising_reuses_a_consumed_decision() {
     let db = migrated_db().await;
     let session_id = UserSessionId(Uuid::new_v4());
     pending_row(&db, session_id, "a-target").await;
@@ -330,51 +342,6 @@ async fn re_advertising_reuses_a_consumed_admin_decision() {
     assert!(
         row.consumed_at.is_some(),
         "and the record of it having been delivered",
-    );
-}
-
-/// Self approval is the other way round: the question is whether a login is
-/// really the user, a retried login reuses the session id it failed under, and
-/// the approval the last attempt was given must not admit the next one.
-#[tokio::test]
-async fn re_advertising_reopens_a_consumed_user_approval() {
-    let db = migrated_db().await;
-    let session_id = UserSessionId(Uuid::new_v4());
-    let mut subject = plain_subject("");
-    subject.kind = ApprovalKind::User;
-    advertise_row(&db, session_id, &subject).await;
-    assert!(
-        record_decision(
-            &db,
-            session_id,
-            ApprovalKind::User,
-            "",
-            ApprovalDecision::Approved(ApprovalScope::Once),
-            &admin_actor(),
-        )
-        .await
-        .unwrap()
-    );
-    mark_consumed(&db, one_request(session_id, ApprovalKind::User))
-        .await
-        .unwrap();
-
-    advertise_row(&db, session_id, &subject).await;
-
-    let row = find_request(&db, session_id, ApprovalKind::User)
-        .await
-        .unwrap()
-        .expect("the request should still exist");
-    assert_eq!(
-        row.status,
-        SessionApprovalRequest::ApprovalRequestStatus::Pending,
-        "a fresh login must be asked again",
-    );
-    assert!(row.consumed_at.is_none(), "the stamp must be cleared too");
-    assert!(row.scope.is_none(), "the previous answer must be cleared");
-    assert!(
-        row.resolved_by_username.is_none(),
-        "the previous resolver must be cleared",
     );
 }
 

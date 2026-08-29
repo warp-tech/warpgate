@@ -24,10 +24,14 @@ pub enum ApprovalRequestStatus {
 }
 
 impl ApprovalRequestStatus {
-    // states that
     /// Terminal states that carry no decision, and so answer nothing. A row in
     /// one of these is history: a later gate on the same session reopens it.
     pub const UNANSWERED: [Self; 2] = [Self::TimedOut, Self::Abandoned];
+
+    /// States that carry an answer. Nothing rewrites a row in one of these —
+    /// the answer stands, and a later gate asking the same question reads it
+    /// back rather than putting it to anyone again.
+    pub const DECIDED: [Self; 2] = [Self::Approved, Self::Rejected];
 }
 
 /// An out-of-band approval request — a first-class record, not a projection:
@@ -49,9 +53,9 @@ impl ApprovalRequestStatus {
 /// are different questions and each keeps its own record.
 ///
 /// Within one key, creation is idempotent: a wait site that runs twice upserts
-/// its own row instead of queueing a duplicate, and a row left over from an
-/// earlier, finished gate on the same target is reopened rather than
-/// duplicated.
+/// its own row instead of queueing a duplicate, and a gate that ended without
+/// an answer leaves a row a later one asks again through rather than
+/// duplicating. An answer, once given, is never rewritten.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "session_approval_requests")]
 pub struct Model {
@@ -103,7 +107,8 @@ pub struct Model {
 }
 
 impl Column {
-    /// Columns rewritten when a request is re-advertised or reopened ([`upsert_request`])
+    /// Columns rewritten when a request is re-advertised or asked again
+    /// ([`upsert_request`])
     pub const IDENTITY: [Self; 9] = [
         Self::NodeId,
         Self::Protocol,
@@ -116,7 +121,8 @@ impl Column {
         Self::Started,
     ];
 
-    /// Everything else (decision record), overwritten only on a reopen
+    /// Everything else (decision record), cleared only when a question that
+    /// went unanswered is asked again
     pub const DECISION: [Self; 6] = [
         Self::Status,
         Self::Scope,
@@ -241,69 +247,32 @@ pub fn one_question(session_id: UserSessionId, kind: ApprovalKind, target: &str)
     one_request(session_id, kind).add(Column::Target.eq(target))
 }
 
-/// Row key: (session_id, kind, target)
+/// Advertises a question on its row, keyed `(session_id, kind, target)`: a wait
+/// site that runs twice updates its own row instead of queueing a duplicate,
+/// and a question about another target is simply another row.
 ///
-/// `, so a wait site that runs
-/// twice for the same question updates its own row instead of queueing a
-/// duplicate, and a question about another target is simply another row.
+/// Whether the row already exists decides only *how* it is written, never
+/// whether: an answer is never overwritten, in either direction. A row still
+/// pending has the asker's facts refreshed — a request/response protocol
+/// re-enters its gate on every request, and an answer given between two of
+/// those is the answer to *this* question. A row that ended without an answer
+/// is a previous asking, and is asked afresh. A row carrying a decision is left
+/// exactly as it stands, for the asker to read back.
 ///
-/// A decision nobody has picked up yet is deliberately left alone.
-/// Re-advertising is the same session asking the same question again — a
-/// request/response protocol re-enters its gate on every request — and an
-/// answer given between two of those is the answer to *this* question.
-/// Rewriting it would silently discard a decision an administrator has already
-/// made.
-///
-/// A row that ended *without* an answer is a previous asking of the same
-/// question and is always reopened — there is no decision to lose, and the
-/// session is legitimately asking again. What a row that does carry a decision
-/// means is [`DecidedRow`], because it differs by kind.
-pub enum DecidedRow {
-    /// The decision stands, and a fresh asking of the same question reuses it
-    /// rather than putting it to anyone again.
-    ///
-    /// This is administrator approval, where the question is whether a user
-    /// session may reach a target. `(user_session_id, target_id)` is unique and
-    /// a target session is only ever ended along with its parent, so an admitted
-    /// session keeps its open access row and never reaches the gate a second
-    /// time. Were it to anyway, the answer it already has is the right one.
-    Reuse,
-    /// The decision answered a *previous* asking, and must not be read as this
-    /// one's — the row is reopened and the question put again.
-    ///
-    /// This is self approval, where the question is whether a login is really
-    /// the user. A retried login reuses the session id it failed under, so one
-    /// key genuinely carries a succession of questions.
-    Reopen,
-}
-
+/// Two statements rather than one because a missing row and a decided row both
+/// leave the update matching nothing, and telling them apart in the insert
+/// would need a conditional conflict action, which MySQL has no syntax for.
 pub async fn upsert_request(
     db: &DatabaseConnection,
     row: ActiveModel,
-    decided: DecidedRow,
 ) -> Result<(), WarpgateError> {
-    use self::ApprovalRequestStatus as Status;
+    // The one status write outside `StatusTransition`, and it can only ever
+    // produce a question: the rest of the row is the caller's to state.
+    let mut asking = row.clone();
+    asking.status = Set(ApprovalRequestStatus::Pending);
 
-    let mut reopened = row.clone();
-    // Same row, decision cleared out
-    reopened.status = Set(Status::Pending);
-    reopened.scope = Set(None);
-    reopened.resolved_by_username = Set(None);
-    reopened.resolved_by_user_id = Set(None);
-    reopened.resolved_at = Set(None);
-    reopened.consumed_at = Set(None);
-
-    let mut still_a_question = Condition::any()
-        // Ended without an answer (timed out / abandoned)
-        .add(Column::Status.is_in(ApprovalRequestStatus::UNANSWERED))
-        // OR is still pending
-        .add(Column::Status.eq(Status::Pending));
-    if matches!(decided, DecidedRow::Reopen) {
-        still_a_question = still_a_question.add(Column::ConsumedAt.is_not_null());
-    }
-
-    match Entity::update(reopened)
-        .filter(still_a_question)
+    match Entity::update(asking)
+        .filter(Column::Status.is_not_in(ApprovalRequestStatus::DECIDED))
         .exec(db)
         .await
     {
@@ -314,12 +283,12 @@ pub async fn upsert_request(
         Err(error) => return Err(error.into()),
     }
 
+    // No entry ot entry was undecided
     match Entity::insert(row)
         .on_conflict(
             OnConflict::columns([Column::SessionId, Column::Kind, Column::Target])
-                // Re-assigning a key column the value it already holds is the
-                // portable way to say "leave this row alone": `do_nothing()`
-                // builds `ON DUPLICATE KEY IGNORE` for MySQL, which is not SQL.
+                // .do_nothing() is broken in sea-orm on MySQL
+                // this is a portable "do nothing" (noop update):
                 .update_column(Column::SessionId)
                 .to_owned(),
         )
@@ -327,9 +296,6 @@ pub async fn upsert_request(
         .await
     {
         Ok(_) => Ok(()),
-        // The standing answer the update declined to touch, or a row another
-        // node advertised in between — current either way, and not this call's
-        // to overwrite.
         Err(DbErr::RecordNotInserted) => Ok(()),
         Err(error) => Err(error.into()),
     }
@@ -356,10 +322,9 @@ pub async fn close_request(
 
 /// Records that the owning node has read a decision off the row and acted on
 /// it. The row stays as the audit record; the stamp is what takes it out of the
-/// self-approval sweep, and what tells a later asking of a [`DecidedRow::Reopen`]
-/// question that the answer it can see belongs to an earlier one. `which` names
-/// the rows — [`one_question`] where the caller knows which question it
-/// delivered, [`one_request`] where the state, not the row, was the authority.
+/// self-approval sweep. `which` names the rows — [`one_question`] where the
+/// caller knows which question it delivered, [`one_request`] where the state,
+/// not the row, was the authority.
 pub async fn mark_consumed(db: &DatabaseConnection, which: Condition) -> Result<(), WarpgateError> {
     use Column;
 
