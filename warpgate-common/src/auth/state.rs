@@ -3,6 +3,7 @@ use std::fmt::Write;
 use std::future::Future;
 use std::net::IpAddr;
 
+use data_encoding::HEXLOWER;
 use rand::RngExt;
 use sha2::Digest;
 use time::OffsetDateTime;
@@ -166,20 +167,19 @@ impl CredentialFingerprints {
     /// digest that isn't keyed to the installation cannot be written at all.
     #[must_use]
     pub fn digest(&self, salt: &CredentialDigestSalt) -> String {
-        let mut bytes = Vec::new();
-        // Length-framed like every other field, so no set of fingerprints can
-        // reproduce the bytes of a different salt-and-set pair.
+        let mut bytes = vec![1]; // version
+
         let salt = salt.expose_secret();
+        // length prefixed to avoid a collision if salt length changes
         bytes.extend_from_slice(&(salt.len() as u64).to_le_bytes());
         bytes.extend_from_slice(salt.as_bytes());
+
         for fingerprint in &self.0 {
             fingerprint.write_canonical_bytes(&mut bytes);
         }
-        let mut out = String::new();
-        for byte in sha2::Sha256::digest(&bytes) {
-            let _ = write!(&mut out, "{byte:02x}");
-        }
-        out
+
+        let digest = sha2::Sha256::digest(&bytes);
+        HEXLOWER.encode(&digest)
     }
 }
 

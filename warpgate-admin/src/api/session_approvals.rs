@@ -96,10 +96,7 @@ impl Api {
         // out — the owning node has yet to pick it up — so it is not offered
         // for another one.
         let requests = SessionApprovalRequest::Entity::find()
-            .filter(
-                SessionApprovalRequest::Column::Kind
-                    .eq(SessionApprovalRequest::ApprovalRequestKind::Admin),
-            )
+            .filter(SessionApprovalRequest::Column::Kind.eq(ApprovalKind::Admin))
             .filter(
                 SessionApprovalRequest::Column::Status
                     .eq(SessionApprovalRequest::ApprovalRequestStatus::Pending),

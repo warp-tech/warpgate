@@ -331,9 +331,15 @@ mod tests {
             db.execute(Statement::from_sql_and_values(
                 backend,
                 "INSERT INTO session_approval_requests \
-                 (session_id, kind, target, node_id, protocol, username, started, status) \
-                 VALUES (?, 'admin', ?, ?, 'SSH', 'someone', CURRENT_TIMESTAMP, 'pending')",
-                [session.into(), target.into(), Uuid::new_v4().into()],
+                 (session_id, kind, target, node_id, protocol, username, user_id, \
+                  started, status) \
+                 VALUES (?, 'admin', ?, ?, 'SSH', 'someone', ?, CURRENT_TIMESTAMP, 'pending')",
+                [
+                    session.into(),
+                    target.into(),
+                    Uuid::new_v4().into(),
+                    Uuid::new_v4().into(),
+                ],
             ))
             .await
             .unwrap();
@@ -372,4 +378,3 @@ mod tests {
         );
     }
 }
-

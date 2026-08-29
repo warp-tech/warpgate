@@ -21,6 +21,7 @@ pub mod session_approval_request {
         pub node_id: Uuid,
         pub protocol: String,
         pub username: String,
+        pub user_id: Uuid,
         #[sea_orm(primary_key, auto_increment = false)]
         pub target: String,
         pub remote_address: Option<String>,

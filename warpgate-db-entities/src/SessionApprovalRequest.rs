@@ -1,36 +1,9 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::auth::ApprovalKind;
+use warpgate_common::auth::{ApprovalKind, ApprovalScope};
 use warpgate_common::{NodeId, UserSessionId};
 
-/// Which out-of-band approval factor a request is waiting on.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, DeriveActiveEnum)]
-#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
-pub enum ApprovalRequestKind {
-    #[sea_orm(string_value = "user")]
-    User,
-    #[sea_orm(string_value = "admin")]
-    Admin,
-}
-
-impl From<ApprovalKind> for ApprovalRequestKind {
-    fn from(kind: ApprovalKind) -> Self {
-        match kind {
-            ApprovalKind::User => Self::User,
-            ApprovalKind::Admin => Self::Admin,
-        }
-    }
-}
-
-/// Where a request has got to. The decision lives on the row, so any node can
-/// record it and the owning node reads it back.
-///
-/// Everything but [`Pending`] is terminal. The two that carry no decision are
-/// kept apart because the difference is the whole audit answer: nobody answered
-/// in time, versus nobody was left to answer for.
-///
-/// [`Pending`]: Self::Pending
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 pub enum ApprovalRequestStatus {
@@ -40,31 +13,19 @@ pub enum ApprovalRequestStatus {
     Approved,
     #[sea_orm(string_value = "rejected")]
     Rejected,
-    /// The approval window ran out before anyone decided.
+    /// nobody answered the approval
     #[sea_orm(string_value = "timed_out")]
     TimedOut,
-    /// The connection waiting on it went away first — the client left, the
-    /// session ended, or the owning node did.
+    /// the connection died before the approval got answered
     #[sea_orm(string_value = "abandoned")]
     Abandoned,
 }
 
 impl ApprovalRequestStatus {
+    // states that
     /// Terminal states that carry no decision, and so answer nothing. A row in
     /// one of these is history: a later gate on the same session reopens it.
     pub const UNANSWERED: [Self; 2] = [Self::TimedOut, Self::Abandoned];
-}
-
-/// How widely an approval is remembered for later bypass.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, DeriveActiveEnum)]
-#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
-pub enum ApprovalRequestScope {
-    #[sea_orm(string_value = "once")]
-    Once,
-    #[sea_orm(string_value = "target")]
-    Target,
-    #[sea_orm(string_value = "all_targets")]
-    AllTargets,
 }
 
 /// An out-of-band approval request — a first-class record, not a projection:
@@ -95,17 +56,21 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub session_id: UserSessionId,
     #[sea_orm(primary_key, auto_increment = false)]
-    pub kind: ApprovalRequestKind,
+    pub kind: ApprovalKind,
     /// The node running the session that is waiting (the row's creator).
     pub node_id: NodeId,
     pub protocol: String,
     pub username: String,
+    /// The user whose session is being asked about. Stored alongside the name
+    /// so a decision can be attributed to them in the audit trail without a
+    /// lookup, mirroring `resolved_by_user_id` for the approver.
+    pub user_id: Uuid,
     /// Part of the key: see the type docs.
     #[sea_orm(primary_key, auto_increment = false)]
     pub target: String,
     pub remote_address: Option<String>,
     /// The short code the user is shown, for confirming they are approving
-    /// their own login. Only [`ApprovalRequestKind::User`] has one — an
+    /// their own login. Only [`ApprovalKind::User`] has one — an
     /// administrator approval is a gate on a connection, with no second party
     /// reading a code off a screen.
     pub identification_string: Option<String>,
@@ -122,7 +87,7 @@ pub struct Model {
     pub started: OffsetDateTime,
     pub status: ApprovalRequestStatus,
     /// Set alongside [`ApprovalRequestStatus::Approved`].
-    pub scope: Option<ApprovalRequestScope>,
+    pub scope: Option<ApprovalScope>,
     pub resolved_by_username: Option<String>,
     /// Null when the resolver isn't a user, such as the admin API token.
     pub resolved_by_user_id: Option<Uuid>,
@@ -136,17 +101,12 @@ pub struct Model {
 }
 
 impl Column {
-    /// The question: who is asking, from where, and what they are asking with.
-    /// Rewritten wholesale whenever the row is re-advertised or a finished
-    /// request is reopened. *What* is being asked about is the key, not this.
-    ///
-    /// Every non-key column belongs to exactly this set or [`Self::DECISION`] —
-    /// a new column must be added to one of them so the reopen path handles it
-    /// (enforced by a test in `warpgate_core::approvals`).
-    pub const IDENTITY: [Self; 8] = [
+    /// Columns rewritten when a request is re-advertised or reopened (upsert_request)
+    pub const IDENTITY: [Self; 9] = [
         Self::NodeId,
         Self::Protocol,
         Self::Username,
+        Self::UserId,
         Self::RemoteAddress,
         Self::IdentificationString,
         Self::CredentialsDigest,
@@ -154,9 +114,7 @@ impl Column {
         Self::Started,
     ];
 
-    /// The answer: how the question ended, who ended it, and whether the owner
-    /// picked it up. Reset when a finished row is reopened, and never
-    /// overwritten while the question stands.
+    /// Everything else (decision record), overwritten only on a reopen
     pub const DECISION: [Self; 6] = [
         Self::Status,
         Self::Scope,

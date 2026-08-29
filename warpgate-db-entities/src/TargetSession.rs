@@ -112,8 +112,11 @@ pub async fn open_or_lookup(
 
     Entity::insert(model)
         .on_conflict(
+            // Re-assigning a key column the value it already holds, rather
+            // than `do_nothing()`: that builds `ON DUPLICATE KEY IGNORE` for
+            // MySQL, which is not SQL. The row is read back below either way.
             OnConflict::columns([Column::UserSessionId, Column::TargetId])
-                .do_nothing()
+                .update_column(Column::UserSessionId)
                 .to_owned(),
         )
         .do_nothing()

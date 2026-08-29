@@ -1719,7 +1719,7 @@
       },
       "ApprovalScope": {
         "type": "string",
-        "description": "How an approval should be remembered for later bypass.\n\nDerives the OpenAPI enum directly so both the administrator and the\nself-approval endpoints can take it as-is; a per-API copy would be three\nidentical enums and two conversions that only exist to satisfy the derive.",
+        "description": "How widely an approval is remembered for later bypass.\n\nStored on the request row and taken by both approval endpoints, so it\nderives its database and OpenAPI representations here rather than being\nrestated per layer with conversions between the copies.",
         "enum": [
           "Once",
           "Target",

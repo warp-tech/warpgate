@@ -60,11 +60,7 @@ pub async fn find_pending_approval(
     kind: ApprovalKind,
     target: &str,
 ) -> Result<Option<PendingApproval>, WarpgateError> {
-    let key = (
-        session_id,
-        SessionApprovalRequest::ApprovalRequestKind::from(kind),
-        target.to_owned(),
-    );
+    let key = (session_id, kind, target.to_owned());
 
     let Some(row) = SessionApprovalRequest::Entity::find_by_id(key)
         .one(&ctx.services().db)
@@ -100,10 +96,7 @@ pub async fn find_user_approval_row(
     // own request is unambiguous without naming it.
     let row = SessionApprovalRequest::Entity::find()
         .filter(SessionApprovalRequest::Column::SessionId.eq(session_id))
-        .filter(
-            SessionApprovalRequest::Column::Kind
-                .eq(SessionApprovalRequest::ApprovalRequestKind::User),
-        )
+        .filter(SessionApprovalRequest::Column::Kind.eq(ApprovalKind::User))
         .one(&ctx.services().db)
         .await?;
     Ok(row.filter(|row| is_pending(row) && username_eq_ci(&row.username, username)))
@@ -131,10 +124,7 @@ async fn pending_approval_from_row(
     row: SessionApprovalRequest::Model,
 ) -> Result<Option<PendingApproval>, WarpgateError> {
     let services = ctx.services();
-    let kind = match row.kind {
-        SessionApprovalRequest::ApprovalRequestKind::User => ApprovalKind::User,
-        SessionApprovalRequest::ApprovalRequestKind::Admin => ApprovalKind::Admin,
-    };
+    let kind = row.kind;
 
     if row.node_id != services.cluster.node_id
         && Node::Entity::find_by_id(row.node_id)

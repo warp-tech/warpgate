@@ -1,6 +1,8 @@
 use bytes::Bytes;
 use poem_openapi::Enum;
 use russh::keys::Algorithm;
+use sea_orm::entity::prelude::{DeriveActiveEnum, EnumIter};
+use sea_orm::sea_query::StringLen;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -29,12 +31,35 @@ pub enum CredentialKind {
 /// Only [`ApprovalKind::User`] is a credential; administrator approval is a
 /// gate on the connection, decided after authentication. The two must never
 /// cross-satisfy, so the kind is part of every request key and match key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 pub enum ApprovalKind {
     /// Self approval from the user's own browser session.
+    #[sea_orm(string_value = "user")]
     User,
     /// JIT approval by an administrator.
+    #[sea_orm(string_value = "admin")]
     Admin,
+}
+
+/// How widely an approval is remembered for later bypass.
+///
+/// Stored on the request row and taken by both approval endpoints, so it
+/// derives its database and OpenAPI representations here rather than being
+/// restated per layer with conversions between the copies.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
+pub enum ApprovalScope {
+    #[sea_orm(string_value = "once")]
+    Once,
+    #[sea_orm(string_value = "target")]
+    Target,
+    #[sea_orm(string_value = "all_targets")]
+    AllTargets,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,15 +122,16 @@ fn sha256(bytes: &[u8]) -> [u8; 32] {
 }
 
 impl AuthCredentialFingerprint {
-    /// Appends a canonical byte encoding of this fingerprint, for digesting a
-    /// set of them into a value stable across processes and releases — it is
-    /// compared against digests stored in the database. Variable-length parts
-    /// are length-prefixed so no two sets can encode to the same bytes.
+    /// Not necessarily a stable encoding!
+    /// Pushes a byte encoding of this fingerprint, for hashing into a total
+    /// fingerprint of an authentication.
+    /// Variable-length parts are length-prefixed
     pub(crate) fn write_canonical_bytes(&self, out: &mut Vec<u8>) {
         fn push_str(out: &mut Vec<u8>, s: &str) {
             out.extend_from_slice(&(s.len() as u64).to_le_bytes());
             out.extend_from_slice(s.as_bytes());
         }
+
         match self {
             Self::Otp => out.push(1),
             Self::Password { hash } => {

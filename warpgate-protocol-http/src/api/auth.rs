@@ -25,7 +25,7 @@ use warpgate_admin::approvals::{
     ApprovalResolution, Approver, acting_approver, find_pending_user_approval,
     find_user_approval_row, resolve_pending_approval,
 };
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
+use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
@@ -317,10 +317,7 @@ impl Api {
         // node's in-memory store. A row that already carries a decision is
         // awaiting pickup by its owner, so it is no longer something to act on.
         let requests = SessionApprovalRequest::Entity::find()
-            .filter(
-                SessionApprovalRequest::Column::Kind
-                    .eq(SessionApprovalRequest::ApprovalRequestKind::User),
-            )
+            .filter(SessionApprovalRequest::Column::Kind.eq(ApprovalKind::User))
             .filter(
                 SessionApprovalRequest::Column::Status
                     .eq(SessionApprovalRequest::ApprovalRequestStatus::Pending),

@@ -45,6 +45,7 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+pub use warpgate_common::auth::ApprovalScope;
 use warpgate_common::auth::{
     ApprovalKind, AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialDigestSalt,
     CredentialKind, RememberedBy, WebApprovalMatchKey, WebApprovalScopeKey,
@@ -60,20 +61,6 @@ use crate::config_providers::{
 };
 use crate::services::Services;
 use crate::{TargetSessionStart, WarpgateServerHandle};
-
-/// How an approval should be remembered for later bypass.
-///
-/// Derives the OpenAPI enum directly so both the administrator and the
-/// self-approval endpoints can take it as-is; a per-API copy would be three
-/// identical enums and two conversions that only exist to satisfy the derive.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, poem_openapi::Enum,
-)]
-pub enum ApprovalScope {
-    Once,
-    Target,
-    AllTargets,
-}
 
 /// A decision delivered to the waiting side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -167,33 +154,6 @@ impl ApprovalSubject {
             target = %self.target_name,
             related_users = %format_related_ids(&[self.user_info.id]),
             "Session is awaiting administrator approval",
-        );
-    }
-
-    /// `actor.user_id` is `None` when the resolver isn't a user (the admin API
-    /// token). It is recorded in `related_users` so the decision also shows up
-    /// in the resolver's own audit trail, matching how every other actor-driven
-    /// event is attributed.
-    fn emit_resolved_event(&self, actor: &ApprovalActor, approved: bool) {
-        // A user approving their own session is both parties — don't list twice.
-        let mut related = vec![self.user_info.id];
-        if let Some(id) = actor.user_id.filter(|id| *id != self.user_info.id) {
-            related.push(id);
-        }
-
-        info!(
-            target: "audit",
-            _type = "SessionApprovalResolved1",
-            session = %self.session_id,
-            client_ip = %self.client_ip_for_logging(),
-            user_id = %self.user_info.id,
-            username = %self.user_info.username,
-            protocol = %self.protocol,
-            target = %self.target_name,
-            resolved_by = %actor.username,
-            approved = approved,
-            related_users = %format_related_ids(&related),
-            "Session approval resolved",
         );
     }
 
@@ -315,6 +275,7 @@ async fn advertise_admin_request(
             node_id: Set(node_id),
             protocol: Set(subject.protocol.to_string()),
             username: Set(subject.user_info.username.clone()),
+            user_id: Set(subject.user_info.id),
             target: Set(subject.target_name.clone()),
             remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
             identification_string: Set(None),
@@ -341,7 +302,10 @@ const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// How a wait on a request row ended.
 enum RowOutcome {
-    Decided(ApprovalDecision, ApprovalActor),
+    /// A decision was written to the row. The resolver is not carried along:
+    /// they are recorded and audited where the decision is made, so a waiting
+    /// gate only needs to know the answer.
+    Decided(ApprovalDecision),
     /// The row stopped being a live question underneath the wait — the session
     /// ended, or it was reaped because this node looked dead. Nothing approved
     /// the connection.
@@ -366,7 +330,7 @@ enum RowState {
 }
 
 fn row_state(row: &SessionApprovalRequest::Model) -> RowState {
-    use SessionApprovalRequest::{ApprovalRequestScope, ApprovalRequestStatus};
+    use SessionApprovalRequest::ApprovalRequestStatus;
 
     let decision = match row.status {
         ApprovalRequestStatus::Pending => return RowState::Pending,
@@ -374,13 +338,11 @@ fn row_state(row: &SessionApprovalRequest::Model) -> RowState {
             return RowState::Ended;
         }
         ApprovalRequestStatus::Rejected => ApprovalDecision::Rejected,
-        ApprovalRequestStatus::Approved => ApprovalDecision::Approved(match row.scope {
-            Some(ApprovalRequestScope::Target) => ApprovalScope::Target,
-            Some(ApprovalRequestScope::AllTargets) => ApprovalScope::AllTargets,
-            // Grant this connection only, which is also the safe reading of an
-            // approval that somehow recorded no scope.
-            Some(ApprovalRequestScope::Once) | None => ApprovalScope::Once,
-        }),
+        // A missing scope reads as granting this connection only, the safe
+        // reading of an approval that somehow recorded none.
+        ApprovalRequestStatus::Approved => {
+            ApprovalDecision::Approved(row.scope.unwrap_or(ApprovalScope::Once))
+        }
     };
     let actor = ApprovalActor {
         username: row
@@ -420,8 +382,8 @@ async fn await_row_decision(
                 match find_question(db, session_id, kind, target).await {
                     Ok(Some(row)) => match row_state(&row) {
                         RowState::Pending => {}
-                        RowState::Decided(decision, actor) => {
-                            return RowOutcome::Decided(decision, actor);
+                        RowState::Decided(decision, _) => {
+                            return RowOutcome::Decided(decision);
                         }
                         // Something else ended this wait, so there is nothing
                         // left to wait for.
@@ -531,8 +493,8 @@ impl StatusTransition {
 /// gate asking the same question may reopen the row.
 ///
 /// The counterpart to [`StatusTransition::from_pending`]. Together with the
-/// reopen in [`upsert_request`], these name every source state any write in
-/// this module is allowed to leave.
+/// refresh-or-reopen in [`upsert_request`], these name every source state any
+/// write in this module is allowed to leave.
 fn question_is_over() -> Condition {
     SessionApprovalRequest::Column::Status
         .is_in(SessionApprovalRequest::ApprovalRequestStatus::UNANSWERED)
@@ -544,10 +506,7 @@ fn question_is_over() -> Condition {
 fn one_request(session_id: UserSessionId, kind: ApprovalKind) -> Condition {
     SessionApprovalRequest::Column::SessionId
         .eq(session_id)
-        .and(
-            SessionApprovalRequest::Column::Kind
-                .eq(SessionApprovalRequest::ApprovalRequestKind::from(kind)),
-        )
+        .and(SessionApprovalRequest::Column::Kind.eq(kind))
         .into_condition()
 }
 
@@ -575,28 +534,22 @@ pub async fn record_decision(
     decision: ApprovalDecision,
     actor: &ApprovalActor,
 ) -> Result<bool, WarpgateError> {
-    use SessionApprovalRequest::{ApprovalRequestScope, ApprovalRequestStatus, Column};
+    use SessionApprovalRequest::{ApprovalRequestStatus, Column};
 
     let (status, scope) = match decision {
-        ApprovalDecision::Approved(scope) => (
-            ApprovalRequestStatus::Approved,
-            Some(match scope {
-                ApprovalScope::Once => ApprovalRequestScope::Once,
-                ApprovalScope::Target => ApprovalRequestScope::Target,
-                ApprovalScope::AllTargets => ApprovalRequestScope::AllTargets,
-            }),
-        ),
+        ApprovalDecision::Approved(scope) => (ApprovalRequestStatus::Approved, Some(scope)),
         ApprovalDecision::Rejected => (ApprovalRequestStatus::Rejected, None),
     };
 
-    // Read ahead of the transition, off the pending row only: a question that
-    // is already answered or closed has no spend riding on this decision, and
-    // the transition below moves nothing but a pending row.
+    // Read ahead of the transition, off the pending row only: a question that is
+    // already answered or closed has no spend riding on this decision and is not
+    // this call's to audit, and the transition below moves nothing but a pending
+    // row. The row also carries what the audit event says about the asker.
+    let pending = find_question(db, session_id, kind, target)
+        .await?
+        .filter(|row| row.status == ApprovalRequestStatus::Pending);
     let consumes_ticket_id = if matches!(decision, ApprovalDecision::Approved(_)) {
-        find_question(db, session_id, kind, target)
-            .await?
-            .filter(|row| row.status == ApprovalRequestStatus::Pending)
-            .and_then(|row| row.consumes_ticket_id)
+        pending.as_ref().and_then(|row| row.consumes_ticket_id)
     } else {
         None
     };
@@ -626,7 +579,55 @@ pub async fn record_decision(
         warn!(%error, %ticket_id, "Failed to refund the ticket of an unrecorded approval");
     }
 
-    Ok(moved? > 0)
+    let recorded = moved? > 0;
+    // Audited here rather than where a gate reads the decision back: the
+    // administrator acted, and that stands as a fact even if the connection
+    // they were deciding about has already gone. Gated on the transition, so
+    // of two approvers racing one question only the one that moved it logs.
+    if recorded && let Some(row) = pending {
+        emit_resolved_event(
+            &row,
+            actor,
+            matches!(decision, ApprovalDecision::Approved(_)),
+        );
+    }
+    Ok(recorded)
+}
+
+/// Audits a decision, from the row it was just written to.
+///
+/// Emitted by whoever moves the row out of `pending`, so an administrator's
+/// approve or reject is recorded whether or not the held connection is still
+/// there to receive it — a session that gave up, or an owning node that died,
+/// must not make the decision disappear from the audit trail.
+///
+/// `session` is the user session id the session page filters its log by, and
+/// the audit sink drops any event without it. `actor.user_id` is `None` when
+/// the resolver isn't a user (the admin API token); it joins `related_users`
+/// so the decision also shows up in the resolver's own trail, matching how
+/// every other actor-driven event is attributed.
+fn emit_resolved_event(row: &SessionApprovalRequest::Model, actor: &ApprovalActor, approved: bool) {
+    // A user approving their own session is both parties — don't list twice.
+    let mut related = vec![row.user_id];
+    if let Some(id) = actor.user_id.filter(|id| *id != row.user_id) {
+        related.push(id);
+    }
+
+    info!(
+        target: "audit",
+        _type = "SessionApprovalResolved1",
+        session = %row.session_id,
+        client_ip = %row.remote_address.as_deref().unwrap_or("<unknown>"),
+        user_id = %row.user_id,
+        username = %row.username,
+        protocol = %row.protocol,
+        target = %row.target,
+        kind = ?row.kind,
+        resolved_by = %actor.username,
+        approved = approved,
+        related_users = %format_related_ids(&related),
+        "Session approval resolved",
+    );
 }
 
 /// How a gate ended for a connection that was waiting on it.
@@ -939,10 +940,10 @@ impl Services {
         // A refusal — the administrator's, an expired window, or a gate that
         // failed outright — is not the user's doing, so the ticket gets its
         // use back through the guard's drop. Only an approval keeps the spend.
-        if let Some(mut guard) = held_ticket
+        if let Some(mut refund) = held_ticket
             && matches!(result, Ok(GateOutcome::Approved(_)))
         {
-            guard.disarm();
+            refund.disarm();
         }
 
         result
@@ -992,7 +993,9 @@ impl Services {
         notify_waiting().await?;
 
         let timeout = self.admin_approval_timeout().await?;
-        let (decision, actor) = match await_row_decision(
+        // The resolver is recorded and audited where the decision is written;
+        // this side only needs to know what was decided.
+        let decision = match await_row_decision(
             &self.db,
             session_id,
             ApprovalKind::Admin,
@@ -1002,9 +1005,9 @@ impl Services {
         )
         .await
         {
-            RowOutcome::Decided(decision, actor) => {
+            RowOutcome::Decided(decision) => {
                 guard.decided();
-                (decision, actor)
+                decision
             }
             RowOutcome::TimedOut => {
                 guard.timed_out();
@@ -1013,8 +1016,6 @@ impl Services {
             }
             RowOutcome::Ended | RowOutcome::Cancelled => return Ok(GateOutcome::Expired),
         };
-
-        subject.emit_resolved_event(&actor, matches!(decision, ApprovalDecision::Approved(_)));
 
         match decision {
             // The approved row is itself the remembered approval, scope and
@@ -1138,13 +1139,13 @@ impl Services {
     /// user happened to click. Administrator gates need no sweep: each polls its
     /// own row while it holds the connection.
     pub(crate) async fn apply_decided_user_approvals(&self) -> Result<(), WarpgateError> {
-        use SessionApprovalRequest::{ApprovalRequestKind, ApprovalRequestStatus, Column};
+        use SessionApprovalRequest::{ApprovalRequestStatus, Column};
 
         // Decided and not yet picked up. Rows stay behind as audit records once
         // they are, so the stamp — not the row's absence — is what stops this
         // delivering the same decision every tick.
         let rows = SessionApprovalRequest::Entity::find()
-            .filter(Column::Kind.eq(ApprovalRequestKind::User))
+            .filter(Column::Kind.eq(ApprovalKind::User))
             .filter(Column::NodeId.eq(self.cluster.node_id))
             .filter(Column::Status.is_in([
                 ApprovalRequestStatus::Approved,
@@ -1228,11 +1229,9 @@ impl Services {
             match decision {
                 ApprovalDecision::Approved(_) => {
                     state.add_web_user_approval();
-                    subject.emit_resolved_event(actor, true);
                 }
                 ApprovalDecision::Rejected => {
                     state.reject();
-                    subject.emit_resolved_event(actor, false);
                     // A denied login is a failed authentication too — alerting
                     // keys off this event, and a user explicitly denying an
                     // out-of-band request is its highest-value instance.
@@ -1282,7 +1281,7 @@ pub(crate) async fn approval_is_remembered(
     grace: Duration,
     salt: &CredentialDigestSalt,
 ) -> Result<bool, WarpgateError> {
-    use SessionApprovalRequest::{ApprovalRequestScope, ApprovalRequestStatus, Column};
+    use SessionApprovalRequest::{ApprovalRequestStatus, Column};
 
     #[allow(clippy::cast_possible_wrap)]
     let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(grace.as_secs() as i64);
@@ -1295,13 +1294,13 @@ pub(crate) async fn approval_is_remembered(
     let scope_matches = Condition::any()
         .add(
             Column::Scope
-                .eq(ApprovalRequestScope::Target)
+                .eq(ApprovalScope::Target)
                 .and(Column::Target.eq(asked_target)),
         )
-        .add(Column::Scope.eq(ApprovalRequestScope::AllTargets));
+        .add(Column::Scope.eq(ApprovalScope::AllTargets));
 
     let rows = SessionApprovalRequest::Entity::find()
-        .filter(Column::Kind.eq(SessionApprovalRequest::ApprovalRequestKind::from(key.kind)))
+        .filter(Column::Kind.eq(key.kind))
         .filter(Column::Status.eq(ApprovalRequestStatus::Approved))
         .filter(Column::ResolvedAt.gte(cutoff))
         .filter(scope_matches)
@@ -1327,6 +1326,9 @@ pub(crate) async fn approval_is_remembered(
 /// Written *before* the user is told a request is waiting: the notification and
 /// the record would otherwise race, and a user acting on the notification the
 /// instant it arrives could find nothing to act on.
+///
+/// Note: this can be called multiple times within the same auth, new credentials
+/// arriving rewrite the credential fingerprint and the node ID may change
 pub(crate) async fn advertise_user_request(
     db: &DatabaseConnection,
     node_id: NodeId,
@@ -1344,6 +1346,7 @@ pub(crate) async fn advertise_user_request(
             node_id: Set(node_id),
             protocol: Set(state.protocol().to_string()),
             username: Set(state.user_info().username.clone()),
+            user_id: Set(state.user_info().id),
             target: Set(state.target_name().to_string()),
             remote_address: Set(state.remote_ip().map(|ip| ip.to_string())),
             identification_string: Set(Some(state.identification_string().to_owned())),
@@ -1385,9 +1388,6 @@ async fn upsert_request(
 ) -> Result<(), WarpgateError> {
     use SessionApprovalRequest::ApprovalRequestStatus as Status;
 
-    // The whole row is rewritten, so this writes its status through
-    // `Entity::update` rather than a `StatusTransition` — but under the same
-    // rule: the states it may leave are named, not assumed.
     let mut reopened = row.clone();
     reopened.status = Set(Status::Pending);
     reopened.scope = Set(None);
@@ -1396,30 +1396,48 @@ async fn upsert_request(
     reopened.resolved_at = Set(None);
     reopened.consumed_at = Set(None);
 
+    // A live question has its asker's facts refreshed; a finished one is asked
+    // afresh. A standing answer is neither, and is not written to at all — not
+    // even the identity half, which is what the approver decided about and what
+    // the grace-period bypass later matches a connection against.
+    let still_a_question = Condition::any()
+        .add(question_is_over())
+        .add(SessionApprovalRequest::Column::Status.eq(Status::Pending));
+
     match SessionApprovalRequest::Entity::update(reopened)
-        .filter(question_is_over())
+        .filter(still_a_question)
         .exec(db)
         .await
     {
         Ok(_) => return Ok(()),
-        // No row at all, or one that is still this question's live request.
+        // No row at all, or one holding an answer that stands.
         Err(DbErr::RecordNotUpdated) => {}
         Err(error) => return Err(error.into()),
     }
 
-    SessionApprovalRequest::Entity::insert(row)
+    match SessionApprovalRequest::Entity::insert(row)
         .on_conflict(
             OnConflict::columns([
                 SessionApprovalRequest::Column::SessionId,
                 SessionApprovalRequest::Column::Kind,
                 SessionApprovalRequest::Column::Target,
             ])
-            .update_columns(SessionApprovalRequest::Column::IDENTITY)
+            // Re-assigning a key column the value it already holds is the
+            // portable way to say "leave this row alone": `do_nothing()`
+            // builds `ON DUPLICATE KEY IGNORE` for MySQL, which is not SQL.
+            .update_column(SessionApprovalRequest::Column::SessionId)
             .to_owned(),
         )
         .exec(db)
-        .await?;
-    Ok(())
+        .await
+    {
+        Ok(_) => Ok(()),
+        // The standing answer the update declined to touch, or a row another
+        // node advertised in between — current either way, and not this call's
+        // to overwrite.
+        Err(DbErr::RecordNotInserted) => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// The configured administrator-approval window, or the default auth-state
@@ -1528,6 +1546,9 @@ pub async fn prune_before(
 
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+
     use sea_orm::Database;
     use warpgate_common::auth::AuthCredentialFingerprint;
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
@@ -1563,6 +1584,7 @@ mod tests {
                 node_id: Set(NodeId(Uuid::new_v4())),
                 protocol: Set(subject.protocol.to_string()),
                 username: Set(subject.user_info.username.clone()),
+                user_id: Set(subject.user_info.id),
                 target: Set(subject.target_name.clone()),
                 remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
                 identification_string: Set(None),
@@ -1728,6 +1750,51 @@ mod tests {
         );
     }
 
+    /// The identity columns are what an approver decided about — and what the
+    /// grace-period bypass later matches a connection against. Re-advertising
+    /// while an answer stands must therefore leave them exactly as they were:
+    /// rewriting them would re-key a standing grant to credentials and an
+    /// address nobody approved, and corrupt the record of what was asked.
+    #[tokio::test]
+    async fn re_advertising_does_not_rewrite_what_was_approved() {
+        let db = migrated_db().await;
+        let session_id = UserSessionId(Uuid::new_v4());
+
+        let mut asked = plain_subject("a-target");
+        asked.session_id = session_id;
+        asked.remote_ip = Some("10.0.0.1".parse().unwrap());
+        advertise_row(&db, session_id, &asked).await;
+        assert!(approve(&db, session_id, "a-target").await);
+
+        let approved = find_question(&db, session_id, ApprovalKind::Admin, "a-target")
+            .await
+            .unwrap()
+            .expect("the request should still exist");
+
+        // The same question asked again, by a connection presenting different
+        // credentials from a different address, before the owner picks the
+        // answer up.
+        let mut asked_again = asked.clone();
+        asked_again.remote_ip = Some("10.0.0.2".parse().unwrap());
+        asked_again.credentials = password_credentials([7; 32]);
+        advertise_row(&db, session_id, &asked_again).await;
+
+        let after = find_question(&db, session_id, ApprovalKind::Admin, "a-target")
+            .await
+            .unwrap()
+            .expect("the request should still exist");
+        assert_eq!(
+            after.remote_address, approved.remote_address,
+            "an answered request must keep the address it was approved for",
+        );
+        assert_eq!(
+            after.credentials_digest, approved.credentials_digest,
+            "an answered request must keep the credentials it was approved for",
+        );
+        assert_eq!(after.node_id, approved.node_id);
+        assert_eq!(after.started, approved.started);
+    }
+
     /// Rows outlive their gate now, so a session that gates again — a new
     /// target, or a retry after a timeout — would otherwise read the previous
     /// gate's answer as this one's and walk straight through.
@@ -1827,7 +1894,7 @@ mod tests {
         );
         assert_eq!(
             first.scope,
-            Some(SessionApprovalRequest::ApprovalRequestScope::Target),
+            Some(ApprovalScope::Target),
             "the grant the administrator gave must survive the next question",
         );
         assert_eq!(first.resolved_by_username.as_deref(), Some("admin"));
@@ -1996,7 +2063,7 @@ mod tests {
         assert!(
             matches!(
                 outcome,
-                RowOutcome::Decided(ApprovalDecision::Approved(ApprovalScope::Once), _)
+                RowOutcome::Decided(ApprovalDecision::Approved(ApprovalScope::Once))
             ),
             "the wait should have seen the recorded decision",
         );
@@ -2301,6 +2368,83 @@ mod tests {
             "the failed approval must not have been recorded",
         );
         assert_eq!(uses_left(&db, ticket_id).await, Some(0));
+    }
+
+    /// Every audit event this test binary emits, so an assertion can pick out
+    /// its own by session id.
+    ///
+    /// Installed once and globally rather than per-test with `set_default`:
+    /// `tracing` caches a callsite first reached with no subscriber listening
+    /// as never-interested for the whole process, so a thread-local subscriber
+    /// set afterwards sees nothing whenever another test thread got there
+    /// first — which passes alone and fails in the suite.
+    fn audit_events() -> &'static Mutex<Vec<HashMap<&'static str, String>>> {
+        use tracing_subscriber::layer::SubscriberExt;
+
+        use crate::logging::layer::ValuesLogLayer;
+
+        static EVENTS: OnceLock<Mutex<Vec<HashMap<&'static str, String>>>> = OnceLock::new();
+        let events = EVENTS.get_or_init(|| Mutex::new(Vec::new()));
+        static INSTALLED: OnceLock<()> = OnceLock::new();
+        INSTALLED.get_or_init(|| {
+            let subscriber =
+                tracing_subscriber::registry().with(ValuesLogLayer::new(|values, _target| {
+                    if let Ok(mut events) = events.lock() {
+                        events.push(values.into_values());
+                    }
+                }));
+            let _ = tracing::subscriber::set_global_default(subscriber);
+        });
+        events
+    }
+
+    /// The audit events of one `_type` recorded for one session.
+    fn audited_for(
+        session_id: UserSessionId,
+        event_type: &str,
+    ) -> Vec<HashMap<&'static str, String>> {
+        let session = session_id.0.to_string();
+        audit_events()
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|values| {
+                values.get("session") == Some(&session)
+                    && values.get("_type").map(String::as_str) == Some(event_type)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// The administrator acted, so the audit trail must say so regardless of
+    /// who was listening — a session that gave up, or an owning node that died
+    /// mid-wait, would otherwise erase an approval from the record entirely.
+    /// Captured through the same layer the audit sink uses, since an event
+    /// without a parseable `session` is dropped there and never reaches the
+    /// session log.
+    #[tokio::test]
+    async fn a_decision_is_audited_with_nobody_waiting() {
+        let db = migrated_db().await;
+        let session_id = UserSessionId(Uuid::new_v4());
+        audit_events();
+        pending_row(&db, session_id, "a-target").await;
+
+        assert!(approve(&db, session_id, "a-target").await);
+        // Answering a question that is already over is not this call's to
+        // audit, so a straggling second click must not log a second time.
+        assert!(!approve(&db, session_id, "a-target").await);
+
+        let resolved = audited_for(session_id, "SessionApprovalResolved1");
+
+        assert_eq!(
+            resolved.len(),
+            1,
+            "the decision must be audited exactly once, with nobody waiting on it",
+        );
+        let event = &resolved[0];
+        assert_eq!(event.get("approved").map(String::as_str), Some("true"));
+        assert_eq!(event.get("resolved_by").map(String::as_str), Some("admin"));
+        assert_eq!(event.get("target").map(String::as_str), Some("a-target"));
     }
 
     /// A refusal is not the user's doing, so the ticket keeps its use.
