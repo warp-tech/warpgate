@@ -57,6 +57,39 @@ class Test:
 
         assert b"gate-marker" in client.communicate(timeout=timeout)[0]
 
+    def test_a_held_session_outlives_the_inactivity_timeout(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey: Path,
+        timeout,
+    ):
+        # A session waiting for an administrator sends nothing, so every idle
+        # timer sees it as abandoned — the session loop's, and the transport's
+        # underneath it. Left that way the inactivity timeout silently caps the
+        # approval window: with the defaults an administrator has five minutes
+        # to answer a gate configured to wait ten, and the user is disconnected
+        # mid-decision.
+        wg = processes.start_wg(config_patch={"ssh": {"inactivity_timeout": "3s"}})
+        wait_port(wg.http_port, recv=False)
+        wait_port(wg.ssh_port)
+        url, user, target = _held_ssh_target(processes, wg_c_ed25519_pubkey, wg)
+        client = _connect_held(processes, wg, user, target, "echo", "gate-marker")
+
+        with admin_client(url) as api:
+            approval = wait_for_pending_approval(api, target.name, user.username)
+
+            # Past the session loop's timer several times over, and past the
+            # transport's, which allowed only a few seconds of slack on top.
+            time.sleep(16)
+            assert client.poll() is None, "the held session was dropped as idle"
+            assert [
+                a for a in api.get_session_approvals() if a.id == approval.id
+            ], "the request was closed while it was still waiting"
+
+            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+
+        assert b"gate-marker" in client.communicate(timeout=timeout)[0]
+
     def test_admin_can_close_a_session_waiting_for_approval(
         self,
         processes: ProcessManager,

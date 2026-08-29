@@ -119,6 +119,13 @@ async fn _handle_connection(
         }
     };
 
+    // A session held for administrator approval sends nothing until someone
+    // decides, and the transport's own idle timer is only reset by traffic — so
+    // it has to outlast the approval window, or the gate could never be given
+    // longer than the inactivity timeout to answer in. Reaping genuinely idle
+    // sessions is the session loop's job, and it still does it at the
+    // configured interval.
+    let approval_window = services.admin_approval_timeout().await?;
     let russh_config = {
         let config = services.config.lock().await;
 
@@ -126,7 +133,9 @@ async fn _handle_connection(
             auth_rejection_time: Duration::from_secs(1),
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
             // Extra time for the "closing due to inactivity" message to be sent
-            inactivity_timeout: Some(config.store.ssh.inactivity_timeout + Duration::from_secs(10)),
+            inactivity_timeout: Some(
+                config.store.ssh.inactivity_timeout + approval_window + Duration::from_secs(10),
+            ),
             keepalive_interval: config.store.ssh.keepalive_interval,
             methods: get_allowed_auth_methods(&services).await?,
             keys: russh_config_init.keys.clone(),

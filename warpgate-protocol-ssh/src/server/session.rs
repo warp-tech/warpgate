@@ -398,8 +398,22 @@ impl ServerSession {
                     }
                     continue;
                 }
+                // A session held at the approval gate produces no events by
+                // design — it is waiting on an administrator, not idle — and
+                // the gate's own window is what bounds that wait. Timing it
+                // out here would cap every approval at the inactivity timeout
+                // and disconnect the user mid-decision.
+                let inactivity_timeout = if this.awaiting_approval {
+                    None
+                } else {
+                    Some(inactivity_timeout)
+                };
                 let next_event_fut = this.get_next_event();
-                match tokio::time::timeout(inactivity_timeout, next_event_fut).await {
+                let next_event = match inactivity_timeout {
+                    Some(timeout) => tokio::time::timeout(timeout, next_event_fut).await,
+                    None => Ok(next_event_fut.await),
+                };
+                match next_event {
                     Ok(Some(event)) => {
                         if let Err(error) = this.handle_event(event).await {
                             break Err(error);
