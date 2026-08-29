@@ -20,6 +20,15 @@ use crate::session_handle::KubernetesSessionHandle;
 
 type CorrelationKey = (String, String, Option<String>); // (username, target_name, ip)
 
+/// How long a refused command is remembered.
+///
+/// Only long enough to cover the fan-out of the command that was refused: its
+/// remaining requests must fail with it rather than each opening a fresh
+/// session and asking again. An administrator's refusal answers the connection
+/// in front of them, so it is deliberately not a lockout — a command the user
+/// starts afterwards is a new question.
+const REFUSAL_MEMORY: Duration = Duration::from_secs(5);
+
 #[derive(Clone)]
 pub struct AdmittedSession {
     pub target_session_id: TargetSessionId,
@@ -53,6 +62,11 @@ struct SessionEntry {
 
 pub struct RequestCorrelator {
     handles: HashMap<CorrelationKey, SessionEntry>,
+    /// When each recently refused command was refused. Kept apart from the
+    /// live entries because the entry is evicted on refusal — its session was
+    /// never admitted and must not linger — while the refusal has to outlive
+    /// it.
+    refusals: HashMap<CorrelationKey, Instant>,
     services: Services,
 }
 
@@ -75,6 +89,10 @@ pub async fn correlated_authorization(
     let key = correlation_key_for_request(request, services, &user_info, target_name).await?;
 
     loop {
+        if correlator.lock().await.was_refused(&key) {
+            return Err(unauthorized());
+        }
+
         // Bound to its own `let` so the correlator lock is released before
         // joining: joining waits for the opening request's approval, which can
         // take minutes, and that request needs the correlator lock to clean up
@@ -129,7 +147,19 @@ pub async fn correlated_authorization(
                         },
                         Err(error) => {
                             *authorization = Authorization::Denied;
-                            correlator.lock().await.evict(&key, &slot);
+                            {
+                                let mut correlator = correlator.lock().await;
+                                correlator.evict(&key, &slot);
+                                // A refusal is a decision about this command.
+                                // Without remembering it the command's next
+                                // request finds no entry, opens a session and
+                                // asks again — the refusal would never take
+                                // effect and the queue would refill for as
+                                // long as the client kept trying.
+                                if matches!(error, WarpgateError::SessionNotApproved) {
+                                    correlator.refusals.insert(key.clone(), Instant::now());
+                                }
+                            }
                             settle_failed_attempt(services, &handle, session_id).await;
                             return Err(error.into());
                         }
@@ -283,6 +313,7 @@ impl RequestCorrelator {
     pub fn new(services: &Services) -> Arc<Mutex<Self>> {
         let this = Arc::new(Mutex::new(Self {
             handles: HashMap::new(),
+            refusals: HashMap::new(),
             services: services.clone(),
         }));
         Self::spawn_vacuum_task(this.clone());
@@ -303,6 +334,14 @@ impl RequestCorrelator {
     /// Drops this session's entry unless it has already been replaced — an
     /// attempt long enough to have been vacuumed meanwhile must not evict
     /// whatever took its place.
+    /// Whether this command was refused recently enough that its own remaining
+    /// requests are still arriving.
+    fn was_refused(&self, key: &CorrelationKey) -> bool {
+        self.refusals
+            .get(key)
+            .is_some_and(|at| at.elapsed() < REFUSAL_MEMORY)
+    }
+
     fn evict(&mut self, key: &CorrelationKey, slot: &SharedAuthorization) {
         if self
             .entry(key)
@@ -325,6 +364,8 @@ impl RequestCorrelator {
         let now = Instant::now();
         self.handles
             .retain(|_, entry| now.duration_since(entry.created) < max_age);
+        self.refusals
+            .retain(|_, at| now.duration_since(*at) < REFUSAL_MEMORY);
     }
 
     /// Spawns a background task to periodically call vacuum

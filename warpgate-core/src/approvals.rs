@@ -1644,6 +1644,66 @@ mod tests {
             .status
     }
 
+    /// Moves a request's start time into the past, so the reaper sees it as
+    /// older than the window anything could still be waiting for.
+    async fn backdate(db: &DatabaseConnection, session_id: UserSessionId, by: Duration) {
+        SessionApprovalRequest::Entity::update_many()
+            .col_expr(
+                SessionApprovalRequest::Column::Started,
+                (OffsetDateTime::now_utc() - time::Duration::seconds(by.as_secs() as i64)).into(),
+            )
+            .filter(one_request(session_id, ApprovalKind::Admin))
+            .exec(db)
+            .await
+            .unwrap();
+    }
+
+    /// Nothing else ends a request whose owning node died mid-hold: the guard's
+    /// `Drop` never ran, and no waiter is left to time out. Without the reaper
+    /// the row sits in the inbox forever, offering an administrator a session
+    /// that no longer exists.
+    #[tokio::test]
+    async fn reaping_ends_requests_nobody_can_still_be_waiting_on() {
+        use SessionApprovalRequest::ApprovalRequestStatus as Status;
+
+        let db = migrated_db().await;
+        let stale = UserSessionId(Uuid::new_v4());
+        let recent = UserSessionId(Uuid::new_v4());
+        pending_row(&db, stale, "a-target").await;
+        pending_row(&db, recent, "a-target").await;
+        // Past any window: the lifetime is the approval timeout, never shorter
+        // than the auth-state timeout.
+        backdate(&db, stale, Duration::from_secs(24 * 3600)).await;
+
+        reap_stale(&db).await.unwrap();
+
+        assert_eq!(status_of(&db, stale).await, Status::Abandoned);
+        assert_eq!(
+            status_of(&db, recent).await,
+            Status::Pending,
+            "a request still inside its window is still a live question",
+        );
+    }
+
+    /// The reaper runs on a timer against every row in the table, so it meets
+    /// answered ones too. An answer outranks the reaper: the owning node may
+    /// not have picked it up yet, and overwriting it would deny a session an
+    /// administrator approved.
+    #[tokio::test]
+    async fn reaping_never_erases_an_answer() {
+        use SessionApprovalRequest::ApprovalRequestStatus as Status;
+
+        let db = migrated_db().await;
+        let session_id = UserSessionId(Uuid::new_v4());
+        pending_row(&db, session_id, "a-target").await;
+        assert!(approve(&db, session_id, "a-target").await);
+        backdate(&db, session_id, Duration::from_secs(24 * 3600)).await;
+
+        reap_stale(&db).await.unwrap();
+
+        assert_eq!(status_of(&db, session_id).await, Status::Approved);
+    }
+
     /// A request/response protocol re-enters its gate on every request, so the
     /// same session re-advertises constantly. If that overwrote the decision
     /// columns it would erase an administrator's answer, and the session would

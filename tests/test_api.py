@@ -1129,6 +1129,66 @@ def test_admin_api_permission_enforcement(
         )
 
 
+def test_update_target_keeps_the_approval_gate_when_unmentioned(
+    admin_client: sdk.DefaultApi,
+):
+    # Every other field of a target update is a plain replace, but a client that
+    # predates the administrator gate — or simply doesn't set it — must not be
+    # able to take the gate off a target by saving the rest of it.
+    gated = _ssh_target_request(f"gated-{uuid4()}")
+    gated.require_approval = True
+    target = admin_client.create_target(gated)
+    assert target.require_approval
+
+    renamed = _ssh_target_request(target.name)
+    assert renamed.require_approval is None, "the update must not mention the gate"
+    admin_client.update_target(target.id, renamed)
+    assert admin_client.get_target(target.id).require_approval, (
+        "an update that says nothing about the gate must leave it on"
+    )
+
+    # Turning it off is still an ordinary edit — the rule is about silence, not
+    # about refusing the change.
+    off = _ssh_target_request(target.name)
+    off.require_approval = False
+    admin_client.update_target(target.id, off)
+    assert not admin_client.get_target(target.id).require_approval
+
+
+def test_approval_parameters_can_be_cleared_and_reject_nonsense(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    # The generated clients omit a `None` field rather than sending `null`, so
+    # clearing one is only reachable over raw JSON — which is what the admin UI
+    # sends when the field is blanked.
+    url = f"https://localhost:{pg_wg.http_port}"
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    endpoint = f"{url}/@warpgate/admin/api/parameters"
+
+    def put(**overrides):
+        body = admin_client.get_parameters().to_dict()
+        body.update(overrides)
+        return session.put(endpoint, json=body)
+
+    assert put(admin_approval_grace_period_seconds=300).status_code // 100 == 2
+    assert admin_client.get_parameters().admin_approval_grace_period_seconds == 300
+
+    assert put(admin_approval_grace_period_seconds=None).status_code // 100 == 2
+    assert admin_client.get_parameters().admin_approval_grace_period_seconds is None, (
+        "an explicit null must turn approval caching off, not be ignored"
+    )
+
+    for field in (
+        "admin_approval_grace_period_seconds",
+        "admin_approval_timeout_seconds",
+    ):
+        assert put(**{field: -1}).status_code == 400, (
+            f"{field} must reject a negative window"
+        )
+
+
 def test_update_target_rejects_duplicate_name(admin_client: sdk.DefaultApi):
     first = admin_client.create_target(_ssh_target_request(f"dup-a-{uuid4()}"))
     second = admin_client.create_target(_ssh_target_request(f"dup-b-{uuid4()}"))
