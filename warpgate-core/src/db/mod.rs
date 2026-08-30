@@ -140,7 +140,7 @@ pub async fn cleanup_db(
 
     // Approval requests are audit records once their gate has finished — this
     // is the only thing that deletes one.
-    SessionApprovalRequest::prune_before(db, audit_cutoff).await?;
+    SessionApprovalRequest::delete_all_before(db, audit_cutoff).await?;
 
     LogEntry::Entity::delete_many()
         .filter(Expr::col(LogEntry::Column::Target).eq("audit"))

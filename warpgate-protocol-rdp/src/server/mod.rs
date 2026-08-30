@@ -15,6 +15,7 @@
 //! the viewer while recording them — so native RDP records exactly like the in-browser
 //! path.
 
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -281,7 +282,8 @@ async fn control_loop(
                                     &server_handle,
                                     &server_in_tx,
                                     remote_address,
-                                    screen,
+                                    &mut events,
+                                    &mut screen,
                                 )
                                 .await?
                                 {
@@ -338,7 +340,8 @@ async fn control_loop(
                                             &server_handle,
                                             &server_in_tx,
                                             remote_address,
-                                            screen,
+                                            &mut events,
+                                            &mut screen,
                                         )
                                         .await?
                                         {
@@ -384,7 +387,8 @@ async fn control_loop(
                     &server_handle,
                     &server_in_tx,
                     remote_address,
-                    screen,
+                    &mut events,
+                    &mut screen,
                 )
                 .await?
                 {
@@ -446,7 +450,8 @@ async fn control_loop(
             &server_handle,
             &server_in_tx,
             remote_address,
-            screen,
+            &mut events,
+            &mut screen,
         )
         .await?
         {
@@ -512,6 +517,38 @@ async fn acknowledge_banner(
 /// The single point where a session reaches its target, and so where it is held for
 /// administrator approval. Returns `false` when an administrator denied it, leaving the
 /// session torn down and nothing dialed.
+/// Awaits `hold` while keeping the viewer's event channel drained, returning
+/// `None` if the viewer disconnects first.
+///
+/// The channel is unbounded and an approval window is minutes long, so a client
+/// that keeps typing through one would otherwise queue every event into the
+/// gateway's memory until an administrator answers — and that client is exactly
+/// who the gate exists to hold back. Input is dropped rather than buffered:
+/// replaying a window's worth of clicks into a desktop that was not connected
+/// when they were sent is not what the user asked for either.
+///
+/// `screen` follows any size the viewer settles mid-hold, so the target is
+/// dialled at the size actually being shown.
+async fn hold_draining_viewer<T>(
+    hold: impl Future<Output = T>,
+    events: &mut UnboundedReceiver<ServerEvent>,
+    screen: &mut warpgate_desktop_ui::Screen,
+) -> Option<T> {
+    tokio::pin!(hold);
+    loop {
+        tokio::select! {
+            held = &mut hold => return Some(held),
+            event = events.recv() => match event {
+                Some(ServerEvent::Size { width, height }) => {
+                    *screen = warpgate_desktop_ui::Screen { width, height };
+                }
+                Some(_) => (),
+                None => return None,
+            },
+        }
+    }
+}
+
 async fn dial_if_pending(
     backend: &mut Option<BackendBridge>,
     pending: &mut Option<PendingDial>,
@@ -519,20 +556,27 @@ async fn dial_if_pending(
     server_handle: &Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
     server_in_tx: &Sender<ServerInput>,
     remote_address: SocketAddr,
-    screen: warpgate_desktop_ui::Screen,
+    events: &mut UnboundedReceiver<ServerEvent>,
+    screen: &mut warpgate_desktop_ui::Screen,
 ) -> Result<bool> {
     if backend.is_none()
         && let Some(authorization) = pending.take()
     {
         // Held inline: the viewer keeps its last frame while the administrator
         // decides, exactly as it does for the 2FA hold.
-        let admitted = admit_desktop_session(
+        let admitting = admit_desktop_session(
             services,
             server_handle,
             authorization,
             Some(remote_address.ip()),
-        )
-        .await;
+        );
+        let Some(admitted) = hold_draining_viewer(admitting, events, screen).await else {
+            // The viewer went away mid-hold. Dropping the hold released what it
+            // was holding: the request row is closed and any ticket use
+            // refunded.
+            return Ok(false);
+        };
+
         let admitted = match admitted {
             Ok(admitted) => admitted,
             Err(WarpgateError::SessionNotApproved) => {
@@ -542,7 +586,129 @@ async fn dial_if_pending(
             }
             Err(error) => return Err(error.into()),
         };
-        *backend = Some(connect_backend(services, server_in_tx, admitted, screen).await?);
+        *backend = Some(connect_backend(services, server_in_tx, admitted, *screen).await?);
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::mpsc::unbounded_channel;
+    use warpgate_core::DesktopInput;
+
+    use super::*;
+
+    fn pointer() -> ServerEvent {
+        ServerEvent::Input(DesktopInput::Pointer {
+            x: 1,
+            y: 1,
+            buttons: 0,
+        })
+    }
+
+    /// The channel is unbounded and the hold lasts as long as an administrator
+    /// takes, so anything the viewer sends meanwhile has to be taken off it —
+    /// otherwise a client that keeps typing grows the gateway's memory for the
+    /// length of the window.
+    ///
+    /// The hold here never resolves, which is the case that matters: the drain
+    /// has to happen *during* the wait, not after it.
+    #[tokio::test]
+    async fn viewer_input_does_not_pile_up_behind_the_hold() {
+        let (tx, mut events) = unbounded_channel();
+        let mut screen = warpgate_desktop_ui::Screen {
+            width: 800,
+            height: 600,
+        };
+
+        for _ in 0..1000 {
+            tx.send(pointer()).unwrap();
+        }
+
+        let held = std::future::pending::<()>();
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(200),
+                hold_draining_viewer(held, &mut events, &mut screen),
+            )
+            .await
+            .is_err(),
+            "the hold does not resolve, so the pump should still be waiting",
+        );
+
+        assert!(
+            events.try_recv().is_err(),
+            "every event sent during the hold must have been taken off the channel",
+        );
+    }
+
+    /// What the hold produced still reaches the caller.
+    #[tokio::test]
+    async fn the_held_outcome_is_returned() {
+        let (_tx, mut events) = unbounded_channel::<ServerEvent>();
+        let mut screen = warpgate_desktop_ui::Screen {
+            width: 800,
+            height: 600,
+        };
+
+        assert_eq!(
+            hold_draining_viewer(std::future::ready(7), &mut events, &mut screen).await,
+            Some(7),
+        );
+    }
+
+    /// A viewer can settle a new size mid-hold; the target has to be dialled at
+    /// the size actually being shown, not the one negotiated before the wait.
+    #[tokio::test]
+    async fn a_size_settled_during_the_hold_is_kept() {
+        let (tx, mut events) = unbounded_channel();
+        let mut screen = warpgate_desktop_ui::Screen {
+            width: 800,
+            height: 600,
+        };
+
+        tx.send(ServerEvent::Size {
+            width: 1024,
+            height: 768,
+        })
+        .unwrap();
+        tx.send(pointer()).unwrap();
+        tx.send(ServerEvent::Size {
+            width: 1920,
+            height: 1080,
+        })
+        .unwrap();
+
+        let held = std::future::pending::<()>();
+        let _ = tokio::time::timeout(
+            Duration::from_millis(200),
+            hold_draining_viewer(held, &mut events, &mut screen),
+        )
+        .await;
+
+        assert_eq!(screen.width, 1920);
+        assert_eq!(screen.height, 1080);
+    }
+
+    /// Nothing is left to admit once the viewer is gone, and the caller has to
+    /// hear about it: holding on would keep the approval request standing for a
+    /// connection that no longer exists.
+    #[tokio::test]
+    async fn a_departed_viewer_ends_the_hold() {
+        let (tx, mut events) = unbounded_channel::<ServerEvent>();
+        let mut screen = warpgate_desktop_ui::Screen {
+            width: 800,
+            height: 600,
+        };
+
+        tx.send(pointer()).unwrap();
+        drop(tx);
+
+        assert!(
+            hold_draining_viewer(std::future::pending::<()>(), &mut events, &mut screen)
+                .await
+                .is_none(),
+            "the hold must end when the viewer disconnects, not wait out the window",
+        );
+    }
 }

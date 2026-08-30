@@ -3,30 +3,22 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::IntoCondition;
 use sea_orm::{Database, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::auth::{
-    ApprovalKind, ApprovalScope, AuthCredentialFingerprint, AuthStateUserInfo,
-    CredentialDigestSalt, RememberedBy, WebApprovalMatchKey,
+    ApprovalKind, ApprovalScope, AuthCredentialFingerprint, AuthStateUserInfo, RememberApprovalBy,
+    StoredCredentialId, WebApprovalMatchKey,
 };
 use warpgate_common::{NodeId, Protocol, UserSessionId};
 use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
-use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    close_request, find_question, find_request, mark_consumed, one_request, upsert_request,
+    self, close_request, mark_consumed, upsert_request,
 };
 use warpgate_db_migrations::migrate_database;
 
 use super::*;
-
-/// The tests share one salt: a digest is only ever compared against another
-/// digest from the same installation, so the value is irrelevant — that it
-/// is the *same* one on both sides is the whole point.
-fn test_salt() -> CredentialDigestSalt {
-    #[allow(clippy::expect_used)]
-    CredentialDigestSalt::from_stored("test-salt").expect("non-empty")
-}
 
 async fn migrated_db() -> DatabaseConnection {
     set_config_migration_values(ConfigMigrationValues::default());
@@ -45,7 +37,7 @@ async fn advertise_row(
     if matches!(subject.kind, ApprovalKind::Admin) {
         let mut subject = subject.clone();
         subject.session_id = session_id;
-        super::wait::advertise_admin_request(db, NodeId(Uuid::new_v4()), &test_salt(), &subject)
+        super::wait::advertise_admin_request(db, NodeId(Uuid::new_v4()), &subject)
             .await
             .unwrap();
         return;
@@ -62,7 +54,7 @@ async fn advertise_row(
             target: Set(subject.target_name.clone()),
             remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
             identification_string: Set(None),
-            credentials_digest: Set(subject.credentials_digest(&test_salt())),
+            credentials_digest: Set(subject.credentials_digest()),
             consumes_ticket_id: Set(subject.consumes_ticket_id),
             started: Set(OffsetDateTime::now_utc()),
             status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
@@ -88,7 +80,7 @@ fn plain_subject(target: &str) -> ApprovalSubject {
         protocol: Protocol::Ssh,
         target_name: target.into(),
         remote_ip: None,
-        credentials: RememberedBy::Nothing,
+        credentials: RememberApprovalBy::Nothing,
         consumes_ticket_id: None,
     }
 }
@@ -99,9 +91,19 @@ async fn pending_row(db: &DatabaseConnection, session_id: UserSessionId, target:
 
 fn admin_actor() -> ApprovalActor {
     ApprovalActor {
-        username: "admin".into(),
-        user_id: None,
+        username: Some("admin".into()),
+        user_id: Uuid::nil(),
     }
+}
+
+async fn find_question(
+    db: &DatabaseConnection,
+    which: SessionApprovalRequest::Key,
+) -> Result<Option<SessionApprovalRequest::Model>, WarpgateError> {
+    Ok(SessionApprovalRequest::Entity::find()
+        .filter(which.into_condition())
+        .one(db)
+        .await?)
 }
 
 async fn approve(db: &DatabaseConnection, session_id: UserSessionId, target: &str) -> bool {
@@ -131,16 +133,28 @@ async fn status_of(
     session_id: UserSessionId,
     target: &str,
 ) -> SessionApprovalRequest::ApprovalRequestStatus {
-    find_question(db, session_id, ApprovalKind::Admin, target)
+    let which = SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, target);
+
+    SessionApprovalRequest::Entity::find()
+        .filter(which.into_condition())
+        .one(db)
         .await
         .unwrap()
         .expect("the request should still exist")
         .status
 }
 
+/// Every request of one kind on a session, across its targets.
+fn one_request(session_id: UserSessionId, kind: ApprovalKind) -> Condition {
+    SessionApprovalRequest::Column::SessionId
+        .eq(session_id)
+        .and(SessionApprovalRequest::Column::Kind.eq(kind))
+        .into_condition()
+}
+
 /// Moves a request's start time into the past, so the reaper sees it as
 /// older than the window anything could still be waiting for.
-async fn backdate(db: &DatabaseConnection, session_id: UserSessionId, by: Duration) {
+async fn backdate_request(db: &DatabaseConnection, session_id: UserSessionId, by: Duration) {
     SessionApprovalRequest::Entity::update_many()
         .col_expr(
             SessionApprovalRequest::Column::Started,
@@ -150,6 +164,21 @@ async fn backdate(db: &DatabaseConnection, session_id: UserSessionId, by: Durati
         .exec(db)
         .await
         .unwrap();
+}
+
+/// The request of one kind on a session, where only one can exist: a login has
+/// a single target name fixed when its auth state is built, so its own approval
+/// is unambiguous. Administrator gates name their target — see
+/// [`find_question`].
+async fn find_request(
+    db: &DatabaseConnection,
+    session_id: UserSessionId,
+    kind: ApprovalKind,
+) -> Result<Option<SessionApprovalRequest::Model>, WarpgateError> {
+    Ok(SessionApprovalRequest::Entity::find()
+        .filter(one_request(session_id, kind))
+        .one(db)
+        .await?)
 }
 
 /// Nothing else ends a request whose owning node died mid-hold: the guard's
@@ -167,7 +196,7 @@ async fn reaping_ends_requests_nobody_can_still_be_waiting_on() {
     pending_row(&db, recent, "a-target").await;
     // Past any window: the lifetime is the approval timeout, never shorter
     // than the auth-state timeout.
-    backdate(&db, stale, Duration::from_secs(24 * 3600)).await;
+    backdate_request(&db, stale, Duration::from_secs(24 * 3600)).await;
 
     reap_stale(&db).await.unwrap();
 
@@ -177,6 +206,69 @@ async fn reaping_ends_requests_nobody_can_still_be_waiting_on() {
         Status::Pending,
         "a request still inside its window is still a live question",
     );
+}
+
+/// Audit retention is configured independently of the approval window, so a
+/// short retention meets rows that are still live. Deleting one a held
+/// connection is polling reads to that connection as "no longer a live
+/// question" — it would deny a session no administrator decided against, and
+/// erase the record of the request in the same stroke.
+#[tokio::test]
+async fn pruning_leaves_anything_still_being_waited_on() {
+    let db = migrated_db().await;
+    let asking = UserSessionId(Uuid::new_v4());
+    let answered = UserSessionId(Uuid::new_v4());
+    let delivered = UserSessionId(Uuid::new_v4());
+    let gave_up = UserSessionId(Uuid::new_v4());
+
+    for session in [asking, answered, delivered, gave_up] {
+        pending_row(&db, session, "a-target").await;
+    }
+    // Answered, but the owning node has yet to read it back.
+    assert!(approve(&db, answered, "a-target").await);
+    // Answered and picked up.
+    assert!(approve(&db, delivered, "a-target").await);
+    mark_consumed(
+        &db,
+        SessionApprovalRequest::Key::new(delivered, ApprovalKind::Admin, "a-target"),
+    )
+    .await
+    .unwrap();
+    // Ended without an answer.
+    close_request(
+        &db,
+        gave_up,
+        ApprovalKind::Admin,
+        "a-target",
+        SessionApprovalRequest::UndecidedApprovalRequestStatus::Abandoned,
+    )
+    .await
+    .unwrap();
+
+    // Every row is older than the retention.
+    SessionApprovalRequest::delete_all_before(&db, OffsetDateTime::now_utc())
+        .await
+        .unwrap();
+
+    let survives = async |session| {
+        find_question(
+            &db,
+            SessionApprovalRequest::Key::new(session, ApprovalKind::Admin, "a-target"),
+        )
+        .await
+        .unwrap()
+        .is_some()
+    };
+    assert!(survives(asking).await, "a question still being asked");
+    assert!(
+        survives(answered).await,
+        "an answer the owning node has yet to read back",
+    );
+    assert!(
+        !survives(delivered).await,
+        "a delivered decision is history"
+    );
+    assert!(!survives(gave_up).await, "an abandoned request is history");
 }
 
 /// The reaper runs on a timer against every row in the table, so it meets
@@ -191,7 +283,7 @@ async fn reaping_never_erases_an_answer() {
     let session_id = UserSessionId(Uuid::new_v4());
     pending_row(&db, session_id, "a-target").await;
     assert!(approve(&db, session_id, "a-target").await);
-    backdate(&db, session_id, Duration::from_secs(24 * 3600)).await;
+    backdate_request(&db, session_id, Duration::from_secs(24 * 3600)).await;
 
     reap_stale(&db).await.unwrap();
 
@@ -240,10 +332,13 @@ async fn re_advertising_does_not_rewrite_what_was_approved() {
     advertise_row(&db, session_id, &asked).await;
     assert!(approve(&db, session_id, "a-target").await);
 
-    let approved = find_question(&db, session_id, ApprovalKind::Admin, "a-target")
-        .await
-        .unwrap()
-        .expect("the request should still exist");
+    let approved = find_question(
+        &db,
+        SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "a-target"),
+    )
+    .await
+    .unwrap()
+    .expect("the request should still exist");
 
     // The same question asked again, by a connection presenting different
     // credentials from a different address, before the owner picks the
@@ -253,10 +348,13 @@ async fn re_advertising_does_not_rewrite_what_was_approved() {
     asked_again.credentials = password_credentials([7; 32]);
     advertise_row(&db, session_id, &asked_again).await;
 
-    let after = find_question(&db, session_id, ApprovalKind::Admin, "a-target")
-        .await
-        .unwrap()
-        .expect("the request should still exist");
+    let after = find_question(
+        &db,
+        SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "a-target"),
+    )
+    .await
+    .unwrap()
+    .expect("the request should still exist");
     assert_eq!(
         after.remote_address, approved.remote_address,
         "an answered request must keep the address it was approved for",
@@ -277,8 +375,8 @@ async fn re_advertising_reopens_a_finished_request() {
     let db = migrated_db().await;
 
     for finished in [
-        SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
-        SessionApprovalRequest::ApprovalRequestStatus::Abandoned,
+        SessionApprovalRequest::UndecidedApprovalRequestStatus::TimedOut,
+        SessionApprovalRequest::UndecidedApprovalRequestStatus::Abandoned,
     ] {
         let session_id = UserSessionId(Uuid::new_v4());
         pending_row(&db, session_id, "a-target").await;
@@ -288,10 +386,13 @@ async fn re_advertising_reopens_a_finished_request() {
 
         pending_row(&db, session_id, "a-target").await;
 
-        let row = find_question(&db, session_id, ApprovalKind::Admin, "a-target")
-            .await
-            .unwrap()
-            .expect("the request should still exist");
+        let row = find_question(
+            &db,
+            SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "a-target"),
+        )
+        .await
+        .unwrap()
+        .expect("the request should still exist");
         assert_eq!(
             row.status,
             SessionApprovalRequest::ApprovalRequestStatus::Pending,
@@ -322,9 +423,12 @@ async fn re_advertising_reuses_a_consumed_decision() {
     let session_id = UserSessionId(Uuid::new_v4());
     pending_row(&db, session_id, "a-target").await;
     assert!(approve_with_scope(&db, session_id, "a-target", ApprovalScope::Target).await);
-    mark_consumed(&db, one_request(session_id, ApprovalKind::Admin))
-        .await
-        .unwrap();
+    mark_consumed(
+        &db,
+        SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "a-target".into()),
+    )
+    .await
+    .unwrap();
 
     pending_row(&db, session_id, "a-target").await;
 
@@ -377,10 +481,13 @@ async fn a_second_target_asks_alongside_the_first() {
 
     pending_row(&db, session_id, "b-target").await;
 
-    let first = find_question(&db, session_id, ApprovalKind::Admin, "a-target")
-        .await
-        .unwrap()
-        .expect("the answered question must still be on record");
+    let first = find_question(
+        &db,
+        SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "a-target"),
+    )
+    .await
+    .unwrap()
+    .expect("the answered question must still be on record");
     assert_eq!(
         first.status,
         SessionApprovalRequest::ApprovalRequestStatus::Approved,
@@ -392,10 +499,13 @@ async fn a_second_target_asks_alongside_the_first() {
     );
     assert_eq!(first.resolved_by_username.as_deref(), Some("admin"));
 
-    let second = find_question(&db, session_id, ApprovalKind::Admin, "b-target")
-        .await
-        .unwrap()
-        .expect("the new question should exist");
+    let second = find_question(
+        &db,
+        SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "b-target"),
+    )
+    .await
+    .unwrap()
+    .expect("the new question should exist");
     assert_eq!(
         second.status,
         SessionApprovalRequest::ApprovalRequestStatus::Pending,
@@ -457,7 +567,7 @@ async fn closing_keeps_the_row_and_never_overwrites_an_answer() {
         answered,
         ApprovalKind::Admin,
         "a-target",
-        SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+        SessionApprovalRequest::UndecidedApprovalRequestStatus::TimedOut,
     )
     .await
     .unwrap();
@@ -474,7 +584,7 @@ async fn closing_keeps_the_row_and_never_overwrites_an_answer() {
         two_targets,
         ApprovalKind::Admin,
         "a-target",
-        SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+        SessionApprovalRequest::UndecidedApprovalRequestStatus::TimedOut,
     )
     .await
     .unwrap();
@@ -532,8 +642,8 @@ async fn a_decision_written_later_is_picked_up() {
                 "a-target",
                 ApprovalDecision::Approved(ApprovalScope::Once),
                 &ApprovalActor {
-                    username: "admin".into(),
-                    user_id: None,
+                    username: Some("admin".into()),
+                    user_id: Uuid::nil(),
                 },
             )
             .await
@@ -564,8 +674,10 @@ async fn a_decision_written_later_is_picked_up() {
     );
 }
 
-fn password_credentials(hash: [u8; 32]) -> RememberedBy {
-    RememberedBy::from_fingerprints(vec![AuthCredentialFingerprint::Password { hash }])
+fn password_credentials(hash: [u8; 32]) -> RememberApprovalBy {
+    RememberApprovalBy::from_fingerprints(vec![AuthCredentialFingerprint::Password(
+        StoredCredentialId::of_stored_verifier(hash.as_slice()),
+    )])
 }
 
 fn remembered_subject(target: &str, hash: [u8; 32]) -> ApprovalSubject {
@@ -612,38 +724,33 @@ async fn a_remembered_approval_requires_a_full_match() {
     remembered_approval(&db, "prod", [7u8; 32], ApprovalScope::Target).await;
 
     assert!(
-        approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+        approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
             .await
             .unwrap()
     );
     // Another target is not covered.
     assert!(
-        !approval_is_remembered(&db, &lookup_key("staging", [7u8; 32]), GRACE, &test_salt())
+        !approval_is_remembered(&db, &lookup_key("staging", [7u8; 32]), GRACE)
             .await
             .unwrap()
     );
     // Different credentials are not covered.
     assert!(
-        !approval_is_remembered(&db, &lookup_key("prod", [9u8; 32]), GRACE, &test_salt())
+        !approval_is_remembered(&db, &lookup_key("prod", [9u8; 32]), GRACE)
             .await
             .unwrap()
     );
     // A zero grace is never fresh, so approval is required again.
     assert!(
-        !approval_is_remembered(
-            &db,
-            &lookup_key("prod", [7u8; 32]),
-            Duration::ZERO,
-            &test_salt()
-        )
-        .await
-        .unwrap()
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), Duration::ZERO,)
+            .await
+            .unwrap()
     );
     // The other approval kind is a different question entirely.
     let mut other_kind = lookup_key("prod", [7u8; 32]);
     other_kind.kind = ApprovalKind::User;
     assert!(
-        !approval_is_remembered(&db, &other_kind, GRACE, &test_salt())
+        !approval_is_remembered(&db, &other_kind, GRACE)
             .await
             .unwrap()
     );
@@ -655,19 +762,19 @@ async fn an_all_targets_grant_covers_every_target() {
     remembered_approval(&db, "prod", [7u8; 32], ApprovalScope::AllTargets).await;
 
     assert!(
-        approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+        approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
             .await
             .unwrap()
     );
     assert!(
-        approval_is_remembered(&db, &lookup_key("staging", [7u8; 32]), GRACE, &test_salt())
+        approval_is_remembered(&db, &lookup_key("staging", [7u8; 32]), GRACE)
             .await
             .unwrap()
     );
     // Approving every target is strictly broader than approving a portal
     // sign-in, so it subsumes an untargeted ask too.
     assert!(
-        approval_is_remembered(&db, &lookup_key("", [7u8; 32]), GRACE, &test_salt())
+        approval_is_remembered(&db, &lookup_key("", [7u8; 32]), GRACE)
             .await
             .unwrap()
     );
@@ -682,12 +789,12 @@ async fn an_untargeted_grant_is_its_own_bucket() {
     remembered_approval(&db, "", [7u8; 32], ApprovalScope::Target).await;
 
     assert!(
-        approval_is_remembered(&db, &lookup_key("", [7u8; 32]), GRACE, &test_salt())
+        approval_is_remembered(&db, &lookup_key("", [7u8; 32]), GRACE)
             .await
             .unwrap()
     );
     assert!(
-        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
             .await
             .unwrap()
     );
@@ -699,7 +806,7 @@ async fn a_once_approval_is_not_remembered() {
     remembered_approval(&db, "prod", [7u8; 32], ApprovalScope::Once).await;
 
     assert!(
-        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
             .await
             .unwrap()
     );
@@ -714,7 +821,7 @@ async fn only_an_approval_is_remembered() {
     let pending = UserSessionId(Uuid::new_v4());
     advertise_row(&db, pending, &remembered_subject("prod", [7u8; 32])).await;
     assert!(
-        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
             .await
             .unwrap()
     );
@@ -732,7 +839,7 @@ async fn only_an_approval_is_remembered() {
         .unwrap()
     );
     assert!(
-        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE, &test_salt())
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
             .await
             .unwrap()
     );
@@ -1023,7 +1130,6 @@ mod delivery {
             auth_state_store: Arc::new(Mutex::new(AuthStateStore::new())),
             admin_token: Arc::new(None),
             cluster_token: Arc::new(Secret::new("test".into())),
-            credential_digest_salt: Arc::new(test_salt()),
             login_protection: Arc::new(LoginProtectionService::new(db.clone()).await.unwrap()),
             global_params: Arc::new(params),
             listener_status: Default::default(),
@@ -1072,7 +1178,10 @@ mod delivery {
         session_id: UserSessionId,
         target: &str,
     ) -> SessionApprovalRequest::Model {
-        find_question(db, session_id, ApprovalKind::User, target)
+        let which = SessionApprovalRequest::Key::new(session_id, ApprovalKind::User, target);
+        SessionApprovalRequest::Entity::find()
+            .filter(which.into_condition())
+            .one(db)
             .await
             .unwrap()
             .expect("the request should still exist")

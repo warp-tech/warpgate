@@ -17,7 +17,7 @@ use super::{
     CredentialPolicyResponse,
 };
 use crate::helpers::logging::format_related_ids;
-use crate::{Protocol, Secret, User, UserSessionId, WarpgateError};
+use crate::{Protocol, User, UserSessionId, WarpgateError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
@@ -95,63 +95,11 @@ pub enum WebApprovalScopeKey {
     Target(String),
 }
 
-/// The cluster-global secret mixed into every credential digest.
-///
-/// Digests are stored, and the fingerprints behind them are derived from the
-/// secret the user typed. An unkeyed hash of them would mean a copy of the
-/// database is enough to test password guesses offline against every user who
-/// ever reached an approval — the work factor on the stored credentials buys
-/// nothing there, because a digest is a *different*, cheap hash of the same
-/// secret. Mixing in a value that isn't derivable from the row makes those
-/// guesses untestable without it.
-///
-/// One value for the whole cluster, because an approval remembered on one node
-/// has to match a connection arriving at another.
-#[derive(Clone)]
-pub struct CredentialDigestSalt(Secret<String>);
-
-impl CredentialDigestSalt {
-    /// A fresh salt, for the migration that introduces one and for the
-    /// parameter row of a new installation.
-    #[must_use]
-    pub fn random() -> Self {
-        Self(Secret::random())
-    }
-
-    /// The stored salt, or `None` when there isn't one. Blank counts as absent:
-    /// a digest keyed on nothing is exactly what this type exists to prevent,
-    /// and it would look configured.
-    #[must_use]
-    pub fn from_stored(stored: &str) -> Option<Self> {
-        (!stored.trim().is_empty()).then(|| Self(Secret::new(stored.to_owned())))
-    }
-
-    #[must_use]
-    pub fn expose_secret(&self) -> &str {
-        self.0.expose_secret()
-    }
-}
-
-impl std::fmt::Debug for CredentialDigestSalt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("CredentialDigestSalt(***)")
-    }
-}
-
-/// A non-empty, sorted, deduplicated set of credential fingerprints: the part of
-/// a remembered-approval key that says *how* the session authenticated.
-///
-/// Non-empty by construction, because a key built on no credentials matches on
-/// origin and username alone — it would replay a grant for any later session
-/// from the same place, whatever it authenticated with.
+/// A non-empty, sorted, deduplicated, equatable set of credential IDs - used to key the stored "remember approval" decisions
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CredentialFingerprints(Vec<AuthCredentialFingerprint>);
 
 impl CredentialFingerprints {
-    /// The only way to build a set: sorts and deduplicates, so two attempts
-    /// presenting the same credentials in a different order key the same, and
-    /// answers `None` for an empty one rather than a set that matches on
-    /// nothing.
     #[must_use]
     pub fn new(mut fingerprints: Vec<AuthCredentialFingerprint>) -> Option<Self> {
         fingerprints.sort_unstable();
@@ -159,20 +107,10 @@ impl CredentialFingerprints {
         (!fingerprints.is_empty()).then_some(Self(fingerprints))
     }
 
-    /// A stable digest of the set, for matching a session's credentials
-    /// against a stored approval record. Order-independent because the set is
-    /// sorted on construction.
-    ///
-    /// The salt is a parameter rather than something this reaches for, so a
-    /// digest that isn't keyed to the installation cannot be written at all.
+    /// A stable digest for the credential set (for matching)
     #[must_use]
-    pub fn digest(&self, salt: &CredentialDigestSalt) -> String {
-        let mut bytes = vec![1]; // version
-
-        let salt = salt.expose_secret();
-        // length prefixed to avoid a collision if salt length changes
-        bytes.extend_from_slice(&(salt.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(salt.as_bytes());
+    pub fn digest(&self) -> String {
+        let mut bytes = vec![1]; // version tag
 
         for fingerprint in &self.0 {
             fingerprint.write_canonical_bytes(&mut bytes);
@@ -183,32 +121,22 @@ impl CredentialFingerprints {
     }
 }
 
-/// Whether an approval granted to a session may be remembered for a later one,
-/// and on what.
-///
-/// Separate variants rather than an `Option<Vec<_>>`: "nothing to key a grant
-/// on" and "keyed on nothing" are the same situation but read as opposites, and
-/// only one of them is safe. Building the set is the only way to find out which
-/// you have, so [`Self::from_fingerprints`] decides it once.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum RememberedBy {
-    /// Replayable for a later session presenting the same credentials.
+pub enum RememberApprovalBy {
+    /// Approval can be reused if this credential set matches
     Credentials(CredentialFingerprints),
-    /// Nothing stable to pin a grant to — ticket auth, or a protocol that
-    /// doesn't carry the authenticating credentials on its requests.
+    /// Cannot be remembered because there are no credentials to match
     Nothing,
 }
 
-impl RememberedBy {
-    /// Collapses a set that turns out to be empty to [`Self::Nothing`].
+impl RememberApprovalBy {
     #[must_use]
     pub fn from_fingerprints(fingerprints: Vec<AuthCredentialFingerprint>) -> Self {
         CredentialFingerprints::new(fingerprints).map_or(Self::Nothing, Self::Credentials)
     }
 
-    /// The set to key a grant on, or `None` when there is nothing to key it on.
     #[must_use]
-    pub const fn credentials(&self) -> Option<&CredentialFingerprints> {
+    pub const fn credential_fingerprints(&self) -> Option<&CredentialFingerprints> {
         match self {
             Self::Credentials(fingerprints) => Some(fingerprints),
             Self::Nothing => None,
@@ -216,13 +144,9 @@ impl RememberedBy {
     }
 }
 
-/// What a login must match in a stored approval record for the grace-period
-/// bypass to fire.
+/// Everything a new approval request has to match on to be auto-accepted
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebApprovalMatchKey {
-    /// Which approval kind is being asked about. Part of the key so an
-    /// administrator's grant can never satisfy a request for the user's own
-    /// approval, or the other way round.
     pub kind: ApprovalKind,
     pub remote_ip: IpAddr,
     pub protocol: Protocol,
@@ -243,7 +167,7 @@ impl WebApprovalMatchKey {
         protocol: Protocol,
         username: &str,
         target_name: &str,
-        credentials: &RememberedBy,
+        credentials: &RememberApprovalBy,
     ) -> Option<Self> {
         Some(Self {
             kind,
@@ -258,7 +182,7 @@ impl WebApprovalMatchKey {
             } else {
                 WebApprovalScopeKey::Target(target_name.to_string())
             },
-            other_credentials: credentials.credentials()?.clone(),
+            other_credentials: credentials.credential_fingerprints()?.clone(),
         })
     }
 }
@@ -281,6 +205,11 @@ pub struct AuthState {
     force_rejected: bool,
     policy: Box<dyn CredentialPolicy + Sync + Send>,
     valid_credentials: Vec<AuthCredential>,
+    /// Which stored credential each accepted submission matched, in the order
+    /// they were accepted. Supplied by the validator, which is the only place
+    /// that knows — the submitted credential cannot say which stored one it
+    /// verified against, and must not be fingerprinted itself.
+    credential_fingerprints: Vec<AuthCredentialFingerprint>,
     started: OffsetDateTime,
     identification_string: String,
     last_result: Option<AuthResult>,
@@ -317,6 +246,7 @@ impl AuthState {
             force_rejected: false,
             policy,
             valid_credentials: vec![],
+            credential_fingerprints: vec![],
             started: OffsetDateTime::now_utc(),
             identification_string: generate_identification_string(),
             last_result: None,
@@ -353,12 +283,12 @@ impl AuthState {
     /// credentials presented and is identical whether taken before an approval
     /// is added (check) or after (save).
     #[must_use]
-    pub fn remembered_by(&self) -> RememberedBy {
-        RememberedBy::from_fingerprints(
-            self.valid_credentials
+    pub fn remembered_by(&self) -> RememberApprovalBy {
+        RememberApprovalBy::from_fingerprints(
+            self.credential_fingerprints
                 .iter()
-                .filter(|c| c.kind() != CredentialKind::WebUserApproval)
-                .map(Into::into)
+                .filter(|f| !matches!(f, AuthCredentialFingerprint::WebUserApproval))
+                .cloned()
                 .collect(),
         )
     }
@@ -387,6 +317,10 @@ impl AuthState {
     /// Runs `validate` on the credential and records it only if it passes.
     /// This is the sole path for adding a credential that requires validation,
     /// so a credential in `valid_credentials` is validated by construction.
+    /// `validate` answers with the identity of the stored credential that was
+    /// matched, or `None` for a rejected submission — the identity, not a
+    /// `bool`, because only the validator can see which stored credential
+    /// verified the submission, and that is what an approval is remembered on.
     pub async fn submit_credential<F, Fut>(
         &mut self,
         credential: AuthCredential,
@@ -394,10 +328,13 @@ impl AuthState {
     ) -> Result<SubmitOutcome, WarpgateError>
     where
         F: FnOnce(String, AuthCredential) -> Fut,
-        Fut: Future<Output = Result<bool, WarpgateError>>,
+        Fut: Future<Output = Result<Option<AuthCredentialFingerprint>, WarpgateError>>,
     {
-        if validate(self.user_info.username.clone(), credential.clone()).await? {
+        if let Some(fingerprint) =
+            validate(self.user_info.username.clone(), credential.clone()).await?
+        {
             self.valid_credentials.push(credential);
+            self.credential_fingerprints.push(fingerprint);
             Ok(SubmitOutcome::Valid(self.maybe_update_verification_state()))
         } else {
             self.emit_authentication_failed_event(Some(&credential), "invalid credential");
@@ -409,6 +346,8 @@ impl AuthState {
     /// approval is itself the validation, so there is nothing to check.
     pub fn add_web_user_approval(&mut self) -> AuthResult {
         self.valid_credentials.push(AuthCredential::WebUserApproval);
+        self.credential_fingerprints
+            .push(AuthCredentialFingerprint::WebUserApproval);
         self.maybe_update_verification_state()
     }
 
@@ -543,6 +482,7 @@ impl AuthState {
 mod tests {
     use super::*;
     use crate::Secret;
+    use crate::auth::StoredCredentialId;
 
     /// The whole point of the type: a session with nothing to pin a grant to
     /// must produce no key, not a key that matches on origin and username
@@ -550,47 +490,20 @@ mod tests {
     #[test]
     fn an_empty_credential_set_is_not_remembered() {
         assert_eq!(
-            RememberedBy::from_fingerprints(vec![]),
-            RememberedBy::Nothing
+            RememberApprovalBy::from_fingerprints(vec![]),
+            RememberApprovalBy::Nothing
         );
         assert!(CredentialFingerprints::new(vec![]).is_none());
     }
 
-    /// Order and repetition are presentation details of one attempt, not part
-    /// of what it authenticated with.
-    /// The salt is what stops a stored digest being an offline-testable hash
-    /// of the user's password, so it has to actually reach the hash.
-    #[test]
-    fn a_digest_is_keyed_to_its_salt() {
-        #[allow(clippy::unwrap_used)]
-        let set = CredentialFingerprints::new(vec![AuthCredentialFingerprint::Password {
-            hash: [3; 32],
-        }])
-        .unwrap();
-        #[allow(clippy::unwrap_used)]
-        let one = CredentialDigestSalt::from_stored("salt-one").unwrap();
-        #[allow(clippy::unwrap_used)]
-        let other = CredentialDigestSalt::from_stored("salt-two").unwrap();
-
-        assert_ne!(set.digest(&one), set.digest(&other));
-        assert_eq!(
-            set.digest(&one),
-            set.digest(&one),
-            "and is stable under one"
-        );
-    }
-
-    /// A blank salt reads as configured while keying on nothing.
-    #[test]
-    fn a_blank_salt_is_no_salt() {
-        assert!(CredentialDigestSalt::from_stored("").is_none());
-        assert!(CredentialDigestSalt::from_stored("   ").is_none());
-    }
-
     #[test]
     fn credential_sets_key_the_same_whatever_the_order() {
-        let a = AuthCredentialFingerprint::Password { hash: [1u8; 32] };
-        let b = AuthCredentialFingerprint::Password { hash: [2u8; 32] };
+        let a = AuthCredentialFingerprint::Password(StoredCredentialId::of_stored_verifier(
+            [1u8; 32].as_slice(),
+        ));
+        let b = AuthCredentialFingerprint::Password(StoredCredentialId::of_stored_verifier(
+            [2u8; 32].as_slice(),
+        ));
         assert_eq!(
             CredentialFingerprints::new(vec![a.clone(), b.clone(), a.clone()]),
             CredentialFingerprints::new(vec![b, a]),
@@ -639,7 +552,9 @@ mod tests {
     async fn valid_credential_is_recorded() {
         let mut state = make_state(&[CredentialKind::Password]);
         let outcome = state
-            .submit_credential(password(), |_, _| async { Ok(true) })
+            .submit_credential(password(), |_, _| async {
+                Ok(Some(AuthCredentialFingerprint::Otp))
+            })
             .await
             .unwrap();
         assert!(outcome.is_valid());
@@ -651,7 +566,7 @@ mod tests {
     async fn invalid_credential_leaves_state_unchanged() {
         let mut state = make_state(&[CredentialKind::Password]);
         let outcome = state
-            .submit_credential(password(), |_, _| async { Ok(false) })
+            .submit_credential(password(), |_, _| async { Ok(None) })
             .await
             .unwrap();
         assert!(!outcome.is_valid());
@@ -669,11 +584,13 @@ mod tests {
     async fn invalid_extra_credential_keeps_accepted_state() {
         let mut state = make_state(&[CredentialKind::Password]);
         let _ = state
-            .submit_credential(password(), |_, _| async { Ok(true) })
+            .submit_credential(password(), |_, _| async {
+                Ok(Some(AuthCredentialFingerprint::Otp))
+            })
             .await
             .unwrap();
         let outcome = state
-            .submit_credential(password(), |_, _| async { Ok(false) })
+            .submit_credential(password(), |_, _| async { Ok(None) })
             .await
             .unwrap();
         assert!(!outcome.is_valid());
@@ -690,7 +607,9 @@ mod tests {
     async fn into_accepted_yields_user_only_on_valid_success() {
         let mut state = make_state(&[CredentialKind::Password]);
         let outcome = state
-            .submit_credential(password(), |_, _| async { Ok(true) })
+            .submit_credential(password(), |_, _| async {
+                Ok(Some(AuthCredentialFingerprint::Otp))
+            })
             .await
             .unwrap();
         assert!(outcome.into_accepted().is_ok());

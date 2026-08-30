@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use poem::Request;
 use tokio::sync::Mutex;
-use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberedBy};
+use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberApprovalBy};
 use warpgate_common::{TargetKubernetesOptions, User, UserSessionId, WarpgateError};
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::approvals::{GatedConnection, TicketStake, admit_target_session};
@@ -197,7 +197,7 @@ async fn admit_kubernetes_session(
             // Client certificates and tokens are re-presented per request
             // rather than settled into an auth state, so a Kubernetes session
             // neither contributes nor consumes a remembered approval.
-            credentials: RememberedBy::Nothing,
+            credentials: RememberApprovalBy::Nothing,
             // Kubernetes authenticates with certificates and tokens, never a
             // ticket.
             ticket: TicketStake::None,

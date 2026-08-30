@@ -6,7 +6,9 @@ use warpgate_core::ticket_requests::list_ticket_requests;
 use warpgate_db_entities::TicketRequest::TicketRequestStatus;
 
 use super::AdminContext;
-use crate::api::ticket_request_details::{TicketRequestDetails, resolve_ticket_request_names};
+use crate::api::ticket_request_details::{
+    TicketRequestDetails, batch_resolve_ticket_request_names,
+};
 
 pub struct Api;
 
@@ -31,7 +33,7 @@ impl Api {
         admin.require(AdminPermission::TicketRequestsManage)?;
 
         let requests = list_ticket_requests(&admin.services().db, status.0).await?;
-        let requests = resolve_ticket_request_names(&admin.services().db, requests).await?;
+        let requests = batch_resolve_ticket_request_names(&admin.services().db, requests).await?;
         Ok(GetTicketRequestsResponse::Ok(Json(requests)))
     }
 }

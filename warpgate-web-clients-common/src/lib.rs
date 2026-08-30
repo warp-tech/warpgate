@@ -19,7 +19,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-use warpgate_common::auth::RememberedBy;
+use warpgate_common::auth::RememberApprovalBy;
 use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_core::approvals::{GatedConnection, TicketStake, admit_target_session};
 use warpgate_core::{
@@ -228,7 +228,7 @@ pub async fn gate_web_client_session<O: Send + Sync>(
             // A browser session's own login credentials aren't carried on the
             // client connection, so it neither contributes nor consumes a
             // remembered approval.
-            credentials: RememberedBy::Nothing,
+            credentials: RememberApprovalBy::Nothing,
             // A browser client session is opened from an already established
             // portal login, never by a ticket.
             ticket: TicketStake::None,

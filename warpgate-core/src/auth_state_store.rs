@@ -6,9 +6,7 @@ use std::time::{Duration, Instant};
 use sea_orm::DatabaseConnection;
 use tokio::sync::{Mutex, broadcast};
 use tracing::error;
-use warpgate_common::auth::{
-    AuthResult, AuthState, CredentialDigestSalt, CredentialKind, CredentialPolicy,
-};
+use warpgate_common::auth::{AuthResult, AuthState, CredentialKind, CredentialPolicy};
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{NodeId, Protocol, User, UserSessionId, WarpgateError};
@@ -169,7 +167,6 @@ async fn wait_for_auth_completion_within(
 pub struct ApprovalRequestSink {
     pub db: DatabaseConnection,
     pub node_id: NodeId,
-    pub salt: Arc<CredentialDigestSalt>,
 }
 
 pub struct AuthStateStore {
@@ -339,13 +336,9 @@ impl AuthStateStore {
                 // notification the moment it arrives always finds the request —
                 // including from another node, which has only the record to go on.
                 if let Some(sink) = &request_sink
-                    && let Err(error) = crate::approvals::advertise_user_request(
-                        &sink.db,
-                        sink.node_id,
-                        &sink.salt,
-                        &watched,
-                    )
-                    .await
+                    && let Err(error) =
+                        crate::approvals::advertise_user_request(&sink.db, sink.node_id, &watched)
+                            .await
                 {
                     error!(%error, "Failed to record a session approval request");
                 }

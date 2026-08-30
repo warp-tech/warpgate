@@ -22,8 +22,7 @@ use warpgate_admin::api::cluster_proxy::{
     proxy_or_serve_pending_login,
 };
 use warpgate_admin::approvals::{
-    ApprovalResolution, Approver, acting_approver, find_pending_user_approval,
-    find_user_approval_row, resolve_pending_approval,
+    ApprovalResolution, Approver, PendingApproval, acting_approver, resolve_pending_approval,
 };
 use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
@@ -345,19 +344,25 @@ impl Api {
     async fn api_auth_state(
         &self,
         ctx: AuthedSession,
-        id: Path<Uuid>,
+        Path(id): Path<UserSessionId>,
     ) -> poem::Result<AuthStateResponse> {
         // The live state exists only on the node that created it; anywhere else
         // the request row stands in, and it carries everything the approval page
         // shows, which is why this needs no hop to the owner.
-        if let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await {
+        if let Some(state_arc) = local_auth_state_for_user(&ctx, &id).await {
             return serialize_auth_state_inner(state_arc, ctx.services())
                 .await
                 .map(Json)
                 .map(AuthStateResponse::Ok);
         }
 
-        match find_user_approval_row(&ctx, UserSessionId(*id)).await? {
+        let Some(user) = ctx.auth.as_full_user() else {
+            return Ok(AuthStateResponse::NotFound);
+        };
+
+        match SessionApprovalRequest::find_user_approval(&ctx.services().db, user.username(), id)
+            .await?
+        {
             Some(row) => request_to_auth_state(ctx.services(), row)
                 .await
                 .map(Json)
@@ -429,9 +434,20 @@ async fn resolve_own_approval(
         );
     }
 
-    let Some(pending) = find_pending_user_approval(ctx, session_id).await? else {
+    let Some(user) = ctx.auth.as_full_user() else {
         return Ok(ApprovalActionResponse::NotFound);
     };
+
+    let Some(row) =
+        SessionApprovalRequest::find_user_approval(&ctx.services().db, user.username(), session_id)
+            .await?
+    else {
+        return Ok(ApprovalActionResponse::NotFound);
+    };
+    let Some(pending) = PendingApproval::parse(ctx, row).await? else {
+        return Ok(ApprovalActionResponse::NotFound);
+    };
+
     match resolve_pending_approval(ctx, Approver::TheUserThemselves, pending, decision).await? {
         ApprovalResolution::Resolved => Ok(ApprovalActionResponse::Ok),
         ApprovalResolution::NotFound => Ok(ApprovalActionResponse::NotFound),

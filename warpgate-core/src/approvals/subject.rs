@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use tracing::info;
 use uuid::Uuid;
 use warpgate_common::auth::{
-    ApprovalKind, AuthState, AuthStateUserInfo, CredentialDigestSalt, RememberedBy,
+    ApprovalKind, AuthState, AuthStateUserInfo, RememberApprovalBy,
     WebApprovalMatchKey,
 };
 use warpgate_common::helpers::logging::format_related_ids;
@@ -28,7 +28,7 @@ pub(super) struct ApprovalSubject {
     pub(super) remote_ip: Option<IpAddr>,
     /// What a grant to this session could be remembered on. Where that is
     /// nothing, remembering is disabled rather than keyed on less.
-    pub(super) credentials: RememberedBy,
+    pub(super) credentials: RememberApprovalBy,
     /// The ticket an approval of this request consumes, where consumption is
     /// deferred to the gate — see [`TicketStake::ConsumedOnApproval`].
     pub(super) consumes_ticket_id: Option<Uuid>,
@@ -51,8 +51,8 @@ impl ApprovalSubject {
     /// What the request row stores to match this session's credentials against
     /// a later connection. `None` mirrors [`Self::match_key`]'s: a row without
     /// a digest can never serve as a remembered approval.
-    pub(super) fn credentials_digest(&self, salt: &CredentialDigestSalt) -> Option<String> {
-        self.credentials.credentials().map(|c| c.digest(salt))
+    pub(super) fn credentials_digest(&self) -> Option<String> {
+        self.credentials.credential_fingerprints().map(|c| c.digest())
     }
 
     pub(super) fn client_ip_for_logging(&self) -> String {

@@ -12,7 +12,7 @@ use http::StatusCode;
 use poem::{IntoResponse, Request, Response};
 use tokio::sync::Mutex;
 use warpgate_common::TargetHTTPOptions;
-use warpgate_common::auth::RememberedBy;
+use warpgate_common::auth::RememberApprovalBy;
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
@@ -59,7 +59,7 @@ pub async fn resolve_admin_approval(
                 // The credentials that authenticated the session aren't carried
                 // on the request, so an HTTP session neither contributes nor
                 // consumes a remembered approval.
-                credentials: RememberedBy::Nothing,
+                credentials: RememberApprovalBy::Nothing,
                 ticket,
             },
         )

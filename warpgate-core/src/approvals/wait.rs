@@ -2,14 +2,15 @@ use std::time::Duration;
 
 use sea_orm::ActiveValue::Set;
 use sea_orm::DatabaseConnection;
+use sea_orm::sea_query::IntoCondition;
 use time::OffsetDateTime;
 use tracing::{info, warn};
-use warpgate_common::auth::{ApprovalKind, CredentialDigestSalt};
+use warpgate_common::auth::ApprovalKind;
 use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    StatusTransition, close_request, find_question, mark_consumed, one_question, upsert_request,
+    StatusTransition, close_request, mark_consumed, upsert_request,
 };
 
 use super::*;
@@ -27,7 +28,7 @@ pub(super) struct PendingApproval {
     db: DatabaseConnection,
     /// How to end the row if the wait produces no decision. `None` once one
     /// has, when the row is stamped as picked up instead.
-    close_as: Option<SessionApprovalRequest::ApprovalRequestStatus>,
+    close_as: Option<SessionApprovalRequest::UndecidedApprovalRequestStatus>,
 }
 
 impl Drop for PendingApproval {
@@ -44,7 +45,11 @@ impl Drop for PendingApproval {
                     close_request(&db, session_id, ApprovalKind::Admin, &target, status).await
                 }
                 None => {
-                    mark_consumed(&db, one_question(session_id, ApprovalKind::Admin, &target)).await
+                    mark_consumed(
+                        &db,
+                        SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, &target),
+                    )
+                    .await
                 }
             };
         });
@@ -60,22 +65,21 @@ impl PendingApproval {
     pub(super) async fn begin(
         db: DatabaseConnection,
         node_id: NodeId,
-        salt: &CredentialDigestSalt,
         subject: &ApprovalSubject,
     ) -> Result<Self, WarpgateError> {
         let guard = Self {
             session_id: subject.session_id,
             target: subject.target_name.clone(),
             db,
-            close_as: Some(SessionApprovalRequest::ApprovalRequestStatus::Abandoned),
+            close_as: Some(SessionApprovalRequest::UndecidedApprovalRequestStatus::Abandoned),
         };
-        advertise_admin_request(&guard.db, node_id, salt, subject).await?;
+        advertise_admin_request(&guard.db, node_id, subject).await?;
         Ok(guard)
     }
 
     /// The window ran out with nobody having decided.
     pub(super) const fn timed_out(&mut self) {
-        self.close_as = Some(SessionApprovalRequest::ApprovalRequestStatus::TimedOut);
+        self.close_as = Some(SessionApprovalRequest::UndecidedApprovalRequestStatus::TimedOut);
     }
 
     /// A decision was read off the row and acted on, so the row keeps it and is
@@ -91,7 +95,6 @@ impl PendingApproval {
 pub(super) async fn advertise_admin_request(
     db: &DatabaseConnection,
     node_id: NodeId,
-    salt: &CredentialDigestSalt,
     subject: &ApprovalSubject,
 ) -> Result<(), WarpgateError> {
     upsert_request(
@@ -106,7 +109,7 @@ pub(super) async fn advertise_admin_request(
             target: Set(subject.target_name.clone()),
             remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
             identification_string: Set(None),
-            credentials_digest: Set(subject.credentials_digest(salt)),
+            credentials_digest: Set(subject.credentials_digest()),
             consumes_ticket_id: Set(subject.consumes_ticket_id),
             started: Set(OffsetDateTime::now_utc()),
             status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
@@ -178,8 +181,8 @@ pub(super) fn row_state(row: &SessionApprovalRequest::Model) -> Result<RowState,
     Ok(RowState::Decided(
         decision,
         ApprovalActor {
-            username: resolved_by_username.clone(),
-            user_id: row.resolved_by_user_id,
+            username: Some(resolved_by_username.clone()),
+            user_id: row.resolved_by_user_id.unwrap_or(Uuid::nil()),
         },
     ))
 }
@@ -210,7 +213,9 @@ pub(super) async fn await_row_decision(
             // The first tick is immediate, catching a decision that landed
             // between advertising the row and starting the wait.
             _ = ticker.tick() => {
-                match find_question(db, session_id, kind, target).await {
+                match SessionApprovalRequest::Entity::find().filter(
+                    SessionApprovalRequest::Key::new(session_id, kind, target).into_condition()
+                ).one(db).await {
                     Ok(Some(row)) => match row_state(&row)? {
                         RowState::Pending => {}
                         RowState::Decided(decision, _) => {
@@ -260,7 +265,9 @@ pub async fn record_decision(
     // already answered or closed has no spend riding on this decision and is not
     // this call's to audit, and the transition below moves nothing but the row
     // read here. The row also carries what the audit event says about the asker.
-    let Some(row) = find_question(db, session_id, kind, target)
+    let Some(row) = SessionApprovalRequest::Entity::find()
+        .filter(SessionApprovalRequest::Key::new(session_id, kind, target).into_condition())
+        .one(db)
         .await?
         .filter(|row| row.status == ApprovalRequestStatus::Pending)
     else {
@@ -297,7 +304,9 @@ pub async fn record_decision(
         // window makes the decision a no-op the approver simply repeats.
         .apply(
             db,
-            one_question(session_id, kind, target).add(Column::Started.eq(row.started)),
+            SessionApprovalRequest::Key::new(session_id, kind, target)
+                .into_condition()
+                .add(Column::Started.eq(row.started)),
         )
         .await;
 
@@ -342,8 +351,9 @@ pub(super) fn emit_resolved_event(
 ) {
     // A user approving their own session is both parties — don't list twice.
     let mut related = vec![row.user_id];
-    if let Some(id) = actor.user_id.filter(|id| *id != row.user_id) {
-        related.push(id);
+
+    if actor.user_id != row.user_id {
+        related.push(actor.user_id);
     }
 
     info!(
@@ -356,7 +366,7 @@ pub(super) fn emit_resolved_event(
         protocol = %row.protocol,
         target = %row.target,
         kind = ?row.kind,
-        resolved_by = %actor.username,
+        resolved_by = %actor.username.clone().unwrap_or("<unknown>".into()),
         approved = approved,
         related_users = %format_related_ids(&related),
         "Session approval resolved",

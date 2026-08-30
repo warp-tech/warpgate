@@ -22,7 +22,7 @@ pub use otp::{MAX_OTP_ATTEMPTS, OtpAction, OtpActionApplyOutcome, OtpEntry};
 use tokio::sync::Mutex;
 use tracing::warn;
 use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind, RememberedBy,
+    AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind, RememberApprovalBy,
 };
 use warpgate_common::{
     Secret, TargetOptionsVariant, TargetSessionId, UserSessionId, WarpgateError,
@@ -259,7 +259,7 @@ pub async fn admit_desktop_session<O: Send + Sync>(
     let state = services.auth_state_store.lock().await.get(&session_id);
     let credentials = match state {
         Some(state) => state.lock().await.remembered_by(),
-        None => RememberedBy::Nothing,
+        None => RememberApprovalBy::Nothing,
     };
     // The spend happened at authentication; the guard rides on the gate's
     // outcome, which refunds it on everything but an approval.

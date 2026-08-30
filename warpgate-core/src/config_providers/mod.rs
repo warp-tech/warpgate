@@ -14,7 +14,8 @@ use time::OffsetDateTime;
 use tracing::{error, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialKind, CredentialPolicy,
+    AuthCredential, AuthCredentialFingerprint, AuthResult, AuthState, AuthStateUserInfo,
+    CredentialKind, CredentialPolicy,
 };
 use warpgate_common::helpers::hash::hash_secret;
 use warpgate_common::{
@@ -45,11 +46,15 @@ pub trait ConfigProvider {
     async fn get_target_by_hostname(&self, hostname: &str)
     -> Result<Option<Target>, WarpgateError>;
 
+    /// Identifies the stored credential the submission matched, or `None` if
+    /// none did. The identity rather than a `bool` because this is the only
+    /// place that can see *which* stored credential verified the submission —
+    /// see [`AuthCredentialFingerprint`].
     async fn validate_credential(
         &self,
         username: &str,
         client_credential: &AuthCredential,
-    ) -> Result<bool, WarpgateError>;
+    ) -> Result<Option<AuthCredentialFingerprint>, WarpgateError>;
 
     async fn username_for_sso_credential(
         &self,

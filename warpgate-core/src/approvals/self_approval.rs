@@ -4,12 +4,12 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use warpgate_common::auth::{
-    ApprovalKind, AuthCredential, AuthResult, AuthState, CredentialDigestSalt, CredentialKind,
+    ApprovalKind, AuthCredential, AuthResult, AuthState, CredentialKind,
 };
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    find_undelivered_user_decisions_for_session, mark_consumed, one_question, upsert_request,
+    mark_consumed, undelivered_user_approvals_for_session, upsert_request,
 };
 
 use super::*;
@@ -29,7 +29,7 @@ impl Services {
         &self,
         session_id: &UserSessionId,
     ) -> Result<(), WarpgateError> {
-        for row in find_undelivered_user_decisions_for_session(&self.db, *session_id).await? {
+        for row in undelivered_user_approvals_for_session(&self.db, *session_id).await? {
             self.deliver_user_decision(&row).await?;
         }
         Ok(())
@@ -42,9 +42,11 @@ impl Services {
     /// user happened to click. Administrator gates need no sweep: each polls its
     /// own row while it holds the connection.
     pub(crate) async fn apply_decided_user_approvals(&self) -> Result<(), WarpgateError> {
-        let rows =
-            SessionApprovalRequest::find_undelivered_user_decisions(&self.db, self.cluster.node_id)
-                .await?;
+        let rows = SessionApprovalRequest::undelivered_user_approvals_for_node(
+            &self.db,
+            self.cluster.node_id,
+        )
+        .await?;
 
         for row in rows {
             self.deliver_user_decision(&row).await?;
@@ -100,7 +102,8 @@ impl Services {
         actor: &ApprovalActor,
         question: Option<&SessionApprovalRequest::Model>,
     ) -> Result<bool, WarpgateError> {
-        let consumed = |target: &str| one_question(session_id, ApprovalKind::User, target);
+        let consumed =
+            |target: &str| SessionApprovalRequest::Key::new(session_id, ApprovalKind::User, target);
 
         let Some(state_arc) = self.auth_state_store.lock().await.get(&session_id) else {
             // The state is gone (vacuumed or node restarted) — nothing can act
@@ -197,7 +200,6 @@ impl Services {
 pub(crate) async fn advertise_user_request(
     db: &DatabaseConnection,
     node_id: NodeId,
-    salt: &CredentialDigestSalt,
     state_arc: &Arc<Mutex<AuthState>>,
 ) -> Result<(), WarpgateError> {
     // Snapshot under the state lock and release it before the insert, so
@@ -217,8 +219,8 @@ pub(crate) async fn advertise_user_request(
             identification_string: Set(Some(state.identification_string().to_owned())),
             credentials_digest: Set(state
                 .remembered_by()
-                .credentials()
-                .map(|credentials| credentials.digest(salt))),
+                .credential_fingerprints()
+                .map(|credentials| credentials.digest())),
             consumes_ticket_id: Set(None),
             started: Set(*state.started()),
             status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),

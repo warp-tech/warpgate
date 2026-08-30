@@ -97,11 +97,8 @@ struct ParameterValues {
     pub web_clients_enabled: bool,
     pub web_auth_max_age_seconds: Option<i64>,
     pub web_approval_grace_period_seconds: Option<i64>,
-    /// How long a session held for administrator approval waits before being
-    /// auto-rejected; `None` falls back to the auth-state timeout.
+    // None = AuthStateStore's TIMEOUT
     pub admin_approval_timeout_seconds: Option<i64>,
-    /// Window within which a repeat connection reuses a previous administrator
-    /// approval; `None` disables caching.
     pub admin_approval_grace_period_seconds: Option<i64>,
     pub analytics_consent: Parameters::AnalyticsConsent,
     pub analytics_normal: bool,

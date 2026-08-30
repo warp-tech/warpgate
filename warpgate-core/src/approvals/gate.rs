@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, warn};
 use uuid::Uuid;
-use warpgate_common::auth::{ApprovalKind, RememberedBy};
+use warpgate_common::auth::{ApprovalKind, RememberApprovalBy};
 use warpgate_common::{UserSessionId, WarpgateError};
 
 use super::*;
@@ -177,7 +177,7 @@ pub struct AdminApprovalContext {
     /// a later identical connection. [`RememberedBy::Nothing`] wherever the
     /// authenticating credential has no stable fingerprint (ticket auth) or
     /// isn't carried on the request at all (HTTP, Kubernetes).
-    pub credentials: RememberedBy,
+    pub credentials: RememberApprovalBy,
     /// The ticket riding on this gate's outcome. Naming it here is what makes
     /// the refund rule unforgettable: a wait site states its ticket story to
     /// build the context at all.
@@ -190,7 +190,7 @@ pub struct AdminApprovalContext {
 pub struct GatedConnection {
     pub remote_ip: Option<IpAddr>,
     /// See [`AdminApprovalContext::credentials`].
-    pub credentials: RememberedBy,
+    pub credentials: RememberApprovalBy,
     /// See [`AdminApprovalContext::ticket`].
     pub ticket: TicketStake,
 }
@@ -363,7 +363,6 @@ impl Services {
         let mut guard = PendingApproval::begin(
             self.db.clone(),
             self.cluster.node_id,
-            &self.credential_digest_salt,
             &subject,
         )
         .await?;
@@ -493,6 +492,6 @@ impl Services {
         let Some(key) = subject.match_key() else {
             return Ok(false);
         };
-        approval_is_remembered(&self.db, &key, grace, &self.credential_digest_salt).await
+        approval_is_remembered(&self.db, &key, grace).await
     }
 }

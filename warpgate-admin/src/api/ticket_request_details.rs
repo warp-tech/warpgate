@@ -9,24 +9,21 @@ use warpgate_common::WarpgateError;
 use warpgate_db_entities::TicketRequest::TicketRequestStatus;
 use warpgate_db_entities::{Target, TicketRequest, User};
 
-/// A ticket request with the requesting user's and target's names resolved, so
-/// clients can render one without looking up every referenced id.
+/// ticket request with resolved username and target name
 #[derive(Debug, Clone, Serialize, Object)]
 #[oai(rename = "TicketRequest")]
 pub struct TicketRequestDetails {
     pub id: Uuid,
     pub user_id: Uuid,
-    /// Empty if the user has since been deleted.
+    /// Empty if the user has been deleted
     pub username: Option<String>,
     pub target_id: Uuid,
-    /// Empty if the target has since been deleted.
+    /// Empty if the target has been deleted
     pub target_name: Option<String>,
     pub requested_duration_seconds: Option<i64>,
     pub description: String,
     pub status: TicketRequestStatus,
     pub resolved_by_user_id: Option<Uuid>,
-    /// Name of the administrator who resolved it; `None` while pending, or if
-    /// that user has since been deleted.
     pub resolved_by_username: Option<String>,
     pub ticket_id: Option<Uuid>,
     pub created: OffsetDateTime,
@@ -34,9 +31,7 @@ pub struct TicketRequestDetails {
     pub deny_reason: Option<String>,
 }
 
-/// Resolves the user and target names for a batch of requests in two queries,
-/// rather than one pair per request.
-pub async fn resolve_ticket_request_names(
+pub async fn batch_resolve_ticket_request_names(
     db: &DatabaseConnection,
     requests: Vec<TicketRequest::Model>,
 ) -> Result<Vec<TicketRequestDetails>, WarpgateError> {

@@ -7,7 +7,9 @@ use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::ticket_requests::{approve_ticket_request, deny_ticket_request};
 
 use super::AdminContext;
-use crate::api::ticket_request_details::{TicketRequestDetails, resolve_ticket_request_names};
+use crate::api::ticket_request_details::{
+    TicketRequestDetails, batch_resolve_ticket_request_names,
+};
 
 const fn admin_user_id(ctx: &AuthenticatedRequestContext) -> Option<Uuid> {
     let id = ctx.auth.user_id();
@@ -54,7 +56,7 @@ impl Api {
         let uid = admin_user_id(&admin);
         match approve_ticket_request(&admin.services().db, id.0, uid).await? {
             Some(request) => {
-                match resolve_ticket_request_names(&admin.services().db, vec![request])
+                match batch_resolve_ticket_request_names(&admin.services().db, vec![request])
                     .await?
                     .pop()
                 {
@@ -83,7 +85,7 @@ impl Api {
         let uid = admin_user_id(&admin);
         match deny_ticket_request(&admin.services().db, id.0, uid, body.reason.clone()).await? {
             Some(request) => {
-                match resolve_ticket_request_names(&admin.services().db, vec![request])
+                match batch_resolve_ticket_request_names(&admin.services().db, vec![request])
                     .await?
                     .pop()
                 {

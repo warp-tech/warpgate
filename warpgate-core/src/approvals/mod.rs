@@ -42,11 +42,12 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 pub use warpgate_common::auth::ApprovalScope;
-use warpgate_common::auth::{CredentialDigestSalt, WebApprovalMatchKey, WebApprovalScopeKey};
+use warpgate_common::auth::{WebApprovalMatchKey, WebApprovalScopeKey};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_db_entities::{Parameters, SessionApprovalRequest};
 
 use crate::auth_state_store::TIMEOUT;
+use crate::helpers::i64_seconds_to_duration;
 
 mod gate;
 mod self_approval;
@@ -70,13 +71,11 @@ pub enum ApprovalDecision {
     Rejected,
 }
 
-/// Who resolved an approval. Travels with the decision so the owning node can
-/// attribute the audit entry to them.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ApprovalActor {
-    pub username: String,
-    /// `None` when the resolver isn't a user — e.g. the admin API token.
-    pub user_id: Option<Uuid>,
+    /// None if not a user (admin API token)
+    pub username: Option<String>,
+    pub user_id: Uuid,
 }
 
 /// Whether a stored approval within `grace` matches `key` — the grace-period
@@ -94,7 +93,6 @@ pub(crate) async fn approval_is_remembered(
     db: &DatabaseConnection,
     key: &WebApprovalMatchKey,
     grace: Duration,
-    salt: &CredentialDigestSalt,
 ) -> Result<bool, WarpgateError> {
     use SessionApprovalRequest::{ApprovalRequestStatus, Column};
 
@@ -122,7 +120,7 @@ pub(crate) async fn approval_is_remembered(
         .all(db)
         .await?;
 
-    let digest = key.other_credentials.digest(salt);
+    let digest = key.other_credentials.digest();
     let protocol = key.protocol.to_string();
     Ok(rows.into_iter().any(|row| {
         row.protocol == protocol
@@ -144,9 +142,8 @@ pub(crate) async fn admin_approval_timeout(
     Ok(Parameters::Entity::get(db)
         .await?
         .admin_approval_timeout_seconds
-        .filter(|s| *s > 0)
-        .and_then(|s| u64::try_from(s).ok())
-        .map_or(*TIMEOUT, Duration::from_secs))
+        .and_then(i64_seconds_to_duration)
+        .unwrap_or(*TIMEOUT))
 }
 
 /// How long approval requests must stay alive: the administrator-approval
@@ -165,5 +162,5 @@ pub(crate) async fn reap_stale(db: &DatabaseConnection) -> Result<(), WarpgateEr
     let lifetime = request_lifetime(db).await?;
     #[allow(clippy::cast_possible_wrap)]
     let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(lifetime.as_secs() as i64);
-    SessionApprovalRequest::abandon_asked_before(db, cutoff).await
+    SessionApprovalRequest::abandon_all_requested_before(db, cutoff).await
 }

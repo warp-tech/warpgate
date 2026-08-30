@@ -22,7 +22,7 @@ use url::Url;
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
-    RememberedBy,
+    RememberApprovalBy,
 };
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::helpers::username::username_eq_ci;
@@ -729,7 +729,7 @@ impl ServerSession {
             // are no credentials to key a remembered approval on.
             let credentials = match auth_state {
                 Some(state) => state.lock().await.remembered_by(),
-                None => RememberedBy::Nothing,
+                None => RememberApprovalBy::Nothing,
             };
             let gate = services.require_admin_approval(
                 authorization,
@@ -2374,7 +2374,12 @@ impl ServerSession {
                 let cp = self.services.config_provider.clone();
 
                 if let Some(credential) = credential {
-                    return Ok(cp.validate_credential(username, &credential).await?);
+                    // The offer phase only asks whether the key would work;
+                    // nothing is added to the auth state here.
+                    return Ok(cp
+                        .validate_credential(username, &credential)
+                        .await?
+                        .is_some());
                 }
 
                 Ok(false)

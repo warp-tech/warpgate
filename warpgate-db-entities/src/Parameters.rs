@@ -6,7 +6,6 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_aws::S3StorageConfig;
 use warpgate_common::PasswordPolicy;
-use warpgate_common::auth::CredentialDigestSalt;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
@@ -230,10 +229,6 @@ pub struct Model {
     /// the first node to boot; never exposed through the admin API.
     #[sea_orm(column_type = "Text", nullable)]
     pub cluster_token: Option<String>,
-    /// Cluster-global secret mixed into stored credential digests. Generated
-    /// once and never exposed through the admin API.
-    #[sea_orm(column_type = "Text")]
-    pub credential_digest_salt: String,
     #[sea_orm(column_type = "Text", nullable)]
     pub encryption_key_fp: Option<String>,
     /// Fingerprint of the previous key while a rotation is going on
@@ -337,12 +332,6 @@ impl Entity {
                     )
                     .unwrap()),
                     cluster_token: Set(None),
-                    // A fresh installation creates this row itself, so the
-                    // migration that introduces the salt finds nothing to
-                    // stamp; the two paths generate the same way.
-                    credential_digest_salt: Set(CredentialDigestSalt::random()
-                        .expose_secret()
-                        .to_owned()),
                     encryption_key_fp: Set(None),
                     retiring_key_fp: Set(None),
                 }

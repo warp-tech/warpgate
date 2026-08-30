@@ -26,29 +26,20 @@ pub enum CredentialKind {
     WebUserApproval,
 }
 
-/// Which kind of out-of-band approval a request or a remembered grant is for.
-///
-/// Only [`ApprovalKind::User`] is a credential; administrator approval is a
-/// gate on the connection, decided after authentication. The two must never
-/// cross-satisfy, so the kind is part of every request key and match key.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum,
 )]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 pub enum ApprovalKind {
-    /// Self approval from the user's own browser session.
+    /// User approval: is a credential and part of auth policy, approved by user themselves in their browser session, pre-auth
     #[sea_orm(string_value = "user")]
     User,
-    /// JIT approval by an administrator.
+    /// Admin approval: a target property, not a credential, approved by an admin user, post-auth
     #[sea_orm(string_value = "admin")]
     Admin,
 }
 
-/// How widely an approval is remembered for later bypass.
-///
-/// Stored on the request row and taken by both approval endpoints, so it
-/// derives its database and OpenAPI representations here rather than being
-/// restated per layer with conversions between the copies.
+/// "Remember decision" scope for approvals
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum, EnumIter, DeriveActiveEnum,
 )]
@@ -104,16 +95,48 @@ impl AuthCredential {
     }
 }
 
-/// A value-bound fingerprint of an [`AuthCredential`],
+/// Identifies the *stored* credential that a submitted one matched, so a later
+/// authentication can be recognised as having used the same one.
+///
+/// Built only from a credential's stored verifier — an Argon2 PHC string, an
+/// OpenSSH public key — never from what the client submitted. That is the whole
+/// point of the type: these identifiers end up in the approval rows, and a
+/// digest of a submitted *password* would put a second, far cheaper
+/// representation of it in the same database the Argon2 hash lives in. Anyone
+/// holding a dump already has the verifier, so this tells them nothing new.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StoredCredentialId([u8; 32]);
+
+impl StoredCredentialId {
+    /// `verifier` must be the stored side of the credential, never the client's
+    /// submission — see the type docs.
+    #[must_use]
+    pub fn of_stored_verifier(verifier: &[u8]) -> Self {
+        Self(sha256(verifier))
+    }
+
+    const fn bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+/// Which credentials an authentication was made with, by identity rather than
+/// by value: enough to tell "the same credentials as last time", and nothing
+/// more.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AuthCredentialFingerprint {
     // OTP is represented by kind only to avoid a mismatch every 30s,
     // also its key ID is not known at this time
     Otp,
-    Password { hash: [u8; 32] },
-    PublicKey { kind: String, hash: [u8; 32] },
-    Certificate { hash: [u8; 32] },
-    Sso { provider: String, email: String },
+    Password(StoredCredentialId),
+    PublicKey {
+        kind: String,
+        id: StoredCredentialId,
+    },
+    Sso {
+        provider: String,
+        email: String,
+    },
     WebUserApproval,
 }
 
@@ -134,18 +157,14 @@ impl AuthCredentialFingerprint {
 
         match self {
             Self::Otp => out.push(1),
-            Self::Password { hash } => {
+            Self::Password(id) => {
                 out.push(2);
-                out.extend_from_slice(hash);
+                out.extend_from_slice(id.bytes());
             }
-            Self::PublicKey { kind, hash } => {
+            Self::PublicKey { kind, id } => {
                 out.push(3);
                 push_str(out, kind);
-                out.extend_from_slice(hash);
-            }
-            Self::Certificate { hash } => {
-                out.push(4);
-                out.extend_from_slice(hash);
+                out.extend_from_slice(id.bytes());
             }
             Self::Sso { provider, email } => {
                 out.push(5);
@@ -153,32 +172,6 @@ impl AuthCredentialFingerprint {
                 push_str(out, email);
             }
             Self::WebUserApproval => out.push(6),
-        }
-    }
-}
-
-impl From<&AuthCredential> for AuthCredentialFingerprint {
-    fn from(cred: &AuthCredential) -> Self {
-        match cred {
-            AuthCredential::Otp(_) => Self::Otp,
-            AuthCredential::Password(secret) => Self::Password {
-                hash: sha256(secret.expose_secret().as_bytes()),
-            },
-            AuthCredential::PublicKey {
-                kind,
-                public_key_bytes,
-            } => Self::PublicKey {
-                kind: kind.to_string(),
-                hash: sha256(public_key_bytes),
-            },
-            AuthCredential::Certificate { certificate_pem } => Self::Certificate {
-                hash: sha256(certificate_pem.expose_secret().as_bytes()),
-            },
-            AuthCredential::Sso { provider, email } => Self::Sso {
-                provider: provider.clone(),
-                email: email.clone(),
-            },
-            AuthCredential::WebUserApproval => Self::WebUserApproval,
         }
     }
 }

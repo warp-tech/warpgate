@@ -67,9 +67,7 @@ pub enum SessionAuthorization {
         target_id: Uuid,
         #[serde(default)]
         ticket_id: Option<Uuid>,
-        /// Whether the ticket's consumption was deferred to the administrator
-        /// approval: a gated target spends the ticket on the approval, not on
-        /// establishing the session, so a refusal doesn't burn a use.
+        /// ticket spend is deferred for approval-gated targets
         #[serde(default)]
         ticket_spend_deferred: bool,
     },

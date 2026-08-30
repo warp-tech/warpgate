@@ -11,7 +11,7 @@ use std::net::IpAddr;
 use tracing::{error, info, warn};
 use url::Url;
 use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, CredentialKind, RememberedBy,
+    AuthCredential, AuthResult, AuthSelector, CredentialKind, RememberApprovalBy,
 };
 use warpgate_common::{Protocol, Secret, UserSessionId, WarpgateError};
 
@@ -178,7 +178,7 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                     session_id,
                     remote_ip: Some(remote_ip),
                     // A ticket is not a stable credential fingerprint.
-                    credentials: RememberedBy::Nothing,
+                    credentials: RememberApprovalBy::Nothing,
                     // Armed for the whole hold: the client dropping
                     // mid-approval cancels this future, so the ticket has to
                     // be settled by the gate and the guard rather than by any

@@ -1,9 +1,12 @@
+use std::ops::Deref;
+
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{IntoCondition, OnConflict, SimpleExpr};
 use sea_orm::{Condition, QueryFilter, Set};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::auth::{ApprovalKind, ApprovalScope};
+use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, DeriveActiveEnum)]
@@ -24,14 +27,26 @@ pub enum ApprovalRequestStatus {
 }
 
 impl ApprovalRequestStatus {
-    /// Terminal states that carry no decision, and so answer nothing. A row in
-    /// one of these is history: a later gate on the same session reopens it.
+    /// terminal states w/o decision (can be reopened)
     pub const UNANSWERED: [Self; 2] = [Self::TimedOut, Self::Abandoned];
 
-    /// States that carry an answer. Nothing rewrites a row in one of these —
-    /// the answer stands, and a later gate asking the same question reads it
-    /// back rather than putting it to anyone again.
+    /// terminal states w/ decision (final)
     pub const DECIDED: [Self; 2] = [Self::Approved, Self::Rejected];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UndecidedApprovalRequestStatus {
+    TimedOut,
+    Abandoned,
+}
+
+impl From<UndecidedApprovalRequestStatus> for ApprovalRequestStatus {
+    fn from(value: UndecidedApprovalRequestStatus) -> Self {
+        match value {
+            UndecidedApprovalRequestStatus::TimedOut => Self::TimedOut,
+            UndecidedApprovalRequestStatus::Abandoned => Self::Abandoned,
+        }
+    }
 }
 
 /// An out-of-band approval request — a first-class record, not a projection:
@@ -63,52 +78,33 @@ pub struct Model {
     pub session_id: UserSessionId,
     #[sea_orm(primary_key, auto_increment = false)]
     pub kind: ApprovalKind,
-    /// The node running the session that is waiting (the row's creator).
+    /// the node running the waiting AuthState
     pub node_id: NodeId,
     pub protocol: String,
     pub username: String,
-    /// The user whose session is being asked about. Stored alongside the name
-    /// so a decision can be attributed to them in the audit trail without a
-    /// lookup, mirroring `resolved_by_user_id` for the approver.
     pub user_id: Uuid,
-    /// Part of the key: see the type docs.
     #[sea_orm(primary_key, auto_increment = false)]
     pub target: String,
     pub remote_address: Option<String>,
-    /// The short code the user is shown, for confirming they are approving
-    /// their own login. Only [`ApprovalKind::User`] has one — an
-    /// administrator approval is a gate on a connection, with no second party
-    /// reading a code off a screen.
+    /// only user approvals have these
     pub identification_string: Option<String>,
-    /// A digest of the credentials the session authenticated with, so an
-    /// approved row can be matched against a later identical connection for
-    /// the grace-period bypass. Null when the session has nothing stable to
-    /// pin a grant to — then the row can never serve as a remembered approval.
+    /// hashed credential set, part of the key of the "remember" decisions
     pub credentials_digest: Option<String>,
-    /// The ticket to consume if this request is approved. Set only where a
-    /// ticket's consumption is deferred to the gate (an HTTP ticket session,
-    /// whose session outlives any one request); connection-holding protocols
-    /// settle their ticket through the gate outcome instead.
+    /// ticket to consume if this request is approved (if consumption is deferred (HTTP))
     pub consumes_ticket_id: Option<Uuid>,
     pub started: OffsetDateTime,
     pub status: ApprovalRequestStatus,
-    /// Set alongside [`ApprovalRequestStatus::Approved`].
     pub scope: Option<ApprovalScope>,
     pub resolved_by_username: Option<String>,
-    /// Null when the resolver isn't a user, such as the admin API token.
+    /// None when resolver isn't a user (e.g. API token)
     pub resolved_by_user_id: Option<Uuid>,
-    /// When the question left [`ApprovalRequestStatus::Pending`], however it
-    /// did. For an approval this anchors the grace-period window.
     pub resolved_at: Option<OffsetDateTime>,
-    /// When the owning node read the decision back and acted on it. Null while
-    /// the request is still a live question, which is what keeps the node-wide
-    /// sweep from re-applying a decision it has already delivered.
+    /// when the session has acknowledged the decision
     pub consumed_at: Option<OffsetDateTime>,
 }
 
 impl Column {
-    /// Columns rewritten when a request is re-advertised or asked again
-    /// ([`upsert_request`])
+    /// rewritten when a request is re-advertised
     pub const IDENTITY: [Self; 9] = [
         Self::NodeId,
         Self::Protocol,
@@ -121,8 +117,7 @@ impl Column {
         Self::Started,
     ];
 
-    /// Everything else (decision record), cleared only when a question that
-    /// went unanswered is asked again
+    /// everything else (decision record)
     pub const DECISION: [Self; 6] = [
         Self::Status,
         Self::Scope,
@@ -144,34 +139,6 @@ impl ActiveModelBehavior for ActiveModel {}
 // IDENTITY/DECISION partition they have to respect. What a request *means* —
 // who waits on one, what a decision does to a connection — lives in
 // `warpgate_core::approvals`.
-/// The request of one kind on a session, where only one can exist: a login has
-/// a single target name fixed when its auth state is built, so its own approval
-/// is unambiguous. Administrator gates name their target — see
-/// [`find_question`].
-pub async fn find_request(
-    db: &DatabaseConnection,
-    session_id: UserSessionId,
-    kind: ApprovalKind,
-) -> Result<Option<Model>, WarpgateError> {
-    Ok(Entity::find()
-        .filter(one_request(session_id, kind))
-        .one(db)
-        .await?)
-}
-
-/// [`find_request`], narrowed to one question: `None` also when the slot has
-/// been taken over by a question about a different target.
-pub async fn find_question(
-    db: &DatabaseConnection,
-    session_id: UserSessionId,
-    kind: ApprovalKind,
-    target: &str,
-) -> Result<Option<Model>, WarpgateError> {
-    Ok(Entity::find()
-        .filter(one_question(session_id, kind, target))
-        .one(db)
-        .await?)
-}
 
 /// A status change on request rows, and the only thing in this module that
 /// writes [`Column::Status`].
@@ -188,17 +155,13 @@ pub async fn find_question(
 /// from the model; it names its own source states inline.
 pub struct StatusTransition {
     to: ApprovalRequestStatus,
-    /// Which rows this transition is allowed to leave.
+    /// a filter on start condition
     from: Condition,
-    /// Columns written alongside the status.
+    /// columns to write
     columns: Vec<(Column, SimpleExpr)>,
 }
 
 impl StatusTransition {
-    /// The ordinary case: a request still waiting on an answer. Every way out
-    /// of `Pending` goes through here, so the transition also stamps when the
-    /// question was resolved — for an approval, that is what anchors the
-    /// grace-period window.
     pub fn from_pending(to: ApprovalRequestStatus) -> Self {
         Self {
             to,
@@ -214,8 +177,7 @@ impl StatusTransition {
         self
     }
 
-    /// Applies to every row matching `which` that is also in an allowed source
-    /// state. Returns how many rows moved.
+    /// returns change count
     pub async fn apply(
         self,
         db: &DatabaseConnection,
@@ -232,46 +194,60 @@ impl StatusTransition {
     }
 }
 
-/// Every request of one kind on a session, across its targets.
-pub fn one_request(session_id: UserSessionId, kind: ApprovalKind) -> Condition {
-    Column::SessionId
-        .eq(session_id)
-        .and(Column::Kind.eq(kind))
-        .into_condition()
+/// Condition guaranteed to key on primary key
+pub struct Key(Condition);
+
+impl Key {
+    pub fn new(session_id: UserSessionId, kind: ApprovalKind, target: &str) -> Self {
+        Self(
+            Column::SessionId
+                .eq(session_id)
+                .and(Column::Kind.eq(kind))
+                .and(Column::Target.eq(target))
+                .into_condition(),
+        )
+    }
 }
 
-/// One *question*: [`one_request`] narrowed to the target it asks about — the
-/// full key, which everything that answers, consumes or closes a question must
-/// name so it cannot touch the session's other questions.
-pub fn one_question(session_id: UserSessionId, kind: ApprovalKind, target: &str) -> Condition {
-    one_request(session_id, kind).add(Column::Target.eq(target))
+impl IntoCondition for Key {
+    fn into_condition(self) -> Condition {
+        self.0
+    }
 }
 
-/// Advertises a question on its row, keyed `(session_id, kind, target)`: a wait
-/// site that runs twice updates its own row instead of queueing a duplicate,
-/// and a question about another target is simply another row.
-///
-/// Whether the row already exists decides only *how* it is written, never
-/// whether: an answer is never overwritten, in either direction. A row still
-/// pending has the asker's facts refreshed — a request/response protocol
-/// re-enters its gate on every request, and an answer given between two of
-/// those is the answer to *this* question. A row that ended without an answer
-/// is a previous asking, and is asked afresh. A row carrying a decision is left
-/// exactly as it stands, for the asker to read back.
-///
-/// Two statements rather than one because a missing row and a decided row both
-/// leave the update matching nothing, and telling them apart in the insert
-/// would need a conditional conflict action, which MySQL has no syntax for.
+impl Deref for Key {
+    type Target = Condition;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub async fn find_user_approval(
+    db: &DatabaseConnection,
+    username: &str,
+    session_id: UserSessionId,
+) -> Result<Option<Model>, WarpgateError> {
+    let row = Entity::find()
+        .filter(Column::SessionId.eq(session_id))
+        .filter(Column::Kind.eq(ApprovalKind::User))
+        .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
+        .one(db)
+        .await?;
+    Ok(row.filter(|row| username_eq_ci(&row.username, username)))
+}
+
+/// publish or readvertise a single request
 pub async fn upsert_request(
     db: &DatabaseConnection,
     row: ActiveModel,
 ) -> Result<(), WarpgateError> {
-    // The one status write outside `StatusTransition`, and it can only ever
-    // produce a question: the rest of the row is the caller's to state.
-    let mut asking = row.clone();
-    asking.status = Set(ApprovalRequestStatus::Pending);
+    let same_pending = ActiveModel {
+        status: Set(ApprovalRequestStatus::Pending),
+        ..row.clone()
+    };
 
-    match Entity::update(asking)
+    match Entity::update(same_pending)
         .filter(Column::Status.is_not_in(ApprovalRequestStatus::DECIDED))
         .exec(db)
         .await
@@ -301,42 +277,34 @@ pub async fn upsert_request(
     }
 }
 
-/// Ends a request that is still waiting, leaving the row as the record of how.
+/// ends a request without as abandoned or timed out
 ///
-/// Only a pending request can be closed this way: a decision already written to
-/// the row is the answer, and outranks whatever the waiting side went on to do.
-/// `target` names the question being closed, so a straggling close cannot end a
-/// successor question that has since taken the slot over.
+/// not for final decisions - this does not cross check start timestamp
 pub async fn close_request(
     db: &DatabaseConnection,
     session_id: UserSessionId,
     kind: ApprovalKind,
     target: &str,
-    status: ApprovalRequestStatus,
+    status: UndecidedApprovalRequestStatus,
 ) -> Result<(), WarpgateError> {
-    StatusTransition::from_pending(status)
-        .apply(db, one_question(session_id, kind, target))
+    StatusTransition::from_pending(status.into())
+        .apply(db, Key::new(session_id, kind, target).clone())
         .await?;
     Ok(())
 }
 
-/// Records that the owning node has read a decision off the row and acted on
-/// it. The row stays as the audit record; the stamp is what takes it out of the
-/// self-approval sweep. `which` names the rows — [`one_question`] where the
-/// caller knows which question it delivered, [`one_request`] where the state,
-/// not the row, was the authority.
-pub async fn mark_consumed(db: &DatabaseConnection, which: Condition) -> Result<(), WarpgateError> {
+/// mark a decision as acknowledged by its session
+pub async fn mark_consumed(db: &DatabaseConnection, which: Key) -> Result<(), WarpgateError> {
     Entity::update_many()
         .col_expr(Column::ConsumedAt, OffsetDateTime::now_utc().into())
-        .filter(which)
+        .filter(which.into_condition())
         .filter(Column::ConsumedAt.is_null())
         .exec(db)
         .await?;
     Ok(())
 }
 
-/// Ends every request still waiting on a session, for when the session itself
-/// ends — the waiting connection is gone, so nothing can consume them.
+/// batch mark all session's requests as abandoned
 pub async fn abandon_requests_for_session(
     db: &DatabaseConnection,
     session_id: UserSessionId,
@@ -347,10 +315,6 @@ pub async fn abandon_requests_for_session(
     Ok(())
 }
 
-/// Rows carrying a self-approval decision the node holding the auth state has
-/// yet to act on. Rows stay behind as audit records once it has, so the
-/// `consumed_at` stamp — not the row's absence — is what stops the same
-/// decision being delivered twice.
 fn undelivered_user_decisions() -> Select<Entity> {
     Entity::find()
         .filter(Column::Kind.eq(ApprovalKind::User))
@@ -358,9 +322,7 @@ fn undelivered_user_decisions() -> Select<Entity> {
         .filter(Column::ConsumedAt.is_null())
 }
 
-/// Every undelivered self-approval decision owned by `node_id`, for the
-/// node-wide sweep.
-pub async fn find_undelivered_user_decisions(
+pub async fn undelivered_user_approvals_for_node(
     db: &DatabaseConnection,
     node_id: NodeId,
 ) -> Result<Vec<Model>, WarpgateError> {
@@ -370,10 +332,7 @@ pub async fn find_undelivered_user_decisions(
         .await?)
 }
 
-/// One session's undelivered self-approval decisions — one per target the
-/// session has asked about — for an auth flow pulling a decision the user just
-/// made ahead of the sweep.
-pub async fn find_undelivered_user_decisions_for_session(
+pub async fn undelivered_user_approvals_for_session(
     db: &DatabaseConnection,
     session_id: UserSessionId,
 ) -> Result<Vec<Model>, WarpgateError> {
@@ -383,11 +342,7 @@ pub async fn find_undelivered_user_decisions_for_session(
         .await?)
 }
 
-/// Ends every request still pending that was asked before `cutoff`, for
-/// waiters that are gone without having closed their own (owning node crashed,
-/// or a `Drop` that never got to run). How old is too old is a policy question
-/// and belongs to the caller.
-pub async fn abandon_asked_before(
+pub async fn abandon_all_requested_before(
     db: &DatabaseConnection,
     cutoff: OffsetDateTime,
 ) -> Result<(), WarpgateError> {
@@ -397,15 +352,17 @@ pub async fn abandon_asked_before(
     Ok(())
 }
 
-/// Drops request rows past the audit retention. The only thing that deletes
-/// one: everything else moves a request to a terminal status and leaves it as
-/// the record of what was asked and who answered.
-pub async fn prune_before(
+pub async fn delete_all_before(
     db: &DatabaseConnection,
     cutoff: OffsetDateTime,
 ) -> Result<(), WarpgateError> {
+    let inactive = Column::Status
+        .is_in(ApprovalRequestStatus::UNANSWERED)
+        .or(Column::ConsumedAt.is_not_null());
+
     Entity::delete_many()
         .filter(Column::Started.lt(cutoff))
+        .filter(inactive)
         .exec(db)
         .await?;
     Ok(())
