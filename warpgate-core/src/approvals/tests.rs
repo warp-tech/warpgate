@@ -964,3 +964,231 @@ async fn a_refused_deferred_ticket_keeps_its_use() {
     );
     assert_eq!(uses_left(&db, ticket_id).await, Some(1));
 }
+
+/// Delivering recorded self-approval decisions to the auth state they were
+/// asked for. Needs a real `Services` because delivery spans the store and the
+/// rows; everything heavy in it just wraps the same in-memory database.
+mod delivery {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use tokio::sync::{Mutex, broadcast};
+    use warpgate_common::auth::{
+        AuthCredential, AuthResult, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
+    };
+    use warpgate_common::{GlobalParams, Secret, User, WarpgateConfig, WarpgateConfigStore};
+
+    use super::*;
+    use crate::cluster::Cluster;
+    use crate::login_protection::LoginProtectionService;
+    use crate::rate_limiting::RateLimiterRegistry;
+    use crate::recordings::SessionRecordings;
+    use crate::{AuthStateStore, DatabaseConfigProvider, Services, State};
+
+    struct RequireWebApproval;
+
+    impl CredentialPolicy for RequireWebApproval {
+        fn is_sufficient(
+            &self,
+            _protocol: Protocol,
+            valid_credentials: &[AuthCredential],
+        ) -> CredentialPolicyResponse {
+            if valid_credentials
+                .iter()
+                .any(|c| c.kind() == CredentialKind::WebUserApproval)
+            {
+                CredentialPolicyResponse::Ok
+            } else {
+                CredentialPolicyResponse::Need(
+                    [CredentialKind::WebUserApproval].into_iter().collect(),
+                )
+            }
+        }
+    }
+
+    async fn test_services(db: &DatabaseConnection) -> Services {
+        let params = GlobalParams::new(PathBuf::from("/warpgate.yaml"), false).unwrap();
+        let rate_limiter_registry = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
+        let cluster = Arc::new(Cluster::new(db.clone(), 0).await.unwrap());
+        Services {
+            db: db.clone(),
+            recordings: Arc::new(SessionRecordings::new(db.clone(), &params)),
+            config: Arc::new(Mutex::new(WarpgateConfig {
+                store: WarpgateConfigStore::default(),
+            })),
+            state: State::new(db, &rate_limiter_registry, cluster.node_id),
+            cluster,
+            rate_limiter_registry,
+            config_provider: Arc::new(DatabaseConfigProvider::new(db).into()),
+            auth_state_store: Arc::new(Mutex::new(AuthStateStore::new())),
+            admin_token: Arc::new(None),
+            cluster_token: Arc::new(Secret::new("test".into())),
+            credential_digest_salt: Arc::new(test_salt()),
+            login_protection: Arc::new(LoginProtectionService::new(db.clone()).await.unwrap()),
+            global_params: Arc::new(params),
+            listener_status: Default::default(),
+            admin_approval_request_tx: broadcast::channel(8).0,
+        }
+    }
+
+    fn user_subject(session_id: UserSessionId, user: &User, target: &str) -> ApprovalSubject {
+        let mut subject = plain_subject(target);
+        subject.kind = ApprovalKind::User;
+        subject.session_id = session_id;
+        subject.user_info = AuthStateUserInfo {
+            id: user.id,
+            username: user.username.clone(),
+        };
+        subject
+    }
+
+    fn test_user() -> User {
+        User {
+            id: Uuid::new_v4(),
+            username: "someone".into(),
+            description: String::new(),
+            credential_policy: None,
+            rate_limit_bytes_per_second: None,
+            ldap_server_id: None,
+            allowed_ip_ranges: None,
+        }
+    }
+
+    async fn decide(db: &DatabaseConnection, session_id: UserSessionId, target: &str) -> bool {
+        record_decision(
+            db,
+            session_id,
+            ApprovalKind::User,
+            target,
+            ApprovalDecision::Approved(ApprovalScope::Once),
+            &admin_actor(),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn user_row(
+        db: &DatabaseConnection,
+        session_id: UserSessionId,
+        target: &str,
+    ) -> SessionApprovalRequest::Model {
+        find_question(db, session_id, ApprovalKind::User, target)
+            .await
+            .unwrap()
+            .expect("the request should still exist")
+    }
+
+    /// An auth state answers for one target at a time while its session's rows
+    /// keep one question per target. An answer given to a question the state
+    /// has moved on from must not satisfy the question it is asking now, and
+    /// must not take the live question's row with it when it is put away.
+    #[tokio::test]
+    async fn an_answer_to_a_superseded_question_is_not_delivered_to_the_current_one() {
+        let db = migrated_db().await;
+        let services = test_services(&db).await;
+        let session_id = UserSessionId(Uuid::new_v4());
+        let user = test_user();
+
+        // The question the state has since moved on from, and the current one.
+        advertise_row(&db, session_id, &user_subject(session_id, &user, "alpha")).await;
+        advertise_row(&db, session_id, &user_subject(session_id, &user, "beta")).await;
+
+        let state_arc = services.auth_state_store.lock().await.create(
+            &session_id,
+            &user,
+            Protocol::Ssh,
+            "beta",
+            Box::new(RequireWebApproval),
+            None,
+        );
+
+        assert!(decide(&db, session_id, "alpha").await);
+        services
+            .apply_recorded_user_decision(&session_id)
+            .await
+            .unwrap();
+
+        // Alpha's answer satisfies nothing...
+        assert!(matches!(
+            state_arc.lock().await.verify(),
+            AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval)
+        ));
+        // ...its row is stamped as picked up so it stops being re-offered...
+        assert!(
+            user_row(&db, session_id, "alpha")
+                .await
+                .consumed_at
+                .is_some()
+        );
+        // ...and the live question is untouched: still pending, still deliverable.
+        let beta = user_row(&db, session_id, "beta").await;
+        assert_eq!(
+            beta.status,
+            SessionApprovalRequest::ApprovalRequestStatus::Pending
+        );
+        assert!(beta.consumed_at.is_none());
+
+        // The current question's own answer still gets through.
+        assert!(decide(&db, session_id, "beta").await);
+        services
+            .apply_recorded_user_decision(&session_id)
+            .await
+            .unwrap();
+        assert!(matches!(
+            state_arc.lock().await.verify(),
+            AuthResult::Accepted { .. }
+        ));
+        assert!(
+            user_row(&db, session_id, "beta")
+                .await
+                .consumed_at
+                .is_some()
+        );
+    }
+
+    /// A fresh attempt on the same connection can take the session's state
+    /// over for a different user. An answer given about the previous user's
+    /// login must not satisfy the new user's — same session, same target,
+    /// different question.
+    #[tokio::test]
+    async fn an_answer_about_one_user_is_not_delivered_to_another() {
+        let db = migrated_db().await;
+        let services = test_services(&db).await;
+        let session_id = UserSessionId(Uuid::new_v4());
+        let asked_about = test_user();
+
+        advertise_row(
+            &db,
+            session_id,
+            &user_subject(session_id, &asked_about, "a-target"),
+        )
+        .await;
+
+        // The state was since rebuilt for a different user.
+        let state_arc = services.auth_state_store.lock().await.create(
+            &session_id,
+            &test_user(),
+            Protocol::Ssh,
+            "a-target",
+            Box::new(RequireWebApproval),
+            None,
+        );
+
+        assert!(decide(&db, session_id, "a-target").await);
+        services
+            .apply_recorded_user_decision(&session_id)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            state_arc.lock().await.verify(),
+            AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval)
+        ));
+        assert!(
+            user_row(&db, session_id, "a-target")
+                .await
+                .consumed_at
+                .is_some()
+        );
+    }
+}

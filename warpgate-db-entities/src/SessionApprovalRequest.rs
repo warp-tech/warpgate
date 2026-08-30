@@ -326,8 +326,6 @@ pub async fn close_request(
 /// caller knows which question it delivered, [`one_request`] where the state,
 /// not the row, was the authority.
 pub async fn mark_consumed(db: &DatabaseConnection, which: Condition) -> Result<(), WarpgateError> {
-    use Column;
-
     Entity::update_many()
         .col_expr(Column::ConsumedAt, OffsetDateTime::now_utc().into())
         .filter(which)
@@ -349,22 +347,38 @@ pub async fn abandon_requests_for_session(
     Ok(())
 }
 
-/// Self approvals decided somewhere in the cluster that the node holding the
-/// auth state has yet to act on. Rows stay behind as audit records once they
-/// have been, so the `consumed_at` stamp — not the row's absence — is what
-/// stops the same decision being delivered every tick.
+/// Rows carrying a self-approval decision the node holding the auth state has
+/// yet to act on. Rows stay behind as audit records once it has, so the
+/// `consumed_at` stamp — not the row's absence — is what stops the same
+/// decision being delivered twice.
+fn undelivered_user_decisions() -> Select<Entity> {
+    Entity::find()
+        .filter(Column::Kind.eq(ApprovalKind::User))
+        .filter(Column::Status.is_in(ApprovalRequestStatus::DECIDED))
+        .filter(Column::ConsumedAt.is_null())
+}
+
+/// Every undelivered self-approval decision owned by `node_id`, for the
+/// node-wide sweep.
 pub async fn find_undelivered_user_decisions(
     db: &DatabaseConnection,
     node_id: NodeId,
 ) -> Result<Vec<Model>, WarpgateError> {
-    Ok(Entity::find()
-        .filter(Column::Kind.eq(ApprovalKind::User))
+    Ok(undelivered_user_decisions()
         .filter(Column::NodeId.eq(node_id))
-        .filter(Column::Status.is_in([
-            ApprovalRequestStatus::Approved,
-            ApprovalRequestStatus::Rejected,
-        ]))
-        .filter(Column::ConsumedAt.is_null())
+        .all(db)
+        .await?)
+}
+
+/// One session's undelivered self-approval decisions — one per target the
+/// session has asked about — for an auth flow pulling a decision the user just
+/// made ahead of the sweep.
+pub async fn find_undelivered_user_decisions_for_session(
+    db: &DatabaseConnection,
+    session_id: UserSessionId,
+) -> Result<Vec<Model>, WarpgateError> {
+    Ok(undelivered_user_decisions()
+        .filter(Column::SessionId.eq(session_id))
         .all(db)
         .await?)
 }

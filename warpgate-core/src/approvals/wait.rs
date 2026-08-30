@@ -258,13 +258,16 @@ pub async fn record_decision(
 
     // Read ahead of the transition, off the pending row only: a question that is
     // already answered or closed has no spend riding on this decision and is not
-    // this call's to audit, and the transition below moves nothing but a pending
-    // row. The row also carries what the audit event says about the asker.
-    let pending = find_question(db, session_id, kind, target)
+    // this call's to audit, and the transition below moves nothing but the row
+    // read here. The row also carries what the audit event says about the asker.
+    let Some(row) = find_question(db, session_id, kind, target)
         .await?
-        .filter(|row| row.status == ApprovalRequestStatus::Pending);
+        .filter(|row| row.status == ApprovalRequestStatus::Pending)
+    else {
+        return Ok(false);
+    };
     let consumes_ticket_id = if matches!(decision, ApprovalDecision::Approved(_)) {
-        pending.as_ref().and_then(|row| row.consumes_ticket_id)
+        row.consumes_ticket_id
     } else {
         None
     };
@@ -284,7 +287,18 @@ pub async fn record_decision(
         .set(Column::Scope, scope)
         .set(Column::ResolvedByUsername, actor.username.clone())
         .set(Column::ResolvedByUserId, actor.user_id)
-        .apply(db, one_question(session_id, kind, target))
+        // Pinned by `started` to the asking read above, so the row moved is the
+        // row the ticket was spent for and the audit event describes. Without
+        // it a question closed and asked afresh in that window would be decided
+        // on the strength of its predecessor's ticket.
+        //
+        // The pin cannot tell whether the *approver* saw this asking — their
+        // click carries no identity for it — so a re-advertise landing in the
+        // window makes the decision a no-op the approver simply repeats.
+        .apply(
+            db,
+            one_question(session_id, kind, target).add(Column::Started.eq(row.started)),
+        )
         .await;
 
     if !matches!(moved, Ok(n) if n > 0)
@@ -299,7 +313,7 @@ pub async fn record_decision(
     // administrator acted, and that stands as a fact even if the connection
     // they were deciding about has already gone. Gated on the transition, so
     // of two approvers racing one question only the one that moved it logs.
-    if recorded && let Some(row) = pending {
+    if recorded {
         emit_resolved_event(
             &row,
             actor,

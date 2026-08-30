@@ -9,7 +9,7 @@ use warpgate_common::auth::{
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    find_request, mark_consumed, one_request, upsert_request,
+    find_undelivered_user_decisions_for_session, mark_consumed, one_question, upsert_request,
 };
 
 use super::*;
@@ -29,19 +29,9 @@ impl Services {
         &self,
         session_id: &UserSessionId,
     ) -> Result<(), WarpgateError> {
-        let Some(row) = find_request(&self.db, *session_id, ApprovalKind::User).await? else {
-            return Ok(());
-        };
-        // A row that has been picked up is the record of a decision already
-        // delivered, not one waiting to be.
-        if row.consumed_at.is_some() {
-            return Ok(());
+        for row in find_undelivered_user_decisions_for_session(&self.db, *session_id).await? {
+            self.deliver_user_decision(&row).await?;
         }
-        let RowState::Decided(decision, actor) = row_state(&row)? else {
-            return Ok(());
-        };
-        self.apply_user_approval(row.session_id, decision, &actor)
-            .await?;
         Ok(())
     }
 
@@ -57,13 +47,21 @@ impl Services {
                 .await?;
 
         for row in rows {
-            let RowState::Decided(decision, actor) = row_state(&row)? else {
-                continue;
-            };
-            self.apply_user_approval(row.session_id, decision, &actor)
-                .await?;
+            self.deliver_user_decision(&row).await?;
         }
         Ok(())
+    }
+
+    /// Delivers one recorded decision to the auth state it was asked for.
+    async fn deliver_user_decision(
+        &self,
+        row: &SessionApprovalRequest::Model,
+    ) -> Result<bool, WarpgateError> {
+        let RowState::Decided(decision, actor) = row_state(row)? else {
+            return Ok(false);
+        };
+        self.apply_user_decision(row.session_id, decision, &actor, Some(row))
+            .await
     }
 
     /// Applies a user's own approval to the locally-owned auth state: adds or
@@ -80,12 +78,39 @@ impl Services {
         decision: ApprovalDecision,
         actor: &ApprovalActor,
     ) -> Result<bool, WarpgateError> {
+        self.apply_user_decision(session_id, decision, actor, None)
+            .await
+    }
+
+    /// [`Self::apply_user_approval`], with the question named. `question` is
+    /// the request row a recorded decision was read off; `None` means the
+    /// decision is being made fresh against whatever the state is asking now
+    /// (the user clicked on the node holding it).
+    ///
+    /// The distinction matters because a state answers one question at a time
+    /// while a session's rows keep one per target: a decision recorded for a
+    /// question the state has since moved on from — a different target, or a
+    /// different user after a fresh attempt on the same connection — must not
+    /// satisfy the state's current question, and its consumption stamp must
+    /// land on its own row, not on the live question's.
+    async fn apply_user_decision(
+        &self,
+        session_id: UserSessionId,
+        decision: ApprovalDecision,
+        actor: &ApprovalActor,
+        question: Option<&SessionApprovalRequest::Model>,
+    ) -> Result<bool, WarpgateError> {
+        let consumed = |target: &str| one_question(session_id, ApprovalKind::User, target);
+
         let Some(state_arc) = self.auth_state_store.lock().await.get(&session_id) else {
             // The state is gone (vacuumed or node restarted) — nothing can act
-            // on the decision, so the row is stamped picked up to stop the
-            // sweep re-offering it. It keeps who decided what; that the login
-            // never heard is in its own audit trail.
-            mark_consumed(&self.db, one_request(session_id, ApprovalKind::User)).await?;
+            // on a recorded decision, so its row is stamped picked up to stop
+            // the sweep re-offering it. It keeps who decided what; that the
+            // login never heard is in its own audit trail. A fresh click with
+            // no state has recorded nothing, so there is nothing to stamp.
+            if let Some(row) = question {
+                mark_consumed(&self.db, consumed(&row.target)).await?;
+            }
             return Ok(false);
         };
 
@@ -95,6 +120,20 @@ impl Services {
             let mut state = state_arc.lock().await;
             let subject = ApprovalSubject::from_auth_state(&state);
 
+            // A recorded decision answers the question its row names. A state
+            // asking about a different target — or about a different user,
+            // after a fresh attempt took over the connection — is a different
+            // question; the one this answers can no longer be delivered to
+            // anything, so its row is stamped picked up and the state left
+            // waiting on its own answer.
+            if let Some(row) = question
+                && (row.target != subject.target_name || row.user_id != subject.user_info.id)
+            {
+                drop(state);
+                mark_consumed(&self.db, consumed(&row.target)).await?;
+                return Ok(false);
+            }
+
             // Only resolve a request the state is actually still waiting on —
             // not already accepted, rejected, or resolved concurrently.
             if !matches!(
@@ -103,10 +142,9 @@ impl Services {
             ) {
                 // A state that no longer wants it means the row is stale
                 // (satisfied by a grace bypass, or resolved concurrently) —
-                // close it rather than leave it advertising a request nobody
-                // can fulfil.
+                // stamp it picked up rather than leave it waiting on delivery.
                 drop(state);
-                mark_consumed(&self.db, one_request(session_id, ApprovalKind::User)).await?;
+                mark_consumed(&self.db, consumed(&subject.target_name)).await?;
                 return Ok(false);
             }
 
@@ -143,7 +181,7 @@ impl Services {
             actor,
         )
         .await?;
-        mark_consumed(&self.db, one_request(session_id, ApprovalKind::User)).await?;
+        mark_consumed(&self.db, consumed(&target_name)).await?;
         Ok(true)
     }
 }
