@@ -36,7 +36,7 @@ def assert_401():
 
 
 def _ssh_target_request(name: str) -> sdk.TargetDataRequest:
-    return sdk.TargetDataRequest(
+    return sdk.TargetDataRequest(require_approval=False, 
         name=name,
         options=sdk.TargetOptions(
             sdk.TargetOptionsTargetSSHOptions(
@@ -120,7 +120,10 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         id="approve_session",
         permission="approve_sessions",
         call=lambda api, r: api.approve_session_with_http_info(
-            r["session_id"], sdk.ApprovalScope.ONCE, "no-such-target"
+            r["session_id"],
+            sdk.ApproveSessionRequest(
+                scope=sdk.ApprovalScope.ONCE, target="no-such-target"
+            ),
         ),
         expected_statuses={200, 404},
     ),
@@ -128,7 +131,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         id="reject_session",
         permission="approve_sessions",
         call=lambda api, r: api.reject_session_with_http_info(
-            r["session_id"], "no-such-target"
+            r["session_id"], sdk.RejectSessionRequest(target="no-such-target")
         ),
         expected_statuses={200, 404},
     ),
@@ -1129,26 +1132,36 @@ def test_admin_api_permission_enforcement(
         )
 
 
-def test_update_target_keeps_the_approval_gate_when_unmentioned(
-    admin_client: sdk.DefaultApi,
+def test_update_target_must_state_the_approval_gate(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
 ):
-    # Every other field of a target update is a plain replace, but a client that
-    # predates the administrator gate — or simply doesn't set it — must not be
-    # able to take the gate off a target by saving the rest of it.
+    # The gate is a required field of every target write: a client that
+    # predates it — or simply doesn't set it — is rejected outright rather
+    # than silently taking the gate off a target by saving the rest of it.
+    # The generated client can't express the omission, so raw JSON it is.
     gated = _ssh_target_request(f"gated-{uuid4()}")
     gated.require_approval = True
     target = admin_client.create_target(gated)
     assert target.require_approval
 
-    renamed = _ssh_target_request(target.name)
-    assert renamed.require_approval is None, "the update must not mention the gate"
-    admin_client.update_target(target.id, renamed)
+    url = f"https://localhost:{pg_wg.http_port}"
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    body = admin_client.get_target(target.id).to_dict()
+    del body["require_approval"]
+    silent = session.put(
+        f"{url}/@warpgate/admin/api/targets/{target.id}", json=body
+    )
+    assert silent.status_code == 400, (
+        "an update that says nothing about the gate must be refused, "
+        f"got {silent.status_code}"
+    )
     assert admin_client.get_target(target.id).require_approval, (
-        "an update that says nothing about the gate must leave it on"
+        "and must not have touched it"
     )
 
-    # Turning it off is still an ordinary edit — the rule is about silence, not
-    # about refusing the change.
+    # Turning it off is an ordinary, explicit edit.
     off = _ssh_target_request(target.name)
     off.require_approval = False
     admin_client.update_target(target.id, off)

@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{IntoCondition, OnConflict, SimpleExpr};
-use sea_orm::{Condition, QueryFilter, Set};
+use sea_orm::{Condition, NotSet, QueryFilter, Set, SqlErr};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::auth::{ApprovalKind, ApprovalScope};
@@ -239,47 +239,106 @@ pub async fn find_user_approval(
     Ok(row.filter(|row| username_eq_ci(&row.username, username)))
 }
 
-/// publish or readvertise a single request
+/// What [`upsert_request`] found on the question's key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Advertised {
+    /// A new question was put on the record — created, or reopened after one
+    /// that ended unanswered. The one case worth announcing.
+    Asked,
+    /// A pending row was already there (possibly a concurrent asker's); its
+    /// asker facts were refreshed and nothing else touched.
+    AlreadyAsking,
+    /// A decided row is in the way. Nothing was written: the answer stands
+    /// for the asker to read back.
+    DecisionStands,
+}
+
+/// Refreshes a live question's asker facts — but never `started`: that is the
+/// reap clock and the timeout anchor, and a client re-asking every few seconds
+/// would otherwise push the window out indefinitely.
+async fn try_refresh_pending(db: &DatabaseConnection, row: &ActiveModel) -> Result<bool, DbErr> {
+    let refresh = ActiveModel {
+        started: NotSet,
+        status: NotSet,
+        scope: NotSet,
+        resolved_by_username: NotSet,
+        resolved_by_user_id: NotSet,
+        resolved_at: NotSet,
+        consumed_at: NotSet,
+        ..row.clone()
+    };
+    match Entity::update(refresh)
+        .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
+        .exec(db)
+        .await
+    {
+        Ok(_) => Ok(true),
+        Err(DbErr::RecordNotUpdated) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// Reopens a question that ended unanswered: the decision record is cleared and
+/// the clock starts afresh, because this is a new asking.
+async fn try_reopen_unanswered(db: &DatabaseConnection, row: &ActiveModel) -> Result<bool, DbErr> {
+    let reopened = ActiveModel {
+        status: Set(ApprovalRequestStatus::Pending),
+        scope: Set(None),
+        resolved_by_username: Set(None),
+        resolved_by_user_id: Set(None),
+        resolved_at: Set(None),
+        consumed_at: Set(None),
+        ..row.clone()
+    };
+    match Entity::update(reopened)
+        .filter(Column::Status.is_in(ApprovalRequestStatus::UNANSWERED))
+        .exec(db)
+        .await
+    {
+        Ok(_) => Ok(true),
+        Err(DbErr::RecordNotUpdated) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// Publishes or re-advertises a single request, and says which it did — the
+/// caller announces a question exactly when one was actually asked.
 pub async fn upsert_request(
     db: &DatabaseConnection,
     row: ActiveModel,
-) -> Result<(), WarpgateError> {
-    let same_pending = ActiveModel {
-        status: Set(ApprovalRequestStatus::Pending),
-        ..row.clone()
-    };
-
-    match Entity::update(same_pending)
-        .filter(Column::Status.is_not_in(ApprovalRequestStatus::DECIDED))
-        .exec(db)
-        .await
-    {
-        // Found an existing reusable request and updated it
-        Ok(_) => return Ok(()),
-        // Nothing usable found, continue
-        Err(DbErr::RecordNotUpdated) => {}
-        Err(error) => return Err(error.into()),
+) -> Result<Advertised, WarpgateError> {
+    if try_refresh_pending(db, &row).await? {
+        return Ok(Advertised::AlreadyAsking);
+    }
+    if try_reopen_unanswered(db, &row).await? {
+        return Ok(Advertised::Asked);
     }
 
-    // No entry ot entry was undecided
-    match Entity::insert(row)
-        .on_conflict(
-            OnConflict::columns([Column::SessionId, Column::Kind, Column::Target])
-                // .do_nothing() is broken in sea-orm on MySQL
-                // this is a portable "do nothing" (noop update):
-                .update_column(Column::SessionId)
-                .to_owned(),
-        )
-        .exec(db)
-        .await
-    {
-        Ok(_) => Ok(()),
-        Err(DbErr::RecordNotInserted) => Ok(()),
+    // A plain insert, not an ON CONFLICT one: what happened on a conflict is
+    // the whole return value here, and no portable conflict action reports it
+    // (a no-op update counts as a write on some backends and not others). The
+    // violation is classified instead.
+    match Entity::insert(row.clone()).exec(db).await {
+        Ok(_) => Ok(Advertised::Asked),
+        // Someone got a row in between the updates and the insert. Retry the
+        // two updates so the answer is what actually happened, not a guess;
+        // a decided row is the only thing neither can move.
+        Err(error) if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) => {
+            if try_refresh_pending(db, &row).await? {
+                return Ok(Advertised::AlreadyAsking);
+            }
+            if try_reopen_unanswered(db, &row).await? {
+                return Ok(Advertised::Asked);
+            }
+            Ok(Advertised::DecisionStands)
+        }
         Err(error) => Err(error.into()),
     }
 }
 
-/// ends a request without as abandoned or timed out
+/// Ends a request as abandoned or timed out, and says whether it did — `false`
+/// means the question was no longer pending, so nothing was closed and nothing
+/// should be reported as having been.
 ///
 /// not for final decisions - this does not cross check start timestamp
 pub async fn close_request(
@@ -288,11 +347,11 @@ pub async fn close_request(
     kind: ApprovalKind,
     target: &str,
     status: UndecidedApprovalRequestStatus,
-) -> Result<(), WarpgateError> {
-    StatusTransition::from_pending(status.into())
+) -> Result<bool, WarpgateError> {
+    let moved = StatusTransition::from_pending(status.into())
         .apply(db, Key::new(session_id, kind, target).clone())
         .await?;
-    Ok(())
+    Ok(moved > 0)
 }
 
 /// mark a decision as acknowledged by its session

@@ -135,7 +135,9 @@ class Test:
 
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.reject_session(approval.id, approval.target)
+            api.reject_session(
+                approval.id, sdk.RejectSessionRequest(target=approval.target)
+            )
 
         client.wait(timeout=30)
         assert _uses_left(url, ticket_id) == 1, "a denied session must not burn a ticket"

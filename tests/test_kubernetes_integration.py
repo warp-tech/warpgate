@@ -319,7 +319,7 @@ class TestKubernetesIntegration:
         token_target_name = f"k8s-token-{uuid.uuid4()}"
         with admin_client(url) as api:
             token_target = api.create_target(
-                sdk.TargetDataRequest(
+                sdk.TargetDataRequest(require_approval=False, 
                     name=token_target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -463,7 +463,7 @@ class TestKubernetesIntegration:
 
             target_name = f"k8s-approval-{uuid.uuid4()}"
             target = api.create_target(
-                sdk.TargetDataRequest(
+                sdk.TargetDataRequest(require_approval=False, 
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -689,7 +689,10 @@ class TestKubernetesIntegration:
 
                 with admin_client(url) as api:
                     api.approve_session(
-                        approval.id, sdk.ApprovalScope.ONCE, approval.target
+                        approval.id,
+                        sdk.ApproveSessionRequest(
+                            scope=sdk.ApprovalScope.ONCE, target=approval.target
+                        ),
                     )
 
                 for label, process in (("first", first), ("second", second)):
@@ -732,7 +735,9 @@ class TestKubernetesIntegration:
                     approval = wait_for_pending_approval(
                         api, target_name, user.username
                     )
-                    api.reject_session(approval.id, approval.target)
+                    api.reject_session(
+                        approval.id, sdk.RejectSessionRequest(target=approval.target)
+                    )
 
                     _, err = refused.communicate(timeout=timeout)
                     assert refused.returncode != 0, (
@@ -755,7 +760,10 @@ class TestKubernetesIntegration:
                         api, target_name, user.username
                     )
                     api.approve_session(
-                        approval.id, sdk.ApprovalScope.ONCE, approval.target
+                        approval.id,
+                        sdk.ApproveSessionRequest(
+                            scope=sdk.ApprovalScope.ONCE, target=approval.target
+                        ),
                     )
                 _, err = retried.communicate(timeout=timeout)
                 assert retried.returncode == 0, (
@@ -789,7 +797,7 @@ class TestKubernetesIntegration:
         target_name = f"k8s-run-{uuid.uuid4()}"
         with admin_client(url) as api:
             target = api.create_target(
-                sdk.TargetDataRequest(
+                sdk.TargetDataRequest(require_approval=False, 
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -893,7 +901,7 @@ class TestKubernetesIntegration:
         token_target_name = f"k8s-mtls-{uuid.uuid4()}"
         with admin_client(url) as api:
             target = api.create_target(
-                sdk.TargetDataRequest(
+                sdk.TargetDataRequest(require_approval=False, 
                     name=token_target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -978,7 +986,7 @@ class TestKubernetesIntegration:
         target_name = f"k8s-exec-{uuid.uuid4()}"
         with admin_client(url) as api:
             target = api.create_target(
-                sdk.TargetDataRequest(
+                sdk.TargetDataRequest(require_approval=False, 
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -1104,7 +1112,7 @@ class TestKubernetesIntegration:
         target_name = f"k8s-attach-{uuid.uuid4()}"
         with admin_client(url) as api:
             target = api.create_target(
-                sdk.TargetDataRequest(
+                sdk.TargetDataRequest(require_approval=False, 
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -1312,7 +1320,7 @@ class TestKubernetesIntegration:
                 sdk.RoleDataRequest(name=target_role_name)
             )
             target = api.create_target(
-                sdk.TargetDataRequest(
+                sdk.TargetDataRequest(require_approval=False, 
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -1479,7 +1487,7 @@ class TestKubernetesIntegration:
         with admin_client(url) as api:
             role = api.create_role(sdk.RoleDataRequest(name=target_role))
             target = api.create_target(
-                sdk.TargetDataRequest(
+                sdk.TargetDataRequest(require_approval=False, 
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(

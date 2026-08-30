@@ -53,7 +53,10 @@ class Test:
             time.sleep(2)
             assert client.poll() is None, "session connected before approval"
 
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
 
         assert b"gate-marker" in client.communicate(timeout=timeout)[0]
 
@@ -86,7 +89,10 @@ class Test:
                 a for a in api.get_session_approvals() if a.id == approval.id
             ], "the request was closed while it was still waiting"
 
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
 
         assert b"gate-marker" in client.communicate(timeout=timeout)[0]
 

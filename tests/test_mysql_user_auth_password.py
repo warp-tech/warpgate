@@ -28,7 +28,7 @@ class Test:
             # RSA-encrypted caching_sha2_password full authentication paths
             for tls_mode in (sdk.TlsMode.PREFERRED, sdk.TlsMode.DISABLED):
                 target = api.create_target(
-                    sdk.TargetDataRequest(
+                    sdk.TargetDataRequest(require_approval=False, 
                         name=f"mysql-{uuid4()}",
                         options=sdk.TargetOptions(
                             sdk.TargetOptionsTargetMySqlOptions(

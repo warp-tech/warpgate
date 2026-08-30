@@ -10,7 +10,7 @@ use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    StatusTransition, close_request, mark_consumed, upsert_request,
+    Advertised, StatusTransition, close_request, mark_consumed, upsert_request,
 };
 
 use super::*;
@@ -42,7 +42,9 @@ impl Drop for PendingApproval {
         tokio::spawn(async move {
             let _ = match close_as {
                 Some(status) => {
-                    close_request(&db, session_id, ApprovalKind::Admin, &target, status).await
+                    close_request(&db, session_id, ApprovalKind::Admin, &target, status)
+                        .await
+                        .map(|_| ())
                 }
                 None => {
                     mark_consumed(
@@ -57,24 +59,16 @@ impl Drop for PendingApproval {
 }
 
 impl PendingApproval {
-    /// Advertises the request and hands back a guard that owns the row, so no
-    /// path can leave one behind however the wait ends.
-    ///
-    /// A failed advertise returns through the dropped guard, which cleans up
-    /// after a partial write rather than leaving it to the reaper.
-    pub(super) async fn begin(
-        db: DatabaseConnection,
-        node_id: NodeId,
-        subject: &ApprovalSubject,
-    ) -> Result<Self, WarpgateError> {
-        let guard = Self {
+    /// Takes ownership of the question's row *before* it is advertised, so a
+    /// failed or interrupted advertise is still cleaned up by the drop rather
+    /// than left to the reaper. The caller announces the question right after.
+    pub(super) fn guarding(db: DatabaseConnection, subject: &ApprovalSubject) -> Self {
+        Self {
             session_id: subject.session_id,
             target: subject.target_name.clone(),
             db,
             close_as: Some(SessionApprovalRequest::UndecidedApprovalRequestStatus::Abandoned),
-        };
-        advertise_admin_request(&guard.db, node_id, subject).await?;
-        Ok(guard)
+        }
     }
 
     /// The window ran out with nobody having decided.
@@ -89,14 +83,14 @@ impl PendingApproval {
     }
 }
 
-/// Writes (idempotently) the request row an administrator gate advertises. Kept
-/// beside [`PendingApproval::begin`], its only caller, so the row a guard owns
-/// and the row this writes stay in step.
+/// Writes (idempotently) the request row an administrator gate advertises, and
+/// reports whether that actually asked a question — the caller announces one
+/// exactly when it did.
 pub(super) async fn advertise_admin_request(
     db: &DatabaseConnection,
     node_id: NodeId,
     subject: &ApprovalSubject,
-) -> Result<(), WarpgateError> {
+) -> Result<Advertised, WarpgateError> {
     upsert_request(
         db,
         SessionApprovalRequest::ActiveModel {
@@ -173,15 +167,13 @@ pub(super) fn row_state(row: &SessionApprovalRequest::Model) -> Result<RowState,
             ApprovalDecision::Approved(row.scope.unwrap_or(ApprovalScope::Once))
         }
     };
-    let Some(resolved_by_username) = &row.resolved_by_username else {
-        return Err(WarpgateError::InconsistentState(
-            "Approval request row is decided but has no resolver".to_string(),
-        ));
-    };
+    // Both resolver columns are optional on the row for the same reason they
+    // are on the actor: a resolver that isn't a user (the admin API token)
+    // has neither.
     Ok(RowState::Decided(
         decision,
         ApprovalActor {
-            username: Some(resolved_by_username.clone()),
+            username: row.resolved_by_username.clone(),
             user_id: row.resolved_by_user_id.unwrap_or(Uuid::nil()),
         },
     ))

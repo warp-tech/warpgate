@@ -82,7 +82,9 @@ class Test:
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
             assert approval.protocol == "MySQL"
-            api.reject_session(approval.id, approval.target)
+            api.reject_session(
+                approval.id, sdk.RejectSessionRequest(target=approval.target)
+            )
 
         client.communicate(b"show tables;\n", timeout=timeout)
         assert client.returncode != 0
@@ -115,7 +117,10 @@ class Test:
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
             assert approval.protocol == "HTTP"
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
 
         # The client's own retry now goes through to the echo server.
         for _ in range(40):
@@ -159,7 +164,10 @@ class Test:
 
             # Answer the second one first: the two are independent questions.
             approval = wait_for_pending_approval(api, second.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
 
         _get_until(session, f"{url}/?warpgate-target={second.name}", 200)
         assert session.get(f"{url}/?warpgate-target={first.name}").status_code == 202, (
@@ -168,7 +176,10 @@ class Test:
 
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, first.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
         _get_until(session, f"{url}/?warpgate-target={first.name}", 200)
         assert session.get(f"{url}/?warpgate-target={second.name}").status_code == 200
 
@@ -198,9 +209,14 @@ class Test:
 
         with admin_client(url) as api:
             rejection = wait_for_pending_approval(api, refused.name, user.username)
-            api.reject_session(rejection.id, rejection.target)
+            api.reject_session(
+                rejection.id, sdk.RejectSessionRequest(target=rejection.target)
+            )
             approval = wait_for_pending_approval(api, allowed.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
 
         _get_until(session, f"{url}/?warpgate-target={refused.name}", 403)
         _get_until(session, f"{url}/?warpgate-target={allowed.name}", 200)
@@ -227,7 +243,9 @@ class Test:
 
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.reject_session(approval.id, approval.target)
+            api.reject_session(
+                approval.id, sdk.RejectSessionRequest(target=approval.target)
+            )
 
         for _ in range(40):
             response = session.get(f"{url}/?warpgate-target={target.name}")
@@ -301,7 +319,9 @@ class Test:
 
         with admin_client(f"https://localhost:{node_b.http_port}") as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.reject_session(approval.id, approval.target)
+            api.reject_session(
+                approval.id, sdk.RejectSessionRequest(target=approval.target)
+            )
 
         client.communicate(timeout=timeout)
         assert client.returncode != 0
@@ -366,7 +386,10 @@ class Test:
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
             assert approval.protocol == "VNC"
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
 
         viewer.join(timeout=timeout)
         assert "error" not in result, result.get("error")

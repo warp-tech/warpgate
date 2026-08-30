@@ -49,7 +49,10 @@ class Test:
         first = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.TARGET, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.TARGET, target=approval.target),
+            )
         assert _run_query(first, timeout)
 
         # Same user, same IP, same credentials, same target: remembered.
@@ -62,7 +65,10 @@ class Test:
         third = psql_held(processes, wg.postgres_port, user, other)
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, other.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
         assert _run_query(third, timeout)
 
     def test_all_targets_scope_covers_other_targets(
@@ -85,7 +91,10 @@ class Test:
         first = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ALLTARGETS, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ALLTARGETS, target=approval.target),
+            )
         assert _run_query(first, timeout)
 
         # The grant deliberately spans targets, so the second one is not held.
@@ -113,14 +122,20 @@ class Test:
         first = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
         assert _run_query(first, timeout)
 
         # Once means once, even with caching enabled.
         second = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
         assert _run_query(second, timeout)
 
     def test_no_grace_period_means_no_bypass(
@@ -144,13 +159,19 @@ class Test:
         first = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.TARGET, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.TARGET, target=approval.target),
+            )
         assert _run_query(first, timeout)
 
         second = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
         assert _run_query(second, timeout)
 
     def test_ticket_session_does_not_consume_a_remembered_approval(
@@ -175,7 +196,10 @@ class Test:
         first = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ALLTARGETS, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ALLTARGETS, target=approval.target),
+            )
         assert _run_query(first, timeout)
 
         with admin_client(url) as api:
@@ -204,7 +228,10 @@ class Test:
         # Still held, despite the AllTargets grant sitting in the cache.
         with admin_client(url) as api:
             approval = wait_for_pending_approval(api, target.name, user.username)
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
         assert _run_query(ticket_client, timeout)
 
     def test_hold_times_out_and_denies(

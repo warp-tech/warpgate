@@ -35,7 +35,7 @@ class TestWebSsh:
             )
             api.add_user_role(user.id, role.id)
             ssh_target = api.create_target(
-                sdk.TargetDataRequest(
+                sdk.TargetDataRequest(require_approval=False, 
                     name=f"ssh-{uuid4()}",
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(

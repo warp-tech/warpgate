@@ -14,7 +14,7 @@ use warpgate_common::auth::{
 use warpgate_common::{NodeId, Protocol, UserSessionId};
 use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
 use warpgate_db_entities::SessionApprovalRequest::{
-    self, close_request, mark_consumed, upsert_request,
+    self, Advertised, close_request, mark_consumed, upsert_request,
 };
 use warpgate_db_migrations::migrate_database;
 
@@ -757,7 +757,8 @@ async fn a_remembered_approval_requires_a_full_match() {
         existing.identity().username(),
         "prod",
         &RememberApprovalBy::Credentials(existing.identity().other_credentials().clone()),
-    ).unwrap();
+    )
+    .unwrap();
 
     assert!(
         !approval_is_remembered(&db, &other_kind, GRACE)
@@ -1123,7 +1124,7 @@ mod delivery {
         }
     }
 
-    async fn test_services(db: &DatabaseConnection) -> Services {
+    pub(super) async fn test_services(db: &DatabaseConnection) -> Services {
         let params = GlobalParams::new(PathBuf::from("/warpgate.yaml"), false).unwrap();
         let rate_limiter_registry = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
         let cluster = Arc::new(Cluster::new(db.clone(), 0).await.unwrap());
@@ -1308,6 +1309,321 @@ mod delivery {
                 .await
                 .consumed_at
                 .is_some()
+        );
+    }
+}
+
+// --- The polled gate: one row read per request -------------------------------
+
+mod polled_gate {
+    use warpgate_common::{Target, TargetHTTPOptions, TargetOptions, Tls};
+
+    use super::delivery::test_services;
+    use super::*;
+    use crate::Services;
+
+    fn gated_target(name: &str) -> Target {
+        Target {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            description: String::new(),
+            allow_roles: vec![],
+            options: TargetOptions::Http(TargetHTTPOptions {
+                url: "http://target".into(),
+                tls: Tls::default(),
+                headers: None,
+                external_host: None,
+            }),
+            rate_limit_bytes_per_second: None,
+            group_id: None,
+            ticket_max_duration_seconds: None,
+            ticket_requests_disabled: false,
+            ticket_require_approval: false,
+            require_approval: true,
+            ticket_max_uses: None,
+        }
+    }
+
+    fn someone() -> AuthStateUserInfo {
+        AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "someone".into(),
+        }
+    }
+
+    async fn poll(
+        services: &Services,
+        session_id: UserSessionId,
+        user_info: &AuthStateUserInfo,
+        target: &str,
+    ) -> PolledGate {
+        services
+            .poll_admin_approval(
+                crate::TargetAuthorization::for_test(
+                    user_info.clone(),
+                    gated_target(target),
+                    Protocol::Http,
+                ),
+                AdminApprovalContext {
+                    session_id,
+                    remote_ip: None,
+                    credentials: RememberApprovalBy::Nothing,
+                    ticket: TicketStake::None,
+                },
+            )
+            .await
+            .unwrap()
+    }
+
+    /// The client's retry cadence is the poll, so the same session returns
+    /// every few seconds for the whole window. Only the first arrival asks:
+    /// a repeat must neither announce again nor touch `started` — that is the
+    /// reap clock and the timeout anchor, and refreshing it would let a
+    /// polite client extend its own approval window forever.
+    #[tokio::test]
+    async fn a_poll_asks_once_and_repeats_leave_the_question_alone() {
+        let db = migrated_db().await;
+        audit_events();
+        let services = test_services(&db).await;
+        let session_id = UserSessionId(Uuid::new_v4());
+        let user_info = someone();
+
+        assert!(matches!(
+            poll(&services, session_id, &user_info, "prod").await,
+            PolledGate::Pending
+        ));
+        let asked = find_question(
+            &db,
+            SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "prod"),
+        )
+        .await
+        .unwrap()
+        .expect("the first poll should have asked");
+
+        for _ in 0..3 {
+            assert!(matches!(
+                poll(&services, session_id, &user_info, "prod").await,
+                PolledGate::Pending
+            ));
+        }
+
+        let after = find_question(
+            &db,
+            SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "prod"),
+        )
+        .await
+        .unwrap()
+        .expect("the question should still stand");
+        assert_eq!(
+            after.started, asked.started,
+            "a repeat poll must not reset the question's clock",
+        );
+        assert_eq!(
+            audited_for(session_id, "SessionApprovalRequested1").len(),
+            1,
+            "one asking, one announcement",
+        );
+    }
+
+    /// The row carries the answer, so the poll that finds one delivers it —
+    /// and keeps delivering it, in both directions.
+    #[tokio::test]
+    async fn a_poll_delivers_the_recorded_decision_durably() {
+        let db = migrated_db().await;
+        let services = test_services(&db).await;
+        let user_info = someone();
+
+        let approved_session = UserSessionId(Uuid::new_v4());
+        assert!(matches!(
+            poll(&services, approved_session, &user_info, "prod").await,
+            PolledGate::Pending
+        ));
+        assert!(approve(&db, approved_session, "prod").await);
+        assert!(matches!(
+            poll(&services, approved_session, &user_info, "prod").await,
+            PolledGate::Approved(_)
+        ));
+        assert!(
+            find_question(
+                &db,
+                SessionApprovalRequest::Key::new(approved_session, ApprovalKind::Admin, "prod"),
+            )
+            .await
+            .unwrap()
+            .expect("the answered row is the record")
+            .consumed_at
+            .is_some(),
+            "delivering the answer stamps it picked up",
+        );
+        assert!(matches!(
+            poll(&services, approved_session, &user_info, "prod").await,
+            PolledGate::Approved(_)
+        ));
+
+        let denied_session = UserSessionId(Uuid::new_v4());
+        assert!(matches!(
+            poll(&services, denied_session, &user_info, "prod").await,
+            PolledGate::Pending
+        ));
+        assert!(
+            record_decision(
+                &db,
+                denied_session,
+                ApprovalKind::Admin,
+                "prod",
+                ApprovalDecision::Rejected,
+                &admin_actor(),
+            )
+            .await
+            .unwrap()
+        );
+        for _ in 0..2 {
+            assert!(matches!(
+                poll(&services, denied_session, &user_info, "prod").await,
+                PolledGate::Denied
+            ));
+        }
+    }
+
+    /// Expiry needs no waiter: the poll that finds the window run out closes
+    /// the question as timed out — auditing what a blocking wait's deadline
+    /// would have — and asks afresh, so an administrator who missed the first
+    /// window gets a live question rather than a stale one.
+    #[tokio::test]
+    async fn a_poll_times_out_an_expired_question_and_asks_afresh() {
+        let db = migrated_db().await;
+        audit_events();
+        let services = test_services(&db).await;
+        let session_id = UserSessionId(Uuid::new_v4());
+        let user_info = someone();
+
+        assert!(matches!(
+            poll(&services, session_id, &user_info, "prod").await,
+            PolledGate::Pending
+        ));
+        // Far past any window: the default timeout is the auth-state TTL.
+        backdate_request(&db, session_id, Duration::from_secs(24 * 3600)).await;
+
+        assert!(matches!(
+            poll(&services, session_id, &user_info, "prod").await,
+            PolledGate::Pending
+        ));
+
+        assert_eq!(
+            status_of(&db, session_id, "prod").await,
+            SessionApprovalRequest::ApprovalRequestStatus::Pending,
+            "the expired question must have been asked afresh",
+        );
+        assert_eq!(
+            audited_for(session_id, "SessionApprovalTimedOut1").len(),
+            1,
+            "the expiry itself must reach the audit trail",
+        );
+        assert_eq!(
+            audited_for(session_id, "SessionApprovalRequested1").len(),
+            2,
+            "two askings, two announcements",
+        );
+    }
+
+    /// A standing decision is reused, not re-asked — and *announcing* nothing
+    /// is part of that: a gate that finds the answer already on the row must
+    /// not put a `SessionApprovalRequested1` in the audit trail or ping the
+    /// inbox for a question nobody is being asked.
+    #[tokio::test]
+    async fn a_standing_decision_is_reused_without_announcing() {
+        let db = migrated_db().await;
+        audit_events();
+        let services = test_services(&db).await;
+        let session_id = UserSessionId(Uuid::new_v4());
+        let user_info = someone();
+
+        assert!(matches!(
+            poll(&services, session_id, &user_info, "prod").await,
+            PolledGate::Pending
+        ));
+        assert!(approve(&db, session_id, "prod").await);
+
+        // The blocking shape re-entering the same question: announce finds the
+        // decision standing, and the wait reads it straight back.
+        let outcome: GateOutcome = services
+            .require_admin_approval(
+                crate::TargetAuthorization::for_test(
+                    user_info.clone(),
+                    gated_target("prod"),
+                    Protocol::Http,
+                ),
+                AdminApprovalContext {
+                    session_id,
+                    remote_ip: None,
+                    credentials: RememberApprovalBy::Nothing,
+                    ticket: TicketStake::None,
+                },
+                || async { Ok::<_, WarpgateError>(()) },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(outcome, GateOutcome::Approved(_)));
+
+        assert_eq!(
+            audited_for(session_id, "SessionApprovalRequested1").len(),
+            1,
+            "only the original asking may announce",
+        );
+    }
+
+    /// What the advertiser reports is what the announcement decision rides on.
+    #[tokio::test]
+    async fn advertising_reports_what_it_did() {
+        let db = migrated_db().await;
+        let session_id = UserSessionId(Uuid::new_v4());
+        let mut subject = plain_subject("prod");
+        subject.session_id = session_id;
+        let node = NodeId(Uuid::new_v4());
+
+        let advertise = || super::super::wait::advertise_admin_request(&db, node, &subject);
+        let started = || async {
+            find_question(
+                &db,
+                SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "prod"),
+            )
+            .await
+            .unwrap()
+            .expect("the question should exist")
+            .started
+        };
+
+        assert_eq!(advertise().await.unwrap(), Advertised::Asked);
+        let asked_at = started().await;
+        assert_eq!(advertise().await.unwrap(), Advertised::AlreadyAsking);
+        assert_eq!(
+            started().await,
+            asked_at,
+            "refreshing a live question must not reset its clock — that is the \
+             reap anchor and the timeout anchor, and a re-advertise every few \
+             seconds would push the window out forever",
+        );
+
+        close_request(
+            &db,
+            session_id,
+            ApprovalKind::Admin,
+            "prod",
+            SessionApprovalRequest::UndecidedApprovalRequestStatus::TimedOut,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            advertise().await.unwrap(),
+            Advertised::Asked,
+            "a question that ended unanswered is asked afresh",
+        );
+
+        assert!(approve(&db, session_id, "prod").await);
+        assert_eq!(
+            advertise().await.unwrap(),
+            Advertised::DecisionStands,
+            "an answer on the row is not overwritten by asking again",
         );
     }
 }

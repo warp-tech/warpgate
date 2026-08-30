@@ -89,7 +89,10 @@ class Test:
         assert approval, "menu selection was not held for approval"
 
         with admin_client(url) as api:
-            api.approve_session(approval.id, sdk.ApprovalScope.ONCE, approval.target)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
 
         # Approved: the session connects to the target and runs a command.
         output = client.communicate(b"echo approved-ok\nexit\n", timeout=timeout)[0]

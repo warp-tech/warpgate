@@ -57,7 +57,7 @@ def setup_user_and_target(
         )
         api.add_user_role(user.id, role.id)
         ssh_target = api.create_target(
-            sdk.TargetDataRequest(
+            sdk.TargetDataRequest(require_approval=False, 
                 name=f"ssh-{uuid4()}",
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(
@@ -603,7 +603,7 @@ class Test:
         ssh_target.options.actual_instance.allow_insecure_algos = True
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
-            api.update_target(ssh_target.id, sdk.TargetDataRequest(
+            api.update_target(ssh_target.id, sdk.TargetDataRequest(require_approval=False, 
                 name=ssh_target.name,
                 options=ssh_target.options,
             ))

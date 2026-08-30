@@ -13,7 +13,6 @@ use warpgate_common::{
 };
 use warpgate_db_entities::{Parameters, UserSession};
 
-use crate::approvals::SessionGates;
 use crate::auth_state_store::ApprovalRequestSink;
 use crate::cluster::Cluster;
 use crate::db::connect_to_db_and_migrate;
@@ -173,10 +172,6 @@ impl Services {
 
     pub fn subscribe_admin_approval_request(&self) -> broadcast::Receiver<UserSessionId> {
         self.admin_approval_request_tx.subscribe()
-    }
-
-    pub(crate) async fn admin_approval_gates(&self) -> Arc<SessionGates> {
-        self.state.lock().await.admin_approval_gates()
     }
 
     pub async fn admin_approval_timeout(&self) -> Result<Duration, WarpgateError> {

@@ -20,7 +20,7 @@ class TestHTTPUserAuthTicket:
                 user.id, sdk.NewPasswordCredential(password="123")
             )
             api.add_user_role(user.id, role.id)
-            echo_target = api.create_target(sdk.TargetDataRequest(
+            echo_target = api.create_target(sdk.TargetDataRequest(require_approval=False, 
                 name=f"echo-{uuid4()}",
                 options=sdk.TargetOptions(sdk.TargetOptionsTargetHTTPOptions(
                     kind="Http",
@@ -34,7 +34,7 @@ class TestHTTPUserAuthTicket:
             api.add_target_role(echo_target.id, role.id)
 
             other_target = api.create_target(
-                sdk.TargetDataRequest(
+                sdk.TargetDataRequest(require_approval=False, 
                     name=f"other-{uuid4()}",
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetHTTPOptions(

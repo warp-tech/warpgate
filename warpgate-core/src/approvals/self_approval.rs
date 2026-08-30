@@ -229,5 +229,6 @@ pub(crate) async fn advertise_user_request(
         }
     };
 
-    upsert_request(db, row).await
+    upsert_request(db, row).await?;
+    Ok(())
 }

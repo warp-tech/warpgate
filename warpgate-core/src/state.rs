@@ -13,7 +13,6 @@ use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{NodeId, Protocol, Target, UserSessionId, WarpgateError};
 use warpgate_db_entities::{SessionApprovalRequest, TargetSession, UserSession};
 
-use crate::approvals::SessionGates;
 use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
 use crate::{SessionHandle, WarpgateServerHandle};
 
@@ -23,10 +22,6 @@ pub struct State {
     node_id: NodeId,
     rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     change_sender: broadcast::Sender<()>,
-    /// Administrator-gate ledger for sessions that observe the gate rather
-    /// than parking on it. Kept here because an entry describes one connection
-    /// and must be dropped with it, which is what this type already tracks.
-    admin_approval_gates: Arc<SessionGates>,
 }
 
 impl State {
@@ -42,15 +37,11 @@ impl State {
             node_id,
             rate_limiter_registry: rate_limiter_registry.clone(),
             change_sender: sender,
-            admin_approval_gates: Arc::default(),
         }))
     }
 
     /// Handle to the administrator-gate ledger, for the wait sites that
     /// record into it.
-    pub fn admin_approval_gates(&self) -> Arc<SessionGates> {
-        self.admin_approval_gates.clone()
-    }
 
     /// Registers a session with no owning node: it is a DB record any node
     /// may serve, kept alive by its own backing rather than this node's
@@ -239,8 +230,6 @@ impl State {
         // served elsewhere; anything it reaches this node for again is gated
         // afresh, which is the safe direction. The requests are left alone —
         // they belong to the session, not to this node's view of it.
-        let gates = self.admin_approval_gates.clone();
-        tokio::spawn(async move { gates.forget_session(&id).await });
     }
 
     /// Forgets everything an approval decision could still be applied to once a
@@ -257,7 +246,6 @@ impl State {
         {
             error!(%error, %id, "Could not close the session's approval requests");
         }
-        self.admin_approval_gates.forget_session(&id).await;
     }
 
     pub async fn remove_session(&mut self, id: UserSessionId) {

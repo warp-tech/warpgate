@@ -1,12 +1,17 @@
-use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
 
+use sea_orm::sea_query::IntoCondition;
+use sea_orm::{EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
-use tracing::{error, warn};
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{ApprovalKind, RememberApprovalBy};
 use warpgate_common::{UserSessionId, WarpgateError};
+use warpgate_db_entities::SessionApprovalRequest;
+use warpgate_db_entities::SessionApprovalRequest::{
+    Advertised, UndecidedApprovalRequestStatus, close_request, mark_consumed,
+};
 
 use super::*;
 use crate::config_providers::{ApprovedTarget, TargetAuthorization, TicketRefund};
@@ -42,97 +47,6 @@ pub enum PolledGate<O = warpgate_common::TargetOptions> {
     /// An administrator has been asked and has yet to answer.
     Pending,
     Denied,
-}
-
-/// What a session's gate has settled on, for the non-blocking path.
-///
-/// Only settled outcomes are recorded: a wait that expired without a decision
-/// leaves no entry, so the next request starts a fresh one rather than
-/// inheriting an unattended window as a refusal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SettledGate {
-    Approved,
-    Denied,
-}
-
-/// One session's gates, for the non-blocking path: which targets have a wait
-/// running, and what has already settled for which target. Both are keyed by
-/// target because a gate answers a question about one target and a session is
-/// not confined to one — a session reaching two gated targets asks about both,
-/// and each answer belongs to the target it was given for.
-#[derive(Debug, Default)]
-struct SessionGateState {
-    /// Targets whose waits are running. One per target: a second request for a
-    /// target already being waited on joins that wait rather than starting a
-    /// duplicate.
-    running: HashSet<String>,
-    settled: HashMap<String, SettledGate>,
-}
-
-/// The administrator-gate ledger for sessions that observe the gate rather
-/// than parking on it, owned by [`State`] so a session's entries are dropped
-/// with the session. All access goes through the poll/settle/forget methods:
-/// the one-wait-per-target rule and the only-while-the-session-lives rule
-/// live here, not at the call sites.
-///
-/// [`State`]: crate::State
-#[derive(Default)]
-pub struct SessionGates {
-    sessions: Mutex<HashMap<UserSessionId, SessionGateState>>,
-}
-
-/// What [`SessionGates::poll`] answered without touching the database.
-enum SlotPoll {
-    /// This target's gate already settled for this session.
-    Settled(SettledGate),
-    /// A wait for this target is already running, so the question is already
-    /// in front of an administrator.
-    Waiting,
-    /// The caller took on this target's wait and must start it.
-    Claimed,
-}
-
-impl SessionGates {
-    /// Answers from the ledger, or takes on the wait — under one lock, so
-    /// concurrent requests for one target start exactly one wait between them,
-    /// and a settle landing between a lookup and a claim cannot be missed.
-    async fn poll(&self, session_id: UserSessionId, target: &str) -> SlotPoll {
-        let mut sessions = self.sessions.lock().await;
-        let state = sessions.entry(session_id).or_default();
-        if let Some(settled) = state.settled.get(target) {
-            return SlotPoll::Settled(*settled);
-        }
-        if !state.running.insert(target.to_string()) {
-            return SlotPoll::Waiting;
-        }
-        SlotPoll::Claimed
-    }
-
-    /// Ends `target`'s claim on the slot, recording the outcome if the wait
-    /// settled one. Applied only while the session still has its entry: a
-    /// teardown drops it, and an outcome for a dead session must not resurrect
-    /// one — nothing would ever remove it again.
-    async fn settle(&self, session_id: UserSessionId, target: &str, outcome: Option<SettledGate>) {
-        let mut sessions = self.sessions.lock().await;
-        let Some(state) = sessions.get_mut(&session_id) else {
-            return;
-        };
-        state.running.remove(target);
-        if let Some(outcome) = outcome {
-            state.settled.insert(target.to_string(), outcome);
-        }
-        // An entry holding nothing means nothing — and for a session already
-        // torn down (a poll can race the teardown and re-create its entry),
-        // dropping it here is the only removal it will ever get.
-        if state.running.is_empty() && state.settled.is_empty() {
-            sessions.remove(&session_id);
-        }
-    }
-
-    /// Drops everything the ledger holds for a session, for when it ends.
-    pub(crate) async fn forget_session(&self, session_id: &UserSessionId) {
-        self.sessions.lock().await.remove(session_id);
-    }
 }
 
 /// The connection's stake in a ticket, settled by the gate.
@@ -171,6 +85,35 @@ pub struct AdminApprovalContext {
     /// the refund rule unforgettable: a wait site states its ticket story to
     /// build the context at all.
     pub ticket: TicketStake,
+}
+
+impl AdminApprovalContext {
+    /// The question this connection poses about `authorization`, plus the held
+    /// ticket guard — whose settlement stays with the caller, because only the
+    /// caller knows how its gate ends.
+    fn subject_for<O>(
+        self,
+        authorization: &TargetAuthorization<O>,
+    ) -> (ApprovalSubject, Option<TicketRefund>) {
+        let (held_ticket, consumes_ticket_id) = match self.ticket {
+            TicketStake::None => (None, None),
+            TicketStake::Held(guard) => (Some(guard), None),
+            TicketStake::ConsumedOnApproval(id) => (None, Some(id)),
+        };
+        (
+            ApprovalSubject {
+                kind: ApprovalKind::Admin,
+                session_id: self.session_id,
+                user_info: authorization.user_info().clone(),
+                protocol: authorization.protocol(),
+                target_name: authorization.target().name.clone(),
+                remote_ip: self.remote_ip,
+                credentials: self.credentials,
+                consumes_ticket_id,
+            },
+            held_ticket,
+        )
+    }
 }
 
 /// How a connection presents itself to the gate, minus the session it belongs
@@ -281,28 +224,7 @@ impl Services {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<(), E>>,
     {
-        let AdminApprovalContext {
-            session_id,
-            remote_ip,
-            credentials,
-            ticket,
-        } = context;
-        let (held_ticket, consumes_ticket_id) = match ticket {
-            TicketStake::None => (None, None),
-            TicketStake::Held(guard) => (Some(guard), None),
-            TicketStake::ConsumedOnApproval(id) => (None, Some(id)),
-        };
-
-        let subject = ApprovalSubject {
-            kind: ApprovalKind::Admin,
-            session_id,
-            user_info: authorization.user_info().clone(),
-            protocol: authorization.protocol(),
-            target_name: authorization.target().name.clone(),
-            remote_ip,
-            credentials,
-            consumes_ticket_id,
-        };
+        let (subject, held_ticket) = context.subject_for(&authorization);
 
         let result = self
             .hold_at_admin_gate(authorization, subject, notify_waiting)
@@ -349,11 +271,8 @@ impl Services {
             return Ok(GateOutcome::Approved(ApprovedTarget::new(authorization)));
         }
 
-        let mut guard =
-            PendingApproval::begin(self.db.clone(), self.cluster.node_id, &subject).await?;
-
-        subject.emit_requested_event();
-        let _ = self.admin_approval_request_tx.send(session_id);
+        let mut guard = PendingApproval::guarding(self.db.clone(), &subject);
+        self.announce_admin_request(&subject).await?;
 
         notify_waiting().await?;
 
@@ -391,90 +310,134 @@ impl Services {
         }
     }
 
+    /// Puts the question on the record and tells the inbox — but only when one
+    /// was actually asked. A re-advertise that found the question already live,
+    /// or an answer standing, announces nothing: the audit trail and the inbox
+    /// signal carry one entry per asking, however many times the asker returns.
+    async fn announce_admin_request(
+        &self,
+        subject: &ApprovalSubject,
+    ) -> Result<Advertised, WarpgateError> {
+        let advertised = advertise_admin_request(&self.db, self.cluster.node_id, subject).await?;
+        if matches!(advertised, Advertised::Asked) {
+            subject.emit_requested_event();
+            let _ = self.admin_approval_request_tx.send(subject.session_id);
+        }
+        Ok(advertised)
+    }
+
     /// Non-blocking form of [`Self::require_admin_approval`], for protocols
     /// that answer each request separately and so cannot park on the gate.
     ///
-    /// The first call for a session's target starts the ordinary blocking wait
-    /// on a background task; every call reports where that wait has got to.
-    /// Routing it through the same wait means the grace bypass, timeout, audit
-    /// trail, ticket settlement and request-row lifecycle all behave
-    /// identically to the connection-holding protocols — the only thing that
-    /// differs is who does the waiting.
+    /// Each call answers from the request row: the row carries both the
+    /// question and its answer, so where the gate stands *is* what the row
+    /// says, on whichever node the request happens to land. No wait runs
+    /// anywhere — the client's retry cadence is the poll.
     ///
-    /// A session's targets gate independently: each gets its own wait,
-    /// concurrent requests for one target share the wait already running, and
-    /// settled outcomes are kept per target for the life of the session.
+    /// The caller that finds no live question asks it (idempotently — a
+    /// concurrent asker's row is simply refreshed), and the one that finds the
+    /// window run out closes the question as timed out and asks afresh, so
+    /// expiry needs no waiter to notice it either. A client that stops polling
+    /// leaves its question to the age sweep, exactly like a waiter that died.
     ///
-    /// A ticket rides through here as [`TicketStake::ConsumedOnApproval`]. A
-    /// [`TicketStake::Held`] guard belongs to the blocking form, whose return
-    /// settles it — dropped on a `Pending` answer here, it would read as an
-    /// approval and spend the ticket while the question still stands.
-    ///
-    /// A wait that expires without a decision records nothing, so the next
-    /// request asks again. An unattended window is not an answer, and caching
-    /// it as one would shut a session out of the target until it is rebuilt.
-    pub async fn poll_admin_approval<O: Send + Sync + 'static>(
+    /// A ticket rides through here as [`TicketStake::ConsumedOnApproval`],
+    /// settled by whichever node records the approval. [`TicketStake::Held`]
+    /// belongs to the blocking form, whose return settles it — here there is
+    /// nothing to hold the guard across, and dropping it would refund a spend
+    /// whose question still stands.
+    pub async fn poll_admin_approval<O>(
         &self,
         authorization: TargetAuthorization<O>,
         context: AdminApprovalContext,
     ) -> Result<PolledGate<O>, WarpgateError> {
         // Read off the authorization for the same reason the blocking gate
-        // does; it also means a settled denial stops applying the moment the
+        // does; it also means a recorded denial stops applying the moment the
         // target stops requiring approval.
         if !authorization.target().require_approval {
             return Ok(PolledGate::Approved(ApprovedTarget::new(authorization)));
         }
 
-        let session_id = context.session_id;
-        let target_name = authorization.target().name.clone();
-        let gates = self.admin_approval_gates().await;
-
-        match gates.poll(session_id, &target_name).await {
-            SlotPoll::Settled(SettledGate::Approved) => {
-                return Ok(PolledGate::Approved(ApprovedTarget::new(authorization)));
-            }
-            SlotPoll::Settled(SettledGate::Denied) => return Ok(PolledGate::Denied),
-            SlotPoll::Waiting => return Ok(PolledGate::Pending),
-            SlotPoll::Claimed => {}
+        let (subject, held_ticket) = context.subject_for(&authorization);
+        if held_ticket.is_some() {
+            return Err(WarpgateError::InconsistentState(
+                "a held ticket cannot ride on the polled gate".into(),
+            ));
         }
 
-        let services = self.clone();
-        tokio::spawn(async move {
-            let outcome = services
-                .require_admin_approval(authorization, context, || async {
-                    Ok::<_, WarpgateError>(())
-                })
-                .await;
+        if self.admin_approval_is_remembered(&subject).await? {
+            subject.emit_bypassed_event();
+            return Ok(PolledGate::Approved(ApprovedTarget::new(authorization)));
+        }
 
-            let settled = match outcome {
-                Ok(GateOutcome::Approved(_)) => Some(SettledGate::Approved),
-                Ok(GateOutcome::Refused) => Some(SettledGate::Denied),
-                // Nothing was decided. Recording nothing lets the next request
-                // start a fresh wait instead of inheriting this one.
-                Ok(GateOutcome::Expired) => None,
-                // A hold that failed is not an answer either: the request wasn't
-                // refused, it never reached anyone. Caching it as a denial would
-                // shut the session out of the target for as long as it lives on
-                // the strength of one database blip, so the next request retries.
-                Err(error) => {
-                    error!(%error, "Failed to hold the session for administrator approval");
-                    None
+        let key = || {
+            SessionApprovalRequest::Key::new(
+                subject.session_id,
+                ApprovalKind::Admin,
+                &subject.target_name,
+            )
+        };
+        let row = SessionApprovalRequest::Entity::find()
+            .filter(key().into_condition())
+            .one(&self.db)
+            .await?;
+        let Some(row) = row else {
+            self.announce_admin_request(&subject).await?;
+            return Ok(PolledGate::Pending);
+        };
+
+        match row_state(&row)? {
+            // A question that ended unanswered is history; this request is a
+            // fresh asking.
+            RowState::Ended => {
+                self.announce_admin_request(&subject).await?;
+                Ok(PolledGate::Pending)
+            }
+            RowState::Pending => {
+                let timeout = self.admin_approval_timeout().await?;
+                #[allow(clippy::cast_possible_wrap)]
+                let window = time::Duration::seconds(timeout.as_secs() as i64);
+                if time::OffsetDateTime::now_utc() - row.started >= window {
+                    // The transition names its source state, so a decision that
+                    // landed in the meantime wins and nothing is emitted for a
+                    // timeout that didn't happen.
+                    if close_request(
+                        &self.db,
+                        subject.session_id,
+                        ApprovalKind::Admin,
+                        &subject.target_name,
+                        UndecidedApprovalRequestStatus::TimedOut,
+                    )
+                    .await?
+                    {
+                        subject.emit_timed_out_event();
+                    }
+                    self.announce_admin_request(&subject).await?;
                 }
-            };
-            gates.settle(session_id, &target_name, settled).await;
-        });
-
-        Ok(PolledGate::Pending)
+                Ok(PolledGate::Pending)
+            }
+            RowState::Decided(decision, _) => {
+                mark_consumed(&self.db, key()).await?;
+                match decision {
+                    ApprovalDecision::Approved(_) => {
+                        Ok(PolledGate::Approved(ApprovedTarget::new(authorization)))
+                    }
+                    ApprovalDecision::Rejected => Ok(PolledGate::Denied),
+                }
+            }
+        }
     }
 
     async fn admin_approval_is_remembered(
         &self,
         subject: &ApprovalSubject,
     ) -> Result<bool, WarpgateError> {
-        let Some(grace) = self.admin_approval_grace_period().await? else {
+        // The key first: a subject with nothing to match on (HTTP passes no
+        // credentials) answers without the Parameters read — and this now runs
+        // per request on the polled path.
+        let Some(key) = subject.match_key() else {
             return Ok(false);
         };
-        let Some(key) = subject.match_key() else {
+        let Some(grace) = self.admin_approval_grace_period().await? else {
             return Ok(false);
         };
         approval_is_remembered(&self.db, &key, grace).await

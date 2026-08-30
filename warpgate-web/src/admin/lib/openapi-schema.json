@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-1-geb38ff18-modified"
+    "version": "v0.28.5-32-g75290aa0-modified"
   },
   "servers": [
     {
@@ -4253,29 +4253,18 @@
             "required": true,
             "deprecated": false,
             "explode": true
-          },
-          {
-            "name": "scope",
-            "schema": {
-              "$ref": "#/components/schemas/ApprovalScope"
-            },
-            "in": "query",
-            "required": true,
-            "deprecated": false,
-            "explode": true
-          },
-          {
-            "name": "target",
-            "schema": {
-              "type": "string"
-            },
-            "in": "query",
-            "description": "The target shown for this session in the approvals list.",
-            "required": true,
-            "deprecated": false,
-            "explode": true
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": ""
@@ -4308,19 +4297,18 @@
             "required": true,
             "deprecated": false,
             "explode": true
-          },
-          {
-            "name": "target",
-            "schema": {
-              "type": "string"
-            },
-            "in": "query",
-            "description": "The target shown for this session in the approvals list.",
-            "required": true,
-            "deprecated": false,
-            "explode": true
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": ""
@@ -4791,12 +4779,28 @@
       },
       "ApprovalScope": {
         "type": "string",
-        "description": "How widely an approval is remembered for later bypass.\n\nStored on the request row and taken by both approval endpoints, so it\nderives its database and OpenAPI representations here rather than being\nrestated per layer with conversions between the copies.",
+        "description": "\"Remember decision\" scope for approvals",
         "enum": [
           "Once",
           "Target",
           "AllTargets"
         ]
+      },
+      "ApproveSessionRequest": {
+        "type": "object",
+        "title": "ApproveSessionRequest",
+        "required": [
+          "scope",
+          "target"
+        ],
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/ApprovalScope"
+          },
+          "target": {
+            "type": "string"
+          }
+        }
       },
       "AutoCredentials": {
         "type": "object",
@@ -6123,13 +6127,11 @@
           },
           "admin_approval_timeout_seconds": {
             "type": "integer",
-            "format": "int64",
-            "description": "How long a session held for administrator approval waits before being\nauto-rejected; `None` falls back to the auth-state timeout."
+            "format": "int64"
           },
           "admin_approval_grace_period_seconds": {
             "type": "integer",
-            "format": "int64",
-            "description": "Window within which a repeat connection reuses a previous administrator\napproval; `None` disables caching."
+            "format": "int64"
           },
           "analytics_consent": {
             "$ref": "#/components/schemas/AnalyticsConsent"
@@ -6396,6 +6398,18 @@
             "$ref": "#/components/schemas/S3StorageConfig"
           }
         ]
+      },
+      "RejectSessionRequest": {
+        "type": "object",
+        "title": "RejectSessionRequest",
+        "required": [
+          "target"
+        ],
+        "properties": {
+          "target": {
+            "type": "string"
+          }
+        }
       },
       "Role": {
         "type": "object",
@@ -6727,7 +6741,6 @@
       "SessionApprovalItem": {
         "type": "object",
         "title": "SessionApprovalItem",
-        "description": "A session held pending administrator (JIT) approval.",
         "required": [
           "id",
           "protocol",
@@ -6757,8 +6770,7 @@
           },
           "caching_grace_seconds": {
             "type": "integer",
-            "format": "int64",
-            "description": "When administrator-approval caching is enabled, the caching window in\nseconds; `None` when caching is disabled."
+            "format": "int64"
           }
         }
       },
@@ -6867,8 +6879,7 @@
             "type": "boolean"
           },
           "require_approval": {
-            "type": "boolean",
-            "description": "Whether connections to this target must be approved by an administrator."
+            "type": "boolean"
           },
           "ticket_max_uses": {
             "type": "integer",
@@ -6888,7 +6899,8 @@
         "title": "TargetDataRequest",
         "required": [
           "name",
-          "options"
+          "options",
+          "require_approval"
         ],
         "properties": {
           "name": {
@@ -6919,8 +6931,7 @@
             "type": "boolean"
           },
           "require_approval": {
-            "type": "boolean",
-            "description": "Whether connections to this target must be approved by an administrator."
+            "type": "boolean"
           },
           "ticket_max_uses": {
             "type": "integer",
@@ -7571,7 +7582,7 @@
       "TicketRequest": {
         "type": "object",
         "title": "TicketRequest",
-        "description": "A ticket request with the requesting user's and target's names resolved, so\nclients can render one without looking up every referenced id.",
+        "description": "ticket request with resolved username and target name",
         "required": [
           "id",
           "user_id",
@@ -7591,7 +7602,7 @@
           },
           "username": {
             "type": "string",
-            "description": "Empty if the user has since been deleted."
+            "description": "Empty if the user has been deleted"
           },
           "target_id": {
             "type": "string",
@@ -7599,7 +7610,7 @@
           },
           "target_name": {
             "type": "string",
-            "description": "Empty if the target has since been deleted."
+            "description": "Empty if the target has been deleted"
           },
           "requested_duration_seconds": {
             "type": "integer",
@@ -7616,8 +7627,7 @@
             "format": "uuid"
           },
           "resolved_by_username": {
-            "type": "string",
-            "description": "Name of the administrator who resolved it; `None` while pending, or if\nthat user has since been deleted."
+            "type": "string"
           },
           "ticket_id": {
             "type": "string",

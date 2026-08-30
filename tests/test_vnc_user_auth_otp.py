@@ -28,7 +28,7 @@ def _provision(api, vnc_port, otp_key_base64):
     )
     api.add_user_role(user.id, role.id)
     target = api.create_target(
-        sdk.TargetDataRequest(
+        sdk.TargetDataRequest(require_approval=False, 
             name=f"vnc-{uuid4()}",
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetVncOptions(

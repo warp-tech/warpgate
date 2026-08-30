@@ -58,19 +58,21 @@ class Test:
 
         denied = session.post(
             f"{url}/@warpgate/admin/api/session-approvals/{approval.id}/approve",
-            params={"scope": "Once", "target": approval.target},
+            json={"scope": "Once", "target": approval.target},
         )
         assert denied.status_code == 403, "approving needs approve_sessions"
 
         rejected = session.post(
             f"{url}/@warpgate/admin/api/session-approvals/{approval.id}/reject",
-            params={"target": approval.target},
+            json={"target": approval.target},
         )
         assert rejected.status_code == 403
 
         # Clean up the held session so it doesn't outlive the test.
         with admin_client(url) as api:
-            api.reject_session(approval.id, approval.target)
+            api.reject_session(
+                approval.id, sdk.RejectSessionRequest(target=approval.target)
+            )
         client.communicate(timeout=timeout)
 
     def test_approve_sessions_permission_allows_approval(
@@ -93,7 +95,7 @@ class Test:
         session = _logged_in(url, admin.username)
         approved = session.post(
             f"{url}/@warpgate/admin/api/session-approvals/{approval.id}/approve",
-            params={"scope": "Once", "target": approval.target},
+            json={"scope": "Once", "target": approval.target},
         )
         assert approved.status_code == 200
 
@@ -121,14 +123,14 @@ class Test:
         session = _logged_in(url, user.username)
         denied = session.post(
             f"{url}/@warpgate/admin/api/session-approvals/{approval.id}/approve",
-            params={"scope": "Once", "target": approval.target},
+            json={"scope": "Once", "target": approval.target},
         )
         assert denied.status_code == 403, "self-approval must be refused"
 
         # Rejecting your own session grants nothing, so it stays allowed.
         rejected = session.post(
             f"{url}/@warpgate/admin/api/session-approvals/{approval.id}/reject",
-            params={"target": approval.target},
+            json={"target": approval.target},
         )
         assert rejected.status_code == 200
 
@@ -162,7 +164,7 @@ class Test:
         session = _logged_in(url, user.username)
         approved = session.post(
             f"{url}/@warpgate/admin/api/session-approvals/{approval.id}/approve",
-            params={"scope": "Once", "target": approval.target},
+            json={"scope": "Once", "target": approval.target},
         )
         assert approved.status_code == 200
 
@@ -189,7 +191,7 @@ class Test:
         session = _logged_in(url, admin.username)
         session.post(
             f"{url}/@warpgate/admin/api/session-approvals/{approval.id}/approve",
-            params={"scope": "Once", "target": approval.target},
+            json={"scope": "Once", "target": approval.target},
         )
         client.communicate(b"\\dt\n", timeout=timeout)
 
