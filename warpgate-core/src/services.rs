@@ -277,13 +277,7 @@ impl Services {
         let Some(key) = state_arc.lock().await.web_approval_match_key() else {
             return Ok(false);
         };
-        if !crate::approvals::approval_is_remembered(
-            &self.db,
-            &key,
-            grace,
-        )
-        .await?
-        {
+        if !crate::approvals::approval_is_remembered(&self.db, &key, grace).await? {
             return Ok(false);
         }
 

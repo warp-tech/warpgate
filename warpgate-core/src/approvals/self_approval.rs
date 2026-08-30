@@ -3,9 +3,7 @@ use std::sync::Arc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
-use warpgate_common::auth::{
-    ApprovalKind, AuthCredential, AuthResult, AuthState, CredentialKind,
-};
+use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
@@ -217,10 +215,9 @@ pub(crate) async fn advertise_user_request(
             target: Set(state.target_name().to_string()),
             remote_address: Set(state.remote_ip().map(|ip| ip.to_string())),
             identification_string: Set(Some(state.identification_string().to_owned())),
-            credentials_digest: Set(state
-                .remembered_by()
-                .credential_fingerprints()
-                .map(|credentials| credentials.digest())),
+            match_digest: Set(state
+                .web_approval_match_key()
+                .map(|key| key.identity.digest())),
             consumes_ticket_id: Set(None),
             started: Set(*state.started()),
             status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),

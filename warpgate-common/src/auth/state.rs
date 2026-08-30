@@ -144,15 +144,57 @@ impl RememberApprovalBy {
     }
 }
 
-/// Everything a new approval request has to match on to be auto-accepted
+/// Who is asking, from where, and with what — everything a remembered approval
+/// must match *exactly* to be reused.
+///
+/// Kept apart from the scope because these are the equality half: they are
+/// compared as one [`Self::digest`], which is what a request row stores. A
+/// field added here therefore enters the comparison on its own — the failure
+/// this shape exists to prevent is a new field that widens every remembered
+/// grant because nobody added it to a hand-written comparison.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WebApprovalMatchKey {
+pub struct WebApprovalIdentity {
     pub kind: ApprovalKind,
     pub remote_ip: IpAddr,
     pub protocol: Protocol,
     pub username: String,
-    pub scope: WebApprovalScopeKey,
     pub other_credentials: CredentialFingerprints,
+}
+
+impl WebApprovalIdentity {
+    /// A single value standing for the whole identity, for a row to carry and
+    /// a later attempt to be compared against.
+    ///
+    /// Length-framed field by field, so no two different identities can encode
+    /// to the same bytes by running one field into the next.
+    #[must_use]
+    pub fn digest(&self) -> String {
+        let mut bytes = vec![1]; // version tag
+        let mut push = |part: &[u8]| {
+            bytes.extend_from_slice(&(part.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(part);
+        };
+
+        push(&[self.kind as u8]);
+        push(self.remote_ip.to_string().as_bytes());
+        push(self.protocol.to_string().as_bytes());
+        push(self.username.as_bytes());
+        push(self.other_credentials.digest().as_bytes());
+
+        HEXLOWER.encode(&sha2::Sha256::digest(&bytes))
+    }
+}
+
+/// Everything a new approval request has to match on to be auto-accepted.
+///
+/// Two halves because they are matched two different ways: the identity by
+/// equality, and the scope by *breadth* — an all-targets grant deliberately
+/// matches a target other than the one it was given for, so it can never be
+/// folded into the digest.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WebApprovalMatchKey {
+    pub scope: WebApprovalScopeKey,
+    pub identity: WebApprovalIdentity,
 }
 
 impl WebApprovalMatchKey {
@@ -170,10 +212,6 @@ impl WebApprovalMatchKey {
         credentials: &RememberApprovalBy,
     ) -> Option<Self> {
         Some(Self {
-            kind,
-            remote_ip: remote_ip?,
-            protocol,
-            username: username.to_lowercase(),
             // An empty target name means the flow hasn't picked one (HTTP
             // sign-in, SSH menu) — which is not the same as an approval
             // covering all targets.
@@ -182,7 +220,13 @@ impl WebApprovalMatchKey {
             } else {
                 WebApprovalScopeKey::Target(target_name.to_string())
             },
-            other_credentials: credentials.credential_fingerprints()?.clone(),
+            identity: WebApprovalIdentity {
+                kind,
+                remote_ip: remote_ip?,
+                protocol,
+                username: username.to_lowercase(),
+                other_credentials: credentials.credential_fingerprints()?.clone(),
+            },
         })
     }
 }
@@ -483,6 +527,76 @@ mod tests {
     use super::*;
     use crate::Secret;
     use crate::auth::StoredCredentialId;
+
+    fn fingerprints(byte: u8) -> CredentialFingerprints {
+        #[allow(clippy::expect_used)]
+        CredentialFingerprints::new(vec![AuthCredentialFingerprint::Password(
+            StoredCredentialId::of_stored_verifier([byte; 32].as_slice()),
+        )])
+        .expect("non-empty")
+    }
+
+    fn identity() -> WebApprovalIdentity {
+        WebApprovalIdentity {
+            kind: ApprovalKind::Admin,
+            remote_ip: "10.0.0.1".parse().unwrap(),
+            protocol: Protocol::Ssh,
+            username: "someone".into(),
+            other_credentials: fingerprints(1),
+        }
+    }
+
+    /// The digest *is* the comparison a remembered approval is matched by, so
+    /// a field that doesn't reach it is a field two different sessions are
+    /// allowed to differ in and still share a grant.
+    ///
+    /// The destructuring is the point: adding a field to the identity stops
+    /// this compiling until someone says what it does to the digest.
+    #[test]
+    fn every_part_of_the_identity_reaches_the_digest() {
+        let base = identity();
+        let WebApprovalIdentity {
+            kind,
+            remote_ip,
+            protocol,
+            username,
+            other_credentials,
+        } = identity();
+
+        let differing = [
+            WebApprovalIdentity {
+                kind: ApprovalKind::User,
+                ..identity()
+            },
+            WebApprovalIdentity {
+                remote_ip: "10.0.0.2".parse().unwrap(),
+                ..identity()
+            },
+            WebApprovalIdentity {
+                protocol: Protocol::Http,
+                ..identity()
+            },
+            WebApprovalIdentity {
+                username: "someone-else".into(),
+                ..identity()
+            },
+            WebApprovalIdentity {
+                other_credentials: fingerprints(2),
+                ..identity()
+            },
+        ];
+        // Names the destructured bindings, so none is quietly unused if a
+        // field is added and left out of the cases above.
+        let _ = (kind, remote_ip, protocol, username, other_credentials);
+
+        for altered in differing {
+            assert_ne!(
+                base.digest(),
+                altered.digest(),
+                "identities differing in one field must not share a digest: {altered:?}",
+            );
+        }
+    }
 
     /// The whole point of the type: a session with nothing to pin a grant to
     /// must produce no key, not a key that matches on origin and username

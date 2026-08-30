@@ -360,12 +360,8 @@ impl Services {
             return Ok(GateOutcome::Approved(ApprovedTarget::new(authorization)));
         }
 
-        let mut guard = PendingApproval::begin(
-            self.db.clone(),
-            self.cluster.node_id,
-            &subject,
-        )
-        .await?;
+        let mut guard =
+            PendingApproval::begin(self.db.clone(), self.cluster.node_id, &subject).await?;
 
         subject.emit_requested_event();
         let _ = self.admin_approval_request_tx.send(session_id);

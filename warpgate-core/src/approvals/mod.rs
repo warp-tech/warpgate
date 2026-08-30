@@ -33,7 +33,6 @@
 //! auditor reads is the record the bypass ran on. The corollary is that a
 //! grace period only reaches as far as the audit retention keeps the rows.
 
-use std::net::IpAddr;
 use std::time::Duration;
 
 use sea_orm::sea_query::Condition;
@@ -43,7 +42,6 @@ use uuid::Uuid;
 use warpgate_common::WarpgateError;
 pub use warpgate_common::auth::ApprovalScope;
 use warpgate_common::auth::{WebApprovalMatchKey, WebApprovalScopeKey};
-use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_db_entities::{Parameters, SessionApprovalRequest};
 
 use crate::auth_state_store::TIMEOUT;
@@ -82,13 +80,17 @@ pub struct ApprovalActor {
 /// bypass, answered from the request rows themselves, so a grant given while
 /// talking to one node bypasses the gate on every node.
 ///
-/// A row matches on kind, protocol, scope, user, origin and the credentials
-/// digest. The scope condition covers the exact ask and an all-targets grant,
-/// which is strictly broader; an untargeted ask (empty target name) is its own
-/// bucket, so a grant for a real target never stands in for it, nor the other
-/// way round. The candidate set is narrowed in SQL and pinned down in Rust,
-/// where username comparison follows the same rule as the rest of the auth
-/// stack rather than the database's collation.
+/// Scope is matched by breadth and everything else by equality, which is why
+/// they are matched in different places. The scope condition covers the exact
+/// ask and an all-targets grant, which is strictly broader; an untargeted ask
+/// (empty target name) is its own bucket, so a grant for a real target never
+/// stands in for it, nor the other way round.
+///
+/// Everything else is one comparison against
+/// [`WebApprovalIdentity::digest`] — the same value the row was written with.
+/// Comparing the columns one by one instead would mean a field added to the
+/// identity silently widening every remembered grant, because nothing makes
+/// the comparison list follow the type.
 pub(crate) async fn approval_is_remembered(
     db: &DatabaseConnection,
     key: &WebApprovalMatchKey,
@@ -113,25 +115,17 @@ pub(crate) async fn approval_is_remembered(
         .add(Column::Scope.eq(ApprovalScope::AllTargets));
 
     let rows = SessionApprovalRequest::Entity::find()
-        .filter(Column::Kind.eq(key.kind))
+        .filter(Column::Kind.eq(key.identity.kind))
         .filter(Column::Status.eq(ApprovalRequestStatus::Approved))
         .filter(Column::ResolvedAt.gte(cutoff))
         .filter(scope_matches)
         .all(db)
         .await?;
 
-    let digest = key.other_credentials.digest();
-    let protocol = key.protocol.to_string();
-    Ok(rows.into_iter().any(|row| {
-        row.protocol == protocol
-            && username_eq_ci(&row.username, &key.username)
-            && row.credentials_digest.as_deref() == Some(digest.as_str())
-            && row
-                .remote_address
-                .as_deref()
-                .and_then(|address| address.parse::<IpAddr>().ok())
-                == Some(key.remote_ip)
-    }))
+    let digest = key.identity.digest();
+    Ok(rows
+        .into_iter()
+        .any(|row| row.match_digest.as_deref() == Some(digest.as_str())))
 }
 
 /// The configured administrator-approval window, or the default auth-state

@@ -88,8 +88,10 @@ pub struct Model {
     pub remote_address: Option<String>,
     /// only user approvals have these
     pub identification_string: Option<String>,
-    /// hashed credential set, part of the key of the "remember" decisions
-    pub credentials_digest: Option<String>,
+    /// digest of the `WebApprovalIdentity` this request was made under — who,
+    /// from where, with what — which a later attempt is matched against for the
+    /// grace-period bypass. None when there was nothing to pin a grant to.
+    pub match_digest: Option<String>,
     /// ticket to consume if this request is approved (if consumption is deferred (HTTP))
     pub consumes_ticket_id: Option<Uuid>,
     pub started: OffsetDateTime,
@@ -112,7 +114,7 @@ impl Column {
         Self::UserId,
         Self::RemoteAddress,
         Self::IdentificationString,
-        Self::CredentialsDigest,
+        Self::MatchDigest,
         Self::ConsumesTicketId,
         Self::Started,
     ];

@@ -3,8 +3,7 @@ use std::net::IpAddr;
 use tracing::info;
 use uuid::Uuid;
 use warpgate_common::auth::{
-    ApprovalKind, AuthState, AuthStateUserInfo, RememberApprovalBy,
-    WebApprovalMatchKey,
+    ApprovalKind, AuthState, AuthStateUserInfo, RememberApprovalBy, WebApprovalMatchKey,
 };
 use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{Protocol, UserSessionId};
@@ -51,8 +50,10 @@ impl ApprovalSubject {
     /// What the request row stores to match this session's credentials against
     /// a later connection. `None` mirrors [`Self::match_key`]'s: a row without
     /// a digest can never serve as a remembered approval.
-    pub(super) fn credentials_digest(&self) -> Option<String> {
-        self.credentials.credential_fingerprints().map(|c| c.digest())
+    /// What a later attempt is matched against, taken from the same key the
+    /// match itself uses so the two can't drift.
+    pub(super) fn match_digest(&self) -> Option<String> {
+        Some(self.match_key()?.identity.digest())
     }
 
     pub(super) fn client_ip_for_logging(&self) -> String {

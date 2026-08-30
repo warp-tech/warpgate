@@ -29,7 +29,7 @@ pub mod session_approval_request {
         /// Digest of the credentials the session authenticated with; an
         /// approved row is matched against later connections through it for
         /// the grace-period bypass.
-        pub credentials_digest: Option<String>,
+        pub match_digest: Option<String>,
         /// The ticket an approval of this request consumes, where consumption
         /// is deferred to the gate (HTTP ticket sessions).
         pub consumes_ticket_id: Option<Uuid>,

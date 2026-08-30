@@ -54,7 +54,7 @@ async fn advertise_row(
             target: Set(subject.target_name.clone()),
             remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
             identification_string: Set(None),
-            credentials_digest: Set(subject.credentials_digest()),
+            match_digest: Set(subject.match_digest()),
             consumes_ticket_id: Set(subject.consumes_ticket_id),
             started: Set(OffsetDateTime::now_utc()),
             status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
@@ -360,7 +360,7 @@ async fn re_advertising_does_not_rewrite_what_was_approved() {
         "an answered request must keep the address it was approved for",
     );
     assert_eq!(
-        after.credentials_digest, approved.credentials_digest,
+        after.match_digest, approved.match_digest,
         "an answered request must keep the credentials it was approved for",
     );
     assert_eq!(after.node_id, approved.node_id);
@@ -748,7 +748,7 @@ async fn a_remembered_approval_requires_a_full_match() {
     );
     // The other approval kind is a different question entirely.
     let mut other_kind = lookup_key("prod", [7u8; 32]);
-    other_kind.kind = ApprovalKind::User;
+    other_kind.identity.kind = ApprovalKind::User;
     assert!(
         !approval_is_remembered(&db, &other_kind, GRACE)
             .await

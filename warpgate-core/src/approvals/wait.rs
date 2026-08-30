@@ -109,7 +109,7 @@ pub(super) async fn advertise_admin_request(
             target: Set(subject.target_name.clone()),
             remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
             identification_string: Set(None),
-            credentials_digest: Set(subject.credentials_digest()),
+            match_digest: Set(subject.match_digest()),
             consumes_ticket_id: Set(subject.consumes_ticket_id),
             started: Set(OffsetDateTime::now_utc()),
             status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
