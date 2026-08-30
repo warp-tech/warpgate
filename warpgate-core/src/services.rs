@@ -40,10 +40,6 @@ pub struct Services {
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
     pub listener_status: ListenerStatusRegistry,
-    /// Fires the session id whenever a connection starts waiting on an
-    /// administrator gate, so watchers can refresh without polling. Held here
-    /// rather than behind a lock so a wait site can signal without contending
-    /// with logins.
     pub(crate) admin_approval_request_tx: broadcast::Sender<UserSessionId>,
 }
 
@@ -93,7 +89,11 @@ impl Services {
 
         let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
 
-        let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new()));
+        let auth_state_store =
+            Arc::new(Mutex::new(AuthStateStore::new(Some(ApprovalRequestSink {
+                db: db.clone(),
+                node_id: cluster.node_id,
+            }))));
 
         tokio::spawn({
             let auth_state_store = auth_state_store.clone();
@@ -153,9 +153,8 @@ impl Services {
             admin_approval_request_tx: broadcast::channel(100).0,
         };
 
-        // A self approval can be clicked on any node, but only the node holding
-        // the auth state can satisfy the credential on it, so decisions are
-        // picked up here rather than delivered.
+        // Asynchronously detect user approvals received by other nodes
+        // and apply them to our AuthStates
         {
             let services = services.clone();
             tokio::spawn(async move {
@@ -169,38 +168,21 @@ impl Services {
             });
         }
 
-        // Lets the store record a self-approval request before it announces one,
-        // which is the one place every protocol's auth state passes through.
-        services
-            .auth_state_store
-            .lock()
-            .await
-            .set_request_sink(ApprovalRequestSink {
-                db: services.db.clone(),
-                node_id: services.cluster.node_id,
-            });
-
         Ok(services)
     }
 
-    /// Notified with the session id whenever a connection starts waiting on an
-    /// administrator gate.
     pub fn subscribe_admin_approval_request(&self) -> broadcast::Receiver<UserSessionId> {
         self.admin_approval_request_tx.subscribe()
     }
 
-    /// Handle to the per-session administrator-gate ledger.
     pub(crate) async fn admin_approval_gates(&self) -> Arc<SessionGates> {
         self.state.lock().await.admin_approval_gates()
     }
 
-    /// How long a session held for administrator approval waits before being
-    /// auto-rejected. Falls back to the auth-state timeout when unset.
     pub async fn admin_approval_timeout(&self) -> Result<Duration, WarpgateError> {
         crate::approvals::admin_approval_timeout(&self.db).await
     }
 
-    /// Configured administrator-approval caching window, or `None` if disabled.
     pub async fn admin_approval_grace_period(&self) -> Result<Option<Duration>, WarpgateError> {
         Ok(Parameters::Entity::get(&self.db)
             .await?

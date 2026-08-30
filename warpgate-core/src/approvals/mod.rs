@@ -101,7 +101,7 @@ pub(crate) async fn approval_is_remembered(
     #[allow(clippy::cast_possible_wrap)]
     let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(grace.as_secs() as i64);
 
-    let asked_target = match &key.scope {
+    let asked_target = match &key.scope() {
         WebApprovalScopeKey::Target(name) => name.as_str(),
         // An untargeted flow stores an empty target name on its rows.
         WebApprovalScopeKey::Untargeted => "",
@@ -115,14 +115,14 @@ pub(crate) async fn approval_is_remembered(
         .add(Column::Scope.eq(ApprovalScope::AllTargets));
 
     let rows = SessionApprovalRequest::Entity::find()
-        .filter(Column::Kind.eq(key.identity.kind))
+        .filter(Column::Kind.eq(key.identity().kind()))
         .filter(Column::Status.eq(ApprovalRequestStatus::Approved))
         .filter(Column::ResolvedAt.gte(cutoff))
         .filter(scope_matches)
         .all(db)
         .await?;
 
-    let digest = key.identity.digest();
+    let digest = key.identity().digest();
     Ok(rows
         .into_iter()
         .any(|row| row.match_digest.as_deref() == Some(digest.as_str())))

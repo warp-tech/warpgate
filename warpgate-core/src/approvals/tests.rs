@@ -691,7 +691,7 @@ fn remembered_subject(target: &str, hash: [u8; 32]) -> ApprovalSubject {
 fn lookup_key(target: &str, hash: [u8; 32]) -> WebApprovalMatchKey {
     WebApprovalMatchKey::build(
         ApprovalKind::Admin,
-        Some("10.0.0.5".parse().unwrap()),
+        "10.0.0.5".parse().unwrap(),
         Protocol::Ssh,
         // Case differs from the stored row's "someone" on purpose:
         // usernames compare case-insensitively across the auth stack.
@@ -746,9 +746,19 @@ async fn a_remembered_approval_requires_a_full_match() {
             .await
             .unwrap()
     );
+
     // The other approval kind is a different question entirely.
-    let mut other_kind = lookup_key("prod", [7u8; 32]);
-    other_kind.identity.kind = ApprovalKind::User;
+    let existing = lookup_key("prod", [7u8; 32]);
+
+    let other_kind = WebApprovalMatchKey::build(
+        ApprovalKind::User,
+        existing.identity().remote_ip(),
+        existing.identity().protocol(),
+        existing.identity().username(),
+        "prod",
+        &RememberApprovalBy::Credentials(existing.identity().other_credentials().clone()),
+    ).unwrap();
+
     assert!(
         !approval_is_remembered(&db, &other_kind, GRACE)
             .await
@@ -1127,7 +1137,7 @@ mod delivery {
             cluster,
             rate_limiter_registry,
             config_provider: Arc::new(DatabaseConfigProvider::new(db).into()),
-            auth_state_store: Arc::new(Mutex::new(AuthStateStore::new())),
+            auth_state_store: Arc::new(Mutex::new(AuthStateStore::new(None))),
             admin_token: Arc::new(None),
             cluster_token: Arc::new(Secret::new("test".into())),
             login_protection: Arc::new(LoginProtectionService::new(db.clone()).await.unwrap()),

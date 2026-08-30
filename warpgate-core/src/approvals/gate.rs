@@ -14,26 +14,15 @@ use crate::protocols::AdmittedTarget;
 use crate::services::Services;
 use crate::{TargetSessionStart, WarpgateServerHandle};
 
-/// How a gate ended for a connection that was waiting on it.
-///
-/// `Refused` and `Expired` are kept apart because they mean opposite things to
-/// a protocol that can ask again: an administrator said no, versus nobody was
-/// there to say anything. Treating the second as the first locks a session out
-/// of a target for good on the strength of one unattended window.
-#[must_use = "a gate outcome that is dropped is a gate that was never applied"]
+#[must_use]
 pub enum GateOutcome<O = warpgate_common::TargetOptions> {
-    /// Let through, with the proof needed to reach the target.
     Approved(ApprovedTarget<O>),
-    /// An administrator decided against it.
     Refused,
-    /// The window ran out, the client left, or the request stopped being a live
-    /// question. Nothing was decided, and asking again is legitimate.
+    // timeout / disconnected / gone from the DB (may ask again)
     Expired,
 }
 
 impl<O> GateOutcome<O> {
-    /// The proof, for a caller that treats every non-approval the same way —
-    /// a connection-holding protocol has nothing to retry with.
     pub fn approved(self) -> Option<ApprovedTarget<O>> {
         match self {
             Self::Approved(target) => Some(target),

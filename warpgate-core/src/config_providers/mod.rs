@@ -312,18 +312,13 @@ pub async fn authorize_for_target_by_name<C: ConfigProvider + ?Sized>(
     }
 }
 
-/// When [`authorize_and_spend_ticket`] takes the ticket's use.
+/// When authorize_and_spend_ticket consumes the ticket
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TicketSpend {
-    /// With the authorization, atomically — two presentations of a one-use
-    /// ticket can never both authenticate. For protocols whose connection is
-    /// refused outright when the administrator gate says no; the gate refunds
-    /// the spend on a refusal.
+    /// At the authorization time (for sync protocols that wait), refund happens if the
+    /// protocol does not see the approval
     Immediate,
-    /// Deferred to the administrator approval when the target is gated: the
-    /// session establishes unspent, the request row carries the ticket, and
-    /// whichever node records an approval consumes it. For HTTP, whose ticket
-    /// session outlives any one request and must not burn a use on a refusal.
+    /// deferred for the approval when the target is gated
     DeferredIfApprovalGated,
 }
 
@@ -387,10 +382,7 @@ pub async fn authorize_and_spend_ticket(
         // Spend the ticket
         let defer_spend = spend == TicketSpend::DeferredIfApprovalGated && target.require_approval;
         if defer_spend {
-            // Deferring *when* the use is taken must not defer *whether* there
-            // is one to take: a used-up ticket authorizes nothing, and the
-            // approval that would eventually spend it cannot refuse a session
-            // that has already been let in.
+            // still check NOW whether there are uses left
             if ticket.uses_left.is_some_and(|uses| uses <= 0) {
                 warn!("Ticket is used up: {}", &ticket.id);
                 return Ok(None);
@@ -425,9 +417,7 @@ pub async fn authorize_and_spend_ticket(
     }
 }
 
-/// Decrements a ticket's remaining uses. Only called for a consumption that was
-/// deferred past [`authorize_and_spend_ticket`] — an HTTP ticket session whose
-/// target is gated spends its ticket through the approval that admits it.
+/// Consume a ticket (where consumption was deferred)
 pub async fn consume_ticket(
     db: &DatabaseConnection,
     ticket_id: &Uuid,
@@ -448,10 +438,7 @@ pub async fn consume_ticket(
             .filter(e::Ticket::Column::UsesLeft.gt(0))
             .exec(db)
             .await?;
-        // Nothing left to take: the ticket was exhausted elsewhere between the
-        // session being established and the approval landing. Reported rather
-        // than passed over, so the deferral can never launder a use that was
-        // never available.
+        // ticket has gotten used up elsewhere
         if spent.rows_affected == 0 {
             return Err(WarpgateError::InvalidTicket(*ticket_id));
         }
@@ -460,14 +447,7 @@ pub async fn consume_ticket(
     Ok(())
 }
 
-/// Gives a spent ticket its use back.
-///
-/// [`authorize_and_spend_ticket`] spends atomically with the authorization, so
-/// two presentations of a one-use ticket can never both authenticate. The
-/// administrator gate is the one thing that may still turn an authenticated
-/// session away, and the user should not lose their use to someone else's
-/// refusal — so anything that takes a use without admitting the session gives
-/// it back.
+/// Refund a spent ticket (if session got refused via admin approvals)
 pub(crate) async fn refund_ticket(
     db: &DatabaseConnection,
     ticket_id: Uuid,
@@ -484,22 +464,14 @@ pub(crate) async fn refund_ticket(
     Ok(())
 }
 
-/// Refunds a session's already-spent ticket unless disarmed, for holding across
-/// the administrator gate: armed when the hold begins, disarmed only by an
-/// approval, so a refusal, a timeout, or the client vanishing mid-wait — which
-/// drops the holding future — all give the use back.
-///
-/// Refunding on drop rather than at a call site is what makes this hold: a
-/// protocol that parks on the approval gate is dropped mid-await when its
-/// client disconnects, so any code placed after the wait simply never runs.
+/// A guard that autorefunds the ticket on drop unless disarmed
 pub struct TicketRefund {
     ticket_id: Option<Uuid>,
     db: DatabaseConnection,
 }
 
 impl TicketRefund {
-    /// `None` for a session that didn't authenticate with a ticket, which makes
-    /// the guard inert and lets callers hold one unconditionally.
+    /// None creates an inert guard directly
     pub const fn new(db: DatabaseConnection, ticket_id: Option<Uuid>) -> Self {
         Self { ticket_id, db }
     }
@@ -512,8 +484,6 @@ impl TicketRefund {
 
 impl Drop for TicketRefund {
     fn drop(&mut self) {
-        // Drop can't await, and the refund must happen even when the task is
-        // being torn down, so it outlives this future.
         let Some(ticket_id) = self.ticket_id.take() else {
             return;
         };

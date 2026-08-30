@@ -150,14 +150,7 @@ impl WarpgateServerHandle {
         }))
     }
 
-    /// Starts a target session for a proof the administrator gate minted.
-    ///
-    /// The gate is the only other source of [`ApprovedTarget`], so between this
-    /// and [`Self::start_target_session`] every admission — gated or not — goes
-    /// through the same row and the same audit event.
-    ///
-    /// Takes the proof by value and hands it back inside the [`AdmittedTarget`]:
-    /// the row and the proof it was opened from are only ever held together.
+    /// Register the target session in the DB and issue an ID
     pub async fn register_approved_target_session<O>(
         &self,
         approved: ApprovedTarget<O>,
@@ -254,43 +247,24 @@ impl WarpgateServerHandle {
     }
 }
 
-/// Target session start outcome.
-///
-/// `NeedsApproval` hands the authorization back: the caller takes it to the
-/// administrator gate ([`Services::require_admin_approval`] or
-/// [`Services::poll_admin_approval`]), and registers the proof the gate mints
-/// via [`WarpgateServerHandle::register_approved_target_session`].
-///
-/// [`Services::require_admin_approval`]: crate::Services::require_admin_approval
-/// [`Services::poll_admin_approval`]: crate::Services::poll_admin_approval
+/// Wehther a session can be started without approval or not
 pub enum TargetSessionStart<O> {
     Started(AdmittedTarget<O>),
+    // returns TargetAuthorization back -> proceed to Services::require_admin_approval/poll_admin_approval -> register_approved_target_session
     NeedsApproval(TargetAuthorization<O>),
 }
 
-/// An admitted target session: the open access row, and the proof it was opened
-/// from.
-///
-/// The two are produced together and every consumer wants both — the id to
-/// record against, the proof to connect with — so they travel as one rather
-/// than as a pair a caller could mismatch. There is no way to hold the id
-/// without the proof that earned it, which is what makes an admission
-/// unforgeable rather than merely conventional.
-///
-/// Derefs to the proof, so reading the target or the user reads through.
+/// An admitted target session = approved session + its DB ID
 pub struct AdmittedTarget<O = warpgate_common::TargetOptions> {
     id: TargetSessionId,
     approved: ApprovedTarget<O>,
 }
 
 impl<O> AdmittedTarget<O> {
-    /// The row this admission opened, to record sessions and recordings against.
     pub const fn id(&self) -> TargetSessionId {
         self.id
     }
 
-    /// Hands the proof to whatever makes the connection it authorises, for a
-    /// consumer that has no use for the row id.
     pub fn into_approved(self) -> ApprovedTarget<O> {
         self.approved
     }

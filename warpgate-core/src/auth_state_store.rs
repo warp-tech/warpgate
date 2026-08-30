@@ -172,30 +172,17 @@ pub struct ApprovalRequestSink {
 pub struct AuthStateStore {
     store: HashMap<UserSessionId, (Arc<Mutex<AuthState>>, Instant)>,
     web_auth_request_signal: broadcast::Sender<UserSessionId>,
-    /// Where a self-approval request is recorded so other nodes can see it.
-    /// Unset in unit tests, which run the state machine without a database.
+    // pluggable to allow working without one in tests
     request_sink: Option<ApprovalRequestSink>,
 }
 
-impl Default for AuthStateStore {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl AuthStateStore {
-    pub fn new() -> Self {
+    pub fn new(request_sink: Option<ApprovalRequestSink>) -> Self {
         Self {
             store: HashMap::new(),
             web_auth_request_signal: broadcast::channel(100).0,
-            request_sink: None,
+            request_sink,
         }
-    }
-
-    /// Points the store at the database that records self-approval requests.
-    /// Set once at startup; until then requests are only signalled locally.
-    pub fn set_request_sink(&mut self, sink: ApprovalRequestSink) {
-        self.request_sink = Some(sink);
     }
 
     pub fn contains_key(&self, id: &UserSessionId) -> bool {
@@ -301,9 +288,7 @@ impl AuthStateStore {
         let id = *session_id;
 
         // Small backlog so subscribers that briefly fall behind still see the
-        // terminal transition; laggards re-check the state directly. The
-        // receiver is taken before the state exists, so the transition
-        // `AuthState::new` itself produces is buffered rather than missed.
+        // terminal transition
         let (state_change_tx, mut state_change_rx) = broadcast::channel(8);
 
         let state = AuthState::new(
@@ -320,10 +305,10 @@ impl AuthStateStore {
 
         let web_auth_request_signal = self.web_auth_request_signal.clone();
         let request_sink = self.request_sink.clone();
-        // Weak, because the state owns the sender this task receives on: a
-        // strong handle here would keep the channel open forever, so the task
-        // would never end and `vacuum` could never free the state.
+
+        // avoid keeping the state alive
         let watched = Arc::downgrade(&state_arc);
+
         tokio::spawn(async move {
             while let Ok(AuthResult::Need(result)) = state_change_rx.recv().await {
                 if !result.contains(&CredentialKind::WebUserApproval) {
@@ -332,9 +317,7 @@ impl AuthStateStore {
                 let Some(watched) = watched.upgrade() else {
                     break;
                 };
-                // Recorded before it is announced, so a user acting on the
-                // notification the moment it arrives always finds the request —
-                // including from another node, which has only the record to go on.
+
                 if let Some(sink) = &request_sink
                     && let Err(error) =
                         crate::approvals::advertise_user_request(&sink.db, sink.node_id, &watched)
@@ -450,7 +433,7 @@ mod tests {
     // by its session id, so the owning node resolves from `user_sessions`.
     #[tokio::test]
     async fn create_keys_auth_state_by_session_id() {
-        let mut store = AuthStateStore::new();
+        let mut store = AuthStateStore::new(None);
         let user = test_user();
         let session_id = UserSessionId(Uuid::new_v4());
 
@@ -460,7 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_new_attempt_supersedes_the_session_s_previous_state() {
-        let mut store = AuthStateStore::new();
+        let mut store = AuthStateStore::new(None);
         let user = test_user();
         let session_id = UserSessionId(Uuid::new_v4());
 

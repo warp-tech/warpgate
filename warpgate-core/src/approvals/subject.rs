@@ -53,7 +53,7 @@ impl ApprovalSubject {
     /// What a later attempt is matched against, taken from the same key the
     /// match itself uses so the two can't drift.
     pub(super) fn match_digest(&self) -> Option<String> {
-        Some(self.match_key()?.identity.digest())
+        Some(self.match_key()?.identity().digest())
     }
 
     pub(super) fn client_ip_for_logging(&self) -> String {
@@ -64,14 +64,16 @@ impl ApprovalSubject {
     /// The key this session's approval is remembered under. `None` when
     /// [`WebApprovalMatchKey::build`] has nothing to pin a grant to.
     pub(super) fn match_key(&self) -> Option<WebApprovalMatchKey> {
-        WebApprovalMatchKey::build(
-            self.kind,
-            self.remote_ip,
-            self.protocol,
-            &self.user_info.username,
-            &self.target_name,
-            &self.credentials,
-        )
+        self.remote_ip.and_then(|ip| {
+            WebApprovalMatchKey::build(
+                self.kind,
+                ip,
+                self.protocol,
+                &self.user_info.username,
+                &self.target_name,
+                &self.credentials,
+            )
+        })
     }
 
     pub(super) fn emit_requested_event(&self) {

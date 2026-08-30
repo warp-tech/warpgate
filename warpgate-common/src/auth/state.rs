@@ -144,32 +144,21 @@ impl RememberApprovalBy {
     }
 }
 
-/// Who is asking, from where, and with what — everything a remembered approval
-/// must match *exactly* to be reused.
-///
-/// Kept apart from the scope because these are the equality half: they are
-/// compared as one [`Self::digest`], which is what a request row stores. A
-/// field added here therefore enters the comparison on its own — the failure
-/// this shape exists to prevent is a new field that widens every remembered
-/// grant because nobody added it to a hand-written comparison.
+/// The exact identity half of a remember approval key
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebApprovalIdentity {
-    pub kind: ApprovalKind,
-    pub remote_ip: IpAddr,
-    pub protocol: Protocol,
-    pub username: String,
-    pub other_credentials: CredentialFingerprints,
+    kind: ApprovalKind,
+    remote_ip: IpAddr,
+    protocol: Protocol,
+    username: String,
+    other_credentials: CredentialFingerprints,
 }
 
 impl WebApprovalIdentity {
-    /// A single value standing for the whole identity, for a row to carry and
-    /// a later attempt to be compared against.
-    ///
-    /// Length-framed field by field, so no two different identities can encode
-    /// to the same bytes by running one field into the next.
     #[must_use]
     pub fn digest(&self) -> String {
         let mut bytes = vec![1]; // version tag
+        // Length-prefix everything to avoid collisions via string boundaries
         let mut push = |part: &[u8]| {
             bytes.extend_from_slice(&(part.len() as u64).to_le_bytes());
             bytes.extend_from_slice(part);
@@ -183,51 +172,69 @@ impl WebApprovalIdentity {
 
         HEXLOWER.encode(&sha2::Sha256::digest(&bytes))
     }
+
+    pub fn kind(&self) -> ApprovalKind {
+        self.kind
+    }
+
+    pub fn remote_ip(&self) -> IpAddr {
+        self.remote_ip
+    }
+
+    pub fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
+    pub fn other_credentials(&self) -> &CredentialFingerprints {
+        &self.other_credentials
+    }
 }
 
-/// Everything a new approval request has to match on to be auto-accepted.
-///
-/// Two halves because they are matched two different ways: the identity by
-/// equality, and the scope by *breadth* — an all-targets grant deliberately
-/// matches a target other than the one it was given for, so it can never be
-/// folded into the digest.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebApprovalMatchKey {
-    pub scope: WebApprovalScopeKey,
-    pub identity: WebApprovalIdentity,
+    // compared by "scope is narrower", so it cannot be a part of the digest
+    scope: WebApprovalScopeKey,
+    // compared by equality
+    identity: WebApprovalIdentity,
 }
 
 impl WebApprovalMatchKey {
-    /// The one place a lookup key is normalised, shared by every approval
-    /// kind. `None` without a remote IP or without known credentials, so a
-    /// remembered approval is never replayed for a session that can't be
-    /// pinned to the same origin and the same credentials.
     #[must_use]
     pub fn build(
         kind: ApprovalKind,
-        remote_ip: Option<IpAddr>,
+        remote_ip: IpAddr,
         protocol: Protocol,
         username: &str,
         target_name: &str,
         credentials: &RememberApprovalBy,
     ) -> Option<Self> {
         Some(Self {
-            // An empty target name means the flow hasn't picked one (HTTP
-            // sign-in, SSH menu) — which is not the same as an approval
-            // covering all targets.
             scope: if target_name.is_empty() {
+                // currenrly, only the SSH menu can do this
                 WebApprovalScopeKey::Untargeted
             } else {
                 WebApprovalScopeKey::Target(target_name.to_string())
             },
             identity: WebApprovalIdentity {
                 kind,
-                remote_ip: remote_ip?,
+                remote_ip,
                 protocol,
                 username: username.to_lowercase(),
                 other_credentials: credentials.credential_fingerprints()?.clone(),
             },
         })
+    }
+
+    pub fn identity(&self) -> &WebApprovalIdentity {
+        &self.identity
+    }
+
+    pub fn scope(&self) -> &WebApprovalScopeKey {
+        &self.scope
     }
 }
 
@@ -321,11 +328,7 @@ impl AuthState {
         &self.target_name
     }
 
-    /// What an approval granted to this attempt could be remembered on.
-    ///
-    /// `WebUserApproval` itself is excluded, so the answer describes the *other*
-    /// credentials presented and is identical whether taken before an approval
-    /// is added (check) or after (save).
+    /// Best possible "remember by" key for approving this AuthState
     #[must_use]
     pub fn remembered_by(&self) -> RememberApprovalBy {
         RememberApprovalBy::from_fingerprints(
@@ -340,14 +343,16 @@ impl AuthState {
     /// Builds the key used to match this attempt against a remembered web
     /// approval.
     pub fn web_approval_match_key(&self) -> Option<WebApprovalMatchKey> {
-        WebApprovalMatchKey::build(
-            ApprovalKind::User,
-            self.remote_ip,
-            self.protocol,
-            &self.user_info.username,
-            &self.target_name,
-            &self.remembered_by(),
-        )
+        self.remote_ip.and_then(|ip| {
+            WebApprovalMatchKey::build(
+                ApprovalKind::User,
+                ip,
+                self.protocol,
+                &self.user_info.username,
+                &self.target_name,
+                &self.remembered_by(),
+            )
+        })
     }
 
     pub const fn started(&self) -> &OffsetDateTime {

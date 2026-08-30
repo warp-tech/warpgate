@@ -67,14 +67,8 @@ pub trait DbAuthTransport {
     /// Tell the client the login was denied.
     async fn send_denied(&mut self) -> Result<(), Self::Error>;
 
-    /// Announce that the session is being held for administrator approval.
-    /// Called only while it actually is held, so a session that passes the gate
-    /// straight through says nothing.
-    ///
-    /// A protocol whose notice needs an authenticated connection spends
-    /// `auth_ok` on it; what it leaves behind is what the flow sends once the
-    /// session is approved. The default says nothing, for protocols with no
-    /// in-band channel for it at this point in their handshake.
+    /// Announce to the client that session is waiting for admin approval.
+    /// The impl may take and consume the auth_ok permit at this point.
     async fn notify_awaiting_admin_approval(
         &mut self,
         _auth_ok: &mut Option<AuthOkPermit>,
@@ -83,11 +77,6 @@ pub trait DbAuthTransport {
     }
 }
 
-/// Holds an otherwise-complete login on the administrator-approval gate.
-///
-/// The wait isn't cancelled when the client goes away — neither protocol can
-/// cheaply observe a disconnect — which only delays cleanup, since session
-/// teardown closes the request row regardless.
 async fn hold_for_admin_approval<T: DbAuthTransport>(
     transport: &mut T,
     services: &Services,
@@ -177,12 +166,8 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                 AdminApprovalContext {
                     session_id,
                     remote_ip: Some(remote_ip),
-                    // A ticket is not a stable credential fingerprint.
+                    // tickets aren't stable credential fingerprints
                     credentials: RememberApprovalBy::Nothing,
-                    // Armed for the whole hold: the client dropping
-                    // mid-approval cancels this future, so the ticket has to
-                    // be settled by the gate and the guard rather than by any
-                    // statement below.
                     ticket: TicketStake::Held(TicketRefund::new(services.db.clone(), ticket_id)),
                 },
                 &mut auth_ok,
