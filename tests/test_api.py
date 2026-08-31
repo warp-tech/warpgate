@@ -110,6 +110,13 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={201},
     ),
     AdminApiTestCase(
+        id="search_session_commands",
+        permission="sessions_view",
+        # A non-empty query exercises the actual filter path
+        call=lambda api, r: api.search_session_commands_with_http_info(q="test"),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
         id="get_recording",
         permission="recordings_view",
         call=lambda api, r: api.get_recording_with_http_info(r["recording_id"]),
