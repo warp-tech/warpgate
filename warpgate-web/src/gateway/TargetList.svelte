@@ -96,14 +96,28 @@
         )
     }
 
-    function selectTarget(target: TargetSnapshot) {
+    function urlForTarget(target: TargetSnapshot): string | undefined {
         if (target.kind === TargetKind.Http) {
             if (target.externalHost) {
                 const port = location.port ? `:${location.port}` : ''
-                loadURL(`${location.protocol}//${target.externalHost}${port}`)
+                return `${location.protocol}//${target.externalHost}${port}`
             } else {
-                loadURL(`/?warpgate-target=${target.name}`)
+                return `/?warpgate-target=${target.name}`
             }
+        } else if (target.kind === TargetKind.Ssh) {
+            return `/@warpgate/#/web-ssh/start/${target.id}`
+        } else if (
+            target.kind === TargetKind.Vnc ||
+            target.kind === TargetKind.Rdp
+        ) {
+            return `/@warpgate/#/web-desktop/start/${target.id}`
+        }
+    }
+
+    function selectTarget(target: TargetSnapshot) {
+        if (target.kind === TargetKind.Http) {
+            // biome-ignore lint/style/noNonNullAssertion: .
+            loadURL(urlForTarget(target)!)
         } else if (target.kind === TargetKind.Ssh) {
             const targetClickAction = $serverInfo?.targetClickAction
             if (
@@ -230,11 +244,7 @@
     {#snippet item(target)}
         <a
             class="list-group-item list-group-item-action target-item gap-3"
-            href={target.kind === TargetKind.Http
-                    ? (target.externalHost
-                        ? `${location.protocol}//${target.externalHost}${location.port ? `:${location.port}` : ''}`
-                        : `/?warpgate-target=${target.name}`)
-                    : '/@warpgate/admin'}
+            href={urlForTarget(target)}
             target={target.kind === TargetKind.Http && $openTargetsInNewTab
                 ? '_blank'
                 : undefined}
@@ -391,5 +401,6 @@
     .target-item {
         display: flex;
         align-items: center;
+        cursor: pointer;
     }
 </style>

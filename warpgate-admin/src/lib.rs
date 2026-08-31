@@ -1,5 +1,6 @@
 pub mod api;
 pub mod approvals;
+pub use api::common::require_admin_permission;
 use poem::http::header::CONTENT_SECURITY_POLICY;
 use poem::middleware::SetHeader;
 use poem::{EndpointExt, IntoEndpoint, Route};

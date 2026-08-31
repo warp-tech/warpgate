@@ -43,9 +43,31 @@ def _provision(api, otp_key_base64):
                     auth=sdk.RdpTargetAuth(
                         sdk.RdpTargetAuthRdpTargetPasswordAuth(
                             kind="Password", password="123"
-                        )
+                        ),
                     ),
                     verify_tls=False,
+                    interactive_logon=False,
+                )
+            ),
+        )
+    )
+    target = api.create_target(
+        sdk.TargetDataRequest(
+            name=f"rdp-{uuid4()}",
+            options=sdk.TargetOptions(
+                sdk.TargetOptionsTargetRdpOptions(
+                    kind="Rdp",
+                    # Never dialed: auth is rejected before Warpgate connects the target.
+                    host="localhost",
+                    port=3389,
+                    username="user",
+                    auth=sdk.RdpTargetAuth(
+                        sdk.RdpTargetAuthRdpTargetPasswordAuth(
+                            kind="Password", password="123"
+                        ),
+                    ),
+                    verify_tls=False,
+                    interactive_logon=False,
                 )
             ),
         )
