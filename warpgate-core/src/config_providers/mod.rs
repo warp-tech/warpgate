@@ -13,8 +13,8 @@ use time::OffsetDateTime;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{
-    AuthCredential, AuthCredentialFingerprint, AuthResult, AuthState, AuthStateUserInfo,
-    CredentialKind, CredentialPolicy,
+    AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialKind, CredentialPolicy,
+    StoredCredential,
 };
 use warpgate_common::helpers::hash::hash_secret;
 use warpgate_common::{
@@ -48,12 +48,12 @@ pub trait ConfigProvider {
     /// Identifies the stored credential the submission matched, or `None` if
     /// none did. The identity rather than a `bool` because this is the only
     /// place that can see *which* stored credential verified the submission —
-    /// see [`AuthCredentialFingerprint`].
+    /// see [`StoredCredential`].
     async fn validate_credential(
         &self,
         username: &str,
         client_credential: &AuthCredential,
-    ) -> Result<Option<AuthCredentialFingerprint>, WarpgateError>;
+    ) -> Result<Option<StoredCredential>, WarpgateError>;
 
     async fn username_for_sso_credential(
         &self,
@@ -611,7 +611,11 @@ mod tests {
 
     struct FixedPolicy(bool);
     impl CredentialPolicy for FixedPolicy {
-        fn is_sufficient(&self, _p: Protocol, _c: &[AuthCredential]) -> CredentialPolicyResponse {
+        fn is_sufficient(
+            &self,
+            _p: Protocol,
+            _c: &HashSet<CredentialKind>,
+        ) -> CredentialPolicyResponse {
             if self.0 {
                 CredentialPolicyResponse::Ok
             } else {

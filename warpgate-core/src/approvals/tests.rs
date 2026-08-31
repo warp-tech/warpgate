@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -8,8 +8,8 @@ use sea_orm::{Database, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::auth::{
-    ApprovalKind, ApprovalScope, AuthCredentialFingerprint, AuthStateUserInfo, RememberApprovalBy,
-    StoredCredentialId, WebApprovalMatchKey,
+    ApprovalKind, ApprovalScope, AuthStateUserInfo, RememberApprovalBy, StoredCredential,
+    StoredCredentialId, StoredCredentialKind, WebApprovalMatchKey,
 };
 use warpgate_common::{NodeId, Protocol, UserSessionId};
 use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
@@ -675,7 +675,9 @@ async fn a_decision_written_later_is_picked_up() {
 }
 
 fn password_credentials(hash: [u8; 32]) -> RememberApprovalBy {
-    RememberApprovalBy::from_fingerprints(vec![AuthCredentialFingerprint::Password(
+    RememberApprovalBy::from_credentials(vec![StoredCredential::new(
+        StoredCredentialKind::Password,
+        Uuid::from_u128(u128::from(hash[0])),
         StoredCredentialId::of_stored_verifier(hash.as_slice()),
     )])
 }
@@ -1281,12 +1283,9 @@ mod delivery {
         fn is_sufficient(
             &self,
             _protocol: Protocol,
-            valid_credentials: &[AuthCredential],
+            valid_credentials: &HashSet<CredentialKind>,
         ) -> CredentialPolicyResponse {
-            if valid_credentials
-                .iter()
-                .any(|c| c.kind() == CredentialKind::WebUserApproval)
-            {
+            if valid_credentials.contains(&CredentialKind::WebUserApproval) {
                 CredentialPolicyResponse::Ok
             } else {
                 CredentialPolicyResponse::Need(

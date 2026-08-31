@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -390,12 +390,9 @@ mod tests {
         fn is_sufficient(
             &self,
             _protocol: Protocol,
-            valid_credentials: &[AuthCredential],
+            valid_credentials: &HashSet<CredentialKind>,
         ) -> CredentialPolicyResponse {
-            if valid_credentials
-                .iter()
-                .any(|c| c.kind() == CredentialKind::WebUserApproval)
-            {
+            if valid_credentials.contains(&CredentialKind::WebUserApproval) {
                 CredentialPolicyResponse::Ok
             } else {
                 CredentialPolicyResponse::Need(

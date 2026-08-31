@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{AuthCredential, CredentialKind};
+use super::CredentialKind;
 use crate::Protocol;
 
 pub enum CredentialPolicyResponse {
@@ -9,10 +9,13 @@ pub enum CredentialPolicyResponse {
 }
 
 pub trait CredentialPolicy {
+    /// `valid_credentials` is the *kinds* accepted so far, deliberately: no
+    /// policy distinguishes which stored credential matched, and handing over
+    /// the identities would let one start to.
     fn is_sufficient(
         &self,
         protocol: Protocol,
-        valid_credentials: &[AuthCredential],
+        valid_credentials: &HashSet<CredentialKind>,
     ) -> CredentialPolicyResponse;
 }
 
@@ -34,7 +37,7 @@ impl CredentialPolicy for AnySingleCredentialPolicy {
     fn is_sufficient(
         &self,
         _protocol: Protocol,
-        valid_credentials: &[AuthCredential],
+        valid_credentials: &HashSet<CredentialKind>,
     ) -> CredentialPolicyResponse {
         if valid_credentials.is_empty() {
             CredentialPolicyResponse::Need(
@@ -53,19 +56,16 @@ impl CredentialPolicy for AllCredentialsPolicy {
     fn is_sufficient(
         &self,
         _protocol: Protocol,
-        valid_credentials: &[AuthCredential],
+        valid_credentials: &HashSet<CredentialKind>,
     ) -> CredentialPolicyResponse {
-        let valid_credential_types: HashSet<CredentialKind> =
-            valid_credentials.iter().map(AuthCredential::kind).collect();
-
-        if !valid_credential_types.is_empty()
-            && valid_credential_types.is_superset(&self.required_credential_types)
+        if !valid_credentials.is_empty()
+            && valid_credentials.is_superset(&self.required_credential_types)
         {
             CredentialPolicyResponse::Ok
         } else {
             CredentialPolicyResponse::Need(
                 self.required_credential_types
-                    .difference(&valid_credential_types)
+                    .difference(valid_credentials)
                     .copied()
                     .collect(),
             )
@@ -77,7 +77,7 @@ impl CredentialPolicy for PerProtocolCredentialPolicy {
     fn is_sufficient(
         &self,
         protocol: Protocol,
-        valid_credentials: &[AuthCredential],
+        valid_credentials: &HashSet<CredentialKind>,
     ) -> CredentialPolicyResponse {
         // A protocol without a configured override intentionally falls back to
         // the default policy.
