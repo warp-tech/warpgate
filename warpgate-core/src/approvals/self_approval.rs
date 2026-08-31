@@ -218,7 +218,7 @@ pub(crate) async fn advertise_user_request(
             match_digest: Set(state
                 .web_approval_match_key()
                 .map(|key| key.identity().digest())),
-            consumes_ticket_id: Set(None),
+            ticket_id: Set(None),
             started: Set(*state.started()),
             status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
             scope: Set(None),

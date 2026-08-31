@@ -28,9 +28,9 @@ pub(super) struct ApprovalSubject {
     /// What a grant to this session could be remembered on. Where that is
     /// nothing, remembering is disabled rather than keyed on less.
     pub(super) credentials: RememberApprovalBy,
-    /// The ticket an approval of this request consumes, where consumption is
-    /// deferred to the gate — see [`TicketStake::ConsumedOnApproval`].
-    pub(super) consumes_ticket_id: Option<Uuid>,
+    /// The ticket use this session's question holds — put on the row, so
+    /// whichever node ends the question un-approved gives the use back.
+    pub(super) ticket_id: Option<Uuid>,
 }
 
 impl ApprovalSubject {
@@ -43,7 +43,7 @@ impl ApprovalSubject {
             target_name: state.target_name().to_string(),
             remote_ip: state.remote_ip(),
             credentials: state.remembered_by(),
-            consumes_ticket_id: None,
+            ticket_id: None,
         }
     }
 

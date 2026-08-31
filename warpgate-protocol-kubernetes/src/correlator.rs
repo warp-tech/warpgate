@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberApprovalBy};
 use warpgate_common::{TargetKubernetesOptions, User, UserSessionId, WarpgateError};
 use warpgate_common_http::logging::get_client_ip;
-use warpgate_core::approvals::{GatedConnection, TicketStake, admit_target_session};
+use warpgate_core::approvals::{GatedConnection, admit_target_session};
 use warpgate_core::{
     AdmittedTarget, Services, State, TargetAuthorization, UserSessionStateInit,
     WarpgateServerHandle,
@@ -200,7 +200,6 @@ async fn admit_kubernetes_session(
             credentials: RememberApprovalBy::Nothing,
             // Kubernetes authenticates with certificates and tokens, never a
             // ticket.
-            ticket: TicketStake::None,
         },
     )
     .await

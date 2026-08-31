@@ -30,14 +30,14 @@ use warpgate_common::{
     Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::approvals::{AdminApprovalContext, GateOutcome, TicketStake};
+use warpgate_core::approvals::{AdminApprovalContext, GateOutcome};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
 use warpgate_core::{
     AdmittedTarget, ApprovedTarget, AuthorizedIdentity, ConfigProvider, Services,
-    TargetAuthorization, TargetSessionStart, TicketRefund, TicketSpend, WarpgateServerHandle,
-    authorize_and_spend_ticket, authorize_for_target, authorize_for_target_by_name,
+    TargetAuthorization, TargetSessionStart, WarpgateServerHandle, authorize_and_spend_ticket,
+    authorize_for_target, authorize_for_target_by_name,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
@@ -720,9 +720,6 @@ impl ServerSession {
         let event_sender = self.event_sender.clone();
         let notify_sender = self.event_sender.clone();
         let auth_state = self.auth_state.as_ref().map(|(state, _)| state.clone());
-        // The spend happened at authentication; the guard rides into the gate,
-        // which refunds it on everything but an approval.
-        let ticket = TicketRefund::new(self.services.db.clone(), authorization.ticket_id());
 
         tokio::spawn(async move {
             // Ticket-authorised sessions carry no auth state; without one there
@@ -737,7 +734,6 @@ impl ServerSession {
                     session_id,
                     remote_ip: Some(remote_ip),
                     credentials,
-                    ticket: TicketStake::Held(ticket),
                 },
                 || async move {
                     let _ = notify_sender.send_once(Event::AdminApprovalPending).await;
@@ -745,9 +741,9 @@ impl ServerSession {
                 },
             );
 
-            // A disconnect ends the hold by dropping the gate: the row is
-            // closed and the ticket refunded by the guards it carries, which
-            // is the same way an inline gate ends when its connection drops.
+            // A disconnect ends the hold by dropping the gate: the guard it
+            // carries closes the row, which settles the ticket — the same way
+            // an inline gate ends when its connection drops.
             let approved = tokio::select! {
                 () = cancel.cancelled() => None,
                 outcome = gate => outcome.map_or_else(
@@ -2540,7 +2536,6 @@ impl ServerSession {
                     secret,
                     Some(remote_ip),
                     crate::PROTOCOL_NAME,
-                    TicketSpend::Immediate,
                 )
                 .await?
                 {

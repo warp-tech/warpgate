@@ -13,11 +13,9 @@ use poem::{IntoResponse, Request, Response};
 use tokio::sync::Mutex;
 use warpgate_common::TargetHTTPOptions;
 use warpgate_common::auth::RememberApprovalBy;
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip_addr;
-use warpgate_common_http::{
-    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-};
-use warpgate_core::approvals::{AdminApprovalContext, PolledGate, TicketStake};
+use warpgate_core::approvals::{AdminApprovalContext, PolledGate};
 use warpgate_core::{AdmittedTarget, TargetAuthorization, WarpgateServerHandle};
 
 use crate::internal_page::internal_page;
@@ -39,17 +37,6 @@ pub async fn resolve_admin_approval(
     let target_name = authorization.target().name.clone();
     let session_id = handle.lock().await.user_session_id();
 
-    // A ticket whose spend was deferred — the session was established for a
-    // gated target — is spent by the approval itself, through the request row.
-    let ticket = match &ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::Ticket {
-            ticket_id: Some(ticket_id),
-            ticket_spend_deferred: true,
-            ..
-        }) => TicketStake::ConsumedOnApproval(*ticket_id),
-        _ => TicketStake::None,
-    };
-
     let gate = services
         .poll_admin_approval(
             authorization,
@@ -60,7 +47,6 @@ pub async fn resolve_admin_approval(
                 // on the request, so an HTTP session neither contributes nor
                 // consumes a remembered approval.
                 credentials: RememberApprovalBy::Nothing,
-                ticket,
             },
         )
         .await?;

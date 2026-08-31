@@ -5,7 +5,6 @@ use sea_orm::sea_query::IntoCondition;
 use sea_orm::{EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use tracing::warn;
-use uuid::Uuid;
 use warpgate_common::auth::{ApprovalKind, RememberApprovalBy};
 use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
@@ -14,7 +13,7 @@ use warpgate_db_entities::SessionApprovalRequest::{
 };
 
 use super::*;
-use crate::config_providers::{ApprovedTarget, TargetAuthorization, TicketRefund};
+use crate::config_providers::{ApprovedTarget, TargetAuthorization};
 use crate::protocols::AdmittedTarget;
 use crate::services::Services;
 use crate::{TargetSessionStart, WarpgateServerHandle};
@@ -49,30 +48,9 @@ pub enum PolledGate<O = warpgate_common::TargetOptions> {
     Denied,
 }
 
-/// The connection's stake in a ticket, settled by the gate.
-///
-/// The gate is the only thing that may refuse a session after it has
-/// authenticated, so it is also the one place that knows whether a ticket's
-/// use should stand — putting the settlement here means no wait site can
-/// forget it.
-pub enum TicketStake {
-    /// The session didn't authenticate with a ticket, or its ticket is beyond
-    /// refunding.
-    None,
-    /// A ticket spent by having authenticated, held so that a refusal — or a
-    /// gate that never reached anyone — can refund it. For connection-holding
-    /// protocols, whose session dies with the gate: an approval disarms the
-    /// guard so the spend stands, and on every other outcome its drop refunds.
-    Held(TicketRefund),
-    /// A ticket consumed only by an approval, recorded on the request row so
-    /// that whichever node records the decision consumes it exactly once. For
-    /// request/response protocols, whose session outlives any one gate.
-    ConsumedOnApproval(Uuid),
-}
-
 /// Everything about the *connection* a gate is being asked about. What it is
-/// asked about — the user and the target — comes from the authorization, so the
-/// two can never disagree.
+/// asked about — the user, the target, the ticket that authenticated — comes
+/// from the authorization, so the two can never disagree.
 pub struct AdminApprovalContext {
     pub session_id: UserSessionId,
     pub remote_ip: Option<IpAddr>,
@@ -81,38 +59,24 @@ pub struct AdminApprovalContext {
     /// authenticating credential has no stable fingerprint (ticket auth) or
     /// isn't carried on the request at all (HTTP, Kubernetes).
     pub credentials: RememberApprovalBy,
-    /// The ticket riding on this gate's outcome. Naming it here is what makes
-    /// the refund rule unforgettable: a wait site states its ticket story to
-    /// build the context at all.
-    pub ticket: TicketStake,
 }
 
 impl AdminApprovalContext {
-    /// The question this connection poses about `authorization`, plus the held
-    /// ticket guard — whose settlement stays with the caller, because only the
-    /// caller knows how its gate ends.
-    fn subject_for<O>(
-        self,
-        authorization: &TargetAuthorization<O>,
-    ) -> (ApprovalSubject, Option<TicketRefund>) {
-        let (held_ticket, consumes_ticket_id) = match self.ticket {
-            TicketStake::None => (None, None),
-            TicketStake::Held(guard) => (Some(guard), None),
-            TicketStake::ConsumedOnApproval(id) => (None, Some(id)),
-        };
-        (
-            ApprovalSubject {
-                kind: ApprovalKind::Admin,
-                session_id: self.session_id,
-                user_info: authorization.user_info().clone(),
-                protocol: authorization.protocol(),
-                target_name: authorization.target().name.clone(),
-                remote_ip: self.remote_ip,
-                credentials: self.credentials,
-                consumes_ticket_id,
-            },
-            held_ticket,
-        )
+    /// The question this connection poses about `authorization`. The ticket is
+    /// read off the authorization it rode in on — no wait site states a ticket
+    /// story, so none can state a wrong one; its use is settled by whatever
+    /// ends the question's row.
+    fn subject_for<O>(self, authorization: &TargetAuthorization<O>) -> ApprovalSubject {
+        ApprovalSubject {
+            kind: ApprovalKind::Admin,
+            session_id: self.session_id,
+            user_info: authorization.user_info().clone(),
+            protocol: authorization.protocol(),
+            target_name: authorization.target().name.clone(),
+            remote_ip: self.remote_ip,
+            credentials: self.credentials,
+            ticket_id: authorization.ticket_id(),
+        }
     }
 }
 
@@ -123,8 +87,6 @@ pub struct GatedConnection {
     pub remote_ip: Option<IpAddr>,
     /// See [`AdminApprovalContext::credentials`].
     pub credentials: RememberApprovalBy,
-    /// See [`AdminApprovalContext::ticket`].
-    pub ticket: TicketStake,
 }
 
 /// Starts a target session, holding the connection at the administrator gate
@@ -161,7 +123,6 @@ pub async fn admit_target_session<O: Send + Sync>(
     let GatedConnection {
         remote_ip,
         credentials,
-        ticket,
     } = connection;
     let session_id = handle.lock().await.user_session_id();
 
@@ -172,7 +133,6 @@ pub async fn admit_target_session<O: Send + Sync>(
                 session_id,
                 remote_ip,
                 credentials,
-                ticket,
             },
             || async { Ok::<_, WarpgateError>(()) },
         )
@@ -196,10 +156,9 @@ impl Services {
     ///
     /// Call this at the end of the authentication flow, once the target is
     /// known and before the client is told it is connected. The ticket that
-    /// authenticated the session rides on the outcome through
-    /// [`AdminApprovalContext::ticket`]: a held guard is refunded on every
-    /// outcome but an approval, and a consumption deferred to the request row
-    /// is performed by whichever node records an approval.
+    /// authenticated the session was spent with the authentication; its use is
+    /// settled by whatever ends this question's row — kept by an approval,
+    /// given back by any other end, on whichever node does the ending.
     ///
     /// The ordering here is the point of the function: a remembered approval
     /// short-circuits before anything is announced, the request is advertised
@@ -209,10 +168,11 @@ impl Services {
     /// pass a no-op.
     ///
     /// Ending the hold early, when the client goes away, is done by dropping
-    /// this future: the row is closed and a held ticket refunded by the guards
-    /// it carries, so no path can leave either behind. A caller that holds the
-    /// connection inline gets that for free; one that spawns the gate off its
-    /// event loop selects on its own disconnect signal against this future.
+    /// this future: the guard it carries closes the row, and closing the row
+    /// settles the ticket, so no path can leave either behind. A caller that
+    /// holds the connection inline gets that for free; one that spawns the
+    /// gate off its event loop selects on its own disconnect signal against
+    /// this future.
     pub async fn require_admin_approval<E, F, Fut, O>(
         &self,
         authorization: TargetAuthorization<O>,
@@ -224,37 +184,7 @@ impl Services {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<(), E>>,
     {
-        let (subject, held_ticket) = context.subject_for(&authorization);
-
-        let result = self
-            .hold_at_admin_gate(authorization, subject, notify_waiting)
-            .await;
-
-        // A refusal — the administrator's, an expired window, or a gate that
-        // failed outright — is not the user's doing, so the ticket gets its
-        // use back through the guard's drop. Only an approval keeps the spend.
-        if let Some(mut refund) = held_ticket
-            && matches!(result, Ok(GateOutcome::Approved(_)))
-        {
-            refund.disarm();
-        }
-
-        result
-    }
-
-    /// The wait itself, factored out so [`Self::require_admin_approval`] can
-    /// settle the ticket stake on every way out, error paths included.
-    async fn hold_at_admin_gate<E, F, Fut, O>(
-        &self,
-        authorization: TargetAuthorization<O>,
-        subject: ApprovalSubject,
-        notify_waiting: F,
-    ) -> Result<GateOutcome<O>, E>
-    where
-        E: From<WarpgateError>,
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = Result<(), E>>,
-    {
+        let subject = context.subject_for(&authorization);
         // Read off the authorization rather than re-resolved: the target it
         // names is the row the user was authorized against, and a lookup by
         // name here could answer about a different one — or, if the target had
@@ -272,7 +202,16 @@ impl Services {
         }
 
         let mut guard = PendingApproval::guarding(self.db.clone(), &subject);
-        self.announce_admin_request(&subject).await?;
+        // Asking again needs the ticket use the previous asking gave back; a
+        // session whose ticket can no longer pay is turned away, not parked on
+        // a question that was never opened. (The guard closes nothing here —
+        // there is no pending row to close.)
+        if matches!(
+            self.announce_admin_request(&subject).await?,
+            Advertised::TicketExhausted
+        ) {
+            return Ok(GateOutcome::Refused);
+        }
 
         notify_waiting().await?;
 
@@ -340,11 +279,9 @@ impl Services {
     /// expiry needs no waiter to notice it either. A client that stops polling
     /// leaves its question to the age sweep, exactly like a waiter that died.
     ///
-    /// A ticket rides through here as [`TicketStake::ConsumedOnApproval`],
-    /// settled by whichever node records the approval. [`TicketStake::Held`]
-    /// belongs to the blocking form, whose return settles it — here there is
-    /// nothing to hold the guard across, and dropping it would refund a spend
-    /// whose question still stands.
+    /// A ticket's use rides on the question's row like everywhere else: kept
+    /// by an approval, given back by whatever else ends the row — including
+    /// the timeout this poll itself records.
     pub async fn poll_admin_approval<O>(
         &self,
         authorization: TargetAuthorization<O>,
@@ -357,12 +294,7 @@ impl Services {
             return Ok(PolledGate::Approved(ApprovedTarget::new(authorization)));
         }
 
-        let (subject, held_ticket) = context.subject_for(&authorization);
-        if held_ticket.is_some() {
-            return Err(WarpgateError::InconsistentState(
-                "a held ticket cannot ride on the polled gate".into(),
-            ));
-        }
+        let subject = context.subject_for(&authorization);
 
         if self.admin_approval_is_remembered(&subject).await? {
             subject.emit_bypassed_event();
@@ -381,16 +313,25 @@ impl Services {
             .one(&self.db)
             .await?;
         let Some(row) = row else {
-            self.announce_admin_request(&subject).await?;
-            return Ok(PolledGate::Pending);
+            // A fresh question is paid for by the use taken at authentication,
+            // so this cannot come back exhausted; matched anyway so the enum
+            // stays honest.
+            return Ok(match self.announce_admin_request(&subject).await? {
+                Advertised::TicketExhausted => PolledGate::Denied,
+                _ => PolledGate::Pending,
+            });
         };
 
         match row_state(&row)? {
             // A question that ended unanswered is history; this request is a
             // fresh asking.
             RowState::Ended => {
-                self.announce_admin_request(&subject).await?;
-                Ok(PolledGate::Pending)
+                // Asking afresh re-spends; a ticket that can no longer pay is
+                // a denial, not an eternal 202.
+                Ok(match self.announce_admin_request(&subject).await? {
+                    Advertised::TicketExhausted => PolledGate::Denied,
+                    _ => PolledGate::Pending,
+                })
             }
             RowState::Pending => {
                 let timeout = self.admin_approval_timeout().await?;
@@ -411,7 +352,12 @@ impl Services {
                     {
                         subject.emit_timed_out_event();
                     }
-                    self.announce_admin_request(&subject).await?;
+                    if matches!(
+                        self.announce_admin_request(&subject).await?,
+                        Advertised::TicketExhausted
+                    ) {
+                        return Ok(PolledGate::Denied);
+                    }
                 }
                 Ok(PolledGate::Pending)
             }

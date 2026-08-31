@@ -10,11 +10,10 @@ use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    Advertised, StatusTransition, close_request, mark_consumed, upsert_request,
+    Advertised, close_request, mark_consumed, upsert_request,
 };
 
 use super::*;
-use crate::config_providers::{consume_ticket, refund_ticket};
 
 /// The request row an administrator gate is waiting on, closed when the wait
 /// ends however it ends — resolved, timed out, cancelled, or the future dropped.
@@ -104,7 +103,7 @@ pub(super) async fn advertise_admin_request(
             remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
             identification_string: Set(None),
             match_digest: Set(subject.match_digest()),
-            consumes_ticket_id: Set(subject.consumes_ticket_id),
+            ticket_id: Set(subject.ticket_id),
             started: Set(OffsetDateTime::now_utc()),
             status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
             scope: Set(None),
@@ -246,17 +245,19 @@ pub async fn record_decision(
     decision: ApprovalDecision,
     actor: &ApprovalActor,
 ) -> Result<bool, WarpgateError> {
-    use SessionApprovalRequest::{ApprovalRequestStatus, Column};
+    use SessionApprovalRequest::ApprovalRequestStatus;
 
     let (status, scope) = match decision {
         ApprovalDecision::Approved(scope) => (ApprovalRequestStatus::Approved, Some(scope)),
         ApprovalDecision::Rejected => (ApprovalRequestStatus::Rejected, None),
     };
 
-    // Read ahead of the transition, off the pending row only: a question that is
-    // already answered or closed has no spend riding on this decision and is not
-    // this call's to audit, and the transition below moves nothing but the row
-    // read here. The row also carries what the audit event says about the asker.
+    // Read ahead of the write, off the pending row only: a question that is
+    // already settled is not this call's to decide or audit, and the write
+    // below is pinned to the asking read here — a question closed and asked
+    // afresh in the window is one this decision must not land on. The row also
+    // carries what the audit event says about the asker, and the ticket use a
+    // rejection gives back.
     let Some(row) = SessionApprovalRequest::Entity::find()
         .filter(SessionApprovalRequest::Key::new(session_id, kind, target).into_condition())
         .one(db)
@@ -265,51 +266,16 @@ pub async fn record_decision(
     else {
         return Ok(false);
     };
-    let consumes_ticket_id = if matches!(decision, ApprovalDecision::Approved(_)) {
-        row.consumes_ticket_id
-    } else {
-        None
-    };
 
-    // The deferred ticket is spent before the approval is recorded: an
-    // exhausted ticket must fail the approval, and once the row says approved
-    // the waiting gate admits the session — there is no turning it away for a
-    // spend that turns out not to be there. The pending→approved transition is
-    // still what makes the spend one-shot across the cluster: a concurrent
-    // approver's use is given back below when its transition finds the
-    // question already answered.
-    if let Some(ticket_id) = consumes_ticket_id {
-        consume_ticket(db, &ticket_id).await?;
-    }
-
-    let moved = StatusTransition::from_pending(status)
-        .set(Column::Scope, scope)
-        .set(Column::ResolvedByUsername, actor.username.clone())
-        .set(Column::ResolvedByUserId, actor.user_id)
-        // Pinned by `started` to the asking read above, so the row moved is the
-        // row the ticket was spent for and the audit event describes. Without
-        // it a question closed and asked afresh in that window would be decided
-        // on the strength of its predecessor's ticket.
-        //
-        // The pin cannot tell whether the *approver* saw this asking — their
-        // click carries no identity for it — so a re-advertise landing in the
-        // window makes the decision a no-op the approver simply repeats.
-        .apply(
-            db,
-            SessionApprovalRequest::Key::new(session_id, kind, target)
-                .into_condition()
-                .add(Column::Started.eq(row.started)),
-        )
-        .await;
-
-    if !matches!(moved, Ok(n) if n > 0)
-        && let Some(ticket_id) = consumes_ticket_id
-        && let Err(error) = refund_ticket(db, ticket_id).await
-    {
-        warn!(%error, %ticket_id, "Failed to refund the ticket of an unrecorded approval");
-    }
-
-    let recorded = moved? > 0;
+    let recorded = SessionApprovalRequest::decide_asking(
+        db,
+        &row,
+        status,
+        scope,
+        actor.username.clone(),
+        Some(actor.user_id),
+    )
+    .await?;
     // Audited here rather than where a gate reads the decision back: the
     // administrator acted, and that stands as a fact even if the connection
     // they were deciding about has already gone. Gated on the transition, so

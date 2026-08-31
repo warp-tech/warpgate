@@ -28,13 +28,13 @@ use warpgate_common::{
     Secret, TargetOptionsVariant, TargetSessionId, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::approvals::{GatedConnection, TicketStake, admit_target_session};
+use warpgate_core::approvals::{GatedConnection, admit_target_session};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    AdmittedTarget, AuthorizedIdentity, Services, TargetAuthorization, TicketRefund, TicketSpend,
-    WarpgateServerHandle, authorize_and_spend_ticket, authorize_for_target_by_name,
+    AdmittedTarget, AuthorizedIdentity, Services, TargetAuthorization, WarpgateServerHandle,
+    authorize_and_spend_ticket, authorize_for_target_by_name,
 };
 use warpgate_desktop_ui::AuthPrompt;
 
@@ -199,7 +199,6 @@ pub async fn authenticate<O: TargetOptionsVariant>(
                 &secret,
                 Some(remote_address.ip()),
                 O::PROTOCOL,
-                TicketSpend::Immediate,
             )
             .await?
             {
@@ -261,9 +260,6 @@ pub async fn admit_desktop_session<O: Send + Sync>(
         Some(state) => state.lock().await.remembered_by(),
         None => RememberApprovalBy::Nothing,
     };
-    // The spend happened at authentication; the guard rides on the gate's
-    // outcome, which refunds it on everything but an approval.
-    let ticket = TicketRefund::new(services.db.clone(), authorization.ticket_id());
 
     admit_target_session(
         services,
@@ -272,7 +268,6 @@ pub async fn admit_desktop_session<O: Send + Sync>(
         GatedConnection {
             remote_ip,
             credentials,
-            ticket: TicketStake::Held(ticket),
         },
     )
     .await

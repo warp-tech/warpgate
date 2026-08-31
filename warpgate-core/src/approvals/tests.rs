@@ -55,7 +55,7 @@ async fn advertise_row(
             remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
             identification_string: Set(None),
             match_digest: Set(subject.match_digest()),
-            consumes_ticket_id: Set(subject.consumes_ticket_id),
+            ticket_id: Set(subject.ticket_id),
             started: Set(OffsetDateTime::now_utc()),
             status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
             scope: Set(None),
@@ -81,7 +81,7 @@ fn plain_subject(target: &str) -> ApprovalSubject {
         target_name: target.into(),
         remote_ip: None,
         credentials: RememberApprovalBy::Nothing,
-        consumes_ticket_id: None,
+        ticket_id: None,
     }
 }
 
@@ -923,64 +923,235 @@ async fn uses_left(db: &DatabaseConnection, id: Uuid) -> Option<i16> {
         .uses_left
 }
 
-/// A deferred ticket is spent by the pending→approved transition, which is
-/// one-shot — so however many gates across the cluster watch the row, an
-/// approval spends exactly one use, and nothing else spends any.
+/// The use a question holds was spent when the session authenticated; an
+/// approval leaves that spend standing — it transfers to the admitted session
+/// — and touches the ticket in no other way, however many gates across the
+/// cluster watch the row.
 #[tokio::test]
-async fn a_deferred_ticket_is_consumed_exactly_once_by_an_approval() {
+async fn an_approval_keeps_the_spend_and_takes_nothing_more() {
     let db = migrated_db().await;
-    let ticket_id = ticket_with_uses(&db, 2).await;
+    // The session's own use is already spent — that is what "the question
+    // holds a use" means — leaving none over.
+    let ticket_id = ticket_with_uses(&db, 0).await;
 
     let session_id = UserSessionId(Uuid::new_v4());
     let mut subject = plain_subject("a-target");
-    subject.consumes_ticket_id = Some(ticket_id);
+    subject.ticket_id = Some(ticket_id);
     advertise_row(&db, session_id, &subject).await;
 
-    // A decision about a different target moves nothing and spends nothing.
+    // A decision about a different target moves nothing and settles nothing.
     assert!(!approve(&db, session_id, "another-target").await);
-    assert_eq!(uses_left(&db, ticket_id).await, Some(2));
+    assert_eq!(uses_left(&db, ticket_id).await, Some(0));
 
     assert!(approve(&db, session_id, "a-target").await);
-    assert_eq!(uses_left(&db, ticket_id).await, Some(1));
+    assert_eq!(uses_left(&db, ticket_id).await, Some(0));
 
     // A second decision finds the question already answered.
     assert!(!approve(&db, session_id, "a-target").await);
-    assert_eq!(uses_left(&db, ticket_id).await, Some(1));
+    assert_eq!(uses_left(&db, ticket_id).await, Some(0));
 }
 
-/// Deferring *when* a use is taken must not defer *whether* there is one to
-/// take: a ticket exhausted between the session being established and the
-/// approval landing fails the approval, and the question stays open rather
-/// than admitting a session its ticket could no longer pay for.
+/// A question that ends unanswered gives its use back, and asking the same
+/// question again takes a use of its own — the refund is not a free pass to
+/// re-ask forever on one spend.
 #[tokio::test]
-async fn an_approval_cannot_spend_a_use_that_is_not_there() {
+async fn asking_again_re_spends_the_use_a_timeout_gave_back() {
+    use SessionApprovalRequest::UndecidedApprovalRequestStatus;
+
     let db = migrated_db().await;
     let ticket_id = ticket_with_uses(&db, 0).await;
 
     let session_id = UserSessionId(Uuid::new_v4());
     let mut subject = plain_subject("a-target");
-    subject.consumes_ticket_id = Some(ticket_id);
+    subject.ticket_id = Some(ticket_id);
     advertise_row(&db, session_id, &subject).await;
 
     assert!(
-        record_decision(
+        SessionApprovalRequest::close_request(
             &db,
             session_id,
             ApprovalKind::Admin,
             "a-target",
-            ApprovalDecision::Approved(ApprovalScope::Once),
-            &admin_actor(),
+            UndecidedApprovalRequestStatus::TimedOut,
         )
         .await
-        .is_err(),
-        "an approval that cannot take its deferred use must fail",
+        .unwrap()
     );
+    assert_eq!(
+        uses_left(&db, ticket_id).await,
+        Some(1),
+        "a question that ended unanswered gives the use back",
+    );
+
+    advertise_row(&db, session_id, &subject).await;
     assert_eq!(
         status_of(&db, session_id, "a-target").await,
         SessionApprovalRequest::ApprovalRequestStatus::Pending,
-        "the failed approval must not have been recorded",
+    );
+    assert_eq!(
+        uses_left(&db, ticket_id).await,
+        Some(0),
+        "asking again holds a use of its own",
+    );
+}
+
+/// When the refunded use has since gone elsewhere, the re-ask is refused
+/// rather than opened unpaid — and refused typed, so the gate turns the
+/// session away instead of parking it on a question nobody opened.
+#[tokio::test]
+async fn an_exhausted_ticket_cannot_ask_again() {
+    use SessionApprovalRequest::{Advertised, UndecidedApprovalRequestStatus};
+
+    let db = migrated_db().await;
+    let ticket_id = ticket_with_uses(&db, 0).await;
+
+    let session_id = UserSessionId(Uuid::new_v4());
+    let mut subject = plain_subject("a-target");
+    subject.ticket_id = Some(ticket_id);
+    advertise_row(&db, session_id, &subject).await;
+
+    assert!(
+        SessionApprovalRequest::close_request(
+            &db,
+            session_id,
+            ApprovalKind::Admin,
+            "a-target",
+            UndecidedApprovalRequestStatus::TimedOut,
+        )
+        .await
+        .unwrap()
+    );
+    // The refunded use goes to someone else before the re-ask.
+    warpgate_db_entities::Ticket::spend_use(&db, ticket_id)
+        .await
+        .unwrap();
+
+    let advertised = super::wait::advertise_admin_request(&db, NodeId(Uuid::new_v4()), &{
+        let mut again = subject.clone();
+        again.session_id = session_id;
+        again
+    })
+    .await
+    .unwrap();
+    assert_eq!(advertised, Advertised::TicketExhausted);
+    assert_eq!(
+        status_of(&db, session_id, "a-target").await,
+        SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+        "no question was opened",
     );
     assert_eq!(uses_left(&db, ticket_id).await, Some(0));
+}
+
+/// A settle aimed at one asking must not land on its successor: the write is
+/// pinned to the asking that was read, and a reopened question is a different
+/// asking holding a different use. An unpinned close here would refund a
+/// live, paid-for question — and refund again when it later closes.
+#[tokio::test]
+async fn a_decision_aimed_at_an_earlier_asking_settles_nothing() {
+    use SessionApprovalRequest::UndecidedApprovalRequestStatus;
+
+    let db = migrated_db().await;
+    let ticket_id = ticket_with_uses(&db, 0).await;
+
+    let session_id = UserSessionId(Uuid::new_v4());
+    let mut subject = plain_subject("a-target");
+    subject.ticket_id = Some(ticket_id);
+    advertise_row(&db, session_id, &subject).await;
+
+    // The first asking, as some slow decision-maker read it.
+    let stale = SessionApprovalRequest::Entity::find()
+        .filter(
+            SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "a-target")
+                .into_condition(),
+        )
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // The asking times out (refunding) and is asked afresh (re-spending) —
+    // with a renewed `started`, which is what tells the askings apart.
+    assert!(
+        SessionApprovalRequest::close_request(
+            &db,
+            session_id,
+            ApprovalKind::Admin,
+            "a-target",
+            UndecidedApprovalRequestStatus::TimedOut,
+        )
+        .await
+        .unwrap()
+    );
+    advertise_row(&db, session_id, &subject).await;
+    assert_eq!(uses_left(&db, ticket_id).await, Some(0));
+
+    let landed = SessionApprovalRequest::decide_asking(
+        &db,
+        &stale,
+        SessionApprovalRequest::ApprovalRequestStatus::Rejected,
+        None,
+        Some("admin".into()),
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(!landed, "a decision about the earlier asking must not land");
+    assert_eq!(
+        status_of(&db, session_id, "a-target").await,
+        SessionApprovalRequest::ApprovalRequestStatus::Pending,
+        "the new asking still stands",
+    );
+    assert_eq!(
+        uses_left(&db, ticket_id).await,
+        Some(0),
+        "and keeps the use it holds",
+    );
+}
+
+/// A node that dies mid-hold closes nothing itself; the reaper closes for it,
+/// and a close gives the use back — so a crash costs the user nothing once
+/// the row ages out.
+#[tokio::test]
+async fn reaping_refunds_what_dead_askings_held() {
+    let db = migrated_db().await;
+    let ticket_id = ticket_with_uses(&db, 0).await;
+
+    let session_id = UserSessionId(Uuid::new_v4());
+    let mut subject = plain_subject("a-target");
+    subject.ticket_id = Some(ticket_id);
+    advertise_row(&db, session_id, &subject).await;
+    backdate_request(&db, session_id, Duration::from_secs(24 * 3600)).await;
+
+    reap_stale(&db).await.unwrap();
+
+    assert_eq!(
+        status_of(&db, session_id, "a-target").await,
+        SessionApprovalRequest::ApprovalRequestStatus::Abandoned,
+    );
+    assert_eq!(uses_left(&db, ticket_id).await, Some(1));
+}
+
+/// Ending a session abandons what it was still asking, one asking at a time,
+/// so each gives back the use it held.
+#[tokio::test]
+async fn session_teardown_gives_held_uses_back() {
+    let db = migrated_db().await;
+    let ticket_id = ticket_with_uses(&db, 0).await;
+
+    let session_id = UserSessionId(Uuid::new_v4());
+    let mut subject = plain_subject("a-target");
+    subject.ticket_id = Some(ticket_id);
+    advertise_row(&db, session_id, &subject).await;
+
+    SessionApprovalRequest::abandon_requests_for_session(&db, session_id)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        status_of(&db, session_id, "a-target").await,
+        SessionApprovalRequest::ApprovalRequestStatus::Abandoned,
+    );
+    assert_eq!(uses_left(&db, ticket_id).await, Some(1));
 }
 
 /// Every audit event this test binary emits, so an assertion can pick out
@@ -1057,15 +1228,16 @@ async fn a_decision_is_audited_with_nobody_waiting() {
     assert_eq!(event.get("target").map(String::as_str), Some("a-target"));
 }
 
-/// A refusal is not the user's doing, so the ticket keeps its use.
+/// A refusal is not the user's doing, so the use the question held goes back
+/// to the ticket.
 #[tokio::test]
-async fn a_refused_deferred_ticket_keeps_its_use() {
+async fn a_rejection_gives_the_use_back() {
     let db = migrated_db().await;
-    let ticket_id = ticket_with_uses(&db, 1).await;
+    let ticket_id = ticket_with_uses(&db, 0).await;
 
     let session_id = UserSessionId(Uuid::new_v4());
     let mut subject = plain_subject("a-target");
-    subject.consumes_ticket_id = Some(ticket_id);
+    subject.ticket_id = Some(ticket_id);
     advertise_row(&db, session_id, &subject).await;
 
     assert!(
@@ -1368,11 +1540,109 @@ mod polled_gate {
                     session_id,
                     remote_ip: None,
                     credentials: RememberApprovalBy::Nothing,
-                    ticket: TicketStake::None,
                 },
             )
             .await
             .unwrap()
+    }
+
+    /// An ungated target admits without a question, and the use spent at
+    /// authentication simply stands — there is no guard left to mis-drop it
+    /// back, which is what once made a one-use ticket to an ungated target
+    /// effectively unlimited.
+    #[tokio::test]
+    async fn an_ungated_admission_keeps_the_tickets_spend() {
+        let db = migrated_db().await;
+        audit_events();
+        let services = test_services(&db).await;
+        // Spent at authentication: the fixture's 0 is the post-spend state.
+        let ticket_id = ticket_with_uses(&db, 0).await;
+
+        let mut target = gated_target("open");
+        target.require_approval = false;
+        let gate = services
+            .poll_admin_approval(
+                crate::TargetAuthorization::for_ticket_session(
+                    someone(),
+                    target,
+                    Some(ticket_id),
+                    Protocol::Http,
+                )
+                .unwrap(),
+                AdminApprovalContext {
+                    session_id: UserSessionId(Uuid::new_v4()),
+                    remote_ip: None,
+                    credentials: RememberApprovalBy::Nothing,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(gate, PolledGate::Approved(_)));
+        assert_eq!(uses_left(&db, ticket_id).await, Some(0));
+    }
+
+    /// A poll whose re-ask cannot be paid for is a denial, not an eternal
+    /// "waiting": the client is turned away the moment the ticket runs dry,
+    /// instead of polling a question nobody opened.
+    #[tokio::test]
+    async fn a_poll_on_an_exhausted_ticket_is_denied() {
+        use SessionApprovalRequest::UndecidedApprovalRequestStatus;
+
+        let db = migrated_db().await;
+        audit_events();
+        let services = test_services(&db).await;
+        let ticket_id = ticket_with_uses(&db, 0).await;
+        let session_id = UserSessionId(Uuid::new_v4());
+        let user_info = someone();
+
+        let authorization = || {
+            crate::TargetAuthorization::for_ticket_session(
+                user_info.clone(),
+                gated_target("prod"),
+                Some(ticket_id),
+                Protocol::Http,
+            )
+            .unwrap()
+        };
+        let context = || AdminApprovalContext {
+            session_id,
+            remote_ip: None,
+            credentials: RememberApprovalBy::Nothing,
+        };
+
+        // First ask: paid for by the authentication-time spend.
+        assert!(matches!(
+            services
+                .poll_admin_approval(authorization(), context())
+                .await
+                .unwrap(),
+            PolledGate::Pending
+        ));
+        // The question times out (refunding), and the refunded use goes
+        // elsewhere before the next poll.
+        assert!(
+            SessionApprovalRequest::close_request(
+                &db,
+                session_id,
+                ApprovalKind::Admin,
+                "prod",
+                UndecidedApprovalRequestStatus::TimedOut,
+            )
+            .await
+            .unwrap()
+        );
+        warpgate_db_entities::Ticket::spend_use(&db, ticket_id)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            services
+                .poll_admin_approval(authorization(), context())
+                .await
+                .unwrap(),
+            PolledGate::Denied
+        ));
     }
 
     /// The client's retry cadence is the poll, so the same session returns
@@ -1557,7 +1827,6 @@ mod polled_gate {
                     session_id,
                     remote_ip: None,
                     credentials: RememberApprovalBy::Nothing,
-                    ticket: TicketStake::None,
                 },
                 || async { Ok::<_, WarpgateError>(()) },
             )

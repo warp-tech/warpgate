@@ -21,7 +21,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 use warpgate_common::auth::RememberApprovalBy;
 use warpgate_common::{UserSessionId, WarpgateError};
-use warpgate_core::approvals::{GatedConnection, TicketStake, admit_target_session};
+use warpgate_core::approvals::{GatedConnection, admit_target_session};
 use warpgate_core::{
     AdmittedTarget, Services, SessionHandle, TargetAuthorization, WarpgateServerHandle,
 };
@@ -231,7 +231,6 @@ pub async fn gate_web_client_session<O: Send + Sync>(
             credentials: RememberApprovalBy::Nothing,
             // A browser client session is opened from an already established
             // portal login, never by a ticket.
-            ticket: TicketStake::None,
         },
     )
     .await?;

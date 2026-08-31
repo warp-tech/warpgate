@@ -15,12 +15,12 @@ use warpgate_common::auth::{
 };
 use warpgate_common::{Protocol, Secret, UserSessionId, WarpgateError};
 
-use crate::approvals::{AdminApprovalContext, GateOutcome, TicketStake};
+use crate::approvals::{AdminApprovalContext, GateOutcome};
 use crate::auth::submit_credential;
 use crate::login_protection::FailedAttemptInfo;
 use crate::{
-    ApprovedTarget, AuthorizedIdentity, Services, TargetAuthorization, TicketRefund, TicketSpend,
-    authorize_and_spend_ticket, authorize_for_target_by_name, wait_for_auth_completion,
+    ApprovedTarget, AuthorizedIdentity, Services, TargetAuthorization, authorize_and_spend_ticket,
+    authorize_for_target_by_name, wait_for_auth_completion,
 };
 
 /// Proof that the success message has not been sent yet. Exactly one is minted
@@ -144,7 +144,6 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                 &secret,
                 Some(remote_ip),
                 T::PROTOCOL,
-                TicketSpend::Immediate,
             )
             .await?
             else {
@@ -158,7 +157,6 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
             );
             let mut auth_ok = Some(AuthOkPermit);
 
-            let ticket_id = authorization.ticket_id();
             let outcome = hold_for_admin_approval(
                 transport,
                 services,
@@ -168,7 +166,6 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                     remote_ip: Some(remote_ip),
                     // tickets aren't stable credential fingerprints
                     credentials: RememberApprovalBy::Nothing,
-                    ticket: TicketStake::Held(TicketRefund::new(services.db.clone(), ticket_id)),
                 },
                 &mut auth_ok,
             )
@@ -263,7 +260,6 @@ async fn authorize_user<T: DbAuthTransport>(
                         session_id,
                         remote_ip: Some(remote_ip),
                         credentials,
-                        ticket: TicketStake::None,
                     },
                     &mut auth_ok,
                 )

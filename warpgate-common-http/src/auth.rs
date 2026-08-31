@@ -67,9 +67,6 @@ pub enum SessionAuthorization {
         target_id: Uuid,
         #[serde(default)]
         ticket_id: Option<Uuid>,
-        /// ticket spend is deferred for approval-gated targets
-        #[serde(default)]
-        ticket_spend_deferred: bool,
     },
 }
 
@@ -286,7 +283,6 @@ mod tests {
             username: "alice".into(),
             target_id: Uuid::nil(),
             ticket_id: None,
-            ticket_spend_deferred: false,
         });
         assert!(ticket.as_full_user().is_none());
 

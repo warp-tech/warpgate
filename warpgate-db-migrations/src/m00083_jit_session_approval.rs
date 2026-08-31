@@ -32,7 +32,7 @@ pub mod session_approval_request {
         pub match_digest: Option<String>,
         /// The ticket an approval of this request consumes, where consumption
         /// is deferred to the gate (HTTP ticket sessions).
-        pub consumes_ticket_id: Option<Uuid>,
+        pub ticket_id: Option<Uuid>,
         pub started: OffsetDateTime,
         /// The row carries the decision itself, so an approval is resolved by
         /// writing to it from any node; the owning node reads it back.
