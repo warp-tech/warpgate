@@ -36,7 +36,12 @@
 
     async function init() {
         await reloadServerInfo()
-        if (!get(serverInfo)?.username) {
+        const adminPermissions = get(serverInfo)?.adminPermissions
+        if (
+            !get(serverInfo)?.username ||
+            !adminPermissions ||
+            !ADMIN_PERMISSIONS.some(p => adminPermissions[p.key])
+        ) {
             // Not logged in: redirect to the (gateway) login page, preserving this admin
             // URL — hash route included — as `next` so we return exactly here afterwards.
             // (The admin shell is no longer server-gated, so this runs client-side where
@@ -45,70 +50,46 @@
             location.assign(
                 `/@warpgate#/login?next=${encodeURIComponent(next)}`,
             )
+            await new Promise(() => undefined)
         }
     }
 
     const initPromise = init()
 
-    async function requireAdmin(detail: RouteDetail) {
-        await initPromise
-        const adminPermissions = get(serverInfo)?.adminPermissions
-        if (
-            !adminPermissions ||
-            !ADMIN_PERMISSIONS.some(p => adminPermissions[p.key])
-        ) {
-            let url = `${location.pathname}#${detail.location}`
-            if (detail.querystring) {
-                url += `?${detail.querystring}`
-            }
-            push(`/login?next=${encodeURIComponent(url)}`)
-            return false
-        }
-        return true
-    }
-
     const routes: Record<string, WrappedComponent> = {
         '/': wrap({
             component: Redirect,
             props: { to: '/status/sessions' },
-            conditions: [requireAdmin],
         }),
         '/status/recordings/:id': wrap({
             asyncComponent: () => import('./status/Recording.svelte'),
-            conditions: [requireAdmin],
         }),
         '/status': wrap({
             asyncComponent: () => import('./status/Status.svelte'),
-            conditions: [requireAdmin],
         }),
         '/log': wrap({
             asyncComponent: () => import('./Log.svelte'),
-            conditions: [requireAdmin],
         }),
         '/log/user/:id': wrap({
             asyncComponent: () => import('./Log.svelte'),
             props: {
                 filterKind: 'user',
             },
-            conditions: [requireAdmin],
         }),
         '/log/access-role/:id': wrap({
             asyncComponent: () => import('./Log.svelte'),
             props: {
                 filterKind: 'access-role',
             },
-            conditions: [requireAdmin],
         }),
         '/log/admin-role/:id': wrap({
             asyncComponent: () => import('./Log.svelte'),
             props: {
                 filterKind: 'admin-role',
             },
-            conditions: [requireAdmin],
         }),
         '/config': wrap({
             asyncComponent: () => import('./config/Config.svelte'),
-            conditions: [requireAdmin],
         }),
     }
     // biome-ignore lint/style/noNonNullAssertion: x
