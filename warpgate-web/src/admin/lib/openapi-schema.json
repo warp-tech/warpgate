@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "6847c9d8-modified"
+    "version": "d6c4d733-modified"
   },
   "servers": [
     {
@@ -7288,7 +7288,8 @@
           "port",
           "username",
           "auth",
-          "verify_tls"
+          "verify_tls",
+          "interactive_logon"
         ],
         "properties": {
           "host": {
@@ -7313,6 +7314,10 @@
           },
           "compression": {
             "$ref": "#/components/schemas/RdpTargetCompression"
+          },
+          "interactive_logon": {
+            "type": "boolean",
+            "description": "Show the target's own sign-in screen instead of logging on automatically.\nThe stored credentials still pass network-level authentication (CredSSP)."
           },
           "tls_security": {
             "$ref": "#/components/schemas/RdpTlsSecurity"
