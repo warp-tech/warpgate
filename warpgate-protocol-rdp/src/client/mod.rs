@@ -608,11 +608,10 @@ fn build_config(
     width: u16,
     height: u16,
 ) -> connector::Config {
-    let (codec_overrides, lossy_compression): (&[&str], bool) =
-        match options.compression.unwrap_or_default() {
-            RdpTargetCompression::RemoteFX => (&[], true),
-            RdpTargetCompression::Lossless => (&["remotefx:off"], false),
-        };
+    let codec_overrides: &[&str] = match options.compression.unwrap_or_default() {
+        RdpTargetCompression::RemoteFX => &[],
+        RdpTargetCompression::Lossless => &["remotefx:off"],
+    };
     connector::Config {
         credentials: Credentials::UsernamePassword {
             username: options.username.clone(),
@@ -628,15 +627,17 @@ fn build_config(
         ime_file_name: String::new(),
         dig_product_id: String::new(),
         desktop_size: connector::DesktopSize { width, height },
-        // The default codec set advertises RemoteFX; `lossy_compression` additionally lets
-        // the target use dynamic color fidelity / subsampling on legacy bitmap updates,
-        // like desktop clients do. A `lossless` target advertises neither, so it sends
-        // losslessly-compressed 32bpp bitmap updates instead. (`client_codecs_capabilities`
-        // never fails for these inputs; `None` would just drop the flags.)
+        // The compression mode only controls the codec advertisement: the default set
+        // includes RemoteFX, while a `lossless` target advertises no codecs so it sends
+        // losslessly-compressed 32bpp bitmap updates instead. `lossy_compression` stays
+        // off in every mode — it would advertise the dynamic-color-fidelity / subsampling
+        // drawing flags, inviting the target to dither legacy bitmap updates down to
+        // 16bpp. (`client_codecs_capabilities` never fails for these inputs; `None` would
+        // just drop the flags.)
         bitmap: client_codecs_capabilities(codec_overrides)
             .ok()
             .map(|codecs| connector::BitmapConfig {
-                lossy_compression,
+                lossy_compression: false,
                 color_depth: 32,
                 codecs,
             }),
