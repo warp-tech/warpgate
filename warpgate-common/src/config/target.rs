@@ -405,6 +405,11 @@ pub struct TargetRdpOptions {
     #[serde(default)]
     pub compression: Option<RdpTargetCompression>,
 
+    /// Show the target's own sign-in screen instead of logging on automatically.
+    /// The stored credentials still pass network-level authentication (CredSSP).
+    #[serde(default)]
+    pub interactive_logon: bool,
+
     // TLS compatibility/security profile used for the target-facing RDP connection.
     // Kept as a plain comment so OpenAPI emits a direct enum reference. A field
     // description wraps the enum in allOf, which typescript-fetch misgenerates.

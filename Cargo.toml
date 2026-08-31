@@ -34,6 +34,8 @@ members = [
 # describing the fork and a warpgate.patch reproducing it.
 exclude = [
     "vendor/vnc-rs",
+    "vendor/ironrdp-async",
+    "vendor/ironrdp-connector",
     "vendor/ironrdp-session",
     "vendor/picky",
     "vendor/sspi",
@@ -46,6 +48,8 @@ resolver = "2"
 # forked to drop those pins so both stacks share one crypto generation. See PATCHES.md in
 # each vendored crate.
 [patch.crates-io]
+ironrdp-async = { path = "vendor/ironrdp-async" }
+ironrdp-connector = { path = "vendor/ironrdp-connector" }
 ironrdp-session = { path = "vendor/ironrdp-session" }
 picky = { path = "vendor/picky" }
 sspi = { path = "vendor/sspi" }

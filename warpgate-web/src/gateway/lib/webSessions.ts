@@ -1,7 +1,5 @@
-import { handleReauthError } from 'common/reauth'
 import { get } from 'svelte/store'
 import { push } from 'svelte-spa-router'
-import { api } from './api'
 import { openTargetsInNewTab } from './store'
 
 function maybeOpenInNewTab(url: string) {
@@ -15,17 +13,8 @@ function maybeOpenInNewTab(url: string) {
     }
 }
 
-export async function openWebSshSession(targetId: string): Promise<void> {
-    try {
-        const { sessionId } = await api.createWebSshSession({
-            createWebSshSessionBody: { targetId },
-        })
-        maybeOpenInNewTab(`/web-ssh/${sessionId}`)
-    } catch (err) {
-        if (!(await handleReauthError(err))) {
-            throw err
-        }
-    }
+export function openWebSshSession(targetId: string): void {
+    maybeOpenInNewTab(`/web-ssh/start/${targetId}`)
 }
 
 export function openWebDesktopSession(targetId: string): void {
