@@ -84,6 +84,75 @@ impl SelectExists for sea_orm::sea_query::SelectStatement {
     }
 }
 
+/// What one reconcile did, for the caller's log line.
+struct SshKeySync {
+    unchanged: usize,
+    added: usize,
+    removed: usize,
+}
+
+/// Brings a user's stored public keys in line with `desired`, touching only
+/// what actually differs.
+///
+/// Reconciled rather than replaced because this runs on *every* public-key
+/// login, and a row carries more than its key: the id, and `date_added` /
+/// `last_used`. Deleting and re-inserting the lot would reset all three for
+/// keys that never changed, and would give a user a different key identity on
+/// every login.
+///
+/// `desired` must already be normalised — see the caller.
+async fn reconcile_ldap_ssh_keys(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    desired: HashSet<String>,
+) -> Result<SshKeySync, WarpgateError> {
+    let existing = entities::PublicKeyCredential::Entity::find()
+        .filter(entities::PublicKeyCredential::Column::UserId.eq(user_id))
+        .all(db)
+        .await?;
+
+    let mut present = HashSet::new();
+    let mut withdrawn = vec![];
+    for row in existing {
+        if desired.contains(&row.openssh_public_key) {
+            present.insert(row.openssh_public_key);
+        } else {
+            withdrawn.push(row.id);
+        }
+    }
+
+    let removed = withdrawn.len();
+    if !withdrawn.is_empty() {
+        entities::PublicKeyCredential::Entity::delete_many()
+            .filter(entities::PublicKeyCredential::Column::Id.is_in(withdrawn))
+            .exec(db)
+            .await?;
+    }
+
+    let mut added = 0;
+    for openssh_key in desired.difference(&present) {
+        entities::PublicKeyCredential::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user_id),
+            date_added: Set(Some(OffsetDateTime::now_utc())),
+            last_used: Set(None),
+            label: Set("Public key synchronized from LDAP".to_string()),
+            ..entities::PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential {
+                key: openssh_key.clone().into(),
+            })
+        }
+        .insert(db)
+        .await?;
+        added += 1;
+    }
+
+    Ok(SshKeySync {
+        unchanged: present.len(),
+        added,
+        removed,
+    })
+}
+
 impl DatabaseConfigProvider {
     pub fn new(db: &DatabaseConnection) -> Self {
         Self { db: db.clone() }
@@ -125,46 +194,35 @@ impl DatabaseConfigProvider {
             return Ok(());
         };
 
-        // Delete existing public key credentials for this user
-        entities::PublicKeyCredential::Entity::delete_many()
-            .filter(entities::PublicKeyCredential::Column::UserId.eq(user_id))
-            .exec(db)
-            .await?;
-
-        // Insert SSH keys from LDAP
+        // Normalised so a key that differs only by its comment is the same key.
+        let mut desired = HashSet::new();
         for ssh_key in &ldap_user.ssh_public_keys {
             let ssh_key = ssh_key.trim();
             if ssh_key.is_empty() {
                 continue;
             }
-
-            // Parse and validate the SSH key
-            let key_result = russh::keys::PublicKey::from_openssh(ssh_key);
-            if let Ok(mut key) = key_result {
-                key.set_comment("");
-                let openssh_key = key.to_openssh().map_err(russh::keys::Error::from)?;
-
-                entities::PublicKeyCredential::ActiveModel {
-                    id: Set(Uuid::new_v4()),
-                    user_id: Set(user_id),
-                    date_added: Set(Some(OffsetDateTime::now_utc())),
-                    last_used: Set(None),
-                    label: Set("Public key synchronized from LDAP".to_string()),
-                    ..entities::PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential {
-                        key: openssh_key.into(),
-                    })
+            match russh::keys::PublicKey::from_openssh(ssh_key) {
+                Ok(mut key) => {
+                    key.set_comment("");
+                    desired.insert(
+                        key.to_openssh()
+                            .map_err(russh::keys::Error::from)?
+                            .to_string(),
+                    );
                 }
-                .insert(db)
-                .await?;
-            } else {
-                warn!("Invalid SSH key from LDAP: {}", ssh_key);
+                Err(_) => warn!("Invalid SSH key from LDAP: {}", ssh_key),
             }
         }
 
+        let SshKeySync {
+            unchanged,
+            added,
+            removed,
+        } = reconcile_ldap_ssh_keys(db, user_id, desired).await?;
+
         info!(
-            "Synced {} SSH key(s) from LDAP for {}",
-            ldap_user.ssh_public_keys.len(),
-            ldap_user.username
+            "Synced SSH keys from LDAP for {}: {unchanged} unchanged, {added} added, {removed} removed",
+            ldap_user.username,
         );
 
         Ok(())
@@ -993,6 +1051,93 @@ mod tests {
         .insert(db)
         .await
         .unwrap();
+    }
+
+    async fn user_with_key(db: &DatabaseConnection, key: &str) -> (Uuid, Uuid) {
+        let user = entities::User::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            username: Set("ldap-user".to_owned()),
+            description: Set(String::new()),
+            credential_policy: Set(serde_json::json!(null)),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        let credential = entities::PublicKeyCredential::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user.id),
+            label: Set("from LDAP".to_owned()),
+            date_added: Set(Some(OffsetDateTime::UNIX_EPOCH)),
+            last_used: Set(Some(OffsetDateTime::UNIX_EPOCH)),
+            openssh_public_key: Set(key.to_owned()),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        (user.id, credential.id)
+    }
+
+    /// The sync runs on *every* public-key login. Replacing the rows wholesale
+    /// would give a key a new id each time — and the id is what a remembered
+    /// approval is keyed on — as well as resetting when the key was added and
+    /// wiping when it was last used.
+    #[tokio::test]
+    async fn re_syncing_leaves_an_unchanged_key_alone() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        let (user_id, credential_id) = user_with_key(&db, "ssh-ed25519 AAAAkept").await;
+
+        let sync = reconcile_ldap_ssh_keys(
+            &db,
+            user_id,
+            [
+                "ssh-ed25519 AAAAkept".to_owned(),
+                "ssh-ed25519 AAAAnew".to_owned(),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .await
+        .unwrap();
+        assert_eq!((sync.unchanged, sync.added, sync.removed), (1, 1, 0));
+
+        let kept = entities::PublicKeyCredential::Entity::find_by_id(credential_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .expect("the unchanged key must keep its row, and so its identity");
+        assert_eq!(kept.openssh_public_key, "ssh-ed25519 AAAAkept");
+        assert_eq!(kept.date_added, Some(OffsetDateTime::UNIX_EPOCH));
+        assert_eq!(
+            kept.last_used,
+            Some(OffsetDateTime::UNIX_EPOCH),
+            "a re-sync must not forget when the key was last used",
+        );
+    }
+
+    /// The other half: LDAP is the authority, so a key it stops listing goes.
+    #[tokio::test]
+    async fn re_syncing_removes_a_withdrawn_key() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        let (user_id, credential_id) = user_with_key(&db, "ssh-ed25519 AAAAold").await;
+
+        let sync = reconcile_ldap_ssh_keys(&db, user_id, HashSet::new())
+            .await
+            .unwrap();
+        assert_eq!((sync.unchanged, sync.added, sync.removed), (0, 0, 1));
+        assert!(
+            entities::PublicKeyCredential::Entity::find_by_id(credential_id)
+                .one(&db)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     /// The fingerprint an accepted password produces must follow the *stored*

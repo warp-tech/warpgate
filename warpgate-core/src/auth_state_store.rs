@@ -172,16 +172,34 @@ pub struct ApprovalRequestSink {
 pub struct AuthStateStore {
     store: HashMap<UserSessionId, (Arc<Mutex<AuthState>>, Instant)>,
     web_auth_request_signal: broadcast::Sender<UserSessionId>,
-    // pluggable to allow working without one in tests
+    /// `None` only for [`AuthStateStore::without_request_recording`], which no
+    /// production path can reach. A store that cannot record fails silently —
+    /// the request exists on this node and nowhere else — so the absence is
+    /// confined to the one constructor that says it out loud.
     request_sink: Option<ApprovalRequestSink>,
 }
 
 impl AuthStateStore {
-    pub fn new(request_sink: Option<ApprovalRequestSink>) -> Self {
+    pub fn new(request_sink: ApprovalRequestSink) -> Self {
         Self {
             store: HashMap::new(),
             web_auth_request_signal: broadcast::channel(100).0,
-            request_sink,
+            request_sink: Some(request_sink),
+        }
+    }
+
+    /// A store that records nothing, for tests that drive the state machine
+    /// without a database.
+    ///
+    /// Requests it raises are visible only to this node: no row is written, so
+    /// no other node can list or resolve one, and a decision has no `node_id`
+    /// to be routed back by. That is why this is test-only.
+    #[cfg(test)]
+    pub(crate) fn without_request_recording() -> Self {
+        Self {
+            store: HashMap::new(),
+            web_auth_request_signal: broadcast::channel(100).0,
+            request_sink: None,
         }
     }
 
@@ -433,7 +451,7 @@ mod tests {
     // by its session id, so the owning node resolves from `user_sessions`.
     #[tokio::test]
     async fn create_keys_auth_state_by_session_id() {
-        let mut store = AuthStateStore::new(None);
+        let mut store = AuthStateStore::without_request_recording();
         let user = test_user();
         let session_id = UserSessionId(Uuid::new_v4());
 
@@ -443,7 +461,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_new_attempt_supersedes_the_session_s_previous_state() {
-        let mut store = AuthStateStore::new(None);
+        let mut store = AuthStateStore::without_request_recording();
         let user = test_user();
         let session_id = UserSessionId(Uuid::new_v4());
 

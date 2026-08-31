@@ -88,11 +88,10 @@ impl Services {
 
         let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
 
-        let auth_state_store =
-            Arc::new(Mutex::new(AuthStateStore::new(Some(ApprovalRequestSink {
-                db: db.clone(),
-                node_id: cluster.node_id,
-            }))));
+        let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new(ApprovalRequestSink {
+            db: db.clone(),
+            node_id: cluster.node_id,
+        })));
 
         tokio::spawn({
             let auth_state_store = auth_state_store.clone();

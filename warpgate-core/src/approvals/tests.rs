@@ -1310,7 +1310,7 @@ mod delivery {
             cluster,
             rate_limiter_registry,
             config_provider: Arc::new(DatabaseConfigProvider::new(db).into()),
-            auth_state_store: Arc::new(Mutex::new(AuthStateStore::new(None))),
+            auth_state_store: Arc::new(Mutex::new(AuthStateStore::without_request_recording())),
             admin_token: Arc::new(None),
             cluster_token: Arc::new(Secret::new("test".into())),
             login_protection: Arc::new(LoginProtectionService::new(db.clone()).await.unwrap()),
