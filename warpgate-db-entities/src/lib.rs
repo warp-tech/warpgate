@@ -23,6 +23,7 @@ macro_rules! with_every_entity {
             PublicKeyCredential,
             Recording,
             Role,
+            SessionCommand,
             SshClientKey,
             SsoCredential,
             Target,

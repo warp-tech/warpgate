@@ -80,6 +80,7 @@
 
     let filter = $state('')
     let loaded = $state(false)
+    let hasItems = $state(false)
 
     const page$ = new Subject<number>()
     const filter$ = new Subject<string>()
@@ -110,7 +111,15 @@
     )
 
     const total = observe<number>(responses.pipe(map(x => x.total)), 0)
-    const items = observe<T[] | null>(responses.pipe(map(x => x.items)), null)
+    const items = observe<T[] | null>(
+        responses.pipe(
+            map(x => x.items),
+            tap(list => {
+                hasItems = !!list?.length
+            }),
+        ),
+        null,
+    )
 
     interface Row {
         item: T
@@ -196,19 +205,19 @@
     })
 </script>
 
+<!-- Search input lives outside {#await} so it is never destroyed by data reloads -->
+{#if showSearch && (filter || hasItems)}
+    <div class="mb-2">
+        <Input bind:value={filter} placeholder="Search..." class="w-100" />
+    </div>
+{/if}
+
 {#await $items}
     <DelayedSpinner />
 {:then _items}
     {@const _built = buildRows(_items ?? [])}
-    <div class="d-flex align-items-center mb-2" hidden={!loaded}>
-        <!-- either filtering or not filtering and there are at least some items at all -->
-        {#if showSearch && (filter || !!_items?.length)}
-            <Input
-                bind:value={filter}
-                placeholder="Search..."
-                class="flex-grow-1"
-            />
-        {/if}
+    <div hidden={!loaded}>
+        <!-- Filters rendered on a separate row below search -->
         {@render header?.(_items, {
             available: _built.keys.length > 0 && !filter,
             collapseAll: () => {
