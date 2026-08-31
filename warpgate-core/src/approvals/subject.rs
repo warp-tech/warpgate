@@ -8,28 +8,16 @@ use warpgate_common::auth::{
 use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{Protocol, UserSessionId};
 
-/// The session an approval is about, and the single source for its request row,
-/// audit events and grace key.
-///
-/// The administrator gate owns one directly — that is the point of the gate, no
-/// auth state need exist. The self-approval path builds one from its auth state
-/// via [`ApprovalSubject::from_auth_state`], so both kinds audit through the
-/// same code.
 #[derive(Debug, Clone)]
 pub(super) struct ApprovalSubject {
-    /// Which approval this subject describes. Part of every key it produces, so
-    /// a grant of one kind can never satisfy a request of the other.
     pub(super) kind: ApprovalKind,
     pub(super) session_id: UserSessionId,
     pub(super) user_info: AuthStateUserInfo,
     pub(super) protocol: Protocol,
     pub(super) target_name: String,
     pub(super) remote_ip: Option<IpAddr>,
-    /// What a grant to this session could be remembered on. Where that is
-    /// nothing, remembering is disabled rather than keyed on less.
-    pub(super) credentials: RememberApprovalBy,
-    /// The ticket use this session's question holds — put on the row, so
-    /// whichever node ends the question un-approved gives the use back.
+    pub(super) remember_by: RememberApprovalBy,
+    /// Ticket to refund if the approval is not granted
     pub(super) ticket_id: Option<Uuid>,
 }
 
@@ -42,16 +30,11 @@ impl ApprovalSubject {
             protocol: state.protocol(),
             target_name: state.target_name().to_string(),
             remote_ip: state.remote_ip(),
-            credentials: state.remembered_by(),
+            remember_by: state.remembered_by(),
             ticket_id: None,
         }
     }
 
-    /// What the request row stores to match this session's credentials against
-    /// a later connection. `None` mirrors [`Self::match_key`]'s: a row without
-    /// a digest can never serve as a remembered approval.
-    /// What a later attempt is matched against, taken from the same key the
-    /// match itself uses so the two can't drift.
     pub(super) fn match_digest(&self) -> Option<String> {
         Some(self.match_key()?.identity().digest())
     }
@@ -61,8 +44,7 @@ impl ApprovalSubject {
             .map_or_else(|| "<unknown>".to_string(), |ip| ip.to_string())
     }
 
-    /// The key this session's approval is remembered under. `None` when
-    /// [`WebApprovalMatchKey::build`] has nothing to pin a grant to.
+    /// Key for the "remember decision" bypass
     pub(super) fn match_key(&self) -> Option<WebApprovalMatchKey> {
         self.remote_ip.and_then(|ip| {
             WebApprovalMatchKey::build(
@@ -71,7 +53,7 @@ impl ApprovalSubject {
                 self.protocol,
                 &self.user_info.username,
                 &self.target_name,
-                &self.credentials,
+                &self.remember_by,
             )
         })
     }

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
+use sea_orm::sea_query::IntoCondition;
 use sea_orm::ActiveValue::Set;
 use sea_orm::DatabaseConnection;
-use sea_orm::sea_query::IntoCondition;
 use time::OffsetDateTime;
 use tracing::{info, warn};
 use warpgate_common::auth::ApprovalKind;
@@ -10,30 +10,22 @@ use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    Advertised, close_request, mark_consumed, upsert_request,
+    close_request, mark_consumed, upsert_request, Advertised,
 };
 
 use super::*;
 
-/// The request row an administrator gate is waiting on, closed when the wait
-/// ends however it ends — resolved, timed out, cancelled, or the future dropped.
-///
-/// The guard names the whole question — session, kind and target — so a
-/// straggling close can only ever land on its own row, never on one of the
-/// session's other questions.
+// An "owning" close-on-drop guard for an approval
 pub(super) struct PendingApproval {
     session_id: UserSessionId,
     target: String,
     db: DatabaseConnection,
-    /// How to end the row if the wait produces no decision. `None` once one
-    /// has, when the row is stamped as picked up instead.
+    /// How to close the request if there is no decision
     close_as: Option<SessionApprovalRequest::UndecidedApprovalRequestStatus>,
 }
 
 impl Drop for PendingApproval {
     fn drop(&mut self) {
-        // Drop can't await. `reap_stale` and the session-teardown sweep both
-        // cover a row this spawn never gets to close.
         let session_id = self.session_id;
         let target = std::mem::take(&mut self.target);
         let db = self.db.clone();
@@ -58,9 +50,6 @@ impl Drop for PendingApproval {
 }
 
 impl PendingApproval {
-    /// Takes ownership of the question's row *before* it is advertised, so a
-    /// failed or interrupted advertise is still cleaned up by the drop rather
-    /// than left to the reaper. The caller announces the question right after.
     pub(super) fn guarding(db: DatabaseConnection, subject: &ApprovalSubject) -> Self {
         Self {
             session_id: subject.session_id,
@@ -70,21 +59,16 @@ impl PendingApproval {
         }
     }
 
-    /// The window ran out with nobody having decided.
     pub(super) const fn timed_out(&mut self) {
         self.close_as = Some(SessionApprovalRequest::UndecidedApprovalRequestStatus::TimedOut);
     }
 
-    /// A decision was read off the row and acted on, so the row keeps it and is
-    /// only stamped as picked up.
     pub(super) const fn decided(&mut self) {
         self.close_as = None;
     }
 }
 
-/// Writes (idempotently) the request row an administrator gate advertises, and
-/// reports whether that actually asked a question — the caller announces one
-/// exactly when it did.
+/// Idempotently write a request rentry
 pub(super) async fn advertise_admin_request(
     db: &DatabaseConnection,
     node_id: NodeId,
@@ -116,15 +100,9 @@ pub(super) async fn advertise_admin_request(
     .await
 }
 
-/// How often a waiting gate re-reads its row.
-///
-/// ponytail: one query per waiting session per tick. Approvals are human-paced
-/// and few at a time; batch them into one node-wide query if the number of
-/// simultaneous holds ever makes this show up.
 pub(super) const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
-/// How a wait on a request row ended.
-pub(super) enum RowOutcome {
+pub(super) enum DecisionWaitOutcome {
     /// A decision was written to the row. The resolver is not carried along:
     /// they are recorded and audited where the decision is made, so a waiting
     /// gate only needs to know the answer.
@@ -194,15 +172,14 @@ pub(super) async fn await_row_decision(
     kind: ApprovalKind,
     target: &str,
     timeout: Duration,
-) -> Result<RowOutcome, WarpgateError> {
+) -> Result<DecisionWaitOutcome, WarpgateError> {
     let deadline = tokio::time::Instant::now() + timeout;
     let mut ticker = tokio::time::interval(POLL_INTERVAL);
 
     loop {
         tokio::select! {
-            () = tokio::time::sleep_until(deadline) => return Ok(RowOutcome::TimedOut),
-            // The first tick is immediate, catching a decision that landed
-            // between advertising the row and starting the wait.
+            () = tokio::time::sleep_until(deadline) => return Ok(DecisionWaitOutcome::TimedOut),
+            // The first tick is immediate
             _ = ticker.tick() => {
                 match SessionApprovalRequest::Entity::find().filter(
                     SessionApprovalRequest::Key::new(session_id, kind, target).into_condition()
@@ -210,15 +187,13 @@ pub(super) async fn await_row_decision(
                     Ok(Some(row)) => match row_state(&row)? {
                         RowState::Pending => {}
                         RowState::Decided(decision, _) => {
-                            return Ok(RowOutcome::Decided(decision));
+                            return Ok(DecisionWaitOutcome::Decided(decision));
                         }
-                        // Something else ended this wait, so there is nothing
-                        // left to wait for.
-                        RowState::Ended => return Ok(RowOutcome::Ended),
+                        // Something else ended it
+                        RowState::Ended => return Ok(DecisionWaitOutcome::Ended),
                     },
-                    // The row is gone (retention never prunes one this young),
-                    // so the question is no longer being asked.
-                    Ok(None) => return Ok(RowOutcome::Ended),
+                    // row is gone
+                    Ok(None) => return Ok(DecisionWaitOutcome::Ended),
                     Err(error) => {
                         warn!(%error, "Failed to read a session approval request");
                     }
