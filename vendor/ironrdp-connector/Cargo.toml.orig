@@ -1,0 +1,38 @@
+[package]
+name = "ironrdp-connector"
+version = "0.10.0"
+readme = "README.md"
+description = "State machines to drive an RDP connection sequence"
+edition.workspace = true
+rust-version = "1.89"
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+doctest = false
+test = false
+
+[features]
+default = []
+qoi = ["ironrdp-pdu/qoi"]
+qoiz = ["ironrdp-pdu/qoiz"]
+
+[dependencies]
+ironrdp-svc = { path = "../ironrdp-svc", version = "0.8" } # public
+ironrdp-core = { path = "../ironrdp-core", version = "0.2" } # public
+ironrdp-error = { path = "../ironrdp-error", version = "0.2" } # public
+ironrdp-pdu = { path = "../ironrdp-pdu", version = "0.9", features = ["std"] } # public
+sspi = { version = "0.21", features = ["scard"] }
+url = "2.5" # public
+rand = { version = "0.9", features = ["std"] } # TODO: dependency injection?
+tracing = { version = "0.1", features = ["log"] }
+picky-asn1-der = "0.5"
+picky-asn1-x509 = "0.15"
+picky = "=7.0.0-rc.25" # FIXME: We are pinning with = because the candidate version number counts as the minor number by Cargo, and will be automatically bumped in the Cargo.lock.
+
+[lints]
+workspace = true
