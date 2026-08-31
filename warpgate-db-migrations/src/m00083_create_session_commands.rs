@@ -101,3 +101,61 @@ impl MigrationTrait for Migration {
             .await
     }
 }
+
+#[cfg(all(test, feature = "sqlite"))]
+mod tests {
+    use sea_orm::ActiveValue::Set;
+    use sea_orm::{Database, EntityTrait};
+    use sea_orm_migration::MigratorTrait;
+    use time::OffsetDateTime;
+    use uuid::Uuid;
+    use warpgate_common::TargetSessionId;
+    use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+    use warpgate_db_entities::{SessionCommand, TargetSession};
+
+    use crate::Migrator;
+
+    #[tokio::test]
+    async fn up_down_up_round_trip() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+
+        let target_session_id = TargetSessionId(Uuid::new_v4());
+        TargetSession::Entity::insert(TargetSession::ActiveModel {
+            id: Set(target_session_id),
+            user_session_id: Set(warpgate_common::UserSessionId(Uuid::new_v4())),
+            target_snapshot: Set(r#"{"name":"web"}"#.into()),
+            target_id: Set(Uuid::new_v4()),
+            started: Set(OffsetDateTime::now_utc()),
+            ended: Set(None),
+            ticket_id: Set(None),
+            node_id: Set(None),
+        })
+        .exec_without_returning(&db)
+        .await
+        .unwrap();
+        SessionCommand::Entity::insert(SessionCommand::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            target_session_id: Set(target_session_id),
+            command: Set("ls".into()),
+            time: Set(OffsetDateTime::now_utc()),
+            node_id: Set(None),
+        })
+        .exec_without_returning(&db)
+        .await
+        .unwrap();
+        assert_eq!(
+            SessionCommand::Entity::find().all(&db).await.unwrap().len(),
+            1
+        );
+
+        Migrator::down(&db, Some(1)).await.unwrap();
+        // Down must leave no trace — re-running up rebuilds the table empty.
+        Migrator::up(&db, Some(1)).await.unwrap();
+        assert_eq!(
+            SessionCommand::Entity::find().all(&db).await.unwrap().len(),
+            0
+        );
+    }
+}
