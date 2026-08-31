@@ -160,9 +160,6 @@ async fn wait_for_auth_completion_within(
     .unwrap_or(AuthResult::Rejected)
 }
 
-/// Everything the store needs to record a self-approval request where the rest
-/// of the cluster can see it. One value rather than three parameters, so a
-/// caller can't assemble a sink out of pieces that don't belong together.
 #[derive(Clone)]
 pub struct ApprovalRequestSink {
     pub db: DatabaseConnection,
@@ -172,10 +169,6 @@ pub struct ApprovalRequestSink {
 pub struct AuthStateStore {
     store: HashMap<UserSessionId, (Arc<Mutex<AuthState>>, Instant)>,
     web_auth_request_signal: broadcast::Sender<UserSessionId>,
-    /// `None` only for [`AuthStateStore::without_request_recording`], which no
-    /// production path can reach. A store that cannot record fails silently —
-    /// the request exists on this node and nowhere else — so the absence is
-    /// confined to the one constructor that says it out loud.
     request_sink: Option<ApprovalRequestSink>,
 }
 
@@ -188,12 +181,6 @@ impl AuthStateStore {
         }
     }
 
-    /// A store that records nothing, for tests that drive the state machine
-    /// without a database.
-    ///
-    /// Requests it raises are visible only to this node: no row is written, so
-    /// no other node can list or resolve one, and a decision has no `node_id`
-    /// to be routed back by. That is why this is test-only.
     #[cfg(test)]
     pub(crate) fn without_request_recording() -> Self {
         Self {

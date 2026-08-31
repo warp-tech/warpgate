@@ -92,16 +92,7 @@ struct SshKeySync {
     removed: usize,
 }
 
-/// Brings a user's stored public keys in line with `desired`, touching only
-/// what actually differs.
-///
-/// Reconciled rather than replaced because this runs on *every* public-key
-/// login, and a row carries more than its key: the id, and `date_added` /
-/// `last_used`. Deleting and re-inserting the lot would reset all three for
-/// keys that never changed, and would give a user a different key identity on
-/// every login.
-///
-/// `desired` must already be normalised — see the caller.
+/// LDAP keys need reconcillation because key IDs are used for approval bypass matching
 async fn reconcile_ldap_ssh_keys(
     db: &DatabaseConnection,
     user_id: Uuid,

@@ -103,29 +103,16 @@ pub(super) async fn advertise_admin_request(
 pub(super) const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(super) enum DecisionWaitOutcome {
-    /// A decision was written to the row. The resolver is not carried along:
-    /// they are recorded and audited where the decision is made, so a waiting
-    /// gate only needs to know the answer.
     Decided(ApprovalDecision),
-    /// The row stopped being a live question underneath the wait — the session
-    /// ended, or it was reaped because this node looked dead. Nothing approved
-    /// the connection.
+    /// The row is gone
     Ended,
     TimedOut,
 }
 
-/// What a request row currently says.
-///
-/// Three states, not an `Option`: "nobody has answered yet" and "this will never
-/// be answered" both carry no decision but mean opposite things to a waiter, and
-/// an `Option` makes them the same value with the difference left on the row for
-/// each caller to re-derive.
 pub(super) enum RowState {
     /// Still a live question.
     Pending,
     Decided(ApprovalDecision, ApprovalActor),
-    /// Terminal with no decision — nobody answered in time, or nobody was left
-    /// to answer for.
     Ended,
 }
 
@@ -138,15 +125,10 @@ pub(super) fn row_state(row: &SessionApprovalRequest::Model) -> Result<RowState,
             return Ok(RowState::Ended);
         }
         ApprovalRequestStatus::Rejected => ApprovalDecision::Rejected,
-        // A missing scope reads as granting this connection only, the safe
-        // reading of an approval that somehow recorded none.
         ApprovalRequestStatus::Approved => {
             ApprovalDecision::Approved(row.scope.unwrap_or(ApprovalScope::Once))
         }
     };
-    // Both resolver columns are optional on the row for the same reason they
-    // are on the actor: a resolver that isn't a user (the admin API token)
-    // has neither.
     Ok(RowState::Decided(
         decision,
         ApprovalActor {
@@ -156,16 +138,6 @@ pub(super) fn row_state(row: &SessionApprovalRequest::Model) -> Result<RowState,
     ))
 }
 
-/// Waits for a decision to be written to this question's row, giving up at
-/// `timeout`.
-///
-/// Giving up early, when the client the gate is holding goes away, is the
-/// caller's to arrange by dropping this future: the guards it is holding close
-/// the row and refund the ticket on the way out.
-///
-/// A read failure keeps the wait going rather than ending it: a database blip
-/// must not deny a connection an administrator is in the middle of approving,
-/// and the timeout still bounds the wait.
 pub(super) async fn await_row_decision(
     db: &DatabaseConnection,
     session_id: UserSessionId,
@@ -195,6 +167,7 @@ pub(super) async fn await_row_decision(
                     // row is gone
                     Ok(None) => return Ok(DecisionWaitOutcome::Ended),
                     Err(error) => {
+                        // Do not fail the wait because of a single DB error
                         warn!(%error, "Failed to read a session approval request");
                     }
                 }
@@ -203,15 +176,6 @@ pub(super) async fn await_row_decision(
     }
 }
 
-/// Records a decision against a pending request, from whichever node the
-/// approver happens to be talking to. `Ok(false)` when there is no longer a
-/// pending request to decide — already resolved, or the waiter gave up and
-/// closed it.
-///
-/// `target` is the question the approver believes they are answering — what
-/// their screen said, or what the row said when it was looked up. A stale
-/// click can only ever land on the question it was shown for, never on
-/// another of the session's questions.
 pub async fn record_decision(
     db: &DatabaseConnection,
     session_id: UserSessionId,
@@ -227,18 +191,13 @@ pub async fn record_decision(
         ApprovalDecision::Rejected => (ApprovalRequestStatus::Rejected, None),
     };
 
-    // Read ahead of the write, off the pending row only: a question that is
-    // already settled is not this call's to decide or audit, and the write
-    // below is pinned to the asking read here — a question closed and asked
-    // afresh in the window is one this decision must not land on. The row also
-    // carries what the audit event says about the asker, and the ticket use a
-    // rejection gives back.
     let Some(row) = SessionApprovalRequest::Entity::find()
         .filter(SessionApprovalRequest::Key::new(session_id, kind, target).into_condition())
         .one(db)
         .await?
         .filter(|row| row.status == ApprovalRequestStatus::Pending)
     else {
+        // entry is gone or already decided
         return Ok(false);
     };
 
@@ -251,10 +210,6 @@ pub async fn record_decision(
         Some(actor.user_id),
     )
     .await?;
-    // Audited here rather than where a gate reads the decision back: the
-    // administrator acted, and that stands as a fact even if the connection
-    // they were deciding about has already gone. Gated on the transition, so
-    // of two approvers racing one question only the one that moved it logs.
     if recorded {
         emit_resolved_event(
             &row,
@@ -265,18 +220,7 @@ pub async fn record_decision(
     Ok(recorded)
 }
 
-/// Audits a decision, from the row it was just written to.
-///
-/// Emitted by whoever moves the row out of `pending`, so an administrator's
-/// approve or reject is recorded whether or not the held connection is still
-/// there to receive it — a session that gave up, or an owning node that died,
-/// must not make the decision disappear from the audit trail.
-///
-/// `session` is the user session id the session page filters its log by, and
-/// the audit sink drops any event without it. `actor.user_id` is `None` when
-/// the resolver isn't a user (the admin API token); it joins `related_users`
-/// so the decision also shows up in the resolver's own trail, matching how
-/// every other actor-driven event is attributed.
+/// Audit is emitted by the node that changes the stored status (not by the session-owned node which might be gone)
 pub(super) fn emit_resolved_event(
     row: &SessionApprovalRequest::Model,
     actor: &ApprovalActor,
