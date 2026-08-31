@@ -11,7 +11,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
     AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialKind,
-    CredentialPolicy, PerProtocolCredentialPolicy, StoredCredential, StoredCredentialId,
+    CredentialPolicy, PerProtocolCredentialPolicy, StoredCredential, StoredCredentialFingerprint,
     StoredCredentialKind,
 };
 use warpgate_common::helpers::hash::{hash_secret, verify_password_hash};
@@ -648,7 +648,9 @@ impl ConfigProvider for DatabaseConfigProvider {
                         StoredCredential::new(
                             StoredCredentialKind::PublicKey,
                             c.id,
-                            StoredCredentialId::of_stored_verifier(c.openssh_public_key.as_bytes()),
+                            StoredCredentialFingerprint::of_stored_verifier(
+                                c.openssh_public_key.as_bytes(),
+                            ),
                         )
                     })
             }
@@ -676,7 +678,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                         // The stored Argon2 hash, never the password: the hash
                         // is already in this database, so nothing new reaches
                         // the approval rows.
-                        StoredCredentialId::of_stored_verifier(c.argon_hash.as_bytes()),
+                        StoredCredentialFingerprint::of_stored_verifier(c.argon_hash.as_bytes()),
                     )
                 }),
 
@@ -694,7 +696,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     StoredCredential::new(
                         StoredCredentialKind::Totp,
                         c.id,
-                        StoredCredentialId::of_stored_verifier(&c.secret_key),
+                        StoredCredentialFingerprint::of_stored_verifier(&c.secret_key),
                     )
                 }),
 
@@ -722,7 +724,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                         c.id,
                         // The stored row, so nothing the client supplied reaches
                         // the approval rows.
-                        StoredCredentialId::of_stored_verifier(&verifier),
+                        StoredCredentialFingerprint::of_stored_verifier(&verifier),
                     )
                 }),
 
@@ -1283,13 +1285,67 @@ mod tests {
         );
     }
 
+    /// Re-hashing a password produces a different Argon2 string for the very
+    /// same password. The identity must follow that stored string, so it
+    /// changes — which is the only assertion that can tell a verifier taken
+    /// from the stored side from one taken from the client's submission.
+    ///
+    /// It matters because the submitted password must never be digested into
+    /// an approval row: that would place a cheap second representation of a
+    /// live password beside the Argon2 hash meant to protect it.
+    #[tokio::test]
+    async fn rehashing_a_password_changes_its_identity() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        user_with_password(&db, "alice", "same-password").await;
+
+        let provider = DatabaseConfigProvider::new(&db);
+        let submitted = AuthCredential::Password("same-password".to_string().into());
+        let before = provider
+            .validate_credential("alice", &submitted)
+            .await
+            .unwrap()
+            .expect("the password is accepted");
+
+        // Same row, same password, freshly hashed — so only the stored string
+        // differs.
+        let stored = entities::PasswordCredential::Entity::find()
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        entities::PasswordCredential::ActiveModel {
+            id: Set(stored.id),
+            argon_hash: Set(hash_password("same-password")),
+            ..Default::default()
+        }
+        .update(&db)
+        .await
+        .unwrap();
+
+        let after = provider
+            .validate_credential("alice", &submitted)
+            .await
+            .unwrap()
+            .expect("the password is still accepted");
+
+        assert_ne!(
+            identity_digest(before),
+            identity_digest(after),
+            "the identity must follow the stored hash, not the submitted password",
+        );
+    }
+
     /// The fingerprint an accepted password produces must follow the *stored*
     /// credential, not the password itself.
     ///
     /// Two accounts sharing a password are two different stored rows, so they
-    /// must not share an identity. Deriving it from the submitted password
-    /// would make them identical — and would put a digest of a live password
-    /// into the approval rows, beside the Argon2 hash meant to protect it.
+    /// must not share an identity.
+    ///
+    /// Note this alone does *not* prove the identity avoids the submitted
+    /// password — the two rows differ by id whatever the verifier is derived
+    /// from. `rehashing_a_password_changes_its_identity` is what pins that.
     #[tokio::test]
     async fn a_password_is_identified_by_its_stored_row() {
         set_config_migration_values(ConfigMigrationValues::default());

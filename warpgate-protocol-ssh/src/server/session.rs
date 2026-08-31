@@ -30,7 +30,7 @@ use warpgate_common::{
     Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_core::approvals::{AdminApprovalContext, GateOutcome};
+use warpgate_core::approvals::{GateOutcome, GatedConnection};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
@@ -730,8 +730,8 @@ impl ServerSession {
             };
             let gate = services.require_admin_approval(
                 authorization,
-                AdminApprovalContext {
-                    session_id,
+                session_id,
+                GatedConnection {
                     remote_ip: Some(remote_ip),
                     credentials,
                 },

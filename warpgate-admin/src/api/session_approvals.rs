@@ -64,8 +64,6 @@ async fn resolve_inner(
     target: &str, // target seen by the approval to ensure no TOCTOU
     decision: ApprovalDecision,
 ) -> poem::Result<ActionResponse> {
-    // Looked up by the whole key, so the request this returns is by construction
-    // the one the approver's screen named.
     let Some(pending) = find_pending_approval(ctx, session_id, ApprovalKind::Admin, target).await?
     else {
         return Ok(ActionResponse::NotFound);

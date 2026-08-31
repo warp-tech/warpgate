@@ -27,6 +27,19 @@ pub enum CredentialKind {
     WebUserApproval,
 }
 
+impl CredentialKind {
+    pub const fn readable_description(self) -> &'static str {
+        match self {
+            Self::Password => "password",
+            Self::PublicKey => "public key",
+            Self::Certificate => "client certificate",
+            Self::Totp => "one-time password",
+            Self::Sso => "SSO",
+            Self::WebUserApproval => "in-browser auth",
+        }
+    }
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum,
 )]
@@ -84,36 +97,27 @@ impl AuthCredential {
         }
     }
 
-    pub fn safe_description(&self) -> String {
+    pub fn readable_description(&self) -> String {
         match self {
-            Self::Password { .. } => "password".to_string(),
-            Self::PublicKey { .. } => "public key".to_string(),
-            Self::Certificate { .. } => "client certificate".to_string(),
-            Self::Otp { .. } => "one-time password".to_string(),
             Self::Sso { provider, .. } => format!("SSO ({provider})"),
-            Self::WebUserApproval => "in-browser auth".to_string(),
+            _ => self.kind().readable_description().to_string(),
         }
     }
 }
 
-/// Identifies the *stored* credential that a submitted one matched, so a later
-/// authentication can be recognised as having used the same one.
+/// An identifying representation of a credential
+/// * does not contain secret material
+/// * is stable
 ///
-/// Built only from a credential's stored verifier — an Argon2 PHC string, an
-/// OpenSSH public key — never from what the client submitted. That is the whole
-/// point of the type: these identifiers end up in the approval rows, and a
-/// digest of a submitted *password* would put a second, far cheaper
-/// representation of it in the same database the Argon2 hash lives in. Anyone
-/// holding a dump already has the verifier, so this tells them nothing new.
+/// Used to remember and match against "remembered" approval decisions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StoredCredentialId([u8; 32]);
+pub struct StoredCredentialFingerprint([u8; 32]);
 
-impl StoredCredentialId {
-    /// `verifier` must be the stored side of the credential, never the client's
-    /// submission — see the type docs.
+impl StoredCredentialFingerprint {
+    // never the actual secret
     #[must_use]
     pub fn of_stored_verifier(verifier: &[u8]) -> Self {
-        Self(sha256(verifier))
+        Self(Sha256::digest(verifier).into())
     }
 
     const fn bytes(&self) -> &[u8; 32] {
@@ -121,12 +125,8 @@ impl StoredCredentialId {
     }
 }
 
-/// The credential kinds that exist as a stored row.
-///
-/// Deliberately not [`CredentialKind`]: an in-browser approval has no row and
-/// so no id, and `{ kind: WebUserApproval, id }` must not be a pair anyone can
-/// write. Certificates have a table but no submission path yet — add the
-/// variant when one exists and the compiler will ask for its tag.
+/// A subset of CredentialKind types that are stored in the DB
+/// and are excplitily submissible by the user (i.e. not TLS certificates)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StoredCredentialKind {
     Password,
@@ -145,17 +145,14 @@ impl StoredCredentialKind {
         }
     }
 
-    const fn description(self) -> &'static str {
-        match self {
-            Self::Password => "password",
-            Self::PublicKey => "public key",
-            Self::Totp => "one-time password",
-            Self::Sso => "SSO",
-        }
+    const fn readable_description(self) -> &'static str {
+        self.kind().readable_description()
     }
 }
 
-/// The stored credential a submission was verified against: which row, and what
+/// A confirmation of an actual stored credential match from the auth backend, including the entry ID and verifiable fingerprint
+///
+///  The stored credential a submission was verified against: which row, and what
 /// that row held at the time.
 ///
 /// Both halves, because they answer different questions. The id distinguishes
@@ -168,51 +165,45 @@ impl StoredCredentialKind {
 pub struct StoredCredential {
     kind: StoredCredentialKind,
     id: Uuid,
-    verifier: StoredCredentialId,
+    fingerprint: StoredCredentialFingerprint,
 }
 
 impl StoredCredential {
-    /// `verifier` is the row's own material — see [`StoredCredentialId`].
     #[must_use]
-    pub const fn new(kind: StoredCredentialKind, id: Uuid, verifier: StoredCredentialId) -> Self {
-        Self { kind, id, verifier }
+    pub const fn new(
+        kind: StoredCredentialKind,
+        id: Uuid,
+        fingerprint: StoredCredentialFingerprint,
+    ) -> Self {
+        Self {
+            kind,
+            id,
+            fingerprint,
+        }
     }
 
     pub const fn kind(&self) -> StoredCredentialKind {
         self.kind
     }
 
-    /// Pushes a byte encoding of this credential's identity, for hashing into a
-    /// digest of a whole authentication.
-    ///
-    /// Every part is fixed-width — a tag, a 16-byte uuid, a 32-byte digest — so
-    /// the concatenation is unambiguous without length framing. Restore the
-    /// framing if a variable-length part is ever added.
+    /// serialize into a byte buffer for fingerprint generation of an entire credential set later
     pub(crate) fn write_canonical_bytes(&self, out: &mut Vec<u8>) {
-        // Written out rather than `kind as u8`: this digest is persisted in
-        // approval rows, so reordering the enum must not renumber it.
         out.push(match self.kind {
+            // stable ids
             StoredCredentialKind::Password => 1,
             StoredCredentialKind::PublicKey => 2,
             StoredCredentialKind::Totp => 3,
             StoredCredentialKind::Sso => 4,
         });
         out.extend_from_slice(self.id.as_bytes());
-        out.extend_from_slice(self.verifier.bytes());
+        out.extend_from_slice(self.fingerprint.bytes());
     }
 }
 
-/// A credential that passed validation, by identity rather than by value.
-///
-/// One value replaces what used to be two index-parallel vectors — the
-/// submission and the stored credential it matched — so the two cannot drift.
-/// Nothing here is secret, so an auth state that lives for the whole auth
-/// timeout no longer holds a plaintext password or one-time code.
+/// A type tag for validated credential's identity
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ValidCredential {
     Stored(StoredCredential),
-    /// The user approving in their own browser. There is no stored row to point
-    /// at — the act of approving *is* the credential — so none can be attached.
     WebUserApproval,
 }
 
@@ -225,11 +216,6 @@ impl ValidCredential {
         }
     }
 
-    /// The stored row this asserts, where there is one.
-    ///
-    /// The projection a remember-by key is built through, so "an approval is
-    /// not part of the key it is remembered under" holds by type rather than by
-    /// a filter someone has to remember to write.
     #[must_use]
     pub const fn stored(&self) -> Option<&StoredCredential> {
         match self {
@@ -238,20 +224,20 @@ impl ValidCredential {
         }
     }
 
-    /// How an accepted credential appears in the `Authenticated` audit event.
     #[must_use]
-    pub fn description(&self) -> String {
+    pub fn readable_description(&self) -> String {
         match self {
             Self::Stored(credential) => {
-                format!("{} ({})", credential.kind.description(), credential.id)
+                // TODO check verbosity
+                format!(
+                    "{} ({})",
+                    credential.kind.readable_description(),
+                    credential.id
+                )
             }
             Self::WebUserApproval => "in-browser auth".to_string(),
         }
     }
-}
-
-fn sha256(bytes: &[u8]) -> [u8; 32] {
-    Sha256::digest(bytes).into()
 }
 
 impl From<UserCertificateCredential> for AuthCredential {
@@ -289,7 +275,7 @@ mod tests {
         StoredCredential::new(
             StoredCredentialKind::Password,
             Uuid::from_u128(1),
-            StoredCredentialId::of_stored_verifier(b"stored"),
+            StoredCredentialFingerprint::of_stored_verifier(b"stored"),
         )
     }
 
@@ -301,7 +287,11 @@ mod tests {
     /// stops this compiling until someone says what it does to the digest.
     #[test]
     fn every_part_of_a_stored_credential_reaches_the_digest() {
-        let StoredCredential { kind, id, verifier } = base();
+        let StoredCredential {
+            kind,
+            id,
+            fingerprint: verifier,
+        } = base();
         let _ = (kind, id, verifier);
 
         for altered in [
@@ -310,32 +300,11 @@ mod tests {
             StoredCredential::new(
                 kind,
                 id,
-                StoredCredentialId::of_stored_verifier(b"replaced"),
+                StoredCredentialFingerprint::of_stored_verifier(b"replaced"),
             ),
         ] {
             assert_ne!(digest(base()), digest(altered), "{altered:?}");
         }
-    }
-
-    /// Both halves earn their place, and each catches what the other cannot:
-    /// the id separates two rows holding identical material, and the verifier
-    /// notices a row whose material was replaced in place — which the admin
-    /// public-key and SSO endpoints do, keeping the id.
-    #[test]
-    fn the_id_and_the_material_each_catch_what_the_other_misses() {
-        let same_material_different_row = StoredCredential::new(
-            StoredCredentialKind::Password,
-            Uuid::from_u128(2),
-            StoredCredentialId::of_stored_verifier(b"stored"),
-        );
-        assert_ne!(digest(base()), digest(same_material_different_row));
-
-        let same_row_replaced_material = StoredCredential::new(
-            StoredCredentialKind::Password,
-            Uuid::from_u128(1),
-            StoredCredentialId::of_stored_verifier(b"rotated"),
-        );
-        assert_ne!(digest(base()), digest(same_row_replaced_material));
     }
 
     /// Every kind must encode distinctly, or two credentials of different kinds
@@ -366,7 +335,7 @@ mod tests {
                 digest(StoredCredential::new(
                     kind,
                     Uuid::nil(),
-                    StoredCredentialId::of_stored_verifier(b""),
+                    StoredCredentialFingerprint::of_stored_verifier(b""),
                 ))
             })
             .collect();

@@ -15,7 +15,7 @@ use warpgate_common::TargetHTTPOptions;
 use warpgate_common::auth::RememberApprovalBy;
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip_addr;
-use warpgate_core::approvals::{AdminApprovalContext, PolledGate};
+use warpgate_core::approvals::{GatedConnection, PolledGate};
 use warpgate_core::{AdmittedTarget, TargetAuthorization, WarpgateServerHandle};
 
 use crate::internal_page::internal_page;
@@ -40,8 +40,8 @@ pub async fn resolve_admin_approval(
     let gate = services
         .poll_admin_approval(
             authorization,
-            AdminApprovalContext {
-                session_id,
+            session_id,
+            GatedConnection {
                 remote_ip: get_client_ip_addr(req, services).await,
                 // The credentials that authenticated the session aren't carried
                 // on the request, so an HTTP session neither contributes nor
@@ -64,7 +64,7 @@ pub async fn resolve_admin_approval(
              continue automatically once they do.",
             true,
         )),
-        PolledGate::Denied => Err(gate_response(
+        PolledGate::Refused => Err(gate_response(
             &target_name,
             "Session not approved",
             "An administrator did not approve this session.",

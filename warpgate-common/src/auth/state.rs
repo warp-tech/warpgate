@@ -263,11 +263,6 @@ pub struct AuthState {
     target_name: String,
     force_rejected: bool,
     policy: Box<dyn CredentialPolicy + Sync + Send>,
-    /// Every credential that passed validation, in the order they were
-    /// accepted, by identity: which stored row was matched, never what was
-    /// submitted. One vector rather than two parallel ones, so "what was
-    /// accepted" and "what it was accepted against" cannot drift — and nothing
-    /// secret is retained by a state that lives for the whole auth timeout.
     valid_credentials: Vec<ValidCredential>,
     started: OffsetDateTime,
     identification_string: String,
@@ -338,8 +333,6 @@ impl AuthState {
     /// Best possible "remember by" key for approving this AuthState
     #[must_use]
     pub fn remembered_by(&self) -> RememberApprovalBy {
-        // A web approval is the thing being remembered, so it cannot be part
-        // of the key it is remembered under. `stored()` is that exclusion.
         RememberApprovalBy::from_credentials(
             self.valid_credentials
                 .iter()
@@ -375,10 +368,8 @@ impl AuthState {
     /// Runs `validate` on the credential and records it only if it passes.
     /// This is the sole path for adding a credential that requires validation,
     /// so a credential in `valid_credentials` is validated by construction.
-    /// `validate` answers with the identity of the stored credential that was
-    /// matched, or `None` for a rejected submission — the identity, not a
-    /// `bool`, because only the validator can see which stored credential
-    /// verified the submission, and that is what an approval is remembered on.
+    ///
+    /// validate() should return None for rejected credentials
     pub async fn submit_credential<F, Fut>(
         &mut self,
         credential: AuthCredential,
@@ -431,7 +422,7 @@ impl AuthState {
     fn valid_credentials_description(&self) -> String {
         self.valid_credentials
             .iter()
-            .map(ValidCredential::description)
+            .map(ValidCredential::readable_description)
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -486,7 +477,7 @@ impl AuthState {
         reason: &str,
     ) {
         let credentials =
-            credential.map_or_else(|| "<unknown>".to_string(), AuthCredential::safe_description);
+            credential.map_or_else(|| "<unknown>".to_string(), AuthCredential::readable_description);
 
         info!(
             target: "audit",
@@ -543,13 +534,13 @@ impl AuthState {
 mod tests {
     use super::*;
     use crate::Secret;
-    use crate::auth::{StoredCredentialId, StoredCredentialKind};
+    use crate::auth::{StoredCredentialFingerprint, StoredCredentialKind};
 
     fn stored_credential(byte: u8) -> StoredCredential {
         StoredCredential::new(
             StoredCredentialKind::Password,
             Uuid::from_u128(u128::from(byte)),
-            StoredCredentialId::of_stored_verifier([byte; 32].as_slice()),
+            StoredCredentialFingerprint::of_stored_verifier([byte; 32].as_slice()),
         )
     }
 

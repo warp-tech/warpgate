@@ -15,7 +15,7 @@ use warpgate_common::auth::{
 };
 use warpgate_common::{Protocol, Secret, UserSessionId, WarpgateError};
 
-use crate::approvals::{AdminApprovalContext, GateOutcome};
+use crate::approvals::{GateOutcome, GatedConnection};
 use crate::auth::submit_credential;
 use crate::login_protection::FailedAttemptInfo;
 use crate::{
@@ -81,11 +81,12 @@ async fn hold_for_admin_approval<T: DbAuthTransport>(
     transport: &mut T,
     services: &Services,
     authorization: TargetAuthorization,
-    context: AdminApprovalContext,
+    session_id: UserSessionId,
+    connection: GatedConnection,
     auth_ok: &mut Option<AuthOkPermit>,
 ) -> Result<GateOutcome, T::Error> {
     services
-        .require_admin_approval(authorization, context, || async move {
+        .require_admin_approval(authorization, session_id, connection, || async move {
             transport.notify_awaiting_admin_approval(auth_ok).await
         })
         .await
@@ -161,8 +162,8 @@ pub async fn run_db_authorization<T: DbAuthTransport>(
                 transport,
                 services,
                 authorization,
-                AdminApprovalContext {
-                    session_id,
+                session_id,
+                GatedConnection {
                     remote_ip: Some(remote_ip),
                     // tickets aren't stable credential fingerprints
                     credentials: RememberApprovalBy::Nothing,
@@ -256,8 +257,8 @@ async fn authorize_user<T: DbAuthTransport>(
                     transport,
                     services,
                     authorization,
-                    AdminApprovalContext {
-                        session_id,
+                    session_id,
+                    GatedConnection {
                         remote_ip: Some(remote_ip),
                         credentials,
                     },

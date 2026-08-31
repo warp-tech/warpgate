@@ -199,6 +199,7 @@ impl StatusTransition {
 }
 
 /// Condition guaranteed to key on primary key
+#[derive(Clone)]
 pub struct Key(Condition);
 
 impl Key {

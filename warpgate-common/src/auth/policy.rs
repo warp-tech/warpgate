@@ -9,9 +9,6 @@ pub enum CredentialPolicyResponse {
 }
 
 pub trait CredentialPolicy {
-    /// `valid_credentials` is the *kinds* accepted so far, deliberately: no
-    /// policy distinguishes which stored credential matched, and handing over
-    /// the identities would let one start to.
     fn is_sufficient(
         &self,
         protocol: Protocol,

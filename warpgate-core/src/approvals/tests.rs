@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::auth::{
     ApprovalKind, ApprovalScope, AuthStateUserInfo, RememberApprovalBy, StoredCredential,
-    StoredCredentialId, StoredCredentialKind, WebApprovalMatchKey,
+    StoredCredentialFingerprint, StoredCredentialKind, WebApprovalMatchKey,
 };
 use warpgate_common::{NodeId, Protocol, UserSessionId};
 use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
@@ -678,7 +678,7 @@ fn password_credentials(hash: [u8; 32]) -> RememberApprovalBy {
     RememberApprovalBy::from_credentials(vec![StoredCredential::new(
         StoredCredentialKind::Password,
         Uuid::from_u128(u128::from(hash[0])),
-        StoredCredentialId::of_stored_verifier(hash.as_slice()),
+        StoredCredentialFingerprint::of_stored_verifier(hash.as_slice()),
     )])
 }
 
@@ -1535,8 +1535,8 @@ mod polled_gate {
                     gated_target(target),
                     Protocol::Http,
                 ),
-                AdminApprovalContext {
-                    session_id,
+                session_id,
+                GatedConnection {
                     remote_ip: None,
                     credentials: RememberApprovalBy::Nothing,
                 },
@@ -1568,8 +1568,8 @@ mod polled_gate {
                     Protocol::Http,
                 )
                 .unwrap(),
-                AdminApprovalContext {
-                    session_id: UserSessionId(Uuid::new_v4()),
+                UserSessionId(Uuid::new_v4()),
+                GatedConnection {
                     remote_ip: None,
                     credentials: RememberApprovalBy::Nothing,
                 },
@@ -1604,8 +1604,7 @@ mod polled_gate {
             )
             .unwrap()
         };
-        let context = || AdminApprovalContext {
-            session_id,
+        let connection = || GatedConnection {
             remote_ip: None,
             credentials: RememberApprovalBy::Nothing,
         };
@@ -1613,7 +1612,7 @@ mod polled_gate {
         // First ask: paid for by the authentication-time spend.
         assert!(matches!(
             services
-                .poll_admin_approval(authorization(), context())
+                .poll_admin_approval(authorization(), session_id, connection())
                 .await
                 .unwrap(),
             PolledGate::Pending
@@ -1637,10 +1636,10 @@ mod polled_gate {
 
         assert!(matches!(
             services
-                .poll_admin_approval(authorization(), context())
+                .poll_admin_approval(authorization(), session_id, connection())
                 .await
                 .unwrap(),
-            PolledGate::Denied
+            PolledGate::Refused
         ));
     }
 
@@ -1749,7 +1748,7 @@ mod polled_gate {
         for _ in 0..2 {
             assert!(matches!(
                 poll(&services, denied_session, &user_info, "prod").await,
-                PolledGate::Denied
+                PolledGate::Refused
             ));
         }
     }
@@ -1822,8 +1821,8 @@ mod polled_gate {
                     gated_target("prod"),
                     Protocol::Http,
                 ),
-                AdminApprovalContext {
-                    session_id,
+                session_id,
+                GatedConnection {
                     remote_ip: None,
                     credentials: RememberApprovalBy::Nothing,
                 },
