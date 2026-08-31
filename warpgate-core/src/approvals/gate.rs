@@ -9,7 +9,7 @@ use warpgate_common::auth::{ApprovalKind, RememberApprovalBy};
 use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    close_request, mark_consumed, Advertised, UndecidedApprovalRequestStatus,
+    Advertised, UndecidedApprovalRequestStatus, close_request, mark_consumed,
 };
 
 use super::*;

@@ -45,13 +45,6 @@ pub enum ApprovalDecision {
     Rejected,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ApprovalActor {
-    /// None if not a user (admin API token)
-    pub username: Option<String>,
-    pub user_id: Uuid,
-}
-
 /// Look for a matching, still acceptable approval in the DB
 pub(crate) async fn approval_is_remembered(
     db: &DatabaseConnection,

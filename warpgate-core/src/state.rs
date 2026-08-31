@@ -40,9 +40,6 @@ impl State {
         }))
     }
 
-    /// Handle to the administrator-gate ledger, for the wait sites that
-    /// record into it.
-
     /// Registers a session with no owning node: it is a DB record any node
     /// may serve, kept alive by its own backing rather than this node's
     /// handle (a stored browser cookie session). The row's `node_id` is left
@@ -207,7 +204,7 @@ impl State {
             error!(%error, %id, "Could not delete user session from the DB");
         }
 
-        self.drop_session_approvals(id).await;
+        self.abandon_session_approvals(id).await;
 
         let _ = self.change_sender.send(());
     }
@@ -224,24 +221,9 @@ impl State {
         {
             self.user_sessions.remove(&id);
         }
-
-        // The gate ledger is this node's view of the session, so it goes with
-        // the view. The session itself lives on in the database and may next be
-        // served elsewhere; anything it reaches this node for again is gated
-        // afresh, which is the safe direction. The requests are left alone —
-        // they belong to the session, not to this node's view of it.
     }
 
-    /// Forgets everything an approval decision could still be applied to once a
-    /// session is over. The connection is gone, so a decision can never reach
-    /// it — but a pending request left behind would keep sitting in the
-    /// approval queues, where approving it would still stamp a grace-period
-    /// bypass, and a gate outcome left behind describes a connection a later
-    /// session must not inherit.
-    ///
-    /// The requests are closed, not removed: they stay as the record of what
-    /// was asked, and are pruned with the rest of the audit trail.
-    async fn drop_session_approvals(&self, id: UserSessionId) {
+    async fn abandon_session_approvals(&self, id: UserSessionId) {
         if let Err(error) = SessionApprovalRequest::abandon_requests_for_session(&self.db, id).await
         {
             error!(%error, %id, "Could not close the session's approval requests");
@@ -258,7 +240,7 @@ impl State {
             error!(%error, %id, "Could not end user session in the DB");
         }
 
-        self.drop_session_approvals(id).await;
+        self.abandon_session_approvals(id).await;
 
         let _ = self.change_sender.send(());
     }

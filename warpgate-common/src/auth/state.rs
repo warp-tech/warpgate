@@ -166,7 +166,7 @@ impl WebApprovalIdentity {
     #[must_use]
     pub fn digest(&self) -> String {
         let mut bytes = vec![1]; // version tag
-                                 // Length-prefix everything to avoid collisions via string boundaries
+        // Length-prefix everything to avoid collisions via string boundaries
         let mut push = |part: &[u8]| {
             bytes.extend_from_slice(&(part.len() as u64).to_le_bytes());
             bytes.extend_from_slice(part);
@@ -535,8 +535,8 @@ impl AuthState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::{StoredCredentialFingerprint, StoredCredentialKind};
     use crate::Secret;
+    use crate::auth::{StoredCredentialFingerprint, StoredCredentialKind};
 
     fn stored_credential(byte: u8) -> StoredCredential {
         StoredCredential::new(

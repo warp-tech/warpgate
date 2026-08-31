@@ -83,10 +83,8 @@ pub async fn catchall_endpoint(
         }
         Ok(TargetSessionStart::Started(started)) => started,
         Err(error) => return Err(error.into()),
-        // Gated ahead of the protocol branch so the WebSocket upgrade is held
-        // too — an upgrade has nowhere to render an interstitial, and letting
-        // it through would leave the gate applying only to plain requests.
         Ok(TargetSessionStart::NeedsApproval(authorization)) => {
+            // Fail early, before we get to websocket
             match resolve_admin_approval(req, &ctx, &handle, authorization).await? {
                 Ok(started) => started,
                 Err(response) => return Ok(response),

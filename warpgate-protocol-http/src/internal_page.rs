@@ -1,18 +1,5 @@
-//! The pages Warpgate serves in its own right, on a URL the user reached
-//! expecting a target: a request that failed, or a session an administrator has
-//! yet to let through.
-//!
-//! They share one look because they are the same thing to whoever sees them —
-//! the gateway, not the target, saying something went differently than asked.
-
 use poem::web::Html;
 
-/// Renders one, escaping every part: a caller cannot forget, and the only text
-/// that reaches the page is text this function put there.
-///
-/// `detail` is set in small type under the message, for naming what the page is
-/// about. `refresh_after` re-requests the page after that many seconds, for one
-/// waiting on something to change elsewhere.
 pub fn internal_page(
     heading: &str,
     message: &str,

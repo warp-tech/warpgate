@@ -512,23 +512,11 @@ async fn acknowledge_banner(
     )
 }
 
-/// Dial the pending target, if there is one and it hasn't been dialed yet, at `screen`.
+/// Await `hold` while consuming client events. Returns None if the client disconnects before `hold` resolves
 ///
-/// The single point where a session reaches its target, and so where it is held for
-/// administrator approval. Returns `false` when an administrator denied it, leaving the
-/// session torn down and nothing dialed.
-/// Awaits `hold` while keeping the viewer's event channel drained, returning
-/// `None` if the viewer disconnects first.
+/// This prevents unbounded channel growth while the session is waiting for approval
 ///
-/// The channel is unbounded and an approval window is minutes long, so a client
-/// that keeps typing through one would otherwise queue every event into the
-/// gateway's memory until an administrator answers — and that client is exactly
-/// who the gate exists to hold back. Input is dropped rather than buffered:
-/// replaying a window's worth of clicks into a desktop that was not connected
-/// when they were sent is not what the user asked for either.
-///
-/// `screen` follows any size the viewer settles mid-hold, so the target is
-/// dialled at the size actually being shown.
+/// All events are discarded except resizes which are applied to `screen`
 async fn hold_draining_viewer<T>(
     hold: impl Future<Output = T>,
     events: &mut UnboundedReceiver<ServerEvent>,
@@ -549,6 +537,9 @@ async fn hold_draining_viewer<T>(
     }
 }
 
+/// Connect to target (idempotent) and wait for approval if needed
+///
+/// Returns `false` if an approval is denied
 async fn dial_if_pending(
     backend: &mut Option<BackendBridge>,
     pending: &mut Option<PendingDial>,

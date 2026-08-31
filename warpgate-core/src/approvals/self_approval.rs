@@ -19,7 +19,10 @@ impl Services {
         &self,
         session_id: &UserSessionId,
     ) -> Result<(), WarpgateError> {
-        for row in undelivered_user_approvals_for_session(&self.db, *session_id).await? {
+        for row in
+            undelivered_user_approvals_for_session(&self.db, self.cluster.node_id, *session_id)
+                .await?
+        {
             self.deliver_user_decision(&row).await?;
         }
         Ok(())
@@ -39,57 +42,37 @@ impl Services {
         Ok(())
     }
 
+    /// Delivers one recorded decision to the auth state it was asked for —
+    /// every decision reaches its state through here, on whichever node holds
+    /// it: recording and delivering are separate acts, and only the recording
+    /// is the approver's. The row is stamped consumed once nothing is left to
+    /// deliver to, which is what stops the sweep re-offering it.
     async fn deliver_user_decision(
         &self,
         row: &SessionApprovalRequest::Model,
     ) -> Result<bool, WarpgateError> {
-        let RowState::Decided(decision, actor) = row_state(row)? else {
+        let RowState::Decided(decision, _) = row_state(row)? else {
             return Ok(false);
         };
-        self.apply_user_decision(row.session_id, decision, &actor, Some(row))
-            .await
-    }
-
-    /// Apply to the local AuthState
-    pub async fn apply_user_approval(
-        &self,
-        session_id: UserSessionId,
-        decision: ApprovalDecision,
-        actor: &ApprovalActor,
-    ) -> Result<bool, WarpgateError> {
-        self.apply_user_decision(session_id, decision, actor, None)
-            .await
-    }
-
-    async fn apply_user_decision(
-        &self,
-        session_id: UserSessionId,
-        decision: ApprovalDecision,
-        actor: &ApprovalActor,
-        question: Option<&SessionApprovalRequest::Model>,
-    ) -> Result<bool, WarpgateError> {
         let consumed =
-            |target: &str| SessionApprovalRequest::Key::new(session_id, ApprovalKind::User, target);
+            || SessionApprovalRequest::Key::new(row.session_id, ApprovalKind::User, &row.target);
 
-        let Some(state_arc) = self.auth_state_store.lock().await.get(&session_id) else {
-            // The state is gone (cleaned up or node is gone), mark consumed so that it's not being picked up again
-            if let Some(row) = question {
-                mark_consumed(&self.db, consumed(&row.target)).await?;
-            }
+        let Some(state_arc) = self.auth_state_store.lock().await.get(&row.session_id) else {
+            // The state is gone (cleaned up or node is gone), mark consumed so
+            // that it's not being picked up again
+            mark_consumed(&self.db, consumed()).await?;
             return Ok(false);
         };
 
         // All the in-memory work under one lock
-        let target_name = {
+        {
             let mut state = state_arc.lock().await;
             let subject = ApprovalSubject::from_auth_state(&state);
 
             // Verify that the decision still matches the original request exactly
-            if let Some(row) = question
-                && (row.target != subject.target_name || row.user_id != subject.user_info.id)
-            {
+            if row.target != subject.target_name || row.user_id != subject.user_info.id {
                 drop(state);
-                mark_consumed(&self.db, consumed(&row.target)).await?;
+                mark_consumed(&self.db, consumed()).await?;
                 return Ok(false);
             }
 
@@ -99,7 +82,7 @@ impl Services {
                 AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval)
             ) {
                 drop(state);
-                mark_consumed(&self.db, consumed(&subject.target_name)).await?;
+                mark_consumed(&self.db, consumed()).await?;
                 return Ok(false);
             }
 
@@ -115,19 +98,9 @@ impl Services {
                     );
                 }
             }
-            subject.target_name
-        };
+        }
 
-        let _ = record_decision(
-            &self.db,
-            session_id,
-            ApprovalKind::User,
-            &target_name,
-            decision,
-            actor,
-        )
-        .await?;
-        mark_consumed(&self.db, consumed(&target_name)).await?;
+        mark_consumed(&self.db, consumed()).await?;
         Ok(true)
     }
 }

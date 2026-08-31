@@ -45,10 +45,6 @@ pub trait ConfigProvider {
     async fn get_target_by_hostname(&self, hostname: &str)
     -> Result<Option<Target>, WarpgateError>;
 
-    /// Identifies the stored credential the submission matched, or `None` if
-    /// none did. The identity rather than a `bool` because this is the only
-    /// place that can see *which* stored credential verified the submission —
-    /// see [`StoredCredential`].
     async fn validate_credential(
         &self,
         username: &str,
@@ -311,21 +307,6 @@ pub async fn authorize_for_target_by_name<C: ConfigProvider + ?Sized>(
     }
 }
 
-/// The ticket a secret names, without authorizing or spending anything — for
-/// telling whether a presented secret is the one a session already
-/// authenticated with. Deliberately no expiry or user vetting: equality with
-/// an already-vetted session is the only question this may answer.
-pub async fn ticket_id_for_secret(
-    db: &DatabaseConnection,
-    secret: &Secret<String>,
-) -> Result<Option<Uuid>, WarpgateError> {
-    Ok(e::Ticket::Entity::find()
-        .filter(e::Ticket::Column::SecretHash.eq(hash_secret(secret.expose_secret())))
-        .one(db)
-        .await?
-        .map(|ticket| ticket.id))
-}
-
 pub async fn authorize_and_spend_ticket(
     db: &DatabaseConnection,
     login_protection: &LoginProtectionService,
@@ -381,10 +362,6 @@ pub async fn authorize_and_spend_ticket(
 
         let target = Target::try_from(ticket_target)?;
 
-        // The spend is atomic with the authorization, so two presentations of
-        // a one-use ticket can never both authenticate. If an administrator
-        // gate later turns the session away, the question's row gives the use
-        // back — the spend rides on the row from here on.
         if let Err(error) = e::Ticket::spend_use(db, ticket.id).await {
             if matches!(error, WarpgateError::InvalidTicket(_)) {
                 warn!("Ticket is used up: {}", &ticket.id);

@@ -18,17 +18,10 @@ use crate::session_handle::KubernetesSessionHandle;
 
 type CorrelationKey = (String, String, Option<String>); // (username, target_name, ip)
 
-/// How long a refused command is remembered.
-///
-/// Only long enough to cover the fan-out of the command that was refused: its
-/// remaining requests must fail with it rather than each opening a fresh
-/// session and asking again. An administrator's refusal answers the connection
-/// in front of them, so it is deliberately not a lockout — a command the user
-/// starts afterwards is a new question.
+/// Approval refusale are remembered because otherwise every API request would trigger a new one
+/// This is just long enough to cover a burst of API requests from a single kubectl
 const REFUSAL_MEMORY: Duration = Duration::from_secs(5);
 
-/// One admitted Kubernetes session, shared by every request that joins it: a
-/// `kubectl` command's fan-out all connects through the one admission.
 pub type AdmittedSession = Arc<AdmittedTarget<TargetKubernetesOptions>>;
 
 /// The outcome of the request that opened one correlated session. Requests that
@@ -58,10 +51,7 @@ struct SessionEntry {
 
 pub struct RequestCorrelator {
     handles: HashMap<CorrelationKey, SessionEntry>,
-    /// When each recently refused command was refused. Kept apart from the
-    /// live entries because the entry is evicted on refusal — its session was
-    /// never admitted and must not linger — while the refusal has to outlive
-    /// it.
+    // Refused sessions are dropped from `handles` immediately and kept here
     refusals: HashMap<CorrelationKey, Instant>,
     services: Services,
 }
@@ -143,12 +133,6 @@ pub async fn correlated_authorization(
                             {
                                 let mut correlator = correlator.lock().await;
                                 correlator.evict(&key, &slot);
-                                // A refusal is a decision about this command.
-                                // Without remembering it the command's next
-                                // request finds no entry, opens a session and
-                                // asks again — the refusal would never take
-                                // effect and the queue would refill for as
-                                // long as the client kept trying.
                                 if matches!(error, WarpgateError::SessionNotApproved) {
                                     correlator.refusals.insert(key.clone(), Instant::now());
                                 }
@@ -174,12 +158,7 @@ pub async fn correlated_authorization(
     }
 }
 
-/// Starts the target session, holding the opening request at the administrator
-/// gate when the target requires approval.
-///
-/// `kubectl` has no channel for a "waiting" notice, so the command's requests
-/// simply hold — exactly as they already do on the correlator's slot for a
-/// pending web approval — and the rest of the fan-out waits on the slot.
+/// Start the target session, waiting for approval if needed
 async fn admit_kubernetes_session(
     request: &Request,
     services: &Services,
@@ -194,12 +173,8 @@ async fn admit_kubernetes_session(
             remote_ip: get_client_ip(request, services)
                 .await
                 .and_then(|ip| ip.parse().ok()),
-            // Client certificates and tokens are re-presented per request
-            // rather than settled into an auth state, so a Kubernetes session
-            // neither contributes nor consumes a remembered approval.
+            // k8s has no AuthState
             credentials: RememberApprovalBy::Nothing,
-            // Kubernetes authenticates with certificates and tokens, never a
-            // ticket.
         },
     )
     .await
@@ -323,11 +298,6 @@ impl RequestCorrelator {
             .map(|entry| (entry.handle.clone(), entry.authorization.clone()))
     }
 
-    /// Drops this session's entry unless it has already been replaced — an
-    /// attempt long enough to have been vacuumed meanwhile must not evict
-    /// whatever took its place.
-    /// Whether this command was refused recently enough that its own remaining
-    /// requests are still arriving.
     fn was_refused(&self, key: &CorrelationKey) -> bool {
         self.refusals
             .get(key)

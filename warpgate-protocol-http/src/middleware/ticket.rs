@@ -10,6 +10,7 @@ use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::authorize_and_spend_ticket;
+use warpgate_db_entities::Ticket;
 
 use crate::common::SessionExt;
 
@@ -99,12 +100,8 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
         if let Some(ticket) = ticket_value {
             let ticket_secret = Secret::new(ticket);
 
-            // Presenting a ticket spends a use, and clients re-present freely —
-            // a header-borne token arrives on every request, and a ticket link
-            // gets re-clicked. A session already authenticated by this very
-            // ticket has paid; only a new presentation spends.
-            let presented =
-                warpgate_core::ticket_id_for_secret(&ctx.services().db, &ticket_secret).await?;
+            let presented = Ticket::for_secret(&ctx.services().db, &ticket_secret).await?;
+            // Do not re-spend the ticket if it has authenticated the current session already
             let already_this_ticket = matches!(
                 (session.get_auth(), presented),
                 (

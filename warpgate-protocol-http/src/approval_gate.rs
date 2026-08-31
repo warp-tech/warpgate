@@ -20,13 +20,9 @@ use warpgate_core::{AdmittedTarget, TargetAuthorization, WarpgateServerHandle};
 
 use crate::internal_page::internal_page;
 
-/// How often the interstitial re-checks. Short enough to feel immediate, long
-/// enough not to hammer the gateway while a session waits.
 const RETRY_AFTER_SECONDS: u32 = 3;
 
-/// Takes an authorization the session's target-session start handed back as
-/// needing approval, polls the gate, and either registers the admitted target
-/// session or produces the response to send instead.
+/// Start an approval procees if needed (idempotent) and then poll for status once
 pub async fn resolve_admin_approval(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
@@ -73,9 +69,7 @@ pub async fn resolve_admin_approval(
     })
 }
 
-/// A branded standalone page. The status code is the machine-readable signal —
-/// 202 with `Retry-After` while pending, 403 once denied — so a client that
-/// never renders the body still knows what happened.
+// An interstitial with auto-refresh
 fn gate_response(target_name: &str, heading: &str, message: &str, pending: bool) -> Response {
     let page = internal_page(
         heading,

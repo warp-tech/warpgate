@@ -49,28 +49,6 @@ impl From<UndecidedApprovalRequestStatus> for ApprovalRequestStatus {
     }
 }
 
-/// An out-of-band approval request — a first-class record, not a projection:
-/// the wait site on the owning node creates it when an approval becomes needed,
-/// and it carries the decision as well as the question. Any node can resolve a
-/// request by writing the decision to its row; the owning node, the only one
-/// that can act on it, reads it back from there.
-///
-/// Rows are never deleted while they matter — they are moved to a terminal
-/// status instead, and pruned only by `cleanup_db` at the audit retention. So
-/// the table is the approval audit trail, and a gate can always tell "answered
-/// and I missed it" from "no longer a live question"; a vanishing row could
-/// only ever be read as the latter.
-///
-/// Keyed by `(session_id, kind, target)`: a question is about one session
-/// reaching one target, and a session that reaches several holds one row each.
-/// The target is part of the key rather than a column so that asking about a
-/// second target cannot overwrite the answer given about the first — the two
-/// are different questions and each keeps its own record.
-///
-/// Within one key, creation is idempotent: a wait site that runs twice upserts
-/// its own row instead of queueing a duplicate, and a gate that ended without
-/// an answer leaves a row a later one asks again through rather than
-/// duplicating. An answer, once given, is never rewritten.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "session_approval_requests")]
 pub struct Model {
@@ -88,13 +66,8 @@ pub struct Model {
     pub remote_address: Option<String>,
     /// only user approvals have these
     pub identification_string: Option<String>,
-    /// digest of the `WebApprovalIdentity` this request was made under — who,
-    /// from where, with what — which a later attempt is matched against for the
-    /// grace-period bypass. None when there was nothing to pin a grant to.
     pub match_digest: Option<String>,
-    /// The ticket use this question holds: spent when the question was opened,
-    /// given back if it ends without an approval. None for sessions that did
-    /// not authenticate with a ticket.
+    /// the spent ticket used for this session (for refund)
     pub ticket_id: Option<Uuid>,
     pub started: OffsetDateTime,
     pub status: ApprovalRequestStatus,
@@ -137,26 +110,6 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-// --- Request rows ---------------------------------------------------------
-//
-// The queries and writes over this table, kept beside the columns and the
-// IDENTITY/DECISION partition they have to respect. What a request *means* —
-// who waits on one, what a decision does to a connection — lives in
-// `warpgate_core::approvals`.
-
-/// A status change on request rows, and the only thing in this module that
-/// writes [`Column::Status`].
-///
-/// There is no constructor that doesn't name the states it may leave. That is
-/// the whole point: every write here is a close of some kind, and a close that
-/// forgot to exclude `Approved`/`Rejected` would erase an answer an
-/// administrator had already given — the session would then wait out its window
-/// while the inbox kept offering it again. Making the guard part of building the
-/// statement means a new close site cannot be written without one.
-///
-/// The one status write that doesn't go through this is the reopen in
-/// [`upsert_request`], which rewrites every column and so builds its statement
-/// from the model; it names its own source states inline.
 struct StatusTransition {
     to: ApprovalRequestStatus,
     /// a filter on start condition
@@ -242,30 +195,10 @@ pub async fn find_user_approval(
     Ok(row.filter(|row| username_eq_ci(&row.username, username)))
 }
 
-/// What [`upsert_request`] found on the question's key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Advertised {
-    /// A new question was put on the record — created, or reopened after one
-    /// that ended unanswered. The one case worth announcing.
-    Asked,
-    /// A pending row was already there (possibly a concurrent asker's); its
-    /// asker facts were refreshed and nothing else touched.
-    AlreadyAsking,
-    /// A decided row is in the way. Nothing was written: the answer stands
-    /// for the asker to read back.
-    DecisionStands,
-    /// Asking again would need a ticket use that is no longer there. Nothing
-    /// was written; the asker is turned away, not left waiting on a question
-    /// nobody opened.
-    TicketExhausted,
-}
-
-/// Refreshes a live question's asker facts — but never `started`: that is the
-/// reap clock and the timeout anchor, and a client re-asking every few seconds
-/// would otherwise push the window out indefinitely.
+/// Refreshes a live request's facts
 async fn try_refresh_pending(db: &DatabaseConnection, row: &ActiveModel) -> Result<bool, DbErr> {
     let refresh = ActiveModel {
-        started: NotSet,
+        started: NotSet, // not touching this
         status: NotSet,
         scope: NotSet,
         resolved_by_username: NotSet,
@@ -285,20 +218,18 @@ async fn try_refresh_pending(db: &DatabaseConnection, row: &ActiveModel) -> Resu
     }
 }
 
-/// Reopens a question that ended unanswered: the decision record is cleared and
-/// the clock starts afresh, because this is a new asking — and a new asking
-/// holds its own ticket use. The previous asking gave its use back when it
-/// closed, so the spend comes first; if the reopen then loses to a concurrent
-/// asker, the use is returned, mirroring how a decision that loses its
-/// transition gives back what it took.
+enum Reopened {
+    Reopened,
+    /// The entry to be reopened just got refreshed by someone else
+    NotUnanswered,
+    TicketExhausted,
+}
+
+/// Reopen a matching old request (spends the ticket again)
 async fn try_reopen_unanswered(
     db: &DatabaseConnection,
     row: &ActiveModel,
 ) -> Result<Reopened, WarpgateError> {
-    // The spend belongs to reopening, not to asking at all: a fresh question
-    // is paid for by the use taken at authentication. Only when an unanswered
-    // row is actually there to reopen is a new use taken — the probe can race,
-    // but every losing arm below gives the spend back.
     let ticket_id = match &row.ticket_id {
         Set(id) => *id,
         _ => None,
@@ -347,9 +278,6 @@ async fn try_reopen_unanswered(
     result
 }
 
-/// The primary-key condition an advertiser's model names. The three key
-/// columns are always `Set` — the model is built whole — so an unset one is a
-/// caller bug worth surfacing, not defaulting.
 fn key_of(row: &ActiveModel) -> Result<Key, WarpgateError> {
     match (&row.session_id, &row.kind, &row.target) {
         (Set(session_id), Set(kind), Set(target)) => Ok(Key::new(*session_id, *kind, target)),
@@ -359,16 +287,21 @@ fn key_of(row: &ActiveModel) -> Result<Key, WarpgateError> {
     }
 }
 
-enum Reopened {
-    Reopened,
-    /// The row is no longer unanswered — decided, or a concurrent asker got
-    /// there first. Whatever was spent above has been given back.
-    NotUnanswered,
+/// Result of an upsert_request
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Advertised {
+    /// Created or reopened an entry
+    Asked,
+    /// Refreshed an already existing pending entry
+    AlreadyAsking,
+    /// There is already a matching entry with a decision
+    DecisionStands,
+    /// The ticket used for the request is already exhausted
+    /// nobody opened.
     TicketExhausted,
 }
 
-/// Publishes or re-advertises a single request, and says which it did — the
-/// caller announces a question exactly when one was actually asked.
+/// Create or re-advertise a request
 pub async fn upsert_request(
     db: &DatabaseConnection,
     row: ActiveModel,
@@ -378,11 +311,9 @@ pub async fn upsert_request(
     }
     match try_reopen_unanswered(db, &row).await? {
         Reopened::Reopened => return Ok(Advertised::Asked),
-        // Whether that is truly the end is decided below: a concurrent asker
-        // that got the reopen in first has paid for a live question this
-        // asker simply joins.
         Reopened::TicketExhausted => {
             return Ok(if try_refresh_pending(db, &row).await? {
+                // The other requester has already spent a ticket so it's fine
                 Advertised::AlreadyAsking
             } else {
                 Advertised::TicketExhausted
@@ -391,19 +322,10 @@ pub async fn upsert_request(
         Reopened::NotUnanswered => {}
     }
 
-    // A plain insert, not an ON CONFLICT one: what happened on a conflict is
-    // the whole return value here, and no portable conflict action reports it
-    // (a no-op update counts as a write on some backends and not others). The
-    // violation is classified instead.
-    //
-    // The insert spends nothing: a fresh question is paid for by the use taken
-    // when the session authenticated, which nothing has given back yet.
     match Entity::insert(row.clone()).exec(db).await {
         Ok(_) => Ok(Advertised::Asked),
-        // Someone got a row in between the updates and the insert. Retry the
-        // two updates so the answer is what actually happened, not a guess;
-        // a decided row is the only thing neither can move.
         Err(error) if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) => {
+            // raced, try refreshing again
             if try_refresh_pending(db, &row).await? {
                 return Ok(Advertised::AlreadyAsking);
             }
@@ -417,18 +339,8 @@ pub async fn upsert_request(
     }
 }
 
-/// Ends one *asking* of a question, and settles the ticket use it holds: any
-/// end but an approval gives the use back. `false` means this asking was no
-/// longer pending — someone else settled it, and whoever did also settled the
-/// ticket — so nothing was closed and nothing should be reported as having
-/// been.
-///
-/// Every pending→terminal write goes through here, which is what makes the
-/// refund rule unforgettable: there is no way to end an asking without
-/// settling what it holds. The transition is pinned to the asking that was
-/// read — key *and* `started`, which a reopen renews — so a close aimed at one
-/// asking can neither end nor refund its successor.
-async fn settle_asking(
+// Returns whether the change succeeded, or was raced by somebody else
+async fn settle_request_internal(
     db: &DatabaseConnection,
     row: &Model,
     transition: StatusTransition,
@@ -449,12 +361,10 @@ async fn settle_asking(
     {
         tracing::warn!(%error, %ticket_id, "Failed to refund the ticket of an ended approval request");
     }
+    // false if the request was already settled
     Ok(moved > 0)
 }
 
-/// Ends a request as abandoned or timed out, and says whether it did — `false`
-/// means the question was no longer pending, so nothing was closed and nothing
-/// should be reported as having been.
 pub async fn close_request(
     db: &DatabaseConnection,
     session_id: UserSessionId,
@@ -470,30 +380,30 @@ pub async fn close_request(
     else {
         return Ok(false);
     };
-    settle_asking(db, &row, StatusTransition::from_pending(status.into())).await
+    settle_request_internal(db, &row, StatusTransition::from_pending(status.into())).await
 }
 
-/// Writes a decision to a pending asking, and says whether it landed — `false`
-/// when the asking was already settled, or was closed and asked afresh since
-/// `row` was read (the pin in [`settle_asking`] tells the two askings apart).
-///
-/// An approval keeps the ticket spend — it transfers to the session being
-/// admitted; a rejection gives it back like every other end.
-pub async fn decide_asking(
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ApprovalActor {
+    /// None if not a user (admin API token)
+    pub username: Option<String>,
+    pub user_id: Uuid,
+}
+
+pub async fn settle_request(
     db: &DatabaseConnection,
     row: &Model,
     status: ApprovalRequestStatus,
     scope: Option<ApprovalScope>,
-    resolved_by_username: Option<String>,
-    resolved_by_user_id: Option<Uuid>,
+    resolved_by: &ApprovalActor,
 ) -> Result<bool, WarpgateError> {
-    settle_asking(
+    settle_request_internal(
         db,
         row,
         StatusTransition::from_pending(status)
             .set(Column::Scope, scope)
-            .set(Column::ResolvedByUsername, resolved_by_username)
-            .set(Column::ResolvedByUserId, resolved_by_user_id),
+            .set(Column::ResolvedByUsername, resolved_by.username.clone())
+            .set(Column::ResolvedByUserId, resolved_by.user_id),
     )
     .await
 }
@@ -509,7 +419,6 @@ pub async fn mark_consumed(db: &DatabaseConnection, which: Key) -> Result<(), Wa
     Ok(())
 }
 
-/// Abandons everything a session was still asking, for when the session ends.
 pub async fn abandon_requests_for_session(
     db: &DatabaseConnection,
     session_id: UserSessionId,
@@ -517,10 +426,6 @@ pub async fn abandon_requests_for_session(
     abandon_each(db, Column::SessionId.eq(session_id).into_condition()).await
 }
 
-/// Abandons every pending asking matching `which`, one at a time through
-/// [`settle_asking`] so each settles its own ticket. Per-row rather than one
-/// UPDATE because a refund belongs to exactly one won transition; the sweeps
-/// this serves are small and human-paced.
 async fn abandon_each(db: &DatabaseConnection, which: Condition) -> Result<(), WarpgateError> {
     let pending = Entity::find()
         .filter(which)
@@ -528,7 +433,7 @@ async fn abandon_each(db: &DatabaseConnection, which: Condition) -> Result<(), W
         .all(db)
         .await?;
     for row in pending {
-        settle_asking(
+        settle_request_internal(
             db,
             &row,
             StatusTransition::from_pending(ApprovalRequestStatus::Abandoned),
@@ -555,11 +460,17 @@ pub async fn undelivered_user_approvals_for_node(
         .await?)
 }
 
+/// One session's undelivered decisions, `node_id`-scoped like the sweep:
+/// a row's `node_id` is the node holding the auth state it must be delivered
+/// to, and only that node may conclude "the state is gone" — anywhere else,
+/// absence from the local store means nothing.
 pub async fn undelivered_user_approvals_for_session(
     db: &DatabaseConnection,
+    node_id: NodeId,
     session_id: UserSessionId,
 ) -> Result<Vec<Model>, WarpgateError> {
     Ok(undelivered_user_decisions()
+        .filter(Column::NodeId.eq(node_id))
         .filter(Column::SessionId.eq(session_id))
         .all(db)
         .await?)

@@ -1,16 +1,15 @@
 use std::time::Duration;
 
-use sea_orm::sea_query::IntoCondition;
 use sea_orm::ActiveValue::Set;
 use sea_orm::DatabaseConnection;
+use sea_orm::sea_query::IntoCondition;
 use time::OffsetDateTime;
 use tracing::{info, warn};
 use warpgate_common::auth::ApprovalKind;
 use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
-use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    close_request, mark_consumed, upsert_request, Advertised,
+    self, Advertised, ApprovalActor, close_request, mark_consumed, upsert_request,
 };
 
 use super::*;
@@ -182,7 +181,7 @@ pub async fn record_decision(
     kind: ApprovalKind,
     target: &str,
     decision: ApprovalDecision,
-    actor: &ApprovalActor,
+    actor: ApprovalActor,
 ) -> Result<bool, WarpgateError> {
     use SessionApprovalRequest::ApprovalRequestStatus;
 
@@ -201,19 +200,11 @@ pub async fn record_decision(
         return Ok(false);
     };
 
-    let recorded = SessionApprovalRequest::decide_asking(
-        db,
-        &row,
-        status,
-        scope,
-        actor.username.clone(),
-        Some(actor.user_id),
-    )
-    .await?;
+    let recorded = SessionApprovalRequest::settle_request(db, &row, status, scope, &actor).await?;
     if recorded {
         emit_resolved_event(
             &row,
-            actor,
+            &actor,
             matches!(decision, ApprovalDecision::Approved(_)),
         );
     }

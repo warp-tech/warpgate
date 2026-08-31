@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.5-32-g75290aa0-modified"
+    "version": "v0.28.5-39-ga5df8eb9-modified"
   },
   "servers": [
     {
@@ -1729,7 +1729,6 @@
       "ApproveAuthRequest": {
         "type": "object",
         "title": "ApproveAuthRequest",
-        "description": "The outcome of acting on an approval request. The decision is applied by the\nnode holding the login, so there is no updated state to hand back here.",
         "required": [
           "scope"
         ],

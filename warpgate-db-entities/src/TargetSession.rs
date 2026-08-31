@@ -1,6 +1,6 @@
-use sea_orm::TransactionTrait;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::OnConflict;
+use sea_orm::TransactionTrait;
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::audit::AuditEvent;
@@ -110,15 +110,7 @@ pub async fn open_or_lookup(
         node_id: Set(node_id),
     };
 
-    Entity::insert(model)
-        .on_conflict(
-            // Re-assigning a key column the value it already holds, rather
-            // than `do_nothing()`: that builds `ON DUPLICATE KEY IGNORE` for
-            // MySQL, which is not SQL. The row is read back below either way.
-            OnConflict::columns([Column::UserSessionId, Column::TargetId])
-                .update_column(Column::UserSessionId)
-                .to_owned(),
-        )
+    insert_unless_already_open(model)
         .do_nothing()
         .exec_without_returning(&transaction)
         .await?;
@@ -148,9 +140,19 @@ pub async fn open_or_lookup(
     Ok(TargetSessionOpenOutcome::AlreadyExists(row))
 }
 
-/// Whether the user session already holds an open access record for the
-/// target. The row is written on admission, so its presence means any
-/// administrator gate on the target was already passed — on whichever node.
+/// The insert half of [`open_or_lookup`]: a row per `(user_session, target)`,
+/// left exactly as it is when one already exists. Built separately so a test
+/// can check the SQL it renders on every backend — the natural spelling,
+/// `OnConflict::do_nothing()`, renders as `ON DUPLICATE KEY IGNORE` on MySQL,
+/// which is not MySQL syntax; the no-op self-assignment is the portable form.
+fn insert_unless_already_open(model: ActiveModel) -> sea_orm::Insert<ActiveModel> {
+    Entity::insert(model).on_conflict(
+        OnConflict::columns([Column::UserSessionId, Column::TargetId])
+            .update_column(Column::UserSessionId)
+            .to_owned(),
+    )
+}
+
 pub async fn is_open(
     db: &DatabaseConnection,
     user_session_id: UserSessionId,
@@ -165,9 +167,7 @@ pub async fn is_open(
         .is_some())
 }
 
-/// Emits the end-of-access audit event for one row; the login identity comes
-/// from the parent, which the caller has already loaded.
-pub fn emit_ended(session: &TargetSession::Model, user_id: Uuid, username: &str) {
+pub fn emit_ended_audit_event(session: &TargetSession::Model, user_id: Uuid, username: &str) {
     let Some(target_name) = serde_json::from_str::<serde_json::Value>(&session.target_snapshot)
         .ok()
         .and_then(|value| {
@@ -187,4 +187,43 @@ pub fn emit_ended(session: &TargetSession::Model, user_id: Uuid, username: &str)
         username: username.into(),
     }
     .emit();
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::{DbBackend, QueryTrait, Set};
+
+    use super::*;
+
+    /// The statement [`open_or_lookup`] executes must be valid SQL on every
+    /// backend it can meet. This failed silently once: sea-query renders
+    /// `OnConflict::do_nothing()` as `ON DUPLICATE KEY IGNORE` on MySQL —
+    /// ERROR 1064 on a real server — and nothing before a MySQL deployment
+    /// would have said so, because the protocol test suites run on SQLite.
+    #[test]
+    fn the_open_conflict_clause_renders_valid_sql_on_every_backend() {
+        let model = ActiveModel {
+            id: Set(TargetSessionId(Uuid::new_v4())),
+            user_session_id: Set(UserSessionId(Uuid::new_v4())),
+            target_snapshot: Set("{}".into()),
+            target_id: Set(Uuid::new_v4()),
+            started: Set(OffsetDateTime::now_utc()),
+            ended: Set(None),
+            ticket_id: Set(None),
+            node_id: Set(None),
+        };
+
+        for backend in [DbBackend::MySql, DbBackend::Postgres, DbBackend::Sqlite] {
+            let sql = insert_unless_already_open(model.clone())
+                .build(backend)
+                .to_string();
+            assert!(
+                !sql.contains("ON DUPLICATE KEY IGNORE"),
+                "{backend:?} rendered sea-query's invalid MySQL construct: {sql}",
+            );
+            let has_valid_conflict_action =
+                sql.contains("ON DUPLICATE KEY UPDATE") || sql.contains("ON CONFLICT");
+            assert!(has_valid_conflict_action, "{backend:?}: {sql}");
+        }
+    }
 }

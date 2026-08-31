@@ -54,8 +54,6 @@ pub struct Model {
     pub ticket_requests_disabled: bool,
     pub ticket_require_approval: bool,
     pub ticket_max_uses: Option<i16>,
-    /// Whether a connection to this target is held until an administrator
-    /// approves it.
     pub require_approval: bool,
 }
 

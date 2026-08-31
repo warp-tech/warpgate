@@ -240,9 +240,6 @@ impl Services {
 
     /// If a matching web approval is still within the grace period, satisfies the
     /// pending `WebUserApproval` requirement and logs an audit event.
-    ///
-    /// The lookup runs against the stored approval records, so an approval
-    /// granted while the user was talking to another node bypasses here too.
     pub async fn try_web_approval_bypass(
         &self,
         state_arc: &Arc<Mutex<AuthState>>,
@@ -259,8 +256,7 @@ impl Services {
 
         let mut state = state_arc.lock().await;
 
-        // A concurrent change may have satisfied or cancelled the requirement
-        // while the lookup ran unlocked.
+        // check that we are still waiting for an approval
         if !matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval))
         {
             return Ok(false);

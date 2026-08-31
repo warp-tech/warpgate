@@ -22,7 +22,7 @@ use warpgate_admin::api::cluster_proxy::{
     proxy_or_serve_pending_login,
 };
 use warpgate_admin::approvals::{
-    ApprovalResolution, Approver, PendingApproval, acting_approver, resolve_pending_approval,
+    ApprovalResolution, Approver, PendingApproval, resolve_pending_approval,
 };
 use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
@@ -34,7 +34,7 @@ use warpgate_core::Services;
 use warpgate_core::approvals::{ApprovalDecision, ApprovalScope};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_db_entities::{Parameters, SessionApprovalRequest, UserSession};
+use warpgate_db_entities::{Parameters, SessionApprovalRequest as SAR, UserSession};
 
 use super::common::{emit_unknown_authentication_failed_event, logout};
 use crate::api::auth_scheme::AuthedSession;
@@ -129,8 +129,6 @@ struct AuthStateResponseInternal {
     pub web_approval_caching_grace_seconds: Option<i64>,
 }
 
-/// The outcome of acting on an approval request. The decision is applied by the
-/// node holding the login, so there is no updated state to hand back here.
 #[derive(Object)]
 struct ApproveAuthRequest {
     scope: ApprovalScope,
@@ -311,17 +309,10 @@ impl Api {
             return Ok(AuthStateListResponse::NotFound);
         };
 
-        // A login waiting on the user's approval may be held by any node, so the
-        // requests are read from the shared request table rather than this
-        // node's in-memory store. A row that already carries a decision is
-        // awaiting pickup by its owner, so it is no longer something to act on.
-        let requests = SessionApprovalRequest::Entity::find()
-            .filter(SessionApprovalRequest::Column::Kind.eq(ApprovalKind::User))
-            .filter(
-                SessionApprovalRequest::Column::Status
-                    .eq(SessionApprovalRequest::ApprovalRequestStatus::Pending),
-            )
-            .order_by_asc(SessionApprovalRequest::Column::Started)
+        let requests = SAR::Entity::find()
+            .filter(SAR::Column::Kind.eq(ApprovalKind::User))
+            .filter(SAR::Column::Status.eq(SAR::ApprovalRequestStatus::Pending))
+            .order_by_asc(SAR::Column::Started)
             .all(&services.db)
             .await
             .map_err(WarpgateError::from)?;
@@ -346,23 +337,11 @@ impl Api {
         ctx: AuthedSession,
         Path(id): Path<UserSessionId>,
     ) -> poem::Result<AuthStateResponse> {
-        // The live state exists only on the node that created it; anywhere else
-        // the request row stands in, and it carries everything the approval page
-        // shows, which is why this needs no hop to the owner.
-        if let Some(state_arc) = local_auth_state_for_user(&ctx, &id).await {
-            return serialize_auth_state_inner(state_arc, ctx.services())
-                .await
-                .map(Json)
-                .map(AuthStateResponse::Ok);
-        }
-
         let Some(user) = ctx.auth.as_full_user() else {
             return Ok(AuthStateResponse::NotFound);
         };
 
-        match SessionApprovalRequest::find_user_approval(&ctx.services().db, user.username(), id)
-            .await?
-        {
+        match SAR::find_user_approval(&ctx.services().db, user.username(), id).await? {
             Some(row) => request_to_auth_state(ctx.services(), row)
                 .await
                 .map(Json)
@@ -404,43 +383,23 @@ impl Api {
     }
 }
 
-/// Records the user's decision on their own pending approval.
-///
-/// The decision is written to the request row and the node holding the login
-/// reads it back, so this is served wherever it lands. `find_pending_user_approval`
-/// is what enforces that the request belongs to the user asking.
+/// Records the user's decision on their own pending approval — on the request
+/// row, wherever the click lands: the row is written before the request's id
+/// is announced anywhere, so it is always there to decide on, and the node
+/// holding the login reads the decision back. When that node is this one, the
+/// decision is delivered on the spot rather than left to the sweep's next
+/// tick.
 async fn resolve_own_approval(
     ctx: &AuthenticatedRequestContext,
     session_id: UserSessionId,
     decision: ApprovalDecision,
 ) -> poem::Result<ApprovalActionResponse> {
-    // The auth state is what the approval actually satisfies, so the node
-    // holding it settles the decision itself. The request row exists to reach
-    // the *other* nodes, and it is written from the same signal that tells the
-    // user a request is waiting — so acting on that notification immediately
-    // can outrun it. Going to the state first makes that race unobservable.
-    if local_auth_state_for_user(ctx, &session_id).await.is_some() {
-        let actor = acting_approver(ctx);
-        return Ok(
-            if ctx
-                .services()
-                .apply_user_approval(session_id, decision, &actor)
-                .await?
-            {
-                ApprovalActionResponse::Ok
-            } else {
-                ApprovalActionResponse::NotFound
-            },
-        );
-    }
-
     let Some(user) = ctx.auth.as_full_user() else {
         return Ok(ApprovalActionResponse::NotFound);
     };
 
     let Some(row) =
-        SessionApprovalRequest::find_user_approval(&ctx.services().db, user.username(), session_id)
-            .await?
+        SAR::find_user_approval(&ctx.services().db, user.username(), session_id).await?
     else {
         return Ok(ApprovalActionResponse::NotFound);
     };
@@ -449,7 +408,19 @@ async fn resolve_own_approval(
     };
 
     match resolve_pending_approval(ctx, Approver::TheUserThemselves, pending, decision).await? {
-        ApprovalResolution::Resolved => Ok(ApprovalActionResponse::Ok),
+        ApprovalResolution::Resolved => {
+            // Best-effort: the decision is recorded, and the sweep delivers
+            // within a tick to whichever node holds the login — this only
+            // spares a login held *here* that wait.
+            if let Err(error) = ctx
+                .services()
+                .apply_recorded_user_decision(&session_id)
+                .await
+            {
+                warn!(%error, %session_id, "Failed to deliver a freshly recorded approval");
+            }
+            Ok(ApprovalActionResponse::Ok)
+        }
         ApprovalResolution::NotFound => Ok(ApprovalActionResponse::NotFound),
     }
 }
@@ -772,7 +743,7 @@ impl ReparseForwardedResponse for AuthStateResponse {
 /// row fields, so any node can serve it without holding the login.
 async fn request_to_auth_state(
     services: &Services,
-    request: SessionApprovalRequest::Model,
+    request: SAR::Model,
 ) -> poem::Result<AuthStateResponseInternal> {
     let web_approval_caching_grace_seconds = services
         .web_approval_grace_period()
@@ -791,30 +762,6 @@ async fn request_to_auth_state(
     })
 }
 
-/// Looks up a locally-held auth state, enforcing that it belongs to the
-/// requesting user: a user may only act on auth states created for their own
-/// username. This runs on the node that holds the state, so a cluster-forwarded
-/// request (carrying the origin's user identity) is re-checked here.
-async fn local_auth_state_for_user(
-    ctx: &AuthenticatedRequestContext,
-    id: &UserSessionId,
-) -> Option<Arc<Mutex<AuthState>>> {
-    // Answering a login's out-of-band request is a user-scoped act, so it takes
-    // the same authority as the rest of them — a ticket names a user but does
-    // not act as one. This is also the predicate `find_user_approval_row`
-    // applies, and the two must agree: which of them serves a request is
-    // decided by which node the load balancer picked.
-    let username = ctx.auth.as_full_user()?.username().to_owned();
-    let state_arc = {
-        let store = ctx.services().auth_state_store.lock().await;
-        store.get(id)?
-    };
-    if username_eq_ci(&state_arc.lock().await.user_info().username, &username) {
-        Some(state_arc)
-    } else {
-        None
-    }
-}
 async fn serialize_auth_state_inner(
     state_arc: Arc<Mutex<AuthState>>,
     services: &Services,

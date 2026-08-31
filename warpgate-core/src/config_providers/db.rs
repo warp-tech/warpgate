@@ -606,17 +606,6 @@ impl ConfigProvider for DatabaseConfigProvider {
             );
         }
 
-        // Matched against the credential rows themselves rather than through
-        // `load_details`, which drops the row id on its way to
-        // `UserAuthCredential` — and the id is half of what identifies a
-        // credential. Also one query instead of six.
-        //
-        // `order_by_asc(Id)` because duplicate rows are reachable (two SSO rows
-        // for one email, one of them provider-less) and `.all()` has no defined
-        // order: without it, which row a login identifies could vary run to run.
-        //
-        // Every comparison stays in Rust: MySQL's default collation is
-        // case-insensitive, and base64 key material and emails are not.
         let matched: Option<StoredCredential> = match client_credential {
             AuthCredential::PublicKey {
                 kind,
@@ -666,16 +655,11 @@ impl ConfigProvider for DatabaseConfigProvider {
                     StoredCredential::new(
                         StoredCredentialKind::Password,
                         c.id,
-                        // The stored Argon2 hash, never the password: the hash
-                        // is already in this database, so nothing new reaches
-                        // the approval rows.
+                        // Fingerprint the hash, not the password
                         StoredCredentialFingerprint::of_stored_verifier(c.argon_hash.as_bytes()),
                     )
                 }),
 
-            // `find`, not `any`: the row that actually verified the code is the
-            // credential being asserted. A one-time code rotates every 30s; the
-            // row it belongs to does not.
             AuthCredential::Otp(client_otp) => user_model
                 .find_related(entities::OtpCredential::Entity)
                 .order_by_asc(entities::OtpCredential::Column::Id)
@@ -707,15 +691,14 @@ impl ConfigProvider for DatabaseConfigProvider {
                         && c.provider.as_ref().is_none_or(|p| p == client_provider)
                 })
                 .map(|c| {
-                    let mut verifier = c.provider.clone().unwrap_or_default().into_bytes();
-                    verifier.push(0);
-                    verifier.extend_from_slice(c.email.as_bytes());
                     StoredCredential::new(
                         StoredCredentialKind::Sso,
                         c.id,
                         // The stored row, so nothing the client supplied reaches
                         // the approval rows.
-                        StoredCredentialFingerprint::of_stored_verifier(&verifier),
+                        StoredCredentialFingerprint::of_stored_verifier(
+                            &c.as_fingerprintable_bytes(),
+                        ),
                     )
                 }),
 

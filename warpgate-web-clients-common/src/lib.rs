@@ -10,8 +10,8 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::futures::Notified;
@@ -21,7 +21,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 use warpgate_common::auth::RememberApprovalBy;
 use warpgate_common::{UserSessionId, WarpgateError};
-use warpgate_core::approvals::{GatedConnection, admit_target_session};
+use warpgate_core::approvals::{admit_target_session, GatedConnection};
 use warpgate_core::{
     AdmittedTarget, Services, SessionHandle, TargetAuthorization, WarpgateServerHandle,
 };
@@ -204,14 +204,8 @@ pub enum SessionAccess<S> {
     Forbidden,
 }
 
-/// Starts an in-browser client session's target session, holding it at the
-/// administrator gate when the target requires approval.
-///
-/// The session is registered before the gate so an administrator can see (and
-/// close) the attempt while it waits, but marked provisional until it is let
-/// through: one that never becomes a session leaves no session behind, only
-/// its approval request.
-pub async fn gate_web_client_session<O: Send + Sync>(
+/// Starts a target session, waiting for approval if needed
+pub async fn admit_web_client_session<O: Send + Sync>(
     services: &Services,
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,
@@ -225,12 +219,7 @@ pub async fn gate_web_client_session<O: Send + Sync>(
         authorization,
         GatedConnection {
             remote_ip: remote_address.map(|address| address.ip()),
-            // A browser session's own login credentials aren't carried on the
-            // client connection, so it neither contributes nor consumes a
-            // remembered approval.
             credentials: RememberApprovalBy::Nothing,
-            // A browser client session is opened from an already established
-            // portal login, never by a ticket.
         },
     )
     .await?;
@@ -239,15 +228,7 @@ pub async fn gate_web_client_session<O: Send + Sync>(
     Ok(admitted)
 }
 
-/// A user's claim on one session slot, held from before the session exists until
-/// it is in the registry.
-///
-/// Setting a session up is not instant — most of the wait is the administrator
-/// approval gate — and until [`ClientManager::insert`] runs the session is in no
-/// map, so it counts towards nothing. Without the claim a user can park any
-/// number of attempts at the gate: the per-user limit only sees the ones that
-/// got through, and each attempt is a registered session and an entry in the
-/// approvals queue.
+/// Session slot guard, slots limit the number of parallel approval attempts
 #[must_use = "dropping the reservation immediately releases the slot it holds"]
 pub struct SessionSlot {
     user_id: Uuid,
@@ -256,8 +237,6 @@ pub struct SessionSlot {
 
 impl Drop for SessionSlot {
     fn drop(&mut self) {
-        // Drop can't await, and the slot has to come back however the setup
-        // ended — approved, refused, or the client hanging up mid-wait.
         let user_id = self.user_id;
         let reservations = self.reservations.clone();
         tokio::spawn(async move {
@@ -275,7 +254,7 @@ impl Drop for SessionSlot {
 /// protocol-specific `create_session`.
 pub struct ClientManager<S> {
     sessions: Arc<Mutex<HashMap<UserSessionId, Arc<S>>>>,
-    /// Slots claimed by sessions being set up, which are in no map yet.
+    /// Setup slots for not yet running sessions
     reservations: Arc<Mutex<HashMap<Uuid, usize>>>,
 }
 
@@ -319,15 +298,13 @@ impl<S: ManagedSession> ClientManager<S> {
         SessionAccess::Granted(session)
     }
 
-    /// Claims a slot for `user_id`, counting the sessions being set up as well
-    /// as the live ones. Hold the returned [`SessionSlot`] until the session is
-    /// in the registry; dropping it gives the slot back.
+    /// Claim a future session slot for user
     pub async fn reserve_slot(
         &self,
         user_id: Uuid,
         max_per_user: usize,
     ) -> Result<SessionSlot, WarpgateError> {
-        // Reservations before sessions, the one order this pair is ever taken in.
+        // Reservations lock before sessions lock
         let mut reservations = self.reservations.lock().await;
         let live = self
             .sessions

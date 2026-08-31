@@ -239,21 +239,13 @@ pub async fn finalize_user_auth<O: TargetOptionsVariant>(
     Ok(authorization)
 }
 
-/// Start a desktop session's target session, holding the viewer at the
-/// administrator-approval gate when the target requires one.
-///
-/// Both desktop protocols hold their viewer connection on this call itself.
-/// The ticket that authenticated the session rides on the gate's outcome,
-/// which refunds it on everything but an approval — a refusal is not the
-/// user's doing.
+/// Start a target session, holding for approval if needed
 pub async fn admit_desktop_session<O: Send + Sync>(
     services: &Services,
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,
     remote_ip: Option<IpAddr>,
 ) -> Result<AdmittedTarget<O>, WarpgateError> {
-    // The auth state is keyed by the session id. A ticket-authorised session has none, and
-    // so no credential fingerprints to key a remembered approval on.
     let session_id = server_handle.lock().await.user_session_id();
     let state = services.auth_state_store.lock().await.get(&session_id);
     let credentials = match state {

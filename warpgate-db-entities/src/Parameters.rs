@@ -1,6 +1,6 @@
 use poem_openapi::{Enum, Object, Union};
-use sea_orm::Set;
 use sea_orm::entity::prelude::*;
+use sea_orm::Set;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -216,7 +216,7 @@ pub struct Model {
     pub web_auth_max_age_seconds: Option<i64>,
     pub web_approval_grace_period_seconds: Option<i64>,
     /// How long a session held for administrator approval waits before being
-    /// auto-rejected. Unset (or zero) falls back to the auth-state timeout.
+    /// auto-rejected. Unset (or zero) falls back to the AuthState timeout
     pub admin_approval_timeout_seconds: Option<i64>,
     /// How long an administrator's approval is remembered for a later
     /// identical connection. Unset (or zero) disables remembering.
