@@ -50,7 +50,8 @@ def _provision(api, otp_key_base64):
                 )
             ),
         )
-    )    target = api.create_target(
+    )
+    target = api.create_target(
         sdk.TargetDataRequest(
             name=f"rdp-{uuid4()}",
             options=sdk.TargetOptions(
