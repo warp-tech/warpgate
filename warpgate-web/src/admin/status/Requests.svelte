@@ -31,6 +31,7 @@
     } from 'common/approvalRequests'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { formatDurationAsHumantime } from 'common/duration'
+    import EmptyState from 'common/EmptyState.svelte'
     import { errorStatus, stringifyError } from 'common/errors'
     import RelativeDate from 'common/RelativeDate.svelte'
     import Fa from 'svelte-fa'
@@ -218,7 +219,7 @@
         <DelayedSpinner />
     {:else}
         {#if !entries.length}
-            <div class="text-muted">Nothing is awaiting your action.</div>
+            <EmptyState title="Nothing right now" />
         {/if}
 
         <div class="list-group list-group-flush">

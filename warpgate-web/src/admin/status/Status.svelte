@@ -36,7 +36,7 @@
             small
             class="mb-2"
             title="Requests"
-            description="Sessions and tickets awaiting your action"
+            description="Users awaiting your action"
             href="/status/requests"
         />
 

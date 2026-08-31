@@ -16,6 +16,7 @@
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
+    import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { onDestroy, onMount, tick } from 'svelte'
@@ -234,8 +235,7 @@
         try {
             sessionInfo = await api.getWebSshSession({ sessionId })
         } catch (e) {
-            connectionError =
-                e instanceof Error ? e.message : 'Failed to load session info'
+            connectionError = await stringifyError(e)
             if (e instanceof ResponseError && e.response.status === 404) {
                 sessionNotFound = true
             }

@@ -11,10 +11,10 @@ use std::sync::Arc;
 use http::StatusCode;
 use poem::{IntoResponse, Request, Response};
 use tokio::sync::Mutex;
-use warpgate_common::TargetHTTPOptions;
 use warpgate_common::auth::RememberApprovalBy;
-use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_common::TargetHTTPOptions;
 use warpgate_common_http::logging::get_client_ip_addr;
+use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::approvals::{GatedConnection, PolledGate};
 use warpgate_core::{AdmittedTarget, TargetAuthorization, WarpgateServerHandle};
 
