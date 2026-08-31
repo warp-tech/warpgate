@@ -104,6 +104,7 @@
                         password: '',
                     },
                     verifyTls: false,
+                    interactiveLogon: false,
                     tlsSecurity: RdpTlsSecurity.Tls12,
                     compression: RdpTargetCompression.Remotefx,
                 },

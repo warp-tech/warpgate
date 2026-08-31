@@ -1,0 +1,11 @@
+diff -ru ironrdp-async-0.10.0/src/connector.rs base/src/connector.rs
+--- ironrdp-async-0.10.0/src/connector.rs	2006-07-24 03:21:28.000000000 +0200
++++ base/src/connector.rs	2026-08-31 14:40:31.494623661 +0200
+@@ -138,6 +138,7 @@
+         server_name,
+         server_public_key,
+         kerberos_config,
++        connector.config.credssp_credentialless,
+     )?;
+ 
+     loop {

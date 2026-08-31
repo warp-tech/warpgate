@@ -60,6 +60,16 @@
     </FormGroup>
 {/if}
 
+<Input
+    type="switch"
+    label="Interactive logon"
+    bind:checked={options.interactiveLogon}
+/>
+<HelpText>
+    Shows the target's sign-in screen instead of logging on automatically. The
+    credentials above are still used for network-level authentication.
+</HelpText>
+
 <h4 class="mt-4">TLS</h4>
 
 <FormGroup floating label="Security level">
