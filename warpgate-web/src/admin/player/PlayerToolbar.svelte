@@ -24,11 +24,18 @@
     export let liveActive = false
     // Optional per-bucket (0..1) input-density band drawn behind the scrubber.
     export let heatmap: number[] | null = null
+    // Content search in the recording (terminal only). Enter submits; the
+    // parent runs the scan and renders the results.
+    export let showSearch = false
+    export let searchScanning = false
+    export let onSearch: ((query: string) => void) | null = null
     export let onTogglePlaying: () => void
     export let onToggleFullscreen: () => void
     export let onGoLive: () => void
     // Called with the new scrubber position as a percentage (0..100).
     export let onSeek: (percent: number) => void
+
+    let searchValue = ''
 
     function isTextEntry(el: HTMLElement | null): boolean {
         if (!el) {
@@ -78,6 +85,28 @@
                 Go live
             </Tooltip>
         {/if}
+    {/if}
+    {#if showSearch && onSearch}
+        <div class="search">
+            <input
+                type="search"
+                placeholder="Search in recording…"
+                aria-label="Search in recording"
+                bind:value={searchValue}
+                on:keydown={event => {
+                    if (event.key === 'Enter') {
+                        onSearch(searchValue)
+                    }
+                }}
+            >
+            {#if searchScanning}
+                <div
+                    class="spinner-border spinner-border-sm search-spinner"
+                    role="status"
+                    aria-label="Searching"
+                ></div>
+            {/if}
+        </div>
     {/if}
     <div class="seek">
         {#if heatmap}
@@ -140,6 +169,37 @@
             font-weight: bold;
             font-size: 0.75rem;
             letter-spacing: 1px;
+        }
+    }
+
+    .search {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0 5px;
+
+        input[type="search"] {
+            background: #ffffff14;
+            color: #eee;
+            border: none;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-size: 0.8rem;
+            height: 26px;
+            width: 180px;
+
+            &::-webkit-search-cancel-button {
+                -webkit-appearance: none;
+            }
+
+            &:focus {
+                outline: 1px solid #ffffff5e;
+            }
+        }
+
+        .search-spinner {
+            color: #eee;
+            font-size: 0.7rem;
         }
     }
 

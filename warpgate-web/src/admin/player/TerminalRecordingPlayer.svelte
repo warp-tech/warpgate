@@ -3,18 +3,30 @@
     import { Spinner } from '@sveltestrap/sveltestrap'
     import { Terminal } from '@xterm/xterm'
     import type { Recording } from 'admin/lib/api'
+    import formatDuration from 'format-duration'
     import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
     import PlayerToolbar from './PlayerToolbar.svelte'
     import { PlaybackController } from './playbackController'
     import { type Keyframe, RangeStream } from './rangeStream'
 
-    export let recording: Recording
+    interface Props {
+        recording: Recording
+    }
+
+    let { recording }: Props = $props()
 
     // The first generation whose terminal recordings carry an `index.ndjson` sidecar.
     const INDEXED_GENERATION = 3
     // Replayed bytes are batched into xterm rather than written per recorded chunk.
     const WRITE_BATCH_CHARS = 8192
+
+    // Content search: how many matches to collect before stopping the scan,
+    // and how much of an un-newlined tail to keep for boundary-spanning matches.
+    const MAX_SEARCH_MATCHES = 500
+    const MAX_SEARCH_TAIL = 16 * 1024
+    const SEARCH_CONTEXT_BEFORE = 30
+    const SEARCH_CONTEXT_AFTER = 60
 
     const DATA_URL = `/@warpgate/admin/api/recordings/${recording.id}/data`
     const INDEX_URL = `/@warpgate/admin/api/recordings/${recording.id}/index`
@@ -22,10 +34,22 @@
 
     let containerElement: HTMLDivElement
     let rootElement: HTMLDivElement
-    let seekInputValue = 0
     let resizeObserver: ResizeObserver | undefined
     let loading = true
     let ptyMode = false
+
+    interface SearchMatch {
+        time: number
+        before: string
+        hit: string
+        after: string
+    }
+
+    let searchMatches: SearchMatch[] | null = $state(null)
+    let searchTruncated = $state(false)
+    let searchScanning = $state(false)
+    let searchError: string | null = $state(null)
+    let searchController: AbortController | null = null
 
     // Terminal sizes over time, from the index: a snapshot has to be restored at the size
     // it was taken at.
@@ -156,10 +180,11 @@
     )
 
     const { mode, timestamp, duration, seekPercent, sessionIsLive } = player
-    $: seekInputValue = $seekPercent
+    let seekInputValue = $derived($seekPercent)
 
     onDestroy(() => {
         player.destroy()
+        searchController?.abort()
         resizeObserver?.disconnect()
     })
 
@@ -263,6 +288,127 @@
         }
     }
 
+    // ── Content search ─────────────────────────────────────────────────────────
+    //
+    // Streams the whole `data.ndjson` through a second RangeStream (memory-bounded,
+    // same as playback), searching the visible (non-Input) streams. Matches are
+    // line-based: ANSI escapes are stripped and \n splits chunks into candidate
+    // lines; the last partial line carries over a bounded tail so matches that
+    // span chunk boundaries are still found.
+
+    // ESC-prefixed sequences: CSI (...m etc.), OSC (title, ended by BEL or ST),
+    // and the two-character ones (DECSC, IND, ...). Runs of remaining C0
+    // controls (a bare CR from a progress bar, tabs) collapse into a space.
+    const ANSI_PATTERN =
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: matching escape bytes is the point
+        /\x1b\[[0-9;:<=>?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[@-Z\\-_]/g
+
+    function stripAnsi(text: string): string {
+        return (
+            text
+                .replace(ANSI_PATTERN, '')
+                // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control bytes is the point
+                .replace(/[\x00-\x09\x0b-\x1f\x7f]+/g, ' ')
+        )
+    }
+
+    async function runSearch(query: string) {
+        searchController?.abort()
+        const trimmed = query.trim()
+        if (!trimmed) {
+            searchMatches = null
+            searchTruncated = false
+            searchError = null
+            return
+        }
+        const controller = new AbortController()
+        searchController = controller
+        const signal = controller.signal
+        searchScanning = true
+        searchError = null
+        searchTruncated = false
+
+        const matches: SearchMatch[] = []
+        let truncated = false
+        const needle = trimmed.toLowerCase()
+
+        const collect = (line: string, time: number) => {
+            const haystack = line.toLowerCase()
+            let index = haystack.indexOf(needle)
+            while (index >= 0) {
+                matches.push({
+                    time,
+                    before: line.slice(
+                        Math.max(0, index - SEARCH_CONTEXT_BEFORE),
+                        index,
+                    ),
+                    hit: line.slice(index, index + trimmed.length),
+                    after: line.slice(
+                        index + trimmed.length,
+                        index + trimmed.length + SEARCH_CONTEXT_AFTER,
+                    ),
+                })
+                if (matches.length >= MAX_SEARCH_MATCHES) {
+                    truncated = true
+                    return
+                }
+                index = haystack.indexOf(needle, index + trimmed.length)
+            }
+        }
+
+        try {
+            const scan = new RangeStream(DATA_URL)
+            await scan.openAt(0, signal)
+            let tail = ''
+            let lastTime = 0
+            for (;;) {
+                const item = await scan.next<TerminalItem>()
+                if (!item) {
+                    break
+                }
+                if (signal.aborted) {
+                    return
+                }
+                if ('data' in item && item.stream !== 'Input') {
+                    lastTime = item.time
+                    tail += decodeBase64Lossy(item.data)
+                    if (tail.length > MAX_SEARCH_TAIL) {
+                        tail = tail.slice(-MAX_SEARCH_TAIL)
+                    }
+                    const lines = tail.split('\n')
+                    tail = lines.pop() ?? ''
+                    for (const line of lines) {
+                        collect(stripAnsi(line), item.time)
+                        if (truncated) {
+                            break
+                        }
+                    }
+                    if (truncated) {
+                        break
+                    }
+                }
+            }
+            if (!truncated && tail) {
+                // The file's last line had no terminating newline.
+                collect(stripAnsi(tail), lastTime)
+            }
+            if (!signal.aborted) {
+                searchMatches = matches
+                searchTruncated = truncated
+            }
+        } catch (error) {
+            if (!signal.aborted) {
+                searchError =
+                    error instanceof Error ? error.message : String(error)
+            }
+        } finally {
+            if (searchController === controller) {
+                searchScanning = false
+                searchController = null
+            }
+        }
+    }
+
     // The terminal size in effect at `time`, or null when the recording has no size
     // information before it (an exec channel, or a pre-index recording).
     function sizeAt(time: number): { cols: number; rows: number } | null {
@@ -351,6 +497,58 @@
         bind:this={containerElement}
     ></div>
 
+    {#if searchScanning || searchError || searchMatches !== null}
+        <div class="search-results">
+            <div class="search-header">
+                {#if searchScanning}
+                    <span class="text-muted">
+                        Searching… {searchMatches?.length ?? 0} found
+                    </span>
+                {:else if searchError}
+                    <span class="text-danger"
+                        >Search failed: {searchError}</span
+                    >
+                {:else}
+                    <span class="text-muted">
+                        {searchMatches?.length ?? 0}
+                        {(searchMatches?.length ?? 0) === 1 ? 'match' : 'matches'}
+                        {#if searchTruncated}
+                            (showing first {MAX_SEARCH_MATCHES})
+                        {/if}
+                    </span>
+                {/if}
+                <button
+                    type="button"
+                    class="btn-close btn-close-white ms-auto"
+                    aria-label="Close search results"
+                    on:click={() => runSearch('')}
+                ></button>
+            </div>
+            {#if searchMatches?.length}
+                <ul class="list-unstyled mb-0">
+                    {#each searchMatches as match, i (i)}
+                        <li>
+                            <button
+                                type="button"
+                                title="Jump to this point"
+                                on:click={() => player.seek(match.time, true)}
+                            >
+                                <span class="match-time">
+                                    {formatDuration(match.time * 1000, { leading: true })}
+                                </span>
+                                <span class="match-line">
+                                    <span class="context">{match.before}</span
+                                    ><mark>{match.hit}</mark
+                                    ><span class="context">{match.after}</span>
+                                </span>
+                            </button>
+                        </li>
+                    {/each}
+                </ul>
+            {/if}
+        </div>
+    {/if}
+
     <PlayerToolbar
         playing={$mode !== 'paused'}
         timestamp={$timestamp}
@@ -358,6 +556,9 @@
         hidden={loading}
         isLive={$sessionIsLive === true}
         liveActive={$mode === 'live'}
+        showSearch={!loading}
+        {searchScanning}
+        onSearch={runSearch}
         onTogglePlaying={() => player.togglePlaying()}
         onToggleFullscreen={toggleFullscreen}
         onGoLive={() => player.goLive()}
@@ -387,6 +588,71 @@
 
         display: flex;
         align-items: center;
+    }
+
+    .search-results {
+        flex: none;
+        max-height: 30%;
+        overflow-y: auto;
+        background: #1d1d1d;
+        border-top: 1px solid #ffffff24;
+        font-size: 0.8rem;
+        color: #ddd;
+
+        .search-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            position: sticky;
+            top: 0;
+            background: #1d1d1d;
+        }
+
+        ul {
+            li + li {
+                border-top: 1px solid #ffffff12;
+            }
+
+            button {
+                display: flex;
+                align-items: baseline;
+                gap: 0.75rem;
+                width: 100%;
+                text-align: left;
+                padding: 0.25rem 0.75rem;
+                background: none;
+                border: none;
+                color: inherit;
+
+                &:hover {
+                    background: #ffffff14;
+                }
+            }
+        }
+
+        .match-time {
+            flex: none;
+            font-size: 0.7rem;
+            opacity: .75;
+        }
+
+        .match-line {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-family: monospace;
+
+            mark {
+                padding: 0;
+                background: #8a6d00;
+                color: #ffe36e;
+            }
+
+            .context {
+                opacity: .85;
+            }
+        }
     }
 
     :global(.xterm) {
