@@ -649,9 +649,13 @@ fn build_config(
         platform: MajorPlatformType::UNIX,
         hardware_id: None,
         request_data: None,
-        // Warpgate always supplies the target credentials, so request autologon to
-        // skip the server's own login UI (e.g. xrdp honours INFO_AUTOLOGON).
-        autologon: true,
+        // Warpgate supplies the target credentials, so by default request autologon to
+        // skip the server's own login UI (e.g. xrdp honours INFO_AUTOLOGON). An
+        // interactive-logon target flips both switches: no autologon flag, and CredSSP
+        // delegates no credentials — NLA still authenticates the connection, but the
+        // server has nothing to log the session on with and shows its sign-in screen.
+        autologon: !options.interactive_logon,
+        credssp_credentialless: options.interactive_logon,
         enable_audio_playback: false,
         performance_flags: PerformanceFlags::default(),
         license_cache: None,
