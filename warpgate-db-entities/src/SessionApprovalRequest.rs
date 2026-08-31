@@ -151,6 +151,79 @@ impl StatusTransition {
     }
 }
 
+pub enum RequestAsk {
+    Admin { ticket_id: Option<Uuid> },
+    User { identification_string: String },
+}
+
+impl RequestAsk {
+    pub const fn kind(&self) -> ApprovalKind {
+        match self {
+            Self::Admin { .. } => ApprovalKind::Admin,
+            Self::User { .. } => ApprovalKind::User,
+        }
+    }
+
+    const fn ticket_id(&self) -> Option<Uuid> {
+        match self {
+            Self::Admin { ticket_id } => *ticket_id,
+            Self::User { .. } => None,
+        }
+    }
+}
+
+pub struct NewRequest {
+    pub session_id: UserSessionId,
+    pub target: String,
+    pub node_id: NodeId,
+    pub protocol: String,
+    pub username: String,
+    pub user_id: Uuid,
+    pub remote_address: Option<String>,
+    pub match_digest: Option<String>,
+    pub started: OffsetDateTime,
+    pub about: RequestAsk,
+}
+
+impl NewRequest {
+    #[must_use]
+    pub fn key(&self) -> Key {
+        Key::new(self.session_id, self.about.kind(), &self.target)
+    }
+}
+
+impl From<NewRequest> for ActiveModel {
+    fn from(request: NewRequest) -> Self {
+        let (identification_string, ticket_id) = match &request.about {
+            RequestAsk::Admin { ticket_id } => (None, *ticket_id),
+            RequestAsk::User {
+                identification_string,
+            } => (Some(identification_string.clone()), None),
+        };
+        Self {
+            session_id: Set(request.session_id),
+            kind: Set(request.about.kind()),
+            node_id: Set(request.node_id),
+            protocol: Set(request.protocol),
+            username: Set(request.username),
+            user_id: Set(request.user_id),
+            target: Set(request.target),
+            remote_address: Set(request.remote_address),
+            identification_string: Set(identification_string),
+            match_digest: Set(request.match_digest),
+            ticket_id: Set(ticket_id),
+            started: Set(request.started),
+            // Not the asker's to state: a question is asked unanswered.
+            status: Set(ApprovalRequestStatus::Pending),
+            scope: Set(None),
+            resolved_by_username: Set(None),
+            resolved_by_user_id: Set(None),
+            resolved_at: Set(None),
+            consumed_at: Set(None),
+        }
+    }
+}
+
 /// Condition guaranteed to key on primary key
 #[derive(Clone)]
 pub struct Key(Condition);
@@ -228,15 +301,13 @@ enum Reopened {
 /// Reopen a matching old request (spends the ticket again)
 async fn try_reopen_unanswered(
     db: &DatabaseConnection,
+    key: &Key,
+    ticket_id: Option<Uuid>,
     row: &ActiveModel,
 ) -> Result<Reopened, WarpgateError> {
-    let ticket_id = match &row.ticket_id {
-        Set(id) => *id,
-        _ => None,
-    };
     if let Some(ticket_id) = ticket_id {
         let unanswered_row_exists = Entity::find()
-            .filter(key_of(row)?.into_condition())
+            .filter(key.clone().into_condition())
             .filter(Column::Status.is_in(ApprovalRequestStatus::UNANSWERED))
             .one(db)
             .await?
@@ -278,15 +349,6 @@ async fn try_reopen_unanswered(
     result
 }
 
-fn key_of(row: &ActiveModel) -> Result<Key, WarpgateError> {
-    match (&row.session_id, &row.kind, &row.target) {
-        (Set(session_id), Set(kind), Set(target)) => Ok(Key::new(*session_id, *kind, target)),
-        _ => Err(WarpgateError::InconsistentState(
-            "approval request model without its key".into(),
-        )),
-    }
-}
-
 /// Result of an upsert_request
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Advertised {
@@ -304,12 +366,16 @@ pub enum Advertised {
 /// Create or re-advertise a request
 pub async fn upsert_request(
     db: &DatabaseConnection,
-    row: ActiveModel,
+    request: NewRequest,
 ) -> Result<Advertised, WarpgateError> {
+    let key = request.key();
+    let ticket_id = request.about.ticket_id();
+    let row = ActiveModel::from(request);
+
     if try_refresh_pending(db, &row).await? {
         return Ok(Advertised::AlreadyAsking);
     }
-    match try_reopen_unanswered(db, &row).await? {
+    match try_reopen_unanswered(db, &key, ticket_id, &row).await? {
         Reopened::Reopened => return Ok(Advertised::Asked),
         Reopened::TicketExhausted => {
             return Ok(if try_refresh_pending(db, &row).await? {
@@ -329,7 +395,7 @@ pub async fn upsert_request(
             if try_refresh_pending(db, &row).await? {
                 return Ok(Advertised::AlreadyAsking);
             }
-            match try_reopen_unanswered(db, &row).await? {
+            match try_reopen_unanswered(db, &key, ticket_id, &row).await? {
                 Reopened::Reopened => Ok(Advertised::Asked),
                 Reopened::TicketExhausted => Ok(Advertised::TicketExhausted),
                 Reopened::NotUnanswered => Ok(Advertised::DecisionStands),

@@ -47,7 +47,13 @@
               at: Date
               session: SessionApprovalItem
           }
-        | { kind: 'ticket'; key: string; id: string; at: Date; ticket: TicketRequest }
+        | {
+              kind: 'ticket'
+              key: string
+              id: string
+              at: Date
+              ticket: TicketRequest
+          }
 
     let sessions: SessionApprovalItem[] = $state([])
     let tickets: TicketRequest[] = $state([])
@@ -150,13 +156,19 @@
         scope: ApprovalScope,
     ) {
         await resolveSession(() =>
-            api.approveSession({ id: item.id, scope, target: item.target }),
+            api.approveSession({
+                id: item.id,
+                approveSessionRequest: { scope, target: item.target },
+            }),
         )
     }
 
     async function rejectSession(item: SessionApprovalItem) {
         await resolveSession(() =>
-            api.rejectSession({ id: item.id, target: item.target }),
+            api.rejectSession({
+                id: item.id,
+                rejectSessionRequest: { target: item.target },
+            }),
         )
     }
 
@@ -368,8 +380,7 @@
                 to
                 <strong>
                     {denyModalRequest.targetName ?? denyModalRequest.targetId}
-                </strong
-                >?
+                </strong>?
             </p>
             <FormGroup floating label="Reason (optional)">
                 <input

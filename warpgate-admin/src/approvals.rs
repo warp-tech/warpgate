@@ -107,12 +107,6 @@ async fn check_self_approval(
         return Ok(());
     }
 
-    if matches!(approver, Approver::TheUserThemselves) && pending.kind != ApprovalKind::User {
-        return Err(WarpgateError::InconsistentState(
-            "only the user's own approval request can be answered as the user themselves".into(),
-        ));
-    }
-
     let Some(username) = ctx.auth.username() else {
         // somehow, admin API token -> there is no "own session"
         return Ok(());

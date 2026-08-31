@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use sea_orm::ActiveValue::Set;
 use sea_orm::DatabaseConnection;
 use sea_orm::sea_query::IntoCondition;
 use time::OffsetDateTime;
@@ -75,25 +74,19 @@ pub(super) async fn advertise_admin_request(
 ) -> Result<Advertised, WarpgateError> {
     upsert_request(
         db,
-        SessionApprovalRequest::ActiveModel {
-            session_id: Set(subject.session_id),
-            kind: Set(ApprovalKind::Admin.into()),
-            node_id: Set(node_id),
-            protocol: Set(subject.protocol.to_string()),
-            username: Set(subject.user_info.username.clone()),
-            user_id: Set(subject.user_info.id),
-            target: Set(subject.target_name.clone()),
-            remote_address: Set(subject.remote_ip.map(|ip| ip.to_string())),
-            identification_string: Set(None),
-            match_digest: Set(subject.match_digest()),
-            ticket_id: Set(subject.ticket_id),
-            started: Set(OffsetDateTime::now_utc()),
-            status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
-            scope: Set(None),
-            resolved_by_username: Set(None),
-            resolved_by_user_id: Set(None),
-            resolved_at: Set(None),
-            consumed_at: Set(None),
+        SessionApprovalRequest::NewRequest {
+            session_id: subject.session_id,
+            target: subject.target_name.clone(),
+            node_id,
+            protocol: subject.protocol.to_string(),
+            username: subject.user_info.username.clone(),
+            user_id: subject.user_info.id,
+            remote_address: subject.remote_ip.map(|ip| ip.to_string()),
+            match_digest: subject.match_digest(),
+            started: OffsetDateTime::now_utc(),
+            about: SessionApprovalRequest::RequestAsk::Admin {
+                ticket_id: subject.ticket_id,
+            },
         },
     )
     .await

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use sea_orm::ActiveValue::Set;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, AuthState, CredentialKind};
@@ -113,27 +112,21 @@ pub(crate) async fn advertise_user_request(
     let row = {
         let state = state_arc.lock().await;
         let session_id = *state.session_id();
-        SessionApprovalRequest::ActiveModel {
-            session_id: Set(session_id),
-            kind: Set(ApprovalKind::User.into()),
-            node_id: Set(node_id),
-            protocol: Set(state.protocol().to_string()),
-            username: Set(state.user_info().username.clone()),
-            user_id: Set(state.user_info().id),
-            target: Set(state.target_name().to_string()),
-            remote_address: Set(state.remote_ip().map(|ip| ip.to_string())),
-            identification_string: Set(Some(state.identification_string().to_owned())),
-            match_digest: Set(state
+        SessionApprovalRequest::NewRequest {
+            session_id,
+            target: state.target_name().to_string(),
+            node_id,
+            protocol: state.protocol().to_string(),
+            username: state.user_info().username.clone(),
+            user_id: state.user_info().id,
+            remote_address: state.remote_ip().map(|ip| ip.to_string()),
+            match_digest: state
                 .web_approval_match_key()
-                .map(|key| key.identity().digest())),
-            ticket_id: Set(None),
-            started: Set(*state.started()),
-            status: Set(SessionApprovalRequest::ApprovalRequestStatus::Pending),
-            scope: Set(None),
-            resolved_by_username: Set(None),
-            resolved_by_user_id: Set(None),
-            resolved_at: Set(None),
-            consumed_at: Set(None),
+                .map(|key| key.identity().digest()),
+            started: *state.started(),
+            about: SessionApprovalRequest::Asking::User {
+                identification_string: state.identification_string().to_owned(),
+            },
         }
     };
 
