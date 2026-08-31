@@ -12,12 +12,15 @@
     import Fa from 'svelte-fa'
     import Router, {
         link,
+        push,
+        type RouteDetail,
         router,
         type WrappedComponent,
     } from 'svelte-spa-router'
     import active from 'svelte-spa-router/active'
     import { wrap } from 'svelte-spa-router/wrap'
     import AnalyticsConsentModal from './AnalyticsConsentModal.svelte'
+    import { ADMIN_PERMISSIONS } from './lib/store'
 
     let showAnalyticsModal = $state(false)
     $effect(() => {
@@ -33,7 +36,12 @@
 
     async function init() {
         await reloadServerInfo()
-        if (!get(serverInfo)?.username) {
+        const adminPermissions = get(serverInfo)?.adminPermissions
+        if (
+            !get(serverInfo)?.username ||
+            !adminPermissions ||
+            !ADMIN_PERMISSIONS.some(p => adminPermissions[p.key])
+        ) {
             // Not logged in: redirect to the (gateway) login page, preserving this admin
             // URL — hash route included — as `next` so we return exactly here afterwards.
             // (The admin shell is no longer server-gated, so this runs client-side where
@@ -42,6 +50,7 @@
             location.assign(
                 `/@warpgate#/login?next=${encodeURIComponent(next)}`,
             )
+            await new Promise(() => undefined)
         }
     }
 

@@ -17,6 +17,7 @@
     } from '@sveltestrap/sveltestrap'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import InfoBox from 'common/InfoBox.svelte'
+    import { handleReauthError } from 'common/reauth'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { onDestroy, onMount, tick } from 'svelte'
     import { SvelteMap } from 'svelte/reactivity'
@@ -29,8 +30,9 @@
     } from './lib/ReconnectingWebSocket.svelte'
     import SshTerminalTab, { THEME } from './WebSshTab.svelte'
 
+    // Match both routes (start & viewer)
     interface Props {
-        params: { sessionId: string }
+        params: { sessionId?: string; targetId?: string }
     }
     let { params }: Props = $props()
 
@@ -77,7 +79,7 @@
     const tabs: Record<string, SshTerminalTab> = {}
 
     // svelte-ignore state_referenced_locally
-    const { sessionId } = params
+    let sessionId = $state(params.sessionId)
 
     let sessionInfo = $state<WebSshSessionInfo | null>(null)
 
@@ -102,19 +104,27 @@
     let menuOpen = $state(false)
     let showInstructions = $state(false)
 
-    const ws = new ReconnectingWebSocket({
-        url: `wss://${location.host}/@warpgate/api/web-ssh/sessions/${sessionId}/stream`,
-        onOpen: () => {
-            if (channelOrder.length === 0) {
-                requestNewChannel()
-            }
-        },
-        onMessage: data =>
-            onMessage(JSON.parse(data as string) as ServerMessage),
-    })
+    let ws = $state<ReconnectingWebSocket | undefined>()
+
+    function startStream() {
+        if (!sessionId) {
+            return
+        }
+        ws = new ReconnectingWebSocket({
+            url: `wss://${location.host}/@warpgate/api/web-ssh/sessions/${sessionId}/stream`,
+            onOpen: () => {
+                if (channelOrder.length === 0) {
+                    requestNewChannel()
+                }
+            },
+            onMessage: data =>
+                onMessage(JSON.parse(data as string) as ServerMessage),
+        })
+        ws.connect()
+    }
 
     function send(msg: ClientMessage) {
-        ws.send(JSON.stringify(msg))
+        ws?.send(JSON.stringify(msg))
     }
 
     function bytesToBase64(bytes: Uint8Array): string {
@@ -137,6 +147,9 @@
     }
 
     function onMessage(msg: ServerMessage) {
+        if (!ws) {
+            return
+        }
         switch (msg.type) {
             case 'connection_state':
                 ws.state = msg.state
@@ -223,17 +236,37 @@
     }
 
     async function disconnect() {
-        ws.close()
-        await api.deleteWebSshSession({ sessionId })
+        ws?.close()
+        if (sessionId) {
+            await api.deleteWebSshSession({ sessionId })
+        }
         window.close()
+    }
+
+    async function startSession(targetId: string): Promise<void> {
+        const { sessionId: id } = await api.createWebSshSession({
+            createWebSshSessionBody: { targetId },
+        })
+        sessionId = id
+        history.replaceState(history.state, '', `#/web-ssh/${id}`)
     }
 
     onMount(async () => {
         reloadServerInfo()
 
         try {
+            if (!sessionId && params.targetId) {
+                await startSession(params.targetId)
+            }
+            if (!sessionId) {
+                sessionNotFound = true
+                return
+            }
             sessionInfo = await api.getWebSshSession({ sessionId })
         } catch (e) {
+            if (await handleReauthError(e)) {
+                return
+            }
             connectionError =
                 e instanceof Error ? e.message : 'Failed to load session info'
             if (e instanceof ResponseError && e.response.status === 404) {
@@ -241,7 +274,7 @@
             }
             return
         }
-        ws.connect()
+        startStream()
     })
 
     const originalTitle = document.title
@@ -258,7 +291,7 @@
     })
 
     onDestroy(() => {
-        ws.close()
+        ws?.close()
     })
 
     loadTheme('dark')
@@ -277,7 +310,7 @@
                     bind:this={tabs[id]}
                     active={id === activeChannelId}
                     {fontSize}
-                    readOnly={ws.state !== ConnectionState.Connected}
+                    readOnly={ws?.state !== ConnectionState.Connected}
                     onInput={data => send({ type: 'input', channel_id: id, data: bytesToBase64(data) })}
                     onResize={(cols, rows) => send({ type: 'resize', channel_id: id, cols, rows })}
                     onTitleChange={title => {
@@ -330,7 +363,7 @@
                     {/if}
                 {/each}
 
-                {#if ws.state === ConnectionState.Connected}
+                {#if ws?.state === ConnectionState.Connected}
                     <button
                         type="button"
                         class="btn btn-secondary px-3"
@@ -343,14 +376,14 @@
 
             {#if !sessionNotFound}
                 <span class="text-muted small me-3">
-                    {ws.state}
-                    {#if ws.state === ConnectionState.Connecting && ws.attempt > 0}
+                    {ws?.state ?? ConnectionState.Connecting}
+                    {#if ws?.state === ConnectionState.Connecting && ws.attempt > 0}
                         &nbsp;(attempt {ws.attempt})
                     {/if}
                 </span>
             {/if}
 
-            {#if ws.state === ConnectionState.Connected}
+            {#if ws?.state === ConnectionState.Connected}
                 <Button color="danger" onclick={disconnect}>Disconnect</Button>
             {/if}
 
