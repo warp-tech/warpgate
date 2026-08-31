@@ -10,6 +10,9 @@
         '/sessions/:id': wrap({
             asyncComponent: () => import('./Session.svelte'),
         }),
+        '/commands': wrap({
+            asyncComponent: () => import('./Commands.svelte'),
+        }),
         '/login-protection': wrap({
             asyncComponent: () => import('./LoginProtection.svelte'),
         }),
@@ -27,6 +30,14 @@
             title="Sessions"
             description="Active and past connections"
             href="/status/sessions"
+        />
+
+        <NavListItem
+            small
+            class="mb-2"
+            title="Commands"
+            description="Search shell commands recorded in SSH sessions"
+            href="/status/commands"
         />
 
         <NavListItem

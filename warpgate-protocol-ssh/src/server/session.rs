@@ -1636,6 +1636,17 @@ impl ServerSession {
         let Some(target_session_id) = self.target_session_id else {
             return;
         };
+        // Detected commands persist independently of whether recording itself
+        // succeeds, so the sink is attached unconditionally here.
+        {
+            let db = self.services.db.clone();
+            let node_id = Some(self.services.cluster.node_id);
+            if let Some(channel_state) = self.channels.get_mut(&channel_id) {
+                channel_state
+                    .audit
+                    .set_command_sink(db, target_session_id, node_id);
+            }
+        }
         let recorder = async {
             let recorder = self
                 .services

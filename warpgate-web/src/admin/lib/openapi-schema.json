@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "713b4985-modified"
+    "version": "6847c9d8-modified"
   },
   "servers": [
     {
@@ -312,6 +312,107 @@
           }
         ],
         "operationId": "get_recording"
+      }
+    },
+    "/commands/search": {
+      "get": {
+        "parameters": [
+          {
+            "name": "q",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "user",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "target",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "from",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "to",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_SessionCommandSnapshot"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "search_session_commands"
       }
     },
     "/roles": {
@@ -5651,6 +5752,31 @@
           "ForcedOff"
         ]
       },
+      "PaginatedResponse_SessionCommandSnapshot": {
+        "type": "object",
+        "title": "PaginatedResponse_SessionCommandSnapshot",
+        "required": [
+          "items",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionCommandSnapshot"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
       "PaginatedResponse_UserSessionSnapshot": {
         "type": "object",
         "title": "PaginatedResponse_UserSessionSnapshot",
@@ -6598,6 +6724,45 @@
           "failed_attempts_last_24h": {
             "type": "integer",
             "format": "uint64"
+          }
+        }
+      },
+      "SessionCommandSnapshot": {
+        "type": "object",
+        "title": "SessionCommandSnapshot",
+        "required": [
+          "id",
+          "command",
+          "time",
+          "target_session_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "command": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "target_session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The parent login session; `None` only in the race where it was deleted\nbetween listing the commands and fetching their parents."
+          },
+          "username": {
+            "type": "string"
+          },
+          "target_name": {
+            "type": "string",
+            "description": "Target name parsed from the session's target snapshot"
           }
         }
       },
