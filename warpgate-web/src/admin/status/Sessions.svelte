@@ -9,6 +9,7 @@
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
+    import { PROTOCOL_PROPERTIES } from 'common/protocols'
     import RelativeDate from 'common/RelativeDate.svelte'
     import { formatDistance } from 'date-fns'
     import { serverInfo } from 'gateway/lib/store'
@@ -35,6 +36,14 @@
         'sessions-list:show-logged-in-only',
         true,
     )
+    let [protocolFilter, protocolFilter$] = autosave(
+        'sessions-list:protocol-filter',
+        '',
+    )
+    let [fromDate, fromDate$] = autosave('sessions-list:from-date', '')
+    let [toDate, toDate$] = autosave('sessions-list:to-date', '')
+
+    const PROTOCOLS = Object.keys(PROTOCOL_PROPERTIES)
 
     let activeSessionCount: number | undefined = $state()
 
@@ -43,6 +52,21 @@
     )
     let sessionChanges$ = fromEvent(socket, 'message')
     onDestroy(() => socket.close())
+
+    // A date input value ("YYYY-MM-DD") as an API timestamp bound; a `to` date
+    // includes the whole selected day. Returned as a Date — the API client
+    // serializes it to an ISO string.
+    function dateInputToDate(
+        value: string,
+        endOfDay: boolean,
+    ): Date | undefined {
+        if (!value) {
+            return undefined
+        }
+        const time = endOfDay ? '23:59:59.999' : '00:00:00.000'
+        const parsed = new Date(`${value}T${time}`)
+        return Number.isNaN(parsed.getTime()) ? undefined : parsed
+    }
 
     function loadSessions(
         opt: LoadOptions,
@@ -54,23 +78,31 @@
         return combineLatest([
             showActiveOnly$,
             showLoggedInOnly$,
+            protocolFilter$,
+            fromDate$,
+            toDate$,
             merge(timer(0, 60000), sessionChanges$),
         ]).pipe(
-            switchMap(([activeOnly, loggedInOnly]) => {
-                api.getSessions({
-                    activeOnly: true,
-                    limit: 1,
-                }).then(response => {
-                    activeSessionCount = response.total
-                })
-                return from(
+            switchMap(
+                ([activeOnly, loggedInOnly, protocol, fromValue, toValue]) => {
                     api.getSessions({
-                        activeOnly,
-                        loggedInOnly,
-                        ...opt,
-                    }),
-                )
-            }),
+                        activeOnly: true,
+                        limit: 1,
+                    }).then(response => {
+                        activeSessionCount = response.total
+                    })
+                    return from(
+                        api.getSessions({
+                            activeOnly,
+                            loggedInOnly,
+                            protocol: protocol || undefined,
+                            from: dateInputToDate(fromValue, false),
+                            to: dateInputToDate(toValue, true),
+                            ...opt,
+                        }),
+                    )
+                },
+            ),
         )
     }
 
@@ -128,10 +160,33 @@
         </div>
     {/if}
 
-    <ItemList load={loadSessions} pageSize={100}>
+    <ItemList load={loadSessions} pageSize={100} showSearch={true}>
         {#snippet header()}
-            <div class="d-flex align-items-center mb-1 w-100">
+            <div class="d-flex align-items-center mb-1 w-100 flex-wrap gap-1">
                 <div class="ms-auto"></div>
+                <Input
+                    class="ms-3"
+                    type="select"
+                    aria-label="Protocol filter"
+                    bind:value={$protocolFilter}
+                >
+                    <option value="">All protocols</option>
+                    {#each PROTOCOLS as protocol (protocol)}
+                        <option value={protocol}>{protocol}</option>
+                    {/each}
+                </Input>
+                <Input
+                    class="ms-3"
+                    type="date"
+                    label="From"
+                    bind:value={$fromDate}
+                />
+                <Input
+                    class="ms-3"
+                    type="date"
+                    label="To"
+                    bind:value={$toDate}
+                />
                 <Input
                     class="ms-3"
                     type="switch"
