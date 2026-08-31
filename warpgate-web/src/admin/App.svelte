@@ -12,12 +12,15 @@
     import Fa from 'svelte-fa'
     import Router, {
         link,
+        push,
+        type RouteDetail,
         router,
         type WrappedComponent,
     } from 'svelte-spa-router'
     import active from 'svelte-spa-router/active'
     import { wrap } from 'svelte-spa-router/wrap'
     import AnalyticsConsentModal from './AnalyticsConsentModal.svelte'
+    import { ADMIN_PERMISSIONS } from './lib/store'
 
     let showAnalyticsModal = $state(false)
     $effect(() => {
@@ -47,40 +50,65 @@
 
     const initPromise = init()
 
+    async function requireAdmin(detail: RouteDetail) {
+        await initPromise
+        const adminPermissions = get(serverInfo)?.adminPermissions
+        if (
+            !adminPermissions ||
+            !ADMIN_PERMISSIONS.some(p => adminPermissions[p.key])
+        ) {
+            let url = `${location.pathname}#${detail.location}`
+            if (detail.querystring) {
+                url += `?${detail.querystring}`
+            }
+            push(`/login?next=${encodeURIComponent(url)}`)
+            return false
+        }
+        return true
+    }
+
     const routes: Record<string, WrappedComponent> = {
         '/': wrap({
             component: Redirect,
             props: { to: '/status/sessions' },
+            conditions: [requireAdmin],
         }),
         '/status/recordings/:id': wrap({
             asyncComponent: () => import('./status/Recording.svelte'),
+            conditions: [requireAdmin],
         }),
         '/status': wrap({
             asyncComponent: () => import('./status/Status.svelte'),
+            conditions: [requireAdmin],
         }),
         '/log': wrap({
             asyncComponent: () => import('./Log.svelte'),
+            conditions: [requireAdmin],
         }),
         '/log/user/:id': wrap({
             asyncComponent: () => import('./Log.svelte'),
             props: {
                 filterKind: 'user',
             },
+            conditions: [requireAdmin],
         }),
         '/log/access-role/:id': wrap({
             asyncComponent: () => import('./Log.svelte'),
             props: {
                 filterKind: 'access-role',
             },
+            conditions: [requireAdmin],
         }),
         '/log/admin-role/:id': wrap({
             asyncComponent: () => import('./Log.svelte'),
             props: {
                 filterKind: 'admin-role',
             },
+            conditions: [requireAdmin],
         }),
         '/config': wrap({
             asyncComponent: () => import('./config/Config.svelte'),
+            conditions: [requireAdmin],
         }),
     }
     // biome-ignore lint/style/noNonNullAssertion: x

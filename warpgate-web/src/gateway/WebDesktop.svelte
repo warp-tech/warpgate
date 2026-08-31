@@ -232,6 +232,13 @@
                 // Reveal only once there's something to show, so the canvas fades in with
                 // the first real content instead of flashing an empty surface.
                 painted = true
+                if (
+                    frame.type === 'raw_image' ||
+                    frame.type === 'png_image' ||
+                    frame.type === 'jpeg_image'
+                ) {
+                    painted = true
+                }
             }
         } finally {
             draining = false
