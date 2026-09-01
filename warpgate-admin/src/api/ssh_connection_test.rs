@@ -1,6 +1,7 @@
 use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
+use tracing::error;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
 use warpgate_protocol_ssh::{
@@ -115,10 +116,20 @@ impl Api {
                     remote_key_base64: key.public_key_base64(),
                 },
             ))),
-            Err(err) => Ok(CheckSshHostKeyResponse::Error(PlainText(
-                err.downcast_ref::<ConnectionError>()
-                    .map_or_else(|| format!("{err:#}"), ConnectionError::client_message),
-            ))),
+            Err(err) => {
+                // The sanitised text is all the caller gets, so without this the
+                // reason exists nowhere: a Vault refusal names its status and
+                // body only in the error's own Display, and every 4xx collapses
+                // into one client message. The session path already logs the
+                // full error before sanitising it; this path did not, and a
+                // failing host-key check was therefore undiagnosable from the
+                // server side.
+                error!(target_id=%body.target_id, error=%format!("{err:#}"), "SSH host key check failed");
+                Ok(CheckSshHostKeyResponse::Error(PlainText(
+                    err.downcast_ref::<ConnectionError>()
+                        .map_or_else(|| format!("{err:#}"), ConnectionError::client_message),
+                )))
+            }
         }
     }
 }
