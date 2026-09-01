@@ -43,13 +43,22 @@ impl AwsError {
 
     pub fn client_message(&self) -> &'static str {
         match self {
-            AwsError::NoCredentials
-            | AwsError::StaticCredentialsDisallowed
-            | AwsError::Credentials(_) => "AWS credential provider error",
+            AwsError::NoCredentials => "No AWS credentials are available",
+            // Its own message because the credentials exist and we refused
+            // them: grouped with "none available", an operator who had set
+            // static keys was sent looking for the thing they had already done.
+            AwsError::StaticCredentialsDisallowed => {
+                "Static AWS credentials are refused; Vault authentication needs a temporary workload identity"
+            }
+            AwsError::Credentials(_) => "AWS credential provider error",
             AwsError::SigningParams(_) | AwsError::Signing(_) | AwsError::Http(_) => {
                 "AWS signing request failed"
             }
-            AwsError::RegionUnknown(_) | AwsError::ResourceNotFound(_, _) => "AWS resource error",
+            // A region that could not be derived is configuration; a resource
+            // that was not found is an id or a permission. Different places to
+            // look, so different sentences.
+            AwsError::RegionUnknown(_) => "The AWS region could not be determined",
+            AwsError::ResourceNotFound(_, _) => "The AWS resource was not found",
             AwsError::Other(_) => "AWS integration error",
         }
     }

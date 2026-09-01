@@ -82,12 +82,18 @@ pub enum VaultError {
 impl VaultError {
     pub fn client_message(&self) -> &'static str {
         match self {
-            VaultError::InsecureAddress | VaultError::InvalidAddress(_) => {
-                "Vault endpoint configuration is invalid"
+            // Split rather than grouped: refusing plaintext is a rule of ours
+            // that an operator may not know they have hit, and an unparseable
+            // address is a typo. One message sent both to the same wrong place.
+            VaultError::InsecureAddress => "The Vault address must use HTTPS outside localhost",
+            VaultError::InvalidAddress(_) => "The Vault address is not a valid URL",
+            VaultError::InvalidRole(_) | VaultError::InvalidCertificateTtl(_) => {
+                "Invalid Vault role or mount configuration"
             }
-            VaultError::InvalidRole(_)
-            | VaultError::InvalidCertificateTtl(_)
-            | VaultError::CaBundle { .. } => "Invalid Vault role or mount configuration",
+            // Named separately because it is not a role or a mount at all: the
+            // file at `ca_bundle` cannot be read or parsed. Grouped with the
+            // role, it sent the reader to the one place that was fine.
+            VaultError::CaBundle { .. } => "The Vault CA bundle cannot be read or parsed",
             VaultError::InvalidPrincipal(_) | VaultError::InvalidKeyId => {
                 "Invalid certificate request parameters"
             }
@@ -96,8 +102,23 @@ impl VaultError {
                 // from working, and nothing else in the message would say so.
                 if body.contains("setting key_id is not allowed by role") {
                     "The Vault role does not permit a key ID; set allow_user_key_ids=true on it"
-                } else if status.is_client_error() {
+                } else if *status == reqwest::StatusCode::UNAUTHORIZED
+                    || *status == reqwest::StatusCode::FORBIDDEN
+                {
+                    // The credential, not the request: a policy that does not
+                    // reach this path, or a token Vault no longer honours.
                     "Vault denied the certificate signing request"
+                } else if *status == reqwest::StatusCode::NOT_FOUND {
+                    "Vault has no signing role or mount at that path"
+                } else if status.is_client_error() {
+                    // Reported from the field, where a 400 cost a round trip to
+                    // diagnose: at the sign endpoint it is the role refusing the
+                    // request — a principal, key type, extension, critical
+                    // option or TTL outside what the role allows. That is an
+                    // operator's configuration to fix, and a message naming the
+                    // role points at it; the previous wording sent the reader
+                    // looking at the credential instead.
+                    "Vault rejected the request as not permitted by the signing role"
                 } else {
                     "Vault service error"
                 }
@@ -106,11 +127,20 @@ impl VaultError {
                 "Failed to read Vault credentials"
             }
             VaultError::SecretIdUnwrap { .. } => "Failed to unwrap the Vault AppRole secret ID",
-            VaultError::Request(_) | VaultError::LoginTimeout => "Vault is currently unavailable",
-            VaultError::Json(_)
-            | VaultError::MetadataAddress(_)
-            | VaultError::OversizedResponse
-            | VaultError::InvalidLease(_) => "Invalid response from Vault",
+            VaultError::Request(_) => "Vault is currently unavailable",
+            // Not the same as Vault being down, and the doc comment on the
+            // variant says why: the bound covers reading the credential too, so
+            // a FIFO, a hung mount or a stalled cloud chain lands here while
+            // Vault is healthy.
+            VaultError::LoginTimeout => {
+                "Authenticating to Vault timed out; the credential source may be stalled"
+            }
+            // The metadata service, not Vault. Vault never answered, so calling
+            // this a bad response from it named the wrong machine.
+            VaultError::MetadataAddress(_) => "The cloud metadata service address is invalid",
+            VaultError::Json(_) | VaultError::OversizedResponse | VaultError::InvalidLease(_) => {
+                "Invalid response from Vault"
+            }
             VaultError::Aws(e) => e.client_message(),
         }
     }
