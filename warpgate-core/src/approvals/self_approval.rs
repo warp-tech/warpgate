@@ -124,7 +124,7 @@ pub(crate) async fn advertise_user_request(
                 .web_approval_match_key()
                 .map(|key| key.identity().digest()),
             started: *state.started(),
-            about: SessionApprovalRequest::Asking::User {
+            about: SessionApprovalRequest::RequestAsk::User {
                 identification_string: state.identification_string().to_owned(),
             },
         }

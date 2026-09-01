@@ -1,15 +1,17 @@
 use std::ops::Deref;
 
+use poem_openapi::Enum;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{IntoCondition, SimpleExpr};
 use sea_orm::{Condition, NotSet, QueryFilter, Set, SqlErr};
+use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::auth::{ApprovalKind, ApprovalScope};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, DeriveActiveEnum)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Enum, EnumIter, DeriveActiveEnum, Serialize)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 pub enum ApprovalRequestStatus {
     #[sea_orm(string_value = "pending")]

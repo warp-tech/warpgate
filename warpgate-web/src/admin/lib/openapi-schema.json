@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-39-ga5df8eb9-modified"
+    "version": "v0.28.5-46-gf80dd42d-modified"
   },
   "servers": [
     {
@@ -4777,6 +4777,16 @@
           }
         }
       },
+      "ApprovalRequestStatus": {
+        "type": "string",
+        "enum": [
+          "Pending",
+          "Approved",
+          "Rejected",
+          "TimedOut",
+          "Abandoned"
+        ]
+      },
       "ApprovalScope": {
         "type": "string",
         "description": "\"Remember decision\" scope for approvals",
@@ -6774,6 +6784,37 @@
           }
         }
       },
+      "SessionApprovalRequestSnapshot": {
+        "type": "object",
+        "title": "SessionApprovalRequestSnapshot",
+        "required": [
+          "target",
+          "status"
+        ],
+        "properties": {
+          "resolved_by_username": {
+            "type": "string"
+          },
+          "resolved_by_user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApprovalRequestStatus"
+          }
+        }
+      },
       "SshHostKeyVerificationMode": {
         "type": "string",
         "description": "What to do when a target's SSH host key isn't in the known hosts list.",
@@ -7986,7 +8027,8 @@
           "started",
           "protocol",
           "remote_address",
-          "target_sessions"
+          "target_sessions",
+          "admin_approvals"
         ],
         "properties": {
           "id": {
@@ -8027,6 +8069,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TargetSessionSnapshot"
+            }
+          },
+          "admin_approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionApprovalRequestSnapshot"
             }
           }
         }

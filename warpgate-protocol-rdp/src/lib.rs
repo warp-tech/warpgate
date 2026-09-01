@@ -14,12 +14,12 @@ mod session_handle;
 use anyhow::Context;
 use futures::future::BoxFuture;
 pub use server::bind_server;
-use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender, channel, unbounded_channel};
-use tracing::{Instrument, error, info_span};
+use tokio::sync::mpsc::{channel, unbounded_channel, Receiver, Sender, UnboundedSender};
+use tracing::{error, info_span, Instrument};
 use warpgate_common::{ListenEndpoint, Protocol, TargetRdpOptions, WarpgateError};
 use warpgate_core::{
-    AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopState,
-    ProtocolServer, Services,
+    AdmittedTarget, DesktopEvent, DesktopInput, DesktopState, ProtocolServer, Services,
+    DESKTOP_INPUT_CHANNEL_CAPACITY,
 };
 use warpgate_tls::TlsCertificateAndPrivateKey;
 

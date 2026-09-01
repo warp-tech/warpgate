@@ -1,14 +1,18 @@
 <script lang="ts">
     import { faComputer } from '@fortawesome/free-solid-svg-icons'
     import { Badge } from '@sveltestrap/sveltestrap'
+    import { adminPermissions } from 'admin/lib/store'
     import Fa from 'svelte-fa'
-    import { link } from 'svelte-spa-router'
 
-    export let id: string
+    export let id: string | undefined
     export let name: string
 </script>
 
-<Badge color="primary" class="d-flex align-items-center">
-    <Fa icon={faComputer} class="me-2" />
-    <a href="/config/targets/{id}" use:link>{name}</a>
+<Badge
+    href={$adminPermissions.targetsEdit && id ? `#/config/targets/${id}` : undefined}
+    color="info"
+    class="d-flex align-items-center gap-2"
+>
+    <Fa icon={faComputer} />
+    {name}
 </Badge>

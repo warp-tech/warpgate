@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::IntoCondition;
+use sea_orm::ActiveValue::Set;
 use sea_orm::{Database, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -12,9 +12,9 @@ use warpgate_common::auth::{
     StoredCredentialFingerprint, StoredCredentialKind, WebApprovalMatchKey,
 };
 use warpgate_common::{NodeId, Protocol, UserSessionId};
-use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+use warpgate_db_entities::Parameters::{set_config_migration_values, ConfigMigrationValues};
 use warpgate_db_entities::SessionApprovalRequest::{
-    self, Advertised, ApprovalActor, close_request, mark_consumed, upsert_request,
+    self, close_request, mark_consumed, upsert_request, Advertised, ApprovalActor,
 };
 use warpgate_db_migrations::migrate_database;
 
@@ -614,8 +614,8 @@ async fn closing_keeps_the_row_and_never_overwrites_an_answer() {
 fn every_column_is_classified() {
     use std::collections::HashSet;
 
-    use SessionApprovalRequest::Column;
     use sea_orm::Iterable;
+    use SessionApprovalRequest::Column;
 
     let classified: HashSet<String> = [Column::SessionId, Column::Kind, Column::Target]
         .iter()
@@ -770,11 +770,9 @@ async fn a_remembered_approval_requires_a_full_match() {
     )
     .unwrap();
 
-    assert!(
-        !approval_is_remembered(&db, &other_kind, GRACE)
-            .await
-            .unwrap()
-    );
+    assert!(!approval_is_remembered(&db, &other_kind, GRACE)
+        .await
+        .unwrap());
 }
 
 #[tokio::test]
@@ -847,18 +845,16 @@ async fn only_an_approval_is_remembered() {
             .unwrap()
     );
 
-    assert!(
-        record_decision(
-            &db,
-            pending,
-            ApprovalKind::Admin,
-            "prod",
-            ApprovalDecision::Rejected,
-            admin_actor(),
-        )
-        .await
-        .unwrap()
-    );
+    assert!(record_decision(
+        &db,
+        pending,
+        ApprovalKind::Admin,
+        "prod",
+        ApprovalDecision::Rejected,
+        admin_actor(),
+    )
+    .await
+    .unwrap());
     assert!(
         !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
             .await
@@ -976,17 +972,15 @@ async fn asking_again_re_spends_the_use_a_timeout_gave_back() {
     subject.ticket_id = Some(ticket_id);
     advertise_row(&db, session_id, &subject).await;
 
-    assert!(
-        SessionApprovalRequest::close_request(
-            &db,
-            session_id,
-            ApprovalKind::Admin,
-            "a-target",
-            UndecidedApprovalRequestStatus::TimedOut,
-        )
-        .await
-        .unwrap()
-    );
+    assert!(SessionApprovalRequest::close_request(
+        &db,
+        session_id,
+        ApprovalKind::Admin,
+        "a-target",
+        UndecidedApprovalRequestStatus::TimedOut,
+    )
+    .await
+    .unwrap());
     assert_eq!(
         uses_left(&db, ticket_id).await,
         Some(1),
@@ -1020,17 +1014,15 @@ async fn an_exhausted_ticket_cannot_ask_again() {
     subject.ticket_id = Some(ticket_id);
     advertise_row(&db, session_id, &subject).await;
 
-    assert!(
-        SessionApprovalRequest::close_request(
-            &db,
-            session_id,
-            ApprovalKind::Admin,
-            "a-target",
-            UndecidedApprovalRequestStatus::TimedOut,
-        )
-        .await
-        .unwrap()
-    );
+    assert!(SessionApprovalRequest::close_request(
+        &db,
+        session_id,
+        ApprovalKind::Admin,
+        "a-target",
+        UndecidedApprovalRequestStatus::TimedOut,
+    )
+    .await
+    .unwrap());
     // The refunded use goes to someone else before the re-ask.
     warpgate_db_entities::Ticket::spend_use(&db, ticket_id)
         .await
@@ -1081,17 +1073,15 @@ async fn a_decision_aimed_at_an_earlier_asking_settles_nothing() {
 
     // The asking times out (refunding) and is asked afresh (re-spending) —
     // with a renewed `started`, which is what tells the askings apart.
-    assert!(
-        SessionApprovalRequest::close_request(
-            &db,
-            session_id,
-            ApprovalKind::Admin,
-            "a-target",
-            UndecidedApprovalRequestStatus::TimedOut,
-        )
-        .await
-        .unwrap()
-    );
+    assert!(SessionApprovalRequest::close_request(
+        &db,
+        session_id,
+        ApprovalKind::Admin,
+        "a-target",
+        UndecidedApprovalRequestStatus::TimedOut,
+    )
+    .await
+    .unwrap());
     advertise_row(&db, session_id, &subject).await;
     assert_eq!(uses_left(&db, ticket_id).await, Some(0));
 
@@ -1252,18 +1242,16 @@ async fn a_rejection_gives_the_use_back() {
     subject.ticket_id = Some(ticket_id);
     advertise_row(&db, session_id, &subject).await;
 
-    assert!(
-        record_decision(
-            &db,
-            session_id,
-            ApprovalKind::Admin,
-            "a-target",
-            ApprovalDecision::Rejected,
-            admin_actor(),
-        )
-        .await
-        .unwrap()
-    );
+    assert!(record_decision(
+        &db,
+        session_id,
+        ApprovalKind::Admin,
+        "a-target",
+        ApprovalDecision::Rejected,
+        admin_actor(),
+    )
+    .await
+    .unwrap());
     assert_eq!(uses_left(&db, ticket_id).await, Some(1));
 }
 
@@ -1274,9 +1262,9 @@ mod delivery {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use tokio::sync::{Mutex, broadcast};
+    use tokio::sync::{broadcast, Mutex};
     use warpgate_common::auth::{
-        AuthCredential, AuthResult, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
+        AuthResult, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
     };
     use warpgate_common::{GlobalParams, Secret, User, WarpgateConfig, WarpgateConfigStore};
 
@@ -1428,12 +1416,10 @@ mod delivery {
             AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval)
         ));
         // ...its row is stamped as picked up so it stops being re-offered...
-        assert!(
-            user_row(&db, session_id, "alpha")
-                .await
-                .consumed_at
-                .is_some()
-        );
+        assert!(user_row(&db, session_id, "alpha")
+            .await
+            .consumed_at
+            .is_some());
         // ...and the live question is untouched: still pending, still deliverable.
         let beta = user_row(&db, session_id, "beta").await;
         assert_eq!(
@@ -1452,12 +1438,10 @@ mod delivery {
             state_arc.lock().await.verify(),
             AuthResult::Accepted { .. }
         ));
-        assert!(
-            user_row(&db, session_id, "beta")
-                .await
-                .consumed_at
-                .is_some()
-        );
+        assert!(user_row(&db, session_id, "beta")
+            .await
+            .consumed_at
+            .is_some());
     }
 
     /// A fresh attempt on the same connection can take the session's state
@@ -1499,12 +1483,10 @@ mod delivery {
             state_arc.lock().await.verify(),
             AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval)
         ));
-        assert!(
-            user_row(&db, session_id, "a-target")
-                .await
-                .consumed_at
-                .is_some()
-        );
+        assert!(user_row(&db, session_id, "a-target")
+            .await
+            .consumed_at
+            .is_some());
     }
 }
 
@@ -1643,17 +1625,15 @@ mod polled_gate {
         ));
         // The question times out (refunding), and the refunded use goes
         // elsewhere before the next poll.
-        assert!(
-            SessionApprovalRequest::close_request(
-                &db,
-                session_id,
-                ApprovalKind::Admin,
-                "prod",
-                UndecidedApprovalRequestStatus::TimedOut,
-            )
-            .await
-            .unwrap()
-        );
+        assert!(SessionApprovalRequest::close_request(
+            &db,
+            session_id,
+            ApprovalKind::Admin,
+            "prod",
+            UndecidedApprovalRequestStatus::TimedOut,
+        )
+        .await
+        .unwrap());
         warpgate_db_entities::Ticket::spend_use(&db, ticket_id)
             .await
             .unwrap();
@@ -1757,18 +1737,16 @@ mod polled_gate {
             poll(&services, denied_session, &user_info, "prod").await,
             PolledGate::Pending
         ));
-        assert!(
-            record_decision(
-                &db,
-                denied_session,
-                ApprovalKind::Admin,
-                "prod",
-                ApprovalDecision::Rejected,
-                admin_actor(),
-            )
-            .await
-            .unwrap()
-        );
+        assert!(record_decision(
+            &db,
+            denied_session,
+            ApprovalKind::Admin,
+            "prod",
+            ApprovalDecision::Rejected,
+            admin_actor(),
+        )
+        .await
+        .unwrap());
         for _ in 0..2 {
             assert!(matches!(
                 poll(&services, denied_session, &user_info, "prod").await,

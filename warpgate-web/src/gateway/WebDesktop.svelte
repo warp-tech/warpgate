@@ -1,6 +1,7 @@
 <script lang="ts">
     import { faCompress, faExpand } from '@fortawesome/free-solid-svg-icons'
     import { Button } from '@sveltestrap/sveltestrap'
+    import ConnectingNotice from 'common/ConnectingNotice.svelte'
     import {
         applyDesktopFrame,
         type DesktopFrame,
@@ -529,12 +530,7 @@
     </div>
 
     {#if opening}
-        <div class="mx-3 mt-3">
-            <InfoBox>
-                Connecting. If this target needs administrator approval, the
-                session will start once an administrator approves it.
-            </InfoBox>
-        </div>
+        <ConnectingNotice />
     {/if}
 
     {#if connectionError}

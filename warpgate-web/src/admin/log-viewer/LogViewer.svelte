@@ -850,6 +850,7 @@
             align-items: center;
             min-width: 0;
             white-space: normal;
+            gap: 1rem;
 
             .text {
                 font-weight: bold;
