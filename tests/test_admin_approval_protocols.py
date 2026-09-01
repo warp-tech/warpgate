@@ -281,6 +281,7 @@ class Test:
         self,
         processes: ProcessManager,
         timeout,
+        shared_postgres_port,
     ):
         # The approval RPC is exercised cross-node elsewhere; a denial travels
         # the same path and must actually end the session on the owning node.
@@ -289,8 +290,6 @@ class Test:
         node_b = processes.start_wg(share_with=node_a)
         wait_port(node_b.http_port, recv=False)
 
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
         with admin_client(f"https://localhost:{node_a.http_port}") as api:
             user, role = create_password_user(api)
             target = api.create_target(
@@ -301,7 +300,7 @@ class Test:
                         sdk.TargetOptionsTargetPostgresOptions(
                             kind="Postgres",
                             host="localhost",
-                            port=db_port,
+                            port=shared_postgres_port,
                             username="user",
                             auth=sdk.DatabaseTargetAuth(
                                 sdk.DatabaseTargetAuthDatabaseTargetPasswordAuth(

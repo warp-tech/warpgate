@@ -607,29 +607,6 @@ async fn closing_keeps_the_row_and_never_overwrites_an_answer() {
     );
 }
 
-/// Every column belongs to the key, the question or the answer — the
-/// reopen path rewrites by these sets, so an unclassified column would
-/// silently keep stale data when a question is asked again.
-#[test]
-fn every_column_is_classified() {
-    use std::collections::HashSet;
-
-    use sea_orm::Iterable;
-    use SessionApprovalRequest::Column;
-
-    let classified: HashSet<String> = [Column::SessionId, Column::Kind, Column::Target]
-        .iter()
-        .chain(&Column::IDENTITY)
-        .chain(&Column::DECISION)
-        .map(|column| format!("{column:?}"))
-        .collect();
-    let all: HashSet<String> = Column::iter().map(|column| format!("{column:?}")).collect();
-    assert_eq!(
-        classified, all,
-        "add the new column to Column::IDENTITY or Column::DECISION",
-    );
-}
-
 /// The waiting side has to notice a decision written by *another* task —
 /// that hand-off is the whole substrate, and a wait that only ever reads the
 /// row once would hold the session open forever.
@@ -1864,7 +1841,7 @@ mod polled_gate {
 
         assert_eq!(advertise().await.unwrap(), Advertised::Asked);
         let asked_at = started().await;
-        assert_eq!(advertise().await.unwrap(), Advertised::AlreadyAsking);
+        assert_eq!(advertise().await.unwrap(), Advertised::AlreadyAdvertised);
         assert_eq!(
             started().await,
             asked_at,
@@ -1891,7 +1868,7 @@ mod polled_gate {
         assert!(approve(&db, session_id, "prod").await);
         assert_eq!(
             advertise().await.unwrap(),
-            Advertised::DecisionStands,
+            Advertised::AlreadyAdvertised,
             "an answer on the row is not overwritten by asking again",
         );
     }

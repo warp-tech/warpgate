@@ -21,7 +21,7 @@ class TestHTTPUserAuthPassword:
             )
             api.add_user_role(user.id, role.id)
             echo_target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=f"echo-{uuid4()}",
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetHTTPOptions(
@@ -75,7 +75,7 @@ class TestHTTPUserAuthPassword:
             )
             api.add_user_role(user.id, role.id)
             echo_target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=f"echo-{uuid4()}",
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetHTTPOptions(

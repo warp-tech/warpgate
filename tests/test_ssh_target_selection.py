@@ -28,7 +28,7 @@ class Test:
             user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
             api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
             api.add_user_role(user.id, role.id)
-            ssh_target = api.create_target(sdk.TargetDataRequest(require_approval=False, 
+            ssh_target = api.create_target(sdk.TargetDataRequest(
                 name=f"ssh-{uuid4()}",
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(

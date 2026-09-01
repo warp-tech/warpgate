@@ -49,9 +49,9 @@
     import { openWebDesktopSession, openWebSshSession } from './lib/webSessions'
 
     let instructionsTarget: TargetSnapshot | undefined = $state()
-    /// The target an in-browser session is being opened for. Opening one can
-    /// take as long as an administrator takes to approve it, and until then
-    /// there is nothing else on screen to say the click did anything.
+    // The target an in-browser session is being opened for. Opening one can
+    // take as long as an administrator takes to approve it, and until then
+    // there is nothing else on screen to say the click did anything.
     let openingTarget: TargetSnapshot | undefined = $state()
     let openError: string | undefined = $state()
 
@@ -142,9 +142,9 @@
         }
     }
 
-    /// A target that needs administrator approval holds this until someone
-    /// decides, and answers 403 if they say no — so it needs both a sign that
-    /// it is in progress and somewhere for the refusal to land.
+    // A target that needs administrator approval holds this until someone
+    // decides, and answers 403 if they say no — so it needs both a sign that
+    // it is in progress and somewhere for the refusal to land.
     async function openInBrowser(
         target: TargetSnapshot,
         open: () => void | Promise<void>,

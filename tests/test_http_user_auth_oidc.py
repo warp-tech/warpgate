@@ -90,7 +90,7 @@ def _start_wg_with_oidc(processes, wg_http_port, oidc_port, *, external_host="12
 def _create_echo_target(api, echo_server_port, role_id, *, external_host=None):
     """Create an HTTP echo target and grant a role access."""
     target = api.create_target(
-        sdk.TargetDataRequest(require_approval=False, 
+        sdk.TargetDataRequest(
             name=f"echo-{uuid4()}",
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetHTTPOptions(

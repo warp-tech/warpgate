@@ -1,13 +1,16 @@
 <script lang="ts">
     import InfoBox from 'common/InfoBox.svelte'
 
-    /// Opening a session is usually quick; only a target held at the approval
-    /// gate takes long enough for this to be worth reading.
+    // Opening a session is usually quick; only a target held at the approval
+    // gate takes long enough for this to be worth reading.
     let visible = $state(false)
 
-    setTimeout(() => {
-        visible = true
-    }, 2000)
+    $effect(() => {
+        const timer = setTimeout(() => {
+            visible = true
+        }, 2000)
+        return () => clearTimeout(timer)
+    })
 </script>
 
 {#if visible}

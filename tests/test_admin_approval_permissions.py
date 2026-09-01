@@ -17,7 +17,6 @@ from .approval_util import (
     wait_for_pending_approval,
 )
 from .conftest import ProcessManager, WarpgateProcess
-from .util import wait_port
 
 
 def _logged_in(url, username, password="123"):
@@ -37,14 +36,13 @@ class Test:
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
+        shared_postgres_port,
     ):
         # The approval queue is gated entirely on `approve_sessions`: seeing who
         # is held is itself approver-only, and before that permission existed
         # this was reachable by every role with `sessions_terminate`.
         url = f"https://localhost:{shared_wg.http_port}"
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
-        user, target = create_user_and_postgres_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, shared_postgres_port)
 
         admin = create_approver(url, sessions_view=True, sessions_terminate=True)
 
@@ -80,11 +78,10 @@ class Test:
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
+        shared_postgres_port,
     ):
         url = f"https://localhost:{shared_wg.http_port}"
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
-        user, target = create_user_and_postgres_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, shared_postgres_port)
 
         admin = create_approver(url, sessions_view=True, approve_sessions=True)
 
@@ -107,13 +104,12 @@ class Test:
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
+        shared_postgres_port,
     ):
         # Four-eyes is the point of the gate: an approver who could open their
         # own held session and wave it through has defeated it.
         url = f"https://localhost:{shared_wg.http_port}"
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
-        user, target = create_user_and_postgres_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, shared_postgres_port)
         grant_admin_role(url, user.id, sessions_view=True, approve_sessions=True)
 
         client = psql_held(processes, shared_wg.postgres_port, user, target)
@@ -142,13 +138,12 @@ class Test:
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
+        shared_postgres_port,
     ):
         # Someone who can edit targets could just clear `require_approval`, so
         # refusing their self-approval would only cost a round trip.
         url = f"https://localhost:{shared_wg.http_port}"
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
-        user, target = create_user_and_postgres_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, shared_postgres_port)
         grant_admin_role(
             url,
             user.id,
@@ -176,11 +171,10 @@ class Test:
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
+        shared_postgres_port,
     ):
         url = f"https://localhost:{shared_wg.http_port}"
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
-        user, target = create_user_and_postgres_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, shared_postgres_port)
 
         admin = create_approver(url, sessions_view=True, approve_sessions=True)
 

@@ -26,11 +26,10 @@ class Test:
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
+        shared_postgres_port,
     ):
-        db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
-        user, target = create_user_and_postgres_target(url, db_port)
-        wait_port(db_port, recv=False)
+        user, target = create_user_and_postgres_target(url, shared_postgres_port)
 
         client = psql_held(processes, shared_wg.postgres_port, user, target)
 
@@ -66,11 +65,10 @@ class Test:
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
+        shared_postgres_port,
     ):
-        db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
-        user, target = create_user_and_postgres_target(url, db_port)
-        wait_port(db_port, recv=False)
+        user, target = create_user_and_postgres_target(url, shared_postgres_port)
 
         client = psql_held(processes, shared_wg.postgres_port, user, target)
 
@@ -90,12 +88,12 @@ class Test:
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
+        shared_postgres_port,
     ):
         # A policy requiring in-browser approval AND a target requiring admin
         # approval: the session is held twice, sequentially.
-        db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
-        user, target = create_user_and_postgres_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, shared_postgres_port)
         with admin_client(url) as api:
             api.update_user(
                 user.id,
@@ -109,7 +107,6 @@ class Test:
                     ),
                 ),
             )
-        wait_port(db_port, recv=False)
 
         session = aiohttp.ClientSession()
         headers = {"Host": f"localhost:{shared_wg.http_port}"}
@@ -156,15 +153,15 @@ class Test:
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
+        shared_postgres_port,
     ):
         # A ticket names a user but does not act as one: it is scoped to a
         # single target and is often handed to someone who is not that user at
         # all. Letting it answer their pending login would turn a ticket into
         # the second factor for every session they start.
-        db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
         user, target = create_user_and_postgres_target(
-            url, db_port, require_approval=False
+            url, shared_postgres_port, require_approval=False
         )
         with admin_client(url) as api:
             api.update_user(
@@ -184,7 +181,6 @@ class Test:
                     target_name=target.name, username=user.username
                 )
             ).secret
-        wait_port(db_port, recv=False)
 
         session = aiohttp.ClientSession()
         headers = {"Host": f"localhost:{shared_wg.http_port}"}
@@ -261,15 +257,14 @@ class Test:
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
+        shared_postgres_port,
     ):
         # The approvals indicator in both app shells counts the admin API's
         # pending list using the browser session cookie, so an admin logged
         # into the gateway must be able to read it cross-app.
-        db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
-        user, target = create_user_and_postgres_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, shared_postgres_port)
         grant_admin_role(url, user.id, approve_sessions=True)
-        wait_port(db_port, recv=False)
 
         session = aiohttp.ClientSession()
         headers = {"Host": f"localhost:{shared_wg.http_port}"}
@@ -320,6 +315,7 @@ class Test:
         self,
         processes: ProcessManager,
         timeout,
+        shared_postgres_port,
     ):
         # The requests inbox (and the indicator that links to it) merges held
         # sessions with pending ticket requests. Uses its own node because it
@@ -328,8 +324,7 @@ class Test:
         wait_port(wg.http_port, recv=False)
         url = f"https://localhost:{wg.http_port}"
 
-        db_port = processes.start_postgres_server()
-        user, target = create_user_and_postgres_target(url, db_port)
+        user, target = create_user_and_postgres_target(url, shared_postgres_port)
         grant_admin_role(
             url, user.id, approve_sessions=True, ticket_requests_manage=True
         )
@@ -340,7 +335,6 @@ class Test:
                     ticket_auto_approve_existing_access=False,
                 )
             )
-        wait_port(db_port, recv=False)
 
         session = requests.Session()
         session.verify = False
@@ -399,14 +393,13 @@ class Test:
         processes: ProcessManager,
         timeout,
         shared_wg: WarpgateProcess,
+        shared_postgres_port,
     ):
         # A ticket carries its own authorization, but a target requiring
         # approval must still hold it — otherwise `require_approval` is
         # bypassable by anyone holding a ticket.
-        db_port = processes.start_postgres_server()
         url = f"https://localhost:{shared_wg.http_port}"
-        user, target = create_user_and_postgres_target(url, db_port)
-        wait_port(db_port, recv=False)
+        user, target = create_user_and_postgres_target(url, shared_postgres_port)
 
         with admin_client(url) as api:
             secret = api.create_ticket(
@@ -448,6 +441,7 @@ class Test:
         self,
         processes: ProcessManager,
         timeout,
+        shared_postgres_port,
     ):
         # Two nodes on one database. The session is held on node A; the admin
         # approves from node B, which lists the request from the shared DB and
@@ -457,11 +451,9 @@ class Test:
         node_b = processes.start_wg(share_with=node_a)
         wait_port(node_b.http_port, recv=False)
 
-        db_port = processes.start_postgres_server()
         user, target = create_user_and_postgres_target(
-            f"https://localhost:{node_a.http_port}", db_port
+            f"https://localhost:{node_a.http_port}", shared_postgres_port
         )
-        wait_port(db_port, recv=False)
 
         # Held on node A.
         client = psql_held(processes, node_a.postgres_port, user, target)

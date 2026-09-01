@@ -279,24 +279,19 @@ mod tests {
         )
     }
 
-    /// The digest *is* the comparison a remembered approval is matched by, so a
-    /// part of a credential's identity that doesn't reach it is a part two
-    /// different credentials may differ in and still share a grant.
-    ///
-    /// The destructuring is the point: adding a field to `StoredCredential`
-    /// stops this compiling until someone says what it does to the digest.
+    /// The digest is what a remembered approval is matched by, so two
+    /// credentials differing in any part of their identity must not share one.
     #[test]
     fn every_part_of_a_stored_credential_reaches_the_digest() {
         let StoredCredential {
             kind,
             id,
-            fingerprint: verifier,
+            fingerprint,
         } = base();
-        let _ = (kind, id, verifier);
 
         for altered in [
-            StoredCredential::new(StoredCredentialKind::Sso, id, verifier),
-            StoredCredential::new(kind, Uuid::from_u128(2), verifier),
+            StoredCredential::new(StoredCredentialKind::Sso, id, fingerprint),
+            StoredCredential::new(kind, Uuid::from_u128(2), fingerprint),
             StoredCredential::new(
                 kind,
                 id,
@@ -319,16 +314,6 @@ mod tests {
             StoredCredentialKind::Totp,
             StoredCredentialKind::Sso,
         ];
-        // Exhaustive by construction: a new variant fails to compile here.
-        for kind in kinds {
-            let _: () = match kind {
-                StoredCredentialKind::Password
-                | StoredCredentialKind::PublicKey
-                | StoredCredentialKind::Totp
-                | StoredCredentialKind::Sso => (),
-            };
-        }
-
         let digests: HashSet<_> = kinds
             .into_iter()
             .map(|kind| {

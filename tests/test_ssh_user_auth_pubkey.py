@@ -35,7 +35,7 @@ class Test:
             )
             api.add_user_role(user.id, role.id)
             ssh_target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
@@ -110,7 +110,7 @@ class Test:
                 ),
             )
             api.add_user_role(user.id, role.id)
-            ssh_target = api.create_target(sdk.TargetDataRequest(require_approval=False, 
+            ssh_target = api.create_target(sdk.TargetDataRequest(
                 name=f"ssh-{uuid4()}",
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(

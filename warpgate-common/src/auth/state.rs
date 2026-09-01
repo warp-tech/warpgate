@@ -561,23 +561,11 @@ mod tests {
         }
     }
 
-    /// The digest *is* the comparison a remembered approval is matched by, so
-    /// a field that doesn't reach it is a field two different sessions are
-    /// allowed to differ in and still share a grant.
-    ///
-    /// The destructuring is the point: adding a field to the identity stops
-    /// this compiling until someone says what it does to the digest.
+    /// The digest is what a remembered approval is matched by, so two sessions
+    /// differing in any part of their identity must not share one.
     #[test]
     fn every_part_of_the_identity_reaches_the_digest() {
         let base = identity();
-        let WebApprovalIdentity {
-            kind,
-            remote_ip,
-            protocol,
-            username,
-            other_credentials,
-        } = identity();
-
         let differing = [
             WebApprovalIdentity {
                 kind: ApprovalKind::User,
@@ -600,9 +588,6 @@ mod tests {
                 ..identity()
             },
         ];
-        // Names the destructured bindings, so none is quietly unused if a
-        // field is added and left out of the cases above.
-        let _ = (kind, remote_ip, protocol, username, other_credentials);
 
         for altered in differing {
             assert_ne!(

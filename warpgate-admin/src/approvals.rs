@@ -62,11 +62,6 @@ impl PendingApproval {
     }
 }
 
-pub enum ApprovalResolution {
-    Resolved,
-    NotFound,
-}
-
 pub async fn find_pending_approval(
     ctx: &AuthenticatedRequestContext,
     session_id: UserSessionId,
@@ -128,11 +123,11 @@ pub async fn resolve_pending_approval(
     approver: Approver,
     pending: PendingApproval,
     decision: ApprovalDecision,
-) -> Result<ApprovalResolution, WarpgateError> {
+) -> Result<bool, WarpgateError> {
     check_self_approval(ctx, &approver, &pending, decision).await?;
 
     let actor = acting_approver(ctx);
-    let recorded = record_decision(
+    record_decision(
         &ctx.services().db,
         pending.session_id,
         pending.kind,
@@ -140,11 +135,5 @@ pub async fn resolve_pending_approval(
         decision,
         actor,
     )
-    .await?;
-
-    Ok(if recorded {
-        ApprovalResolution::Resolved
-    } else {
-        ApprovalResolution::NotFound
-    })
+    .await
 }

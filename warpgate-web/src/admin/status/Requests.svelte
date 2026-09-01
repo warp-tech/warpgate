@@ -36,30 +36,24 @@
     import RelativeDate from 'common/RelativeDate.svelte'
     import Fa from 'svelte-fa'
 
-    /// One inbox entry, whichever kind of request produced it. `at` is the
-    /// shared sort key so both kinds interleave chronologically, and `key`
-    /// identifies the entry in the list: a session holds a question per gated
-    /// target it reaches, so its id alone does not distinguish them.
-    type Entry =
-        | {
-              kind: 'session'
-              key: string
-              id: string
-              at: Date
-              session: SessionApprovalItem
-          }
-        | {
-              kind: 'ticket'
-              key: string
-              id: string
-              at: Date
-              ticket: TicketRequest
-          }
+    // One inbox entry, whichever kind of request produced it. `at` is the
+    // shared sort key so both kinds interleave chronologically, and `key`
+    // identifies the entry in the list: a session holds a question per gated
+    // target it reaches, so its id alone does not distinguish them.
+    type Entry = { key: string; at: Date } & (
+        | { kind: 'session'; session: SessionApprovalItem }
+        | { kind: 'ticket'; ticket: TicketRequest }
+    )
 
     let sessions: SessionApprovalItem[] = $state([])
     let tickets: TicketRequest[] = $state([])
-    let error: string | undefined = $state()
-    /// Gates the first render only; the watch drives every refresh after it.
+    // Separate slots: a background refresh must not eat the message telling
+    // the admin their action failed, and an action must not hide a list that
+    // has stopped loading.
+    let loadError: string | undefined = $state()
+    let actionError: string | undefined = $state()
+    let error = $derived(actionError ?? loadError)
+    // Gates the first render only; the watch drives every refresh after it.
     let loaded = $state(false)
     let denyModalRequest: TicketRequest | undefined = $state()
     let denyReason = $state('')
@@ -72,51 +66,37 @@
     let entries: Entry[] = $derived(
         [
             ...sessions.map(
-                session =>
-                    ({
-                        kind: 'session',
-                        key: `session:${session.id}:${session.target}`,
-                        id: session.id,
-                        at: session.started,
-                        session,
-                    }) as Entry,
+                (session): Entry => ({
+                    kind: 'session',
+                    key: `session:${session.id}:${session.target}`,
+                    at: session.started,
+                    session,
+                }),
             ),
             ...tickets.map(
-                ticket =>
-                    ({
-                        kind: 'ticket',
-                        key: `ticket:${ticket.id}`,
-                        id: ticket.id,
-                        at: ticket.created,
-                        ticket,
-                    }) as Entry,
+                (ticket): Entry => ({
+                    kind: 'ticket',
+                    key: `ticket:${ticket.id}`,
+                    at: ticket.created,
+                    ticket,
+                }),
             ),
         ].sort((a, b) => a.at.getTime() - b.at.getTime()),
     )
 
-    async function reload() {
-        const result = await loadPendingRequests({
-            canSeeSessions,
-            canManageTickets,
-        })
-        sessions = result.sessions
-        tickets = result.tickets
-    }
-
-    /// Swallows the error so a failed background refresh leaves the last known
-    /// list on screen instead of blanking the inbox; actions surface their own.
-    ///
-    /// `keepError` is for the refresh that follows a failed action: the list
-    /// needs reloading either way, but the message saying why the action failed
-    /// is the only thing telling the admin anything happened at all.
-    async function refresh(keepError = false) {
+    // Swallows the error so a failed background refresh leaves the last known
+    // list on screen instead of blanking the inbox.
+    async function refresh() {
         try {
-            await reload()
-            if (!keepError) {
-                error = undefined
-            }
+            const result = await loadPendingRequests({
+                canSeeSessions,
+                canManageTickets,
+            })
+            sessions = result.sessions
+            tickets = result.tickets
+            loadError = undefined
         } catch (err) {
-            error = await stringifyError(err)
+            loadError = await stringifyError(err)
         }
         loaded = true
     }
@@ -130,23 +110,28 @@
         }),
     )
 
-    /// A 404 means someone else already resolved it, or the held session gave
-    /// up waiting — the entry is simply gone, so reload either way. It answers
-    /// with no body, so it needs saying here; a shared queue produces it
-    /// routinely and "API error:" with nothing after it explains nothing.
-    async function resolveSession(action: () => Promise<void>) {
-        error = undefined
-        let failed = false
+    // A 404 means someone else already resolved it, or the held session gave
+    // up waiting — the entry is simply gone. It answers with no body, so it
+    // needs saying here; a shared queue produces it routinely and "API error:"
+    // with nothing after it explains nothing.
+    async function describeFailure(err: unknown): Promise<string> {
+        return errorStatus(err) === 404
+            ? 'This request is no longer waiting — someone else answered it, or the session gave up.'
+            : await stringifyError(err)
+    }
+
+    // Rethrows so the button that ran it marks the failure, and reloads either
+    // way: a failed action usually means the entry has moved on without us.
+    async function runAction(action: () => Promise<unknown>): Promise<void> {
+        actionError = undefined
         try {
             await action()
         } catch (err) {
-            error =
-                errorStatus(err) === 404
-                    ? 'This request is no longer waiting — someone else answered it, or the session gave up.'
-                    : await stringifyError(err)
-            failed = true
+            actionError = await describeFailure(err)
+            throw err
+        } finally {
+            await refresh()
         }
-        await refresh(failed)
     }
 
     // The target is echoed with the decision so it lands on the question this
@@ -156,7 +141,7 @@
         item: SessionApprovalItem,
         scope: ApprovalScope,
     ) {
-        await resolveSession(() =>
+        await runAction(() =>
             api.approveSession({
                 id: item.id,
                 approveSessionRequest: { scope, target: item.target },
@@ -165,7 +150,7 @@
     }
 
     async function rejectSession(item: SessionApprovalItem) {
-        await resolveSession(() =>
+        await runAction(() =>
             api.rejectSession({
                 id: item.id,
                 rejectSessionRequest: { target: item.target },
@@ -174,16 +159,10 @@
     }
 
     async function approveTicket(request: TicketRequest) {
-        error = undefined
-        try {
-            await api.approveTicketRequest({ id: request.id })
-            await reload()
-        } catch (err) {
-            error = await stringifyError(err)
-            throw err
-        }
+        await runAction(() => api.approveTicketRequest({ id: request.id }))
     }
 
+    // Reports into the modal it is run from, not the page behind it.
     async function denyTicket() {
         if (!denyModalRequest) {
             return
@@ -194,13 +173,13 @@
                 id: denyModalRequest.id,
                 denyTicketRequestBody: { reason: denyReason || undefined },
             })
-            denyModalRequest = undefined
-            denyReason = ''
-            await reload()
         } catch (err) {
-            denyError = await stringifyError(err)
+            denyError = await describeFailure(err)
             throw err
         }
+        denyModalRequest = undefined
+        denyReason = ''
+        await refresh()
     }
 </script>
 
@@ -381,7 +360,8 @@
                 to
                 <strong>
                     {denyModalRequest.targetName ?? denyModalRequest.targetId}
-                </strong>?
+                </strong
+                >?
             </p>
             <FormGroup floating label="Reason (optional)">
                 <input

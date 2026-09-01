@@ -6940,8 +6940,7 @@
         "title": "TargetDataRequest",
         "required": [
           "name",
-          "options",
-          "require_approval"
+          "options"
         ],
         "properties": {
           "name": {

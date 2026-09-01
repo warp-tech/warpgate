@@ -32,18 +32,17 @@ class Test:
         self,
         processes: ProcessManager,
         timeout,
+        shared_postgres_port,
     ):
         wg = processes.start_wg()
         wait_port(wg.http_port, recv=False)
         url = f"https://localhost:{wg.http_port}"
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
 
         with admin_client(url) as api:
             api.update_parameters(default_params(admin_approval_grace_period_seconds=300))
             user, role = create_password_user(api)
-            target = create_postgres_target(api, role, db_port)
-            other = create_postgres_target(api, role, db_port)
+            target = create_postgres_target(api, role, shared_postgres_port)
+            other = create_postgres_target(api, role, shared_postgres_port)
 
         # First connection is held and approved for the target.
         first = psql_held(processes, wg.postgres_port, user, target)
@@ -75,18 +74,17 @@ class Test:
         self,
         processes: ProcessManager,
         timeout,
+        shared_postgres_port,
     ):
         wg = processes.start_wg()
         wait_port(wg.http_port, recv=False)
         url = f"https://localhost:{wg.http_port}"
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
 
         with admin_client(url) as api:
             api.update_parameters(default_params(admin_approval_grace_period_seconds=300))
             user, role = create_password_user(api)
-            target = create_postgres_target(api, role, db_port)
-            other = create_postgres_target(api, role, db_port)
+            target = create_postgres_target(api, role, shared_postgres_port)
+            other = create_postgres_target(api, role, shared_postgres_port)
 
         first = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:
@@ -107,17 +105,16 @@ class Test:
         self,
         processes: ProcessManager,
         timeout,
+        shared_postgres_port,
     ):
         wg = processes.start_wg()
         wait_port(wg.http_port, recv=False)
         url = f"https://localhost:{wg.http_port}"
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
 
         with admin_client(url) as api:
             api.update_parameters(default_params(admin_approval_grace_period_seconds=300))
             user, role = create_password_user(api)
-            target = create_postgres_target(api, role, db_port)
+            target = create_postgres_target(api, role, shared_postgres_port)
 
         first = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:
@@ -142,19 +139,18 @@ class Test:
         self,
         processes: ProcessManager,
         timeout,
+        shared_postgres_port,
     ):
         # With caching disabled a Target-scoped approval must not carry over —
         # the scope says "remember", the parameter says "don't".
         wg = processes.start_wg()
         wait_port(wg.http_port, recv=False)
         url = f"https://localhost:{wg.http_port}"
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
 
         with admin_client(url) as api:
             api.update_parameters(default_params(admin_approval_grace_period_seconds=None))
             user, role = create_password_user(api)
-            target = create_postgres_target(api, role, db_port)
+            target = create_postgres_target(api, role, shared_postgres_port)
 
         first = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:
@@ -178,6 +174,7 @@ class Test:
         self,
         processes: ProcessManager,
         timeout,
+        shared_postgres_port,
     ):
         # A ticket has no stable credential fingerprint, so it must not inherit
         # an approval granted to a password session — otherwise approving one
@@ -185,13 +182,11 @@ class Test:
         wg = processes.start_wg()
         wait_port(wg.http_port, recv=False)
         url = f"https://localhost:{wg.http_port}"
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
 
         with admin_client(url) as api:
             api.update_parameters(default_params(admin_approval_grace_period_seconds=300))
             user, role = create_password_user(api)
-            target = create_postgres_target(api, role, db_port)
+            target = create_postgres_target(api, role, shared_postgres_port)
 
         first = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:
@@ -238,19 +233,18 @@ class Test:
         self,
         processes: ProcessManager,
         timeout,
+        shared_postgres_port,
     ):
         # Nobody approves. The session must be dropped once the configured
         # window elapses rather than hanging until the client gives up.
         wg = processes.start_wg()
         wait_port(wg.http_port, recv=False)
         url = f"https://localhost:{wg.http_port}"
-        db_port = processes.start_postgres_server()
-        wait_port(db_port, recv=False)
 
         with admin_client(url) as api:
             api.update_parameters(default_params(admin_approval_timeout_seconds=5))
             user, role = create_password_user(api)
-            target = create_postgres_target(api, role, db_port)
+            target = create_postgres_target(api, role, shared_postgres_port)
 
         client = psql_held(processes, wg.postgres_port, user, target)
         with admin_client(url) as api:

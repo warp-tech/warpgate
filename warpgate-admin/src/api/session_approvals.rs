@@ -17,7 +17,7 @@ use warpgate_db_entities::{Parameters, SessionApprovalRequest};
 use super::AdminContext;
 use crate::api::common::require_admin_permission;
 use crate::approvals::{
-    ApprovalResolution, Approver, find_pending_approval, resolve_pending_approval,
+    Approver, find_pending_approval, resolve_pending_approval,
 };
 
 pub struct Api;
@@ -69,9 +69,10 @@ async fn resolve_inner(
         return Ok(ActionResponse::NotFound);
     };
 
-    match resolve_pending_approval(ctx, Approver::Administrator, pending, decision).await? {
-        ApprovalResolution::Resolved => Ok(ActionResponse::Ok),
-        ApprovalResolution::NotFound => Ok(ActionResponse::NotFound),
+    if resolve_pending_approval(ctx, Approver::Administrator, pending, decision).await? {
+        Ok(ActionResponse::Ok)
+    } else {
+        Ok(ActionResponse::NotFound)
     }
 }
 

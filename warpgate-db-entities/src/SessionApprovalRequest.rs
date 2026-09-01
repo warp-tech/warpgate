@@ -82,31 +82,6 @@ pub struct Model {
     pub consumed_at: Option<OffsetDateTime>,
 }
 
-impl Column {
-    /// rewritten when a request is re-advertised
-    pub const IDENTITY: [Self; 9] = [
-        Self::NodeId,
-        Self::Protocol,
-        Self::Username,
-        Self::UserId,
-        Self::RemoteAddress,
-        Self::IdentificationString,
-        Self::MatchDigest,
-        Self::TicketId,
-        Self::Started,
-    ];
-
-    /// everything else (decision record)
-    pub const DECISION: [Self; 6] = [
-        Self::Status,
-        Self::Scope,
-        Self::ResolvedByUsername,
-        Self::ResolvedByUserId,
-        Self::ResolvedAt,
-        Self::ConsumedAt,
-    ];
-}
-
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
@@ -356,12 +331,9 @@ async fn try_reopen_unanswered(
 pub enum Advertised {
     /// Created or reopened an entry
     Asked,
-    /// Refreshed an already existing pending entry
-    AlreadyAsking,
-    /// There is already a matching entry with a decision
-    DecisionStands,
+    /// An entry was already there — still pending, or already decided
+    AlreadyAdvertised,
     /// The ticket used for the request is already exhausted
-    /// nobody opened.
     TicketExhausted,
 }
 
@@ -375,14 +347,14 @@ pub async fn upsert_request(
     let row = ActiveModel::from(request);
 
     if try_refresh_pending(db, &row).await? {
-        return Ok(Advertised::AlreadyAsking);
+        return Ok(Advertised::AlreadyAdvertised);
     }
     match try_reopen_unanswered(db, &key, ticket_id, &row).await? {
         Reopened::Reopened => return Ok(Advertised::Asked),
         Reopened::TicketExhausted => {
             return Ok(if try_refresh_pending(db, &row).await? {
                 // The other requester has already spent a ticket so it's fine
-                Advertised::AlreadyAsking
+                Advertised::AlreadyAdvertised
             } else {
                 Advertised::TicketExhausted
             });
@@ -395,12 +367,12 @@ pub async fn upsert_request(
         Err(error) if matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) => {
             // raced, try refreshing again
             if try_refresh_pending(db, &row).await? {
-                return Ok(Advertised::AlreadyAsking);
+                return Ok(Advertised::AlreadyAdvertised);
             }
             match try_reopen_unanswered(db, &key, ticket_id, &row).await? {
                 Reopened::Reopened => Ok(Advertised::Asked),
                 Reopened::TicketExhausted => Ok(Advertised::TicketExhausted),
-                Reopened::NotUnanswered => Ok(Advertised::DecisionStands),
+                Reopened::NotUnanswered => Ok(Advertised::AlreadyAdvertised),
             }
         }
         Err(error) => Err(error.into()),

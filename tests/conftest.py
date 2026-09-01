@@ -995,6 +995,18 @@ def shared_ssh_port(processes, wg_c_ed25519_pubkey):
 
 
 @pytest.fixture(scope="session")
+def shared_postgres_port(processes: ProcessManager):
+    """Shared PostgreSQL server for tests that only read from it.
+
+    The approval tests each need their own warpgate node, but the database
+    behind the target is stateless as far as they are concerned.
+    """
+    port = processes.start_postgres_server()
+    wait_port(port, recv=False)
+    return port
+
+
+@pytest.fixture(scope="session")
 def wg_c_ed25519_pubkey():
     return Path(os.getcwd()) / "ssh-keys/wg/client-ed25519.pub"
 

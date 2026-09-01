@@ -1,8 +1,8 @@
 import * as admin from 'admin/lib/api'
 import * as gw from 'gateway/lib/api'
 
-/// The status an API error carried, for callers that can say something better
-/// than the response body about a particular one.
+// The status an API error carried, for callers that can say something better
+// than the response body about a particular one.
 export function errorStatus(err: unknown): number | undefined {
     return (err as { response?: Response } | undefined)?.response?.status
 }

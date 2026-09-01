@@ -17,8 +17,6 @@
     let sessionCount = $state(0)
     let ticketCount = $state(0)
 
-    // Each kind of request has its own permission, so an admin only ever counts
-    // what they are allowed to act on.
     let canSeeSessions = $derived(
         $serverInfo?.adminPermissions?.approveSessions ?? false,
     )

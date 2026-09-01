@@ -319,7 +319,7 @@ class TestKubernetesIntegration:
         token_target_name = f"k8s-token-{uuid.uuid4()}"
         with admin_client(url) as api:
             token_target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=token_target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -463,7 +463,7 @@ class TestKubernetesIntegration:
 
             target_name = f"k8s-approval-{uuid.uuid4()}"
             target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -797,7 +797,7 @@ class TestKubernetesIntegration:
         target_name = f"k8s-run-{uuid.uuid4()}"
         with admin_client(url) as api:
             target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -901,7 +901,7 @@ class TestKubernetesIntegration:
         token_target_name = f"k8s-mtls-{uuid.uuid4()}"
         with admin_client(url) as api:
             target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=token_target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -986,7 +986,7 @@ class TestKubernetesIntegration:
         target_name = f"k8s-exec-{uuid.uuid4()}"
         with admin_client(url) as api:
             target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -1112,7 +1112,7 @@ class TestKubernetesIntegration:
         target_name = f"k8s-attach-{uuid.uuid4()}"
         with admin_client(url) as api:
             target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -1320,7 +1320,7 @@ class TestKubernetesIntegration:
                 sdk.RoleDataRequest(name=target_role_name)
             )
             target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
@@ -1487,7 +1487,7 @@ class TestKubernetesIntegration:
         with admin_client(url) as api:
             role = api.create_role(sdk.RoleDataRequest(name=target_role))
             target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=target_name,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(

@@ -22,7 +22,7 @@ use warpgate_admin::api::cluster_proxy::{
     proxy_or_serve_pending_login,
 };
 use warpgate_admin::approvals::{
-    ApprovalResolution, Approver, PendingApproval, resolve_pending_approval,
+    Approver, PendingApproval, resolve_pending_approval,
 };
 use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
@@ -407,22 +407,21 @@ async fn resolve_own_approval(
         return Ok(ApprovalActionResponse::NotFound);
     };
 
-    match resolve_pending_approval(ctx, Approver::TheUserThemselves, pending, decision).await? {
-        ApprovalResolution::Resolved => {
-            // Best-effort: the decision is recorded, and the sweep delivers
-            // within a tick to whichever node holds the login — this only
-            // spares a login held *here* that wait.
-            if let Err(error) = ctx
-                .services()
-                .apply_recorded_user_decision(&session_id)
-                .await
-            {
-                warn!(%error, %session_id, "Failed to deliver a freshly recorded approval");
-            }
-            Ok(ApprovalActionResponse::Ok)
-        }
-        ApprovalResolution::NotFound => Ok(ApprovalActionResponse::NotFound),
+    if !resolve_pending_approval(ctx, Approver::TheUserThemselves, pending, decision).await? {
+        return Ok(ApprovalActionResponse::NotFound);
     }
+
+    // Best-effort: the decision is recorded, and the sweep delivers within a
+    // tick to whichever node holds the login — this only spares a login held
+    // *here* that wait.
+    if let Err(error) = ctx
+        .services()
+        .apply_recorded_user_decision(&session_id)
+        .await
+    {
+        warn!(%error, %session_id, "Failed to deliver a freshly recorded approval");
+    }
+    Ok(ApprovalActionResponse::Ok)
 }
 
 pub(crate) async fn record_failed_login_attempt(

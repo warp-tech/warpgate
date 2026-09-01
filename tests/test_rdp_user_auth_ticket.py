@@ -27,7 +27,7 @@ class Test:
             user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
             api.add_user_role(user.id, role.id)
             target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=f"rdp-{uuid4()}",
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetRdpOptions(

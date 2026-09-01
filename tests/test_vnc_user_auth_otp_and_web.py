@@ -52,7 +52,7 @@ class Test:
             )
             api.add_user_role(user.id, role.id)
             target = api.create_target(
-                sdk.TargetDataRequest(require_approval=False, 
+                sdk.TargetDataRequest(
                     name=f"vnc-{uuid4()}",
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetVncOptions(
