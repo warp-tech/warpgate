@@ -14,14 +14,16 @@ mod session_handle;
 use anyhow::Context;
 use futures::future::BoxFuture;
 pub use server::bind_server;
-use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender, channel, unbounded_channel};
+use tokio::sync::mpsc::{channel, unbounded_channel};
 use tracing::{Instrument, error, info_span};
-use warpgate_common::{ListenEndpoint, Protocol, TargetRdpOptions, WarpgateError};
+use warpgate_common::{ListenEndpoint, Protocol, TargetRdpOptions, TargetSessionId, WarpgateError};
 use warpgate_core::{
-    ApprovedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopState,
-    ProtocolServer, Services,
+    ApprovedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopEvent,
+    DesktopInput, DesktopState, LogonState, ProtocolServer, Services,
 };
 use warpgate_tls::TlsCertificateAndPrivateKey;
+
+use crate::client::LogonWatcher;
 
 pub const PROTOCOL_NAME: Protocol = Protocol::Rdp;
 
@@ -71,29 +73,39 @@ impl std::fmt::Debug for RdpProtocolServer {
     }
 }
 
-/// Handles for driving a backend RDP client.
-pub struct RdpClientHandles {
-    pub event_rx: Receiver<DesktopEvent>,
-    pub input_tx: Sender<DesktopInput>,
-    pub abort_tx: UnboundedSender<()>,
-}
-
 /// Start an RDP client for a target and bridge it to normalised desktop streams.
 pub fn connect(
     approved: ApprovedTarget<TargetRdpOptions>,
     size: (u16, u16),
-) -> Result<RdpClientHandles, WarpgateError> {
-    let (_, target) = approved.into_parts();
-    let (_, options) = target.into_parts();
+    target_session_id: TargetSessionId,
+) -> Result<DesktopClientHandles, WarpgateError> {
+    let (user_info, target) = approved.into_parts();
+    let (target, options) = target.into_parts();
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
     let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);
     let (abort_tx, abort_rx) = unbounded_channel::<()>();
+
+    // Autologon passes the credentials over CredSSP, so the session is logged on by the
+    // time it is active; only an interactive-logon target starts at its sign-in screen.
+    let sign_in = if options.interactive_logon {
+        LogonState::at_logon_screen()
+    } else {
+        LogonState::logged_on()
+    };
+    let logon = LogonWatcher {
+        target_session_id,
+        target_id: target.id,
+        target_name: target.name,
+        user_id: user_info.id,
+        username: user_info.username,
+        sign_in: sign_in.clone(),
+    };
 
     let span = info_span!("RDP-client", host = %options.host, port = options.port);
     tokio::spawn(
         async move {
             if let Err(error) =
-                client::run(options, size, event_tx.clone(), input_rx, abort_rx).await
+                client::run(options, size, event_tx.clone(), input_rx, abort_rx, logon).await
             {
                 let error_chain = format!("{error:#}");
                 error!(%error, %error_chain, "RDP client failed");
@@ -106,9 +118,10 @@ pub fn connect(
         .instrument(span),
     );
 
-    Ok(RdpClientHandles {
+    Ok(DesktopClientHandles {
         event_rx,
         input_tx,
         abort_tx,
+        logon_state: sign_in,
     })
 }

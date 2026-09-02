@@ -214,9 +214,15 @@ impl Storage {
     pub(crate) async fn remove(&self, session_id: &TargetSessionId, name: &str) -> Result<()> {
         if let Backend::S3(s3) = &self.backend {
             for key in [
-                format!("{session_id}/{name}/{}", RecordingFile::NDJsonData.filename()),
+                format!(
+                    "{session_id}/{name}/{}",
+                    RecordingFile::NDJsonData.filename()
+                ),
                 format!("{session_id}/{name}/{}", RecordingFile::Index.filename()),
-                format!("{session_id}/{name}/{}", RecordingFile::TcpDumpData.filename()),
+                format!(
+                    "{session_id}/{name}/{}",
+                    RecordingFile::TcpDumpData.filename()
+                ),
                 // Gen-1 recordings are a single object named after the recording.
                 format!("{session_id}/{name}"),
             ] {
