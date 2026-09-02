@@ -38,6 +38,7 @@ pub enum UserAuthCredential {
     Certificate(UserCertificateCredential),
     Totp(UserTotpCredential),
     Sso(UserSsoCredential),
+    WebAuthn(UserWebAuthnCredential),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Object)]
@@ -73,6 +74,13 @@ pub struct UserSsoCredential {
     pub email: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
+pub struct UserWebAuthnCredential {
+    pub credential_id: String,
+    pub credential_json: String,
+    pub label: String,
+}
+
 impl UserAuthCredential {
     pub const fn kind(&self) -> CredentialKind {
         match self {
@@ -81,6 +89,7 @@ impl UserAuthCredential {
             Self::Certificate(_) => CredentialKind::Certificate,
             Self::Totp(_) => CredentialKind::Totp,
             Self::Sso(_) => CredentialKind::Sso,
+            Self::WebAuthn(_) => CredentialKind::WebAuthn,
         }
     }
 }
@@ -137,6 +146,54 @@ impl UserRequireCredentialsPolicy {
             }
             if !kinds.is_empty() {
                 kinds.push(CredentialKind::Totp);
+                copy.ssh = Some(kinds);
+            }
+        }
+        copy
+    }
+
+    #[must_use]
+    pub fn upgrade_to_webauthn(&self, with_existing_credentials: &[UserAuthCredential]) -> Self {
+        let mut copy = self.clone();
+
+        if let Some(policy) = &mut copy.http {
+            if !policy.contains(&CredentialKind::WebAuthn) {
+                policy.push(CredentialKind::WebAuthn);
+            }
+        } else {
+            let mut kinds = vec![];
+            if with_existing_credentials
+                .iter()
+                .any(|c| c.kind() == CredentialKind::Password)
+            {
+                kinds.push(CredentialKind::Password);
+            }
+            if !kinds.is_empty() {
+                kinds.push(CredentialKind::WebAuthn);
+                copy.http = Some(kinds);
+            }
+        }
+
+        if let Some(policy) = &mut copy.ssh {
+            if !policy.contains(&CredentialKind::WebAuthn) {
+                policy.push(CredentialKind::WebAuthn);
+            }
+        } else {
+            // Mirrors `upgrade_to_otp` exactly for consistency: when no explicit
+            // ssh policy exists, seed one from an existing password/public-key.
+            // Note we push `Password` (not `PublicKey`) even when only a public
+            // key is present — this matches the pre-existing OTP behavior. A
+            // public-key-only user would therefore need to also set a password
+            // to satisfy an auto-generated ssh policy. Left as-is to avoid
+            // diverging from the sibling method / changing pre-existing behavior.
+            let mut kinds = vec![];
+            if with_existing_credentials.iter().any(|c| {
+                c.kind() == CredentialKind::Password || c.kind() == CredentialKind::PublicKey
+            }) {
+                kinds.push(CredentialKind::Password);
+            }
+            if !kinds.is_empty() {
+                kinds.push(CredentialKind::WebAuthn);
                 copy.ssh = Some(kinds);
             }
         }
@@ -950,7 +1007,11 @@ impl WarpgateConfig {
 mod tests {
     use std::time::Duration;
 
-    use super::{SshConfig, WarpgateConfigStore};
+    use super::{
+        CredentialKind, SshConfig, UserAuthCredential, UserPasswordCredential,
+        UserRequireCredentialsPolicy, UserTotpCredential, WarpgateConfigStore,
+    };
+    use crate::Secret;
 
     #[test]
     fn keepalive_interval_is_a_humantime_string() {
@@ -969,5 +1030,75 @@ mod tests {
         let config = config.as_object().unwrap();
 
         assert!(!config.contains_key("recordings"));
+    }
+
+    #[test]
+    fn upgrade_to_webauthn_adds_when_password_exists() {
+        let policy = UserRequireCredentialsPolicy::default();
+        let creds = vec![UserAuthCredential::Password(UserPasswordCredential {
+            hash: Secret::new("hash".into()),
+        })];
+        let upgraded = policy.upgrade_to_webauthn(&creds);
+        assert_eq!(
+            upgraded.http,
+            Some(vec![CredentialKind::Password, CredentialKind::WebAuthn])
+        );
+        assert_eq!(
+            upgraded.ssh,
+            Some(vec![CredentialKind::Password, CredentialKind::WebAuthn])
+        );
+    }
+
+    #[test]
+    fn upgrade_to_webauthn_does_not_duplicate() {
+        let policy = UserRequireCredentialsPolicy {
+            http: Some(vec![CredentialKind::Password, CredentialKind::WebAuthn]),
+            ..Default::default()
+        };
+        let creds = vec![UserAuthCredential::Password(UserPasswordCredential {
+            hash: Secret::new("hash".into()),
+        })];
+        let upgraded = policy.upgrade_to_webauthn(&creds);
+        let webauthn_count = upgraded
+            .http
+            .unwrap()
+            .iter()
+            .filter(|k| **k == CredentialKind::WebAuthn)
+            .count();
+        assert_eq!(webauthn_count, 1);
+    }
+
+    #[test]
+    fn upgrade_to_webauthn_stacks_with_otp() {
+        let policy = UserRequireCredentialsPolicy {
+            http: Some(vec![CredentialKind::Password, CredentialKind::Totp]),
+            ..Default::default()
+        };
+        let creds = vec![
+            UserAuthCredential::Password(UserPasswordCredential {
+                hash: Secret::new("hash".into()),
+            }),
+            UserAuthCredential::Totp(UserTotpCredential {
+                key: vec![0u8; 32].into(),
+            }),
+        ];
+        let upgraded = policy.upgrade_to_webauthn(&creds);
+        assert_eq!(
+            upgraded.http,
+            Some(vec![
+                CredentialKind::Password,
+                CredentialKind::Totp,
+                CredentialKind::WebAuthn,
+            ])
+        );
+    }
+
+    #[test]
+    fn upgrade_to_webauthn_noop_without_password() {
+        let policy = UserRequireCredentialsPolicy::default();
+        let creds = vec![];
+        let upgraded = policy.upgrade_to_webauthn(&creds);
+        assert_eq!(upgraded.http, None);
+        assert_eq!(upgraded.ssh, None);
     }
 }

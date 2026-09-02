@@ -600,6 +600,20 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={204},
     ),
     AdminApiTestCase(
+        id="get_webauthn_credentials",
+        permission="users_edit",
+        call=lambda api, r: api.get_webauthn_credentials_with_http_info(r["user_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="delete_webauthn_credential",
+        permission="users_edit",
+        call=lambda api, r: api.delete_webauthn_credential_with_http_info(
+            r["user_id"], r["otp_id"]
+        ),
+        expected_statuses={204, 404},
+    ),
+    AdminApiTestCase(
         id="get_ldap_servers",
         permission="config_edit",
         call=lambda api, r: api.get_ldap_servers_with_http_info(),

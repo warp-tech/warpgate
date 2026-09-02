@@ -627,6 +627,20 @@ impl ConfigProvider for DatabaseConfigProvider {
                 }
                 Ok(false)
             }
+            AuthCredential::WebAuthn => {
+                // Returns Ok(true) because the WebAuthn ceremony in
+                // `serve_webauthn_auth_complete` has already, before this
+                // credential is ever submitted:
+                //   (a) cryptographically verified the assertion signature and
+                //       challenge via `finish_securitykey_authentication`, and
+                //   (b) confirmed the signing credential belongs to this
+                //       login's user (explicit user_id match in
+                //       `verify_webauthn_authentication`).
+                // This arm is only reachable immediately after that ceremony
+                // succeeds; it records the already-verified factor as satisfied,
+                // mirroring how `WebUserApproval` is handled.
+                Ok(true)
+            }
             _ => Err(WarpgateError::InvalidCredentialType),
         }
     }

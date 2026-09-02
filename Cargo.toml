@@ -190,6 +190,8 @@ tokio-tungstenite = { version = "0.30", features = [
 reqwest-websocket = { version = "0.6.0", default-features = false }
 time = { version = "0.3", default-features = false }
 url = { version = "2.4", default-features = false }
+webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation", "danger-user-presence-only-security-keys"] }
+webauthn-rs-proto = "0.5"
 zune-jpeg = "0.5"
 
 [profile.dev]

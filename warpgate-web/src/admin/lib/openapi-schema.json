@@ -4406,6 +4406,92 @@
         ],
         "operationId": "revoke_certificate_credential"
       }
+    },
+    "/users/{user_id}/credentials/webauthn": {
+      "get": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExistingWebauthnCredential"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_webauthn_credentials"
+      }
+    },
+    "/users/{user_id}/credentials/webauthn/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "user_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_webauthn_credential"
+      }
     }
   },
   "components": {
@@ -4862,7 +4948,8 @@
           "Certificate",
           "Totp",
           "Sso",
-          "WebUserApproval"
+          "WebUserApproval",
+          "WebAuthn"
         ]
       },
       "DatabaseTargetAuth": {
@@ -5053,6 +5140,31 @@
           },
           "email": {
             "type": "string"
+          }
+        }
+      },
+      "ExistingWebauthnCredential": {
+        "type": "object",
+        "title": "ExistingWebauthnCredential",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "date_added": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

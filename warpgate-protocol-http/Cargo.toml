@@ -42,6 +42,8 @@ warpgate-web = { path = "../warpgate-web", default-features = false }
 warpgate-web-clients-common = { path = "../warpgate-web-clients-common" }
 warpgate-web-desktop = { path = "../warpgate-web-desktop", default-features = false }
 warpgate-web-ssh = { path = "../warpgate-web-ssh", default-features = false }
+webauthn-rs = { workspace = true }
+webauthn-rs-proto = { workspace = true }
 
 [dev-dependencies]
 poem = { workspace = true, features = ["test"] }

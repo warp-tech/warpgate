@@ -22,6 +22,8 @@ pub enum CredentialKind {
     Sso,
     #[serde(rename = "web")]
     WebUserApproval,
+    #[serde(rename = "webauthn")]
+    WebAuthn,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +42,7 @@ pub enum AuthCredential {
         email: String,
     },
     WebUserApproval,
+    WebAuthn,
 }
 
 impl AuthCredential {
@@ -51,6 +54,7 @@ impl AuthCredential {
             Self::Otp { .. } => CredentialKind::Totp,
             Self::Sso { .. } => CredentialKind::Sso,
             Self::WebUserApproval => CredentialKind::WebUserApproval,
+            Self::WebAuthn => CredentialKind::WebAuthn,
         }
     }
 
@@ -62,6 +66,7 @@ impl AuthCredential {
             Self::Otp { .. } => "one-time password".to_string(),
             Self::Sso { provider, .. } => format!("SSO ({provider})"),
             Self::WebUserApproval => "in-browser auth".to_string(),
+            Self::WebAuthn => "passkey".to_string(),
         }
     }
 }
@@ -77,6 +82,7 @@ pub enum AuthCredentialFingerprint {
     Certificate { hash: [u8; 32] },
     Sso { provider: String, email: String },
     WebUserApproval,
+    WebAuthn,
 }
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -105,6 +111,7 @@ impl From<&AuthCredential> for AuthCredentialFingerprint {
                 email: email.clone(),
             },
             AuthCredential::WebUserApproval => Self::WebUserApproval,
+            AuthCredential::WebAuthn => Self::WebAuthn,
         }
     }
 }
