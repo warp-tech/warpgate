@@ -84,27 +84,24 @@ pub async fn bind_server(
                     let span =
                         info_span!("VNC", session=%server_handle.lock().await.user_session_id());
 
-                    // The whole session runs inside the span, outcome logs included:
-                    // anything logged outside it is not attributed to the session.
-                    async {
-                        tokio::select! {
-                            result = handle_connection(
-                                services,
-                                server_handle.clone(),
-                                viewer_stream,
-                                tls_config,
-                                remote_address,
-                            ) => match result {
-                                Ok(()) => info!("Session ended"),
-                                Err(error) => error!(%error, "Session failed"),
-                            },
-                            _ = abort_rx.recv() => {
-                                warn!("Session aborted by admin");
-                            }
-                        }
+                    // The outcome logs run in the span too: anything logged outside it is
+                    // not attributed to the session. They are synchronous, so they enter the
+                    // span directly rather than nesting another future in this one.
+                    tokio::select! {
+                        result = handle_connection(
+                            services,
+                            server_handle.clone(),
+                            viewer_stream,
+                            tls_config,
+                            remote_address,
+                        ).instrument(span.clone()) => span.in_scope(|| match result {
+                            Ok(()) => info!("Session ended"),
+                            Err(error) => error!(%error, "Session failed"),
+                        }),
+                        _ = abort_rx.recv() => span.in_scope(|| {
+                            warn!("Session aborted by admin");
+                        }),
                     }
-                    .instrument(span)
-                    .await;
                     Ok(())
                 }
             },
