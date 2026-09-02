@@ -12,8 +12,8 @@ mod handle;
 mod terminal_screen;
 
 pub use desktop::{
-    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
-    MAX_CLIPBOARD_BYTES, Scancode, truncate_clipboard_contents,
+    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopEvent, DesktopInput, DesktopRect,
+    DesktopState, LogonState, MAX_CLIPBOARD_BYTES, Scancode, truncate_clipboard_contents,
     truncate_clipboard_contents_in_place,
 };
 pub use framebuffer::{Framebuffer, PngEncodeError, Rect, decode_png_rgba};

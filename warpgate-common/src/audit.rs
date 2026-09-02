@@ -94,6 +94,17 @@ pub enum AuditEvent {
         actor_user_id: Uuid,
         related_admin_roles: String,
     },
+    // currently used for RDP logon PDU
+    TargetLogon {
+        session_id: Uuid,
+        target_name: String,
+        target_id: Uuid,
+        user_id: Uuid,
+        username: String,
+        /// for RPD, DOMAIN\user
+        target_account: Option<String>,
+        target_session_id: Option<u32>,
+    },
     TicketCreated {
         ticket_id: Uuid,
         user_id: Uuid,
@@ -323,6 +334,29 @@ impl AuditEvent {
                     username = %username,
                     related_users = ?format_related_ids(&[*user_id]),
                     "Target session ended"
+                );
+            }
+            Self::TargetLogon {
+                session_id,
+                target_name,
+                target_id,
+                user_id,
+                username,
+                target_account,
+                target_session_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "TargetLogon1",
+                    session_id = %session_id,
+                    target_id = %target_id,
+                    target_name = %target_name,
+                    user_id = %user_id,
+                    username = %username,
+                    target_account = target_account.as_deref(),
+                    target_session_id = *target_session_id,
+                    related_users = ?format_related_ids(&[*user_id]),
+                    "Logged on to target"
                 );
             }
             Self::TicketCreated {

@@ -9427,6 +9427,7 @@ dependencies = [
  "tokio-openssl",
  "tokio-stream",
  "tracing",
+ "uuid",
  "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",

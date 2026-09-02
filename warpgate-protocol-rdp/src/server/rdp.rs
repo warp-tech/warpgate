@@ -21,7 +21,7 @@ use ironrdp_server::{
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, oneshot};
-use tracing::{debug, warn};
+use tracing::{Instrument as _, Span, debug, warn};
 use warpgate_core::{DesktopInput, Scancode};
 use warpgate_desktop_ui::DEFAULT_SIZE;
 
@@ -55,6 +55,9 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
     let (done_tx, done_rx) = oneshot::channel();
+    // The session span is thread-local, so it has to be carried over by hand: without it
+    // nothing this server logs is attributed to the session.
+    let span = Span::current();
     std::thread::spawn(move || {
         let runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -66,7 +69,8 @@ where
                 return;
             }
         };
-        let result = runtime.block_on(run(stream, cert_pem, key_pem, size, out_tx, in_rx));
+        let result =
+            runtime.block_on(run(stream, cert_pem, key_pem, size, out_tx, in_rx).instrument(span));
         let _ = done_tx.send(result);
     });
     done_rx
@@ -99,15 +103,18 @@ where
 
     let clipboard = ViewerClipboard::new(out_tx.clone());
 
-    let router = tokio::spawn(route_input(
-        in_rx,
-        frame_tx,
-        DisplayRouteState {
-            size: Arc::clone(&size),
-            out: out_tx.clone(),
-        },
-        clipboard.clone(),
-    ));
+    let router = tokio::spawn(
+        route_input(
+            in_rx,
+            frame_tx,
+            DisplayRouteState {
+                size: Arc::clone(&size),
+                out: out_tx.clone(),
+            },
+            clipboard.clone(),
+        )
+        .in_current_span(),
+    );
 
     let display = DisplayHandler {
         size,
