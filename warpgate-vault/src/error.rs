@@ -30,7 +30,7 @@ pub enum VaultError {
         source: std::io::Error,
     },
 
-    #[error("Vault address must use HTTPS for non-localhost endpoints")]
+    #[error("the Vault address must use HTTPS; there is no exception for loopback")]
     InsecureAddress,
 
     #[error("invalid Vault address: {0}")]
@@ -48,13 +48,19 @@ pub enum VaultError {
     #[error("Vault response is too large")]
     OversizedResponse,
 
+    /// Reported separately from `OversizedResponse`, which it used to borrow:
+    /// a body that is not UTF-8 is not a body that is too long, and the log
+    /// named a size problem that had not occurred.
+    #[error("the response is not valid UTF-8")]
+    NonUtf8Response,
+
     #[error("Vault reported an unusable token lease of {0} seconds")]
     InvalidLease(u64),
 
     #[error("the credential at {path} is {size} bytes, which is too large to be one")]
     CredentialTooLarge { path: PathBuf, size: u64 },
 
-    #[error("certificate_ttl of {0:?} is less than a second, which no issuer accepts")]
+    #[error("certificate_ttl of {0:?} is outside the range an issuer accepts")]
     InvalidCertificateTtl(std::time::Duration),
 
     #[error("cannot use the CA bundle at {path}: {reason}")]
@@ -85,10 +91,13 @@ impl VaultError {
             // Split rather than grouped: refusing plaintext is a rule of ours
             // that an operator may not know they have hit, and an unparseable
             // address is a typo. One message sent both to the same wrong place.
-            VaultError::InsecureAddress => "The Vault address must use HTTPS outside localhost",
+            VaultError::InsecureAddress => "The Vault address must use HTTPS",
             VaultError::InvalidAddress(_) => "The Vault address is not a valid URL",
-            VaultError::InvalidRole(_) | VaultError::InvalidCertificateTtl(_) => {
-                "Invalid Vault role or mount configuration"
+            VaultError::InvalidRole(_) => "Invalid Vault role or mount configuration",
+            // Its own message: grouped with the role, a certificate_ttl outside
+            // the range sent the operator to a setting that was correct.
+            VaultError::InvalidCertificateTtl(_) => {
+                "certificate_ttl is outside the range the issuer accepts"
             }
             // Named separately because it is not a role or a mount at all: the
             // file at `ca_bundle` cannot be read or parsed. Grouped with the
@@ -138,7 +147,10 @@ impl VaultError {
             // The metadata service, not Vault. Vault never answered, so calling
             // this a bad response from it named the wrong machine.
             VaultError::MetadataAddress(_) => "The cloud metadata service address is invalid",
-            VaultError::Json(_) | VaultError::OversizedResponse | VaultError::InvalidLease(_) => {
+            VaultError::Json(_)
+            | VaultError::OversizedResponse
+            | VaultError::NonUtf8Response
+            | VaultError::InvalidLease(_) => {
                 "Invalid response from Vault"
             }
             VaultError::Aws(e) => e.client_message(),

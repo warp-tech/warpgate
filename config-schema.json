@@ -816,7 +816,7 @@
       ]
     },
     "VaultAuth": {
-      "description": "How Warpgate proves its own identity to Vault.\n\nBoth methods read their credential from a file rather than from the config,\ndeliberately: the point of issuing target credentials on demand is that\nnothing long-lived sits on the Warpgate host, and a value pasted into the\nconfig would put it straight back. A Kubernetes service account token is\nmounted and rotated by the kubelet; an AppRole secret ID is short-lived and\nmeant to be delivered response-wrapped by whatever provisions the host.",
+      "description": "How Warpgate proves its own identity to Vault.\n\nNo method reads its credential from the config, deliberately: the point of\nissuing target credentials on demand is that nothing long-lived sits on the\nWarpgate host, and a value pasted into the config would put it straight\nback. Kubernetes and AppRole read a file — a service account token mounted\nand rotated by the kubelet, or a short-lived secret ID meant to arrive\nresponse-wrapped from whatever provisions the host. AWS, GCP and Azure read\nnothing durable at all: each proves the workload's own cloud identity, over\nthe instance metadata service or the provider's credential chain.",
       "oneOf": [
         {
           "type": "object",

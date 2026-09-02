@@ -416,12 +416,14 @@ pub enum LogFormat {
 
 /// How Warpgate proves its own identity to Vault.
 ///
-/// Both methods read their credential from a file rather than from the config,
-/// deliberately: the point of issuing target credentials on demand is that
-/// nothing long-lived sits on the Warpgate host, and a value pasted into the
-/// config would put it straight back. A Kubernetes service account token is
-/// mounted and rotated by the kubelet; an AppRole secret ID is short-lived and
-/// meant to be delivered response-wrapped by whatever provisions the host.
+/// No method reads its credential from the config, deliberately: the point of
+/// issuing target credentials on demand is that nothing long-lived sits on the
+/// Warpgate host, and a value pasted into the config would put it straight
+/// back. Kubernetes and AppRole read a file — a service account token mounted
+/// and rotated by the kubelet, or a short-lived secret ID meant to arrive
+/// response-wrapped from whatever provisions the host. AWS, GCP and Azure read
+/// nothing durable at all: each proves the workload's own cloud identity, over
+/// the instance metadata service or the provider's credential chain.
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VaultAuth {

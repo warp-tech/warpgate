@@ -20,7 +20,7 @@ from uuid import uuid4
 
 import pytest
 
-from .api_client import admin_client, sdk
+from .api_client import admin_client
 from .conftest import ProcessManager
 from .util import wait_port
 from .vault_server import RealVault, matrix
@@ -234,14 +234,21 @@ class TestTheStubMatchesTheServer:
         """`lease_duration: 0` is how a token without a lease is reported, which
         Warpgate used to read as "expired 30 seconds ago" and answer with a
         fresh login on every certificate request."""
+        # A token that genuinely has no lease, which is what the zero stands
+        # for. A role without `token_ttl` does not produce it: the server falls
+        # back to the system maximum and answers 2764800, and asserting only
+        # the type held for that just as well — which is what made this check
+        # vacuous. A root token is the case the servers report as zero.
         response = server._api(
             "POST",
-            "auth/approle/login",
-            {"role_id": server.role_id, "secret_id": server.secret_id},
-            token=None,
+            "auth/token/create",
+            {"policies": ["root"], "no_parent": True},
         )
         assert "lease_duration" in response["auth"]
-        assert isinstance(response["auth"]["lease_duration"], int)
+        assert response["auth"]["lease_duration"] == 0, (
+            "a token with no lease must be reported as zero, not "
+            f"{response['auth']['lease_duration']}"
+        )
 
     def test_a_wrapping_token_is_single_use(self, server):
         """Asserted directly against the server, so the stub's single-use
@@ -260,7 +267,7 @@ class TestTheStubMatchesTheServer:
         Warpgate needs no client-side check."""
         server._api(
             "POST",
-            f"ssh-client-signer/roles/no-key-ids",
+            "ssh-client-signer/roles/no-key-ids",
             {
                 "key_type": "ca",
                 "allow_user_certificates": True,

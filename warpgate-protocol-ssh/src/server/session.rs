@@ -1182,6 +1182,12 @@ impl ServerSession {
                         )?;
                     }
                     ConnectionError::Authentication(ref reason) => {
+                        // Logged as well as shown. The catch-all arm below does
+                        // this, and without it here an authentication rejection
+                        // was the one connection failure leaving no server-side
+                        // record — while clock skew on a short-lived certificate
+                        // is exactly the diagnosis an operator needs the log for.
+                        tracing::error!(%reason, "Target rejected the authentication request");
                         // The reason is what tells a wrong credential apart from
                         // a target whose clock disagrees, which is the most
                         // common cause of a short-lived certificate being

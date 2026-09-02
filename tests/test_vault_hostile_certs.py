@@ -13,8 +13,9 @@ from uuid import uuid4
 
 import pytest
 
+
 from .api_client import admin_client, sdk
-from .conftest import ProcessManager, WarpgateProcess
+from .conftest import TARGET_HOST, ProcessManager, WarpgateProcess
 from .stub_vault import SERVICE_ACCOUNT_JWT, StubVault
 from .util import wait_port
 
@@ -418,7 +419,7 @@ class TestTheCredentialFileItself:
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
-                        host="localhost",
+                        host=TARGET_HOST,
                         port=cert_ssh_port,
                         username="root",
                         auth=sdk.SSHTargetAuth(

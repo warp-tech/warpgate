@@ -361,6 +361,17 @@ class RealVault:
             capture_output=True,
             check=False,
         )
+        # Raised rather than swallowed. Every property built on this — `signs`,
+        # `issued`, `logins`, `unwraps` — returns an empty list when the read
+        # fails, and a test that asserts a count did not change then passes with
+        # both sides zero, having observed nothing. That is the same shape as
+        # the silently-ignored `file_path` `start()` warns about above: a
+        # failure that reads as a working device with nothing to report.
+        if result.returncode != 0:
+            raise Exception(
+                f"cannot read the audit log at {AUDIT_PATH}: "
+                f"{result.stderr.decode(errors='replace').strip()}"
+            )
         entries = []
         for line in result.stdout.decode(errors="replace").splitlines():
             try:

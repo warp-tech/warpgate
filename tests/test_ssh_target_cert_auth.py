@@ -1313,8 +1313,17 @@ class TestSecrets:
         self, processes, cert_wg, cert_ssh_port, stub_vault, api, timeout
     ):
         user, target = make_user_and_target(api, cert_ssh_port)
+        # The gateway logs in once and caches the token, and both fixtures here
+        # are module-scoped, so a test that simply reads `valid_token` checks a
+        # string some earlier test's login produced. Invalidating first makes
+        # this connection do its own login, and the assertion below proves it.
+        logins_before = len(stub_vault.logins)
+        stub_vault.invalidate_token()
         connect(processes, cert_wg, user, target, timeout)
 
+        assert len(stub_vault.logins) > logins_before, (
+            "the gateway never logged in, so the token below is not one it presented"
+        )
         assert stub_vault.valid_token
         log = Path(cert_wg.log_path).read_text()
         # Asserted so the check below cannot pass merely because nothing was logged.

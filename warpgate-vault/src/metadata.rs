@@ -104,6 +104,6 @@ pub async fn gcp_identity_token(
     // this is an identity token, and whatever answers on `metadata_address` is
     // no more trusted than whatever answers on the Vault address.
     let raw = read_bounded(response).await?;
-    let text = std::str::from_utf8(&raw).map_err(|_| VaultError::OversizedResponse)?;
+    let text = std::str::from_utf8(&raw).map_err(|_| VaultError::NonUtf8Response)?;
     Ok(Zeroizing::new(text.trim().to_owned()))
 }

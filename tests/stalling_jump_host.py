@@ -28,8 +28,13 @@ PASSWORD = "let-me-through"
 
 
 class _Server(paramiko.ServerInterface):
-    def __init__(self, opened: threading.Event):
+    def __init__(self, opened: threading.Event, stop: threading.Event):
         self.opened = opened
+        # The server's own event, not a fresh one: waiting on a throwaway
+        # `threading.Event()` cannot be released by `stop()`, so the transport
+        # thread held the accepted socket for the full 300 seconds after the
+        # test had finished.
+        self.stop = stop
 
     def get_allowed_auths(self, username):
         return "password"
@@ -51,7 +56,7 @@ class _Server(paramiko.ServerInterface):
         test, so the client is the one that gives up.
         """
         self.opened.set()
-        threading.Event().wait(300)
+        self.stop.wait(300)
         return paramiko.OPEN_FAILED_CONNECT_FAILED
 
 
@@ -98,7 +103,7 @@ class StallingJumpHost:
         try:
             transport = paramiko.Transport(client)
             transport.add_server_key(host_key)
-            transport.start_server(server=_Server(self.tunnel_requested))
+            transport.start_server(server=_Server(self.tunnel_requested, self._stop))
             # The stall happens on the transport thread inside
             # `check_channel_direct_tcpip_request`; nothing to do here but hold
             # the session open until the client gives up or the test ends.

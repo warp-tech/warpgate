@@ -42,9 +42,6 @@ def cert_wg(processes: ProcessManager, ctx, stub_vault):
     token_path.write_text(SERVICE_ACCOUNT_JWT)
     wg = processes.start_wg(
         config_patch={
-            # Short, so a handshake that never finishes is measurable inside a
-            # test rather than only in production.
-            
             "vault": {
                 "address": stub_vault.url,
                 "ca_bundle": stub_vault.ca_bundle,
@@ -143,8 +140,10 @@ def test_a_target_that_stalls_the_handshake_is_given_up_on(
 
         assert server.connections > 0, "the stalling server was never reached"
         assert code != 0
-        # The configured inactivity timeout is 8s; the assertion is that the
-        # handshake is bounded by something at all.
+        # Warpgate's own message rather than any non-zero exit: a silent peer
+        # and a dropped connection end the session alike, and only one of them
+        # is what this test is named for.
+        assert "never completed the handshake" in shown, shown[-400:]
         # The handshake has its own 30s bound. Without it this is held for the
         # inactivity timeout instead — five minutes by default, and however long
         # an operator has raised it to.

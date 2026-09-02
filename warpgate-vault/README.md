@@ -123,7 +123,7 @@ is not something Warpgate can see:
 Set `certificate_ttl` well below the 24-hour ceiling; it is a backstop against a
 misconfigured role, not a target to aim at.
 
-Warpgate refuses a plain-HTTP `address` unless it is loopback. Vault's
+Warpgate refuses a plain-HTTP `address`, loopback included. Vault's
 certificate is verified against the host's trust store, plus `ca_bundle` if set:
 
 ```yaml
@@ -451,6 +451,6 @@ requests — including the ones carrying its Vault token and its cloud identity
 token — at a host of their choosing. That is no more access than editing the
 config already grants, but it means the config file deserves the same protection
 as a credential: root-owned, not world-readable, and under change review.
-Warpgate refuses plain HTTP for `address` outside localhost and never follows a
+Warpgate refuses plain HTTP for `address` and never follows a
 redirect, so neither address can be downgraded or re-pointed after the fact by
 whatever answers it.

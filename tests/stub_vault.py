@@ -403,6 +403,10 @@ class StubVault:
         self.cert_type = "user"
         self.sign_options = []
         self.sign_key_id = None
+        # Cleared like the rest: `invalidate_token` leaves a value here that no
+        # gateway ever presented, and a later test reading the field would check
+        # that string rather than the live one.
+        self.valid_token = None
         self.logins.clear()
         self.signs.clear()
         self.requests.clear()
