@@ -39,7 +39,7 @@ jobs:
       - name: Judge
         id: judge
         if: steps.stage.outputs.judge == 'true'
-        uses: actions/ai-inference@v1
+        uses: actions/ai-inference@v3
         with:
           model: openai/gpt-4.1
           max-tokens: 16
