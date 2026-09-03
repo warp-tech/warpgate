@@ -26,7 +26,18 @@ impl LogonWatcher {
             InfoData::LogonInfoV2(info) => Some(&info.logon_info),
             InfoData::PlainNotify => None,
             InfoData::LogonExtended(extended) => {
-                debug!(?extended, "Target sent extended logon info");
+                // Not `?extended`. `LogonInfoExtended` derives `Debug` over its
+                // whole shape, and the auto-reconnect packet inside it carries
+                // the sixteen random bytes a client turns into the verifier
+                // that re-attaches to this session without presenting
+                // credentials again ([MS-RDPBCGR] 2.2.10.1.1.1). Printing the
+                // struct wrote that value into the log.
+                debug!(
+                    flags = ?extended.present_fields_flags,
+                    errors = ?extended.errors_info,
+                    auto_reconnect = extended.auto_reconnect.is_some(),
+                    "Target sent extended logon info"
+                );
                 return;
             }
         };
