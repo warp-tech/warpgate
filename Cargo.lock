@@ -4464,9 +4464,9 @@ dependencies = [
 
 [[package]]
 name = "mysql_common"
-version = "0.37.3"
+version = "0.38.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f27695f286b461da077b8c2f72f47feaa04ce3c3f9c0976257410e90e21208a"
+checksum = "d11189bb0e285f58b71744ee23aa8b943bd5120ef0877555813d2107374d3970"
 dependencies = [
  "base64 0.22.1",
  "bitflags 2.13.1",
@@ -4475,15 +4475,16 @@ dependencies = [
  "bytes",
  "crc32fast",
  "flate2",
- "getrandom 0.3.4",
- "num-bigint 0.4.8",
+ "getrandom 0.4.3",
+ "hex",
+ "num-bigint 0.5.1",
  "num-traits",
  "regex",
  "saturating",
  "serde",
  "serde_json",
- "sha1 0.10.6",
- "sha2 0.10.9",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
  "thiserror 2.0.20",
  "uuid",
 ]
