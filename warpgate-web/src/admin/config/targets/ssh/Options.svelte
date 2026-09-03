@@ -63,6 +63,17 @@
         ]
     }
 
+    function useDefaultExtensions() {
+        if (options.auth.kind !== 'Certificate') {
+            return
+        }
+        // Back to the absent key, which the server fills with `permit-pty`.
+        // Not the same as the empty list, and reachable no other way: removing
+        // rows can only ever arrive at `[]`, so without this an operator who
+        // cleared the list could not undo it from the form.
+        options.auth.allowedExtensions = undefined
+    }
+
     function removeExtension(index: number) {
         if (options.auth.kind !== 'Certificate') {
             return
@@ -323,6 +334,15 @@
     <div class="mb-3">
         <div class="d-flex align-items-center mb-2">
             <span class="me-auto">Allowed certificate extensions</span>
+            {#if options.auth.allowedExtensions !== undefined}
+                <button
+                    type="button"
+                    class="btn btn-link btn-sm"
+                    onclick={useDefaultExtensions}
+                >
+                    Use the default
+                </button>
+            {/if}
             <button
                 type="button"
                 class="btn btn-link btn-sm"
@@ -346,6 +366,12 @@
             rather than granting anything. An empty list is valid and means no
             extension is permitted at all.
         </small>
+        {#if options.auth.allowedExtensions?.length === 0}
+            <div class="text-warning small mb-2">
+                Nothing is permitted: a certificate carrying any extension is
+                refused, and one carrying none opens no interactive session.
+            </div>
+        {/if}
         {#each options.auth.allowedExtensions ?? [] as extension, index}
             <div class="d-flex mb-2">
                 <input
