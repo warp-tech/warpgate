@@ -16,7 +16,8 @@ Two modes, and the routine one is `--named`. From the repository root:
 
     PYTHONPATH=$PWD poetry -C tests run python -m tests.mutation_matrix --named
     PYTHONPATH=$PWD poetry -C tests run python -m tests.mutation_matrix --named principal
-    ... --named --changed <base>      # only guards whose anchor file changed
+    ... --named --changed <base>      # only guards whose anchor, or named test,
+                                      # changed
     ... --named --fail-fast           # stop at the first guard that does not
                                       # discriminate, rather than spending hours
                                       # confirming the rest
@@ -50,6 +51,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import sys
@@ -1518,6 +1520,84 @@ def check_discriminators(mutations):
         )
 
 
+# Directories a text scan for a test's defining file must not wander into:
+# build output, a vendored fork with its own house rules (PATCHES.md governs
+# those, not this script), and dependency trees nobody here wrote, which can
+# contain a `def` or `fn` with the same name by coincidence.
+_SCAN_EXCLUDED_DIRS = {"target", ".git", "vendor", "node_modules", ".venv"}
+
+# A plain definition line, Rust or Python. Good enough to find a name that is
+# supposed to be unique in the repository — it does not need to understand
+# `#[test]` attributes or decorators, because the guard being measured is
+# whether the *file* changed, not whether the match is a test.
+_DEF_RE = re.compile(
+    r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)\s*[<(]"
+    r"|^\s*(?:async\s+)?def\s+(\w+)\s*\(",
+    re.MULTILINE,
+)
+
+
+def _discriminator_source_files(names: set[str]) -> dict[str, set[str]]:
+    """Where each of `names` is defined, as repository-relative paths.
+
+    `--changed` used to ask only whether a guard's *anchor* was touched. The
+    anchor is product code; the thing that actually proves a guard is
+    exercised is the test named for it in `DISCRIMINATES`, and that test can
+    be weakened — made to assert less, or to assert something unreachable —
+    without the anchor moving at all. That happened: a test was found
+    asserting on a target it could never reach, and every `--changed` run
+    before it had reported nothing to measure, because the file that had
+    changed was the test, not the guard it discriminates.
+    So a guard is now selected when either its anchor changed or the file
+    defining its named test did, and this is how the second half resolves a
+    test name to a file.
+
+    Most of the Rust discriminators are not under `tests/` at all — they are
+    `#[test] fn`s inline in the same source file the guard is anchored to
+    (`warpgate-protocol-ssh/src/client/mod.rs`, `warpgate-vault/src/client.rs`).
+    Only the Python integration tests live under `tests/`. `cargo test -p
+    <crate> -- --list` (`_crate_tests`) would answer a related question — where
+    a Rust test *runs from* — but that is a module path
+    (`client::tests::name`), not a file, and getting it means building that
+    crate's test binary. `--changed` runs before anything is known to be worth
+    building, so this reads source text instead, the same kind of static check
+    `check_anchors` already relies on for the same reason.
+
+    A name with no result is an error, not an empty set. Resolving "no file
+    found" to "not touched" would silently reintroduce the exact failure this
+    exists to close — a guard reported as having nothing to measure because
+    the thing that should have flagged it could not be found.
+    """
+    found: dict[str, set[str]] = {name: set() for name in names}
+    for dirpath, dirnames, filenames in os.walk(REPO):
+        dirnames[:] = [d for d in dirnames if d not in _SCAN_EXCLUDED_DIRS]
+        for filename in filenames:
+            if not filename.endswith((".rs", ".py")):
+                continue
+            path = Path(dirpath) / filename
+            try:
+                text = path.read_text()
+            except (UnicodeDecodeError, OSError):
+                continue
+            for match in _DEF_RE.finditer(text):
+                name = match.group(1) or match.group(2)
+                if name in found:
+                    found[name].add(str(path.relative_to(REPO)))
+
+    unresolved = sorted(name for name, files in found.items() if not files)
+    if unresolved:
+        lines = "\n".join(f"  {name}" for name in unresolved)
+        raise SystemExit(
+            f"{len(unresolved)} named discriminator(s) could not be resolved "
+            f"to a defining file by scanning the repository:\n{lines}\n\n"
+            "--changed selects a guard when its test's file changed, the same "
+            "way it does when its anchor changes; a test this cannot find a "
+            "file for cannot be watched, and reporting it as 'not touched' "
+            "would be the silent under-selection this mode exists to avoid."
+        )
+    return found
+
+
 def failing_rust_tests(crate: str) -> set[str]:
     """Which Rust tests fail, by name.
 
@@ -1689,17 +1769,38 @@ def main():
                 "means the checkout has no history — fetch-depth: 0."
             )
         touched = {line.strip() for line in diff.stdout.splitlines() if line.strip()}
-        selected = [m for m in MUTATIONS if m[1] in touched]
+        # A guard's anchor is product code; it is not the only thing that can
+        # be touched in a way that invalidates a claim about that guard. The
+        # test named for it in DISCRIMINATES can be weakened in a file the
+        # anchor never goes near, and the anchor check alone would call that a
+        # no-op. So a guard is selected on either signal, not just the first.
+        by_anchor = {name for name, path, *_ in MUTATIONS if path in touched}
+        wanted_tests = {t for name, *_ in MUTATIONS for t in DISCRIMINATES.get(name, [])}
+        discriminator_files = _discriminator_source_files(wanted_tests)
+        by_discriminator = {
+            name
+            for name, *_ in MUTATIONS
+            for test in DISCRIMINATES.get(name, [])
+            if discriminator_files[test] & touched
+        }
+        selected = [m for m in MUTATIONS if m[0] in by_anchor or m[0] in by_discriminator]
         print(
             f"{len(touched)} file(s) changed against {changed_base}; "
-            f"{len(selected)} of {len(MUTATIONS)} guards live in them"
+            f"{len(by_anchor)} guard(s) have an anchor in them, "
+            f"{len(by_discriminator - by_anchor)} more have a named "
+            f"discriminator test in them "
+            f"({len(selected)} of {len(MUTATIONS)} total)"
         )
         # Said out loud rather than left to be inferred from a green check: this
-        # mode cannot see a guard broken in a file the change did not touch.
-        # That is what the full sweep exists for, and a run that reports on a
-        # subset has to name the subset.
+        # mode cannot see a guard broken in a file that changed neither the
+        # guard nor the test that is supposed to catch its removal. That is
+        # what the full sweep exists for, and a run that reports on a subset
+        # has to name the subset.
         if not selected:
-            print("no guard's anchor file was touched; nothing to measure")
+            print(
+                "no guard's anchor or named discriminator test was touched; "
+                "nothing to measure"
+            )
             raise SystemExit(0)
     else:
         selected = [m for m in MUTATIONS if not only or only in m[0]]
