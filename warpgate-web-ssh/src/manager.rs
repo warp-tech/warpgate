@@ -205,6 +205,13 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::ConnectionError(e) => {
+                            // `Vault`, `Aws` and `Warpgate` arrive here with no
+                            // error-level log anywhere upstream — the connect
+                            // path logs at debug!, under the default
+                            // `warpgate=info` filter — so without this a
+                            // certificate failure leaves the server side with
+                            // no record at all, only the sanitised text below.
+                            tracing::error!(error=%e, "Target connection failed");
                             session
                                 .push(ServerMessage::Error {
                                     message: shown_to_the_browser(&e),

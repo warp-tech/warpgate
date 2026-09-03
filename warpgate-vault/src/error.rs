@@ -150,9 +150,7 @@ impl VaultError {
             VaultError::Json(_)
             | VaultError::OversizedResponse
             | VaultError::NonUtf8Response
-            | VaultError::InvalidLease(_) => {
-                "Invalid response from Vault"
-            }
+            | VaultError::InvalidLease(_) => "Invalid response from Vault",
             VaultError::Aws(e) => e.client_message(),
         }
     }

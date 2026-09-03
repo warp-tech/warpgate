@@ -75,7 +75,11 @@ Two settings deserve attention:
   the target. Setting the username explicitly is almost always what you want.
 
 `default_extensions` grants the minimum. Add `permit-port-forwarding` or
-`permit-agent-forwarding` only if your users need them.
+`permit-agent-forwarding` only if your users need them — and only together with
+the matching change on the target. A target's `allowed_extensions` defaults to
+`permit-pty` alone and refuses any certificate carrying an extension not on that
+list, so granting one here without updating the target does not add a
+capability: it fails every session to that target.
 
 ## 2. Warpgate's identity to Vault
 
@@ -141,6 +145,22 @@ There is deliberately no setting to skip verification. The HTTP and Kubernetes
 target paths offer `verify: false` for devices whose certificates cannot be
 fixed; there is no equivalent case for Vault, and the Vault token crosses this
 connection in a header.
+
+Pin the CA itself with `ca_public_key`, the same key section 3 below writes to
+the target's `TrustedUserCAKeys`:
+
+```yaml
+vault:
+  ca_public_key: "ssh-ed25519 AAAA..."   # optional
+```
+
+Every other check on Vault's response asks whether the certificate matches what
+was requested - the principal, the lifetime, the options. This is the only one
+that asks who signed it, and it catches a role rebound to a different CA.
+Without it a certificate from the wrong CA is still refused, but only by the
+target's `TrustedUserCAKeys`, after Warpgate has already offered it, and the
+rejection that comes back names the target rather than the CA that mis-signed.
+Left unset, nothing is checked here.
 
 ### Kubernetes
 
@@ -281,7 +301,9 @@ Through the API:
 ## Verification
 
 ```bash
-# Warpgate: one login, one certificate per session
+# Warpgate: one login, one certificate per session. Both lines log at debug
+# level, and the default filter is warpgate=info, so run with -d (or
+# RUST_LOG=warpgate=debug) to see them.
 grep -E 'Authenticated to Vault|Issued an SSH certificate' <warpgate log>
 
 # The target names the person, not the gateway
@@ -426,24 +448,33 @@ omit it and certificates with it fail.
 
 The refusal reaches the connecting user, not only the log.
 
-**Extensions are not checked at all, and `force-command` alone does not confine a
-session.** An unexpected extension is logged at debug level and nothing else.
+**A pinned `force-command` alone does not confine a session.** It decides what
+the *shell or exec* channel runs. It does not touch the other channel types, and
+OpenSSH gates those purely on what the certificate carries:
+`permit-port-forwarding` opens `direct-tcpip`, `permit-agent-forwarding` reaches
+the connecting user's own SSH agent. A role whose `default_extensions` grants
+either — set deliberately, or written by someone with role-write and nothing
+else — would otherwise hand out a session that forwards and pivots from a target
+the certificate was supposed to lock to one command.
 
-That is a gap, not a design decision, and it undercuts the example above. A
-`force-command` decides what the *shell or exec* channel runs. It does not touch
-the other channel types, and OpenSSH gates those purely on what the certificate
-carries: `permit-port-forwarding` opens `direct-tcpip`, `permit-agent-forwarding`
-reaches the connecting user's own SSH agent. So a role whose
-`default_extensions` grants either — set deliberately, or written by someone with
-role-write and nothing else — gives a session that forwards and pivots from a
-target the certificate was supposed to lock to one command, and Warpgate accepts
-it without comment.
+Extensions are checked for that reason. A target's `allowed_extensions` is an
+allow-list, and a certificate carrying anything not on it is refused before it
+is offered to the target. It defaults to `permit-pty` alone, which is enough for
+an interactive session and nothing more:
 
-Until this is closed, the control is on the Vault side only: keep
-`default_extensions` to the minimum the role actually needs, as §1 says, and do
-not read a pinned `force-command` as confinement on its own. Check the target's
-own `sshd_config` too — `AllowTcpForwarding no` and `AllowAgentForwarding no`
-hold regardless of what a certificate permits.
+```json
+"auth": {
+  "kind": "Certificate",
+  "role": "warpgate-prod",
+  "allowed_extensions": ["permit-pty", "permit-port-forwarding"]
+}
+```
+
+Widen it only for a target whose sessions need to forward, and only together
+with the matching `default_extensions` on the role, as section 1 says: either
+one without the other fails every session to that target rather than granting
+anything. Check the target's own `sshd_config` too — `AllowTcpForwarding no` and
+`AllowAgentForwarding no` hold regardless of what a certificate permits.
 
 **`address` and `metadata_address` are fetched as given.** Both come from
 `warpgate.yaml`, so anyone who can edit that file can point Warpgate's outbound

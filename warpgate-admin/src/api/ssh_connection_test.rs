@@ -5,7 +5,8 @@ use tracing::error;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
 use warpgate_protocol_ssh::{
-    ConnectionError, IdentityHint, RCCommand, RCEvent, RemoteClient, resolve_ssh_chain_for_admin,
+    ConnectionError, IdentityHint, RCCommand, RCEvent, RemoteClient, client_error_message,
+    resolve_ssh_chain_for_admin,
 };
 
 use super::AdminContext;
@@ -126,8 +127,17 @@ impl Api {
                 // server side.
                 error!(target_id=%body.target_id, error=%format!("{err:#}"), "SSH host key check failed");
                 Ok(CheckSshHostKeyResponse::Error(PlainText(
-                    err.downcast_ref::<ConnectionError>()
-                        .map_or_else(|| format!("{err:#}"), ConnectionError::client_message),
+                    // The loop above returns `RCEvent::Error` unchanged, and the
+                    // command loop wraps that in `anyhow!("Error in command loop:
+                    // …")`, so it downcasts to neither error type this endpoint
+                    // knows — and the old fallback rendered the whole chain,
+                    // `WarpgateError::DatabaseError`'s SQL text included, into
+                    // the response. `client_error_message` is the constant the
+                    // session path falls back to for exactly that case.
+                    err.downcast_ref::<ConnectionError>().map_or_else(
+                        || client_error_message(&err).to_owned(),
+                        ConnectionError::client_message,
+                    ),
                 )))
             }
         }
