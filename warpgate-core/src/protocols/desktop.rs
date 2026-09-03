@@ -4,7 +4,11 @@
 //! protocol into these events/inputs so that a single renderer and a single
 //! recording format can serve every desktop protocol.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use bytes::Bytes;
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender};
 
 pub const DESKTOP_INPUT_CHANNEL_CAPACITY: usize = 256;
 
@@ -25,6 +29,40 @@ pub fn truncate_clipboard_contents(text: &str, max: usize) -> &str {
 pub fn truncate_clipboard_contents_in_place(text: &mut String, max: usize) {
     let end = truncate_clipboard_contents(text, max).len();
     text.truncate(end);
+}
+
+// a simple Sync flip (but no flop) for interactive logon tracking
+#[derive(Debug, Clone)]
+pub struct LogonState(Arc<AtomicBool>);
+
+impl LogonState {
+    pub fn at_logon_screen() -> Self {
+        Self(Arc::new(AtomicBool::new(true)))
+    }
+
+    pub fn logged_on() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+
+    pub fn mark_logged_on(&self) {
+        self.0.store(false, Ordering::Relaxed);
+    }
+
+    pub fn still_at_logon_screen(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// Handles for driving a backend desktop client (RDP / VNC) running on its own task.
+pub struct DesktopClientHandles {
+    /// Normalised desktop events produced by the backend.
+    pub event_rx: Receiver<DesktopEvent>,
+    /// Inputs to forward to the backend.
+    pub input_tx: Sender<DesktopInput>,
+    /// Signal the backend task to disconnect and stop.
+    pub abort_tx: UnboundedSender<()>,
+
+    pub logon_state: LogonState,
 }
 
 /// A rectangular region of the remote framebuffer.
@@ -116,4 +154,28 @@ pub enum DesktopInput {
     /// The viewer's available display area changed; request the target resize its
     /// desktop to `width`×`height`. Backends without dynamic-resize support ignore it.
     Resize { width: u16, height: u16 },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signing_in_is_one_way() {
+        let state = LogonState::at_logon_screen();
+        assert!(state.still_at_logon_screen());
+
+        let observer = state.clone();
+        state.mark_logged_on();
+        assert!(!observer.still_at_logon_screen());
+
+        // Nothing can put the session back at the sign-in screen.
+        state.mark_logged_on();
+        assert!(!observer.still_at_logon_screen());
+    }
+
+    #[test]
+    fn a_backend_that_cannot_tell_never_suppresses() {
+        assert!(!LogonState::logged_on().still_at_logon_screen());
+    }
 }

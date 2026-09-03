@@ -121,6 +121,9 @@ pub async fn bind_server(
                     let span =
                         info_span!("RDP", session=%server_handle.lock().await.user_session_id());
 
+                    // The outcome logs run in the span too: anything logged outside it is
+                    // not attributed to the session. They are synchronous, so they enter the
+                    // span directly rather than nesting another future in this one.
                     tokio::select! {
                         result = handle_connection(
                             services,
@@ -129,13 +132,13 @@ pub async fn bind_server(
                             remote_address,
                             cert_pem,
                             key_pem,
-                        ).instrument(span) => match result {
+                        ).instrument(span.clone()) => span.in_scope(|| match result {
                             Ok(()) => info!("Session ended"),
                             Err(error) => error!(%error, "Session failed"),
-                        },
-                        _ = abort_rx.recv() => {
+                        }),
+                        _ = abort_rx.recv() => span.in_scope(|| {
                             warn!("Session aborted by admin");
-                        }
+                        }),
                     }
                     Ok(())
                 }

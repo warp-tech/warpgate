@@ -1,10 +1,11 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tracing::error;
+use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Recording::RecordingKind;
 
 use super::{Error, Recorder, Result};
@@ -13,7 +14,7 @@ use crate::protocols::framebuffer::{
 };
 use crate::recordings::RecordingWriterOpener;
 use crate::recordings::writer::NDJsonRecordingWriter;
-use crate::{DesktopEvent, DesktopInput, DesktopRect};
+use crate::{DesktopEvent, DesktopInput, DesktopRect, LogonState};
 
 const MAX_GOP_BYTES: usize = 2_000_000;
 const MAX_GOP_SECONDS: f32 = 10.0;
@@ -199,9 +200,25 @@ pub struct DesktopRecorder {
     index_writer: Arc<NDJsonRecordingWriter>,
     started_at: Instant,
     state: Arc<Mutex<RecorderState>>,
+
+    // we do not record keyboard inputs at windows logon screen
+    sign_in: OnceLock<LogonState>,
+    record_keyboard: bool,
 }
 
 impl DesktopRecorder {
+    pub fn track_logon_state(&self, state: LogonState) {
+        let _ = self.sign_in.set(state);
+    }
+
+    fn should_record_keyboard(&self) -> bool {
+        self.record_keyboard
+            && !self
+                .sign_in
+                .get()
+                .is_some_and(LogonState::still_at_logon_screen)
+    }
+
     fn get_time(&self) -> f32 {
         self.started_at.elapsed().as_secs_f32()
     }
@@ -493,6 +510,9 @@ impl DesktopRecorder {
     /// Record a viewer input (client -> server) for audit: written to the stream and added
     /// to the index input track. `Refresh` is a redraw request, not a user action.
     pub async fn write_input(&self, input: &DesktopInput) -> Result<()> {
+        if matches!(input, DesktopInput::Key { .. }) && !self.should_record_keyboard() {
+            return Ok(());
+        }
         let time = self.get_time();
         let item = match input {
             // Prefer the keysym: it is what the user actually typed, whereas the scancode
@@ -605,6 +625,10 @@ impl Recorder for DesktopRecorder {
             index_writer: Arc::new(opener.open_index().await?),
             started_at: Instant::now(),
             state: Arc::new(Mutex::new(RecorderState::default())),
+            sign_in: OnceLock::new(),
+            record_keyboard: Parameters::Entity::get(&opener.db)
+                .await?
+                .record_desktop_keyboard_input,
         })
     }
 }

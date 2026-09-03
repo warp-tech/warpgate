@@ -958,6 +958,28 @@
                                     <div>Record sessions</div>
                                 </label>
 
+                                {#if parameters.recordingsEnable}
+                                    <label
+                                        for="recordDesktopKeyboardInput"
+                                        class="d-flex align-items-center mb-2"
+                                    >
+                                        <Input
+                                            id="recordDesktopKeyboardInput"
+                                            class="mb-0 me-2"
+                                            type="switch"
+                                            bind:checked={parameters.recordDesktopKeyboardInput}
+                                        />
+                                        <div>
+                                            Record remote desktop keyboard input
+                                        </div>
+                                    </label>
+                                    <HelpText>
+                                        Disable if recording passwords typed in
+                                        by users in various applications is a
+                                        security concern.
+                                    </HelpText>
+                                {/if}
+
                                 <FormGroup floating label="Storage backend">
                                     <select
                                         id="recordingsStorage"

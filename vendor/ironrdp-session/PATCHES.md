@@ -20,6 +20,14 @@ source-only `warpgate.patch`.
 When re-vendoring, check whether upstream splits concatenated Share Control PDUs and updates
 both active-stage processors before retaining these hunks.
 
+## Save Session Info PDU
+
+The upstream session processor decodes the Server Save Session Info PDU ([MS-RDPBCGR]
+2.2.10.1) only to log it, so a consumer cannot tell whether the session is still sitting at
+the target's sign-in screen. The fork surfaces it as `ProcessorOutput::SaveSessionInfo` /
+`ActiveStageOutput::SaveSessionInfo`; `warpgate-protocol-rdp` uses it to audit the target's
+own logon and to keep credentials typed at that sign-in screen out of session recordings.
+
 ## Bitmap row padding
 
 RDP servers may pad `TS_BITMAP_DATA` beyond the destination rectangle — the width up to a
