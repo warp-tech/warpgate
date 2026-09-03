@@ -323,19 +323,28 @@
     <div class="mb-3">
         <div class="d-flex align-items-center mb-2">
             <span class="me-auto">Allowed certificate extensions</span>
-            <button type="button" class="btn btn-link btn-sm" onclick={addExtension}>
+            <button
+                type="button"
+                class="btn btn-link btn-sm"
+                onclick={addExtension}
+            >
                 Add
             </button>
         </div>
         <small class="text-muted d-block mb-2">
-            An allow-list: a certificate carrying any extension not listed here is
-            refused, whatever the Vault role granted. Defaults to <code>permit-pty</code>
+            An allow-list: a certificate carrying any extension not listed here
+            is refused, whatever the Vault role granted. Defaults to
+            <code>permit-pty</code>
             alone, which is enough for an interactive session and nothing more.
-            <strong>Reaching this target as a jump host needs
-            <code>permit-port-forwarding</code> in both places</strong> — here, and in
-            the Vault role's <code>default_extensions</code>. Either one without the
-            other fails every session to this target rather than granting anything.
-            An empty list is valid and means no extension is permitted at all.
+            <strong
+                >Reaching this target as a jump host needs
+                <code>permit-port-forwarding</code>
+                in both places</strong
+            >
+            — here, and in the Vault role's <code>default_extensions</code>.
+            Either one without the other fails every session to this target
+            rather than granting anything. An empty list is valid and means no
+            extension is permitted at all.
         </small>
         {#each options.auth.allowedExtensions ?? [] as extension, index}
             <div class="d-flex mb-2">
