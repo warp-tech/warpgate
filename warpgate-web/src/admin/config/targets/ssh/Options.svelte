@@ -53,6 +53,30 @@
         ).filter((_, i) => i !== index)
     }
 
+    function addExtension() {
+        if (options.auth.kind !== 'Certificate') {
+            return
+        }
+        options.auth.allowedExtensions = [
+            ...(options.auth.allowedExtensions ?? []),
+            '',
+        ]
+    }
+
+    function removeExtension(index: number) {
+        if (options.auth.kind !== 'Certificate') {
+            return
+        }
+        // `.filter` always yields an array, so removing the last entry leaves
+        // an empty list rather than `undefined`. That distinction is load
+        // bearing: an absent key lets the server apply its `permit-pty`
+        // default, while an empty list means no extension is permitted at all,
+        // and an operator who clears the list means the latter.
+        options.auth.allowedExtensions = (
+            options.auth.allowedExtensions ?? []
+        ).filter((_, i) => i !== index)
+    }
+
     api.getTargets().then(targets => {
         sshTargets = targets.filter(
             t => t.options.kind === TargetKind.Ssh && t.id !== id,
@@ -287,6 +311,57 @@
                     type="button"
                     class="btn btn-link btn-sm"
                     onclick={() => removeCriticalOption(index)}
+                >
+                    Remove
+                </button>
+            </div>
+        {/each}
+    </div>
+{/if}
+
+{#if options.auth.kind === 'Certificate'}
+    <div class="mb-3">
+        <div class="d-flex align-items-center mb-2">
+            <span class="me-auto">Allowed certificate extensions</span>
+            <button type="button" class="btn btn-link btn-sm" onclick={addExtension}>
+                Add
+            </button>
+        </div>
+        <small class="text-muted d-block mb-2">
+            An allow-list: a certificate carrying any extension not listed here is
+            refused, whatever the Vault role granted. Defaults to <code>permit-pty</code>
+            alone, which is enough for an interactive session and nothing more.
+            <strong>Reaching this target as a jump host needs
+            <code>permit-port-forwarding</code> in both places</strong> — here, and in
+            the Vault role's <code>default_extensions</code>. Either one without the
+            other fails every session to this target rather than granting anything.
+            An empty list is valid and means no extension is permitted at all.
+        </small>
+        {#each options.auth.allowedExtensions ?? [] as extension, index}
+            <div class="d-flex mb-2">
+                <input
+                    class="form-control me-2"
+                    placeholder="permit-port-forwarding"
+                    required
+                    value={extension}
+                    oninput={e => {
+                        // Written back through a fresh array rather than bound
+                        // to the loop variable: the entries are strings, so
+                        // there is no object to mutate by reference, and the
+                        // `?? []` in the each expression means a binding has no
+                        // guaranteed path back to the field.
+                        if (options.auth.kind !== 'Certificate') {
+                            return
+                        }
+                        const list = [...(options.auth.allowedExtensions ?? [])]
+                        list[index] = e.currentTarget.value
+                        options.auth.allowedExtensions = list
+                    }}
+                >
+                <button
+                    type="button"
+                    class="btn btn-link btn-sm"
+                    onclick={() => removeExtension(index)}
                 >
                     Remove
                 </button>

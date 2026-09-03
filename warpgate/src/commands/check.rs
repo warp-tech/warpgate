@@ -45,7 +45,17 @@ pub async fn command(params: &GlobalParams) -> Result<()> {
     // `vault:`: an unusable one stops every certificate session. Constructed
     // and dropped — building the client is the validation.
     if let Some(vault) = config.store.vault.clone() {
-        warpgate_vault::VaultClient::new(vault).with_context(|| "Checking Vault configuration")?;
+        let client = warpgate_vault::VaultClient::new(vault)
+            .with_context(|| "Checking Vault configuration")?;
+        // Construction validates the address, mount and role names. The
+        // credential file is read per login, not at construction, so a typo in
+        // `token_path` or `secret_id_path` passed this check and then failed
+        // every certificate session — the failure this command exists to catch
+        // early, and the one thing it was not catching.
+        client
+            .check_credential()
+            .await
+            .with_context(|| "Checking the Vault credential")?;
     }
 
     info!("No problems found");

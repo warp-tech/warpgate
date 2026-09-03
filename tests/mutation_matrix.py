@@ -553,6 +553,23 @@ MUTATIONS = [
         "        .is_none_or(|_| true)",
     ),
     (
+        # An option name no certificate can carry. Pinned, it refuses every
+        # certificate; bare, it is a row that does nothing. Either way the form
+        # accepted something that cannot work.
+        "admin: an empty critical option name is refused on save",
+        "warpgate-admin/src/api/targets.rs",
+        "        .any(|option| option.name.trim().is_empty())",
+        "        .any(|option| option.name.trim().is_empty() && false)",
+    ),
+    (
+        # The connect path enforces every pin, so two that disagree describe a
+        # target nothing can open. Caught where it is still cheap to fix.
+        "admin: contradictory pinned critical options are refused on save",
+        "warpgate-admin/src/api/targets.rs",
+        "        .all(|(name, value)| *pinned.entry(name).or_insert(value) == value)",
+        "        .all(|(name, value)| *pinned.entry(name).or_insert(value) == value || true)",
+    ),
+    (
         # The one response-side property that had no check at all: every other
         # asks whether the certificate matches the request, none asked who
         # signed it.
@@ -727,6 +744,12 @@ DISCRIMINATES = {
     ],
     "admin: a Vault role the signing path would refuse is refused on save": [
         "a_role_the_signing_path_would_refuse_is_refused_at_save_time"
+    ],
+    "admin: an empty critical option name is refused on save": [
+        "critical_options_no_certificate_could_satisfy_are_refused_at_save_time"
+    ],
+    "admin: contradictory pinned critical options are refused on save": [
+        "critical_options_no_certificate_could_satisfy_are_refused_at_save_time"
     ],
     "certificate: the signing CA must be the pinned one": [
         "a_certificate_from_an_unpinned_ca_is_refused"

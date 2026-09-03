@@ -128,17 +128,20 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     {
         let mut config_rx = config_rx.clone();
         let vault = services.vault.clone();
-        let mut current = config_rx.borrow().store.vault.clone();
         tokio::spawn(async move {
             while config_rx.changed().await.is_ok() {
                 let desired = config_rx.borrow().store.vault.clone();
-                if desired == current {
-                    continue;
-                }
-                match desired.clone().map(VaultClient::new).transpose() {
+                // Deliberately rebuilt even when the `vault:` section is
+                // unchanged. `ca_bundle` names a file that the client reads
+                // once, at construction, and the watcher only ever sees the
+                // config file itself — so a rotated bundle is invisible here.
+                // Rebuilding unconditionally makes `touch config.yaml` enough
+                // to pick one up, instead of a process restart. The cost is a
+                // fresh login on an unrelated edit to a file that holds
+                // listeners and keys, not targets, and is edited by hand.
+                match desired.map(VaultClient::new).transpose() {
                     Ok(client) => {
                         vault.replace(client.map(Arc::new));
-                        current = desired;
                         info!("Reloaded the Vault configuration");
                     }
                     // Same choice the listener supervisor makes on a bad bind:

@@ -476,6 +476,33 @@ impl VaultClient {
         self.config.ca_public_key.as_deref()
     }
 
+    /// Reads the on-disk half of the configured credential, without logging in.
+    ///
+    /// `warpgate check` exists to find a broken config before a session depends
+    /// on it, the way it already does for the listeners' TLS material.
+    /// Constructing this client validates the address, mount and role names,
+    /// but the Kubernetes token and the AppRole secret ID are read per login
+    /// rather than at construction — so a typo in either path passed the check
+    /// and then failed every certificate session. The cloud methods have no
+    /// file to read here: their credential comes from an SDK chain or a
+    /// metadata service, reachable only at login.
+    ///
+    /// A read and not `login_body()`, deliberately: a response-wrapped secret
+    /// ID is redeemed once, and spending that redemption here would make the
+    /// first real login fail.
+    pub async fn check_credential(&self) -> Result<()> {
+        match &self.config.auth {
+            VaultAuth::Kubernetes { token_path, .. } => {
+                Self::read_credential(token_path).await?;
+            }
+            VaultAuth::AppRole { secret_id_path, .. } => {
+                Self::read_credential(secret_id_path).await?;
+            }
+            VaultAuth::Aws { .. } | VaultAuth::Azure { .. } | VaultAuth::Gcp { .. } => {}
+        }
+        Ok(())
+    }
+
     /// Signs `public_key` into a short-lived OpenSSH user certificate, returned
     /// in OpenSSH wire format.
     ///
@@ -967,7 +994,11 @@ mod tests {
     /// loopback included. Shared rather than per-server so adding a test needs
     /// no ceremony, and so the bundle path is a constant `approle_config` can
     /// reach without threading it through nine call sites.
-    fn test_tls() -> &'static (Vec<rustls::pki_types::CertificateDer<'static>>, Vec<u8>, PathBuf) {
+    fn test_tls() -> &'static (
+        Vec<rustls::pki_types::CertificateDer<'static>>,
+        Vec<u8>,
+        PathBuf,
+    ) {
         static TLS: std::sync::OnceLock<(
             Vec<rustls::pki_types::CertificateDer<'static>>,
             Vec<u8>,
@@ -981,8 +1012,7 @@ mod tests {
             // until its timeout. Every TLS test reaches this helper, and
             // `get_or_init` makes the install happen exactly once.
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-            let cert =
-                rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_owned()]).unwrap();
+            let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_owned()]).unwrap();
             let dir = std::env::temp_dir().join("warpgate-vault-test-tls");
             std::fs::create_dir_all(&dir).unwrap();
             let bundle = dir.join("ca.pem");
@@ -1314,8 +1344,7 @@ mod tests {
         let secret_id_path = tmp.path().join("secret-id");
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
-        let client =
-            VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
+        let client = VaultClient::new(approle_config(vault, secret_id_path)).unwrap();
         let error = client
             .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
             .await
@@ -1686,7 +1715,10 @@ mod tests {
             "http://[::1]:8200",
         ] {
             assert!(
-                matches!(validate_address(plaintext), Err(VaultError::InsecureAddress)),
+                matches!(
+                    validate_address(plaintext),
+                    Err(VaultError::InsecureAddress)
+                ),
                 "{plaintext} was accepted"
             );
         }
