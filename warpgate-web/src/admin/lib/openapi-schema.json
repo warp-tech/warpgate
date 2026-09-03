@@ -5703,6 +5703,9 @@
           "record_scp": {
             "type": "boolean"
           },
+          "record_desktop_keyboard_input": {
+            "type": "boolean"
+          },
           "login_protection_enabled": {
             "type": "boolean"
           },
@@ -5812,6 +5815,7 @@
           "show_session_menu",
           "password_policy",
           "record_scp",
+          "record_desktop_keyboard_input",
           "login_protection_enabled",
           "login_protection_retention_seconds",
           "lp_ip_max_attempts",
@@ -5897,6 +5901,9 @@
             "format": "int64"
           },
           "record_scp": {
+            "type": "boolean"
+          },
+          "record_desktop_keyboard_input": {
             "type": "boolean"
           },
           "login_protection_enabled": {

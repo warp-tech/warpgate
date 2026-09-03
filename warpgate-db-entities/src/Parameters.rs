@@ -192,6 +192,8 @@ pub struct Model {
     pub password_policy_require_special: bool,
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
+    /// Whether keystrokes are kept in desktop session recordings.
+    pub record_desktop_keyboard_input: bool,
     pub tutorial_dismissed: bool,
     pub login_protection_enabled: bool,
     pub login_protection_retention_seconds: i32,
@@ -296,6 +298,7 @@ impl Entity {
                     password_policy_require_special: Set(false),
                     max_api_token_duration_seconds: Set(None),
                     record_scp: Set(true),
+                    record_desktop_keyboard_input: Set(true),
                     tutorial_dismissed: Set(false),
                     login_protection_enabled: Set(true),
                     login_protection_retention_seconds: Set(2_592_000), // 30d

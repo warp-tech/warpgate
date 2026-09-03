@@ -6,11 +6,12 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
-use tracing::{info, warn};
+use tracing::{Instrument as _, info, warn};
 use warpgate_common::TargetRdpOptions;
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{
-    DesktopEvent, DesktopState, Services, TargetAuthorization, WarpgateServerHandle,
+    DesktopClientHandles, DesktopEvent, DesktopState, Services, TargetAuthorization,
+    WarpgateServerHandle,
 };
 
 use super::BackendBridge;
@@ -33,13 +34,16 @@ async fn frame_bridge(
 ) {
     let record_tx = recorder.map(|recorder| {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<DesktopEvent>(256);
-        tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                if let Err(error) = recorder.write_event(&event).await {
-                    warn!(%error, "Failed to record RDP desktop event");
+        tokio::spawn(
+            async move {
+                while let Some(event) = rx.recv().await {
+                    if let Err(error) = recorder.write_event(&event).await {
+                        warn!(%error, "Failed to record RDP desktop event");
+                    }
                 }
             }
-        });
+            .in_current_span(),
+        );
         tx
     });
 
@@ -102,16 +106,18 @@ pub(super) async fn connect_backend(
         .await
         .map(Arc::new);
 
-    let crate::RdpClientHandles {
+    let DesktopClientHandles {
         event_rx,
         input_tx,
         abort_tx,
-    } = crate::connect(approved, (screen.width, screen.height))?;
-    let frame_bridge = tokio::spawn(frame_bridge(
-        event_rx,
-        server_in_tx.clone(),
-        recorder.clone(),
-    ));
+        logon_state,
+    } = crate::connect(approved, (screen.width, screen.height), target_session_id)?;
+    if let Some(recorder) = &recorder {
+        recorder.track_logon_state(logon_state);
+    }
+    let frame_bridge = tokio::spawn(
+        frame_bridge(event_rx, server_in_tx.clone(), recorder.clone()).in_current_span(),
+    );
     Ok(BackendBridge {
         input_tx,
         abort_tx,
