@@ -817,9 +817,10 @@
                                             <strong>
                                                 multiplier × the previous block
                                                 duration
-                                            </strong>, capped at the maximum.
-                                            The repeat count resets only after
-                                            the cooldown period of
+                                            </strong
+                                            >, capped at the maximum. The repeat
+                                            count resets only after the cooldown
+                                            period of
                                             <em>clean</em>
                                             activity — not when a block expires.
                                         </HelpText>
