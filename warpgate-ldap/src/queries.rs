@@ -90,13 +90,22 @@ fn extract_ldap_user(search_entry: &SearchEntry, config: &LdapConfig) -> Result<
                     })
             })
     } else {
-        // Default behavior: Active Directory uses objectGUID, OpenLDAP uses entryUUID
+        // Active Directory returns objectGUID as 16 raw bytes, so it lands in
+        // bin_attrs. entryUUID is a dashed string, which ldap3 decodes into
+        // attrs instead, so it has to be parsed from there.
         search_entry
             .bin_attrs
             .get("objectGUID")
             .or_else(|| search_entry.bin_attrs.get("entryUUID"))
             .and_then(|v: &Vec<Vec<u8>>| v.first())
             .and_then(|b| Uuid::from_slice(&b[..]).ok())
+            .or_else(|| {
+                search_entry
+                    .attrs
+                    .get("entryUUID")
+                    .and_then(|v| v.first())
+                    .and_then(|s| Uuid::parse_str(s).ok())
+            })
     }
     .ok_or(LdapError::NoUUID(dn.clone()))?;
 
