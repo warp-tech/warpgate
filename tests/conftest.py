@@ -26,6 +26,24 @@ from typing import List, Optional
 from deepmerge import always_merger
 
 from .util import _wait_timeout, alloc_port, wait_port
+
+# Anchored on this file rather than on the working directory. The rest of the
+# suite reaches its keys as `ssh-keys/...` and gets away with it because pytest
+# runs from `tests/`; a path handed to `docker -v` does not get away with it,
+# because Docker resolves it against a different root and fails quietly.
+SUITE_SSH_KEYS = Path(__file__).parent / "ssh-keys"
+
+# The address a target is configured with, and therefore the one Warpgate dials
+# outbound. Not `localhost`: Warpgate resolves a hostname and connects to the
+# first address it gets, which on a dual-stack host is `::1`, while the Docker
+# containers these tests start publish on v4 only. The connection is then
+# refused, the test fails for a reason that has nothing to do with what it
+# asserts, and — worse — a guard-disabled run fails identically, which reads as
+# the guard being caught. The Python fake servers in this suite were made
+# dual-stack for the same underlying reason; that fixed the instances we owned
+# and not the class, because nothing can make a published Docker port answer on
+# `::1`.
+TARGET_HOST = "127.0.0.1"
 from .test_http_common import echo_server_port  # noqa
 
 
@@ -86,6 +104,15 @@ RDP_BACKEND_SIZE = (1280, 800)
 
 
 @dataclass
+class SshHostKey:
+    """The key an `sshd` fixture was started with, in the two fields the admin
+    API names it by."""
+
+    key_type: str
+    base64: str
+
+
+@dataclass
 class WarpgateProcess:
     config_path: Path
     process: subprocess.Popen
@@ -106,6 +133,9 @@ class ProcessManager:
         self.ctx = ctx
         self.timeout = timeout
         self._k3s_containers: List[str] = []
+        # Port to the host key that server was started with, for the servers
+        # that were given one of their own.
+        self.host_keys: dict[int, SshHostKey] = {}
 
     def _remove_k3s_containers(self):
         """Force-remove every k3s container we've started so far. Idempotent —
@@ -144,18 +174,56 @@ class ProcessManager:
                         pass
                 p.kill()
 
-    def start_ssh_server(self, trusted_keys=[], extra_config=""):
+    def start_ssh_server(
+        self, trusted_keys=[], extra_config="", trusted_ca=[], distinct_host_key=False
+    ):
         port = alloc_port()
         data_dir = self.ctx.tmpdir / f"sshd-{uuid.uuid4()}"
         data_dir.mkdir(parents=True)
         authorized_keys_path = data_dir / "authorized_keys"
         authorized_keys_path.write_text("\n".join(trusted_keys))
+        # Always written, even when empty: an unreadable TrustedUserCAKeys file
+        # makes sshd reject every connection, which is indistinguishable from the
+        # certificate being wrong.
+        trusted_ca_path = data_dir / "trusted_ca"
+        trusted_ca_path.write_text("\n".join(trusted_ca))
+        # Every server otherwise shares one host key, which makes two of them
+        # indistinguishable to anything that identifies a host by its key — and
+        # therefore makes it impossible to tell which hop of a chain answered.
+        #
+        # Either way the key ends up inside `data_dir`, which is already bind
+        # mounted. The shared one used to be reached by mounting the source tree
+        # itself, `-v {os.getcwd()}/ssh-keys:/ssh-keys` — a host path assembled
+        # from wherever pytest happened to start. A Docker setup that
+        # allow-lists which host directories may be shared mounts that as empty
+        # rather than refusing, so sshd came up with no host key and every
+        # target container died before the test it was started for could say
+        # why. Eleven guards were reported as not discriminating for this and
+        # one other cause, none of them application defects.
+        own_key = data_dir / "host_key"
+        if distinct_host_key:
+            subprocess.run(
+                ["ssh-keygen", "-q", "-t", "ed25519", "-f", str(own_key), "-N", ""],
+                check=True,
+            )
+            # Recorded so a test can assert which host answered, rather than
+            # only that it was not some other one. With two hops those are the
+            # same claim; with three they are not, and the weaker one is what
+            # the host-key tests were making.
+            key_type, key_base64 = own_key.with_suffix(".pub").read_text().split()[:2]
+            self.host_keys[port] = SshHostKey(key_type=key_type, base64=key_base64)
+        else:
+            shutil.copy(SUITE_SSH_KEYS / "id_ed25519", own_key)
+        own_key.chmod(0o600)
+        host_key_path = str(own_key)
+
         config_path = data_dir / "sshd_config"
         config_path.write_text(
             dedent(
                 f"""\
                 Port 22
                 AuthorizedKeysFile {authorized_keys_path}
+                TrustedUserCAKeys {trusted_ca_path}
                 AllowAgentForwarding yes
                 AllowTcpForwarding yes
                 GatewayPorts yes
@@ -164,7 +232,7 @@ class ProcessManager:
                 PermitTunnel yes
                 StrictModes no
                 PermitRootLogin yes
-                HostKey /ssh-keys/id_ed25519
+                HostKey {host_key_path}
                 Subsystem	sftp	/usr/lib/ssh/sftp-server
                 LogLevel DEBUG3
                 {extra_config}
@@ -173,6 +241,7 @@ class ProcessManager:
         )
         data_dir.chmod(0o700)
         authorized_keys_path.chmod(0o600)
+        trusted_ca_path.chmod(0o600)
         config_path.chmod(0o600)
 
         self.start(
@@ -182,10 +251,14 @@ class ProcessManager:
                 "--rm",
                 "-p",
                 f"{port}:22",
+                # A jump host has to dial the next hop, which is another
+                # container published on a host port. Docker Desktop invents
+                # this name on its own, so a chain test passes on a laptop and
+                # fails on Linux, where nothing defines it.
+                "--add-host",
+                "host.docker.internal:host-gateway",
                 "-v",
                 f"{data_dir}:{data_dir}",
-                "-v",
-                f"{os.getcwd()}/ssh-keys:/ssh-keys",
                 "warpgate-e2e-ssh-server",
                 "-f",
                 str(config_path),
@@ -1042,3 +1115,50 @@ logging.basicConfig(level=logging.DEBUG)
 requests.packages.urllib3.disable_warnings()
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 subprocess.call("chmod 600 ssh-keys/id*", shell=True)
+
+
+# What the gateway itself said, as opposed to what its dependencies said.
+#
+# This was a list of things to drop, and it lost three times running: first the
+# tokio runtime tracing, then the config watcher's inotify events, then rustls
+# dumping every handshake. Each new dependency brings its own chatter and the
+# tail is only twenty-five lines, so excluding by name is a race that cannot be
+# won. Selecting by name can be: a failure is explained by what warpgate and
+# the SSH library did, and by anything that called itself a warning.
+_SIGNAL = ("warpgate", "russh", " WARN ", "ERROR")
+
+
+def _is_signal(line: str) -> bool:
+    return any(marker in line for marker in _SIGNAL)
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """On failure, show the tail of every gateway log the run produced.
+
+    The gateway's stdout goes to a file so a test can assert on it, which also
+    means a failure in CI arrives with the reason absent: the assertion says the
+    connection did not succeed and nothing says why. Twice in one day that cost
+    an hour of guessing at a message already written down.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if report.when != "call" or not report.failed:
+        return
+    ctx = item.funcargs.get("ctx")
+    if ctx is None:
+        return
+    for log in sorted(Path(ctx.tmpdir).glob("*.log")):
+        try:
+            lines = log.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        # Filter first, then take the tail. Taking the tail first spends the
+        # whole budget on whatever the runtime happened to be doing: a session
+        # that hung for two minutes ends with tokio bookkeeping, and the last
+        # thing the session itself did scrolls out of reach.
+        interesting = [line for line in lines if _is_signal(line)][-25:]
+        if interesting:
+            report.sections.append(
+                (f"gateway log {log.name} (last lines)", "\n".join(interesting))
+            )

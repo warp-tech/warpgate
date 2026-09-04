@@ -225,6 +225,17 @@ impl FullUserAuthorization {
     }
 }
 
+/// The names `attribution()` gives to the two tokens, and the names no user may
+/// have.
+///
+/// Exported so the admin API can refuse them: `attribution()` returns these
+/// into the certificate key ID, which the target's sshd log carries verbatim,
+/// and nothing stopped an admin creating a user called `admin-token`. A session
+/// opened by that person and one opened by the admin API token then read
+/// identically in the target's log and in Vault's audit log — the two records
+/// this feature exists to make trustworthy.
+pub const TOKEN_ATTRIBUTIONS: [&str; 2] = ["admin-token", "cluster-token"];
+
 impl RequestAuthorization {
     /// Returns a username if one is present (admin token has none)
     pub const fn username(&self) -> Option<&String> {
@@ -233,6 +244,35 @@ impl RequestAuthorization {
             Self::UserToken { username, .. } => Some(username),
             Self::AdminToken | Self::ClusterToken => None,
         }
+    }
+
+    /// A name for a log that is not ours, honest for every variant.
+    ///
+    /// `username()` returns `None` for a token, and the one caller that needed
+    /// a name substituted the literal string "admin" — so a certificate minted
+    /// by an API token was recorded, in the target's own sshd log and in
+    /// Vault's issuance log, as though a person called "admin" had opened the
+    /// session. That is the attribution failure the certificate feature exists
+    /// to prevent, reintroduced by the change that was meant to fix it.
+    ///
+    /// A token is not a person and this says so.
+    pub fn attribution(&self) -> &str {
+        match self {
+            Self::Session(auth) => auth.username(),
+            Self::UserToken { username, .. } => username,
+            Self::AdminToken => TOKEN_ATTRIBUTIONS[0],
+            Self::ClusterToken => TOKEN_ATTRIBUTIONS[1],
+        }
+    }
+
+    /// Whether `attribution()` names the gateway rather than a person.
+    ///
+    /// `username()` already draws this line — it is `None` for exactly the two
+    /// token variants. This asks a different question with the same answer: not
+    /// "who is the user" but "is this string ours, to be kept verbatim".
+    #[must_use]
+    pub const fn attribution_is_gateway(&self) -> bool {
+        matches!(self, Self::AdminToken | Self::ClusterToken)
     }
 
     /// Returns a user ID if present in the authorization context or nil UUID

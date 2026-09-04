@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-4-g120feec4-modified"
+    "version": "v0.28.5-66-gd5e0e5010-modified"
   },
   "servers": [
     {
@@ -6460,6 +6460,9 @@
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
           },
           {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetCertificateAuth"
+          },
+          {
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         ],
@@ -6468,9 +6471,32 @@
           "mapping": {
             "Password": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth",
             "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth",
+            "Certificate": "#/components/schemas/SSHTargetAuth_SshTargetCertificateAuth",
             "IamRole": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         }
+      },
+      "SSHTargetAuth_SshTargetCertificateAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Certificate"
+                ],
+                "example": "Certificate"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetCertificateAuth"
+          }
+        ]
       },
       "SSHTargetAuth_SshTargetIamRoleAuth": {
         "allOf": [
@@ -6566,6 +6592,23 @@
           }
         }
       },
+      "SshCertificateCriticalOption": {
+        "type": "object",
+        "title": "SshCertificateCriticalOption",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Option name as it appears in the certificate, e.g. `force-command`."
+          },
+          "value": {
+            "type": "string",
+            "description": "The exact value required. Unset accepts any value for this name — worth\navoiding for `force-command`, whose value is the command that runs."
+          }
+        }
+      },
       "SshHostKeyVerificationMode": {
         "type": "string",
         "description": "What to do when a target's SSH host key isn't in the known hosts list.",
@@ -6575,6 +6618,34 @@
           "AutoReject",
           "Ignore"
         ]
+      },
+      "SshTargetCertificateAuth": {
+        "type": "object",
+        "title": "SshTargetCertificateAuth",
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "Vault signing role for this target; `None` uses the configured default\nrole. The role is what constrains which principals may be requested, so\ntargets of differing privilege belong to differing roles."
+          },
+          "allowed_critical_options": {
+            "type": "array",
+            "description": "Critical options this target's certificates may carry.\n\nAnything not listed here is refused, because the target's sshd enforces\nwhatever arrives: a `force-command` decides what the session runs, under\nthe connecting user's own principal and key ID.\n\nPinning a `value` also makes the option **mandatory** — a certificate\nwithout it is refused. Otherwise someone who can write the Vault role\nbut not sign with it removes the pinned `force-command` instead of\nadding an option, and a target locked to one command hands out a shell.\nA bare name only permits, which is how a role that sometimes sets an\noption is expressed.",
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SshCertificateCriticalOption"
+            }
+          },
+          "allowed_extensions": {
+            "type": "array",
+            "description": "Certificate extensions this target's certificates may carry.\n\nA separate authorization mechanism from critical options, and the one\nthat decides what a session can *do* rather than what it runs. OpenSSH\nopens `direct-tcpip` only for `permit-port-forwarding` and reaches the\nconnecting user's own SSH agent only for `permit-agent-forwarding`, both\njudged purely on what the certificate carries. So a pinned\n`force-command` does not confine a session on its own: it governs the\nshell and exec channels and nothing else.\n\nDefaults to `permit-pty` alone — enough for an interactive session and\nnothing more. Anything else has to be named here, because the alternative\nis that a Vault role's `default_extensions`, set deliberately or written\nby someone with role-write and no signing right, silently grants\nforwarding on a target that was supposed to be locked down.",
+            "default": [
+              "permit-pty"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "SshTargetIamRoleAuth": {
         "type": "object",

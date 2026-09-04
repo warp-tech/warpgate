@@ -12,6 +12,7 @@ use warpgate_common::{
     GlobalParams, Protocol, Secret, UserSessionId, WarpgateConfig, WarpgateError,
 };
 use warpgate_db_entities::{Parameters, UserSession};
+use warpgate_vault::VaultClient;
 
 use crate::cluster::Cluster;
 use crate::db::connect_to_db_and_migrate;
@@ -20,6 +21,7 @@ use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
 use crate::{
     AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry, State,
+    VaultCell,
 };
 
 #[derive(Clone)]
@@ -30,6 +32,9 @@ pub struct Services {
     pub cluster: Arc<Cluster>,
     pub state: Arc<Mutex<State>>,
     pub config_provider: Arc<ConfigProviderEnum>,
+    /// Empty unless the config declares a Vault server. Swappable so that
+    /// editing `vault:` takes effect without a restart.
+    pub vault: VaultCell,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Option<Secret<String>>>,
     pub cluster_token: Arc<Secret<String>>,
@@ -70,10 +75,47 @@ impl Services {
         admin_token: Option<String>,
         params: GlobalParams,
     ) -> Result<Self> {
+        Self::build(config, admin_token, params, true).await
+    }
+
+    /// For commands that never reach a target, and so never need Vault.
+    ///
+    /// `recover-access` is the break-glass path: it exists for the moment
+    /// something is already wrong. Building the Vault client eagerly made an
+    /// unusable `vault:` section — a namespaced mount like `team-a/ssh`, which
+    /// `validate_segment` rejects, or an unreadable `ca_bundle` — enough to stop
+    /// an administrator recovering their own access. Nothing in that command,
+    /// or in `create-user`, opens a session.
+    pub async fn new_without_vault(
+        config: WarpgateConfig,
+        admin_token: Option<String>,
+        params: GlobalParams,
+    ) -> Result<Self> {
+        Self::build(config, admin_token, params, false).await
+    }
+
+    async fn build(
+        config: WarpgateConfig,
+        admin_token: Option<String>,
+        params: GlobalParams,
+        with_vault: bool,
+    ) -> Result<Self> {
         let db = connect_to_db_and_migrate(&config, &params).await?;
         let recordings = Arc::new(SessionRecordings::new(db.clone(), &params));
 
         let cluster = Arc::new(Cluster::new(db.clone(), config.store.http.listen.port()).await?);
+
+        let vault = VaultCell::new(if with_vault {
+            config
+                .store
+                .vault
+                .clone()
+                .map(VaultClient::new)
+                .transpose()?
+                .map(Arc::new)
+        } else {
+            None
+        });
 
         let config = Arc::new(Mutex::new(config));
 
@@ -125,6 +167,7 @@ impl Services {
             cluster,
             rate_limiter_registry,
             config_provider,
+            vault,
             auth_state_store,
             admin_token: Arc::new(admin_token.map(Secret::new)),
             cluster_token: Arc::new(resolve_cluster_token(&db).await?),

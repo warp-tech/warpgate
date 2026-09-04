@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -9,8 +11,8 @@ use sea_orm::{
 use uuid::Uuid;
 use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::{
-    AdminPermission, Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions,
-    WarpgateError, map_target_secrets,
+    AdminPermission, Role as RoleConfig, SSHTargetAuth, Target as TargetConfig, TargetOptions,
+    TargetSSHOptions, WarpgateError, map_target_secrets,
 };
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
@@ -63,6 +65,58 @@ enum CreateTargetResponse {
 
     #[oai(status = 400)]
     BadRequest(Json<String>),
+}
+
+/// Whether a target's options name a Vault role the signing path could use.
+///
+/// Checked when the target is saved, not only when a session tries to use it.
+/// The connect path validates the role and refuses — correctly, and hours later,
+/// with an error naming the session rather than the form that accepted the typo.
+fn vault_role_is_usable(options: &TargetOptions) -> bool {
+    let TargetOptions::Ssh(ssh) = options else {
+        return true;
+    };
+    let SSHTargetAuth::Certificate(certificate) = &ssh.auth else {
+        return true;
+    };
+    certificate
+        .role
+        .as_ref()
+        .is_none_or(|role| warpgate_common::vault_name_is_well_formed(role))
+}
+
+/// Whether a target's critical options describe something a certificate could
+/// actually satisfy.
+///
+/// Two ways they do not. An empty name matches no option any CA will ever put
+/// in a certificate, so pinning one refuses every certificate and leaving it
+/// bare is a row that does nothing. And the connect path enforces every pin
+/// naming an option rather than the first one, deliberately — picking by
+/// position would let the admin UI show a pin that is not the one deciding —
+/// so two pins disagreeing about one option describe a target nothing can open.
+///
+/// Neither row looks wrong on its own, which is why the form is the last place
+/// this is cheap to see. Afterwards it is a session that will not start.
+fn critical_options_are_usable(options: &TargetOptions) -> bool {
+    let TargetOptions::Ssh(ssh) = options else {
+        return true;
+    };
+    let SSHTargetAuth::Certificate(certificate) = &ssh.auth else {
+        return true;
+    };
+    if certificate
+        .allowed_critical_options
+        .iter()
+        .any(|option| option.name.trim().is_empty())
+    {
+        return false;
+    }
+    let mut pinned: HashMap<&str, &str> = HashMap::new();
+    certificate
+        .allowed_critical_options
+        .iter()
+        .filter_map(|option| Some((option.name.as_str(), option.value.as_deref()?)))
+        .all(|(name, value)| *pinned.entry(name).or_insert(value) == value)
 }
 
 pub struct ListApi;
@@ -125,6 +179,15 @@ impl ListApi {
 
         if body.name.is_empty() {
             return Ok(CreateTargetResponse::BadRequest(Json("name".into())));
+        }
+
+        if !vault_role_is_usable(&body.options) {
+            return Ok(CreateTargetResponse::BadRequest(Json("role".into())));
+        }
+        if !critical_options_are_usable(&body.options) {
+            return Ok(CreateTargetResponse::BadRequest(Json(
+                "allowed_critical_options".into(),
+            )));
         }
 
         let db = &admin.services().db;
@@ -239,7 +302,10 @@ impl DetailApi {
             return Ok(UpdateTargetResponse::NotFound);
         };
 
-        if target.kind != (&body.options).into() {
+        if target.kind != (&body.options).into()
+            || !vault_role_is_usable(&body.options)
+            || !critical_options_are_usable(&body.options)
+        {
             return Ok(UpdateTargetResponse::BadRequest);
         }
 
@@ -481,5 +547,112 @@ impl RolesApi {
         model.delete(db).await.map_err(WarpgateError::from)?;
 
         Ok(DeleteTargetRoleResponse::Deleted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_common::{
+        SSHTargetAuth, SshCertificateCriticalOption, SshTargetCertificateAuth,
+        SshTargetPublicKeyAuth, TargetOptions, TargetSSHOptions,
+    };
+
+    use super::{critical_options_are_usable, vault_role_is_usable};
+
+    fn ssh_target(auth: SSHTargetAuth) -> TargetOptions {
+        TargetOptions::Ssh(TargetSSHOptions {
+            host: "localhost".to_owned(),
+            port: 22,
+            username: "root".to_owned(),
+            allow_insecure_algos: None,
+            auth,
+            jump_host: None,
+        })
+    }
+
+    fn certificate_target(role: Option<&str>) -> TargetOptions {
+        ssh_target(SSHTargetAuth::Certificate(SshTargetCertificateAuth {
+            role: role.map(str::to_owned),
+            ..Default::default()
+        }))
+    }
+
+    /// An admin API that takes a role the signing path would refuse leaves the
+    /// operator to learn of the typo from a broken session rather than from the
+    /// form that accepted it.
+    #[test]
+    fn a_role_the_signing_path_would_refuse_is_refused_at_save_time() {
+        assert!(vault_role_is_usable(&certificate_target(Some("warpgate"))));
+        assert!(vault_role_is_usable(&certificate_target(None)));
+        assert!(
+            !vault_role_is_usable(&certificate_target(Some("warp/gate"))),
+            "a role with a path separator was accepted at save time"
+        );
+        assert!(
+            !vault_role_is_usable(&certificate_target(Some(""))),
+            "an empty role was accepted at save time"
+        );
+    }
+
+    fn with_options(options: &[(&str, Option<&str>)]) -> TargetOptions {
+        ssh_target(SSHTargetAuth::Certificate(SshTargetCertificateAuth {
+            allowed_critical_options: options
+                .iter()
+                .map(|(name, value)| SshCertificateCriticalOption {
+                    name: (*name).to_owned(),
+                    value: value.map(str::to_owned),
+                })
+                .collect(),
+            ..Default::default()
+        }))
+    }
+
+    /// An empty name, and two pins that disagree: both describe a target no
+    /// certificate can open, and each row looks right on its own. The form is
+    /// the last place either is cheap to see.
+    #[test]
+    fn critical_options_no_certificate_could_satisfy_are_refused_at_save_time() {
+        assert!(critical_options_are_usable(&with_options(&[
+            ("force-command", Some("/usr/bin/backup")),
+            ("source-address", Some("10.0.0.0/8")),
+        ])));
+        assert!(
+            critical_options_are_usable(&with_options(&[
+                ("force-command", Some("/usr/bin/backup")),
+                ("force-command", Some("/usr/bin/backup")),
+            ])),
+            "a pin repeated with the same value is redundant, not unsatisfiable"
+        );
+        assert!(
+            critical_options_are_usable(&with_options(&[
+                ("force-command", None),
+                ("force-command", Some("/usr/bin/backup")),
+            ])),
+            "a bare name alongside a pin is how an option that is sometimes set is written"
+        );
+        assert!(
+            !critical_options_are_usable(&with_options(&[
+                ("force-command", Some("/usr/bin/backup")),
+                ("force-command", Some("/bin/sh")),
+            ])),
+            "two pins that no certificate can satisfy at once were accepted at save time"
+        );
+        assert!(
+            !critical_options_are_usable(&with_options(&[("", Some("/usr/bin/backup"))])),
+            "an empty option name was accepted at save time"
+        );
+        assert!(
+            !critical_options_are_usable(&with_options(&[("   ", None)])),
+            "a whitespace-only option name was accepted at save time"
+        );
+    }
+
+    /// A target with no Vault role has nothing to check, and must not be
+    /// refused for lacking one.
+    #[test]
+    fn a_target_without_a_vault_role_is_left_alone() {
+        assert!(vault_role_is_usable(&ssh_target(SSHTargetAuth::PublicKey(
+            SshTargetPublicKeyAuth::default()
+        ))));
     }
 }

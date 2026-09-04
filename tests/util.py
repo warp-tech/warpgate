@@ -21,9 +21,34 @@ if "GITHUB_ACTION" in os.environ:
 
 
 def alloc_port():
+    """The next port nothing is listening on.
+
+    It used to be `last_port += 1` with no check, so it handed out whatever
+    number came next whether or not something already held it. Anything on the
+    machine could own that port — another suite, a leftover process, an
+    ephemeral port the kernel had just handed to a stub — and the caller only
+    found out when its own `bind` raised `Address already in use`, some way
+    further into a test that then failed for a reason unrelated to what it was
+    testing. That was worth roughly one failure per run of the hostile-target
+    suite.
+
+    Probed the way the callers bind — dual-stack on `::`, `SO_REUSEADDR` — so a
+    port that passes here is one they can take.
+    """
     global last_port
-    last_port += 1
-    return last_port
+    for _ in range(200):
+        last_port += 1
+        probe = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        try:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            probe.bind(("::", last_port))
+        except OSError:
+            continue
+        finally:
+            probe.close()
+        return last_port
+    raise RuntimeError(f"no free port found above {last_port - 200}")
 
 
 def _wait_timeout(fn, msg, timeout=60):

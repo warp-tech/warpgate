@@ -18,7 +18,7 @@ pub async fn command(
     role: Option<&String>,
 ) -> anyhow::Result<()> {
     let config = load_config(params, true)?;
-    let services = Services::new(config.clone(), None, params.clone()).await?;
+    let services = Services::new_without_vault(config.clone(), None, params.clone()).await?;
 
     let db = &services.db;
 

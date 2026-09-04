@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.5-4-g120feec4-modified"
+    "version": "v0.28.5-66-gd5e0e5010-modified"
   },
   "servers": [
     {
@@ -2199,6 +2199,10 @@
           },
           "running_on_ec2": {
             "type": "boolean"
+          },
+          "has_vault": {
+            "type": "boolean",
+            "description": "Whether a Vault server is configured, so the admin UI can hide target\nauthentication options that would fail at connect time."
           },
           "should_prompt_analytics": {
             "type": "boolean"

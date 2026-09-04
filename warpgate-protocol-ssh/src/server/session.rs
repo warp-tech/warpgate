@@ -46,12 +46,14 @@ use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
 use crate::server::get_allowed_auth_methods;
-use crate::server::service_output::{VisualConnectionChainItem, paint_fg};
+use crate::server::service_output::{
+    VisualConnectionChainItem, paint_fg, without_control_characters_except_newline,
+};
 use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
-    SshRecordingMetadata, X11Request, resolve_approved_ssh_chain,
+    SshRecordingMetadata, X11Request, client_error_message, resolve_approved_ssh_chain,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
@@ -556,14 +558,24 @@ impl ServerSession {
         Ok(())
     }
 
+    /// Escaping happens here, at the sink, and not in the callers.
+    ///
+    /// A fix applied at the point of use only ever covers the points somebody
+    /// went looking at — a target name in one message, a certificate's
+    /// principals in another. Both PTY sinks escape unconditionally, so a new
+    /// call site cannot reopen the hole by forgetting, and Warpgate's own
+    /// colour codes are added after the text has been through it.
     pub fn emit_service_message(&self, msg: &str) -> Result<()> {
-        debug!("Service message: {}", msg);
+        // Before the escaping below, not after: this logs the raw message,
+        // so a `\n` in a certificate's option name or a Vault error body forges
+        // a log record even though the same text reaches the terminal escaped.
+        debug!("Service message: {msg:?}");
 
         let _ = self.emit_pty_output(self.service_output.erase_display().as_bytes());
         let output = format!(
             "{} {}\r\n",
             paint_fg(Color::Blue, false, "● Warpgate:"),
-            msg.replace('\n', "\r\n")
+            without_control_characters_except_newline(msg).replace('\n', "\r\n")
         );
         self.emit_pty_output(output.as_bytes())
     }
@@ -573,6 +585,7 @@ impl ServerSession {
             self.service_output.stop_progress();
             let _ = self.emit_pty_output(self.service_output.erase_display().as_bytes());
         }
+        let msg = without_control_characters_except_newline(msg).replace('\n', "\r\n");
         let output = format!("{} {msg}\r\n", paint_fg(Color::Red, false, "● Warpgate:"));
         self.emit_pty_output(output.as_bytes())
     }
@@ -630,10 +643,8 @@ impl ServerSession {
 
         let visual_chain = self.make_visual_connection_chain(&ssh_chain[..]).await?;
         self.rc_state = RCState::Connecting;
-        self.send_command(RCCommand::Connect(
-            ssh_chain.into_iter().map(|x| x.ssh_options).collect(),
-        ))
-        .map_err(|_| anyhow::anyhow!("cannot send command"))?;
+        self.send_command(RCCommand::Connect(ssh_chain))
+            .map_err(|_| anyhow::anyhow!("cannot send command"))?;
         self.emit_pty_output(b"\r\n")?;
         self.service_output.start_progress(visual_chain).await;
         Ok(())
@@ -1170,19 +1181,43 @@ impl ServerSession {
                             "you can remove the old key in the Warpgate management UI and try again",
                         )?;
                     }
-                    ConnectionError::Authentication => {
-                        let _ = self.emit_pty_error(
-                            "SSH target rejected Warpgate's authentication request",
-                        );
+                    ConnectionError::Authentication(ref reason) => {
+                        // Logged as well as shown. The catch-all arm below does
+                        // this, and without it here an authentication rejection
+                        // was the one connection failure leaving no server-side
+                        // record — while clock skew on a short-lived certificate
+                        // is exactly the diagnosis an operator needs the log for.
+                        tracing::error!(%reason, "Target rejected the authentication request");
+                        // The reason is what tells a wrong credential apart from
+                        // a target whose clock disagrees, which is the most
+                        // common cause of a short-lived certificate being
+                        // refused, so it must reach the user and not stop at
+                        // the server log.
+                        let _ = self.emit_pty_error(&format!(
+                            "SSH target rejected Warpgate's authentication request: {reason}"
+                        ));
                     }
                     error => {
-                        let _ = self.emit_pty_error(&format!("Target connection failed: {error}"));
+                        tracing::error!(%error, "Target connection failed");
+                        // `client_message()` and not `{error}`: the full text is
+                        // for the log above, and carries Vault URLs and role
+                        // names a connected user must not be handed.
+                        let _ = self.emit_pty_error(&format!(
+                            "Target connection failed: {}",
+                            error.client_message()
+                        ));
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_pty_error(&format!("Error: {e}"));
+                // The full error to the log, a constant to the terminal. The
+                // detail is what an operator needs and what a connected user
+                // must not be handed; printing `{e}` gave it to the user and
+                // was the one path to this sink that no round of hardening had
+                // touched.
+                error!(error=%e, "Client session error");
+                let _ = self.emit_pty_error(client_error_message(&e));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {

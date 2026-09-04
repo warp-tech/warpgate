@@ -13,6 +13,7 @@ curve25519-dalek = { version = "5.0.0", default-features = false } # pin due to 
 dialoguer.workspace = true
 ed25519-dalek = { version = "3.0.0", default-features = false } # pin due to build fail on x86 in 2.1
 futures.workspace = true
+humantime = "2"
 natord = { version = "1.0", default-features = false }
 ratatui = { version = "0.30", default-features = false, features = [
     "crossterm",
@@ -39,4 +40,5 @@ warpgate-common-http = { path = "../warpgate-common-http", default-features = fa
 warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
 warpgate-tls = { path = "../warpgate-tls" }
+warpgate-vault = { path = "../warpgate-vault" }
 zeroize = { version = "^1.5", default-features = false }

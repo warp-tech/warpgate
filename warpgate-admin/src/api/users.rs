@@ -11,11 +11,29 @@ use warpgate_common::{
     AdminPermission, AdminRole as AdminRoleConfig, User as UserConfig,
     UserRequireCredentialsPolicy, WarpgateError,
 };
+use warpgate_common_http::auth::TOKEN_ATTRIBUTIONS;
 use warpgate_core::logging::{AuditEvent, format_related_ids};
 use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
 use super::AdminContext;
 use crate::api::common::case_insensitive_search;
+
+/// A username may not contain `:`.
+///
+/// It is echoed into the certificate key ID as `warpgate:<username>:<session>`,
+/// which the target's own sshd log carries and which anything reading that log
+/// splits on the colon. A name with one in it silently shifts every field, so
+/// the person a session is attributed to is not the person who opened it —
+/// which is the single claim the certificate feature makes.
+/// The names the API tokens are attributed under are also refused, for the
+/// same reason one field further along: `attribution()` puts `admin-token` into
+/// the key ID when the admin API token drives a session, and nothing stopped an
+/// admin creating a user by that name. Two sessions with different actors then
+/// read identically in the target's log and in Vault's, which is the pair of
+/// records this feature exists to make trustworthy.
+fn username_is_well_formed(username: &str) -> bool {
+    !username.is_empty() && !username.contains(':') && !TOKEN_ATTRIBUTIONS.contains(&username)
+}
 
 #[derive(Object)]
 struct CreateUserRequest {
@@ -84,7 +102,7 @@ impl ListApi {
     ) -> Result<CreateUserResponse, WarpgateError> {
         admin.require(AdminPermission::UsersCreate)?;
 
-        if body.username.is_empty() {
+        if !username_is_well_formed(&body.username) {
             return Ok(CreateUserResponse::BadRequest(Json("name".into())));
         }
 
@@ -240,7 +258,7 @@ impl DetailApi {
             return Ok(UpdateUserResponse::NotFound);
         };
 
-        if body.username.is_empty() {
+        if !username_is_well_formed(&body.username) {
             return Ok(UpdateUserResponse::BadRequest(Json("username".into())));
         }
 
@@ -868,5 +886,38 @@ impl RolesApi {
         .emit();
 
         Ok(DeleteUserAdminRoleResponse::Deleted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::username_is_well_formed;
+
+    /// The `:` rejection had no test in either language, and no matrix guard —
+    /// the only check in this feature with neither. It protects the one claim
+    /// the certificate path makes: that `warpgate:<username>:<session>` in the
+    /// target's sshd log names the person who opened the session.
+    #[test]
+    fn a_username_with_a_colon_would_shift_every_field_of_the_key_id() {
+        // What the target's sshd log carries, and what reads it back.
+        let key_id = |username: &str| format!("warpgate:{username}:0e5f");
+        let field = |id: &str, n: usize| id.split(':').nth(n).unwrap_or_default().to_owned();
+
+        assert!(username_is_well_formed("alice"));
+        assert_eq!(field(&key_id("alice"), 1), "alice");
+
+        // Without the check: the reader attributes the session to `root`, and
+        // an operator auditing the target's logs sees a name that was chosen
+        // rather than authenticated.
+        assert_eq!(field(&key_id("root:admin"), 1), "root");
+        assert!(!username_is_well_formed("root:admin"));
+
+        // A token is not a person, and a person may not take a token's name.
+        assert!(!username_is_well_formed("admin-token"));
+        assert!(!username_is_well_formed("cluster-token"));
+
+        assert!(!username_is_well_formed(":"));
+        assert!(!username_is_well_formed("trailing:"));
+        assert!(!username_is_well_formed(""));
     }
 }

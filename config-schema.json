@@ -119,6 +119,17 @@
         "$ref": "#/$defs/SsoProviderConfig"
       }
     },
+    "vault": {
+      "description": "Absent unless the deployment issues target credentials from Vault.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VaultConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "vnc": {
       "$ref": "#/$defs/VncConfig",
       "default": {
@@ -802,6 +813,185 @@
       "enum": [
         "external_host",
         "host_header"
+      ]
+    },
+    "VaultAuth": {
+      "description": "How Warpgate proves its own identity to Vault.\n\nNo method reads its credential from the config, deliberately: the point of\nissuing target credentials on demand is that nothing long-lived sits on the\nWarpgate host, and a value pasted into the config would put it straight\nback. Kubernetes and AppRole read a file — a service account token mounted\nand rotated by the kubelet, or a short-lived secret ID meant to arrive\nresponse-wrapped from whatever provisions the host. AWS, GCP and Azure read\nnothing durable at all: each proves the workload's own cloud identity, over\nthe instance metadata service or the provider's credential chain.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "kubernetes"
+            },
+            "role": {
+              "type": "string"
+            },
+            "token_path": {
+              "type": "string",
+              "default": "/var/run/secrets/kubernetes.io/serviceaccount/token"
+            }
+          },
+          "required": [
+            "kind",
+            "role"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "app_role"
+            },
+            "role_id": {
+              "type": "string"
+            },
+            "secret_id_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "role_id",
+            "secret_id_path"
+          ]
+        },
+        {
+          "description": "Signs an `sts:GetCallerIdentity` call with the default credential chain —\non EC2 that is the instance role. Access keys in the environment work but\nput back the long-lived secret this exists to avoid.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "aws"
+            },
+            "region": {
+              "description": "Signs against a regional STS endpoint instead of the global one. Set\nthis only when Vault is configured with a matching `sts_endpoint`:\nVault replays the request globally by default, and a region-scoped\nsignature is rejected there.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "role": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "server_id": {
+              "description": "Bound into the signature so a captured request cannot be replayed\nagainst a different Vault. Must match the server's `iam_server_id_header_value`.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "azure"
+            },
+            "metadata_address": {
+              "type": "string",
+              "default": "http://169.254.169.254"
+            },
+            "resource": {
+              "type": "string",
+              "default": "https://management.azure.com/"
+            },
+            "role": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "role"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "gcp"
+            },
+            "metadata_address": {
+              "type": "string",
+              "default": "http://metadata.google.internal"
+            },
+            "role": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "role"
+          ]
+        }
+      ]
+    },
+    "VaultConfig": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "Base URL of the Vault server, e.g. `https://vault.internal:8200`.",
+          "type": "string"
+        },
+        "auth": {
+          "$ref": "#/$defs/VaultAuth"
+        },
+        "ca_bundle": {
+          "description": "PEM file holding the CA that issued Vault's certificate, for a Vault\nbehind a private CA.\n\nAdded to the host's trust store rather than replacing it, so a\nmisconfigured path cannot silently turn verification off — an\nunreadable or malformed file is a startup error. There is deliberately\nno switch to skip verification: the Vault token crosses this connection\nin a header, and unlike the HTTP and Kubernetes target paths, which\noffer `verify: false` for devices whose certificates cannot be fixed,\nthere is no equivalent case here.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "ca_public_key": {
+          "description": "The signing CA the target trusts, in OpenSSH public-key format\n(`ssh-ed25519 AAAA…`), pinned so a certificate signed by anything else\nis refused before it is offered.\n\nEvery other check on Vault's response asks whether the certificate is\nwhat was requested. This is the only one that asks *who signed it*. The\ntarget's `TrustedUserCAKeys` is the real enforcement and would refuse\nsuch a certificate anyway — but it does so after Warpgate has offered\nit, and the refusal that comes back names the target rather than the\nissuer that mis-signed. Pinning turns a confusing rejection into a\nprecise one, and detects a role rebound to a different CA.\n\nLeft unset, nothing is checked here.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "certificate_ttl": {
+          "description": "Lifetime asked for when signing. Vault clamps this to the role's\n`max_ttl`, so it can only shorten what the role already allows — set it\nto hold the window down without editing Vault. Left unset, the role's own\nTTL decides.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "default_role": {
+          "description": "Signing role used by targets that don't name one of their own.",
+          "type": "string"
+        },
+        "mount": {
+          "description": "Mount point of the SSH secrets engine in signed-certificates mode.",
+          "type": "string",
+          "default": "ssh-client-signer"
+        },
+        "timeout": {
+          "type": "string",
+          "default": "10s"
+        }
+      },
+      "required": [
+        "address",
+        "default_role",
+        "auth"
       ]
     },
     "VncConfig": {
