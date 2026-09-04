@@ -5,7 +5,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, Secret, WarpgateError};
+use warpgate_common::{AdminPermission, Secret, WarpgateError, client_error_message};
 use warpgate_db_entities::LdapServer;
 use warpgate_ldap::LdapUsernameAttribute;
 use warpgate_tls::TlsMode;
@@ -439,10 +439,14 @@ impl ListApi {
                         },
                     )))
                 }
+                // This endpoint's whole purpose is telling an admin what is
+                // wrong with the LDAP connection they are configuring --
+                // `client_error_message` is the deliberate opt-out of
+                // `WarpgateError`'s generic `as_response()` rendering.
                 Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
                     TestLdapServerResponse {
                         success: false,
-                        message: format!("Connection failed: {e}"),
+                        message: format!("Connection failed: {}", client_error_message(&e)),
                         base_dns: None,
                     },
                 ))),
