@@ -13,7 +13,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
-pub use error::SshClientError;
+pub use error::{SshClientError, client_error_message};
 use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
@@ -77,6 +77,38 @@ pub enum ConnectionError {
 
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
+}
+
+impl ConnectionError {
+    /// What a connected user — over a PTY or a browser session — may be shown
+    /// for a failed target connection.
+    ///
+    /// `Io`/`Key`/`Ssh` carry the underlying library's own `Display`, and
+    /// `Warpgate` is `#[error(transparent)]`, so its `Display` is
+    /// `WarpgateError`'s own — a database failure rendering as
+    /// `database error: {DbErr}` carrying SQL text, or an encryption-key
+    /// mismatch naming configured key fingerprints. None of that is this
+    /// user's business; the full error still goes to the log via `Display`/
+    /// `{:?}`, this is only what crosses that boundary.
+    #[must_use]
+    pub fn client_message(&self) -> String {
+        match self {
+            Self::HostKeyMismatch { .. } => "Host key mismatch".to_string(),
+            Self::Aws(_) => "AWS authentication for the SSH target failed".to_string(),
+            Self::Resolve => "Could not resolve target address".to_string(),
+            Self::Aborted => "Connection aborted".to_string(),
+            Self::Authentication => {
+                "SSH target rejected Warpgate's authentication request".to_string()
+            }
+            Self::JumpHostTargetNotFound => "Jump host target not found".to_string(),
+            Self::Io(_) | Self::Key(_) | Self::Ssh(_) => "SSH protocol error".to_string(),
+            // Not `Warpgate(e) => e.to_string()`: that would forward
+            // `WarpgateError`'s own `Display` verbatim to whoever is watching
+            // this session. Folded in with `Internal` since both are "nothing
+            // this user can act on", for different reasons.
+            Self::Internal | Self::Warpgate(_) => "Internal connection error".to_string(),
+        }
+    }
 }
 
 pub struct ResolvedSshChainHost {
@@ -566,7 +598,11 @@ impl RemoteClient {
                     }
                 }
                 Err(e) => {
-                    debug!("Connect error: {}", e);
+                    // Single funnel for every `ConnectionError` variant regardless of
+                    // which internal step produced it (resolve, handshake, auth, jump
+                    // host) — was `debug!`, which meant a user-visible connect failure
+                    // left no record at the default log level.
+                    error!(error = ?e, "Connect error");
                     let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
                     self.set_disconnected().await;
 
