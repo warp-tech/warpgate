@@ -158,6 +158,7 @@ struct CreateLdapServerRequest {
     ssh_key_attribute: String,
     #[oai(default = "default_uuid_attribute")]
     uuid_attribute: String,
+    base_dns: Option<Vec<String>>,
 }
 
 const fn default_port() -> i32 {
@@ -361,8 +362,18 @@ impl ListApi {
             },
         };
 
-        // Discover base DNs
-        let base_dns = if std::env::var("WARPGATE_UNDER_TEST")
+        let supplied_base_dns: Vec<String> = body
+            .base_dns
+            .iter()
+            .flatten()
+            .map(|dn| dn.trim().to_owned())
+            .filter(|dn| !dn.is_empty())
+            .collect();
+
+        // Discover base DNs unless the caller named them
+        let base_dns = if !supplied_base_dns.is_empty() {
+            supplied_base_dns
+        } else if std::env::var("WARPGATE_UNDER_TEST")
             .unwrap_or_default()
             .is_empty()
         {
