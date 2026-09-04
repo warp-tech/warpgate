@@ -21,6 +21,7 @@ pub use session::ServerSession;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::oneshot;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::net::accept_loop;
@@ -103,12 +104,19 @@ async fn _handle_connection(
 
     let handler = ServerHandler { event_tx, banner };
 
+    // The session and the wire protocol run as two independent tasks (spawned
+    // below); this is the only link between them. It lets a teardown on the
+    // session side find out when russh's own loop has actually shut the
+    // stream down, instead of guessing with a sleep (#2520).
+    let (protocol_done_tx, protocol_done_rx) = oneshot::channel();
+
     let session = match ServerSession::start(
         remote_address,
         &services,
         server_handle,
         session_handle_rx,
         event_rx,
+        protocol_done_rx,
     )
     .await
     {
@@ -157,7 +165,12 @@ async fn _handle_connection(
 
     tokio::task::Builder::new()
         .name(&format!("SSH {id} protocol"))
-        .spawn(_run_stream(russh_config, wrapped_stream, handler))?;
+        .spawn(_run_stream(
+            russh_config,
+            wrapped_stream,
+            handler,
+            protocol_done_tx,
+        ))?;
 
     Ok(())
 }
@@ -166,6 +179,7 @@ async fn _run_stream<R>(
     config: Arc<russh::server::Config>,
     socket: R,
     handler: ServerHandler,
+    protocol_done_tx: oneshot::Sender<()>,
 ) -> Result<()>
 where
     R: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -176,6 +190,14 @@ where
         Ok(())
     }
     .await;
+
+    // Fires once russh's own session loop has actually exited and (tried to)
+    // shut the stream down — unlike a send into `Handle`, which only proves
+    // russh accepted a message into its own queue. Sent unconditionally, on
+    // both outcomes, since the session side only cares that this task is
+    // done, not why. A dropped receiver (the session already gave up and
+    // moved on) makes this a no-op.
+    let _ = protocol_done_tx.send(());
 
     if let Err(ref error) = ret {
         error!(%error, "Session failed");
