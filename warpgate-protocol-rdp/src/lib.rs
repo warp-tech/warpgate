@@ -107,9 +107,11 @@ pub fn connect(
             if let Err(error) =
                 client::run(options, size, event_tx.clone(), input_rx, abort_rx, logon).await
             {
-                let error_chain = format!("{error:#}");
-                error!(%error, %error_chain, "RDP client failed");
-                let _ = event_tx.send(DesktopEvent::Error(error_chain)).await;
+                // The full chain (which can name a target host or an internal
+                // path) goes to the log; only the top-level cause reaches the
+                // viewer — see `DesktopEvent::backend_error`.
+                error!(%error, error_chain = %format!("{error:#}"), "RDP client failed");
+                let _ = event_tx.send(DesktopEvent::backend_error(&error)).await;
             }
             let _ = event_tx
                 .send(DesktopEvent::State(DesktopState::Disconnected))

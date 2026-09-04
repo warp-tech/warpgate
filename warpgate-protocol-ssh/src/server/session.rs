@@ -51,7 +51,7 @@ use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
-    SshRecordingMetadata, X11Request, resolve_approved_ssh_chain,
+    SshRecordingMetadata, X11Request, client_error_message, resolve_approved_ssh_chain,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
@@ -202,11 +202,21 @@ fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::s
     }
 }
 
+/// What a terminal session is told when the connection to the target fails.
+///
+/// Named for the same reason as web-ssh's `shown_to_the_browser`: what is worth
+/// guarding is the choice — `client_message()` and not `Display` — and a call
+/// sitting inside the event loop has nowhere for a test to stand.
+fn shown_in_the_terminal(error: &ConnectionError) -> String {
+    format!("Target connection failed: {}", error.client_message())
+}
+
 #[cfg(test)]
 mod tests {
     use russh::{MethodKind, MethodSet};
+    use warpgate_common::WarpgateError;
 
-    use super::reject_with_allowed_auth_methods;
+    use super::{ConnectionError, reject_with_allowed_auth_methods, shown_in_the_terminal};
 
     #[test]
     fn rejected_public_key_auth_advertises_only_configured_methods() {
@@ -224,6 +234,29 @@ mod tests {
         assert_eq!(advertised_methods, configured_methods);
         assert!(!advertised_methods.contains(&MethodKind::Password));
         assert!(!advertised_methods.contains(&MethodKind::KeyboardInteractive));
+    }
+
+    /// The terminal is told a fixed phrase, never the error's own words.
+    ///
+    /// `Warpgate` is `#[error(transparent)]`, so this variant's `Display` is
+    /// `WarpgateError`'s own — the one the boundary exists for. Asserting the
+    /// fixture carries the leak first is what stops this passing vacuously.
+    #[test]
+    fn the_pty_leg_shows_a_fixed_phrase_not_the_error() {
+        let leaky = ConnectionError::Warpgate(WarpgateError::Other(
+            "database error: SELECT secret FROM credentials".into(),
+        ));
+        assert!(leaky.to_string().contains("SELECT"));
+
+        let shown = shown_in_the_terminal(&leaky);
+        assert!(
+            !shown.contains("SELECT"),
+            "the raw error reached the terminal: {shown}"
+        );
+        assert!(
+            !shown.contains("database error"),
+            "the raw error reached the terminal: {shown}"
+        );
     }
 }
 
@@ -1176,13 +1209,21 @@ impl ServerSession {
                         );
                     }
                     error => {
-                        let _ = self.emit_pty_error(&format!("Target connection failed: {error}"));
+                        // The PTY leg gets the same boundary as the browser
+                        // leg: `ConnectionError::Warpgate` is transparent, so
+                        // its `Display` is `WarpgateError`'s own — a database
+                        // failure arriving here would render its SQL text onto
+                        // the user's terminal. The connect path itself logs
+                        // only at `debug!`, so this is the server-side record.
+                        error!(?error, "Target connection failed");
+                        let _ = self.emit_pty_error(&shown_in_the_terminal(&error));
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_pty_error(&format!("Error: {e}"));
+                error!(error=?e, "Client session error");
+                let _ = self.emit_pty_error(&format!("Error: {}", client_error_message(&e)));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {

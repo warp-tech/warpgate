@@ -126,8 +126,10 @@ fn spawn_client(
         async move {
             if let Err(error) = run(options, encodings, event_tx.clone(), input_rx, abort_rx).await
             {
-                error!(%error, "VNC backend client failed");
-                let _ = event_tx.send(DesktopEvent::Error(error.to_string())).await;
+                // The full chain goes to the log; only the top-level cause
+                // reaches the viewer — see `DesktopEvent::backend_error`.
+                error!(%error, error_chain = %format!("{error:#}"), "VNC backend client failed");
+                let _ = event_tx.send(DesktopEvent::backend_error(&error)).await;
             }
             let _ = event_tx
                 .send(DesktopEvent::State(DesktopState::Disconnected))

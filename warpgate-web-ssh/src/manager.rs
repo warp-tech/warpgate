@@ -12,11 +12,24 @@ use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
-    RCCommand, RCEvent, RCState, RemoteClient, resolve_approved_ssh_chain,
+    ConnectionError, RCCommand, RCEvent, RCState, RemoteClient, client_error_message,
+    resolve_approved_ssh_chain,
 };
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
 use crate::protocol::ServerMessage;
+
+/// What a browser session is told when the connection fails.
+///
+/// A named function rather than a method call inside the event loop, because
+/// what is worth guarding here is the *choice* — `client_message()` and not
+/// `Display`. A call sitting inside an async loop cannot be reached by a test
+/// without driving a whole browser session; named here, the boundary has
+/// somewhere a test can stand.
+#[must_use]
+pub fn shown_to_the_browser(error: &ConnectionError) -> String {
+    error.client_message()
+}
 use crate::session::WebSshSession;
 
 const MAX_SESSIONS_PER_USER: usize = 100;
@@ -178,16 +191,27 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::Error(e) => {
+                            // The full chain (which may name a target host, a
+                            // key fingerprint or, via `SshClientError::Warpgate`,
+                            // a raw database error) goes to the log; only the
+                            // sanitised constant crosses into a browser.
+                            error!(session=%session_id, error=?e, "Client session error");
                             session
                                 .push(ServerMessage::Error {
-                                    message: e.to_string(),
+                                    message: client_error_message(&e).to_owned(),
                                 })
                                 .await;
                         }
                         RCEvent::ConnectionError(e) => {
+                            // The connect path itself only logs at `debug!`
+                            // (dropped under the default `warpgate=info`
+                            // filter), so without this a failed session leaves
+                            // no server-side record at all — only the sanitised
+                            // text the user sees below.
+                            error!(session=%session_id, error=?e, "Target connection failed");
                             session
                                 .push(ServerMessage::Error {
-                                    message: e.to_string(),
+                                    message: shown_to_the_browser(&e),
                                 })
                                 .await;
                             session
@@ -249,4 +273,40 @@ fn spawn_event_loop(
             .instrument(span),
         )
         .ok();
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_common::WarpgateError;
+
+    use super::{ConnectionError, shown_to_the_browser};
+
+    /// The browser is told a fixed phrase, never the error's own words.
+    ///
+    /// `Warpgate` is `#[error(transparent)]`, so its `Display` is whatever the
+    /// inner error says — a database failure renders as `database error: …`
+    /// carrying SQL text. That variant is the one this boundary exists for, and
+    /// asserting on it specifically is what makes this test fail if the call
+    /// reverts to `to_string()`.
+    #[test]
+    fn a_browser_never_sees_the_error_s_own_words() {
+        let leaky = ConnectionError::Warpgate(WarpgateError::Other(
+            "database error: SELECT secret FROM credentials".into(),
+        ));
+
+        // Without this the test would still pass if the fixture stopped
+        // carrying the text at all, proving nothing about the boundary.
+        assert!(leaky.to_string().contains("SELECT"));
+
+        let shown = shown_to_the_browser(&leaky);
+        assert!(
+            !shown.contains("SELECT"),
+            "the raw error reached the browser: {shown}"
+        );
+        assert!(
+            !shown.contains("database error"),
+            "the raw error reached the browser: {shown}"
+        );
+        assert_eq!(shown, leaky.client_message());
+    }
 }
