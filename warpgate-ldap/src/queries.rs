@@ -338,9 +338,11 @@ pub async fn find_user_by_uuid(
 
 #[cfg(test)]
 mod tests {
+    use ldap3::SearchEntry;
+    use uuid::Uuid;
     use warpgate_tls::TlsMode;
 
-    use super::username_filter;
+    use super::{extract_ldap_user, username_filter};
     use crate::types::{LdapConfig, LdapUsernameAttribute};
 
     fn config() -> LdapConfig {
@@ -397,5 +399,55 @@ mod tests {
             username_filter(&config, "alice")
                 .starts_with("(&(&(objectClass=person)(!(disabled=TRUE)))")
         );
+    }
+
+    const ENTRY_UUID: &str = "94708f40-8e23-103d-8006-951699206877";
+
+    fn search_entry(attrs: &[(&str, &str)], bin_attrs: &[(&str, Vec<u8>)]) -> SearchEntry {
+        SearchEntry {
+            dn: "cn=alice,dc=example,dc=com".into(),
+            attrs: attrs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), vec![(*v).to_owned()]))
+                .collect(),
+            bin_attrs: bin_attrs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), vec![v.clone()]))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_string_entry_uuid_is_read_when_no_uuid_attribute_is_configured() {
+        // ldap3 decodes a dashed entryUUID as UTF-8 into `attrs`, so looking
+        // only in `bin_attrs` misses what OpenLDAP and hosted directories
+        // return, and the entry is discarded as having no UUID.
+        let entry = search_entry(&[("cn", "alice"), ("entryUUID", ENTRY_UUID)], &[]);
+        let user = extract_ldap_user(&entry, &config()).unwrap();
+        assert_eq!(user.username, "alice");
+        assert_eq!(user.object_uuid, Uuid::parse_str(ENTRY_UUID).unwrap());
+    }
+
+    #[test]
+    fn a_binary_object_guid_is_still_read() {
+        let raw = vec![7u8; 16];
+        let entry = search_entry(&[("cn", "alice")], &[("objectGUID", raw.clone())]);
+        let user = extract_ldap_user(&entry, &config()).unwrap();
+        assert_eq!(user.object_uuid, Uuid::from_slice(&raw).unwrap());
+    }
+
+    #[test]
+    fn a_configured_uuid_attribute_may_hold_a_string() {
+        let mut config = config();
+        config.uuid_attribute = Some("entryUUID".into());
+        let entry = search_entry(&[("cn", "alice"), ("entryUUID", ENTRY_UUID)], &[]);
+        let user = extract_ldap_user(&entry, &config).unwrap();
+        assert_eq!(user.object_uuid, Uuid::parse_str(ENTRY_UUID).unwrap());
+    }
+
+    #[test]
+    fn an_entry_carrying_no_uuid_is_rejected() {
+        let entry = search_entry(&[("cn", "alice")], &[]);
+        assert!(extract_ldap_user(&entry, &config()).is_err());
     }
 }
