@@ -7560,6 +7560,12 @@
           },
           "uuid_attribute": {
             "type": "string"
+          },
+          "base_dns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
