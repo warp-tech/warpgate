@@ -79,12 +79,19 @@ mod tests {
         // `RCEvent::Error` is typed `anyhow::Error`, and anything on the way
         // there may add context. The downcast has to walk the chain, or the
         // sanitiser silently degrades to the fallback for wrapped errors.
-        let wrapped = anyhow::Error::from(leaky()).context("connecting to target");
-        assert!(format!("{wrapped:?}").contains(LEAK));
-        assert_eq!(
-            client_error_message(&wrapped),
-            "Internal error in the target connection"
-        );
+        //
+        // Deliberately not the `leaky()` fixture: its variant's
+        // `client_message()` is the same string as the fallback, so an
+        // assertion on it cannot tell a downcast that walked the chain from
+        // the degradation this test exists to catch. `MpscError` says
+        // something only a successful downcast can produce.
+        let wrapped = anyhow::Error::from(SshClientError::MpscError).context("connecting");
+        assert_eq!(client_error_message(&wrapped), "Internal connection error");
+
+        // And the leak still does not cross once wrapped.
+        let leaky_wrapped = anyhow::Error::from(leaky()).context("connecting to target");
+        assert!(format!("{leaky_wrapped:?}").contains(LEAK));
+        assert!(!client_error_message(&leaky_wrapped).contains("SELECT"));
     }
 
     #[test]
