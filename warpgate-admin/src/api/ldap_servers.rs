@@ -439,10 +439,8 @@ impl ListApi {
                         },
                     )))
                 }
-                // This endpoint's whole purpose is telling an admin what is
-                // wrong with the LDAP connection they are configuring --
-                // `client_error_message` is the deliberate opt-out of
-                // `WarpgateError`'s generic `as_response()` rendering.
+                // This endpoint exists to tell an admin what is wrong, so
+                // it opts out of the generic rendering.
                 Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
                     TestLdapServerResponse {
                         success: false,

@@ -8,34 +8,19 @@ use warpgate_common::WarpgateError;
 
 /// Replaces the body of a 5xx that was rendered from an error's own `Display`.
 ///
-/// [`WarpgateError::as_response`] sorts that crate's own variants into what a
-/// caller may read and what only the log may, but it only ever runs for an
-/// error that reaches poem *as* a `WarpgateError`. Poem renders every other
-/// error itself, and [`poem::Error`]'s own `Display` forwards to whatever type
-/// actually failed -- for an `anyhow::Error` source with `{err:#}`, so the
-/// entire causal chain. Anything that turns a foreign error into a
-/// `poem::Error` directly (`poem::error::InternalServerError(e)`,
-/// `Error::from_string(format!("{e}"), ..)`) or launders one through
-/// `anyhow::Context::context()` on the way to a `poem::Result` therefore
-/// bypasses that sorting completely, and a `sea_orm::DbErr`, `reqwest::Error`
-/// or `std::io::Error` reaches the client verbatim.
+/// [`WarpgateError::as_response`] only runs for an error that reaches poem
+/// *as* a `WarpgateError`. Poem renders every other error itself, through a
+/// `Display` that forwards to whatever actually failed -- an `anyhow` source
+/// as `{err:#}`, so the entire chain. `.context()` and
+/// `poem::error::InternalServerError` both land there.
 ///
-/// The rule applied here is narrower than "never show an error": a 5xx says
-/// the server failed, so its body was never a promise to the caller and
-/// nothing can be reading it as one. A 4xx is left alone, because that is
-/// where the API's real contract lives -- poem-openapi's own validation and
-/// parse messages included.
+/// A 5xx body was never a promise to the caller, so it is safe to replace.
+/// 4xx is left alone: that is where the API's contract lives.
 ///
-/// # What this deliberately does not catch
-///
-/// An error that still carries a `WarpgateError` is left to
-/// `as_response()`, which is the reviewed decision for those variants and
-/// the only thing that can keep a caller-facing message like
-/// `ExternalHostUnknown` intact. A `WarpgateError` laundered through
-/// `.context()` also answers to that check while rendering through `Display`,
-/// so it slips past: those call sites are fixed where they are, because the
-/// alternative -- flattening every 5xx -- would silently discard the
-/// caller-facing half of `as_response()`.
+/// An error still carrying a `WarpgateError` is left to `as_response()`,
+/// which is the reviewed decision for those variants. One laundered through
+/// `.context()` answers that check while rendering through `Display`, so it
+/// slips past and is fixed at its call site instead.
 pub fn flatten_internal_error(error: poem::Error) -> poem::Error {
     if !error.status().is_server_error() || error.downcast_ref::<WarpgateError>().is_some() {
         return error;
@@ -65,9 +50,8 @@ pub fn flatten_internal_error(error: poem::Error) -> poem::Error {
 
 /// [`flatten_internal_error`] as a layer, for `.around()`.
 ///
-/// Belongs at the very outside of an app: middleware that runs before routing
-/// -- session loading, header parsing, authorization injection -- fails the
-/// same way handlers do, and an inner wrapper never sees those.
+/// Belongs at the very outside of an app: middleware that runs before
+/// routing fails the same way handlers do, and an inner wrapper never sees it.
 pub async fn flatten_internal_errors<E: Endpoint + 'static>(
     ep: Arc<E>,
     req: Request,

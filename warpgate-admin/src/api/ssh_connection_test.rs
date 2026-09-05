@@ -86,10 +86,9 @@ impl Api {
             anyhow::Ok(key)
         };
 
-        // Result is matched manually, rather than via `?`, because this
-        // endpoint's whole purpose is telling an admin what is wrong with a
-        // target's host key -- `client_error_message` is the deliberate
-        // opt-out of `WarpgateError`'s generic `as_response()` rendering.
+        // Matched manually rather than via `?`: this endpoint exists to
+        // tell an admin what is wrong, so it opts out of the generic
+        // rendering.
         match fut.await {
             Ok(key) => Ok(CheckSshHostKeyResponse::Ok(Json(
                 CheckSshHostKeyResponseBody {

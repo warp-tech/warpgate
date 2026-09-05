@@ -341,10 +341,8 @@ impl ProtocolServer for HTTPProtocolServer {
             .data(http_client_cache.clone())
             .data(session_store.clone())
             .data(session_storage.clone())
-            // Outermost on purpose: session loading, header parsing and
-            // authorization injection all run before routing and fail the
-            // same way a handler does, so a wrapper any deeper never sees
-            // them.
+            // Outermost on purpose: session loading and header parsing run
+            // before routing and fail the same way a handler does.
             .around(flatten_internal_errors);
 
         tokio::spawn(async move {
