@@ -106,13 +106,9 @@ pub async fn handle_api_request(
                 .map(IntoResponse::into_response)
                 .map_err(poem::Error::from)
         } else {
-            // Deliberately not `.context(...)`: that converts the
-            // `WarpgateError` to an `anyhow::Error`, and poem then renders
-            // the chain's own `Display` instead of calling
-            // `WarpgateError::as_response()`. `flatten_internal_errors` cannot
-            // repair it either -- the error still downcasts to a
-            // `WarpgateError`, which is exactly what that layer steps aside
-            // for. Keeping the type is the whole fix.
+            // Not `.context(...)`: that converts the `WarpgateError` to an
+            // `anyhow::Error`, which poem renders through `Display` instead
+            // of `as_response()`.
             _handle_normal_request_inner(req, body, admitted, &path, ctx.services())
                 .await
                 .map(IntoResponse::into_response)

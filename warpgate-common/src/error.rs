@@ -102,30 +102,17 @@ impl ResponseError for WarpgateError {
         }
     }
 
-    // poem's default `as_response()` is `self.to_string().into_response()` --
-    // for a `thiserror` enum that means the `Display` of whichever variant
-    // fired becomes the HTTP body, including every `#[error(transparent)]`
-    // wrapper around `sea_orm::DbErr`, `reqwest::Error`, `LdapError` and the
-    // rest. None of that text was written with an HTTP client as its
-    // audience, and it changes shape on every dependency bump. Override it
-    // so a caller only ever sees text a Warpgate author deliberately chose
-    // to say to them.
-    //
-    // The match below is exhaustive (no `_` arm) on purpose: adding a new
-    // variant forces a decision about which bucket it belongs to, rather
-    // than silently inheriting whichever behaviour the catch-all happened
-    // to have.
+    // poem's default renders the `Display` of whichever variant fired into
+    // the body, which for the `#[error(transparent)]` ones is a foreign
+    // error's own words. Exhaustive on purpose: a new variant has to be
+    // sorted rather than inherit a catch-all.
     fn as_response(&self) -> Response
     where
         Self: Error + Send + Sync + 'static,
     {
         let message = match self {
-            // Warpgate-authored, no wrapped foreign error, and every
-            // interpolated value (a ticket id, a username, an IP) is
-            // something the caller already supplied or already knows. These
-            // are load-bearing API contracts -- the SSH/HTTP frontends match
-            // on some of them by variant already -- not internal debug
-            // output, so they keep their text.
+            // Written for the caller, interpolating only values they
+            // supplied or already know.
             Self::InvalidTicket(_)
             | Self::InvalidTarget
             | Self::InvalidCredentialType
@@ -144,24 +131,11 @@ impl ResponseError for WarpgateError {
             | Self::NoHostInUrl
             | Self::SessionEnd => self.to_string(),
 
-            // Everything else either wraps an error this crate does not
-            // control (DB, HTTP client, TLS, SSO/LDAP, key parsing, JSON,
-            // rate limiting, `Other`/`Anyhow` catch-alls) or names an
-            // invariant violation / server-side detail that is not the
-            // caller's to see. `InconsistentState` is a bug report, not a
-            // caller-facing contract. `ExternalHostNotWhitelisted` and
-            // `RoleNotFound` are the odd ones out here: both *are*
-            // Warpgate-authored, but unlike the rest of the "keep text"
-            // bucket the value each interpolates is the administrator's
-            // configuration rather than the caller's own input. The first
-            // renders the configured domain whitelist to an anonymous
-            // caller who supplied a spoofed `Host` header (it fires from
-            // the pre-auth SSO redirect-URL check); the second renders a
-            // role name from the SSO provider's `admin_role_mappings` to
-            // any user the identity provider will authenticate. Only a
-            // generic, per-status message crosses the wire; the real text
-            // still goes to the log, keyed by a correlation id the caller
-            // can hand back to an operator.
+            // Wraps an error this crate does not control, or names a
+            // server-side detail. `ExternalHostNotWhitelisted` and
+            // `RoleNotFound` read as caller-authored but interpolate the
+            // administrator's configuration: a domain whitelist to an
+            // anonymous caller, a configured role name to any SSO user.
             Self::DatabaseError(_)
             | Self::Other(_)
             | Self::UrlParse(_)
@@ -182,11 +156,7 @@ impl ResponseError for WarpgateError {
             | Self::Aws(_)
             | Self::Encryption(_) => {
                 let correlation_id = Uuid::new_v4();
-                // `{:#}` rather than `{}`: for the `#[error(transparent)]`
-                // variants this forwards the alternate flag straight to the
-                // wrapped error's `Display` (that's what "transparent" means
-                // to thiserror), which for an `anyhow::Error` renders the
-                // full causal chain instead of just its top frame. This line
+                // `{:#}` renders an `anyhow` chain in full, and this line
                 // is the only place that detail goes.
                 let detail = format!("{self:#}");
                 tracing::error!(
@@ -206,16 +176,13 @@ impl ResponseError for WarpgateError {
     }
 }
 
-/// Renders an error's full text (including, for an [`anyhow::Error`], its
-/// causal chain) for an admin-only "test connection" style endpoint whose
-/// entire purpose is answering "what is wrong with this configuration".
+/// Renders an error's full text, causal chain included, for an admin-only
+/// "test connection" endpoint that exists to answer "what is wrong with this
+/// configuration".
 ///
-/// This is the explicit opt-in out of [`WarpgateError::as_response`]'s
-/// default flattening. Only call it on an error the caller *asked* to see by
-/// initiating that specific diagnostic action -- never on an error headed to
-/// an endpoint with any other purpose, and never on anything that might
-/// carry a credential (a Vault token, a bind password) rather than a
-/// connection-shaped failure.
+/// The deliberate opt-out of [`WarpgateError::as_response`]'s flattening.
+/// Only for an error the caller asked to see, and never for one that could
+/// carry a credential rather than a connection failure.
 pub fn client_error_message(err: &(impl std::fmt::Display + ?Sized)) -> String {
     format!("{err:#}")
 }
