@@ -32,6 +32,7 @@ use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::errors::flatten_internal_errors;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
@@ -339,7 +340,10 @@ impl ProtocolServer for HTTPProtocolServer {
             .data(UnauthenticatedRequestContext::new(self.services.clone()).await)
             .data(http_client_cache.clone())
             .data(session_store.clone())
-            .data(session_storage.clone());
+            .data(session_storage.clone())
+            // Outermost on purpose: session loading and header parsing run
+            // before routing and fail the same way a handler does.
+            .around(flatten_internal_errors);
 
         tokio::spawn(async move {
             loop {
