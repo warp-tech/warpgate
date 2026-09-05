@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.3-labs
 # hadolint global ignore=DL3008
-FROM rust:1.97.1-bullseye@sha256:02d78ca3f928195c2a907543de778adfd728ad7e2a24fdc6aef582b7c77842e0 AS build
+FROM rust:1.97.1-bookworm@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates-java nodejs openjdk-17-jdk \
+    && apt-get install -y --no-install-recommends ca-certificates-java nodejs default-jre-headless \
     && rm -rf /var/lib/apt/lists/* \
     && cargo install --locked just@1.4.0
 
@@ -26,7 +26,7 @@ RUN just npm ci \
     && just npm run build \
     && cargo build --features mysql,postgres,rdp-openssl-tls --release
 
-FROM debian:bullseye-20260803@sha256:99cdf7792e25416bd801861ccd8e2fb27fb527b25e8d9a8704ebc3ead2015675
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 LABEL maintainer=heywoodlh
 ARG USER_ID=1000
 
