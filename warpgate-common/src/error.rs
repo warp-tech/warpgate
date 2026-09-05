@@ -150,15 +150,18 @@ impl ResponseError for WarpgateError {
             // invariant violation / server-side detail that is not the
             // caller's to see. `InconsistentState` is a bug report, not a
             // caller-facing contract. `ExternalHostNotWhitelisted` and
-            // `RoleNotFound` are the odd ones out here -- both *are*
-            // Warpgate-authored -- but unlike
-            // the rest of the "keep text" bucket, its second field is the
-            // admin-configured domain whitelist itself, which an anonymous
-            // caller supplying a spoofed `Host` header has no business
-            // learning (this fires from the pre-auth SSO redirect-URL
-            // check). Only a generic, per-status message crosses the wire;
-            // the real text still goes to the log, keyed by a correlation
-            // id the caller can hand back to an operator.
+            // `RoleNotFound` are the odd ones out here: both *are*
+            // Warpgate-authored, but unlike the rest of the "keep text"
+            // bucket the value each interpolates is the administrator's
+            // configuration rather than the caller's own input. The first
+            // renders the configured domain whitelist to an anonymous
+            // caller who supplied a spoofed `Host` header (it fires from
+            // the pre-auth SSO redirect-URL check); the second renders a
+            // role name from the SSO provider's `admin_role_mappings` to
+            // any user the identity provider will authenticate. Only a
+            // generic, per-status message crosses the wire; the real text
+            // still goes to the log, keyed by a correlation id the caller
+            // can hand back to an operator.
             Self::DatabaseError(_)
             | Self::Other(_)
             | Self::UrlParse(_)
