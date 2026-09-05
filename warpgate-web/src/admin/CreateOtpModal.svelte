@@ -124,7 +124,11 @@
         <ModalBody>
             <div class="d-flex gap-4 layout ms-2">
                 <div>
-                    <img class="qr mb-3 mt-2" bind:this={qrImage} alt="OTP QR code">
+                    <img
+                        class="qr mb-3 mt-2"
+                        bind:this={qrImage}
+                        alt="OTP QR code"
+                    >
                     <div
                         class="d-flex ms-2 me-2 mb-4 gap-3 justify-content-center"
                     >

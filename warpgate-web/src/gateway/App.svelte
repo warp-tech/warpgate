@@ -42,7 +42,10 @@
             push(`/login?next=${encodeURIComponent(url)}`)
             return false
         }
-        if (get(serverInfo)?.needsMfaSetup && detail.location !== '/mfa-setup') {
+        if (
+            get(serverInfo)?.needsMfaSetup &&
+            detail.location !== '/mfa-setup'
+        ) {
             push('/mfa-setup')
             return false
         }
