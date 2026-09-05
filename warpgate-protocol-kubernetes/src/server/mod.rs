@@ -22,6 +22,7 @@ mod client_certs;
 mod handlers;
 
 use client_certs::CertificateExtractorMiddleware;
+use warpgate_common_http::errors::flatten_internal_errors;
 
 pub async fn bind_server(
     services: Services,
@@ -36,7 +37,10 @@ pub async fn bind_server(
         .with(poem::middleware::Cors::new())
         .with(CertificateExtractorMiddleware)
         .data(UnauthenticatedRequestContext::new(services.clone()).await)
-        .data(correlator);
+        .data(correlator)
+        // This listener has its own app, so the gateway's layer does not
+        // reach it.
+        .around(flatten_internal_errors);
 
     info!(?address, "Kubernetes protocol listening");
 

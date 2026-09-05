@@ -131,7 +131,6 @@ impl ResponseError for WarpgateError {
             | Self::InvalidCredentialType
             | Self::UserNotFound(_)
             | Self::UserAlreadyExists(_)
-            | Self::RoleNotFound(_)
             | Self::TargetSessionRequiresApproval
             | Self::UserSessionAlreadyAttributed
             | Self::UserSessionEnded
@@ -150,8 +149,9 @@ impl ResponseError for WarpgateError {
             // rate limiting, `Other`/`Anyhow` catch-alls) or names an
             // invariant violation / server-side detail that is not the
             // caller's to see. `InconsistentState` is a bug report, not a
-            // caller-facing contract. `ExternalHostNotWhitelisted` is the
-            // odd one out here -- it *is* Warpgate-authored -- but unlike
+            // caller-facing contract. `ExternalHostNotWhitelisted` and
+            // `RoleNotFound` are the odd ones out here -- both *are*
+            // Warpgate-authored -- but unlike
             // the rest of the "keep text" bucket, its second field is the
             // admin-configured domain whitelist itself, which an anonymous
             // caller supplying a spoofed `Host` header has no business
@@ -165,6 +165,7 @@ impl ResponseError for WarpgateError {
             | Self::DeserializeJson(_)
             | Self::InconsistentState(_)
             | Self::ExternalHostNotWhitelisted(..)
+            | Self::RoleNotFound(_)
             | Self::Anyhow(_)
             | Self::Sso(_)
             | Self::Ca(_)
