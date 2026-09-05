@@ -6,7 +6,8 @@ use warpgate_common::{
 };
 use warpgate_core::Services;
 use warpgate_db_entities::{
-    AdminRole, PasswordCredential, Role, User, UserAdminRoleAssignment, UserRoleAssignment,
+    AdminRole, Parameters, PasswordCredential, Role, User, UserAdminRoleAssignment,
+    UserRoleAssignment,
 };
 
 use crate::config::load_config;
@@ -21,6 +22,7 @@ pub async fn command(
     let services = Services::new(config.clone(), None, params.clone()).await?;
 
     let db = &services.db;
+    let parameters = Parameters::Entity::get(db).await?;
 
     let existing_user = User::Entity::find()
         .filter(User::Entity::username_eq_ci(username))
@@ -37,7 +39,9 @@ pub async fn command(
             id: Set(Uuid::new_v4()),
             username: Set(username.to_owned()),
             description: Set("".into()),
-            credential_policy: Set(serde_json::to_value(None::<UserRequireCredentialsPolicy>)?),
+            credential_policy: Set(serde_json::to_value(
+                parameters.default_credential_policy()?,
+            )?),
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),

@@ -21,7 +21,7 @@
         faKeyboard,
         faMobileScreen,
     } from '@fortawesome/free-solid-svg-icons'
-    import { Alert, Button, Tooltip } from '@sveltestrap/sveltestrap'
+    import { Button, Tooltip } from '@sveltestrap/sveltestrap'
     import {
         api,
         CredentialKind,
@@ -37,8 +37,10 @@
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import { abbreviatePublicKey, possibleCredentials } from 'common/protocols'
-    import { SvelteSet } from 'svelte/reactivity'
+    import {
+        abbreviatePublicKey,
+        getEffectivePossibleCredentials,
+    } from 'common/protocols'
     import Fa from 'svelte-fa'
     import CertificateCredentialModal from '../../CertificateCredentialModal.svelte'
     import CreateOtpModal from '../../CreateOtpModal.svelte'
@@ -74,62 +76,6 @@
     let editingCertificateCredential = $state(false)
 
     const loadPromise = load()
-
-    const policyProtocols: {
-        id: 'ssh' | 'http' | 'mysql' | 'postgres' | 'kubernetes' | 'vnc' | 'rdp'
-        name: string
-    }[] = [
-        { id: 'ssh', name: 'SSH' },
-        { id: 'http', name: 'HTTP' },
-        { id: 'mysql', name: 'MySQL' },
-        { id: 'postgres', name: 'PostgreSQL' },
-        { id: 'kubernetes', name: 'Kubernetes' },
-        { id: 'vnc', name: 'VNC' },
-        { id: 'rdp', name: 'RDP' },
-    ]
-
-    // Get effective possible credentials for a protocol, considering global SSH auth settings
-    function getEffectivePossibleCredentials(
-        protocolId: string,
-    ): SvelteSet<CredentialKind> {
-        const base = possibleCredentials[protocolId]
-        if (!base) {
-            return new SvelteSet()
-        }
-
-        // For SSH, filter based on global auth method settings
-        if (protocolId === 'ssh' && globalParameters) {
-            const filtered = new SvelteSet<CredentialKind>()
-            for (const kind of base) {
-                // PublicKey requires publickey auth enabled
-                if (
-                    kind === CredentialKind.PublicKey &&
-                    !globalParameters.sshClientAuthPublickey
-                ) {
-                    continue
-                }
-                // Password requires password auth enabled
-                if (
-                    kind === CredentialKind.Password &&
-                    !globalParameters.sshClientAuthPassword
-                ) {
-                    continue
-                }
-                // Totp and WebUserApproval require keyboard-interactive auth enabled
-                if (
-                    (kind === CredentialKind.Totp ||
-                        kind === CredentialKind.WebUserApproval) &&
-                    !globalParameters.sshClientAuthKeyboardInteractive
-                ) {
-                    continue
-                }
-                filtered.add(kind)
-            }
-            return filtered
-        }
-
-        return new SvelteSet(base)
-    }
 
     async function load() {
         await Promise.all([
@@ -267,7 +213,10 @@
                 CredentialKind.Password,
                 CredentialKind.PublicKey,
             ]) {
-                const effectiveCreds = getEffectivePossibleCredentials(protocol)
+                const effectiveCreds = getEffectivePossibleCredentials(
+                    protocol,
+                    globalParameters,
+                )
                 if (
                     !credentialPolicy[protocol] &&
                     credentials.some(x => x.kind === ck) &&
@@ -503,10 +452,6 @@
     <AuthPolicyEditor
         bind:value={credentialPolicy}
         existingCredentials={credentials}
-        protocols={policyProtocols.map(p => ({
-            ...p,
-            possibleCredentials: getEffectivePossibleCredentials(p.id),
-        }))}
         {globalParameters}
     />
 </Loadable>

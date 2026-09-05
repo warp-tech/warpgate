@@ -233,13 +233,19 @@ impl DatabaseConfigProvider {
             return Err(WarpgateError::UserAlreadyExists(preferred_username));
         }
 
+        let default_credential_policy = match default_credential_policy {
+            Some(x) => x,
+            None => {
+                let parameters = entities::Parameters::Entity::get(db).await?;
+                serde_json::to_value(parameters.default_credential_policy()?)?
+            }
+        };
+
         let user = entities::User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(preferred_username.clone()),
             description: Set("".into()),
-            credential_policy: Set(default_credential_policy.unwrap_or_else(|| {
-                serde_json::to_value(UserRequireCredentialsPolicy::default()).unwrap_or_default()
-            })),
+            credential_policy: Set(default_credential_policy),
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(ldap_server_id),
             ldap_object_uuid: Set(ldap_object_uuid),

@@ -7,38 +7,47 @@
         type UserRequireCredentialsPolicy,
     } from 'admin/lib/api'
     import InfoBox from 'common/InfoBox.svelte'
+    import {
+        getEffectivePossibleCredentials,
+        type ProtocolID,
+    } from 'common/protocols'
     import { SvelteSet } from 'svelte/reactivity'
     import Fa from 'svelte-fa'
     import type { ExistingCredential } from './CredentialEditor.svelte'
 
-    type ProtocolID =
-        | 'http'
-        | 'ssh'
-        | 'mysql'
-        | 'postgres'
-        | 'kubernetes'
-        | 'vnc'
-        | 'rdp'
-
     interface PolicyProtocol {
         id: ProtocolID
         name: string
-        possibleCredentials: Set<CredentialKind>
     }
 
     interface Props {
         value: UserRequireCredentialsPolicy
-        existingCredentials: ExistingCredential[]
-        protocols: PolicyProtocol[]
+        existingCredentials?: ExistingCredential[]
         globalParameters?: ParameterValues
     }
 
     let {
         value = $bindable(),
         existingCredentials,
-        protocols,
         globalParameters,
     }: Props = $props()
+
+    const protocols: {
+        id: ProtocolID
+        name: string
+    }[] = [
+        { id: 'ssh', name: 'SSH' },
+        { id: 'http', name: 'HTTP' },
+        { id: 'mysql', name: 'MySQL' },
+        { id: 'postgres', name: 'PostgreSQL' },
+        { id: 'kubernetes', name: 'Kubernetes' },
+        { id: 'vnc', name: 'VNC' },
+        { id: 'rdp', name: 'RDP' },
+    ]
+
+    function possibleCredentials(protocol: ProtocolID) {
+        return getEffectivePossibleCredentials(protocol, globalParameters)
+    }
 
     const credentialKinds: { kind: CredentialKind; label: string }[] = [
         { kind: CredentialKind.Password, label: 'Password' },
@@ -81,28 +90,33 @@
         ]),
     }
 
-    const availableKinds = $derived.by(() => {
-        const s = new SvelteSet(
-            existingCredentials.map(x => x.kind as CredentialKind),
-        )
-        s.add(CredentialKind.WebUserApproval)
-        return s
-    })
+    const availableKinds = $derived.by<SvelteSet<CredentialKind> | undefined>(
+        () => {
+            if (!existingCredentials) {
+                return undefined
+            }
+            const s = new SvelteSet(
+                existingCredentials.map(x => x.kind as CredentialKind),
+            )
+            s.add(CredentialKind.WebUserApproval)
+            return s
+        },
+    )
 
     // see Parameters::Model::mfa_required_factor
     function mfaEnforcedFactor(protocolId: ProtocolID): CredentialKind | null {
         if (!globalParameters || globalParameters.mfaEnforcement === 'Off') {
             return null
         }
-        const hasSso = existingCredentials.some(
-            x => x.kind === CredentialKind.Sso,
-        )
+        const hasSso =
+            existingCredentials?.some(x => x.kind === CredentialKind.Sso) ??
+            false
         if (globalParameters.mfaPolicyExemptSsoUsers && hasSso) {
             return null
         }
-        const hasTotp = existingCredentials.some(
-            x => x.kind === CredentialKind.Totp,
-        )
+        const hasTotp =
+            existingCredentials?.some(x => x.kind === CredentialKind.Totp) ??
+            false
         if (protocolId === 'http') {
             return hasTotp ? CredentialKind.Totp : null
         }
@@ -126,7 +140,7 @@
     ): { kind: CredentialKind; label: string }[] {
         return credentialKinds.filter(
             ({ kind }) =>
-                protocol.possibleCredentials.has(kind) ||
+                possibleCredentials(protocol.id).has(kind) ||
                 (value[protocol.id]?.includes(kind) ?? false) ||
                 mfaEnforcedFactor(protocol.id) === kind,
         )
@@ -166,8 +180,9 @@
         } else if (requiresPassword(protocol.id)) {
             value[protocol.id] = [CredentialKind.Password]
         } else {
-            const oneCred = Array.from(availableKinds).find(x =>
-                protocol.possibleCredentials.has(x),
+            const possible = possibleCredentials(protocol.id)
+            const oneCred = Array.from(availableKinds ?? []).find(x =>
+                possible.has(x),
             )
             value[protocol.id] = oneCred ? [oneCred] : []
         }
@@ -193,7 +208,7 @@
 </script>
 
 {#if globalParameters && globalParameters.mfaEnforcement !== 'Off'}
-    {#if globalParameters.mfaPolicyExemptSsoUsers && existingCredentials.some(x => x.kind === CredentialKind.Sso)}
+    {#if globalParameters.mfaPolicyExemptSsoUsers && existingCredentials?.some(x => x.kind === CredentialKind.Sso)}
         <InfoBox>
             MFA enforcement is on, but is set to exempt this user from MFA
             requirements because they have an SSO credential.
@@ -212,7 +227,7 @@
         <div class="list-group-item">
             <div class="d-flex align-items-center">
                 <strong>{protocol.name}</strong>
-                {#if protocol.possibleCredentials.size > 0 || value[protocol.id]?.length}
+                {#if possibleCredentials(protocol.id).size > 0 || value[protocol.id]?.length}
                     <Input
                         type="checkbox"
                         id={`policy-editor-${protocol.id}`}
@@ -238,10 +253,10 @@
                         {@const enforced =
                             mfaEnforcedFactor(protocol.id) === kind}
                         {@const missingCredential =
-                            enabled && !availableKinds.has(kind)}
+                            enabled && availableKinds && !availableKinds.has(kind)}
                         {@const unsupported =
                             (enabled || enforced) &&
-                            !protocol.possibleCredentials.has(kind)}
+                            !possibleCredentials(protocol.id).has(kind)}
                         <div
                             class="d-flex align-items-center gap-2"
                             id={`policy-editor-${protocol.id}${kind}-wrap`}

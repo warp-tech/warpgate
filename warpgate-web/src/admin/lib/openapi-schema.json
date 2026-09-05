@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-8-g0b053ece-modified"
+    "version": "v0.28.5-10-g07953d14-modified"
   },
   "servers": [
     {
@@ -5542,7 +5542,6 @@
       },
       "MfaEnforcement": {
         "type": "string",
-        "description": "Global multi-factor authentication requirement, applied on top of per-user\ncredential policies.",
         "enum": [
           "Off",
           "Enroll",
@@ -5675,6 +5674,9 @@
           },
           "mfa_policy_exempt_sso_users": {
             "type": "boolean"
+          },
+          "default_credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
           },
           "ticket_self_service_enabled": {
             "type": "boolean"
@@ -5822,6 +5824,7 @@
           "password_login_mode",
           "mfa_enforcement",
           "mfa_policy_exempt_sso_users",
+          "default_credential_policy",
           "minimize_password_login",
           "ticket_self_service_enabled",
           "ticket_auto_approve_existing_access",
@@ -5882,6 +5885,9 @@
           },
           "mfa_policy_exempt_sso_users": {
             "type": "boolean"
+          },
+          "default_credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
           },
           "minimize_password_login": {
             "type": "boolean",

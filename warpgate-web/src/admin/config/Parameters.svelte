@@ -693,18 +693,12 @@
                                     </select>
                                 </FormGroup>
 
-                                <label
-                                    class="d-flex align-items-center mt-3 mb-2"
-                                >
-                                    <Input
-                                        class="mb-0 me-2"
-                                        type="switch"
-                                        bind:checked={parameters.mfaPolicyExemptSsoUsers}
-                                    />
-                                    <div>
-                                        Exempt SSO users from MFA enforcement
-                                    </div>
-                                </label>
+                                <Input
+                                    class="mb-0 me-2"
+                                    type="switch"
+                                    label="Exempt SSO users from MFA enforcement"
+                                    bind:checked={parameters.mfaPolicyExemptSsoUsers}
+                                />
                                 <HelpText>
                                     Enable if you already enforce MFA at your
                                     SSO provider

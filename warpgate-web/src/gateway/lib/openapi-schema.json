@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.5-8-g0b053ece-modified"
+    "version": "v0.28.5-10-g07953d14-modified"
   },
   "servers": [
     {
@@ -2203,12 +2203,10 @@
             "type": "boolean"
           },
           "needs_mfa_setup": {
-            "type": "boolean",
-            "description": "The current user is held in the MFA setup flow until they enroll"
+            "type": "boolean"
           },
           "otp_setup_enforced": {
-            "type": "boolean",
-            "description": "MFA enforcement applies to the current user, so their last OTP\ncredential can't be deleted"
+            "type": "boolean"
           },
           "setup_state": {
             "$ref": "#/components/schemas/SetupState"
