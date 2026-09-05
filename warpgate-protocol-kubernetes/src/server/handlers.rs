@@ -104,11 +104,19 @@ pub async fn handle_api_request(
             _handle_websocket_request_inner(ws, req, admitted, &path, ctx.services())
                 .await
                 .map(IntoResponse::into_response)
+                .map_err(poem::Error::from)
         } else {
+            // Deliberately not `.context(...)`: that converts the
+            // `WarpgateError` to an `anyhow::Error`, and poem then renders
+            // the chain's own `Display` instead of calling
+            // `WarpgateError::as_response()`. `flatten_internal_errors` cannot
+            // repair it either -- the error still downcasts to a
+            // `WarpgateError`, which is exactly what that layer steps aside
+            // for. Keeping the type is the whole fix.
             _handle_normal_request_inner(req, body, admitted, &path, ctx.services())
                 .await
                 .map(IntoResponse::into_response)
-                .context("handling Kubernetes API request")
+                .map_err(poem::Error::from)
         };
 
         let client_ip = get_client_ip(req, ctx.services()).await;
