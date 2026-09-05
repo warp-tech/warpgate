@@ -45,6 +45,7 @@ use super::event_intake::EventIntake;
 use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
+use super::transport_abort::TransportAbort;
 use crate::server::get_allowed_auth_methods;
 use crate::server::service_output::{VisualConnectionChainItem, paint_fg};
 use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
@@ -180,6 +181,9 @@ pub struct ServerSession {
     /// waits on it instead of guessing how long that takes with a sleep (#2520).
     /// `None` once consumed — it's only ever worth waiting on the first time.
     protocol_done_rx: Option<oneshot::Receiver<()>>,
+    /// Closes the client's connection outright. The last resort in
+    /// `disconnect_server`, for the client that cannot be told anything.
+    transport_abort: TransportAbort,
 }
 
 fn session_debug_tag(id: &UserSessionId, remote_address: &SocketAddr) -> String {
@@ -255,6 +259,7 @@ impl ServerSession {
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
         mut handler_event_rx: UnboundedReceiver<ServerHandlerEvent>,
         protocol_done_rx: oneshot::Receiver<()>,
+        transport_abort: TransportAbort,
     ) -> Result<impl Future<Output = Result<()>> + use<>> {
         let id = server_handle.lock().await.user_session_id();
 
@@ -300,6 +305,7 @@ impl ServerSession {
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
             probe: ProbeState::NoAttempt,
             protocol_done_rx: Some(protocol_done_rx),
+            transport_abort,
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -2590,8 +2596,24 @@ impl ServerSession {
         if had_handle
             && self.command_wait_depth == 0
             && let Some(protocol_done_rx) = self.protocol_done_rx.take()
+            && tokio::time::timeout(DISCONNECT_DRAIN_GRACE, protocol_done_rx)
+                .await
+                .is_err()
         {
-            let _ = tokio::time::timeout(DISCONNECT_DRAIN_GRACE, protocol_done_rx).await;
+            // Everything above this point asks russh to end the session, and
+            // russh can only act on any of it while the client is reading. A
+            // client whose window is full blocks the lot, and russh's own
+            // loop is parked in a socket write to that same client, so no
+            // timeout inside it is ever armed either -- the connection is
+            // held until the process exits. Measured: still held 400s after
+            // the target died, released only when the client resumed reading.
+            //
+            // So the connection is ended from underneath instead. Reaching
+            // here means the flush already failed and russh's loop is still
+            // running, which for a session being torn down is not a state
+            // worth waiting out.
+            warn!("Client did not accept the session teardown; closing its connection");
+            self.transport_abort.abort();
         }
 
         self.session_handle = None;
