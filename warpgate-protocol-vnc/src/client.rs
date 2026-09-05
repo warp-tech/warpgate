@@ -261,9 +261,58 @@ fn map_event(event: VncEvent) -> Option<DesktopEvent> {
         },
         VncEvent::Text(text) => DesktopEvent::Clipboard(text),
         VncEvent::Bell => DesktopEvent::Bell,
-        VncEvent::Error(message) => DesktopEvent::Error(message),
+        VncEvent::Error(message) => {
+            // The other way a VNC failure reaches a viewer, and until now the
+            // unhardened one. `spawn_client` routes a connect-time failure
+            // through `DesktopEvent::backend_error`; this arm carries a
+            // mid-session decode failure to the same sink, and it was passing
+            // the decoder's own words through. Those are not ours to shape --
+            // `vnc::VncError::IoError` is `#[error(transparent)]` over
+            // `std::io::Error`, so the string is whatever the OS said -- and
+            // there is no structured error here to take a top-level cause
+            // from, so the viewer gets a fixed phrase and the log gets the
+            // text.
+            error!(%message, "VNC backend reported an error mid-session");
+            DesktopEvent::Error("The VNC session failed".into())
+        }
         // Everything else (including the server's pixel-format echo — we fix our own)
         // is not surfaced.
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use vnc::VncEvent;
+    use warpgate_core::DesktopEvent;
+
+    use super::map_event;
+
+    /// `spawn_client` hardened the connect-time failure; this is the same sink
+    /// reached from the live loop, which had stayed unhardened. One hardened
+    /// path and one unhardened path to the same sink is not a boundary.
+    #[test]
+    fn a_viewer_never_sees_the_decoder_s_own_words() {
+        // What the vendored decoder actually hands over for its `IoError`
+        // variant: `#[error(transparent)]` over `std::io::Error`, so the OS's
+        // own words.
+        const LEAK: &str = "Connection reset by peer (os error 54)";
+
+        let mapped = map_event(VncEvent::Error(LEAK.to_owned()));
+        // Asserted first: without it this would pass on a fixture that never
+        // carried the text and would prove nothing about the boundary.
+        assert!(LEAK.contains("os error"));
+
+        let shown = match mapped {
+            Some(DesktopEvent::Error(shown)) => shown,
+            // Anything else means the arm stopped producing an error event at
+            // all, which the assertion below reports rather than hiding.
+            other => format!("{other:?}"),
+        };
+        assert!(
+            !shown.contains("os error"),
+            "the decoder's own words reached the viewer: {shown}"
+        );
+        assert_eq!(shown, "The VNC session failed");
+    }
 }
