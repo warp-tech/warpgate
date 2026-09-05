@@ -4,10 +4,8 @@ use warpgate_common::WarpgateError;
 
 /// What a connected user may be shown for an error carried as `anyhow::Error`.
 ///
-/// `RCEvent::Error` is typed `anyhow::Error`, so the concrete error has to be
-/// recovered before it can be sanitised. Anything that does not downcast falls
-/// back to a constant — the safe direction, and the only one available when the
-/// type is unknown.
+/// The concrete error has to be recovered before it can be sanitised;
+/// anything that does not downcast falls back to a constant.
 #[must_use]
 pub fn client_error_message(error: &anyhow::Error) -> &'static str {
     error.downcast_ref::<SshClientError>().map_or(
@@ -35,15 +33,9 @@ impl SshClientError {
 
     /// What a connected user may be shown.
     ///
-    /// The same job `ConnectionError::client_message` does, and for the same
-    /// reason: `Warpgate` here is `#[error(transparent)]`, so `WarpgateError`'s
-    /// own `Display` would otherwise pass straight through — a database
-    /// failure rendering as `database error: {DbErr}` carrying SQL text.
-    ///
-    /// This error reaches a terminal too, through `RCEvent::Error`, which wrote
-    /// `format!("Error: {e}")` and so went around the sanitiser entirely. One
-    /// hardened path and one unhardened path to the same sink is not a
-    /// boundary.
+    /// `Warpgate` is `#[error(transparent)]`, so its `Display` would pass a
+    /// database failure through as `database error: {DbErr}`, SQL included.
+    /// This reaches a terminal as well as a browser, through `RCEvent::Error`.
     pub const fn client_message(&self) -> &'static str {
         match self {
             Self::MpscError => "Internal connection error",
@@ -67,24 +59,18 @@ mod tests {
 
     #[test]
     fn a_terminal_never_sees_the_error_s_own_words() {
-        // Asserted first: without it this test would keep passing if the
-        // fixture stopped carrying the text, proving nothing about the
-        // boundary.
+        // Asserted first, or a fixture that stopped carrying the text
+        // would make the rest of this prove nothing.
         assert!(leaky().to_string().contains(LEAK));
         assert!(!leaky().client_message().contains("SELECT"));
     }
 
     #[test]
     fn sanitising_survives_a_context_wrapper() {
-        // `RCEvent::Error` is typed `anyhow::Error`, and anything on the way
-        // there may add context. The downcast has to walk the chain, or the
-        // sanitiser silently degrades to the fallback for wrapped errors.
-        //
-        // Deliberately not the `leaky()` fixture: its variant's
-        // `client_message()` is the same string as the fallback, so an
-        // assertion on it cannot tell a downcast that walked the chain from
-        // the degradation this test exists to catch. `MpscError` says
-        // something only a successful downcast can produce.
+        // Not the `leaky()` fixture: its `client_message()` is the same
+        // string as the fallback, so an assertion on it could not tell a
+        // downcast that walked the context chain from the degradation this
+        // test exists to catch.
         let wrapped = anyhow::Error::from(SshClientError::MpscError).context("connecting");
         assert_eq!(client_error_message(&wrapped), "Internal connection error");
 

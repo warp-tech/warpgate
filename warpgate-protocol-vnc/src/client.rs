@@ -262,16 +262,11 @@ fn map_event(event: VncEvent) -> Option<DesktopEvent> {
         VncEvent::Text(text) => DesktopEvent::Clipboard(text),
         VncEvent::Bell => DesktopEvent::Bell,
         VncEvent::Error(message) => {
-            // The other way a VNC failure reaches a viewer, and until now the
-            // unhardened one. `spawn_client` routes a connect-time failure
-            // through `DesktopEvent::backend_error`; this arm carries a
-            // mid-session decode failure to the same sink, and it was passing
-            // the decoder's own words through. Those are not ours to shape --
-            // `vnc::VncError::IoError` is `#[error(transparent)]` over
-            // `std::io::Error`, so the string is whatever the OS said -- and
-            // there is no structured error here to take a top-level cause
-            // from, so the viewer gets a fixed phrase and the log gets the
-            // text.
+            // The same sink `spawn_client` already hardens, reached from
+            // the live loop. `vnc::VncError::IoError` is
+            // `#[error(transparent)]` over `std::io::Error`, so the string is
+            // whatever the OS said, and there is no structured error here to
+            // take a top-level cause from.
             error!(%message, "VNC backend reported an error mid-session");
             DesktopEvent::Error("The VNC session failed".into())
         }
@@ -293,20 +288,17 @@ mod tests {
     /// path and one unhardened path to the same sink is not a boundary.
     #[test]
     fn a_viewer_never_sees_the_decoder_s_own_words() {
-        // What the vendored decoder actually hands over for its `IoError`
-        // variant: `#[error(transparent)]` over `std::io::Error`, so the OS's
-        // own words.
+        // What the decoder hands over for its `IoError` variant.
         const LEAK: &str = "Connection reset by peer (os error 54)";
 
         let mapped = map_event(VncEvent::Error(LEAK.to_owned()));
-        // Asserted first: without it this would pass on a fixture that never
-        // carried the text and would prove nothing about the boundary.
+        // Asserted first, or a fixture that never carried the text would
+        // make this prove nothing.
         assert!(LEAK.contains("os error"));
 
         let shown = match mapped {
             Some(DesktopEvent::Error(shown)) => shown,
-            // Anything else means the arm stopped producing an error event at
-            // all, which the assertion below reports rather than hiding.
+            // Anything else is reported by the assertion below.
             other => format!("{other:?}"),
         };
         assert!(

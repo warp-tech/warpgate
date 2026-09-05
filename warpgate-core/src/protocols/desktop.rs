@@ -119,15 +119,9 @@ impl DesktopEvent {
     /// What a browser watching a desktop session is shown when the backend
     /// connection fails.
     ///
-    /// One conversion point for both RDP and VNC, which used to each pick
-    /// their own answer — the full `anyhow` chain in one case, only the
-    /// top-level cause in the other, for no reason tied to either protocol.
-    /// This is the top-level cause only (`anyhow::Error`'s default `Display`,
-    /// not the `{:#}` chain that also walks every wrapped source): a target
-    /// host, a mount path or a config detail can sit behind `.context(...)`
-    /// several layers down, and this is where that stops reaching a viewer.
-    /// The caller is expected to log the full chain itself before or instead
-    /// of calling this.
+    /// One conversion point for both RDP and VNC. The top-level cause only,
+    /// not the `{:#}` chain: a target host or a config detail can sit behind
+    /// `.context(...)` several layers down. The caller logs the full chain.
     #[must_use]
     pub fn backend_error(error: &anyhow::Error) -> Self {
         Self::Error(error.to_string())
