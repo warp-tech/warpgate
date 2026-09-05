@@ -28,6 +28,7 @@ use warpgate_core::{ConfigProvider, vet_credential_bearer};
 use warpgate_db_entities::User;
 use warpgate_sso::WarpgateIdToken;
 
+use crate::middleware::assert_mfa_setup_gate;
 use crate::session::SessionStore;
 use crate::session_storage::SharedSessionStorage;
 
@@ -168,27 +169,38 @@ pub fn page_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     })
 }
 
-pub fn gateway_redirect(req: &Request) -> Response {
-    // Only do a login redirect for document requests
-    if let Some(mode) = req.headers().get(HeaderName::from_static("sec-fetch-mode"))
-        && mode != "navigate"
-    {
-        return Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .finish();
+pub fn is_navigation_request(req: &Request) -> bool {
+    req.headers()
+        .get(HeaderName::from_static("sec-fetch-mode"))
+        .is_none_or(|mode| mode == "navigate")
+}
+
+pub fn redirect_navigations(
+    req: &Request,
+    location: String,
+    fallback_status: StatusCode,
+) -> Response {
+    if !is_navigation_request(req) {
+        return Response::builder().status(fallback_status).finish();
     }
 
+    Redirect::temporary(location).into_response()
+}
+
+pub fn gateway_redirect(req: &Request) -> Response {
     let path = req
         .original_uri()
         .path_and_query()
         .map_or_else(String::new, ToString::to_string);
 
-    let path = format!(
-        "/@warpgate#/login?next={}",
-        utf8_percent_encode(&path, NON_ALPHANUMERIC),
-    );
-
-    Redirect::temporary(path).into_response()
+    redirect_navigations(
+        req,
+        format!(
+            "/@warpgate#/login?next={}",
+            utf8_percent_encode(&path, NON_ALPHANUMERIC),
+        ),
+        StatusCode::UNAUTHORIZED,
+    )
 }
 
 pub async fn get_or_create_auth_state_for_request(
@@ -494,6 +506,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     if let Some(auth) = auth {
         // build context and attach it instead of raw authorization
         let actx = ctx.to_authenticated(auth);
+        assert_mfa_setup_gate(&actx, &req, session).await?;
         Ok(ep.data(actx).data(ctx).call(req).await?)
     } else {
         Ok(ep.data(ctx).call(req).await?)

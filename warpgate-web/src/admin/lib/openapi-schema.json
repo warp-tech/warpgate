@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-4-g120feec4-modified"
+    "version": "v0.28.5-8-g0b053ece-modified"
   },
   "servers": [
     {
@@ -5540,6 +5540,15 @@
           }
         }
       },
+      "MfaEnforcement": {
+        "type": "string",
+        "description": "Global multi-factor authentication requirement, applied on top of per-user\ncredential policies.",
+        "enum": [
+          "Off",
+          "Enroll",
+          "Require"
+        ]
+      },
       "NewOtpCredential": {
         "type": "object",
         "title": "NewOtpCredential",
@@ -5660,6 +5669,12 @@
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
+          },
+          "mfa_enforcement": {
+            "$ref": "#/components/schemas/MfaEnforcement"
+          },
+          "mfa_policy_exempt_sso_users": {
+            "type": "boolean"
           },
           "ticket_self_service_enabled": {
             "type": "boolean"
@@ -5805,6 +5820,8 @@
           "ssh_client_auth_keyboard_interactive",
           "ssh_host_key_verification",
           "password_login_mode",
+          "mfa_enforcement",
+          "mfa_policy_exempt_sso_users",
           "minimize_password_login",
           "ticket_self_service_enabled",
           "ticket_auto_approve_existing_access",
@@ -5859,6 +5876,12 @@
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
+          },
+          "mfa_enforcement": {
+            "$ref": "#/components/schemas/MfaEnforcement"
+          },
+          "mfa_policy_exempt_sso_users": {
+            "type": "boolean"
           },
           "minimize_password_login": {
             "type": "boolean",

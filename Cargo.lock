@@ -9275,6 +9275,7 @@ dependencies = [
  "serde",
  "serde_json",
  "subtle",
+ "thiserror 2.0.20",
  "time",
  "tokio",
  "tokio-tungstenite 0.30.0",

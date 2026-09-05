@@ -4,6 +4,7 @@
     import {
         AnalyticsConsent,
         api,
+        type MfaEnforcement,
         type OpenTargetsInNewTabMode,
         type ParameterValues,
         type PasswordLoginMode,
@@ -671,6 +672,45 @@
                                 </HelpText>
 
                                 <FormGroup>
+                                    <label class="mb-2" for="mfaEnforcement">
+                                        MFA enforcement
+                                    </label>
+                                    <select
+                                        id="mfaEnforcement"
+                                        class="form-select"
+                                        value={parameters.mfaEnforcement ?? 'Off'}
+                                        onchange={e => parameters.mfaEnforcement = e.currentTarget.value as MfaEnforcement}
+                                    >
+                                        <option value="Off">Off</option>
+                                        <option value="Enroll">
+                                            Enroll (users must set up an OTP
+                                            when they log in on the web)
+                                        </option>
+                                        <option value="Require">
+                                            Require (prevent any logins without
+                                            a second factor)
+                                        </option>
+                                    </select>
+                                </FormGroup>
+
+                                <label
+                                    class="d-flex align-items-center mt-3 mb-2"
+                                >
+                                    <Input
+                                        class="mb-0 me-2"
+                                        type="switch"
+                                        bind:checked={parameters.mfaPolicyExemptSsoUsers}
+                                    />
+                                    <div>
+                                        Exempt SSO users from MFA enforcement
+                                    </div>
+                                </label>
+                                <HelpText>
+                                    Enable if you already enforce MFA at your
+                                    SSO provider
+                                </HelpText>
+
+                                <FormGroup>
                                     <label class="mb-2" for="banner">
                                         Login banner
                                     </label>
@@ -817,10 +857,9 @@
                                             <strong>
                                                 multiplier × the previous block
                                                 duration
-                                            </strong
-                                            >, capped at the maximum. The repeat
-                                            count resets only after the cooldown
-                                            period of
+                                            </strong>, capped at the maximum.
+                                            The repeat count resets only after
+                                            the cooldown period of
                                             <em>clean</em>
                                             activity — not when a block expires.
                                         </HelpText>

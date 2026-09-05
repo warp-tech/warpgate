@@ -21,7 +21,7 @@
         faKeyboard,
         faMobileScreen,
     } from '@fortawesome/free-solid-svg-icons'
-    import { Button, Tooltip } from '@sveltestrap/sveltestrap'
+    import { Alert, Button, Tooltip } from '@sveltestrap/sveltestrap'
     import {
         api,
         CredentialKind,
@@ -500,28 +500,15 @@
     </div>
 
     <h4>Auth policy</h4>
-    <div class="list-group list-group-flush mb-3">
-        {#each policyProtocols as protocol (protocol)}
-            {@const effectiveCredentials = getEffectivePossibleCredentials(protocol.id)}
-            <div class="list-group-item">
-                <div class="mb-1">
-                    <strong>{protocol.name}</strong>
-                </div>
-                {#if effectiveCredentials.size > 0 || credentialPolicy[protocol.id]?.length}
-                    <AuthPolicyEditor
-                        bind:value={credentialPolicy}
-                        existingCredentials={credentials}
-                        possibleCredentials={effectiveCredentials}
-                        protocolId={protocol.id}
-                    />
-                {:else}
-                    <span class="text-muted">
-                        No authentication methods available for this protocol
-                    </span>
-                {/if}
-            </div>
-        {/each}
-    </div>
+    <AuthPolicyEditor
+        bind:value={credentialPolicy}
+        existingCredentials={credentials}
+        protocols={policyProtocols.map(p => ({
+            ...p,
+            possibleCredentials: getEffectivePossibleCredentials(p.id),
+        }))}
+        {globalParameters}
+    />
 </Loadable>
 
 {#if creatingPassword}

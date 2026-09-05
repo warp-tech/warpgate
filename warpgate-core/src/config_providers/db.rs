@@ -11,7 +11,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
     AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialKind,
-    CredentialPolicy, PerProtocolCredentialPolicy,
+    CredentialPolicy, MfaEnforcementPolicy, PerProtocolCredentialPolicy,
 };
 use warpgate_common::helpers::hash::{hash_secret, verify_password_hash};
 use warpgate_common::helpers::otp::verify_totp;
@@ -408,7 +408,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             },
         }) as Box<dyn CredentialPolicy + Sync + Send>;
 
-        if let Some(req) = user.credential_policy.clone() {
+        let policy = if let Some(req) = user.credential_policy.clone() {
             let mut policy = PerProtocolCredentialPolicy {
                 default: default_policy,
                 protocols: HashMap::new(),
@@ -461,11 +461,20 @@ impl ConfigProvider for DatabaseConfigProvider {
                 }
             }
 
-            Ok(Some(
-                Box::new(policy) as Box<dyn CredentialPolicy + Sync + Send>
-            ))
+            Box::new(policy) as Box<dyn CredentialPolicy + Sync + Send>
         } else {
-            Ok(Some(default_policy))
+            default_policy
+        };
+
+        let parameters = entities::Parameters::Entity::get(db).await?;
+        let mfa_factors = parameters.mfa_required_factors(&user.credentials);
+        if mfa_factors.is_empty() {
+            Ok(Some(policy))
+        } else {
+            Ok(Some(Box::new(MfaEnforcementPolicy {
+                inner: policy,
+                required: mfa_factors,
+            })))
         }
     }
 

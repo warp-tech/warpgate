@@ -12,14 +12,14 @@ use uuid::Uuid;
 use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
-use warpgate_common::{TargetKubernetesOptions, User, UserSessionId};
+use warpgate_common::{Protocol, TargetKubernetesOptions, User, UserSessionId, WarpgateError};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
     AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, authorize_for_target,
     vet_credential_bearer, wait_for_auth_completion,
 };
-use warpgate_db_entities::{CertificateCredential, CertificateRevocation};
+use warpgate_db_entities::{CertificateCredential, CertificateRevocation, Parameters};
 
 use crate::server::client_certs::RequestCertificateExt;
 
@@ -158,11 +158,12 @@ pub async fn authorize_kubernetes_target(
 /// web-approval factor on top, the one factor a non-interactive client can
 /// satisfy, so no transport credential is ever submitted to the auth state here.
 ///
-/// With no policy the transport identity is used directly. With one, a fresh auth
-/// state enforces the web approval, cleared either by a cached grace-period bypass
-/// or by the user approving the pending request in the Warpgate UI while the
-/// request waits (kubectl has no default client timeout; the auth-state TTL bounds
-/// the wait).
+/// With no policy the transport identity is used directly — unless global MFA
+/// enforcement adds a factor for Kubernetes (see `mfa_required_factor`).
+/// Otherwise a fresh auth state enforces the web approval, cleared either by a
+/// cached grace-period bypass or by the user approving the pending request in
+/// the Warpgate UI while the request waits (kubectl has no default client
+/// timeout; the auth-state TTL bounds the wait).
 async fn authorize_kubernetes_identity(
     services: &Services,
     user: &User,
@@ -177,10 +178,19 @@ async fn authorize_kubernetes_identity(
         .is_some_and(|kinds| !kinds.is_empty());
 
     if !policy_configured {
-        return Ok(AuthorizedIdentity::for_authenticated_session(
-            user.into(),
-            crate::PROTOCOL_NAME,
-        ));
+        let parameters = Parameters::Entity::get(&services.db)
+            .await
+            .map_err(WarpgateError::from)?;
+        if services
+            .mfa_required_factor(&parameters, user.id, Protocol::Kubernetes)
+            .await?
+            .is_none()
+        {
+            return Ok(AuthorizedIdentity::for_authenticated_session(
+                user.into(),
+                crate::PROTOCOL_NAME,
+            ));
+        }
     }
 
     let state_arc = services

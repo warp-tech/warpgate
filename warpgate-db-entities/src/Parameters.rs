@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use poem_openapi::{Enum, Object, Union};
 use sea_orm::Set;
 use sea_orm::entity::prelude::*;
@@ -5,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_aws::S3StorageConfig;
-use warpgate_common::PasswordPolicy;
+use warpgate_common::auth::CredentialKind;
+use warpgate_common::{PasswordPolicy, Protocol, UserAuthCredential};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
@@ -47,6 +50,22 @@ pub enum PasswordLoginMode {
     /// Password login not offered and rejected by the server.
     #[sea_orm(string_value = "Disabled")]
     Disabled,
+}
+
+#[derive(
+    Debug, Default, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum,
+)]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
+pub enum MfaEnforcement {
+    #[default]
+    #[sea_orm(string_value = "Off")]
+    Off,
+    /// Web users without TOTP get enrolled, other protocols do not require it
+    #[sea_orm(string_value = "Enroll")]
+    Enroll,
+    /// Above + all protocols require MFA
+    #[sea_orm(string_value = "Require")]
+    Require,
 }
 
 /// What to do when a target's SSH host key isn't in the known hosts list.
@@ -176,6 +195,8 @@ pub struct Model {
     pub ssh_client_auth_keyboard_interactive: bool,
     pub ssh_host_key_verification: SshHostKeyVerificationMode,
     pub password_login_mode: PasswordLoginMode,
+    pub mfa_enforcement: MfaEnforcement,
+    pub mfa_policy_exempt_sso_users: bool,
     pub ticket_self_service_enabled: bool,
     pub ticket_auto_approve_existing_access: bool,
     pub ticket_max_duration_seconds: Option<i64>,
@@ -252,6 +273,65 @@ impl ActiveModelBehavior for ActiveModel {}
 pub enum Relation {}
 
 impl Model {
+    pub const fn effective_mfa_enforcement_for_user(
+        &self,
+        has_sso_credential: bool,
+    ) -> MfaEnforcement {
+        if self.mfa_policy_exempt_sso_users && has_sso_credential {
+            MfaEnforcement::Off
+        } else {
+            self.mfa_enforcement
+        }
+    }
+
+    pub const fn mfa_required_factor(
+        &self,
+        protocol: Protocol,
+        has_sso: bool,
+        has_totp: bool,
+    ) -> Option<CredentialKind> {
+        match (self.effective_mfa_enforcement_for_user(has_sso), protocol) {
+            (MfaEnforcement::Off, _) => None,
+            (_, Protocol::Http) => {
+                if has_totp {
+                    Some(CredentialKind::Totp)
+                } else {
+                    // users without TOTP can still log in and will get enrolled
+                    None
+                }
+            }
+            (MfaEnforcement::Enroll, _) => None,
+            // Protocols that can prompt for an OTP
+            (MfaEnforcement::Require, Protocol::Ssh | Protocol::Rdp | Protocol::Vnc) => {
+                Some(if has_totp {
+                    CredentialKind::Totp
+                } else {
+                    CredentialKind::WebUserApproval
+                })
+            }
+            // Protocols that can't prompt for an OTP
+            (
+                MfaEnforcement::Require,
+                Protocol::MySql | Protocol::Postgres | Protocol::Kubernetes,
+            ) => Some(CredentialKind::WebUserApproval),
+        }
+    }
+
+    pub fn mfa_required_factors(
+        &self,
+        credentials: &[UserAuthCredential],
+    ) -> HashMap<Protocol, CredentialKind> {
+        let has = |kind| credentials.iter().any(|c| c.kind() == kind);
+        let has_sso = has(CredentialKind::Sso);
+        let has_totp = has(CredentialKind::Totp);
+        Protocol::all()
+            .filter_map(|protocol| {
+                self.mfa_required_factor(protocol, has_sso, has_totp)
+                    .map(|factor| (protocol, factor))
+            })
+            .collect()
+    }
+
     pub fn password_policy(&self) -> PasswordPolicy {
         PasswordPolicy {
             min_length: self.password_policy_min_length.max(0) as u32,
@@ -282,6 +362,8 @@ impl Entity {
                         get_config_migration_values().ssh_host_key_verification
                     ),
                     password_login_mode: Set(PasswordLoginMode::Enabled),
+                    mfa_enforcement: Set(MfaEnforcement::Off),
+                    mfa_policy_exempt_sso_users: Set(false),
                     ticket_self_service_enabled: Set(false),
                     ticket_auto_approve_existing_access: Set(true),
                     ticket_max_duration_seconds: Set(Some(28800)),
@@ -339,7 +421,152 @@ impl Entity {
 
 #[cfg(test)]
 mod tests {
+    use warpgate_common::{Secret, UserSsoCredential, UserTotpCredential};
+
     use super::*;
+
+    fn totp_credential() -> UserAuthCredential {
+        UserAuthCredential::Totp(UserTotpCredential {
+            key: Secret::new(vec![]),
+        })
+    }
+
+    fn sso_credential() -> UserAuthCredential {
+        UserAuthCredential::Sso(UserSsoCredential {
+            provider: None,
+            email: "user@example.com".into(),
+        })
+    }
+
+    fn parameters(mode: MfaEnforcement, exempt_sso: bool) -> Model {
+        Model {
+            mfa_enforcement: mode,
+            mfa_policy_exempt_sso_users: exempt_sso,
+            ..parameters_defaults()
+        }
+    }
+
+    fn parameters_defaults() -> Model {
+        Model {
+            id: Uuid::nil(),
+            allow_own_credential_management: true,
+            rate_limit_bytes_per_second: None,
+            ca_certificate_pem: "".into(),
+            ca_private_key_pem: "".into(),
+            ssh_client_auth_publickey: true,
+            ssh_client_auth_password: true,
+            ssh_client_auth_keyboard_interactive: true,
+            ssh_host_key_verification: SshHostKeyVerificationMode::Prompt,
+            password_login_mode: PasswordLoginMode::Enabled,
+            mfa_enforcement: MfaEnforcement::Off,
+            mfa_policy_exempt_sso_users: false,
+            ticket_self_service_enabled: false,
+            ticket_auto_approve_existing_access: true,
+            ticket_max_duration_seconds: None,
+            ticket_max_uses: None,
+            ticket_require_description: false,
+            ticket_request_show_all_targets: false,
+            target_click_action: TargetClickAction::Connect,
+            open_targets_in_new_tab: OpenTargetsInNewTabMode::DefaultOn,
+            show_session_menu: true,
+            password_policy_min_length: 0,
+            password_policy_require_uppercase: false,
+            password_policy_require_lowercase: false,
+            password_policy_require_digits: false,
+            password_policy_require_special: false,
+            max_api_token_duration_seconds: None,
+            record_scp: true,
+            record_desktop_keyboard_input: true,
+            tutorial_dismissed: false,
+            login_protection_enabled: false,
+            login_protection_retention_seconds: 0,
+            lp_ip_max_attempts: 0,
+            lp_ip_time_window_seconds: 0,
+            lp_ip_base_block_duration_seconds: 0,
+            lp_ip_block_duration_multiplier: 0.0,
+            lp_ip_max_block_duration_seconds: 0,
+            lp_ip_cooldown_reset_seconds: 0,
+            lp_user_max_attempts: 0,
+            lp_user_time_window_seconds: 0,
+            lp_user_auto_unlock: false,
+            lp_user_lockout_duration_seconds: 0,
+            lp_user_exempt_admins: false,
+            banner: "".into(),
+            web_clients_enabled: true,
+            analytics_consent: AnalyticsConsent::Undecided,
+            analytics_normal: false,
+            analytics_instance_id: "".into(),
+            instance_created_at: OffsetDateTime::UNIX_EPOCH,
+            web_auth_max_age_seconds: None,
+            web_approval_grace_period_seconds: None,
+            recordings_enable: false,
+            recordings_storage: "".into(),
+            cluster_token: None,
+            encryption_key_fp: None,
+            retiring_key_fp: None,
+        }
+    }
+
+    #[test]
+    fn mfa_required_factors_off_is_empty() {
+        let params = parameters(MfaEnforcement::Off, false);
+        assert!(params.mfa_required_factors(&[totp_credential()]).is_empty());
+    }
+
+    #[test]
+    fn mfa_required_factors_exempts_sso_users() {
+        let params = parameters(MfaEnforcement::Require, true);
+        assert!(
+            params
+                .mfa_required_factors(&[sso_credential(), totp_credential()])
+                .is_empty()
+        );
+        assert!(!params.mfa_required_factors(&[totp_credential()]).is_empty());
+    }
+
+    #[test]
+    fn mfa_required_factors_enroll_only_binds_http_for_enrolled_users() {
+        let params = parameters(MfaEnforcement::Enroll, false);
+
+        // Unenrolled users must be able to log in to reach the setup flow
+        assert!(params.mfa_required_factors(&[]).is_empty());
+
+        let factors = params.mfa_required_factors(&[totp_credential()]);
+        assert_eq!(factors.len(), 1);
+        assert_eq!(factors.get(&Protocol::Http), Some(&CredentialKind::Totp));
+    }
+
+    #[test]
+    fn mfa_required_factors_require_covers_all_protocols() {
+        let params = parameters(MfaEnforcement::Require, false);
+
+        let factors = params.mfa_required_factors(&[totp_credential()]);
+        for protocol in Protocol::all() {
+            assert!(factors.contains_key(&protocol), "{protocol}");
+        }
+        assert_eq!(factors.get(&Protocol::Http), Some(&CredentialKind::Totp));
+        assert_eq!(factors.get(&Protocol::Ssh), Some(&CredentialKind::Totp));
+        assert_eq!(factors.get(&Protocol::Rdp), Some(&CredentialKind::Totp));
+        assert_eq!(factors.get(&Protocol::Vnc), Some(&CredentialKind::Totp));
+        for protocol in [Protocol::MySql, Protocol::Postgres, Protocol::Kubernetes] {
+            assert_eq!(
+                factors.get(&protocol),
+                Some(&CredentialKind::WebUserApproval)
+            );
+        }
+
+        // No OTP: HTTP lets the user in to enroll; every other protocol
+        // requires a factor, with web approval standing in for the missing OTP
+        let factors = params.mfa_required_factors(&[]);
+        assert_eq!(factors.get(&Protocol::Http), None);
+        for protocol in Protocol::all().filter(|p| *p != Protocol::Http) {
+            assert_eq!(
+                factors.get(&protocol),
+                Some(&CredentialKind::WebUserApproval),
+                "{protocol}"
+            );
+        }
+    }
 
     #[test]
     fn storage_config_roundtrips() {
