@@ -126,8 +126,10 @@ fn spawn_client(
         async move {
             if let Err(error) = run(options, encodings, event_tx.clone(), input_rx, abort_rx).await
             {
-                error!(%error, "VNC backend client failed");
-                let _ = event_tx.send(DesktopEvent::Error(error.to_string())).await;
+                // The full chain goes to the log; only the top-level cause
+                // reaches the viewer — see `DesktopEvent::backend_error`.
+                error!(%error, error_chain = %format!("{error:#}"), "VNC backend client failed");
+                let _ = event_tx.send(DesktopEvent::backend_error(&error)).await;
             }
             let _ = event_tx
                 .send(DesktopEvent::State(DesktopState::Disconnected))
@@ -259,9 +261,50 @@ fn map_event(event: VncEvent) -> Option<DesktopEvent> {
         },
         VncEvent::Text(text) => DesktopEvent::Clipboard(text),
         VncEvent::Bell => DesktopEvent::Bell,
-        VncEvent::Error(message) => DesktopEvent::Error(message),
+        VncEvent::Error(message) => {
+            // The same sink `spawn_client` already hardens, reached from
+            // the live loop. `vnc::VncError::IoError` is
+            // `#[error(transparent)]` over `std::io::Error`, so the string is
+            // whatever the OS said, and there is no structured error here to
+            // take a top-level cause from.
+            error!(%message, "VNC backend reported an error mid-session");
+            DesktopEvent::Error("The VNC session failed".into())
+        }
         // Everything else (including the server's pixel-format echo — we fix our own)
         // is not surfaced.
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use vnc::VncEvent;
+    use warpgate_core::DesktopEvent;
+
+    use super::map_event;
+
+    /// `spawn_client` hardened the connect-time failure; this is the same sink
+    /// reached from the live loop, which had stayed unhardened. One hardened
+    /// path and one unhardened path to the same sink is not a boundary.
+    #[test]
+    fn a_viewer_never_sees_the_decoder_s_own_words() {
+        // What the decoder hands over for its `IoError` variant.
+        const LEAK: &str = "Connection reset by peer (os error 54)";
+
+        let mapped = map_event(VncEvent::Error(LEAK.to_owned()));
+        // Asserted first, or a fixture that never carried the text would
+        // make this prove nothing.
+        assert!(LEAK.contains("os error"));
+
+        let shown = match mapped {
+            Some(DesktopEvent::Error(shown)) => shown,
+            // Anything else is reported by the assertion below.
+            other => format!("{other:?}"),
+        };
+        assert!(
+            !shown.contains("os error"),
+            "the decoder's own words reached the viewer: {shown}"
+        );
+        assert_eq!(shown, "The VNC session failed");
+    }
 }

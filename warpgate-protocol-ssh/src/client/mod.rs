@@ -13,7 +13,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
-pub use error::SshClientError;
+pub use error::{SshClientError, client_error_message};
 use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
@@ -77,6 +77,33 @@ pub enum ConnectionError {
 
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
+}
+
+impl ConnectionError {
+    /// What a connected user — over a PTY or a browser session — may be shown
+    /// for a failed target connection.
+    ///
+    /// `Io`/`Key`/`Ssh` carry the underlying library's own `Display`, and
+    /// `Warpgate` is `#[error(transparent)]`, so its `Display` can render a
+    /// database failure with its SQL text or name configured key
+    /// fingerprints. The full error still goes to the log.
+    #[must_use]
+    pub fn client_message(&self) -> String {
+        match self {
+            Self::HostKeyMismatch { .. } => "Host key mismatch".to_string(),
+            Self::Aws(_) => "AWS authentication for the SSH target failed".to_string(),
+            Self::Resolve => "Could not resolve target address".to_string(),
+            Self::Aborted => "Connection aborted".to_string(),
+            Self::Authentication => {
+                "SSH target rejected Warpgate's authentication request".to_string()
+            }
+            Self::JumpHostTargetNotFound => "Jump host target not found".to_string(),
+            Self::Io(_) | Self::Key(_) | Self::Ssh(_) => "SSH protocol error".to_string(),
+            // Not `e.to_string()`: that forwards `WarpgateError`'s own
+            // `Display` to whoever is watching the session.
+            Self::Internal | Self::Warpgate(_) => "Internal connection error".to_string(),
+        }
+    }
 }
 
 pub struct ResolvedSshChainHost {
@@ -566,7 +593,9 @@ impl RemoteClient {
                     }
                 }
                 Err(e) => {
-                    debug!("Connect error: {}", e);
+                    // Was `debug!`, so a user-visible connect failure left no
+                    // record at the default log level.
+                    error!(error = ?e, "Connect error");
                     let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
                     self.set_disconnected().await;
 

@@ -115,6 +115,19 @@ pub enum DesktopEvent {
     Error(String),
 }
 
+impl DesktopEvent {
+    /// What a browser watching a desktop session is shown when the backend
+    /// connection fails.
+    ///
+    /// One conversion point for both RDP and VNC. The top-level cause only,
+    /// not the `{:#}` chain: a target host or a config detail can sit behind
+    /// `.context(...)` several layers down. The caller logs the full chain.
+    #[must_use]
+    pub fn backend_error(error: &anyhow::Error) -> Self {
+        Self::Error(error.to_string())
+    }
+}
+
 /// A physical key position: a PC/AT set-1 "make" code, with `extended` marking the
 /// `E0` prefix that distinguishes e.g. the nav cluster from the numeric keypad.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,5 +190,14 @@ mod tests {
     #[test]
     fn a_backend_that_cannot_tell_never_suppresses() {
         assert!(!LogonState::logged_on().still_at_logon_screen());
+    }
+
+    #[test]
+    fn backend_error_drops_the_chain_not_just_the_top() {
+        let root = anyhow::anyhow!("connection refused");
+        let wrapped = root.context("connecting to target");
+        let shown = format!("{:?}", DesktopEvent::backend_error(&wrapped));
+        assert!(shown.contains("connecting to target"));
+        assert!(!shown.contains("connection refused"));
     }
 }

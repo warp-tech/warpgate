@@ -12,11 +12,21 @@ use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
-    RCCommand, RCEvent, RCState, RemoteClient, resolve_approved_ssh_chain,
+    ConnectionError, RCCommand, RCEvent, RCState, RemoteClient, client_error_message,
+    resolve_approved_ssh_chain,
 };
 use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
 use crate::protocol::ServerMessage;
+
+/// What a browser session is told when the connection fails.
+///
+/// Named rather than inlined in the event loop so a test can stand at the
+/// boundary without driving a whole browser session.
+#[must_use]
+pub fn shown_to_the_browser(error: &ConnectionError) -> String {
+    error.client_message()
+}
 use crate::session::WebSshSession;
 
 const MAX_SESSIONS_PER_USER: usize = 100;
@@ -178,16 +188,23 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::Error(e) => {
+                            // The full chain goes to the log; only the
+                            // sanitised constant crosses into a browser.
+                            error!(session=%session_id, error=?e, "Client session error");
                             session
                                 .push(ServerMessage::Error {
-                                    message: e.to_string(),
+                                    message: client_error_message(&e).to_owned(),
                                 })
                                 .await;
                         }
                         RCEvent::ConnectionError(e) => {
+                            // The connect path logs at `debug!`, dropped
+                            // under the default filter, so without this a
+                            // failed session leaves no record at all.
+                            error!(session=%session_id, error=?e, "Target connection failed");
                             session
                                 .push(ServerMessage::Error {
-                                    message: e.to_string(),
+                                    message: shown_to_the_browser(&e),
                                 })
                                 .await;
                             session
@@ -249,4 +266,36 @@ fn spawn_event_loop(
             .instrument(span),
         )
         .ok();
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_common::WarpgateError;
+
+    use super::{ConnectionError, shown_to_the_browser};
+
+    /// The browser is told a fixed phrase, never the error's own words.
+    ///
+    /// Asserting on the `Warpgate` variant specifically is what makes this
+    /// fail if the call reverts to `to_string()`.
+    #[test]
+    fn a_browser_never_sees_the_error_s_own_words() {
+        let leaky = ConnectionError::Warpgate(WarpgateError::Other(
+            "database error: SELECT secret FROM credentials".into(),
+        ));
+
+        // Or a fixture that stopped carrying the text would prove nothing.
+        assert!(leaky.to_string().contains("SELECT"));
+
+        let shown = shown_to_the_browser(&leaky);
+        assert!(
+            !shown.contains("SELECT"),
+            "the raw error reached the browser: {shown}"
+        );
+        assert!(
+            !shown.contains("database error"),
+            "the raw error reached the browser: {shown}"
+        );
+        assert_eq!(shown, leaky.client_message());
+    }
 }

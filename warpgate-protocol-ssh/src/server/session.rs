@@ -51,7 +51,7 @@ use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
-    SshRecordingMetadata, X11Request, resolve_approved_ssh_chain,
+    SshRecordingMetadata, X11Request, client_error_message, resolve_approved_ssh_chain,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
@@ -202,11 +202,20 @@ fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::s
     }
 }
 
+/// What a terminal session is told when the connection to the target fails.
+///
+/// Named, like web-ssh's `shown_to_the_browser`, so a test has somewhere to
+/// stand: a call inside the event loop does not.
+fn shown_in_the_terminal(error: &ConnectionError) -> String {
+    format!("Target connection failed: {}", error.client_message())
+}
+
 #[cfg(test)]
 mod tests {
     use russh::{MethodKind, MethodSet};
+    use warpgate_common::WarpgateError;
 
-    use super::reject_with_allowed_auth_methods;
+    use super::{ConnectionError, reject_with_allowed_auth_methods, shown_in_the_terminal};
 
     #[test]
     fn rejected_public_key_auth_advertises_only_configured_methods() {
@@ -224,6 +233,28 @@ mod tests {
         assert_eq!(advertised_methods, configured_methods);
         assert!(!advertised_methods.contains(&MethodKind::Password));
         assert!(!advertised_methods.contains(&MethodKind::KeyboardInteractive));
+    }
+
+    /// The terminal is told a fixed phrase, never the error's own words.
+    ///
+    /// The `Warpgate` variant is the one this boundary exists for; asserting
+    /// the fixture carries the leak first stops it passing vacuously.
+    #[test]
+    fn the_pty_leg_shows_a_fixed_phrase_not_the_error() {
+        let leaky = ConnectionError::Warpgate(WarpgateError::Other(
+            "database error: SELECT secret FROM credentials".into(),
+        ));
+        assert!(leaky.to_string().contains("SELECT"));
+
+        let shown = shown_in_the_terminal(&leaky);
+        assert!(
+            !shown.contains("SELECT"),
+            "the raw error reached the terminal: {shown}"
+        );
+        assert!(
+            !shown.contains("database error"),
+            "the raw error reached the terminal: {shown}"
+        );
     }
 }
 
@@ -1176,13 +1207,18 @@ impl ServerSession {
                         );
                     }
                     error => {
-                        let _ = self.emit_pty_error(&format!("Target connection failed: {error}"));
+                        // The same boundary as the browser leg, and the
+                        // server-side record: the connect path logs only at
+                        // `debug!`.
+                        error!(?error, "Target connection failed");
+                        let _ = self.emit_pty_error(&shown_in_the_terminal(&error));
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_pty_error(&format!("Error: {e}"));
+                error!(error=?e, "Client session error");
+                let _ = self.emit_pty_error(&format!("Error: {}", client_error_message(&e)));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
