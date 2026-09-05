@@ -1,19 +1,15 @@
 //! Closing the client transport when nothing politer can reach the client.
 //!
-//! Warpgate's teardown talks to the client through russh: channel closes, a
-//! disconnect, an error line on the terminal. All of it goes through russh's
-//! own bounded message queue, and russh only drains that queue while it has no
-//! data pending for the client. A client that has stopped reading long enough
-//! for its channel window to run out therefore blocks every one of those, and
-//! the loop that would notice a timeout is itself parked in a socket write to
-//! that client, so no timer inside it is ever armed.
+//! Everything Warpgate's teardown says to a client goes through russh's
+//! bounded message queue, which russh drains only while it has no data
+//! pending. A client that has stopped reading blocks all of it, and russh's
+//! own loop parks in a socket write to that client, so no timer inside it is
+//! ever armed.
 //!
-//! At that point the connection is only reachable from underneath. Warpgate
-//! owns the stream before handing it to `russh::server::run_stream`, so it can
-//! fail the write out from under russh and let the whole thing unwind. A raw
-//! `shutdown(2)` on the descriptor would do the same, but `unsafe_code` is
-//! denied workspace-wide; a wrapper that starts answering `ConnectionAborted`
-//! needs no `unsafe` and is honest about who ended the connection.
+//! The connection is then only reachable from underneath. Warpgate owns the
+//! stream before handing it to `russh::server::run_stream`, so it can fail
+//! the write out from under russh. `shutdown(2)` on the descriptor would do
+//! the same, but `unsafe_code` is denied workspace-wide.
 
 use std::io;
 use std::pin::Pin;

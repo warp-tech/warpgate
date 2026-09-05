@@ -77,14 +77,9 @@ impl ChannelWriter {
                         description,
                         language_tag,
                     ) => {
-                        // Same fire-and-forget shape as `Close` above: a
-                        // successful send only means russh's session task
-                        // accepted the message into its own queue, not that
-                        // it reached the socket. What actually differs is
-                        // what processing it does once dequeued — dispatching
-                        // a `Disconnect` is what makes russh's session loop
-                        // exit and shut the stream down, which dispatching a
-                        // channel `Close` never does.
+                        // Fire-and-forget like `Close` above. What differs is
+                        // the processing: a `Disconnect` makes russh's loop
+                        // exit and shut the stream down; a `Close` does not.
                         let _ = handle.disconnect(reason, description, language_tag).await;
                     }
                     ChannelWriteOperation::Success(handle, channel) => {
@@ -176,11 +171,9 @@ impl ChannelWriter {
         self.enqueue(ChannelWriteOperation::Close(handle, channel))
     }
 
-    /// A channel `Close` only ends that channel; it never tells the client
-    /// the *connection* is over, so nothing obliges a well-behaved client to
-    /// let go of the socket. This is the operation that does: queue it after
-    /// the channel closes it's meant to follow, and once dequeued it forces
-    /// russh's own session loop to end and shut the stream down.
+    /// A channel `Close` never tells the client the connection is over, so
+    /// nothing obliges it to let go of the socket. This does: queued after
+    /// the closes it follows, it ends russh's own session loop.
     pub fn disconnect(
         &self,
         handle: Handle,

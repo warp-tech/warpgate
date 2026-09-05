@@ -92,9 +92,8 @@ async fn _handle_connection(
     .await
     .context("registering session")?;
 
-    // The last resort for a client that has stopped reading: everything else
-    // Warpgate can say to it goes through russh, and russh cannot say anything
-    // to a client whose window is full. See `transport_abort`.
+    // The last resort for a client that has stopped reading. See
+    // `transport_abort`.
     let (wrapped_stream, transport_abort) = AbortableStream::new(wrapped_stream);
 
     let id = server_handle.lock().await.user_session_id();
@@ -112,10 +111,9 @@ async fn _handle_connection(
 
     let handler = ServerHandler { event_tx, banner };
 
-    // The session and the wire protocol run as two independent tasks (spawned
-    // below); this is the only link between them. It lets a teardown on the
-    // session side find out when russh's own loop has actually shut the
-    // stream down, instead of guessing with a sleep (#2520).
+    // The only link between the session and the wire protocol tasks: it lets
+    // a teardown find out when russh's loop has actually shut the stream
+    // down, instead of guessing with a sleep (#2520).
     let (protocol_done_tx, protocol_done_rx) = oneshot::channel();
 
     let session = match ServerSession::start(
@@ -200,12 +198,8 @@ where
     }
     .await;
 
-    // Fires once russh's own session loop has actually exited and (tried to)
-    // shut the stream down — unlike a send into `Handle`, which only proves
-    // russh accepted a message into its own queue. Sent unconditionally, on
-    // both outcomes, since the session side only cares that this task is
-    // done, not why. A dropped receiver (the session already gave up and
-    // moved on) makes this a no-op.
+    // Sent on both outcomes: the session side only cares that this task is
+    // done, not why. A dropped receiver makes it a no-op.
     let _ = protocol_done_tx.send(());
 
     if let Err(ref error) = ret {

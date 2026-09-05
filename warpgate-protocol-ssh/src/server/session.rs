@@ -68,12 +68,9 @@ const MAX_NESTED_COMMAND_WAITS: usize = 16;
 /// giving up on them.
 const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Ceiling on how long a teardown waits for `protocol_done_rx` — i.e. for
-/// russh's own session loop to actually exit — once it's known safe to wait
-/// at all (see `disconnect_server`). Bounds a real signal rather than
-/// standing in for one: the wait normally ends the moment the signal fires,
-/// this only covers the case where it doesn't (a wedged protocol task, or a
-/// legitimately slow client during the final stream shutdown).
+/// Ceiling on how long a teardown waits for `protocol_done_rx`, i.e. for
+/// russh's own session loop to exit. Bounds a real signal rather than
+/// standing in for one: the wait normally ends when the signal fires.
 const DISCONNECT_DRAIN_GRACE: Duration = Duration::from_millis(250);
 
 #[allow(clippy::large_enum_variant)]
@@ -176,10 +173,9 @@ pub struct ServerSession {
     allowed_auth_methods: MethodSet,
     /// Track the state of a client snooping around pre-auth
     probe: ProbeState,
-    /// Fires once when the wire protocol task's own `run()` loop has exited,
-    /// i.e. russh has (tried to) shut the stream down for good. `disconnect_server`
-    /// waits on it instead of guessing how long that takes with a sleep (#2520).
-    /// `None` once consumed — it's only ever worth waiting on the first time.
+    /// Fires once the wire protocol task's `run()` loop has exited.
+    /// `disconnect_server` waits on it rather than guessing with a sleep
+    /// (#2520). `None` once consumed.
     protocol_done_rx: Option<oneshot::Receiver<()>>,
     /// Closes the client's connection outright. The last resort in
     /// `disconnect_server`, for the client that cannot be told anything.
@@ -1241,11 +1237,8 @@ impl ServerSession {
                     Ok(Some((handle, id))) => self.channel_writer.close(handle, id)?,
                     Ok(None) => {}
                     Err(error) => {
-                        // Unlike the other arms, an unknown channel here isn't
-                        // necessarily a bug: `ChannelRegistry::close` is reached
-                        // from both the client and the target side, so the
-                        // registry entry may already be gone if the client half
-                        // of the close raced ahead of this target-side event.
+                        // Not necessarily a bug: this is reached from both
+                        // sides, so the client half may have closed first.
                         debug!(%channel, ?error, "Target closed a channel already gone from the registry");
                     }
                 }
@@ -2547,14 +2540,9 @@ impl ServerSession {
             for ch in channels {
                 let _ = self.channel_writer.close(handle.clone(), ch.0);
             }
-            // A channel close only ends that channel — it says nothing about
-            // the *connection*, so a dead target never gives the client a
-            // reason to let go of the socket (#2520). Queue an actual
-            // protocol disconnect behind the channel closes so relative
-            // ordering holds. `ByApplication` matches the reason already
-            // used for the client-facing leg's own teardown
-            // (`client/mod.rs::disconnect`): Warpgate is ending the session
-            // on its own initiative, not reporting a wire protocol error.
+            // A channel close says nothing about the connection, so a dead
+            // target never gives the client a reason to let go of the socket
+            // (#2520). Queued behind the closes so the ordering holds.
             let _ = self.channel_writer.disconnect(
                 handle,
                 russh::Disconnect::ByApplication,
@@ -2563,36 +2551,19 @@ impl ServerSession {
             );
         }
 
-        // Give the channel writer's own queue a chance to hand the closes and
-        // the disconnect above (and any error or timeout notice emitted
-        // before them) off to russh. Bounded: a client whose window is full
-        // never lets the queue drain, and this runs on the event loop.
+        // Bounded: a client whose window is full never lets the queue
+        // drain, and this runs on the event loop.
         let _ = tokio::time::timeout(DISCONNECT_FLUSH_TIMEOUT, self.channel_writer.flush()).await;
 
-        // `flush()` only proves the above reached russh's `Handle`, i.e. that
-        // `Handle::close`/`Handle::disconnect` returned — not that russh's
-        // own session task, which runs independently of this one, has had a
-        // turn to actually write them. Processing the disconnect is what
-        // makes that task exit its loop and shut the stream down, so wait
-        // for `protocol_done_rx` — fired from that task once it actually has
-        // — rather than guessing how long that takes with a sleep (#2520).
+        // `flush()` only proves the messages reached russh's `Handle`, not
+        // that its session task has written them, so wait for the task to
+        // say it has (#2520).
         //
-        // Only when this call isn't nested inside `send_command_and_wait`'s
-        // own pump (`command_wait_depth == 0`), because every russh handler
-        // callback that carries a reply (`ChannelClose`, `Data`, ...) blocks
-        // on it from *inside* russh's own session task, and some of those
-        // replies are sent only once a nested pump — reached from here
-        // through `_channel_close` and friends — drains. Waiting on
-        // `protocol_done_rx` from there can never resolve before
-        // `DISCONNECT_DRAIN_GRACE` expires: russh cannot reach the code that
-        // would send the reply the pump is blocked on, because it is stuck
-        // in the callback waiting for that very reply. The timeout keeps that
-        // case from hanging forever, but at that point it is a bound on a
-        // wait already known to be pointless, not a real signal — the same
-        // fixed delay this replaces, just scoped to the one case where a
-        // signal genuinely can't help. The top-level call (the common case,
-        // and the one #2520 is about) has no such reply outstanding, so it
-        // resolves as soon as russh actually finishes.
+        // Skipped when nested inside `send_command_and_wait`'s pump: russh
+        // handler callbacks block from inside russh's own task, so the
+        // signal cannot arrive before the grace expires and the wait is
+        // known to be pointless. The top-level call has no such reply
+        // outstanding.
         if had_handle
             && self.command_wait_depth == 0
             && let Some(protocol_done_rx) = self.protocol_done_rx.take()
@@ -2600,18 +2571,10 @@ impl ServerSession {
                 .await
                 .is_err()
         {
-            // Everything above this point asks russh to end the session, and
-            // russh can only act on any of it while the client is reading. A
-            // client whose window is full blocks the lot, and russh's own
-            // loop is parked in a socket write to that same client, so no
-            // timeout inside it is ever armed either -- the connection is
-            // held until the process exits. Measured: still held 400s after
-            // the target died, released only when the client resumed reading.
-            //
-            // So the connection is ended from underneath instead. Reaching
-            // here means the flush already failed and russh's loop is still
-            // running, which for a session being torn down is not a state
-            // worth waiting out.
+            // Everything above asks russh to end the session, and russh can
+            // only act on it while the client is reading. Reaching here means
+            // the flush already failed and russh's loop is still running, so
+            // the connection is ended from underneath instead.
             warn!("Client did not accept the session teardown; closing its connection");
             self.transport_abort.abort();
         }
