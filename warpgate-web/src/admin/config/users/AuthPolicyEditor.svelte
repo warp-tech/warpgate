@@ -32,10 +32,7 @@
         globalParameters,
     }: Props = $props()
 
-    const protocols: {
-        id: ProtocolID
-        name: string
-    }[] = [
+    const protocols: PolicyProtocol[] = [
         { id: 'ssh', name: 'SSH' },
         { id: 'http', name: 'HTTP' },
         { id: 'mysql', name: 'MySQL' },
@@ -45,8 +42,17 @@
         { id: 'rdp', name: 'RDP' },
     ]
 
-    function possibleCredentials(protocol: ProtocolID) {
-        return getEffectivePossibleCredentials(protocol, globalParameters)
+    const possibleCredentialsByProtocol = $derived(
+        new Map(
+            protocols.map(p => [
+                p.id,
+                getEffectivePossibleCredentials(p.id, globalParameters),
+            ]),
+        ),
+    )
+
+    function possibleCredentials(protocol: ProtocolID): Set<CredentialKind> {
+        return possibleCredentialsByProtocol.get(protocol) ?? new Set()
     }
 
     const credentialKinds: { kind: CredentialKind; label: string }[] = [

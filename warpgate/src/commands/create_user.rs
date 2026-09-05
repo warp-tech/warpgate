@@ -1,9 +1,7 @@
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tracing::info;
 use uuid::Uuid;
-use warpgate_common::{
-    GlobalParams, Secret, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError,
-};
+use warpgate_common::{GlobalParams, Secret, UserPasswordCredential, WarpgateError};
 use warpgate_core::Services;
 use warpgate_db_entities::{
     AdminRole, Parameters, PasswordCredential, Role, User, UserAdminRoleAssignment,
