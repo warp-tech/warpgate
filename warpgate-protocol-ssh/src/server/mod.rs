@@ -6,6 +6,8 @@ mod service_output;
 mod session;
 mod session_handle;
 mod target_menu;
+mod transport_abort;
+
 use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -21,7 +23,9 @@ pub use session::ServerSession;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::oneshot;
 use tracing::*;
+use transport_abort::AbortableStream;
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::net::accept_loop;
 use warpgate_core::{Services, State, UserSessionStateInit};
@@ -88,6 +92,10 @@ async fn _handle_connection(
     .await
     .context("registering session")?;
 
+    // The last resort for a client that has stopped reading. See
+    // `transport_abort`.
+    let (wrapped_stream, transport_abort) = AbortableStream::new(wrapped_stream);
+
     let id = server_handle.lock().await.user_session_id();
 
     let (event_tx, event_rx) = unbounded_channel();
@@ -103,12 +111,19 @@ async fn _handle_connection(
 
     let handler = ServerHandler { event_tx, banner };
 
+    // The only link between the session and the wire protocol tasks: it lets
+    // a teardown find out when russh's loop has actually shut the stream
+    // down, instead of guessing with a sleep (#2520).
+    let (protocol_done_tx, protocol_done_rx) = oneshot::channel();
+
     let session = match ServerSession::start(
         remote_address,
         &services,
         server_handle,
         session_handle_rx,
         event_rx,
+        protocol_done_rx,
+        transport_abort,
     )
     .await
     {
@@ -157,7 +172,12 @@ async fn _handle_connection(
 
     tokio::task::Builder::new()
         .name(&format!("SSH {id} protocol"))
-        .spawn(_run_stream(russh_config, wrapped_stream, handler))?;
+        .spawn(_run_stream(
+            russh_config,
+            wrapped_stream,
+            handler,
+            protocol_done_tx,
+        ))?;
 
     Ok(())
 }
@@ -166,6 +186,7 @@ async fn _run_stream<R>(
     config: Arc<russh::server::Config>,
     socket: R,
     handler: ServerHandler,
+    protocol_done_tx: oneshot::Sender<()>,
 ) -> Result<()>
 where
     R: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -176,6 +197,10 @@ where
         Ok(())
     }
     .await;
+
+    // Sent on both outcomes: the session side only cares that this task is
+    // done, not why. A dropped receiver makes it a no-op.
+    let _ = protocol_done_tx.send(());
 
     if let Err(ref error) = ret {
         error!(%error, "Session failed");
