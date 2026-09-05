@@ -84,12 +84,9 @@ impl ConnectionError {
     /// for a failed target connection.
     ///
     /// `Io`/`Key`/`Ssh` carry the underlying library's own `Display`, and
-    /// `Warpgate` is `#[error(transparent)]`, so its `Display` is
-    /// `WarpgateError`'s own — a database failure rendering as
-    /// `database error: {DbErr}` carrying SQL text, or an encryption-key
-    /// mismatch naming configured key fingerprints. None of that is this
-    /// user's business; the full error still goes to the log via `Display`/
-    /// `{:?}`, this is only what crosses that boundary.
+    /// `Warpgate` is `#[error(transparent)]`, so its `Display` can render a
+    /// database failure with its SQL text or name configured key
+    /// fingerprints. The full error still goes to the log.
     #[must_use]
     pub fn client_message(&self) -> String {
         match self {
@@ -102,10 +99,8 @@ impl ConnectionError {
             }
             Self::JumpHostTargetNotFound => "Jump host target not found".to_string(),
             Self::Io(_) | Self::Key(_) | Self::Ssh(_) => "SSH protocol error".to_string(),
-            // Not `Warpgate(e) => e.to_string()`: that would forward
-            // `WarpgateError`'s own `Display` verbatim to whoever is watching
-            // this session. Folded in with `Internal` since both are "nothing
-            // this user can act on", for different reasons.
+            // Not `e.to_string()`: that forwards `WarpgateError`'s own
+            // `Display` to whoever is watching the session.
             Self::Internal | Self::Warpgate(_) => "Internal connection error".to_string(),
         }
     }
@@ -598,10 +593,8 @@ impl RemoteClient {
                     }
                 }
                 Err(e) => {
-                    // Single funnel for every `ConnectionError` variant regardless of
-                    // which internal step produced it (resolve, handshake, auth, jump
-                    // host) — was `debug!`, which meant a user-visible connect failure
-                    // left no record at the default log level.
+                    // Was `debug!`, so a user-visible connect failure left no
+                    // record at the default log level.
                     error!(error = ?e, "Connect error");
                     let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
                     self.set_disconnected().await;

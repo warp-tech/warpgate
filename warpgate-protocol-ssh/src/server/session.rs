@@ -204,9 +204,8 @@ fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::s
 
 /// What a terminal session is told when the connection to the target fails.
 ///
-/// Named for the same reason as web-ssh's `shown_to_the_browser`: what is worth
-/// guarding is the choice — `client_message()` and not `Display` — and a call
-/// sitting inside the event loop has nowhere for a test to stand.
+/// Named, like web-ssh's `shown_to_the_browser`, so a test has somewhere to
+/// stand: a call inside the event loop does not.
 fn shown_in_the_terminal(error: &ConnectionError) -> String {
     format!("Target connection failed: {}", error.client_message())
 }
@@ -238,9 +237,8 @@ mod tests {
 
     /// The terminal is told a fixed phrase, never the error's own words.
     ///
-    /// `Warpgate` is `#[error(transparent)]`, so this variant's `Display` is
-    /// `WarpgateError`'s own — the one the boundary exists for. Asserting the
-    /// fixture carries the leak first is what stops this passing vacuously.
+    /// The `Warpgate` variant is the one this boundary exists for; asserting
+    /// the fixture carries the leak first stops it passing vacuously.
     #[test]
     fn the_pty_leg_shows_a_fixed_phrase_not_the_error() {
         let leaky = ConnectionError::Warpgate(WarpgateError::Other(
@@ -1209,12 +1207,9 @@ impl ServerSession {
                         );
                     }
                     error => {
-                        // The PTY leg gets the same boundary as the browser
-                        // leg: `ConnectionError::Warpgate` is transparent, so
-                        // its `Display` is `WarpgateError`'s own — a database
-                        // failure arriving here would render its SQL text onto
-                        // the user's terminal. The connect path itself logs
-                        // only at `debug!`, so this is the server-side record.
+                        // The same boundary as the browser leg, and the
+                        // server-side record: the connect path logs only at
+                        // `debug!`.
                         error!(?error, "Target connection failed");
                         let _ = self.emit_pty_error(&shown_in_the_terminal(&error));
                     }

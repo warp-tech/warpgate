@@ -21,11 +21,8 @@ use crate::protocol::ServerMessage;
 
 /// What a browser session is told when the connection fails.
 ///
-/// A named function rather than a method call inside the event loop, because
-/// what is worth guarding here is the *choice* — `client_message()` and not
-/// `Display`. A call sitting inside an async loop cannot be reached by a test
-/// without driving a whole browser session; named here, the boundary has
-/// somewhere a test can stand.
+/// Named rather than inlined in the event loop so a test can stand at the
+/// boundary without driving a whole browser session.
 #[must_use]
 pub fn shown_to_the_browser(error: &ConnectionError) -> String {
     error.client_message()
@@ -191,9 +188,7 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::Error(e) => {
-                            // The full chain (which may name a target host, a
-                            // key fingerprint or, via `SshClientError::Warpgate`,
-                            // a raw database error) goes to the log; only the
+                            // The full chain goes to the log; only the
                             // sanitised constant crosses into a browser.
                             error!(session=%session_id, error=?e, "Client session error");
                             session
@@ -203,11 +198,9 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::ConnectionError(e) => {
-                            // The connect path itself only logs at `debug!`
-                            // (dropped under the default `warpgate=info`
-                            // filter), so without this a failed session leaves
-                            // no server-side record at all — only the sanitised
-                            // text the user sees below.
+                            // The connect path logs at `debug!`, dropped
+                            // under the default filter, so without this a
+                            // failed session leaves no record at all.
                             error!(session=%session_id, error=?e, "Target connection failed");
                             session
                                 .push(ServerMessage::Error {
@@ -283,19 +276,15 @@ mod tests {
 
     /// The browser is told a fixed phrase, never the error's own words.
     ///
-    /// `Warpgate` is `#[error(transparent)]`, so its `Display` is whatever the
-    /// inner error says — a database failure renders as `database error: …`
-    /// carrying SQL text. That variant is the one this boundary exists for, and
-    /// asserting on it specifically is what makes this test fail if the call
-    /// reverts to `to_string()`.
+    /// Asserting on the `Warpgate` variant specifically is what makes this
+    /// fail if the call reverts to `to_string()`.
     #[test]
     fn a_browser_never_sees_the_error_s_own_words() {
         let leaky = ConnectionError::Warpgate(WarpgateError::Other(
             "database error: SELECT secret FROM credentials".into(),
         ));
 
-        // Without this the test would still pass if the fixture stopped
-        // carrying the text at all, proving nothing about the boundary.
+        // Or a fixture that stopped carrying the text would prove nothing.
         assert!(leaky.to_string().contains("SELECT"));
 
         let shown = shown_to_the_browser(&leaky);
