@@ -6,6 +6,8 @@ mod service_output;
 mod session;
 mod session_handle;
 mod target_menu;
+mod transport_abort;
+
 use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -23,6 +25,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot;
 use tracing::*;
+use transport_abort::AbortableStream;
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::net::accept_loop;
 use warpgate_core::{Services, State, UserSessionStateInit};
@@ -89,6 +92,11 @@ async fn _handle_connection(
     .await
     .context("registering session")?;
 
+    // The last resort for a client that has stopped reading: everything else
+    // Warpgate can say to it goes through russh, and russh cannot say anything
+    // to a client whose window is full. See `transport_abort`.
+    let (wrapped_stream, transport_abort) = AbortableStream::new(wrapped_stream);
+
     let id = server_handle.lock().await.user_session_id();
 
     let (event_tx, event_rx) = unbounded_channel();
@@ -117,6 +125,7 @@ async fn _handle_connection(
         session_handle_rx,
         event_rx,
         protocol_done_rx,
+        transport_abort,
     )
     .await
     {
