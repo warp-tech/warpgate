@@ -20,6 +20,18 @@ impl Display for CredentialChangedVia {
     }
 }
 
+/// Who acted, and on which target. Every Kubernetes audit event carries exactly
+/// this identity, and the protocol builds it once per request, so it is one
+/// struct rather than four fields repeated across six variants.
+#[derive(Clone)]
+pub struct KubernetesAuditSubject {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub username: String,
+    pub target_id: Uuid,
+    pub target_name: String,
+}
+
 #[derive(Clone)]
 pub enum AuditEvent {
     CredentialCreated {
@@ -118,6 +130,79 @@ pub enum AuditEvent {
         username: String,
         target: String,
         actor_user_id: Uuid,
+    },
+    /// `kubectl exec` — a command run inside an existing container.
+    KubernetesExecStarted {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        /// The container the client named. `None` when it named none: kubectl
+        /// omits it for single-container pods and lets the API server choose,
+        /// and guessing here would put an unverified name in the audit log.
+        container: Option<String>,
+        /// argv as a JSON array.
+        command: String,
+        tty: bool,
+        stdin: bool,
+    },
+    /// `kubectl attach` — a client attached to a container's existing streams.
+    KubernetesAttachStarted {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        container: Option<String>,
+        tty: bool,
+    },
+    /// `kubectl port-forward` — a tunnel to a pod's port was opened.
+    KubernetesPortForwardStarted {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        /// Requested ports as a JSON array, when the client named them in the
+        /// query. The websocket port-forward protocol negotiates ports per
+        /// stream instead and sends no query at all, so this is often absent —
+        /// and an empty list would read as "no ports", which is not the same.
+        ports: Option<String>,
+    },
+    /// The cluster refused a streaming request — typically RBAC. Recorded
+    /// separately because a denied attempt is exactly as interesting as a
+    /// successful one, and the `...Started` event alone cannot say which it was.
+    KubernetesStreamRejected {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        /// `exec`, `attach` or `portforward`.
+        subresource: String,
+        status: u16,
+    },
+    /// `kubectl debug` against a running pod: an ephemeral container was added
+    /// to it. One event per container in the request.
+    KubernetesDebugContainerCreated {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        debug_container: String,
+        image: String,
+        /// The container whose namespaces the debug container joins.
+        target_container: Option<String>,
+        /// argv as a JSON array.
+        command: String,
+        tty: bool,
+        response_status: u16,
+    },
+    /// A pod was created — how `kubectl debug node/...` and `kubectl debug
+    /// --copy-to` land a debug workload, and worth auditing in its own right.
+    KubernetesPodCreated {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        /// Container images as a JSON array.
+        images: String,
+        node_name: Option<String>,
+        host_pid: bool,
+        host_network: bool,
+        privileged: bool,
+        response_status: u16,
     },
 }
 
@@ -392,6 +477,259 @@ impl AuditEvent {
                     related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
                     "Deleted ticket"
                 );
+            }
+            Self::KubernetesExecStarted {
+                subject,
+                namespace,
+                pod,
+                container,
+                command,
+                tty,
+                stdin,
+            } => {
+                // The optional container is emitted as a field only when the
+                // client actually named one, rather than as a placeholder that
+                // would read like a real container name.
+                if let Some(container) = container {
+                    info!(
+                        target: "audit",
+                        _type = "KubernetesExecStarted1",
+                        session = %subject.session_id,
+                        user_id = %subject.user_id,
+                        username = %subject.username,
+                        target_id = %subject.target_id,
+                        target_name = %subject.target_name,
+                        related_users = %format_related_ids(&[subject.user_id]),
+                        namespace = %namespace,
+                        pod = %pod,
+                        container = %container,
+                        command = %command,
+                        tty = %tty,
+                        stdin = %stdin,
+                        "Kubernetes exec"
+                    );
+                } else {
+                    info!(
+                        target: "audit",
+                        _type = "KubernetesExecStarted1",
+                        session = %subject.session_id,
+                        user_id = %subject.user_id,
+                        username = %subject.username,
+                        target_id = %subject.target_id,
+                        target_name = %subject.target_name,
+                        related_users = %format_related_ids(&[subject.user_id]),
+                        namespace = %namespace,
+                        pod = %pod,
+                        command = %command,
+                        tty = %tty,
+                        stdin = %stdin,
+                        "Kubernetes exec"
+                    );
+                }
+            }
+            Self::KubernetesAttachStarted {
+                subject,
+                namespace,
+                pod,
+                container,
+                tty,
+            } => {
+                if let Some(container) = container {
+                    info!(
+                        target: "audit",
+                        _type = "KubernetesAttachStarted1",
+                        session = %subject.session_id,
+                        user_id = %subject.user_id,
+                        username = %subject.username,
+                        target_id = %subject.target_id,
+                        target_name = %subject.target_name,
+                        related_users = %format_related_ids(&[subject.user_id]),
+                        namespace = %namespace,
+                        pod = %pod,
+                        container = %container,
+                        tty = %tty,
+                        "Kubernetes attach"
+                    );
+                } else {
+                    info!(
+                        target: "audit",
+                        _type = "KubernetesAttachStarted1",
+                        session = %subject.session_id,
+                        user_id = %subject.user_id,
+                        username = %subject.username,
+                        target_id = %subject.target_id,
+                        target_name = %subject.target_name,
+                        related_users = %format_related_ids(&[subject.user_id]),
+                        namespace = %namespace,
+                        pod = %pod,
+                        tty = %tty,
+                        "Kubernetes attach"
+                    );
+                }
+            }
+            Self::KubernetesPortForwardStarted {
+                subject,
+                namespace,
+                pod,
+                ports,
+            } => {
+                if let Some(ports) = ports {
+                    info!(
+                        target: "audit",
+                        _type = "KubernetesPortForwardStarted1",
+                        session = %subject.session_id,
+                        user_id = %subject.user_id,
+                        username = %subject.username,
+                        target_id = %subject.target_id,
+                        target_name = %subject.target_name,
+                        related_users = %format_related_ids(&[subject.user_id]),
+                        namespace = %namespace,
+                        pod = %pod,
+                        ports = %ports,
+                        "Kubernetes port forwarding"
+                    );
+                } else {
+                    info!(
+                        target: "audit",
+                        _type = "KubernetesPortForwardStarted1",
+                        session = %subject.session_id,
+                        user_id = %subject.user_id,
+                        username = %subject.username,
+                        target_id = %subject.target_id,
+                        target_name = %subject.target_name,
+                        related_users = %format_related_ids(&[subject.user_id]),
+                        namespace = %namespace,
+                        pod = %pod,
+                        "Kubernetes port forwarding"
+                    );
+                }
+            }
+            Self::KubernetesStreamRejected {
+                subject,
+                namespace,
+                pod,
+                subresource,
+                status,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "KubernetesStreamRejected1",
+                    session = %subject.session_id,
+                    user_id = %subject.user_id,
+                    username = %subject.username,
+                    target_id = %subject.target_id,
+                    target_name = %subject.target_name,
+                    related_users = %format_related_ids(&[subject.user_id]),
+                    namespace = %namespace,
+                    pod = %pod,
+                    subresource = %subresource,
+                    status = %status,
+                    "Kubernetes stream rejected by the cluster"
+                );
+            }
+            Self::KubernetesDebugContainerCreated {
+                subject,
+                namespace,
+                pod,
+                debug_container,
+                image,
+                target_container,
+                command,
+                tty,
+                response_status,
+            } => {
+                if let Some(target_container) = target_container {
+                    info!(
+                        target: "audit",
+                        _type = "KubernetesDebugContainerCreated1",
+                        session = %subject.session_id,
+                        user_id = %subject.user_id,
+                        username = %subject.username,
+                        target_id = %subject.target_id,
+                        target_name = %subject.target_name,
+                        related_users = %format_related_ids(&[subject.user_id]),
+                        namespace = %namespace,
+                        pod = %pod,
+                        debug_container = %debug_container,
+                        image = %image,
+                        target_container = %target_container,
+                        command = %command,
+                        tty = %tty,
+                        response_status = %response_status,
+                        "Kubernetes debug container"
+                    );
+                } else {
+                    info!(
+                        target: "audit",
+                        _type = "KubernetesDebugContainerCreated1",
+                        session = %subject.session_id,
+                        user_id = %subject.user_id,
+                        username = %subject.username,
+                        target_id = %subject.target_id,
+                        target_name = %subject.target_name,
+                        related_users = %format_related_ids(&[subject.user_id]),
+                        namespace = %namespace,
+                        pod = %pod,
+                        debug_container = %debug_container,
+                        image = %image,
+                        command = %command,
+                        tty = %tty,
+                        response_status = %response_status,
+                        "Kubernetes debug container"
+                    );
+                }
+            }
+            Self::KubernetesPodCreated {
+                subject,
+                namespace,
+                pod,
+                images,
+                node_name,
+                host_pid,
+                host_network,
+                privileged,
+                response_status,
+            } => {
+                if let Some(node_name) = node_name {
+                    info!(
+                        target: "audit",
+                        _type = "KubernetesPodCreated1",
+                        session = %subject.session_id,
+                        user_id = %subject.user_id,
+                        username = %subject.username,
+                        target_id = %subject.target_id,
+                        target_name = %subject.target_name,
+                        related_users = %format_related_ids(&[subject.user_id]),
+                        namespace = %namespace,
+                        pod = %pod,
+                        images = %images,
+                        node_name = %node_name,
+                        host_pid = %host_pid,
+                        host_network = %host_network,
+                        privileged = %privileged,
+                        response_status = %response_status,
+                        "Kubernetes pod created"
+                    );
+                } else {
+                    info!(
+                        target: "audit",
+                        _type = "KubernetesPodCreated1",
+                        session = %subject.session_id,
+                        user_id = %subject.user_id,
+                        username = %subject.username,
+                        target_id = %subject.target_id,
+                        target_name = %subject.target_name,
+                        related_users = %format_related_ids(&[subject.user_id]),
+                        namespace = %namespace,
+                        pod = %pod,
+                        images = %images,
+                        host_pid = %host_pid,
+                        host_network = %host_network,
+                        privileged = %privileged,
+                        response_status = %response_status,
+                        "Kubernetes pod created"
+                    );
+                }
             }
         }
     }

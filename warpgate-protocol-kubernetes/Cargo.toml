@@ -16,7 +16,6 @@ http.workspace = true
 md5 = { version = "0.8", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
-regex.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 reqwest-websocket.workspace = true
 rustls.workspace = true
