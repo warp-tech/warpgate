@@ -143,8 +143,11 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for AbortableStream<S> {
     /// An aborted shutdown reports success. The caller's intent -- stop using
     /// this stream -- has already been met, and returning an error here only
     /// turns an orderly unwind into a logged failure.
+    ///
+    /// Registers like every other method here: an inner shutdown that parks
+    /// is otherwise left for someone else to wake.
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        if self.state.aborted() {
+        if self.stopped(&self.state.write_waker, cx) {
             return Poll::Ready(Ok(()));
         }
         Pin::new(&mut self.inner).poll_shutdown(cx)
@@ -153,9 +156,11 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for AbortableStream<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::ErrorKind;
+    use std::io::{self, ErrorKind};
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
 
-    use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf, duplex};
 
     use super::{AbortableStream, TransportAbort};
 
@@ -233,6 +238,65 @@ mod tests {
             outcome.map(|r| r.ok()),
             Ok(Some(Err(ErrorKind::ConnectionAborted))),
             "the parked read was not released by the abort"
+        );
+    }
+
+    /// An inner stream whose shutdown never finishes, which is what a socket
+    /// to a peer that has stopped reading can look like.
+    struct NeverShutsDown;
+
+    impl AsyncRead for NeverShutsDown {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            Poll::Pending
+        }
+    }
+
+    impl AsyncWrite for NeverShutsDown {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Pending
+        }
+    }
+
+    #[tokio::test]
+    async fn a_shutdown_parked_in_the_inner_stream_is_released_by_an_abort() {
+        let (mut stream, abort) = AbortableStream::new(NeverShutsDown);
+
+        let shutdown = tokio::spawn(async move { stream.shutdown().await });
+
+        assert!(!abort.is_aborted());
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !shutdown.is_finished(),
+            "the shutdown completed, so nothing was parked to release"
+        );
+
+        abort.abort();
+
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), shutdown)
+            .await
+            .map(|joined| joined.map(|result| result.map_err(|e| e.kind())));
+        assert_eq!(
+            outcome.map(|r| r.ok()),
+            Ok(Some(Ok(()))),
+            "the parked shutdown was not released by the abort"
         );
     }
 
