@@ -4,6 +4,7 @@
     import {
         AnalyticsConsent,
         api,
+        type MfaEnforcement,
         type OpenTargetsInNewTabMode,
         type ParameterValues,
         type PasswordLoginMode,
@@ -675,6 +676,39 @@
                                 </HelpText>
 
                                 <FormGroup>
+                                    <label class="mb-2" for="mfaEnforcement">
+                                        MFA enforcement
+                                    </label>
+                                    <select
+                                        id="mfaEnforcement"
+                                        class="form-select"
+                                        value={parameters.mfaEnforcement ?? 'Off'}
+                                        onchange={e => parameters.mfaEnforcement = e.currentTarget.value as MfaEnforcement}
+                                    >
+                                        <option value="Off">Off</option>
+                                        <option value="Enroll">
+                                            Enroll (users must set up an OTP
+                                            when they log in on the web)
+                                        </option>
+                                        <option value="Require">
+                                            Require (prevent any logins without
+                                            a second factor)
+                                        </option>
+                                    </select>
+                                </FormGroup>
+
+                                <Input
+                                    class="mb-0 me-2"
+                                    type="switch"
+                                    label="Exempt SSO users from MFA enforcement"
+                                    bind:checked={parameters.mfaPolicyExemptSsoUsers}
+                                />
+                                <HelpText>
+                                    Enable if you already enforce MFA at your
+                                    SSO provider
+                                </HelpText>
+
+                                <FormGroup>
                                     <label class="mb-2" for="banner">
                                         Login banner
                                     </label>
@@ -859,8 +893,8 @@
                                             <strong>
                                                 multiplier × the previous block
                                                 duration
-                                            </strong
-                                            >, capped at the maximum. The repeat
+                                            </strong>
+                                            , capped at the maximum. The repeat
                                             count resets only after the cooldown
                                             period of
                                             <em>clean</em>
@@ -999,6 +1033,28 @@
                                     />
                                     <div>Record sessions</div>
                                 </label>
+
+                                {#if parameters.recordingsEnable}
+                                    <label
+                                        for="recordDesktopKeyboardInput"
+                                        class="d-flex align-items-center mb-2"
+                                    >
+                                        <Input
+                                            id="recordDesktopKeyboardInput"
+                                            class="mb-0 me-2"
+                                            type="switch"
+                                            bind:checked={parameters.recordDesktopKeyboardInput}
+                                        />
+                                        <div>
+                                            Record remote desktop keyboard input
+                                        </div>
+                                    </label>
+                                    <HelpText>
+                                        Disable if recording passwords typed in
+                                        by users in various applications is a
+                                        security concern.
+                                    </HelpText>
+                                {/if}
 
                                 <FormGroup floating label="Storage backend">
                                     <select

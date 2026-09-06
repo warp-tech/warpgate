@@ -38,3 +38,4 @@ node_modules
 .env
 
 rustc-ice-*.txt
+.zed

@@ -1920,8 +1920,7 @@ impl ServerSession {
             self.rc_state == RCState::Connecting
             // aborting admin approval wait
             || matches!(self.target, TargetSelection::AwaitingApproval)
-        )
-            && data.first() == Some(&3)
+        ) && data.first() == Some(&3)
         {
             info!(channel=%channel_id, "User requested connection abort (Ctrl-C)");
             let was_held = matches!(self.target, TargetSelection::AwaitingApproval);

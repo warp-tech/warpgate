@@ -5,6 +5,7 @@
 //! so the web-desktop manager and the native RDP server front end both work unchanged.
 
 mod input;
+mod logon;
 mod tls;
 
 use std::time::Duration;
@@ -38,6 +39,7 @@ use tracing::{debug, warn};
 use warpgate_common::{RdpTargetAuth, RdpTargetCompression, TargetRdpOptions};
 use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
 
+pub(crate) use self::logon::LogonWatcher;
 use crate::clipboard::{Clipboard, ClipboardSink, TextClipboard};
 
 /// Deadline for the TCP connect to the target.
@@ -79,6 +81,7 @@ pub async fn run(
     event_tx: Sender<DesktopEvent>,
     input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
+    logon: LogonWatcher,
 ) -> Result<()> {
     event_tx
         .send(DesktopEvent::State(DesktopState::Connecting))
@@ -139,6 +142,7 @@ pub async fn run(
         &mut abort_rx,
         &clipboard,
         clipboard_rx,
+        &logon,
     )
     .await
 }
@@ -153,6 +157,7 @@ async fn active_loop(
     abort_rx: &mut UnboundedReceiver<()>,
     clipboard: &Clipboard<ClientClipboardSink>,
     mut clipboard_rx: UnboundedReceiver<ClipboardOut>,
+    logon: &LogonWatcher,
 ) -> Result<()> {
     let activation_factory = connection_result.activation_factory;
     let mut active_stage = ActiveStageBuilder {
@@ -249,6 +254,12 @@ async fn active_loop(
         let should_reactivate = outputs
             .iter()
             .any(|output| matches!(output, ActiveStageOutput::DeactivateAll));
+
+        for output in &outputs {
+            if let ActiveStageOutput::SaveSessionInfo(pdu) = output {
+                logon.notify_logon_pdu(pdu);
+            }
+        }
 
         match process_outputs(&mut framed, image, outputs, event_tx, abort_rx).await {
             Ok(true) | Err(Aborted) => return Ok(()),

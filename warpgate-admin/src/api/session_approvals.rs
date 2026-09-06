@@ -16,9 +16,7 @@ use warpgate_db_entities::{Parameters, SessionApprovalRequest};
 
 use super::AdminContext;
 use crate::api::common::require_admin_permission;
-use crate::approvals::{
-    Approver, find_pending_approval, resolve_pending_approval,
-};
+use crate::approvals::{Approver, find_pending_approval, resolve_pending_approval};
 
 pub struct Api;
 

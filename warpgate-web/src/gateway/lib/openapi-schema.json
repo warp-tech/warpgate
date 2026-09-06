@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.5-46-gf80dd42d-modified"
+    "version": "v0.28.5-48-g25441c18-modified"
   },
   "servers": [
     {
@@ -680,6 +680,9 @@
           "401": {
             "description": ""
           },
+          "403": {
+            "description": ""
+          },
           "404": {
             "description": ""
           }
@@ -723,6 +726,9 @@
           },
           "401": {
             "description": ""
+          },
+          "403": {
+            "description": ""
           }
         },
         "security": [
@@ -759,6 +765,9 @@
             "description": ""
           },
           "401": {
+            "description": ""
+          },
+          "403": {
             "description": ""
           },
           "404": {
@@ -2118,6 +2127,8 @@
           "open_targets_in_new_tab",
           "web_clients_enabled",
           "has_ldap",
+          "needs_mfa_setup",
+          "otp_setup_enforced",
           "should_prompt_analytics",
           "banner",
           "show_session_menu"
@@ -2188,6 +2199,12 @@
             "type": "boolean"
           },
           "has_ldap": {
+            "type": "boolean"
+          },
+          "needs_mfa_setup": {
+            "type": "boolean"
+          },
+          "otp_setup_enforced": {
             "type": "boolean"
           },
           "setup_state": {

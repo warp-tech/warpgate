@@ -26,7 +26,8 @@
     }: Props = $props()
     let successVisible = $state(false)
 
-    async function _click() {
+    async function _click(e: MouseEvent) {
+        e.preventDefault()
         if (disabled) {
             return
         }
@@ -38,7 +39,14 @@
     }
 </script>
 
-<Button class={className} on:click={_click} {outline} {color} {disabled}>
+<Button
+    class={className}
+    on:click={_click}
+    {outline}
+    {color}
+    {disabled}
+    type="button"
+>
     {#if children}
         {@render children()}
     {:else}

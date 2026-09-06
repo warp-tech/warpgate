@@ -11,8 +11,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
     AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialKind,
-    CredentialPolicy, PerProtocolCredentialPolicy, StoredCredential, StoredCredentialFingerprint,
-    StoredCredentialKind,
+    CredentialPolicy, MfaEnforcementPolicy, PerProtocolCredentialPolicy, StoredCredential,
+    StoredCredentialFingerprint, StoredCredentialKind,
 };
 use warpgate_common::helpers::hash::{hash_secret, verify_password_hash};
 use warpgate_common::helpers::otp::verify_totp;
@@ -283,13 +283,19 @@ impl DatabaseConfigProvider {
             return Err(WarpgateError::UserAlreadyExists(preferred_username));
         }
 
+        let default_credential_policy = match default_credential_policy {
+            Some(x) => x,
+            None => {
+                let parameters = entities::Parameters::Entity::get(db).await?;
+                serde_json::to_value(parameters.default_credential_policy()?)?
+            }
+        };
+
         let user = entities::User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(preferred_username.clone()),
             description: Set("".into()),
-            credential_policy: Set(default_credential_policy.unwrap_or_else(|| {
-                serde_json::to_value(UserRequireCredentialsPolicy::default()).unwrap_or_default()
-            })),
+            credential_policy: Set(default_credential_policy),
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(ldap_server_id),
             ldap_object_uuid: Set(ldap_object_uuid),
@@ -458,7 +464,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             },
         }) as Box<dyn CredentialPolicy + Sync + Send>;
 
-        if let Some(req) = user.credential_policy.clone() {
+        let policy = if let Some(req) = user.credential_policy.clone() {
             let mut policy = PerProtocolCredentialPolicy {
                 default: default_policy,
                 protocols: HashMap::new(),
@@ -511,11 +517,20 @@ impl ConfigProvider for DatabaseConfigProvider {
                 }
             }
 
-            Ok(Some(
-                Box::new(policy) as Box<dyn CredentialPolicy + Sync + Send>
-            ))
+            Box::new(policy) as Box<dyn CredentialPolicy + Sync + Send>
         } else {
-            Ok(Some(default_policy))
+            default_policy
+        };
+
+        let parameters = entities::Parameters::Entity::get(db).await?;
+        let mfa_factors = parameters.mfa_required_factors(&user.credentials);
+        if mfa_factors.is_empty() {
+            Ok(Some(policy))
+        } else {
+            Ok(Some(Box::new(MfaEnforcementPolicy {
+                inner: policy,
+                required: mfa_factors,
+            })))
         }
     }
 

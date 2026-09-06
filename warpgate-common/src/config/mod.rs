@@ -85,21 +85,26 @@ impl UserAuthCredential {
     }
 }
 
+/// Coerce [] to None
+fn credential_entry_is_unset(entry: &Option<Vec<CredentialKind>>) -> bool {
+    entry.as_ref().is_none_or(Vec::is_empty)
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct UserRequireCredentialsPolicy {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub http: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub kubernetes: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub ssh: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub mysql: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub postgres: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub vnc: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub rdp: Option<Vec<CredentialKind>>,
 }
 

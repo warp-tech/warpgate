@@ -11,6 +11,7 @@ use ironrdp_pdu::rdp::autodetect::AutoDetectRequest;
 use ironrdp_pdu::rdp::client_info::CompressionType as PduCompressionType;
 use ironrdp_pdu::rdp::headers::ShareDataPdu;
 use ironrdp_pdu::rdp::multitransport::MultitransportRequestPdu;
+use ironrdp_pdu::rdp::session_info::SaveSessionInfoPdu;
 use ironrdp_pdu::slow_path::{self, GraphicsUpdateType};
 use ironrdp_pdu::{Action, mcs};
 use ironrdp_svc::{StaticChannelSet, SvcMessage, SvcProcessor, SvcProcessorMessages};
@@ -370,6 +371,10 @@ pub enum ActiveStageOutput {
     ///
     /// [\[MS-RDPBCGR\] 2.2.14.1.5]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/228ffc5c-b60c-4d3e-9781-ac613f822fdf
     AutoDetect(AutoDetectRequest),
+    /// The server reported that the session logged on ([MS-RDPBCGR] 2.2.10.1). Before this
+    /// arrives the session is at the target's own sign-in screen; the PDU optionally names
+    /// the account that was logged on.
+    SaveSessionInfo(SaveSessionInfoPdu),
 }
 
 impl TryFrom<x224::ProcessorOutput> for ActiveStageOutput {
@@ -393,6 +398,7 @@ impl TryFrom<x224::ProcessorOutput> for ActiveStageOutput {
             x224::ProcessorOutput::DeactivateAll => Ok(Self::DeactivateAll),
             x224::ProcessorOutput::MultitransportRequest(pdu) => Ok(Self::MultitransportRequest(pdu)),
             x224::ProcessorOutput::AutoDetect(request) => Ok(Self::AutoDetect(request)),
+            x224::ProcessorOutput::SaveSessionInfo(pdu) => Ok(Self::SaveSessionInfo(pdu)),
             // GraphicsUpdate and PointerUpdate are consumed in ActiveStage::process()
             // before reaching this conversion.
             x224::ProcessorOutput::GraphicsUpdate(_) | x224::ProcessorOutput::PointerUpdate(_) => Err(

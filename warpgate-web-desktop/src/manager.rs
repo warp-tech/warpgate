@@ -11,7 +11,9 @@ use tokio::sync::mpsc;
 use tracing::{Instrument, debug, info_span, warn};
 use warpgate_common::{TargetOptions, UserSessionId, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
-use warpgate_core::{DesktopEvent, Services, State, TargetAuthorization, UserSessionStateInit};
+use warpgate_core::{
+    DesktopClientHandles, DesktopEvent, Services, State, TargetAuthorization, UserSessionStateInit,
+};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_clients_common::{
     ClientManager, SessionRemover, WebSessionHandle, admit_web_client_session,
@@ -86,29 +88,33 @@ impl WebDesktopClientManager {
         let session_id = server_handle.lock().await.user_session_id();
         let target_session_id = admitted.id();
 
-        // Each backend exposes the same (event_rx, input_tx, abort_tx) handle shape
-        // over the shared DesktopEvent/DesktopInput types. The trailing flag asks the
-        // event loop to re-encode raw tiles as JPEG for the browser.
-        let (event_rx, input_tx, abort_tx, encode_jpeg) = match target_kind {
+        let span = info_span!("web-desktop", session=%session_id);
+
+        let (handles, encode_jpeg) = span.in_scope(|| match target_kind {
             TargetKind::Vnc => {
-                let h = warpgate_protocol_vnc::connect(admitted.narrow()?)?;
                 // Tight already picks JPEG for photographic tiles and keeps text and UI
                 // lossless, so re-encoding what it deliberately sent as raw would only
                 // degrade it.
-                (h.event_rx, h.input_tx, h.abort_tx, false)
+                Ok((warpgate_protocol_vnc::connect(admitted.narrow()?)?, false))
             }
             TargetKind::Rdp => {
                 // Connect at the viewer's measured size when known, so the desktop fits the
                 // browser from the first frame; the DVC resize path handles later changes.
-                let h = warpgate_protocol_rdp::connect(
+                let handles = warpgate_protocol_rdp::connect(
                     admitted.narrow()?,
                     size.unwrap_or(warpgate_protocol_rdp::DEFAULT_SIZE),
                 )?;
                 // The RDP helper only ever emits raw RGBA.
-                (h.event_rx, h.input_tx, h.abort_tx, true)
+                Ok((handles, true))
             }
-            _ => return Err(WarpgateError::InvalidTarget),
-        };
+            _ => Err(WarpgateError::InvalidTarget),
+        })?;
+        let DesktopClientHandles {
+            event_rx,
+            input_tx,
+            abort_tx,
+            logon_state: sign_in,
+        } = handles;
 
         // Start a desktop recording (no-op if recording is disabled in config). Shared
         // (Arc) between the session — which records viewer input — and the event loop,
@@ -122,7 +128,10 @@ impl WebDesktopClientManager {
             )
             .await
         {
-            Ok(recorder) => Some(Arc::new(recorder)),
+            Ok(recorder) => {
+                recorder.track_logon_state(sign_in);
+                Some(Arc::new(recorder))
+            }
             Err(warpgate_core::recordings::Error::Disabled) => None,
             Err(error) => {
                 warn!(%error, "Failed to start desktop recording");
@@ -165,6 +174,7 @@ impl WebDesktopClientManager {
             self.0.clone(),
             recorder,
             encode_jpeg,
+            span,
         );
 
         debug!(session=%session_id, user=%username, target=%target_name, "Web-desktop session created");
@@ -221,9 +231,9 @@ fn spawn_event_loop(
     manager: ClientManager<WebDesktopSession>,
     recorder: Option<Arc<DesktopRecorder>>,
     encode_jpeg: bool,
+    span: tracing::Span,
 ) {
     let session_id = session.id();
-    let span = info_span!("web-desktop", session=%session_id);
     tokio::spawn(
         async move {
             // Only the JPEG path loses detail, so only it has anything to refine.

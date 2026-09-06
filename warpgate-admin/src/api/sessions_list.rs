@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use futures::{SinkExt, StreamExt};
 use poem::http::StatusCode;
 use poem::session::Session;
-use poem::web::websocket::{Message, WebSocket};
 use poem::web::Data;
-use poem::{handler, IntoResponse};
+use poem::web::websocket::{Message, WebSocket};
+use poem::{IntoResponse, handler};
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
@@ -266,7 +266,7 @@ mod tests {
     use sea_orm::{ActiveModelTrait, Database};
     use time::OffsetDateTime;
     use uuid::Uuid;
-    use warpgate_db_entities::Parameters::{set_config_migration_values, ConfigMigrationValues};
+    use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_migrations::migrate_database;
 
     use super::*;

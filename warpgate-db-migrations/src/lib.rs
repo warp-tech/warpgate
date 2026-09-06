@@ -86,7 +86,10 @@ mod m00079_unique_target_and_group_names;
 mod m00080_user_and_target_sessions;
 mod m00081_http_session_user_session_id;
 mod m00082_target_session_columns;
-mod m00083_jit_session_approval;
+mod m00083_record_desktop_keyboard_input;
+mod m00084_mfa_enforcement;
+mod m00085_default_credential_policy;
+mod m00086_jit_session_approval;
 
 pub(crate) mod helpers;
 
@@ -178,7 +181,10 @@ impl MigratorTrait for Migrator {
             Box::new(m00080_user_and_target_sessions::Migration),
             Box::new(m00081_http_session_user_session_id::Migration),
             Box::new(m00082_target_session_columns::Migration),
-            Box::new(m00083_jit_session_approval::Migration),
+            Box::new(m00083_record_desktop_keyboard_input::Migration),
+            Box::new(m00084_mfa_enforcement::Migration),
+            Box::new(m00085_default_credential_policy::Migration),
+            Box::new(m00086_jit_session_approval::Migration),
         ]
     }
 }

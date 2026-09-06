@@ -21,9 +21,7 @@ use warpgate_admin::api::cluster_proxy::{
     Owner, ReparseForwardedResponse, forwarded_error, node_owner, parse_forwarded_body,
     proxy_or_serve_pending_login,
 };
-use warpgate_admin::approvals::{
-    Approver, PendingApproval, resolve_pending_approval,
-};
+use warpgate_admin::approvals::{Approver, PendingApproval, resolve_pending_approval};
 use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, UserSessionId, WarpgateError};

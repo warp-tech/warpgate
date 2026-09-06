@@ -1,26 +1,14 @@
 use anyhow::Context;
 use bytes::Bytes;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::{
-    Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
-};
+use tokio::sync::mpsc::{Receiver, UnboundedReceiver, channel, unbounded_channel};
 use tracing::{Instrument, debug, error, info_span, warn};
 use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncEvent, X11Event};
 use warpgate_common::{TargetVncOptions, VncTargetAuth, WarpgateError};
 use warpgate_core::{
-    AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopEvent, DesktopInput, DesktopRect,
-    DesktopState,
+    AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopEvent,
+    DesktopInput, DesktopRect, DesktopState, LogonState,
 };
-
-/// Handles for driving a backend VNC client running on its own task.
-pub struct VncClientHandles {
-    /// Normalised desktop events produced by the backend.
-    pub event_rx: Receiver<DesktopEvent>,
-    /// Inputs to forward to the backend.
-    pub input_tx: Sender<DesktopInput>,
-    /// Signal the backend task to disconnect and stop.
-    pub abort_tx: UnboundedSender<()>,
-}
 
 const fn rect_from(r: vnc::Rect) -> DesktopRect {
     DesktopRect {
@@ -102,7 +90,7 @@ const PROXY_ENCODINGS: &[VncEncoding] = &[
 /// [`DesktopEvent`]/[`DesktopInput`] streams.
 pub fn connect(
     admitted: AdmittedTarget<TargetVncOptions>,
-) -> Result<VncClientHandles, WarpgateError> {
+) -> Result<DesktopClientHandles, WarpgateError> {
     spawn_approved_client(admitted, BROWSER_ENCODINGS)
 }
 
@@ -112,19 +100,22 @@ pub fn connect(
 /// toward the viewer, and optionally recorded.
 pub fn connect_for_proxy(
     admitted: AdmittedTarget<TargetVncOptions>,
-) -> Result<VncClientHandles, WarpgateError> {
+) -> Result<DesktopClientHandles, WarpgateError> {
     spawn_approved_client(admitted, PROXY_ENCODINGS)
 }
 
 fn spawn_approved_client(
     admitted: AdmittedTarget<TargetVncOptions>,
     encodings: &'static [VncEncoding],
-) -> Result<VncClientHandles, WarpgateError> {
-    let options = admitted.specific_target().options();
-    Ok(spawn_client(options.clone(), encodings))
+) -> Result<DesktopClientHandles, WarpgateError> {
+    let options = admitted.specific_target().options().clone();
+    Ok(spawn_client(options, encodings))
 }
 
-fn spawn_client(options: TargetVncOptions, encodings: &'static [VncEncoding]) -> VncClientHandles {
+fn spawn_client(
+    options: TargetVncOptions,
+    encodings: &'static [VncEncoding],
+) -> DesktopClientHandles {
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
     let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);
     let (abort_tx, abort_rx) = unbounded_channel::<()>();
@@ -144,10 +135,12 @@ fn spawn_client(options: TargetVncOptions, encodings: &'static [VncEncoding]) ->
         .instrument(span),
     );
 
-    VncClientHandles {
+    DesktopClientHandles {
         event_rx,
         input_tx,
         abort_tx,
+        // placeholder
+        logon_state: LogonState::logged_on(),
     }
 }
 

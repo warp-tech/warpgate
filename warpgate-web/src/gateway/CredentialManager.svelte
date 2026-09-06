@@ -193,6 +193,12 @@
                     <Button
                         class="ms-2"
                         color="link"
+                        disabled={($serverInfo?.otpSetupEnforced ?? false) &&
+                            creds.otp.length === 1}
+                        title={($serverInfo?.otpSetupEnforced ?? false) &&
+                        creds.otp.length === 1
+                            ? 'One-time passwords are required on this server - add another device first'
+                            : ''}
                         onclick={e => {
                     deleteOtp(credential)
                     e.preventDefault()
@@ -208,6 +214,10 @@
             <Alert color="warning">
                 Your credential policy requires using a one-time password for
                 authentication. Without one, you won't be able to log in.
+            </Alert>
+        {:else if $serverInfo?.otpSetupEnforced}
+            <Alert color="info">
+                One-time passwords are required on this server.
             </Alert>
         {/if}
 

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-46-gf80dd42d-modified"
+    "version": "v0.28.5-48-g25441c18-modified"
   },
   "servers": [
     {
@@ -5699,6 +5699,14 @@
           }
         }
       },
+      "MfaEnforcement": {
+        "type": "string",
+        "enum": [
+          "Off",
+          "Enroll",
+          "Require"
+        ]
+      },
       "NewOtpCredential": {
         "type": "object",
         "title": "NewOtpCredential",
@@ -5820,6 +5828,15 @@
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
           },
+          "mfa_enforcement": {
+            "$ref": "#/components/schemas/MfaEnforcement"
+          },
+          "mfa_policy_exempt_sso_users": {
+            "type": "boolean"
+          },
+          "default_credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
           "ticket_self_service_enabled": {
             "type": "boolean"
           },
@@ -5860,6 +5877,9 @@
             "minimum": 1.0
           },
           "record_scp": {
+            "type": "boolean"
+          },
+          "record_desktop_keyboard_input": {
             "type": "boolean"
           },
           "login_protection_enabled": {
@@ -5971,6 +5991,9 @@
           "ssh_client_auth_keyboard_interactive",
           "ssh_host_key_verification",
           "password_login_mode",
+          "mfa_enforcement",
+          "mfa_policy_exempt_sso_users",
+          "default_credential_policy",
           "minimize_password_login",
           "ticket_self_service_enabled",
           "ticket_auto_approve_existing_access",
@@ -5981,6 +6004,7 @@
           "show_session_menu",
           "password_policy",
           "record_scp",
+          "record_desktop_keyboard_input",
           "login_protection_enabled",
           "login_protection_retention_seconds",
           "lp_ip_max_attempts",
@@ -6025,6 +6049,15 @@
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
           },
+          "mfa_enforcement": {
+            "$ref": "#/components/schemas/MfaEnforcement"
+          },
+          "mfa_policy_exempt_sso_users": {
+            "type": "boolean"
+          },
+          "default_credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
           "minimize_password_login": {
             "type": "boolean",
             "description": "Deprecated in 0.26: superseded by `password_login_mode`"
@@ -6066,6 +6099,9 @@
             "format": "int64"
           },
           "record_scp": {
+            "type": "boolean"
+          },
+          "record_desktop_keyboard_input": {
             "type": "boolean"
           },
           "login_protection_enabled": {

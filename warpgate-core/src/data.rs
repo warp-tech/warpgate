@@ -2,7 +2,7 @@ use poem_openapi::Object;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{redact_target_secrets, NodeId, Target, TargetSessionId, UserSessionId};
+use warpgate_common::{NodeId, Target, TargetSessionId, UserSessionId, redact_target_secrets};
 use warpgate_db_entities::{SessionApprovalRequest, TargetSession, UserSession};
 
 #[derive(Serialize, Object)]

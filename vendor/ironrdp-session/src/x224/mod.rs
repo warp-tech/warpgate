@@ -5,6 +5,7 @@ use ironrdp_pdu::rdp::autodetect::{AutoDetectReqPdu, AutoDetectRequest, AutoDete
 use ironrdp_pdu::rdp::headers::ShareDataPdu;
 use ironrdp_pdu::rdp::multitransport::MultitransportRequestPdu;
 use ironrdp_pdu::rdp::server_error_info::{ErrorInfo, ProtocolIndependentCode, ServerSetErrorInfoPdu};
+use ironrdp_pdu::rdp::session_info::SaveSessionInfoPdu;
 use ironrdp_pdu::x224::X224;
 use ironrdp_svc::{StaticChannelSet, SvcMessage, SvcProcessor, SvcProcessorMessages, client_encode_svc_messages};
 use tracing::debug;
@@ -45,6 +46,10 @@ pub enum ProcessorOutput {
     /// Slow-path pointer update ([MS-RDPBCGR] 2.2.9.1.1.4).
     /// Raw pointer payload starting with `messageType(u16) + pad(u16)`.
     PointerUpdate(Vec<u8>),
+    /// Server Save Session Info PDU ([MS-RDPBCGR] 2.2.10.1): the server reporting that the
+    /// session has logged on, optionally naming the account it logged on as. Until it
+    /// arrives, the session is sitting at the target's own sign-in screen.
+    SaveSessionInfo(SaveSessionInfoPdu),
 }
 
 #[derive(Debug, Clone)]
@@ -182,7 +187,7 @@ impl Processor {
                 match ctx.pdu {
                     ShareDataPdu::SaveSessionInfo(session_info) => {
                         debug!("Got Session Save Info PDU: {session_info:?}");
-                        Ok(Vec::new())
+                        Ok(vec![ProcessorOutput::SaveSessionInfo(session_info)])
                     }
                     // FIXME: workaround fix to not terminate the session on "unhandled PDU: Set Keyboard Indicators PDU"
                     ShareDataPdu::SetKeyboardIndicators(data) => {
