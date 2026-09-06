@@ -147,6 +147,9 @@ pub struct ServerSession {
     /// from a wait can await a command of its own, so the pump re-enters itself
     /// one stack level deeper per concurrent request.
     command_wait_depth: usize,
+    /// Set when a teardown ran nested inside the command pump and so
+    /// could not wait for russh. The pump finishes it on the way out.
+    transport_release_pending: bool,
     rc_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
     rc_abort_tx: UnboundedSender<()>,
     rc_state: RCState,
@@ -281,6 +284,7 @@ impl ServerSession {
             deferred_server_events: vec![],
             pending_events: VecDeque::new(),
             command_wait_depth: 0,
+            transport_release_pending: false,
             rc_tx: rc_handles.command_tx.clone(),
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
@@ -2507,6 +2511,9 @@ impl ServerSession {
             }
         };
         self.command_wait_depth -= 1;
+        if self.command_wait_depth == 0 && self.transport_release_pending {
+            self.release_transport_if_unread().await;
+        }
         result
     }
 
@@ -2555,21 +2562,37 @@ impl ServerSession {
         // drain, and this runs on the event loop.
         let _ = tokio::time::timeout(DISCONNECT_FLUSH_TIMEOUT, self.channel_writer.flush()).await;
 
+        if had_handle {
+            if self.command_wait_depth == 0 {
+                self.release_transport_if_unread().await;
+            } else {
+                // Deferred rather than dropped: the pump is what the fallback
+                // would be waiting on, so it has to run after it, not instead
+                // of it.
+                self.transport_release_pending = true;
+            }
+        }
+
+        self.session_handle = None;
+    }
+
+    /// Waits for russh's session task to report it has finished, and ends the
+    /// connection underneath it when it does not.
+    ///
+    /// Split out of `disconnect_server` because a teardown nested inside the
+    /// command pump has to run this later: russh is blocked in the callback
+    /// that got us there, so the signal cannot arrive until the pump returns.
+    async fn release_transport_if_unread(&mut self) {
+        self.transport_release_pending = false;
         // `flush()` only proves the messages reached russh's `Handle`, not
         // that its session task has written them, so wait for the task to
         // say it has (#2520).
-        //
-        // Skipped when nested inside `send_command_and_wait`'s pump: russh
-        // handler callbacks block from inside russh's own task, so the
-        // signal cannot arrive before the grace expires and the wait is
-        // known to be pointless. The top-level call has no such reply
-        // outstanding.
-        if had_handle
-            && self.command_wait_depth == 0
-            && let Some(protocol_done_rx) = self.protocol_done_rx.take()
-            && tokio::time::timeout(DISCONNECT_DRAIN_GRACE, protocol_done_rx)
-                .await
-                .is_err()
+        let Some(protocol_done_rx) = self.protocol_done_rx.take() else {
+            return;
+        };
+        if tokio::time::timeout(DISCONNECT_DRAIN_GRACE, protocol_done_rx)
+            .await
+            .is_err()
         {
             // Everything above asks russh to end the session, and russh can
             // only act on it while the client is reading. Reaching here means
@@ -2578,8 +2601,6 @@ impl ServerSession {
             warn!("Client did not accept the session teardown; closing its connection");
             self.transport_abort.abort();
         }
-
-        self.session_handle = None;
     }
 }
 
