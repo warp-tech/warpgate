@@ -1,5 +1,7 @@
 from datetime import datetime, timezone, timedelta
 import base64
+import json
+import os
 import hashlib
 import html
 import re
@@ -45,6 +47,133 @@ KUBECTL_CLIENT_SECRET = "kubectl-client-secret"
 # validates the redirect_uri.  Warpgate never sees this URL.  The mock's
 # redirect-uri validator requires an https URL with an explicit port, so we
 # derive it from an allocated port (a real listener is never needed).
+def _provision_kubernetes_target(processes, shared_wg, label):
+    """Create a user, role and Kubernetes target pointing at a fresh k3s.
+
+    Returns ``(k3s, user, target_name, admin_url)``. Mirrors the setup
+    ``test_kubectl_exec_io`` does inline; the audit tests below need the same
+    thing three times over.
+    """
+    k3s: K3sInstance = processes.start_k3s()
+    url = f"https://localhost:{shared_wg.http_port}"
+
+    with admin_client(url) as api:
+        role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
+        user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}"))
+        api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
+        api.add_user_role(user.id, role.id)
+
+        target_name = f"k8s-{label}-{uuid.uuid4()}"
+        target = api.create_target(
+            sdk.TargetDataRequest(
+                name=target_name,
+                options=sdk.TargetOptions(
+                    sdk.TargetOptionsTargetKubernetesOptions(
+                        kind="Kubernetes",
+                        cluster_url=f"https://127.0.0.1:{k3s.port}",
+                        tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
+                        auth=sdk.KubernetesTargetAuth(
+                            sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
+                                kind="Token", token=k3s.token
+                            )
+                        ),
+                    )
+                ),
+            )
+        )
+        api.add_target_role(target.id, role.id)
+
+    return k3s, user, target_name, url
+
+
+async def _issue_user_token(url, user, label):
+    """Log in as ``user`` and mint an API token for kubectl to present."""
+    async with aiohttp.ClientSession() as session:
+        resp = await session.post(
+            f"{url}/@warpgate/api/auth/login",
+            json={"username": user.username, "password": "123"},
+            ssl=False,
+        )
+        resp.raise_for_status()
+        resp = await session.post(
+            f"{url}/@warpgate/api/profile/api-tokens",
+            json={
+                "label": label,
+                "expiry": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            },
+            ssl=False,
+        )
+        resp.raise_for_status()
+        return (await resp.json())["secret"]
+
+
+def _create_running_pod(k3s, pod_name):
+    """Apply a long-lived pod and block until it is Running."""
+    k3s.kubectl(
+        ["apply", "-f", "-"],
+        input=(
+            f"apiVersion: v1\n"
+            f"kind: Pod\n"
+            f"metadata:\n"
+            f"  name: {pod_name}\n"
+            f"  namespace: default\n"
+            f"spec:\n"
+            f"  containers:\n"
+            f"  - name: alpine\n"
+            f"    image: alpine:3\n"
+            f"    command: ['sleep', '3600']\n"
+        ).encode(),
+    )
+    for _ in range(120):
+        r = k3s.kubectl(
+            ["get", "pod", pod_name, "-n", "default", "-o", "jsonpath={.status.phase}"],
+            check=False,
+        )
+        if r.stdout.strip() == b"Running":
+            return
+        time.sleep(1)
+    raise AssertionError(f"pod {pod_name} did not reach Running: {r.stdout!r} {r.stderr!r}")
+
+
+def _log_value(entry, key):
+    """One field of an audit log entry.
+
+    Values are stored as their rendered text inside the entry's JSON ``values``
+    map; some backends hand them back still JSON-quoted, which is why the log
+    viewer strips quotes too.
+    """
+    raw = (entry.values or {}).get(key)
+    if raw is None:
+        return None
+    return str(raw).strip('"')
+
+
+def _wait_for_audit_event(url, username, event_type, timeout=60):
+    """The first audit entry of ``event_type`` recorded for ``username``.
+
+    Filters on the indexed username column rather than the free-text search so
+    the assertion does not depend on how the backend searches the JSON values
+    column.
+    """
+    deadline = time.time() + timeout
+    while True:
+        with admin_client(url) as api:
+            entries = api.get_logs(
+                sdk.GetLogsRequest(username=username, limit=200)
+            )
+        for entry in entries:
+            if _log_value(entry, "_type") == event_type:
+                return entry
+        if time.time() > deadline:
+            seen = sorted(
+                {_log_value(e, "_type") for e in entries if _log_value(e, "_type")}
+            )
+            raise AssertionError(
+                f"no {event_type} audit entry for {username} within {timeout}s; saw {seen}"
+            )
+        time.sleep(1)
+
+
 def _oidc_test_redirect_uri(port):
     return f"https://127.0.0.1:{port}/oidc-test-callback"
 
@@ -1007,6 +1136,128 @@ class TestKubernetesIntegration:
         assert b"hello-from-attach" in p.stdout, (
             f"attach stdout did not contain expected text: {p.stdout!r}"
         )
+
+    # -- Audit events ------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_kubectl_exec_audit_event(self, processes, shared_wg: WarpgateProcess):
+        """`kubectl exec` is audited with the pod and the *whole* command line."""
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "exec-audit"
+        )
+        user_token = await _issue_user_token(url, user, "exec-audit-token")
+        server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+
+        pod_name = f"exec-audit-{uuid.uuid4().hex[:8]}"
+        _create_running_pod(k3s, pod_name)
+
+        p = run_kubectl(
+            [
+                "kubectl",
+                "--server", server,
+                "--insecure-skip-tls-verify",
+                "--token", user_token,
+                "exec", "-n", "default", pod_name,
+                "--", "ls", "-la",
+            ],
+            timeout=30,
+        )
+        assert p.returncode == 0, f"kubectl exec failed: {p.stderr!r}"
+
+        entry = _wait_for_audit_event(url, user.username, "KubernetesExecStarted1")
+        assert _log_value(entry, "namespace") == "default"
+        assert _log_value(entry, "pod") == pod_name
+        assert _log_value(entry, "target_name") == target_name
+        # The whole argv, not just its last element: kubectl sends one
+        # `command=` query parameter per element.
+        assert json.loads(_log_value(entry, "command")) == ["ls", "-la"]
+
+    @pytest.mark.asyncio
+    async def test_kubectl_debug_audit_event(self, processes, shared_wg: WarpgateProcess):
+        """`kubectl debug` is audited with the debug image and target container.
+
+        The interesting detail lives in the request body rather than the URL, so
+        without this it would leave only a bare path in the log.
+        """
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "debug-audit"
+        )
+        user_token = await _issue_user_token(url, user, "debug-audit-token")
+        server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+
+        pod_name = f"debug-audit-{uuid.uuid4().hex[:8]}"
+        _create_running_pod(k3s, pod_name)
+
+        p = run_kubectl(
+            [
+                "kubectl",
+                "--server", server,
+                "--insecure-skip-tls-verify",
+                "--token", user_token,
+                "debug", "-n", "default", pod_name,
+                "--image=alpine:3",
+                "--target=alpine",
+                "--container=debugger",
+                "--", "true",
+            ],
+            timeout=120,
+        )
+        assert p.returncode == 0, f"kubectl debug failed: {p.stderr!r}"
+
+        entry = _wait_for_audit_event(
+            url, user.username, "KubernetesDebugContainerCreated1"
+        )
+        assert _log_value(entry, "namespace") == "default"
+        assert _log_value(entry, "pod") == pod_name
+        assert _log_value(entry, "debug_container") == "debugger"
+        assert _log_value(entry, "image") == "alpine:3"
+        assert _log_value(entry, "target_container") == "alpine"
+
+    @pytest.mark.asyncio
+    async def test_kubectl_port_forward_audit_event(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        """`kubectl port-forward` is audited with the forwarded port."""
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "pf-audit"
+        )
+        user_token = await _issue_user_token(url, user, "pf-audit-token")
+        server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+
+        pod_name = f"pf-audit-{uuid.uuid4().hex[:8]}"
+        _create_running_pod(k3s, pod_name)
+
+        local_port = alloc_port()
+        forward = subprocess.Popen(
+            [
+                "kubectl",
+                "--server", server,
+                "--insecure-skip-tls-verify",
+                "--token", user_token,
+                "port-forward", "-n", "default", pod_name,
+                f"{local_port}:8080",
+            ],
+            # Warpgate proxies the websocket port-forward protocol, not SPDY.
+            # kubectl picks websockets by default from 1.31; asking explicitly
+            # keeps the test honest on older clients rather than silently
+            # exercising a path Warpgate does not implement.
+            env={**os.environ, "KUBECTL_PORT_FORWARD_WEBSOCKETS": "true"},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            entry = _wait_for_audit_event(
+                url, user.username, "KubernetesPortForwardStarted1"
+            )
+        finally:
+            forward.terminate()
+            forward.wait(timeout=30)
+
+        assert _log_value(entry, "namespace") == "default"
+        assert _log_value(entry, "pod") == pod_name
+        # No assertion on ports: the websocket port-forward protocol negotiates
+        # them per stream and sends no query, so the event carries none. Only
+        # the SPDY variant puts them in the URL.
 
     # -- OIDC Bearer authentication ----------------------------------------
 

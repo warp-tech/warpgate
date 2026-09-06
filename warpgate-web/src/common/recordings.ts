@@ -13,14 +13,18 @@ export type RecordingMetadata =
           type: 'kubernetes-exec'
           namespace: string
           pod: string
-          container: string
-          command: string
+          // Absent when the client named no container: kubectl omits it for
+          // single-container pods and lets the API server choose.
+          container?: string | null
+          // Recordings written before argv was captured in full carry a bare
+          // string here rather than the argv array.
+          command: string | string[]
       }
     | {
           type: 'kubernetes-attach'
           namespace: string
           pod: string
-          container: string
+          container?: string | null
       }
     | {
           type: 'kubernetes-api'
@@ -57,6 +61,11 @@ export type RecordingMetadata =
           target: string
       }
 
+/** Older recordings stored a single string where argv is now an array. */
+function formatCommand(command: string | string[]): string {
+    return Array.isArray(command) ? command.join(' ') : command
+}
+
 export function recordingMetadataToFieldSet(
     metadata: RecordingMetadata,
 ): [string, string][] {
@@ -66,13 +75,17 @@ export function recordingMetadataToFieldSet(
         case 'kubernetes-exec':
             fieldSets.push(['Namespace', metadata.namespace])
             fieldSets.push(['Pod', metadata.pod])
-            fieldSets.push(['Container', metadata.container])
-            fieldSets.push(['Command', metadata.command])
+            if (metadata.container) {
+                fieldSets.push(['Container', metadata.container])
+            }
+            fieldSets.push(['Command', formatCommand(metadata.command)])
             break
         case 'kubernetes-attach':
             fieldSets.push(['Namespace', metadata.namespace])
             fieldSets.push(['Pod', metadata.pod])
-            fieldSets.push(['Container', metadata.container])
+            if (metadata.container) {
+                fieldSets.push(['Container', metadata.container])
+            }
             break
         case 'ssh-shell':
             fieldSets.push(['Channel', metadata.channel.toString()])

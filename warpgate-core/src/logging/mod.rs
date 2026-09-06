@@ -7,4 +7,4 @@ mod values;
 pub use database::{format_related_ids, install_database_logger, make_database_logger_layer};
 pub use json_console::make_json_console_logger_layer;
 pub use socket::make_socket_logger_layer;
-pub use warpgate_common::audit::{AuditEvent, CredentialChangedVia};
+pub use warpgate_common::audit::{AuditEvent, CredentialChangedVia, KubernetesAuditSubject};
