@@ -64,7 +64,6 @@ pub async fn flatten_internal_errors<E: Endpoint + 'static>(
 
 #[cfg(test)]
 mod tests {
-    use poem::error::ResponseError;
     use poem::http::StatusCode;
     use warpgate_common::WarpgateError;
 
