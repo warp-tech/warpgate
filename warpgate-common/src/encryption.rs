@@ -406,8 +406,12 @@ mod tests {
         let (head, payload) = encrypted.rsplit_once(':').unwrap();
 
         let mut bytes = BASE64.decode(payload.as_bytes()).unwrap();
-        let last = bytes.len() - 1;
-        bytes.swap(0, last);
+        // Flipping a bit always changes the ciphertext. Swapping the first
+        // and last bytes does nothing when they are equal, which a random
+        // nonce makes them about once in 256 runs.
+        if let Some(byte) = bytes.last_mut() {
+            *byte ^= 1;
+        }
 
         let tampered = format!("{head}:{}", BASE64.encode(&bytes));
         assert!(matches!(
