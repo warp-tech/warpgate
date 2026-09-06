@@ -163,7 +163,7 @@ mod tests {
     async fn a_write_parked_on_a_full_peer_is_released_by_an_abort() {
         // A duplex with a small buffer and nobody reading is the same shape as
         // the case this exists for: a socket whose peer has stopped reading.
-        let (near, _far) = duplex(64);
+        let (near, mut far) = duplex(64);
         let (mut stream, abort) = AbortableStream::new(near);
 
         let writer = tokio::spawn(async move {
@@ -174,10 +174,20 @@ mod tests {
         // Asserted first: without it a writer that had already failed for some
         // other reason would make the rest of this test prove nothing.
         assert!(!abort.is_aborted());
+
+        // Draining one bufferful proves the writer really ran; the yields then
+        // let it refill and park. A `timeout` around a ready future does
+        // neither -- it never reaches the scheduler, so the writer would still
+        // be unpolled and the abort would be read on the way into
+        // `poll_write` rather than delivered to a parked task.
+        let mut drained = [0u8; 64];
+        far.read_exact(&mut drained).await.unwrap();
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
         assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(200), async {})
-                .await
-                .is_ok()
+            !writer.is_finished(),
+            "the write completed, so nothing was parked to release"
         );
 
         abort.abort();
@@ -189,6 +199,40 @@ mod tests {
             outcome.map(|r| r.ok()),
             Ok(Some(Err(ErrorKind::ConnectionAborted))),
             "the parked write was not released by the abort"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_read_parked_on_a_silent_peer_is_released_by_an_abort() {
+        // The read half of the same situation: a peer that sends nothing.
+        // Without this the read waker is woken by `abort` but nothing depends
+        // on it, and deleting that line leaves every test green.
+        let (near, _far) = duplex(64);
+        let (mut stream, abort) = AbortableStream::new(near);
+
+        let reader = tokio::spawn(async move {
+            let mut buf = [0u8; 1];
+            stream.read_exact(&mut buf).await
+        });
+
+        assert!(!abort.is_aborted());
+        for _ in 0..16 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !reader.is_finished(),
+            "the read completed, so nothing was parked to release"
+        );
+
+        abort.abort();
+
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), reader)
+            .await
+            .map(|joined| joined.map(|result| result.map_err(|e| e.kind())));
+        assert_eq!(
+            outcome.map(|r| r.ok()),
+            Ok(Some(Err(ErrorKind::ConnectionAborted))),
+            "the parked read was not released by the abort"
         );
     }
 
