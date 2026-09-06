@@ -87,6 +87,8 @@ mod m00080_user_and_target_sessions;
 mod m00081_http_session_user_session_id;
 mod m00082_target_session_columns;
 mod m00083_record_desktop_keyboard_input;
+mod m00084_mfa_enforcement;
+mod m00085_default_credential_policy;
 
 pub(crate) mod helpers;
 
@@ -179,6 +181,8 @@ impl MigratorTrait for Migrator {
             Box::new(m00081_http_session_user_session_id::Migration),
             Box::new(m00082_target_session_columns::Migration),
             Box::new(m00083_record_desktop_keyboard_input::Migration),
+            Box::new(m00084_mfa_enforcement::Migration),
+            Box::new(m00085_default_credential_policy::Migration),
         ]
     }
 }

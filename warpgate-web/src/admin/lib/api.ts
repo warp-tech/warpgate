@@ -1,3 +1,4 @@
+import { apiErrorRedirectMiddleware } from 'common/apiErrorRedirect'
 import {
     Configuration,
     DefaultApi,
@@ -6,6 +7,7 @@ import {
 
 const configuration = new Configuration({
     basePath: '/@warpgate/admin/api',
+    middleware: [apiErrorRedirectMiddleware],
 })
 
 export const api = new DefaultApi(configuration)
