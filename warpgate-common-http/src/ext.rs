@@ -53,7 +53,7 @@ pub async fn construct_external_url(
     };
 
     if let Some(list) = domain_whitelist
-        && !list.contains(&host)
+        && !list.iter().any(|entry| domain_matches(&host, entry))
     {
         return Err(WarpgateError::ExternalHostNotWhitelisted(
             host,
@@ -69,6 +69,15 @@ pub async fn construct_external_url(
         }
     }
     Url::parse(&url).map_err(WarpgateError::UrlParse)
+}
+
+fn domain_matches(host: &str, entry: &str) -> bool {
+    match entry.strip_prefix("*.") {
+        Some(base) => host
+            .strip_suffix(base)
+            .is_some_and(|prefix| prefix.ends_with('.')),
+        None => host == entry,
+    }
 }
 
 #[cfg(test)]
@@ -95,5 +104,38 @@ mod tests {
             .expect("external url");
 
         assert_eq!(url.as_str(), "https://config.example:8888/");
+    }
+
+    #[test]
+    fn domain_matches_exact() {
+        assert!(domain_matches(
+            "srv1.config.example",
+            "srv1.config.example"
+        ));
+        assert!(!domain_matches(
+            "srv2.config.example",
+            "srv1.config.example"
+        ));
+    }
+
+    #[test]
+    fn domain_matches_wildcard() {
+        assert!(domain_matches(
+            "srv1.config.example",
+            "*.config.example"
+        ));
+        assert!(domain_matches(
+            "a.b.config.example",
+            "*.config.example"
+        ));
+        assert!(!domain_matches(
+            "config.example",
+            "*.config.example"
+        ));
+        assert!(!domain_matches("srv1.evil.com", "*.config.example"));
+        assert!(!domain_matches(
+            "srv1.notconfig.example",
+            "*.config.example"
+        ));
     }
 }
