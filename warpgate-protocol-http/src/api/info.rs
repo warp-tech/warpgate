@@ -10,7 +10,9 @@ use warpgate_common::version::warpgate_version;
 use warpgate_common::{AdminPermission, AdminPermissionSet, warnings};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
+use warpgate_common_http::{
+    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
+};
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::{LdapServer, Parameters};
 
@@ -130,6 +132,8 @@ pub struct Info {
     max_api_token_duration_seconds: Option<i64>,
     web_clients_enabled: bool,
     has_ldap: bool,
+    needs_mfa_setup: bool,
+    otp_setup_enforced: bool,
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
     running_on_ec2: Option<bool>,
@@ -196,6 +200,29 @@ impl Api {
             } else {
                 None
             }
+        };
+
+        let live_user_id = auth_ctx.as_ref().and_then(|auth_ctx| match &auth_ctx.auth {
+            RequestAuthorization::Session(SessionAuthorization::User { user_id, .. }) => {
+                Some(*user_id)
+            }
+            _ => None,
+        });
+        let (needs_mfa_setup, otp_setup_enforced) = match live_user_id {
+            Some(user_id) if parameters.mfa_enforcement != Parameters::MfaEnforcement::Off => {
+                let enforced = ctx
+                    .services()
+                    .effective_mfa_enforcement(parameters, user_id)
+                    .await?
+                    != Parameters::MfaEnforcement::Off;
+                let needs_setup = enforced
+                    && ctx
+                        .services()
+                        .mfa_setup_required(parameters, user_id)
+                        .await?;
+                (needs_setup, enforced)
+            }
+            _ => (false, false),
         };
 
         let has_ldap = LdapServer::Entity::find()
@@ -349,6 +376,8 @@ impl Api {
             open_targets_in_new_tab: parameters.open_targets_in_new_tab,
             max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
             web_clients_enabled: parameters.web_clients_enabled,
+            needs_mfa_setup,
+            otp_setup_enforced,
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,
             admin_permissions,

@@ -7,7 +7,9 @@ use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use serde_json::Value;
 use warpgate_aws::{S3Credentials, S3Storage};
-use warpgate_common::{AdminPermission, PasswordPolicy, WarpgateError};
+use warpgate_common::{
+    AdminPermission, PasswordPolicy, UserRequireCredentialsPolicy, WarpgateError,
+};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 
@@ -64,6 +66,9 @@ struct ParameterValues {
     pub ssh_client_auth_keyboard_interactive: bool,
     pub ssh_host_key_verification: Parameters::SshHostKeyVerificationMode,
     pub password_login_mode: Parameters::PasswordLoginMode,
+    pub mfa_enforcement: Parameters::MfaEnforcement,
+    pub mfa_policy_exempt_sso_users: bool,
+    pub default_credential_policy: UserRequireCredentialsPolicy,
     /// Deprecated in 0.26: superseded by `password_login_mode`
     pub minimize_password_login: bool,
     pub ticket_self_service_enabled: bool,
@@ -114,6 +119,9 @@ struct ParameterUpdate {
     pub ssh_client_auth_keyboard_interactive: Option<bool>,
     pub ssh_host_key_verification: Option<Parameters::SshHostKeyVerificationMode>,
     pub password_login_mode: Option<Parameters::PasswordLoginMode>,
+    pub mfa_enforcement: Option<Parameters::MfaEnforcement>,
+    pub mfa_policy_exempt_sso_users: Option<bool>,
+    pub default_credential_policy: Option<UserRequireCredentialsPolicy>,
     pub ticket_self_service_enabled: Option<bool>,
     pub ticket_auto_approve_existing_access: Option<bool>,
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
@@ -220,6 +228,9 @@ impl Api {
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
             ssh_host_key_verification: parameters.ssh_host_key_verification,
             password_login_mode: parameters.password_login_mode,
+            mfa_enforcement: parameters.mfa_enforcement,
+            mfa_policy_exempt_sso_users: parameters.mfa_policy_exempt_sso_users,
+            default_credential_policy: parameters.default_credential_policy()?,
             minimize_password_login: parameters.password_login_mode
                 == Parameters::PasswordLoginMode::Minimized,
             ticket_self_service_enabled: parameters.ticket_self_service_enabled,
@@ -317,6 +328,13 @@ impl Api {
             .map_or(NotSet, Set);
         parameters.ssh_host_key_verification = body.ssh_host_key_verification.map_or(NotSet, Set);
         parameters.password_login_mode = body.password_login_mode.map_or(NotSet, Set);
+        parameters.mfa_enforcement = body.mfa_enforcement.map_or(NotSet, Set);
+        parameters.mfa_policy_exempt_sso_users =
+            body.mfa_policy_exempt_sso_users.map_or(NotSet, Set);
+        parameters.default_credential_policy = match &body.default_credential_policy {
+            Some(policy) => Set(serde_json::to_string(policy)?),
+            None => NotSet,
+        };
         parameters.ticket_self_service_enabled =
             body.ticket_self_service_enabled.map_or(NotSet, Set);
         parameters.ticket_auto_approve_existing_access =

@@ -4,14 +4,16 @@ use std::time::Duration;
 
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter};
 use tokio::sync::Mutex;
 use tracing::warn;
+use uuid::Uuid;
 use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{
     GlobalParams, Protocol, Secret, UserSessionId, WarpgateConfig, WarpgateError,
 };
-use warpgate_db_entities::{Parameters, UserSession};
+use warpgate_db_entities::Parameters::MfaEnforcement;
+use warpgate_db_entities::{OtpCredential, Parameters, SsoCredential, UserSession};
 
 use crate::cluster::Cluster;
 use crate::db::connect_to_db_and_migrate;
@@ -178,6 +180,58 @@ impl Services {
             policy,
             remote_ip,
         ))
+    }
+
+    async fn user_has_sso_credential(&self, user_id: Uuid) -> Result<bool, WarpgateError> {
+        Ok(SsoCredential::Entity::find()
+            .filter(SsoCredential::Column::UserId.eq(user_id))
+            .count(&self.db)
+            .await?
+            > 0)
+    }
+
+    async fn user_has_otp_credential(&self, user_id: Uuid) -> Result<bool, WarpgateError> {
+        Ok(OtpCredential::Entity::find()
+            .filter(OtpCredential::Column::UserId.eq(user_id))
+            .count(&self.db)
+            .await?
+            > 0)
+    }
+
+    /// User's SSO credential can override MFA enforcement if configured
+    pub async fn effective_mfa_enforcement(
+        &self,
+        parameters: &Parameters::Model,
+        user_id: Uuid,
+    ) -> Result<MfaEnforcement, WarpgateError> {
+        let has_sso = self.user_has_sso_credential(user_id).await?;
+        Ok(parameters.effective_mfa_enforcement_for_user(has_sso))
+    }
+
+    pub async fn mfa_required_factor(
+        &self,
+        parameters: &Parameters::Model,
+        user_id: Uuid,
+        protocol: Protocol,
+    ) -> Result<Option<CredentialKind>, WarpgateError> {
+        if parameters.mfa_enforcement == MfaEnforcement::Off {
+            // quick exit without querying for creds
+            return Ok(None);
+        }
+        let has_sso = self.user_has_sso_credential(user_id).await?;
+        let has_totp = self.user_has_otp_credential(user_id).await?;
+        Ok(parameters.mfa_required_factor(protocol, has_sso, has_totp))
+    }
+
+    pub async fn mfa_setup_required(
+        &self,
+        parameters: &Parameters::Model,
+        user_id: Uuid,
+    ) -> Result<bool, WarpgateError> {
+        if self.effective_mfa_enforcement(parameters, user_id).await? == MfaEnforcement::Off {
+            return Ok(false);
+        }
+        Ok(!self.user_has_otp_credential(user_id).await?)
     }
 
     /// Configured web-approval caching window, or `None` if caching is disabled.

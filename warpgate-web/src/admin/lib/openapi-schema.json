@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-4-g120feec4-modified"
+    "version": "v0.28.5-10-g07953d14-modified"
   },
   "servers": [
     {
@@ -5540,6 +5540,14 @@
           }
         }
       },
+      "MfaEnforcement": {
+        "type": "string",
+        "enum": [
+          "Off",
+          "Enroll",
+          "Require"
+        ]
+      },
       "NewOtpCredential": {
         "type": "object",
         "title": "NewOtpCredential",
@@ -5660,6 +5668,15 @@
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
+          },
+          "mfa_enforcement": {
+            "$ref": "#/components/schemas/MfaEnforcement"
+          },
+          "mfa_policy_exempt_sso_users": {
+            "type": "boolean"
+          },
+          "default_credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
           },
           "ticket_self_service_enabled": {
             "type": "boolean"
@@ -5805,6 +5822,9 @@
           "ssh_client_auth_keyboard_interactive",
           "ssh_host_key_verification",
           "password_login_mode",
+          "mfa_enforcement",
+          "mfa_policy_exempt_sso_users",
+          "default_credential_policy",
           "minimize_password_login",
           "ticket_self_service_enabled",
           "ticket_auto_approve_existing_access",
@@ -5859,6 +5879,15 @@
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
+          },
+          "mfa_enforcement": {
+            "$ref": "#/components/schemas/MfaEnforcement"
+          },
+          "mfa_policy_exempt_sso_users": {
+            "type": "boolean"
+          },
+          "default_credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
           },
           "minimize_password_login": {
             "type": "boolean",

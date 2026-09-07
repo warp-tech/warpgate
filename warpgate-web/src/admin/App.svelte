@@ -52,6 +52,10 @@
             )
             await new Promise(() => undefined)
         }
+        if (get(serverInfo)?.needsMfaSetup) {
+            location.assign('/@warpgate#/mfa-setup')
+            await new Promise(() => undefined)
+        }
     }
 
     const initPromise = init()
