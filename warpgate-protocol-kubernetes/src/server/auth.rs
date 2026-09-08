@@ -11,17 +11,40 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
-use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
-use warpgate_common::{Protocol, TargetKubernetesOptions, User, UserSessionId, WarpgateError};
+use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
+use warpgate_common::{
+    Protocol, Secret, TargetKubernetesOptions, TargetOptions, User, UserSessionId, WarpgateError,
+};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
-    AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, authorize_for_target,
-    vet_credential_bearer, wait_for_auth_completion,
+    AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, ValidatedTicket,
+    authorize_for_target, validate_ticket, vet_credential_bearer, wait_for_auth_completion,
 };
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, Parameters};
 
 use crate::server::client_certs::RequestCertificateExt;
+
+pub enum KubernetesIdentity {
+    User(User),
+    Ticket(ValidatedTicket),
+}
+
+impl KubernetesIdentity {
+    pub fn user_info(&self) -> AuthStateUserInfo {
+        match self {
+            Self::User(user) => user.into(),
+            Self::Ticket(ticket) => ticket.user_info().clone(),
+        }
+    }
+
+    pub fn ticket_id(&self) -> Option<Uuid> {
+        match self {
+            Self::User(_) => None,
+            Self::Ticket(ticket) => Some(ticket.id()),
+        }
+    }
+}
 
 pub fn unauthorized() -> poem::Error {
     poem::Error::from_string(
@@ -65,14 +88,14 @@ fn emit_authentication_failed(client_ip: Option<IpAddr>, credential_type: &str, 
 }
 
 /// Resolve and vet the caller's identity from the request's transport credentials
-/// (API token / OIDC token / client certificate). Runs on *every* request — it
+/// (ticket / API token / OIDC token / client certificate). Runs on *every* request — it
 /// must, both to attribute the request to a session and to re-check the credential
 /// and account status — so it is deliberately cheap: no auth state, no web
 /// approval. `Err(unauthorized)` on any failure.
 pub async fn authenticate_kubernetes_user(
     req: &Request,
     services: &Services,
-) -> poem::Result<User> {
+) -> poem::Result<KubernetesIdentity> {
     let client_ip = get_client_ip_addr(req, services).await;
 
     // Fail closed if login protection currently has this source IP blocked.
@@ -89,7 +112,29 @@ pub async fn authenticate_kubernetes_user(
 
     let credential_kind = presented_credential_kind(req);
 
-    let Some(user) = authenticate(req, services).await? else {
+    let ticket_secret = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer ticket-"));
+    let identity = if let Some(secret) = ticket_secret {
+        validate_ticket(
+            &services.db,
+            &services.login_protection,
+            &Secret::new(secret.to_owned()),
+            client_ip,
+            crate::PROTOCOL_NAME,
+        )
+        .await?
+        .filter(|ticket| matches!(ticket.target().options, TargetOptions::Kubernetes(_)))
+        .map(KubernetesIdentity::Ticket)
+    } else {
+        authenticate(req, services)
+            .await?
+            .map(KubernetesIdentity::User)
+    };
+
+    let Some(identity) = identity else {
         // A presented-but-invalid credential counts toward brute-force
         // protection and is audited; a request with no credential at all is a
         // plain unauthenticated probe and is neither recorded nor audited.
@@ -109,7 +154,9 @@ pub async fn authenticate_kubernetes_user(
     };
 
     // Account lockout and the user's IP allow-list, both fail-closed.
-    if !vet_credential_bearer(&services.login_protection, &user, client_ip).await? {
+    if let KubernetesIdentity::User(user) = &identity
+        && !vet_credential_bearer(&services.login_protection, user, client_ip).await?
+    {
         return Err(unauthorized());
     }
 
@@ -117,11 +164,11 @@ pub async fn authenticate_kubernetes_user(
     if let Some(ip) = client_ip {
         let _ = services
             .login_protection
-            .clear_failed_attempts(&ip, &user.username)
+            .clear_failed_attempts(&ip, &identity.user_info().username)
             .await;
     }
 
-    Ok(user)
+    Ok(identity)
 }
 
 /// Authorize an already-authenticated user for a Kubernetes target, applying the
