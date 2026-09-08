@@ -9310,6 +9310,7 @@ dependencies = [
  "futures",
  "http 1.5.0",
  "md5",
+ "percent-encoding",
  "poem",
  "poem-openapi",
  "rcgen",

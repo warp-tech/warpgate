@@ -15,6 +15,7 @@ futures.workspace = true
 http.workspace = true
 md5 = { version = "0.8", default-features = false }
 poem.workspace = true
+percent-encoding = { version = "2.1", default-features = false }
 poem-openapi.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["json"] }

@@ -32,7 +32,8 @@ pub async fn bind_server(
     let correlator = RequestCorrelator::new(&services);
 
     let app = Route::new()
-        .at("/:target_name/*path", handle_api_request)
+        .at("/", handle_api_request)
+        .at("/*path", handle_api_request)
         .with(poem::middleware::Cors::new())
         .with(CertificateExtractorMiddleware)
         .data(UnauthenticatedRequestContext::new(services.clone()).await)

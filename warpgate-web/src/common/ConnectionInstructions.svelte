@@ -11,6 +11,7 @@
     import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
     import CollapsibleBlock from 'common/CollapsibleBlock.svelte'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
+    import { downloadBlob } from 'common/helpers'
     import {
         makeCommonSelectorUsername,
         makeExampleKubectlCommand,
@@ -307,7 +308,30 @@
     </Alert>
 {/if}
 
-{#if targetKind === TargetKind.Kubernetes}
+{#if targetKind === TargetKind.Kubernetes && ticketSecret}
+    <CopyableTextArea label="Ticket token" value={`ticket-${ticketSecret}`} />
+    <CopyableTextArea label="Kubeconfig file" value={kubeconfig} />
+    <Button
+        color="secondary"
+        class="mb-3"
+        onclick={() => downloadBlob(kubeconfig, 'warpgate-kubeconfig.yaml')}
+    >
+        Download kubeconfig
+    </Button>
+    <CopyableTextArea
+        label="Example kubectl command"
+        value={exampleKubectlCommand}
+    />
+    <InfoBox class="mb-3">
+        Save the kubeconfig as <code>warpgate-kubeconfig.yaml</code> and run the
+        command above. The ticket selects the target automatically; no password
+        or client certificate is needed. A use opens an access session for the
+        configured Kubernetes session lifetime, shared by requests using this
+        ticket from the same IP on the same Warpgate node.
+    </InfoBox>
+{/if}
+
+{#if targetKind === TargetKind.Kubernetes && !ticketSecret}
     {#if k8sOidcConfigs.length > 0}
         <ul class="nav nav-pills mb-3">
             <li class="nav-item">

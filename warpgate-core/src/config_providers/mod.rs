@@ -302,6 +302,72 @@ pub async fn authorize_and_spend_ticket(
     remote_ip: Option<IpAddr>,
     protocol: Protocol,
 ) -> Result<Option<TargetAuthorization>, WarpgateError> {
+    match validate_ticket(db, login_protection, secret, remote_ip, protocol).await? {
+        Some(ticket) => ticket.spend(db).await,
+        None => Ok(None),
+    }
+}
+
+/// A valid ticket credential, which has not yet consumed a use. This can identify
+/// requests joining an existing session even after its final use was consumed.
+/// Only `spend` can turn it into authorization for a new session.
+pub struct ValidatedTicket {
+    authorization: TargetAuthorization,
+    id: Uuid,
+}
+
+impl ValidatedTicket {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn user_info(&self) -> &AuthStateUserInfo {
+        self.authorization.user_info()
+    }
+
+    pub fn target(&self) -> &Target {
+        self.authorization.target()
+    }
+
+    pub async fn spend(
+        self,
+        db: &DatabaseConnection,
+    ) -> Result<Option<TargetAuthorization>, WarpgateError> {
+        // Also match unlimited tickets: a single atomic statement verifies the
+        // ticket still exists and hasn't expired while opening the session.
+        let spent = e::Ticket::Entity::update_many()
+            .col_expr(
+                e::Ticket::Column::UsesLeft,
+                Expr::col(e::Ticket::Column::UsesLeft).sub(1),
+            )
+            .filter(e::Ticket::Column::Id.eq(self.id))
+            .filter(
+                e::Ticket::Column::UsesLeft
+                    .is_null()
+                    .or(e::Ticket::Column::UsesLeft.gt(0)),
+            )
+            .filter(
+                e::Ticket::Column::Expiry
+                    .is_null()
+                    .or(e::Ticket::Column::Expiry.gte(OffsetDateTime::now_utc())),
+            )
+            .exec(db)
+            .await?;
+        if spent.rows_affected == 0 {
+            warn!(ticket_id = %self.id, "Ticket is expired, revoked or used up");
+            return Ok(None);
+        }
+        Ok(Some(self.authorization))
+    }
+}
+
+pub async fn validate_ticket(
+    db: &DatabaseConnection,
+    login_protection: &LoginProtectionService,
+    secret: &Secret<String>,
+    remote_ip: Option<IpAddr>,
+    protocol: Protocol,
+) -> Result<Option<ValidatedTicket>, WarpgateError> {
     // Spending a ticket is a login, so a blocked IP can't do it either. Checked ahead of the
     // lookup so a blocked caller can't use this as a ticket-existence oracle.
     if let Some(ip) = remote_ip
@@ -350,30 +416,16 @@ pub async fn authorize_and_spend_ticket(
 
         let target = Target::try_from(ticket_target)?;
 
-        // Spend the ticket
-        if ticket.uses_left.is_some() {
-            let spent = e::Ticket::Entity::update_many()
-                .col_expr(
-                    e::Ticket::Column::UsesLeft,
-                    Expr::col(e::Ticket::Column::UsesLeft).sub(1),
-                )
-                .filter(e::Ticket::Column::Id.eq(ticket.id))
-                .filter(e::Ticket::Column::UsesLeft.gt(0))
-                .exec(db)
-                .await?;
-            if spent.rows_affected == 0 {
-                warn!("Ticket is used up: {}", &ticket.id);
-                return Ok(None);
-            }
-        }
-
         // A ticket binds user↔target directly, so it mints the proof without a
         // role check — that's what makes it a ticket.
-        Ok(Some(TargetAuthorization {
-            user_info: (&user).into(),
-            target: SpecificTarget::any(target),
-            protocol,
-            ticket_id: Some(ticket.id),
+        Ok(Some(ValidatedTicket {
+            id: ticket.id,
+            authorization: TargetAuthorization {
+                user_info: (&user).into(),
+                target: SpecificTarget::any(target),
+                protocol,
+                ticket_id: Some(ticket.id),
+            },
         }))
     } else {
         warn!("Ticket not found");
@@ -494,15 +546,27 @@ mod tests {
         .await
         .unwrap();
 
-        let first =
-            authorize_and_spend_ticket(&db, &login_protection, &secret, None, Protocol::Http)
-                .await
-                .unwrap();
+        let first = validate_ticket(&db, &login_protection, &secret, None, Protocol::Http)
+            .await
+            .unwrap()
+            .unwrap();
+        let second = validate_ticket(&db, &login_protection, &secret, None, Protocol::Http)
+            .await
+            .unwrap()
+            .unwrap();
+        let (first, second) = tokio::join!(first.spend(&db), second.spend(&db));
+        let authorizations: Vec<_> = [first.unwrap(), second.unwrap()]
+            .into_iter()
+            .flatten()
+            .collect();
+        assert_eq!(authorizations.len(), 1);
         // The ticket travels with the authorization so the target session it
         // opens can record which ticket opened it.
         assert!(
-            first.is_some_and(|authorization| authorization.target().id == target.id
-                && authorization.ticket_id() == Some(ticket_id))
+            authorizations
+                .iter()
+                .all(|authorization| authorization.target().id == target.id
+                    && authorization.ticket_id() == Some(ticket_id))
         );
 
         let second =

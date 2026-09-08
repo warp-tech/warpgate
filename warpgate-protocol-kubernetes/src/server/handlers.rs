@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use futures::{StreamExt, TryStreamExt};
+use poem::web::Data;
 use poem::web::websocket::{WebSocket, WebSocketStream};
-use poem::web::{Data, Path};
 use poem::{Body, IntoResponse, Request, Response, handler};
 use reqwest_websocket::Upgrade;
 use serde::Deserialize;
@@ -24,7 +24,9 @@ use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 
 use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
 use crate::recording::{deduce_exec_recording_metadata, start_recording_api, start_recording_exec};
-use crate::server::auth::{authenticate_kubernetes_user, create_authenticated_client};
+use crate::server::auth::{
+    KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client,
+};
 
 /// A client-supplied impersonation header (`Impersonate-User`,
 /// `Impersonate-Group`, `Impersonate-Uid`, `Impersonate-Extra-*`). These let a
@@ -71,14 +73,11 @@ fn construct_target_url(
 pub async fn handle_api_request(
     ws: Option<WebSocket>,
     req: &Request,
-    Path((target_name, path)): Path<(String, String)>,
     body: Body,
     correlator: Data<&Arc<Mutex<RequestCorrelator>>>,
     ctx: Data<&UnauthenticatedRequestContext>,
 ) -> Result<Response, poem::Error> {
     debug!(
-        target_name = target_name,
-        path_param = ?path,
         full_uri = %req.uri(),
         "Handling Kubernetes API request"
     );
@@ -87,10 +86,19 @@ pub async fn handle_api_request(
     // account status). Authorization — the credential policy / web approval — is
     // resolved once per correlated session and reused, so a single `kubectl`
     // command's fan-out of requests only prompts for approval once.
-    let user = authenticate_kubernetes_user(req, ctx.services()).await?;
+    let identity = authenticate_kubernetes_user(req, ctx.services()).await?;
+    let (target_name, path) = match &identity {
+        // Ticket credentials select the target; the entire URI belongs to the
+        // upstream API, including discovery endpoints such as /api and /version.
+        KubernetesIdentity::Ticket(ticket) => (
+            ticket.target().name.clone(),
+            req.uri().path().trim_start_matches('/').to_owned(),
+        ),
+        KubernetesIdentity::User(_) => named_target_path(req.uri().path())?,
+    };
 
     let (handle, admitted) =
-        correlated_authorization(correlator.0, req, &user, &target_name, ctx.services()).await?;
+        correlated_authorization(correlator.0, req, identity, &target_name, ctx.services()).await?;
 
     let log_span = {
         // The user info is already on the session: it is set when the session is
@@ -127,6 +135,20 @@ pub async fn handle_api_request(
     }
     .instrument(log_span)
     .await
+}
+
+/// Normal credentials retain the /<target>/<api-path> route. Decode only the
+/// target selector; upstream paths must keep their original escaping.
+fn named_target_path(path: &str) -> poem::Result<(String, String)> {
+    let (target, path) = path
+        .strip_prefix('/')
+        .and_then(|p| p.split_once('/'))
+        .filter(|(target, _)| !target.is_empty())
+        .ok_or_else(|| poem::Error::from_status(poem::http::StatusCode::NOT_FOUND))?;
+    let target = percent_encoding::percent_decode_str(target)
+        .decode_utf8()
+        .map_err(|_| poem::Error::from_status(poem::http::StatusCode::BAD_REQUEST))?;
+    Ok((target.into_owned(), path.to_owned()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -502,7 +524,21 @@ async fn _handle_websocket_request_inner(
 mod tests {
     use std::collections::HashMap;
 
-    use super::{is_impersonation_header, redact_headers};
+    use super::{is_impersonation_header, named_target_path, redact_headers};
+
+    #[test]
+    fn named_routes_decode_only_the_target_selector() {
+        assert_eq!(
+            named_target_path("/my%20cluster/api/v1/namespaces/default/pods/a%2Fb").unwrap(),
+            (
+                "my cluster".into(),
+                "api/v1/namespaces/default/pods/a%2Fb".into()
+            ),
+        );
+        assert!(named_target_path("/api").is_err());
+        assert!(named_target_path("/").is_err());
+        assert!(named_target_path("//api").is_err());
+    }
 
     #[test]
     fn impersonation_detection_is_case_insensitive() {
