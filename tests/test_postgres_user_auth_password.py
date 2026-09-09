@@ -27,9 +27,12 @@ class Test:
                 sdk.TargetDataRequest(
                     name=f"postgres-{uuid4()}",
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetPostgresOptions(
                             kind="Postgres",
+                            protocol_version=sdk.PostgresProtocolVersion.ENUM_3_DOT_2,
                             host="localhost",
                             port=db_port,
                             username="user",

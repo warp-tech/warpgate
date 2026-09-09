@@ -63,9 +63,12 @@ class Test:
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
                             kind="Ssh",
+                            allow_insecure_algos=False,
                             host="localhost",
                             port=ssh_port,
                             username="root",

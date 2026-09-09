@@ -54,9 +54,12 @@ def create_postgres_target(api, role, db_port, require_approval=True):
         sdk.TargetDataRequest(
             name=f"postgres-{uuid4()}",
             require_approval=require_approval,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetPostgresOptions(
                     kind="Postgres",
+                    protocol_version=sdk.PostgresProtocolVersion.ENUM_3_DOT_2,
                     host="localhost",
                     port=db_port,
                     username="user",
@@ -80,6 +83,8 @@ def create_mysql_target(api, role, db_port, require_approval=True):
         sdk.TargetDataRequest(
             name=f"mysql-{uuid4()}",
             require_approval=require_approval,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetMySqlOptions(
                     kind="MySql",
@@ -106,9 +111,12 @@ def create_http_target(api, role, echo_server_port, require_approval=True):
         sdk.TargetDataRequest(
             name=f"http-{uuid4()}",
             require_approval=require_approval,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetHTTPOptions(
                     kind="Http",
+                    headers={},
                     url=f"http://localhost:{echo_server_port}",
                     tls=sdk.Tls(mode=sdk.TlsMode.DISABLED, verify=False),
                 )

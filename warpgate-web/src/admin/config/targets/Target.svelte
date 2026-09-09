@@ -57,9 +57,6 @@
             api.getTarget({ id: params.id }),
             api.listTargetGroups(),
         ])
-        if (target.options.kind === 'Postgres') {
-            target.options.protocolVersion ??= '3.2'
-        }
         return target
     }
 
