@@ -38,6 +38,7 @@ def assert_401():
 def _ssh_target_request(name: str) -> sdk.TargetDataRequest:
     return sdk.TargetDataRequest(
         name=name,
+        require_approval=False,
         options=sdk.TargetOptions(
             sdk.TargetOptionsTargetSSHOptions(
                 kind="Ssh",

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-48-g25441c18-modified"
+    "version": "v0.28.5-59-g55bcc96e-modified"
   },
   "servers": [
     {
@@ -6976,7 +6976,8 @@
         "title": "TargetDataRequest",
         "required": [
           "name",
-          "options"
+          "options",
+          "require_approval"
         ],
         "properties": {
           "name": {
@@ -7007,7 +7008,8 @@
             "type": "boolean"
           },
           "require_approval": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Required on every write, so that saving a target without mentioning the\ngate is refused rather than quietly taking it off."
           },
           "ticket_max_uses": {
             "type": "integer",

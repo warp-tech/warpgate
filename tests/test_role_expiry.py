@@ -48,6 +48,7 @@ def setup_user_and_target(
         ssh_target = api.create_target(
             sdk.TargetDataRequest(
                 name=f"ssh-{uuid4()}",
+                require_approval=False,
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
