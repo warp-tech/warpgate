@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-94-g867ec9719-modified"
+    "version": "v0.28.5-100-geed528183-modified"
   },
   "servers": [
     {
@@ -4682,7 +4682,8 @@
           "tickets_create",
           "tickets_delete",
           "config_edit",
-          "admin_roles_manage"
+          "admin_roles_manage",
+          "ticket_requests_manage"
         ],
         "properties": {
           "name": {
@@ -5994,7 +5995,6 @@
           "mfa_enforcement",
           "mfa_policy_exempt_sso_users",
           "default_credential_policy",
-          "minimize_password_login",
           "ticket_self_service_enabled",
           "ticket_auto_approve_existing_access",
           "ticket_require_description",
@@ -6019,7 +6019,6 @@
           "lp_user_lockout_duration_seconds",
           "lp_user_exempt_admins",
           "banner",
-          "web_ssh_enabled",
           "web_clients_enabled",
           "analytics_consent",
           "analytics_normal",
@@ -6057,10 +6056,6 @@
           },
           "default_credential_policy": {
             "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
-          },
-          "minimize_password_login": {
-            "type": "boolean",
-            "description": "Deprecated in 0.26: superseded by `password_login_mode`"
           },
           "ticket_self_service_enabled": {
             "type": "boolean"
@@ -6155,10 +6150,6 @@
           },
           "banner": {
             "type": "string"
-          },
-          "web_ssh_enabled": {
-            "type": "boolean",
-            "description": "Deprecated in 0.27: superseded by `web_clients_enabled`"
           },
           "web_clients_enabled": {
             "type": "boolean"
@@ -6605,7 +6596,6 @@
           "label",
           "kind",
           "public_key",
-          "public_key_base64",
           "is_default"
         ],
         "properties": {
@@ -6621,10 +6611,6 @@
           },
           "public_key": {
             "type": "string"
-          },
-          "public_key_base64": {
-            "type": "string",
-            "description": "The base64 body without the algorithm prefix — kept for the\nbackwards-compatible `own-keys` consumers."
           },
           "is_default": {
             "type": "boolean"
@@ -7048,6 +7034,8 @@
         "required": [
           "name",
           "options",
+          "ticket_requests_disabled",
+          "ticket_require_approval",
           "require_approval"
         ],
         "properties": {
@@ -7073,7 +7061,8 @@
             "format": "int64"
           },
           "ticket_requests_disabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Required on every write, so that saving a target without mentioning a\ngate is refused rather than quietly taking it off."
           },
           "ticket_require_approval": {
             "type": "boolean"
@@ -7134,7 +7123,8 @@
         "title": "TargetHTTPOptions",
         "required": [
           "url",
-          "tls"
+          "tls",
+          "headers"
         ],
         "properties": {
           "url": {
@@ -7181,6 +7171,7 @@
           "host",
           "port",
           "username",
+          "auth",
           "tls"
         ],
         "properties": {
@@ -7196,11 +7187,6 @@
           },
           "auth": {
             "$ref": "#/components/schemas/DatabaseTargetAuth"
-          },
-          "password": {
-            "type": "string",
-            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
-            "deprecated": true
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
@@ -7409,7 +7395,9 @@
           "host",
           "port",
           "username",
-          "tls"
+          "auth",
+          "tls",
+          "protocol_version"
         ],
         "properties": {
           "host": {
@@ -7424,11 +7412,6 @@
           },
           "auth": {
             "$ref": "#/components/schemas/DatabaseTargetAuth"
-          },
-          "password": {
-            "type": "string",
-            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
-            "deprecated": true
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
@@ -7453,7 +7436,9 @@
           "username",
           "auth",
           "verify_tls",
-          "interactive_logon"
+          "compression",
+          "interactive_logon",
+          "tls_security"
         ],
         "properties": {
           "host": {
@@ -7495,6 +7480,7 @@
           "host",
           "port",
           "username",
+          "allow_insecure_algos",
           "auth"
         ],
         "properties": {

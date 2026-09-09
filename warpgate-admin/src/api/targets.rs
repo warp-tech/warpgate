@@ -20,16 +20,10 @@ use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket
 use super::AdminContext;
 use crate::api::common::{case_insensitive_search, is_unique_violation};
 
-/// Normalize, encrypt and serialize options
+/// Encrypt and serialize options
 fn serialize_options_for_storage(
-    mut options: TargetOptions,
+    options: TargetOptions,
 ) -> Result<serde_json::Value, WarpgateError> {
-    match &mut options {
-        TargetOptions::MySql(opts) => opts.normalize(),
-        TargetOptions::Postgres(opts) => opts.normalize(),
-        _ => {}
-    }
-
     let mut value = serde_json::to_value(options).map_err(WarpgateError::from)?;
     map_target_secrets(&mut value, &mut idempotent_maybe_encrypt_secret)?;
     Ok(value)
@@ -43,8 +37,10 @@ struct TargetDataRequest {
     rate_limit_bytes_per_second: Option<u32>,
     group_id: Option<Uuid>,
     ticket_max_duration_seconds: Option<i64>,
-    ticket_requests_disabled: Option<bool>,
-    ticket_require_approval: Option<bool>,
+    /// Required on every write, so that saving a target without mentioning a
+    /// gate is refused rather than quietly taking it off.
+    ticket_requests_disabled: bool,
+    ticket_require_approval: bool,
     require_approval: bool,
     ticket_max_uses: Option<i16>,
 }
@@ -201,8 +197,8 @@ impl ListApi {
             rate_limit_bytes_per_second: Set(None),
             group_id: Set(body.group_id),
             ticket_max_duration_seconds: Set(body.ticket_max_duration_seconds),
-            ticket_requests_disabled: Set(body.ticket_requests_disabled.unwrap_or(false)),
-            ticket_require_approval: Set(body.ticket_require_approval.unwrap_or(false)),
+            ticket_requests_disabled: Set(body.ticket_requests_disabled),
+            ticket_require_approval: Set(body.ticket_require_approval),
             ticket_max_uses: Set(body.ticket_max_uses),
             require_approval: Set(body.require_approval),
         };
@@ -319,8 +315,8 @@ impl DetailApi {
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
         model.group_id = Set(body.group_id);
         model.ticket_max_duration_seconds = Set(body.ticket_max_duration_seconds);
-        model.ticket_requests_disabled = Set(body.ticket_requests_disabled.unwrap_or(false));
-        model.ticket_require_approval = Set(body.ticket_require_approval.unwrap_or(false));
+        model.ticket_requests_disabled = Set(body.ticket_requests_disabled);
+        model.ticket_require_approval = Set(body.ticket_require_approval);
         model.require_approval = Set(body.require_approval);
         model.ticket_max_uses = Set(body.ticket_max_uses);
         let target = match model.update(db).await {

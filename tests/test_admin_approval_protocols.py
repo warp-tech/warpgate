@@ -296,9 +296,12 @@ class Test:
                 sdk.TargetDataRequest(
                     name=f"postgres-{uuid.uuid4()}",
                     require_approval=True,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetPostgresOptions(
                             kind="Postgres",
+                            protocol_version=sdk.PostgresProtocolVersion.ENUM_3_DOT_2,
                             host="localhost",
                             port=shared_postgres_port,
                             username="user",
@@ -345,6 +348,8 @@ class Test:
                 sdk.TargetDataRequest(
                     name=f"vnc-{uuid.uuid4()}",
                     require_approval=True,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetVncOptions(
                             kind="Vnc",

@@ -55,6 +55,8 @@ class Test:
                 sdk.TargetDataRequest(
                     name=f"vnc-{uuid4()}",
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetVncOptions(
                             kind="Vnc",

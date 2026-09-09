@@ -1323,7 +1323,7 @@ impl RemoteClient {
     }
 
     async fn build_ssh_config(&self, ssh_options: &TargetSSHOptions) -> Arc<russh::client::Config> {
-        let algos = if ssh_options.allow_insecure_algos.unwrap_or(false) {
+        let algos = if ssh_options.allow_insecure_algos {
             Preferred {
                 kex: Cow::Borrowed(&[
                     kex::MLKEM768X25519_SHA256,
@@ -1398,7 +1398,7 @@ impl RemoteClient {
             keepalive_interval: ssh_config.keepalive_interval,
             ..Default::default()
         };
-        if ssh_options.allow_insecure_algos.unwrap_or(false)
+        if ssh_options.allow_insecure_algos
             && let Ok(gex) = russh::client::GexParams::new(2048, 2048, 8192)
         {
             config.gex = gex;
@@ -1783,7 +1783,7 @@ impl RemoteClient {
                             &ssh_options.host,
                             &ssh_options.username,
                             &ssh_options.auth,
-                            ssh_options.allow_insecure_algos.unwrap_or(false)
+                            ssh_options.allow_insecure_algos
                         ) => result?,
                     }
 

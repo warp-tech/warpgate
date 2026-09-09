@@ -40,9 +40,12 @@ def _ssh_target_request(name: str) -> sdk.TargetDataRequest:
     return sdk.TargetDataRequest(
         name=name,
         require_approval=False,
+        ticket_requests_disabled=False,
+        ticket_require_approval=False,
         options=sdk.TargetOptions(
             sdk.TargetOptionsTargetSSHOptions(
                 kind="Ssh",
+                allow_insecure_algos=False,
                 host="127.0.0.1",
                 port=22,
                 username="user",
@@ -723,7 +726,6 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         call=lambda api, r: api.update_parameters_with_http_info(
             sdk.ParameterUpdate(
                 allow_own_credential_management=True,
-                minimize_password_login=False,
                 rate_limit_bytes_per_second=None,
                 ssh_client_auth_keyboard_interactive=True,
                 ssh_client_auth_password=True,

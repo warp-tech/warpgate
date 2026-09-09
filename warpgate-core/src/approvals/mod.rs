@@ -16,7 +16,6 @@ use std::time::Duration;
 use sea_orm::sea_query::Condition;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
-use uuid::Uuid;
 use warpgate_common::WarpgateError;
 pub use warpgate_common::auth::ApprovalScope;
 use warpgate_common::auth::{WebApprovalMatchKey, WebApprovalScopeKey};

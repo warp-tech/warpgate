@@ -12,10 +12,6 @@
     }
 
     let { options = $bindable() }: Props = $props()
-
-    $effect(() => {
-        options.tlsSecurity ??= RdpTlsSecurity.Tls12
-    })
 </script>
 
 <h4 class="mt-4">Connection</h4>

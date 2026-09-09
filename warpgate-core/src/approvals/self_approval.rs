@@ -50,7 +50,7 @@ impl Services {
         &self,
         row: &SessionApprovalRequest::Model,
     ) -> Result<bool, WarpgateError> {
-        let RowState::Decided(decision, _) = row_state(row)? else {
+        let RowState::Decided(decision) = row_state(row)? else {
             return Ok(false);
         };
         let consumed =

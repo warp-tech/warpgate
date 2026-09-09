@@ -184,10 +184,8 @@ fn copy_client_response<R: SomeResponse>(
 }
 
 fn rewrite_request<B: SomeRequestBuilder>(mut req: B, options: &TargetHTTPOptions) -> Result<B> {
-    if let Some(ref headers) = options.headers {
-        for (k, v) in headers {
-            req = req.set_header(HeaderName::try_from(k)?, HeaderValue::try_from(v)?);
-        }
+    for (k, v) in &options.headers {
+        req = req.set_header(HeaderName::try_from(k)?, HeaderValue::try_from(v)?);
     }
     Ok(req)
 }
@@ -700,7 +698,7 @@ mod tests {
         TargetHTTPOptions {
             url: url.to_string(),
             tls: Default::default(),
-            headers: None,
+            headers: Default::default(),
             external_host: None,
         }
     }
@@ -708,10 +706,10 @@ mod tests {
     #[test]
     fn rewrite_request_replaces_websocket_host() {
         let mut options = make_options("http://ingress.internal");
-        options.headers = Some(std::collections::HashMap::from([(
+        options.headers = std::collections::HashMap::from([(
             "Host".to_string(),
             "backend.example.com".to_string(),
-        )]));
+        )]);
 
         let request = rewrite_request(
             http::Request::builder().header(http::header::HOST, "ingress.internal"),

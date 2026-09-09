@@ -264,7 +264,7 @@ impl Services {
                 }
                 Ok(PolledGate::Pending)
             }
-            RowState::Decided(decision, _) => {
+            RowState::Decided(decision) => {
                 mark_consumed(&self.db, key).await?;
                 match decision {
                     ApprovalDecision::Approved(_) => {

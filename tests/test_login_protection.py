@@ -26,9 +26,12 @@ def _create_test_user(api, echo_server_port):
         sdk.TargetDataRequest(
             name=f"echo-{uuid4()}",
             require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetHTTPOptions(
                     kind="Http",
+                    headers={},
                     url=f"http://localhost:{echo_server_port}",
                     tls=sdk.Tls(mode=sdk.TlsMode.DISABLED, verify=False),
                 )
@@ -479,9 +482,12 @@ class TestLoginProtection:
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
                             kind="Ssh",
+                            allow_insecure_algos=False,
                             host="localhost",
                             port=ssh_port,
                             username="root",
@@ -563,9 +569,12 @@ class TestLoginProtection:
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
                             kind="Ssh",
+                            allow_insecure_algos=False,
                             host="localhost",
                             port=ssh_port,
                             username="root",

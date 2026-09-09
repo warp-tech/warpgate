@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.5-94-g867ec9719-modified"
+    "version": "v0.28.5-100-geed528183-modified"
   },
   "servers": [
     {
@@ -2116,7 +2116,6 @@
         "required": [
           "ports",
           "password_login_mode",
-          "minimize_password_login",
           "authorized_via_ticket",
           "authorized_via_sso_with_single_logout",
           "own_credential_management_allowed",
@@ -2154,10 +2153,6 @@
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
-          },
-          "minimize_password_login": {
-            "type": "boolean",
-            "description": "Deprecated in 0.26: superseded by `password_login_mode`"
           },
           "authorized_via_ticket": {
             "type": "boolean"

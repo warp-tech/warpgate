@@ -104,7 +104,7 @@ pub(super) enum DecisionWaitOutcome {
 pub(super) enum RowState {
     /// Still a live question.
     Pending,
-    Decided(ApprovalDecision, ApprovalActor),
+    Decided(ApprovalDecision),
     Ended,
 }
 
@@ -121,13 +121,7 @@ pub(super) fn row_state(row: &SessionApprovalRequest::Model) -> Result<RowState,
             ApprovalDecision::Approved(row.scope.unwrap_or(ApprovalScope::Once))
         }
     };
-    Ok(RowState::Decided(
-        decision,
-        ApprovalActor {
-            username: row.resolved_by_username.clone(),
-            user_id: row.resolved_by_user_id.unwrap_or(Uuid::nil()),
-        },
-    ))
+    Ok(RowState::Decided(decision))
 }
 
 pub(super) async fn await_row_decision(
@@ -150,7 +144,7 @@ pub(super) async fn await_row_decision(
                 ).one(db).await {
                     Ok(Some(row)) => match row_state(&row)? {
                         RowState::Pending => {}
-                        RowState::Decided(decision, _) => {
+                        RowState::Decided(decision) => {
                             return Ok(DecisionWaitOutcome::Decided(decision));
                         }
                         // Something else ended it

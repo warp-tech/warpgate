@@ -30,9 +30,13 @@ class Test:
                 sdk.TargetDataRequest(
                     name=f"rdp-{uuid4()}",
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetRdpOptions(
                             kind="Rdp",
+                            compression=sdk.RdpTargetCompression.REMOTEFX,
+                            tls_security=sdk.RdpTlsSecurity.TLS12,
                             host="localhost",
                             port=3389,
                             username="user",
