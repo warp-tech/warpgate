@@ -563,7 +563,7 @@ mod tests {
             host: "localhost".to_owned(),
             port: 22,
             username: "root".to_owned(),
-            allow_insecure_algos: None,
+            allow_insecure_algos: false,
             auth,
             jump_host: None,
         })
