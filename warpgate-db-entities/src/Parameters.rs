@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use poem_openapi::{Enum, Object, Union};
-use sea_orm::Set;
 use sea_orm::entity::prelude::*;
+use sea_orm::Set;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -238,6 +238,12 @@ pub struct Model {
     pub instance_created_at: OffsetDateTime,
     pub web_auth_max_age_seconds: Option<i64>,
     pub web_approval_grace_period_seconds: Option<i64>,
+    /// How long a session held for administrator approval waits before being
+    /// auto-rejected. Unset (or zero) falls back to the AuthState timeout
+    pub admin_approval_timeout_seconds: Option<i64>,
+    /// How long an administrator's approval is remembered for a later
+    /// identical connection. Unset (or zero) disables remembering.
+    pub admin_approval_grace_period_seconds: Option<i64>,
     pub recordings_enable: bool,
     /// Serialized [`RecordingsStorageConfig`].
     #[sea_orm(column_type = "Text")]
@@ -411,6 +417,8 @@ impl Entity {
                     instance_created_at: Set(OffsetDateTime::now_utc()),
                     web_auth_max_age_seconds: Set(None),
                     web_approval_grace_period_seconds: Set(None),
+                    admin_approval_timeout_seconds: Set(None),
+                    admin_approval_grace_period_seconds: Set(None),
                     recordings_enable: Set(false),
                     recordings_storage: Set(serde_json::to_string(
                         &RecordingsStorageConfig::default(),
@@ -490,6 +498,8 @@ mod tests {
             max_api_token_duration_seconds: None,
             record_scp: true,
             record_desktop_keyboard_input: true,
+            admin_approval_timeout_seconds: None,
+            admin_approval_grace_period_seconds: None,
             tutorial_dismissed: false,
             login_protection_enabled: false,
             login_protection_retention_seconds: 0,

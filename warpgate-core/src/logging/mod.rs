@@ -1,6 +1,6 @@
 mod database;
 mod json_console;
-mod layer;
+pub(crate) mod layer;
 mod socket;
 mod values;
 

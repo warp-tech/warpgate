@@ -30,6 +30,7 @@ def _provision(api, vnc_port, otp_key_base64):
     target = api.create_target(
         sdk.TargetDataRequest(
             name=f"vnc-{uuid4()}",
+            require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetVncOptions(
                     kind="Vnc",

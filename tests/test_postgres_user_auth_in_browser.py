@@ -41,6 +41,7 @@ class Test:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"postgres-{uuid4()}",
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetPostgresOptions(
                             kind="Postgres",

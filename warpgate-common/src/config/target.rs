@@ -440,6 +440,7 @@ pub struct Target {
     pub ticket_max_duration_seconds: Option<i64>,
     pub ticket_requests_disabled: bool,
     pub ticket_require_approval: bool,
+    pub require_approval: bool,
     pub ticket_max_uses: Option<i16>,
 }
 

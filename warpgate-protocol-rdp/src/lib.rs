@@ -16,9 +16,9 @@ use futures::future::BoxFuture;
 pub use server::bind_server;
 use tokio::sync::mpsc::{channel, unbounded_channel};
 use tracing::{Instrument, error, info_span};
-use warpgate_common::{ListenEndpoint, Protocol, TargetRdpOptions, TargetSessionId, WarpgateError};
+use warpgate_common::{ListenEndpoint, Protocol, TargetRdpOptions, WarpgateError};
 use warpgate_core::{
-    ApprovedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopEvent,
+    AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopEvent,
     DesktopInput, DesktopState, LogonState, ProtocolServer, Services,
 };
 use warpgate_tls::TlsCertificateAndPrivateKey;
@@ -75,11 +75,11 @@ impl std::fmt::Debug for RdpProtocolServer {
 
 /// Start an RDP client for a target and bridge it to normalised desktop streams.
 pub fn connect(
-    approved: ApprovedTarget<TargetRdpOptions>,
+    admitted: AdmittedTarget<TargetRdpOptions>,
     size: (u16, u16),
-    target_session_id: TargetSessionId,
 ) -> Result<DesktopClientHandles, WarpgateError> {
-    let (user_info, target) = approved.into_parts();
+    let target_session_id = admitted.id();
+    let (user_info, target) = admitted.into_approved().into_parts();
     let (target, options) = target.into_parts();
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
     let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);

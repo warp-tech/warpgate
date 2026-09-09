@@ -25,6 +25,7 @@ def _create_test_user(api, echo_server_port):
     target = api.create_target(
         sdk.TargetDataRequest(
             name=f"echo-{uuid4()}",
+            require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetHTTPOptions(
                     kind="Http",
@@ -477,6 +478,7 @@ class TestLoginProtection:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
                             kind="Ssh",
@@ -560,6 +562,7 @@ class TestLoginProtection:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
                             kind="Ssh",

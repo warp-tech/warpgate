@@ -23,6 +23,7 @@ class TestHTTPUserAuthPassword:
             echo_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"echo-{uuid4()}",
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetHTTPOptions(
                             kind="Http",
@@ -77,6 +78,7 @@ class TestHTTPUserAuthPassword:
             echo_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"echo-{uuid4()}",
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetHTTPOptions(
                             kind="Http",

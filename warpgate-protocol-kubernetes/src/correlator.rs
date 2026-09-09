@@ -4,13 +4,13 @@ use std::time::{Duration, Instant};
 
 use poem::Request;
 use tokio::sync::Mutex;
-use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
-use warpgate_common::{
-    TargetKubernetesOptions, TargetSessionId, User, UserSessionId, WarpgateError,
-};
+use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberApprovalBy};
+use warpgate_common::{TargetKubernetesOptions, User, UserSessionId, WarpgateError};
 use warpgate_common_http::logging::get_client_ip;
+use warpgate_core::approvals::{GatedConnection, admit_target_session};
 use warpgate_core::{
-    ApprovedTarget, Services, State, TargetSessionStart, UserSessionStateInit, WarpgateServerHandle,
+    AdmittedTarget, Services, State, TargetAuthorization, UserSessionStateInit,
+    WarpgateServerHandle,
 };
 
 use crate::server::auth::{authorize_kubernetes_target, unauthorized};
@@ -18,11 +18,11 @@ use crate::session_handle::KubernetesSessionHandle;
 
 type CorrelationKey = (String, String, Option<String>); // (username, target_name, ip)
 
-#[derive(Clone)]
-pub struct AdmittedSession {
-    pub target_session_id: TargetSessionId,
-    pub approved: Arc<ApprovedTarget<TargetKubernetesOptions>>,
-}
+/// Approval refusale are remembered because otherwise every API request would trigger a new one
+/// This is just long enough to cover a burst of API requests from a single kubectl
+const REFUSAL_MEMORY: Duration = Duration::from_secs(5);
+
+pub type AdmittedSession = Arc<AdmittedTarget<TargetKubernetesOptions>>;
 
 /// The outcome of the request that opened one correlated session. Requests that
 /// join a session in flight wait on the mutex, so a `kubectl` command's fan-out
@@ -51,6 +51,8 @@ struct SessionEntry {
 
 pub struct RequestCorrelator {
     handles: HashMap<CorrelationKey, SessionEntry>,
+    // Refused sessions are dropped from `handles` immediately and kept here
+    refusals: HashMap<CorrelationKey, Instant>,
     services: Services,
 }
 
@@ -73,6 +75,10 @@ pub async fn correlated_authorization(
     let key = correlation_key_for_request(request, services, &user_info, target_name).await?;
 
     loop {
+        if correlator.lock().await.was_refused(&key) {
+            return Err(unauthorized());
+        }
+
         // Bound to its own `let` so the correlator lock is released before
         // joining: joining waits for the opening request's approval, which can
         // take minutes, and that request needs the correlator lock to clean up
@@ -119,24 +125,22 @@ pub async fn correlated_authorization(
             .await
         {
             Ok(resolved) => {
-                let admitted = match handle
-                    .lock()
-                    .await
-                    .start_target_session(resolved)
-                    .await
-                    .and_then(TargetSessionStart::admitted)
-                {
-                    Ok((target_session_id, approved)) => AdmittedSession {
-                        target_session_id,
-                        approved: Arc::new(approved),
-                    },
-                    Err(error) => {
-                        *authorization = Authorization::Denied;
-                        correlator.lock().await.evict(&key, &slot);
-                        settle_failed_attempt(services, &handle, session_id).await;
-                        return Err(error.into());
-                    }
-                };
+                let admitted =
+                    match admit_kubernetes_session(request, services, &handle, resolved).await {
+                        Ok(admitted) => Arc::new(admitted),
+                        Err(error) => {
+                            *authorization = Authorization::Denied;
+                            {
+                                let mut correlator = correlator.lock().await;
+                                correlator.evict(&key, &slot);
+                                if matches!(error, WarpgateError::SessionNotApproved) {
+                                    correlator.refusals.insert(key.clone(), Instant::now());
+                                }
+                            }
+                            settle_failed_attempt(services, &handle, session_id).await;
+                            return Err(error.into());
+                        }
+                    };
                 handle.lock().await.confirm();
                 *authorization = Authorization::Authorized(admitted.clone());
                 Ok((handle, admitted))
@@ -152,6 +156,28 @@ pub async fn correlated_authorization(
             }
         };
     }
+}
+
+/// Start the target session, waiting for approval if needed
+async fn admit_kubernetes_session(
+    request: &Request,
+    services: &Services,
+    handle: &Arc<Mutex<WarpgateServerHandle>>,
+    resolved: TargetAuthorization<TargetKubernetesOptions>,
+) -> Result<AdmittedTarget<TargetKubernetesOptions>, WarpgateError> {
+    admit_target_session(
+        services,
+        handle,
+        resolved,
+        GatedConnection {
+            remote_ip: get_client_ip(request, services)
+                .await
+                .and_then(|ip| ip.parse().ok()),
+            // k8s has no AuthState
+            credentials: RememberApprovalBy::Nothing,
+        },
+    )
+    .await
 }
 
 /// Waits for the request that opened this session to resolve its authorization.
@@ -254,6 +280,7 @@ impl RequestCorrelator {
     pub fn new(services: &Services) -> Arc<Mutex<Self>> {
         let this = Arc::new(Mutex::new(Self {
             handles: HashMap::new(),
+            refusals: HashMap::new(),
             services: services.clone(),
         }));
         Self::spawn_vacuum_task(this.clone());
@@ -271,9 +298,12 @@ impl RequestCorrelator {
             .map(|entry| (entry.handle.clone(), entry.authorization.clone()))
     }
 
-    /// Drops this session's entry unless it has already been replaced — an
-    /// attempt long enough to have been vacuumed meanwhile must not evict
-    /// whatever took its place.
+    fn was_refused(&self, key: &CorrelationKey) -> bool {
+        self.refusals
+            .get(key)
+            .is_some_and(|at| at.elapsed() < REFUSAL_MEMORY)
+    }
+
     fn evict(&mut self, key: &CorrelationKey, slot: &SharedAuthorization) {
         if self
             .entry(key)
@@ -296,6 +326,8 @@ impl RequestCorrelator {
         let now = Instant::now();
         self.handles
             .retain(|_, entry| now.duration_since(entry.created) < max_age);
+        self.refusals
+            .retain(|_, at| now.duration_since(*at) < REFUSAL_MEMORY);
     }
 
     /// Spawns a background task to periodically call vacuum

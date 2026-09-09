@@ -19,6 +19,7 @@ import aiohttp
 import pytest
 
 from .api_client import admin_client, sdk
+from .approval_util import wait_for_pending_approval
 from .conftest import ProcessManager, WarpgateProcess, K3sInstance
 from .util import alloc_port, wait_port
 
@@ -320,6 +321,7 @@ class TestKubernetesIntegration:
             token_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=token_target_name,
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -464,6 +466,7 @@ class TestKubernetesIntegration:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=target_name,
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -566,6 +569,214 @@ class TestKubernetesIntegration:
                     kubectl.kill()
                     kubectl.communicate()
 
+    async def _k8s_approval_setup(self, url, k3s, require_approval=True):
+        """A user, an API token for it, and a Kubernetes target behind the
+        administrator gate."""
+        with admin_client(url) as api:
+            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
+            user = api.create_user(
+                sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}")
+            )
+            api.create_password_credential(
+                user.id, sdk.NewPasswordCredential(password="123")
+            )
+            api.add_user_role(user.id, role.id)
+
+            target_name = f"k8s-admin-approval-{uuid.uuid4()}"
+            target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=target_name,
+                    require_approval=require_approval,
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetKubernetesOptions(
+                            kind="Kubernetes",
+                            cluster_url=f"https://127.0.0.1:{k3s.port}",
+                            tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
+                            auth=sdk.KubernetesTargetAuth(
+                                sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
+                                    kind="Token", token=k3s.token
+                                )
+                            ),
+                        )
+                    ),
+                )
+            )
+            api.add_target_role(target.id, role.id)
+        return user, target_name
+
+    async def _kubectl_token(self, session, url, username, port):
+        headers = {"Host": f"localhost:{port}"}
+        resp = await session.post(
+            f"{url}/@warpgate/api/auth/login",
+            json={"username": username, "password": "123"},
+            headers=headers,
+            ssl=False,
+        )
+        resp.raise_for_status()
+        resp = await session.post(
+            f"{url}/@warpgate/api/profile/api-tokens",
+            json={
+                "label": "test-token",
+                "expiry": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            },
+            ssl=False,
+        )
+        resp.raise_for_status()
+        return (await resp.json())["secret"]
+
+    def _kubectl_get_pods(self, wg_port, target_name, token):
+        return subprocess.Popen(
+            [
+                "kubectl",
+                "get",
+                "pods",
+                "--server",
+                f"https://127.0.0.1:{wg_port}/{target_name}",
+                "--insecure-skip-tls-verify",
+                "--token",
+                token,
+                "-n",
+                "default",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    @pytest.mark.asyncio
+    async def test_kubectl_is_held_for_administrator_approval(
+        self, processes, shared_wg: WarpgateProcess, timeout
+    ):
+        """A gated Kubernetes target holds the whole `kubectl` command.
+
+        Kubernetes gates inside the request correlator rather than per request,
+        so one hold has to cover a command's whole fan-out: a second `kubectl`
+        against the same target joins the first's slot instead of raising a
+        second question, and one approval releases both."""
+        k3s = processes.start_k3s()
+        url = f"https://localhost:{shared_wg.http_port}"
+        user, target_name = await self._k8s_approval_setup(url, k3s)
+
+        async with aiohttp.ClientSession() as session:
+            token = await self._kubectl_token(
+                session, url, user.username, shared_wg.http_port
+            )
+            first = self._kubectl_get_pods(
+                shared_wg.kubernetes_port, target_name, token
+            )
+            second = None
+            try:
+                with admin_client(url) as api:
+                    approval = wait_for_pending_approval(
+                        api, target_name, user.username
+                    )
+                assert approval.protocol == "Kubernetes"
+                assert first.poll() is None, "kubectl was let through unapproved"
+
+                # A second command joins the held session rather than asking
+                # again — the correlator's slot is what serialises them.
+                second = self._kubectl_get_pods(
+                    shared_wg.kubernetes_port, target_name, token
+                )
+                time.sleep(2)
+                assert second.poll() is None, "the joining command was let through"
+                with admin_client(url) as api:
+                    held = [
+                        a
+                        for a in api.get_session_approvals()
+                        if a.target == target_name and a.username == user.username
+                    ]
+                assert len(held) == 1, (
+                    f"a command's fan-out must raise one question, got {len(held)}"
+                )
+
+                with admin_client(url) as api:
+                    api.approve_session(
+                        approval.id,
+                        sdk.ApproveSessionRequest(
+                            scope=sdk.ApprovalScope.ONCE, target=approval.target
+                        ),
+                    )
+
+                for label, process in (("first", first), ("second", second)):
+                    _, err = process.communicate(timeout=timeout)
+                    assert process.returncode == 0, (
+                        f"{label} kubectl should succeed after approval: {err!r}"
+                    )
+            finally:
+                for process in (first, second):
+                    if process is not None and process.poll() is None:
+                        process.kill()
+                        process.communicate()
+
+    @pytest.mark.asyncio
+    async def test_kubectl_refusal_stops_the_command_without_locking_out(
+        self, processes, shared_wg: WarpgateProcess, timeout
+    ):
+        """A refused command dies, and does not simply ask again.
+
+        The correlator caches one command's authorization, so a refusal has to
+        outlive the entry it evicts: otherwise the command's very next request
+        opens a fresh session and raises a new question, the client never sees
+        the refusal, and the queue refills for as long as it keeps trying. The
+        memory is deliberately brief — refusing one command must not lock the
+        user out of the target."""
+        k3s = processes.start_k3s()
+        url = f"https://localhost:{shared_wg.http_port}"
+        user, target_name = await self._k8s_approval_setup(url, k3s)
+
+        async with aiohttp.ClientSession() as session:
+            token = await self._kubectl_token(
+                session, url, user.username, shared_wg.http_port
+            )
+            refused = self._kubectl_get_pods(
+                shared_wg.kubernetes_port, target_name, token
+            )
+            retried = None
+            try:
+                with admin_client(url) as api:
+                    approval = wait_for_pending_approval(
+                        api, target_name, user.username
+                    )
+                    api.reject_session(
+                        approval.id, sdk.RejectSessionRequest(target=approval.target)
+                    )
+
+                    _, err = refused.communicate(timeout=timeout)
+                    assert refused.returncode != 0, (
+                        f"a refused command must not reach the cluster: {err!r}"
+                    )
+                    assert not [
+                        a
+                        for a in api.get_session_approvals()
+                        if a.target == target_name and a.username == user.username
+                    ], "the refused command asked again instead of failing"
+
+                # The refusal covers the command, not the user: once its own
+                # requests have stopped arriving, asking again is allowed.
+                time.sleep(6)
+                retried = self._kubectl_get_pods(
+                    shared_wg.kubernetes_port, target_name, token
+                )
+                with admin_client(url) as api:
+                    approval = wait_for_pending_approval(
+                        api, target_name, user.username
+                    )
+                    api.approve_session(
+                        approval.id,
+                        sdk.ApproveSessionRequest(
+                            scope=sdk.ApprovalScope.ONCE, target=approval.target
+                        ),
+                    )
+                _, err = retried.communicate(timeout=timeout)
+                assert retried.returncode == 0, (
+                    f"a later command should be approvable again: {err!r}"
+                )
+            finally:
+                for process in (refused, retried):
+                    if process is not None and process.poll() is None:
+                        process.kill()
+                        process.communicate()
+
     @pytest.mark.asyncio
     async def test_kubectl_run(self, processes, shared_wg: WarpgateProcess):
         """Ensure that write requests such as ``kubectl run`` are proxied."""
@@ -590,6 +801,7 @@ class TestKubernetesIntegration:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=target_name,
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -694,6 +906,7 @@ class TestKubernetesIntegration:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=token_target_name,
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -779,6 +992,7 @@ class TestKubernetesIntegration:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=target_name,
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -905,6 +1119,7 @@ class TestKubernetesIntegration:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=target_name,
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -1113,6 +1328,7 @@ class TestKubernetesIntegration:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=target_name,
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -1280,6 +1496,7 @@ class TestKubernetesIntegration:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=target_name,
+                    require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",

@@ -137,8 +137,8 @@ async fn _handle_normal_request_inner(
     path: &str,
     services: &Services,
 ) -> Result<Response, WarpgateError> {
-    let user_info = admitted.approved.user_info();
-    let k8s_options = admitted.approved.options();
+    let user_info = admitted.user_info();
+    let k8s_options = admitted.options();
     let client = create_authenticated_client(k8s_options, Some(&user_info.username), services)
         .await?
         .build()
@@ -197,7 +197,7 @@ async fn _handle_normal_request_inner(
     let mut recorder_opt = {
         let enabled = services.recordings.is_enabled().await.unwrap_or(false);
         if enabled {
-            match start_recording_api(&admitted.target_session_id, &services.recordings).await {
+            match start_recording_api(&admitted.id(), &services.recordings).await {
                 Ok(recorder) => Some(recorder),
                 Err(e) => {
                     warn!("Failed to start recording: {}", e);
@@ -386,8 +386,8 @@ async fn _handle_websocket_request_inner(
     path: &str,
     services: &Services,
 ) -> anyhow::Result<impl IntoResponse> {
-    let user_info = admitted.approved.user_info();
-    let k8s_options = admitted.approved.options();
+    let user_info = admitted.user_info();
+    let k8s_options = admitted.options();
     let mut full_url = construct_target_url(req, path, k8s_options)?;
     if full_url.scheme() == "https" {
         let _ = full_url.set_scheme("wss");
@@ -404,9 +404,7 @@ async fn _handle_websocket_request_inner(
     {
         let enabled = services.recordings.is_enabled().await.unwrap_or(false);
         if enabled && let Some(metadata) = deduce_exec_recording_metadata(&full_url) {
-            match start_recording_exec(&admitted.target_session_id, &services.recordings, metadata)
-                .await
-            {
+            match start_recording_exec(&admitted.id(), &services.recordings, metadata).await {
                 Err(e) => {
                     error!("Failed to start recording: {}", e);
                 }

@@ -38,6 +38,7 @@ def assert_401():
 def _ssh_target_request(name: str) -> sdk.TargetDataRequest:
     return sdk.TargetDataRequest(
         name=name,
+        require_approval=False,
         options=sdk.TargetOptions(
             sdk.TargetOptionsTargetSSHOptions(
                 kind="Ssh",
@@ -68,6 +69,7 @@ def make_limited_admin_role_payload(**overrides):
         "access_roles_assign": False,
         "sessions_view": False,
         "sessions_terminate": False,
+        "approve_sessions": False,
         "recordings_view": False,
         "tickets_create": False,
         "tickets_delete": False,
@@ -108,6 +110,31 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         permission="sessions_terminate",
         call=lambda api, r: api.close_all_sessions_with_http_info(),
         expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_session_approvals",
+        permission="approve_sessions",
+        call=lambda api, r: api.get_session_approvals_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="approve_session",
+        permission="approve_sessions",
+        call=lambda api, r: api.approve_session_with_http_info(
+            r["session_id"],
+            sdk.ApproveSessionRequest(
+                scope=sdk.ApprovalScope.ONCE, target="no-such-target"
+            ),
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="reject_session",
+        permission="approve_sessions",
+        call=lambda api, r: api.reject_session_with_http_info(
+            r["session_id"], sdk.RejectSessionRequest(target="no-such-target")
+        ),
+        expected_statuses={200, 404},
     ),
     AdminApiTestCase(
         id="get_recording",
@@ -1103,6 +1130,76 @@ def test_admin_api_permission_enforcement(
             (status, body) = e.status, e.body
         assert status in {401, 403}, (
             f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
+        )
+
+
+def test_update_target_must_state_the_approval_gate(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    # The gate is a required field of every target write: a client that
+    # predates it — or simply doesn't set it — is rejected outright rather
+    # than silently taking the gate off a target by saving the rest of it.
+    # The generated client can't express the omission, so raw JSON it is.
+    gated = _ssh_target_request(f"gated-{uuid4()}")
+    gated.require_approval = True
+    target = admin_client.create_target(gated)
+    assert target.require_approval
+
+    url = f"https://localhost:{pg_wg.http_port}"
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    body = admin_client.get_target(target.id).to_dict()
+    del body["require_approval"]
+    silent = session.put(
+        f"{url}/@warpgate/admin/api/targets/{target.id}", json=body
+    )
+    assert silent.status_code == 400, (
+        "an update that says nothing about the gate must be refused, "
+        f"got {silent.status_code}"
+    )
+    assert admin_client.get_target(target.id).require_approval, (
+        "and must not have touched it"
+    )
+
+    # Turning it off is an ordinary, explicit edit.
+    off = _ssh_target_request(target.name)
+    off.require_approval = False
+    admin_client.update_target(target.id, off)
+    assert not admin_client.get_target(target.id).require_approval
+
+
+def test_approval_parameters_can_be_cleared_and_reject_nonsense(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    # The generated clients omit a `None` field rather than sending `null`, so
+    # clearing one is only reachable over raw JSON — which is what the admin UI
+    # sends when the field is blanked.
+    url = f"https://localhost:{pg_wg.http_port}"
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    endpoint = f"{url}/@warpgate/admin/api/parameters"
+
+    def put(**overrides):
+        body = admin_client.get_parameters().to_dict()
+        body.update(overrides)
+        return session.put(endpoint, json=body)
+
+    assert put(admin_approval_grace_period_seconds=300).status_code // 100 == 2
+    assert admin_client.get_parameters().admin_approval_grace_period_seconds == 300
+
+    assert put(admin_approval_grace_period_seconds=None).status_code // 100 == 2
+    assert admin_client.get_parameters().admin_approval_grace_period_seconds is None, (
+        "an explicit null must turn approval caching off, not be ignored"
+    )
+
+    for field in (
+        "admin_approval_grace_period_seconds",
+        "admin_approval_timeout_seconds",
+    ):
+        assert put(**{field: -1}).status_code == 400, (
+            f"{field} must reject a negative window"
         )
 
 

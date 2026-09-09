@@ -30,6 +30,7 @@ struct AdminRoleDataRequest {
 
     sessions_view: bool,
     sessions_terminate: bool,
+    approve_sessions: bool,
 
     recordings_view: bool,
 
@@ -146,6 +147,7 @@ impl ListApi {
             access_roles_assign: Set(body.access_roles_assign),
             sessions_view: Set(body.sessions_view),
             sessions_terminate: Set(body.sessions_terminate),
+            approve_sessions: Set(body.approve_sessions),
             recordings_view: Set(body.recordings_view),
             tickets_create: Set(body.tickets_create),
             tickets_delete: Set(body.tickets_delete),
@@ -215,6 +217,7 @@ impl DetailApi {
         model.access_roles_assign = Set(body.access_roles_assign);
         model.sessions_view = Set(body.sessions_view);
         model.sessions_terminate = Set(body.sessions_terminate);
+        model.approve_sessions = Set(body.approve_sessions);
         model.recordings_view = Set(body.recordings_view);
         model.tickets_create = Set(body.tickets_create);
         model.tickets_delete = Set(body.tickets_delete);
