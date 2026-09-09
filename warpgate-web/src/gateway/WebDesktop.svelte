@@ -1,6 +1,7 @@
 <script lang="ts">
     import { faCompress, faExpand } from '@fortawesome/free-solid-svg-icons'
     import { Button } from '@sveltestrap/sveltestrap'
+    import ConnectingNotice from 'common/ConnectingNotice.svelte'
     import {
         applyDesktopFrame,
         type DesktopFrame,
@@ -11,6 +12,7 @@
     } from 'common/desktopCanvas'
     import { DesktopClipboard } from 'common/desktopClipboard'
     import { codeToScancode } from 'common/desktopInput'
+    import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
     import { handleReauthError } from 'common/reauth'
     import { debounceTime, distinctUntilChanged, Subject } from 'rxjs'
@@ -54,6 +56,7 @@
     let ctx: CanvasRenderingContext2D | null = null
     let connectionError: string | null = $state(null)
     let sessionNotFound = $state(false)
+    let opening = $state(false)
     let sessionInfo = $state<WebDesktopSessionInfo | null>(null)
 
     // Framebuffer messages are queued off the WS thread and painted in a rAF loop so a
@@ -443,7 +446,12 @@
         rafHandle = requestAnimationFrame(tick)
         try {
             if (!sessionId && params.targetId) {
-                await startSession(params.targetId)
+                opening = true
+                try {
+                    await startSession(params.targetId)
+                } finally {
+                    opening = false
+                }
             }
             if (!sessionId) {
                 sessionNotFound = true
@@ -454,8 +462,7 @@
             if (await handleReauthError(e)) {
                 return
             }
-            connectionError =
-                e instanceof Error ? e.message : 'Failed to load session info'
+            connectionError = await stringifyError(e)
             if (e instanceof ResponseError && e.response.status === 404) {
                 sessionNotFound = true
             }
@@ -501,7 +508,7 @@
         <span class="me-auto text-muted small"
             >{sessionInfo?.targetName ?? ''}</span
         >
-        {#if !sessionNotFound}
+        {#if !sessionNotFound && !connectionError}
             <span class="text-muted small me-3">
                 {ws?.state ?? ConnectionState.Connecting}
                 {#if ws?.state === ConnectionState.Connecting && ws.attempt > 0}
@@ -521,6 +528,10 @@
             Disconnect
         </Button>
     </div>
+
+    {#if opening}
+        <ConnectingNotice />
+    {/if}
 
     {#if connectionError}
         <div class="mx-3 mt-3">

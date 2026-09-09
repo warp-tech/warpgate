@@ -8,7 +8,7 @@ use tokio::net::TcpStream;
 use tracing::{debug, info};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{TargetMySqlOptions, WarpgateError};
-use warpgate_core::ApprovedTarget;
+use warpgate_core::AdmittedTarget;
 use warpgate_database_protocols::io::Decode;
 use warpgate_database_protocols::mysql::protocol::Capabilities;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
@@ -39,11 +39,10 @@ pub struct ConnectionOptions {
 
 impl MySqlClient {
     pub async fn connect(
-        approved: ApprovedTarget<TargetMySqlOptions>,
+        approved: AdmittedTarget<TargetMySqlOptions>,
         mut options: ConnectionOptions,
     ) -> Result<Self, MySqlError> {
-        let (_, target) = approved.into_parts();
-        let (_, target) = target.into_parts();
+        let target = approved.specific_target().options().clone();
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
 
@@ -94,8 +93,8 @@ impl MySqlClient {
             info!("Target connection upgraded to TLS");
         }
 
-        // Resolve the effective password (may be an IAM-generated token or legacy field)
-        let effective_password = match &target.effective_auth() {
+        // An IAM role yields a short-lived token in place of a stored password
+        let effective_password = match &target.auth {
             warpgate_common::DatabaseTargetAuth::Password(auth) => auth
                 .password
                 .reveal()

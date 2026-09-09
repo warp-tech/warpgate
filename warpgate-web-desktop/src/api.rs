@@ -25,10 +25,7 @@ pub async fn ws_handler(
 ) -> poem::Result<impl IntoResponse> {
     // Someone else's session reads as absent: a stream request must not
     // reveal that the id exists.
-    let session = match manager
-        .access(session_id, ctx.auth.user_id())
-        .await
-    {
+    let session = match manager.access(session_id, ctx.auth.user_id()).await {
         SessionAccess::Granted(session) => session,
         SessionAccess::NotFound | SessionAccess::Forbidden => {
             return Err(poem::Error::from_string(

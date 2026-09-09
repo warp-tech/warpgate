@@ -21,15 +21,20 @@ pub use hold_screen::{
 pub use otp::{MAX_OTP_ATTEMPTS, OtpAction, OtpActionApplyOutcome, OtpEntry};
 use tokio::sync::Mutex;
 use tracing::warn;
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind};
-use warpgate_common::{Secret, TargetOptionsVariant, TargetSessionId, UserSessionId};
+use warpgate_common::auth::{
+    AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind, RememberApprovalBy,
+};
+use warpgate_common::{
+    Secret, TargetOptionsVariant, TargetSessionId, UserSessionId, WarpgateError,
+};
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::approvals::{GatedConnection, admit_target_session};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    AuthorizedIdentity, Services, TargetAuthorization, WarpgateServerHandle,
-    authorize_for_target_by_name, authorize_and_spend_ticket,
+    AdmittedTarget, AuthorizedIdentity, Services, TargetAuthorization, WarpgateServerHandle,
+    authorize_and_spend_ticket, authorize_for_target_by_name,
 };
 use warpgate_desktop_ui::AuthPrompt;
 
@@ -232,6 +237,32 @@ pub async fn finalize_user_auth<O: TargetOptionsVariant>(
         bail!("Target {target_name} is not a {} target", O::PROTOCOL);
     };
     Ok(authorization)
+}
+
+/// Start a target session, holding for approval if needed
+pub async fn admit_desktop_session<O: Send + Sync>(
+    services: &Services,
+    server_handle: &Arc<Mutex<WarpgateServerHandle>>,
+    authorization: TargetAuthorization<O>,
+    remote_ip: Option<IpAddr>,
+) -> Result<AdmittedTarget<O>, WarpgateError> {
+    let session_id = server_handle.lock().await.user_session_id();
+    let state = services.auth_state_store.lock().await.get(&session_id);
+    let credentials = match state {
+        Some(state) => state.lock().await.remembered_by(),
+        None => RememberApprovalBy::Nothing,
+    };
+
+    admit_target_session(
+        services,
+        server_handle,
+        authorization,
+        GatedConnection {
+            remote_ip,
+            credentials,
+        },
+    )
+    .await
 }
 
 /// Build the browser web-approval URL for the current auth state, or `None` if the external

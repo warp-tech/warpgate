@@ -41,8 +41,6 @@ pub enum WarpgateError {
     NoHostInUrl,
     #[error("Inconsistent state: {0}")]
     InconsistentState(String),
-    #[error("target session requires administrator approval")]
-    TargetSessionRequiresApproval,
     /// Somebody called WarpgateServerHandle::set_user_info twice
     #[error("user session is already attributed to another user")]
     UserSessionAlreadyAttributed,
@@ -84,6 +82,8 @@ pub enum WarpgateError {
     InvalidNetworkAddress(String),
     #[error("session limit reached")]
     SessionLimitReached,
+    #[error("an administrator did not approve this session")]
+    SessionNotApproved,
     #[error(transparent)]
     Encryption(#[from] crate::encryption::EncryptionError),
 }
@@ -101,7 +101,7 @@ impl UserFacingReason for WarpgateError {
             | Self::InvalidCredentialType
             | Self::UserNotFound(_)
             | Self::UserAlreadyExists(_)
-            | Self::TargetSessionRequiresApproval
+            | Self::SessionNotApproved
             | Self::UserSessionAlreadyAttributed
             | Self::UserSessionEnded
             | Self::NoAdminAccess
@@ -194,6 +194,7 @@ impl ResponseError for WarpgateError {
             Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
             Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
             Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
+            Self::SessionNotApproved => poem::http::StatusCode::FORBIDDEN,
             _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

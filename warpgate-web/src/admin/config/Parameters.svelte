@@ -129,6 +129,10 @@
                 webAuthMaxAgeSeconds: parameters.webAuthMaxAgeSeconds ?? null,
                 webApprovalGracePeriodSeconds:
                     parameters.webApprovalGracePeriodSeconds ?? null,
+                adminApprovalTimeoutSeconds:
+                    parameters.adminApprovalTimeoutSeconds ?? null,
+                adminApprovalGracePeriodSeconds:
+                    parameters.adminApprovalGracePeriodSeconds ?? null,
             } as unknown as ParameterValues
             await api.updateParameters({ parameterUpdate })
             await reloadServerInfo()
@@ -722,6 +726,44 @@
                                     proxied HTTP targets, on the RDP/VNC hold
                                     screen and as a PostgreSQL connection
                                     notice.
+                                </HelpText>
+                            </Section>
+
+                            <Section
+                                id="session-approvals"
+                                title="Session approvals"
+                            >
+                                <FormGroup floating label="Approval timeout">
+                                    <input
+                                        type="text"
+                                        class="form-control"
+                                        placeholder="e.g. 5m, 1h"
+                                        use:humantimeDuration={{ seconds: parameters.adminApprovalTimeoutSeconds, onChange: v => { parameters.adminApprovalTimeoutSeconds = v } }}
+                                    >
+                                </FormGroup>
+                                <HelpText>
+                                    A session held for administrator approval is
+                                    rejected if not approved within this time.
+                                    Blank = use the default 10 minute timeout.
+                                </HelpText>
+
+                                <FormGroup
+                                    floating
+                                    label="Admin approval cache period"
+                                >
+                                    <input
+                                        type="text"
+                                        class="form-control"
+                                        placeholder="e.g. 5m, 1h"
+                                        use:humantimeDuration={{ seconds: parameters.adminApprovalGracePeriodSeconds, onChange: v => { parameters.adminApprovalGracePeriodSeconds = v } }}
+                                    >
+                                </FormGroup>
+                                <HelpText>
+                                    After an administrator approves a session,
+                                    remember the approval for this period and do
+                                    not request it for new sessions by the same
+                                    user to the same target from the same IP.
+                                    Blank = never cache approvals.
                                 </HelpText>
                             </Section>
 

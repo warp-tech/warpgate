@@ -850,18 +850,17 @@
             align-items: center;
             min-width: 0;
             white-space: normal;
+            column-gap: 1rem;
 
             .text {
                 font-weight: bold;
-                margin-right: 0.6em;
             }
 
             .key-value {
                 white-space: nowrap;
+                gap: .75rem;
 
                 .key {
-                    margin-left: 0.5em;
-                    margin-right: 0.3em;
                     opacity: .5;
                     font-style: italic;
                 }
