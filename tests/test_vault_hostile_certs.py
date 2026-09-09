@@ -417,9 +417,12 @@ class TestTheCredentialFileItself:
             sdk.TargetDataRequest(
                 name=f"cert-{uuid4()}",
                 require_approval=False,
+                ticket_requests_disabled=False,
+                ticket_require_approval=False,
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
+                        allow_insecure_algos=False,
                         host=TARGET_HOST,
                         port=cert_ssh_port,
                         username="root",

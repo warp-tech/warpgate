@@ -109,9 +109,12 @@ def make_user_and_target(
         sdk.TargetDataRequest(
             name=f"cert-{uuid4()}",
             require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetSSHOptions(
                     kind="Ssh",
+                    allow_insecure_algos=False,
                     host=TARGET_HOST,
                     port=ssh_port,
                     username=username,
@@ -1291,9 +1294,12 @@ class TestControlsStillApply:
             sdk.TargetDataRequest(
                 name=f"pubkey-{uuid4()}",
                 require_approval=False,
+                ticket_requests_disabled=False,
+                ticket_require_approval=False,
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
+                        allow_insecure_algos=False,
                         host=TARGET_HOST,
                         port=port,
                         username="root",
@@ -1416,6 +1422,7 @@ class TestAChainWithAJumpHost:
         def make(name, port, jump=None, host=TARGET_HOST, extensions=None):
             options = sdk.TargetOptionsTargetSSHOptions(
                 kind="Ssh",
+                allow_insecure_algos=False,
                 host=host,
                 port=port,
                 username="root",
@@ -1434,6 +1441,8 @@ class TestAChainWithAJumpHost:
                 sdk.TargetDataRequest(
                     name=name,
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(options),
                 )
             )

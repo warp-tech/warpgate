@@ -209,6 +209,7 @@ def test_a_jump_host_that_never_opens_the_tunnel_is_given_up_on(
         def make(name, port, auth, jump_host=None):
             options = sdk.TargetOptionsTargetSSHOptions(
                 kind="Ssh",
+                allow_insecure_algos=False,
                 host=TARGET_HOST,
                 port=port,
                 username="root",
@@ -220,6 +221,8 @@ def test_a_jump_host_that_never_opens_the_tunnel_is_given_up_on(
                 sdk.TargetDataRequest(
                     name=name,
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(options),
                 )
             )
