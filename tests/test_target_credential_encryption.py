@@ -86,6 +86,7 @@ def _provision(api, db_port):
     target = api.create_target(
         sdk.TargetDataRequest(
             name=f"mysql-{uuid4()}",
+            require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetMySqlOptions(
                     kind="MySql",

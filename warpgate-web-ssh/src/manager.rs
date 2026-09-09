@@ -15,6 +15,9 @@ use warpgate_protocol_ssh::{
     ConnectionError, RCCommand, RCEvent, RCState, RemoteClient, client_error_message,
     resolve_approved_ssh_chain,
 };
+use warpgate_web_clients_common::{
+    ClientManager, SessionRemover, WebSessionHandle, admit_web_client_session,
+};
 
 /// What a browser session is told when the connection fails.
 ///
@@ -29,7 +32,6 @@ use warpgate_protocol_ssh::{
 pub fn shown_to_the_browser(error: &ConnectionError) -> String {
     error.client_message()
 }
-use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
 
 use crate::protocol::ServerMessage;
 use crate::session::WebSshSession;
@@ -64,9 +66,8 @@ impl WebSshClientManager {
         remote_address: Option<SocketAddr>,
     ) -> Result<UserSessionId, WarpgateError> {
         let user_id = authorization.user_info().id;
-        if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
-            return Err(WarpgateError::SessionLimitReached);
-        }
+        // Guard held until the session running
+        let _slot = self.reserve_slot(user_id, MAX_SESSIONS_PER_USER).await?;
 
         let authorization = authorization.narrow::<TargetSSHOptions>()?;
         let username = authorization.user_info().username.clone();
@@ -87,13 +88,9 @@ impl WebSshClientManager {
         .await
         .context("registering webSSH session")?;
 
-        let (target_session_id, approved) = server_handle
-            .lock()
-            .await
-            .start_target_session(authorization)
-            .await
-            .context("starting target session")?
-            .admitted()?;
+        let admitted =
+            admit_web_client_session(services, &server_handle, authorization, remote_address)
+                .await?;
 
         let session_id = server_handle.lock().await.user_session_id();
         let rc_handles = RemoteClient::create(session_id, services.clone())
@@ -104,7 +101,7 @@ impl WebSshClientManager {
             user_id,
             target_name.clone(),
             target_kind,
-            target_session_id,
+            admitted.id(),
             server_handle,
             rc_handles.command_tx.clone(),
             rc_handles.abort_tx.clone(),
@@ -129,7 +126,7 @@ impl WebSshClientManager {
         // Not reduced to plain SSH options: `Connect` carries the identity of
         // each hop, so `connect_chain` can decide which target was asked about
         // rather than assuming it is the last one.
-        let ssh_chain = resolve_approved_ssh_chain(services, approved).await?;
+        let ssh_chain = resolve_approved_ssh_chain(services, admitted).await?;
         rc_handles
             .command_tx
             .send((RCCommand::Connect(ssh_chain), None))

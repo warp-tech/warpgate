@@ -27,6 +27,7 @@ def _provision(api, viewer_password="123"):
     target = api.create_target(
         sdk.TargetDataRequest(
             name=f"rdp-{uuid4()}",
+            require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetRdpOptions(
                     kind="Rdp",

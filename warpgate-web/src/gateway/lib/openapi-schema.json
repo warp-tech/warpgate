@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.5-89-g43346aa74-modified"
+    "version": "v0.28.5-94-g867ec9719-modified"
   },
   "servers": [
     {
@@ -224,14 +224,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -268,14 +261,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -1656,6 +1642,7 @@
           "access_roles_assign",
           "sessions_view",
           "sessions_terminate",
+          "approve_sessions",
           "recordings_view",
           "tickets_create",
           "tickets_delete",
@@ -1700,6 +1687,9 @@
           "sessions_terminate": {
             "type": "boolean"
           },
+          "approve_sessions": {
+            "type": "boolean"
+          },
           "recordings_view": {
             "type": "boolean"
           },
@@ -1736,6 +1726,15 @@
           "IpRejected"
         ]
       },
+      "ApprovalScope": {
+        "type": "string",
+        "description": "\"Remember decision\" scope for approvals",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
+      },
       "ApproveAuthRequest": {
         "type": "object",
         "title": "ApproveAuthRequest",
@@ -1744,7 +1743,7 @@
         ],
         "properties": {
           "scope": {
-            "$ref": "#/components/schemas/WebApprovalScope"
+            "$ref": "#/components/schemas/ApprovalScope"
           }
         }
       },
@@ -2880,15 +2879,6 @@
             }
           }
         }
-      },
-      "WebApprovalScope": {
-        "type": "string",
-        "description": "How an web approval should be remembered for bypass",
-        "enum": [
-          "Once",
-          "Target",
-          "AllTargets"
-        ]
       },
       "WebDesktopSessionCreated": {
         "type": "object",

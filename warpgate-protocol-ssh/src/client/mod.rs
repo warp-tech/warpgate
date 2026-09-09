@@ -37,7 +37,7 @@ use warpgate_common::{
     TargetSSHOptions, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::auth::TOKEN_ATTRIBUTIONS;
-use warpgate_core::{ApprovedTarget, ConfigProvider, Services};
+use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
@@ -830,10 +830,14 @@ pub async fn resolve_ssh_chain_for_admin(
 /// minted for this target session.
 pub async fn resolve_approved_ssh_chain(
     services: &Services,
-    approved: ApprovedTarget<TargetSSHOptions>,
+    admitted: AdmittedTarget<TargetSSHOptions>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
-    let (user_info, target) = approved.into_parts();
-    resolve_ssh_chain(services, target.id, Some(&user_info.username)).await
+    resolve_ssh_chain(
+        services,
+        admitted.target().id,
+        Some(&admitted.user_info().username),
+    )
+    .await
 }
 
 #[derive(Debug)]

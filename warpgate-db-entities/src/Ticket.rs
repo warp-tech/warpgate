@@ -1,6 +1,8 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 use uuid::Uuid;
+use warpgate_common::helpers::hash::hash_secret;
+use warpgate_common::{Secret, WarpgateError};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "tickets")]
@@ -49,3 +51,47 @@ impl Related<super::Target::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+/// Atomic use spend
+///
+/// WarpgateError::InvalidTicket = no uses left
+pub async fn spend_use(db: &DatabaseConnection, ticket_id: Uuid) -> Result<(), WarpgateError> {
+    let ticket = Entity::find_by_id(ticket_id).one(db).await?;
+    let Some(ticket) = ticket else {
+        return Err(WarpgateError::InvalidTicket(ticket_id));
+    };
+    if ticket.uses_left.is_none() {
+        return Ok(());
+    }
+    let spent = Entity::update_many()
+        .col_expr(Column::UsesLeft, Expr::col(Column::UsesLeft).sub(1))
+        .filter(Column::Id.eq(ticket_id))
+        .filter(Column::UsesLeft.gt(0))
+        .exec(db)
+        .await?;
+    if spent.rows_affected == 0 {
+        return Err(WarpgateError::InvalidTicket(ticket_id));
+    }
+    Ok(())
+}
+
+pub async fn refund_use(db: &DatabaseConnection, ticket_id: Uuid) -> Result<(), WarpgateError> {
+    Entity::update_many()
+        .col_expr(Column::UsesLeft, Expr::col(Column::UsesLeft).add(1))
+        .filter(Column::Id.eq(ticket_id))
+        .filter(Column::UsesLeft.is_not_null())
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+pub async fn for_secret(
+    db: &DatabaseConnection,
+    secret: &Secret<String>,
+) -> Result<Option<Uuid>, WarpgateError> {
+    Ok(Entity::find()
+        .filter(Column::SecretHash.eq(hash_secret(secret.expose_secret())))
+        .one(db)
+        .await?
+        .map(|ticket| ticket.id))
+}

@@ -1,8 +1,10 @@
 pub mod api;
+mod approval_gate;
 mod catchall;
 mod client_cache;
 mod common;
 mod error;
+mod internal_page;
 mod middleware;
 pub mod proxy;
 mod session;

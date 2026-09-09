@@ -15,7 +15,9 @@ use warpgate_core::{
     DesktopClientHandles, DesktopEvent, Services, State, TargetAuthorization, UserSessionStateInit,
 };
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
+use warpgate_web_clients_common::{
+    ClientManager, SessionRemover, WebSessionHandle, admit_web_client_session,
+};
 
 use crate::dirty::DirtyTracker;
 use crate::protocol::ServerMessage;
@@ -52,9 +54,9 @@ impl WebDesktopClientManager {
         size: Option<(u16, u16)>,
     ) -> Result<UserSessionId, WarpgateError> {
         let user_id = authorization.user_info().id;
-        if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
-            return Err(WarpgateError::SessionLimitReached);
-        }
+
+        // Guard held until the session is running
+        let _slot = self.reserve_slot(user_id, MAX_SESSIONS_PER_USER).await?;
 
         let username = authorization.user_info().username.clone();
         let target_name = authorization.target().name.clone();
@@ -79,15 +81,12 @@ impl WebDesktopClientManager {
         .await
         .context("registering web-desktop session")?;
 
-        let (target_session_id, approved) = server_handle
-            .lock()
-            .await
-            .start_target_session(authorization)
-            .await
-            .context("starting target session")?
-            .admitted()?;
+        let admitted =
+            admit_web_client_session(services, &server_handle, authorization, remote_address)
+                .await?;
 
         let session_id = server_handle.lock().await.user_session_id();
+        let target_session_id = admitted.id();
 
         let span = info_span!("web-desktop", session=%session_id);
 
@@ -96,15 +95,14 @@ impl WebDesktopClientManager {
                 // Tight already picks JPEG for photographic tiles and keeps text and UI
                 // lossless, so re-encoding what it deliberately sent as raw would only
                 // degrade it.
-                Ok((warpgate_protocol_vnc::connect(approved.narrow()?)?, false))
+                Ok((warpgate_protocol_vnc::connect(admitted.narrow()?)?, false))
             }
             TargetKind::Rdp => {
                 // Connect at the viewer's measured size when known, so the desktop fits the
                 // browser from the first frame; the DVC resize path handles later changes.
                 let handles = warpgate_protocol_rdp::connect(
-                    approved.narrow()?,
+                    admitted.narrow()?,
                     size.unwrap_or(warpgate_protocol_rdp::DEFAULT_SIZE),
-                    target_session_id,
                 )?;
                 // The RDP helper only ever emits raw RGBA.
                 Ok((handles, true))

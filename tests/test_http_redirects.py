@@ -22,6 +22,7 @@ class TestHTTPRedirects:
             api.add_user_role(user.id, role.id)
             echo_target = api.create_target(sdk.TargetDataRequest(
                 name=f"echo-{uuid4()}",
+                require_approval=False,
                 options=sdk.TargetOptions(sdk.TargetOptionsTargetHTTPOptions(
                     kind="Http",
                     url=f"http://localhost:{echo_server_port}",

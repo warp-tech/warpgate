@@ -8,11 +8,11 @@
         type TargetOptions,
         TlsMode,
     } from 'admin/lib/api'
+    import { adminPermissions } from 'admin/lib/store'
     import { stringifyError } from 'common/errors'
     import { TargetKind } from 'gateway/lib/api'
     import { onMount } from 'svelte'
     import { replace } from 'svelte-spa-router'
-    import { adminPermissions } from '../../lib/store'
 
     interface Props {
         params: { kind: string }
@@ -117,6 +117,7 @@
                     name,
                     options,
                     groupId: selectedGroupId,
+                    requireApproval: false,
                 },
             })
             replace(`/config/targets/${target.id}`)
