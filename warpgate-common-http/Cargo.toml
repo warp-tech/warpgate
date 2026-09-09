@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
+html-escape.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
 serde.workspace = true

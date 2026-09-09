@@ -2,7 +2,7 @@ use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, UserSessionId, WarpgateError, client_error_message};
+use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
 use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient, resolve_ssh_chain_for_admin};
 
 use super::AdminContext;
@@ -96,9 +96,9 @@ impl Api {
                     remote_key_base64: key.public_key_base64(),
                 },
             ))),
-            Err(err) => Ok(CheckSshHostKeyResponse::Error(PlainText(
-                client_error_message(&err),
-            ))),
+            Err(err) => Ok(CheckSshHostKeyResponse::Error(PlainText(format!(
+                "{err:#}"
+            )))),
         }
     }
 }

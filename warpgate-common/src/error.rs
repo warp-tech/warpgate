@@ -1,11 +1,11 @@
 use std::error::Error;
 
 use poem::error::ResponseError;
-use poem::{IntoResponse, Response};
 use poem_openapi::ApiResponse;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_ca::CaError;
+use warpgate_ldap::LdapError;
 use warpgate_sso::SsoError;
 use warpgate_tls::RustlsSetupError;
 
@@ -55,7 +55,7 @@ pub enum WarpgateError {
     #[error(transparent)]
     Ca(#[from] CaError),
     #[error(transparent)]
-    Ldap(#[from] warpgate_ldap::LdapError),
+    Ldap(#[from] LdapError),
     #[error(transparent)]
     RusshKeys(#[from] russh::keys::Error),
     #[error("I/O: {0}")]
@@ -88,31 +88,14 @@ pub enum WarpgateError {
     Encryption(#[from] crate::encryption::EncryptionError),
 }
 
-impl ResponseError for WarpgateError {
-    fn status(&self) -> poem::http::StatusCode {
-        match self {
-            Self::InvalidTicket(_)
-            | Self::UserNotFound(_)
-            | Self::RoleNotFound(_)
-            | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
-            Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
-            Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
-            Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
-            _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
-        }
-    }
+/// An alternative to the poem's ResponseError that provides a simplified error reason for the client without sensitive info
+pub trait UserFacingReason {
+    fn user_facing_reason(&self) -> String;
+}
 
-    // poem's default renders the `Display` of whichever variant fired into
-    // the body, which for the `#[error(transparent)]` ones is a foreign
-    // error's own words. Exhaustive on purpose: a new variant has to be
-    // sorted rather than inherit a catch-all.
-    fn as_response(&self) -> Response
-    where
-        Self: Error + Send + Sync + 'static,
-    {
-        let message = match self {
-            // Written for the caller, interpolating only values they
-            // supplied or already know.
+impl UserFacingReason for WarpgateError {
+    fn user_facing_reason(&self) -> String {
+        match self {
             Self::InvalidTicket(_)
             | Self::InvalidTarget
             | Self::InvalidCredentialType
@@ -131,60 +114,89 @@ impl ResponseError for WarpgateError {
             | Self::NoHostInUrl
             | Self::SessionEnd => self.to_string(),
 
+            Self::Sso(e) => e.user_facing_reason(),
+            Self::Ldap(e) => e.user_facing_reason(),
+
             // Wraps an error this crate does not control, or names a
             // server-side detail. `ExternalHostNotWhitelisted` and
             // `RoleNotFound` read as caller-authored but interpolate the
             // administrator's configuration: a domain whitelist to an
             // anonymous caller, a configured role name to any SSO user.
-            Self::DatabaseError(_)
-            | Self::Other(_)
-            | Self::UrlParse(_)
-            | Self::DeserializeJson(_)
-            | Self::InconsistentState(_)
-            | Self::ExternalHostNotWhitelisted(..)
-            | Self::RoleNotFound(_)
-            | Self::Anyhow(_)
-            | Self::Sso(_)
-            | Self::Ca(_)
-            | Self::Ldap(_)
-            | Self::RusshKeys(_)
-            | Self::Io(_)
-            | Self::RateLimiterInsufficientCapacity(_)
-            | Self::RcGen(_)
-            | Self::TlsSetup(_)
-            | Self::Reqwest(_)
-            | Self::Aws(_)
-            | Self::Encryption(_) => {
-                let correlation_id = Uuid::new_v4();
-                // `{:#}` renders an `anyhow` chain in full, and this line
-                // is the only place that detail goes.
-                let detail = format!("{self:#}");
-                tracing::error!(
-                    correlation_id = %correlation_id,
-                    error = %detail,
-                    "Request failed with an internal error"
-                );
-                format!(
-                    "{} (reference: {correlation_id})",
-                    self.status().canonical_reason().unwrap_or("Error")
-                )
-            }
-        };
-        let mut resp = message.into_response();
-        resp.set_status(self.status());
-        resp
+            Self::DatabaseError(_) => "database error".into(),
+            Self::UrlParse(_) => "failed to parse URL".into(),
+            Self::DeserializeJson(_) => "deserialization failed".into(),
+            Self::InconsistentState(_) => "inconsistent state".into(),
+            Self::ExternalHostNotWhitelisted(..) => "hostname is not on the whitelist".into(),
+            Self::RoleNotFound(_) => "role not found".into(),
+            Self::Io(_) => "I/O error".into(),
+            Self::RateLimiterInsufficientCapacity(_) => "rate limiter capacity exceeded".into(),
+            Self::RcGen(_) => "certificate generation failed".into(),
+            Self::TlsSetup(_) => "TLS setup failed".into(),
+            Self::Reqwest(_) => "outbound HTTP request failed".into(),
+            Self::Aws(_) => "AWS error".into(),
+            Self::Ca(_) => "certificate authority error".into(),
+            Self::RusshKeys(_) => "SSH key error".into(),
+            Self::Encryption(_) => "credential encryption error".into(),
+            Self::Other(_) | Self::Anyhow(_) => self
+                .status()
+                .canonical_reason()
+                .unwrap_or("Error")
+                .to_owned(),
+        }
     }
 }
 
-/// Renders an error's full text, causal chain included, for an admin-only
-/// "test connection" endpoint that exists to answer "what is wrong with this
-/// configuration".
-///
-/// The deliberate opt-out of [`WarpgateError::as_response`]'s flattening.
-/// Only for an error the caller asked to see, and never for one that could
-/// carry a credential rather than a connection failure.
-pub fn client_error_message(err: &(impl std::fmt::Display + ?Sized)) -> String {
-    format!("{err:#}")
+impl UserFacingReason for SsoError {
+    fn user_facing_reason(&self) -> String {
+        match self {
+            Self::NotOidc | Self::Mitm | Self::LogoutNotSupported => self.to_string(),
+            Self::UrlParse(_)
+            | Self::ConfigError(_)
+            | Self::Configuration(_)
+            | Self::UnsupportedEndpointScheme { .. } => "SSO provider configuration error".into(),
+            Self::Discovery(_) => "provider discovery error".into(),
+            Self::Verification(_)
+            | Self::ClaimsVerification(_)
+            | Self::Signing(_)
+            | Self::Jwt(_)
+            | Self::SignatureVerification(_) => "SSO token verification failed".into(),
+            Self::Reqwest(_) | Self::Io(_) => "SSO provider request failed".into(),
+            Self::GoogleDirectory(_) => "Google Directory API error".into(),
+            Self::Other(_) => "SSO error".into(),
+        }
+    }
+}
+
+impl UserFacingReason for LdapError {
+    fn user_facing_reason(&self) -> String {
+        match self {
+            Self::ConnectionFailed(_) => "LDAP connection failed",
+            Self::AuthenticationFailed(_) => "LDAP authentication failed",
+            Self::QueryFailed(_) => "LDAP query failed",
+            Self::TlsError(_) | Self::RustlSetup(_) => "LDAP TLS error",
+            Self::InvalidConfiguration(_) => "LDAP configuration is invalid",
+            Self::NoUsername(_) => "cannot determine username for user",
+            Self::NoUUID(_) => "cannot determine UUID for user",
+            Self::AmbiguousMatch { .. } => "LDAP lookup matched more than one entry",
+            Self::LdapClientError(_) | Self::JsonError(_) | Self::Other(_) => "LDAP error",
+        }
+        .into()
+    }
+}
+
+impl ResponseError for WarpgateError {
+    fn status(&self) -> poem::http::StatusCode {
+        match self {
+            Self::InvalidTicket(_)
+            | Self::UserNotFound(_)
+            | Self::RoleNotFound(_)
+            | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
+            Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
+            Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
+            Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
+            _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
 }
 
 impl From<Box<dyn Error + Send + Sync + 'static>> for WarpgateError {
@@ -211,92 +223,56 @@ impl ApiResponse for WarpgateError {
 
 #[cfg(test)]
 mod tests {
-    use poem::error::ResponseError;
-
-    use super::WarpgateError;
+    use super::{UserFacingReason, WarpgateError};
 
     const LEAK: &str = "database error: SELECT secret FROM credentials";
 
-    async fn body_of(response: poem::Response) -> String {
-        response.into_body().into_string().await.unwrap()
-    }
-
-    /// The variant this override exists for: `#[error(transparent)]` around an
-    /// error this crate does not control, whose `Display` was never written
-    /// with an HTTP client as its audience.
-    #[tokio::test]
-    async fn a_wrapped_foreign_error_never_reaches_the_client() {
+    /// The variant this exists for: `#[error(transparent)]` around an error
+    /// this crate does not control, whose `Display` was never written with an
+    /// HTTP client as its audience.
+    #[test]
+    fn a_wrapped_foreign_error_never_reaches_the_client() {
         let leaky = WarpgateError::Other(LEAK.into());
         // Asserted first, or this test would keep passing if the fixture ever
         // stopped carrying the text and would prove nothing about the boundary.
         assert!(leaky.to_string().contains("SELECT"));
-
-        let body = body_of(leaky.as_response()).await;
-        assert!(
-            !body.contains("SELECT"),
-            "the raw error reached the client: {body}"
-        );
-        assert!(
-            !body.contains("database error"),
-            "the raw error reached the client: {body}"
-        );
-        assert!(
-            body.starts_with("Internal Server Error (reference: "),
-            "no correlation id to hand an operator: {body}"
-        );
+        assert_eq!(leaky.user_facing_reason(), "Internal Server Error");
     }
 
     /// The other half of the split. Without this the test above would also
     /// pass on a blanket flattening that told every caller nothing at all.
-    #[tokio::test]
-    async fn a_message_written_for_the_caller_is_kept() {
+    #[test]
+    fn a_message_written_for_the_caller_is_kept() {
         let refusal = WarpgateError::UserNotFound("alice".into());
-        let body = body_of(refusal.as_response()).await;
-        assert!(
-            body.contains("alice"),
-            "a deliberate, caller-facing message was flattened away: {body}"
-        );
+        assert_eq!(refusal.user_facing_reason(), refusal.to_string());
     }
 
     /// `ExternalHostNotWhitelisted` reads as caller-authored and is not: its
     /// second field is the admin-configured whitelist, and this fires from the
     /// pre-auth redirect check, so the caller is anonymous.
-    #[tokio::test]
-    async fn the_configured_whitelist_is_not_disclosed() {
+    #[test]
+    fn the_configured_whitelist_is_not_disclosed() {
         let spoofed = WarpgateError::ExternalHostNotWhitelisted(
             "evil.example".into(),
             vec!["internal.corp.example".into()],
         );
         assert!(spoofed.to_string().contains("internal.corp.example"));
-
-        let body = body_of(spoofed.as_response()).await;
-        assert!(
-            !body.contains("internal.corp.example"),
-            "the whitelist reached an anonymous caller: {body}"
-        );
+        let reason = spoofed.user_facing_reason();
+        assert!(!reason.contains("internal.corp.example"), "{reason}");
+        assert!(!reason.contains("evil.example"), "{reason}");
     }
 
-    /// Flattening the body must not flatten the status: the frontends match on
-    /// these codes.
-    #[tokio::test]
-    async fn the_status_code_survives_the_flattening() {
-        assert_eq!(
-            WarpgateError::Other(LEAK.into()).as_response().status(),
-            poem::http::StatusCode::INTERNAL_SERVER_ERROR
-        );
-        assert_eq!(
-            WarpgateError::UserNotFound("alice".into())
-                .as_response()
-                .status(),
-            poem::http::StatusCode::UNAUTHORIZED
-        );
-    }
+    /// A nested error keeps its own kind, and only that.
+    #[test]
+    fn a_nested_error_passes_its_canonical_reason_through() {
+        let sso = WarpgateError::Sso(super::SsoError::Discovery(
+            "https://idp.corp.example/.well-known: connection refused".into(),
+        ));
+        assert_eq!(sso.user_facing_reason(), "provider discovery error");
 
-    /// The reference is only useful if it identifies one occurrence.
-    #[tokio::test]
-    async fn each_failure_gets_its_own_reference() {
-        let first = body_of(WarpgateError::Other(LEAK.into()).as_response()).await;
-        let second = body_of(WarpgateError::Other(LEAK.into()).as_response()).await;
-        assert_ne!(first, second, "the correlation id is a constant: {first}");
+        let ldap = WarpgateError::Ldap(super::LdapError::AuthenticationFailed(
+            "invalid credentials for cn=svc,dc=corp".into(),
+        ));
+        assert_eq!(ldap.user_facing_reason(), "LDAP authentication failed");
     }
 }

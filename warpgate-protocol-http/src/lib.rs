@@ -2,7 +2,6 @@ pub mod api;
 mod catchall;
 mod client_cache;
 mod common;
-mod error;
 mod middleware;
 pub mod proxy;
 mod session;
@@ -32,7 +31,7 @@ use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
-use warpgate_common_http::errors::flatten_internal_errors;
+use warpgate_common_http::errors::render_errors;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
@@ -50,7 +49,6 @@ use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 use crate::api::common::forward_ws_to_session_owner;
 use crate::client_cache::{HTTP_CLIENT_CACHE_VACUUM_INTERVAL, HttpClientCache};
 use crate::common::{endpoint_auth, page_auth};
-use crate::error::error_page;
 use crate::middleware::{
     ContentSecurityPolicyMiddleware, CookieHostMiddleware, TicketMiddleware,
     WARPGATE_PLAYGROUND_CSP,
@@ -299,12 +297,7 @@ impl ProtocolServer for HTTPProtocolServer {
             .nest("/_warpgate", at_warpgate_endpoints())
             .nest_no_strip(
                 "/",
-                page_auth(catchall::catchall_endpoint).around(move |ep, req| async move {
-                    Ok(match Box::pin(ep.call(req)).await {
-                        Ok(response) => response.into_response(),
-                        Err(ref error) => error_page(error).into_response(),
-                    })
-                }),
+                page_auth(catchall::catchall_endpoint).around(render_errors),
             )
             .around(inject_request_authorization)
             .around(move |ep, req| async move {
@@ -343,7 +336,7 @@ impl ProtocolServer for HTTPProtocolServer {
             .data(session_storage.clone())
             // Outermost on purpose: session loading and header parsing run
             // before routing and fail the same way a handler does.
-            .around(flatten_internal_errors);
+            .around(render_errors);
 
         tokio::spawn(async move {
             loop {

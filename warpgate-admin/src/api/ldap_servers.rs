@@ -5,7 +5,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, Secret, WarpgateError, client_error_message};
+use warpgate_common::{AdminPermission, Secret, WarpgateError};
 use warpgate_db_entities::{LdapServer, Parameters};
 use warpgate_ldap::LdapUsernameAttribute;
 use warpgate_tls::TlsMode;
@@ -445,7 +445,7 @@ impl ListApi {
                 Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
                     TestLdapServerResponse {
                         success: false,
-                        message: format!("Connection failed: {}", client_error_message(&e)),
+                        message: format!("Connection failed: {e:#}"),
                         base_dns: None,
                     },
                 ))),

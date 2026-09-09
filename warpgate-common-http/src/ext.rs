@@ -1,4 +1,5 @@
 use poem::FromRequest;
+use poem::http::HeaderName;
 use poem::http::uri::{Authority, Scheme};
 use poem::web::Data;
 use url::Url;
@@ -96,4 +97,10 @@ mod tests {
 
         assert_eq!(url.as_str(), "https://config.example:8888/");
     }
+}
+
+pub fn is_navigation_request(req: &poem::Request) -> bool {
+    req.headers()
+        .get(HeaderName::from_static("sec-fetch-mode"))
+        .is_none_or(|mode| mode == "navigate")
 }

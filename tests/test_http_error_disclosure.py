@@ -1,7 +1,7 @@
 """End-to-end evidence for what `WarpgateError` puts in an HTTP response body.
 
-The unit tests in `warpgate-common/src/error.rs` exercise `as_response()`
-directly. These go one level out and prove the same property where it is
+The unit tests in `warpgate-common/src/error.rs` and
+`warpgate-common-http/src/errors.rs` exercise the rendering directly. These go one level out and prove the same property where it is
 actually reachable: a real warpgate process, a real HTTP client, and two
 paths a real caller takes -- one of them without authenticating at all.
 
@@ -38,8 +38,10 @@ SPOOFED_HOST = "attacker.example"
 
 ADMIN_TOKEN_HEADER = {"X-Warpgate-Token": "token-value"}
 
+# A canonical reason -- the fixed part of the error, nothing interpolated --
+# and the reference an operator looks up in the log.
 REFERENCE = re.compile(
-    r"^Internal Server Error \(reference: "
+    r"^[^()]+ \(reference: "
     r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)$"
 )
 
@@ -144,9 +146,6 @@ def test_the_configured_whitelist_never_reaches_an_anonymous_caller(
         assert domain not in body, (
             f"an anonymous caller was told the configured whitelist: {body!r}"
         )
-    assert "whitelist" not in body.lower(), (
-        f"the refusal described the check it failed: {body!r}"
-    )
     assert SPOOFED_HOST not in body, f"the request was reflected back: {body!r}"
 
     match = REFERENCE.match(body.strip())
@@ -176,10 +175,10 @@ def test_an_anonymous_caller_gets_no_database_error_from_the_info_endpoint(
 ):
     """The second door, and the one that needed a second pair of eyes.
 
-    `WarpgateError::as_response()` only runs for an error that reaches poem
-    *as* a `WarpgateError`. `GET /@warpgate/api/info` reaches its database
-    through `.context("loading LDAP servers")`, which turns a `sea_orm::DbErr`
-    into an `anyhow::Error` and then into a plain `poem::Error` -- whose own
+    `GET /@warpgate/api/info` reaches its database through
+    `.context("loading LDAP servers")`, which turns a `sea_orm::DbErr` into an
+    `anyhow::Error` and then into a plain `poem::Error` -- not a
+    `WarpgateError` with a canonical reason of its own, but one whose
     `Display` renders an anyhow source with `{err:#}`, the entire causal
     chain. No credential of any kind is needed: this is the endpoint the
     single-page app calls before anyone logs in.

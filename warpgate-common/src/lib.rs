@@ -14,7 +14,7 @@ mod types;
 pub mod version;
 
 pub use config::*;
-pub use error::{WarpgateError, client_error_message};
+pub use error::{UserFacingReason, WarpgateError};
 pub use helpers::password_policy::{PasswordPolicy, PasswordPolicyViolation, validate_password};
 pub use state::GlobalParams;
 pub use types::*;
