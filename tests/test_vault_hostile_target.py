@@ -217,7 +217,11 @@ def test_a_jump_host_that_never_opens_the_tunnel_is_given_up_on(
             if jump_host is not None:
                 options.jump_host = jump_host
             target = api.create_target(
-                sdk.TargetDataRequest(name=name, options=sdk.TargetOptions(options))
+                sdk.TargetDataRequest(
+                    name=name,
+                    require_approval=False,
+                    options=sdk.TargetOptions(options),
+                )
             )
             api.add_target_role(target.id, role.id)
             return target

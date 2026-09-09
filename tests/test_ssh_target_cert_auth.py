@@ -108,6 +108,7 @@ def make_user_and_target(
     target = api.create_target(
         sdk.TargetDataRequest(
             name=f"cert-{uuid4()}",
+            require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetSSHOptions(
                     kind="Ssh",
@@ -1289,6 +1290,7 @@ class TestControlsStillApply:
         target = api.create_target(
             sdk.TargetDataRequest(
                 name=f"pubkey-{uuid4()}",
+                require_approval=False,
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
@@ -1429,7 +1431,11 @@ class TestAChainWithAJumpHost:
             if jump is not None:
                 options.jump_host = jump
             target = api.create_target(
-                sdk.TargetDataRequest(name=name, options=sdk.TargetOptions(options))
+                sdk.TargetDataRequest(
+                    name=name,
+                    require_approval=False,
+                    options=sdk.TargetOptions(options),
+                )
             )
             api.add_target_role(target.id, wg_role.id)
             return target

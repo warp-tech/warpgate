@@ -416,6 +416,7 @@ class TestTheCredentialFileItself:
         target = api.create_target(
             sdk.TargetDataRequest(
                 name=f"cert-{uuid4()}",
+                require_approval=False,
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
