@@ -406,13 +406,14 @@ mod tests {
         let (head, payload) = encrypted.rsplit_once(':').unwrap();
 
         let mut bytes = BASE64.decode(payload.as_bytes()).unwrap();
-        // Bitwise flip instead of swapping 0 and last bytes: random 12-byte GCM nonces
-        // can occasionally yield bytes[0] == bytes[last], making swap a no-op and causing
-        // false test failure.
-        bytes[0] ^= 0xff;
+        // Flipping a bit always changes the ciphertext. Swapping the first
+        // and last bytes does nothing when they are equal, which a random
+        // nonce makes them about once in 256 runs.
+        if let Some(byte) = bytes.last_mut() {
+            *byte ^= 1;
+        }
 
         let tampered = format!("{head}:{}", BASE64.encode(&bytes));
-
         assert!(matches!(
             k.decrypt(&tampered),
             Err(EncryptionError::Corrupt)
