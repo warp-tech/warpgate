@@ -17,10 +17,10 @@
         ModalFooter,
         Tooltip,
     } from '@sveltestrap/sveltestrap'
-    import { stringifyError } from 'common/errors'
     import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import EmptyState from 'common/EmptyState.svelte'
+    import { stringifyError } from 'common/errors'
     import GettingStarted from 'common/GettingStarted.svelte'
     import { resolveGroup } from 'common/groups'
     import ItemList, {

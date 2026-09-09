@@ -11,14 +11,16 @@
     } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
     import {
-        api,
         ApprovalRequestStatus,
+        api,
         type Recording,
         type Target,
         type TargetSessionSnapshot,
         type UserSessionSnapshot,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
+    import TargetBadge from 'admin/log-viewer/TargetBadge.svelte'
+    import UserBadge from 'admin/log-viewer/UserBadge.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
@@ -35,8 +37,6 @@
     import Fa from 'svelte-fa'
     import firstBy from 'thenby'
     import LogViewer from '../log-viewer/LogViewer.svelte'
-    import TargetBadge from 'admin/log-viewer/TargetBadge.svelte'
-    import UserBadge from 'admin/log-viewer/UserBadge.svelte'
 
     interface Props {
         params: { id: string }
