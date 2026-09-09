@@ -93,8 +93,8 @@ impl MySqlClient {
             info!("Target connection upgraded to TLS");
         }
 
-        // Resolve the effective password (may be an IAM-generated token or legacy field)
-        let effective_password = match &target.effective_auth() {
+        // An IAM role yields a short-lived token in place of a stored password
+        let effective_password = match &target.auth {
             warpgate_common::DatabaseTargetAuth::Password(auth) => auth
                 .password
                 .reveal()

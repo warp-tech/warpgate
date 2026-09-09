@@ -355,7 +355,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         admitted: AdmittedTarget<TargetPostgresOptions>,
     ) -> Result<(), PostgresError> {
         let options = admitted.options().clone();
-        let target_protocol_version = match options.protocol_version.unwrap_or_default() {
+        let target_protocol_version = match options.protocol_version {
             PostgresProtocolVersion::V3_0 => ProtocolVersion::PROTOCOL3_0,
             PostgresProtocolVersion::V3_2 => ProtocolVersion::PROTOCOL3_2,
         };

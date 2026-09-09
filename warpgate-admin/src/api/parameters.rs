@@ -69,8 +69,6 @@ struct ParameterValues {
     pub mfa_enforcement: Parameters::MfaEnforcement,
     pub mfa_policy_exempt_sso_users: bool,
     pub default_credential_policy: UserRequireCredentialsPolicy,
-    /// Deprecated in 0.26: superseded by `password_login_mode`
-    pub minimize_password_login: bool,
     pub ticket_self_service_enabled: bool,
     pub ticket_auto_approve_existing_access: bool,
     pub ticket_max_duration_seconds: Option<i64>,
@@ -98,8 +96,6 @@ struct ParameterValues {
     pub lp_user_lockout_duration_seconds: i32,
     pub lp_user_exempt_admins: bool,
     pub banner: String,
-    /// Deprecated in 0.27: superseded by `web_clients_enabled`
-    pub web_ssh_enabled: bool,
     pub web_clients_enabled: bool,
     pub web_auth_max_age_seconds: Option<i64>,
     pub web_approval_grace_period_seconds: Option<i64>,
@@ -238,8 +234,6 @@ impl Api {
             mfa_enforcement: parameters.mfa_enforcement,
             mfa_policy_exempt_sso_users: parameters.mfa_policy_exempt_sso_users,
             default_credential_policy: parameters.default_credential_policy()?,
-            minimize_password_login: parameters.password_login_mode
-                == Parameters::PasswordLoginMode::Minimized,
             ticket_self_service_enabled: parameters.ticket_self_service_enabled,
             ticket_auto_approve_existing_access: parameters.ticket_auto_approve_existing_access,
             ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
@@ -267,7 +261,6 @@ impl Api {
             lp_user_lockout_duration_seconds: parameters.lp_user_lockout_duration_seconds,
             lp_user_exempt_admins: parameters.lp_user_exempt_admins,
             banner: parameters.banner,
-            web_ssh_enabled: parameters.web_clients_enabled,
             web_clients_enabled: parameters.web_clients_enabled,
             web_auth_max_age_seconds: parameters.web_auth_max_age_seconds,
             web_approval_grace_period_seconds: parameters.web_approval_grace_period_seconds,

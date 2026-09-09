@@ -28,9 +28,13 @@ def _provision(api, viewer_password="123"):
         sdk.TargetDataRequest(
             name=f"rdp-{uuid4()}",
             require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetRdpOptions(
                     kind="Rdp",
+                    compression=sdk.RdpTargetCompression.REMOTEFX,
+                    tls_security=sdk.RdpTlsSecurity.TLS12,
                     # The backend is never reached in these auth tests (auth is evaluated
                     # before/instead of dialing it), so this address only needs to be
                     # well-formed.

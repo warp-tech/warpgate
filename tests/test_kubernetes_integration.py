@@ -322,6 +322,8 @@ class TestKubernetesIntegration:
                 sdk.TargetDataRequest(
                     name=token_target_name,
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -467,6 +469,8 @@ class TestKubernetesIntegration:
                 sdk.TargetDataRequest(
                     name=target_name,
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -587,6 +591,8 @@ class TestKubernetesIntegration:
                 sdk.TargetDataRequest(
                     name=target_name,
                     require_approval=require_approval,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -802,6 +808,8 @@ class TestKubernetesIntegration:
                 sdk.TargetDataRequest(
                     name=target_name,
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -907,6 +915,8 @@ class TestKubernetesIntegration:
                 sdk.TargetDataRequest(
                     name=token_target_name,
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -993,6 +1003,8 @@ class TestKubernetesIntegration:
                 sdk.TargetDataRequest(
                     name=target_name,
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -1120,6 +1132,8 @@ class TestKubernetesIntegration:
                 sdk.TargetDataRequest(
                     name=target_name,
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -1329,6 +1343,8 @@ class TestKubernetesIntegration:
                 sdk.TargetDataRequest(
                     name=target_name,
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -1497,6 +1513,8 @@ class TestKubernetesIntegration:
                 sdk.TargetDataRequest(
                     name=target_name,
                     require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",

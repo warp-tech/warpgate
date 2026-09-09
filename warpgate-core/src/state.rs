@@ -324,7 +324,7 @@ mod tests {
             options: TargetOptions::Http(TargetHTTPOptions {
                 url: "http://target".into(),
                 tls: Tls::default(),
-                headers: None,
+                headers: Default::default(),
                 external_host: None,
             }),
             rate_limit_bytes_per_second: None,

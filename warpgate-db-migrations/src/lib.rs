@@ -90,6 +90,7 @@ mod m00083_record_desktop_keyboard_input;
 mod m00084_mfa_enforcement;
 mod m00085_default_credential_policy;
 mod m00086_jit_session_approval;
+mod m00087_drop_null_target_options;
 
 pub(crate) mod helpers;
 
@@ -185,6 +186,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00084_mfa_enforcement::Migration),
             Box::new(m00085_default_credential_policy::Migration),
             Box::new(m00086_jit_session_approval::Migration),
+            Box::new(m00087_drop_null_target_options::Migration),
         ]
     }
 }

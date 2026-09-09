@@ -32,9 +32,12 @@ def _ssh_target(processes, wg_c_ed25519_pubkey, shared_wg, require_approval=Fals
             sdk.TargetDataRequest(
                 name=f"ssh-{uuid4()}",
                 require_approval=require_approval,
+                ticket_requests_disabled=False,
+                ticket_require_approval=False,
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
+                        allow_insecure_algos=False,
                         host="localhost",
                         port=ssh_port,
                         username="root",
