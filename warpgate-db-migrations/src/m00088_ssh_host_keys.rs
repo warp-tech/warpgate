@@ -1,4 +1,4 @@
-use sea_orm::{ConnectionTrait, EntityTrait};
+use sea_orm::ConnectionTrait;
 use sea_orm_migration::prelude::*;
 use warpgate_common::SshHostKeyKind;
 use warpgate_db_entities::Parameters::get_config_migration_values;
@@ -35,14 +35,7 @@ impl MigrationTrait for Migration {
                 .await?;
         }
 
-        // Fill in the row of an existing install: its on-disk keys (published
-        // by the process before migrations run), or fresh ones when it has
-        // none. A fresh install has no row yet and is seeded by
-        // `Parameters::Entity::get`.
         let db = manager.get_connection();
-        if parameters::Entity::find().one(db).await?.is_none() {
-            return Ok(());
-        }
         let values = get_config_migration_values();
         let mut stmt = Query::update();
         stmt.table(parameters::Entity);

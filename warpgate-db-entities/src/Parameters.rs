@@ -145,7 +145,7 @@ impl Default for RecordingsStorageConfig {
 
 /// The config-file settings that have since moved into the parameters row,
 /// published by the process before migrations run so that the migrations can
-/// copy them into the row of an existing install.
+/// copy them into the row.
 #[derive(Default)]
 pub struct ConfigMigrationValues {
     pub recordings_enable: bool,
@@ -400,6 +400,8 @@ impl Model {
 }
 
 impl Entity {
+    /// The single parameters row. Migration m00027 creates it and the later
+    /// migrations fill it in, so it exists on every migrated database.
     pub async fn get(db: &DatabaseConnection) -> Result<Model, DbErr> {
         fn stored_ssh_host_key(kind: SshHostKeyKind) -> Result<String, DbErr> {
             get_config_migration_values()
@@ -407,86 +409,11 @@ impl Entity {
                 .map_err(|e| DbErr::Custom(e.to_string()))
         }
 
-        match Self::find().one(db).await? {
-            Some(model) => Ok(model),
-            None => {
-                #[allow(clippy::unwrap_used, reason = "can't fail")]
-                ActiveModel {
-                    id: Set(Uuid::new_v4()),
-                    allow_own_credential_management: Set(true),
-                    rate_limit_bytes_per_second: Set(None),
-                    ca_certificate_pem: Set("".into()),
-                    ca_private_key_pem: Set("".into()),
-                    ssh_client_auth_publickey: Set(true),
-                    ssh_client_auth_password: Set(true),
-                    ssh_client_auth_keyboard_interactive: Set(true),
-                    ssh_host_key_verification: Set(
-                        get_config_migration_values().ssh_host_key_verification
-                    ),
-                    password_login_mode: Set(PasswordLoginMode::Enabled),
-                    mfa_enforcement: Set(MfaEnforcement::Off),
-                    mfa_policy_exempt_sso_users: Set(false),
-                    ticket_self_service_enabled: Set(false),
-                    ticket_auto_approve_existing_access: Set(true),
-                    ticket_max_duration_seconds: Set(Some(28800)),
-                    ticket_max_uses: Set(None),
-                    ticket_require_description: Set(false),
-                    ticket_request_show_all_targets: Set(false),
-                    target_click_action: Set(TargetClickAction::Connect),
-                    open_targets_in_new_tab: Set(OpenTargetsInNewTabMode::DefaultOn),
-                    show_session_menu: Set(true),
-                    password_policy_min_length: Set(0),
-                    password_policy_require_uppercase: Set(false),
-                    password_policy_require_lowercase: Set(false),
-                    password_policy_require_digits: Set(false),
-                    password_policy_require_special: Set(false),
-                    max_api_token_duration_seconds: Set(None),
-                    record_scp: Set(true),
-                    record_desktop_keyboard_input: Set(true),
-                    tutorial_dismissed: Set(false),
-                    login_protection_enabled: Set(true),
-                    login_protection_retention_seconds: Set(2_592_000), // 30d
-                    lp_ip_max_attempts: Set(5),
-                    lp_ip_time_window_seconds: Set(900),
-                    lp_ip_base_block_duration_seconds: Set(1800),
-                    lp_ip_block_duration_multiplier: Set(2.0),
-                    lp_ip_max_block_duration_seconds: Set(86400),
-                    lp_ip_cooldown_reset_seconds: Set(86400),
-                    lp_user_max_attempts: Set(10),
-                    lp_user_time_window_seconds: Set(3600),
-                    lp_user_auto_unlock: Set(true),
-                    lp_user_lockout_duration_seconds: Set(3600),
-                    lp_user_exempt_admins: Set(true),
-                    banner: Set("".into()),
-                    web_clients_enabled: Set(true),
-                    analytics_consent: Set(AnalyticsConsent::Undecided),
-                    analytics_normal: Set(false),
-                    analytics_instance_id: Set(Uuid::new_v4().to_string()),
-                    instance_created_at: Set(OffsetDateTime::now_utc()),
-                    web_auth_max_age_seconds: Set(None),
-                    web_approval_grace_period_seconds: Set(None),
-                    admin_approval_timeout_seconds: Set(None),
-                    admin_approval_grace_period_seconds: Set(None),
-                    recordings_enable: Set(false),
-                    recordings_storage: Set(serde_json::to_string(
-                        &RecordingsStorageConfig::default(),
-                    )
-                    .unwrap()),
-                    default_credential_policy: Set(serde_json::to_string(
-                        &UserRequireCredentialsPolicy::default(),
-                    )
-                    .unwrap()),
-
-                    cluster_token: Set(None),
-                    encryption_key_fp: Set(None),
-                    retiring_key_fp: Set(None),
-                    ssh_host_key_ed25519: Set(stored_ssh_host_key(SshHostKeyKind::Ed25519)?),
-                    ssh_host_key_rsa: Set(stored_ssh_host_key(SshHostKeyKind::Rsa)?),
-                }
-                .insert(db)
-                .await
-            }
-        }
+        Self::find().one(db).await?.ok_or_else(|| {
+            DbErr::RecordNotFound(
+                "the parameters row is missing; run the database migrations".into(),
+            )
+        })
     }
 }
 
