@@ -1,14 +1,18 @@
 use std::collections::HashMap;
 
 use poem_openapi::{Enum, Object, Union};
-use sea_orm::entity::prelude::*;
 use sea_orm::Set;
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_aws::S3StorageConfig;
 use warpgate_common::auth::CredentialKind;
-use warpgate_common::{PasswordPolicy, Protocol, UserAuthCredential, UserRequireCredentialsPolicy};
+use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
+use warpgate_common::{
+    GlobalParams, PasswordPolicy, Protocol, SshHostKeyKind, UserAuthCredential,
+    UserRequireCredentialsPolicy, WarpgateError,
+};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
@@ -147,16 +151,50 @@ pub struct ConfigMigrationValues {
     pub recordings_enable: bool,
     pub recordings_path: String,
     pub ssh_host_key_verification: SshHostKeyVerificationMode,
+    /// The on-disk SSH host keys (PEM) if still configured
+    pub ssh_host_key_ed25519: Option<String>,
+    pub ssh_host_key_rsa: Option<String>,
 }
 
 impl ConfigMigrationValues {
-    pub fn from_config(config: &warpgate_common::WarpgateConfig) -> Self {
+    pub fn from_config(
+        config: &warpgate_common::WarpgateConfig,
+        params: &GlobalParams,
+    ) -> std::io::Result<Self> {
         let recordings = config.store.recordings.clone().unwrap_or_default();
-        Self {
+        let keys_path = config.store.ssh.keys_path(params);
+        let read_key = |kind: SshHostKeyKind| -> std::io::Result<Option<String>> {
+            match std::fs::read_to_string(keys_path.join(format!("host-{}", kind.name()))) {
+                Ok(pem) => Ok(Some(pem)),
+                // missing file -> ok
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                // other errors fatal
+                Err(e) => Err(e),
+            }
+        };
+        Ok(Self {
             recordings_enable: recordings.enable,
             recordings_path: recordings.path,
             ssh_host_key_verification: config.store.ssh.host_key_verification.into(),
-        }
+            ssh_host_key_ed25519: read_key(SshHostKeyKind::Ed25519)?,
+            ssh_host_key_rsa: read_key(SshHostKeyKind::Rsa)?,
+        })
+    }
+
+    /// Either the legacy key PEM from disk or a fresh one, encrypted
+    pub fn effective_stored_ssh_host_key(
+        &self,
+        kind: SshHostKeyKind,
+    ) -> Result<String, WarpgateError> {
+        let on_disk = match kind {
+            SshHostKeyKind::Ed25519 => &self.ssh_host_key_ed25519,
+            SshHostKeyKind::Rsa => &self.ssh_host_key_rsa,
+        };
+        let pem = match on_disk {
+            Some(pem) => pem.clone(),
+            None => kind.generate_pem()?,
+        };
+        Ok(idempotent_maybe_encrypt_secret(&pem)?)
     }
 }
 
@@ -261,6 +299,10 @@ pub struct Model {
     /// Fingerprint of the previous key while a rotation is going on
     #[sea_orm(column_type = "Text", nullable)]
     pub retiring_key_fp: Option<String>,
+    #[sea_orm(column_type = "Text")]
+    pub ssh_host_key_ed25519: String,
+    #[sea_orm(column_type = "Text")]
+    pub ssh_host_key_rsa: String,
 }
 
 impl Model {
@@ -359,6 +401,12 @@ impl Model {
 
 impl Entity {
     pub async fn get(db: &DatabaseConnection) -> Result<Model, DbErr> {
+        fn stored_ssh_host_key(kind: SshHostKeyKind) -> Result<String, DbErr> {
+            get_config_migration_values()
+                .effective_stored_ssh_host_key(kind)
+                .map_err(|e| DbErr::Custom(e.to_string()))
+        }
+
         match Self::find().one(db).await? {
             Some(model) => Ok(model),
             None => {
@@ -432,6 +480,8 @@ impl Entity {
                     cluster_token: Set(None),
                     encryption_key_fp: Set(None),
                     retiring_key_fp: Set(None),
+                    ssh_host_key_ed25519: Set(stored_ssh_host_key(SshHostKeyKind::Ed25519)?),
+                    ssh_host_key_rsa: Set(stored_ssh_host_key(SshHostKeyKind::Rsa)?),
                 }
                 .insert(db)
                 .await
@@ -528,6 +578,8 @@ mod tests {
             cluster_token: None,
             encryption_key_fp: None,
             retiring_key_fp: None,
+            ssh_host_key_ed25519: "".into(),
+            ssh_host_key_rsa: "".into(),
         }
     }
 

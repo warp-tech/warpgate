@@ -14,7 +14,7 @@ pub use common::*;
 use futures::future::BoxFuture;
 pub use keys::*;
 pub use server::bind_server;
-use warpgate_common::{ListenEndpoint, Protocol};
+use warpgate_common::{ListenEndpoint, Protocol, emit_runtime_warning};
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
@@ -28,8 +28,18 @@ pub struct SSHProtocolServer {
 impl SSHProtocolServer {
     pub async fn new(services: &Services) -> Result<Self> {
         let config = services.config.lock().await;
-        generate_keys(&config, &services.global_params, "host")?;
-        ensure_client_keys(&services.db, &config, &services.global_params).await?;
+        let keys_path = config.store.ssh.keys_path(&services.global_params);
+        ensure_host_keys(&services.db, &keys_path).await?;
+        ensure_client_keys(&services.db, &keys_path).await?;
+        if any_host_key_files_present(&keys_path) {
+            emit_runtime_warning(format!(
+                "SSH host keys are still read from {keys_path:?} and imported into the database. Remove the `ssh.keys` config option and delete the key files to complete the migration; in the future Warpgate will stop reading these files."
+            ));
+        } else if config.store.ssh.keys.is_some() {
+            emit_runtime_warning(format!(
+                "`ssh.keys` points to {keys_path:?} but holds no host keys; the database keys are used. Remove this option from the config."
+            ));
+        }
         Ok(Self {
             services: services.clone(),
         })

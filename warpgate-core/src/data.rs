@@ -1,5 +1,5 @@
 use poem_openapi::Object;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{NodeId, Target, TargetSessionId, UserSessionId, redact_target_secrets};
