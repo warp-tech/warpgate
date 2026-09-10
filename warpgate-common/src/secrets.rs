@@ -128,6 +128,12 @@ impl SecretBackend for DbSecretBackend {
 
 const REFERENCE_SCHEMES: &[&str] = &["vault://", "openbao://"];
 
+/// Whether a stored credential string names a secret in a backend rather than
+/// holding the (possibly encrypted) value itself.
+pub fn is_secret_reference(s: &str) -> bool {
+    REFERENCE_SCHEMES.iter().any(|prefix| s.starts_with(prefix))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MaybeSecretRef {
     Inline(StoredSecret),
@@ -167,7 +173,7 @@ impl FromStr for MaybeSecretRef {
     type Err = SecretError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if REFERENCE_SCHEMES.iter().any(|prefix| s.starts_with(prefix)) {
+        if is_secret_reference(s) {
             SecretRef::from_str(s).map(Self::Reference)
         } else {
             Ok(Self::Inline(StoredSecret::from(s.to_string())))

@@ -352,7 +352,7 @@
                                             class="mb-0 me-2"
                                             type="switch"
                                             checked={parameters.sshHostKeySecretRef != null}
-                                            on:change={e => parameters.sshHostKeySecretRef = (e.currentTarget as HTMLInputElement).checked ? 'vault://' : null}
+                                            on:change={e => parameters.sshHostKeySecretRef = (e.currentTarget as HTMLInputElement).checked ? 'vault://' : undefined}
                                         />
                                         <div>Load host keys from a secret backend</div>
                                     </label>

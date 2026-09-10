@@ -7,6 +7,7 @@ use tracing::{error, info};
 use warpgate_common::encryption::{
     Keyring, env_keyring, idempotent_maybe_decrypt, maybe_reencrypt_str,
 };
+use warpgate_common::secrets::is_secret_reference;
 use warpgate_common::{SshHostKeyKind, WarpgateError, emit_runtime_warning, map_target_secrets};
 use warpgate_db_entities::{Parameters, SshClientKey, Target};
 
@@ -230,6 +231,9 @@ async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
     }
 
     for key in SshClientKey::Entity::find().all(db).await? {
+        if is_secret_reference(&key.secret_key) {
+            continue;
+        }
         let Ok(secret_key) = maybe_reencrypt_str(&key.secret_key) else {
             continue;
         };

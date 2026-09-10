@@ -51,6 +51,8 @@
         keyModalOpen = true
     }
 
+    const REFERENCE_PREFIXES = ['vault://', 'openbao://']
+
     function saveKey(label: string, secretKey: string, isDefault: boolean) {
         const key = editingKey
         run(async () => {
@@ -58,6 +60,12 @@
                 await api.updateSshOwnKey({
                     id: key.id,
                     updateSSHClientKeyRequest: { label, isDefault },
+                })
+                return
+            }
+            if (REFERENCE_PREFIXES.some(p => secretKey.startsWith(p))) {
+                await api.importSshOwnKeyReference({
+                    importSSHClientKeyReferenceRequest: { label, reference: secretKey, isDefault },
                 })
                 return
             }
@@ -114,6 +122,11 @@
                     <strong>{key.label}</strong>
                     {#if key.isDefault}
                         <Badge color="primary">Default</Badge>
+                    {/if}
+                    {#if key.backend}
+                        <Badge color="info" title="Key material is read from this secret backend, not stored in Warpgate">
+                            {key.backend}
+                        </Badge>
                     {/if}
                     {#if $adminPermissions.configEdit}
                         <Button

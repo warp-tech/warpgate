@@ -339,9 +339,12 @@ impl Api {
         if let Some(Some(reference)) = &body.ssh_host_key_secret_ref
             && let Err(error) = reference.parse::<SecretRef>()
         {
-            return Ok(UpdateParametersResponse::BadRequest(Json(error.to_string())));
+            return Ok(UpdateParametersResponse::BadRequest(Json(
+                error.to_string(),
+            )));
         }
-        parameters.ssh_host_key_secret_ref = body.ssh_host_key_secret_ref.clone().map_or(NotSet, Set);
+        parameters.ssh_host_key_secret_ref =
+            body.ssh_host_key_secret_ref.clone().map_or(NotSet, Set);
         parameters.password_login_mode = body.password_login_mode.map_or(NotSet, Set);
         parameters.mfa_enforcement = body.mfa_enforcement.map_or(NotSet, Set);
         parameters.mfa_policy_exempt_sso_users =
