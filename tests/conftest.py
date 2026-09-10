@@ -710,6 +710,7 @@ class ProcessManager:
         http_port=None,
         database_url=None,
         env=None,
+        import_ssh_keys=True,
     ) -> WarpgateProcess:
         args = args or ["run", "--enable-admin-token"]
 
@@ -811,10 +812,10 @@ class ProcessManager:
                 # Likewise a DB parameter seeded from the config at setup time.
                 "--host-key-verification",
                 "auto-accept",
-                # Fixed host/client keys, stored in the DB.
-                "--import-ssh-keys",
-                str(Path(os.getcwd()) / "ssh-keys/wg"),
             ]
+            if import_ssh_keys:
+                # Fixed host/client keys, stored in the DB.
+                setup_args += ["--import-ssh-keys", str(Path(os.getcwd()) / "ssh-keys/wg")]
             if database_url:
                 setup_args += ["--database-url", database_url]
             p = run(

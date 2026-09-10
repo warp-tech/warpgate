@@ -1,13 +1,13 @@
-use sea_orm::ConnectionTrait;
 use sea_orm_migration::prelude::*;
 use warpgate_common::SshHostKeyKind;
-use warpgate_db_entities::Parameters::get_config_migration_values;
 
 use crate::helpers::string_default_value;
 use crate::m00010_parameters::parameters;
 
 /// SSH host keys move out of the `ssh.keys` directory into the parameters row.
-/// The columns are empty only between being added and being filled in below.
+/// The columns start out empty; `ensure_host_keys` fills them at the next
+/// startup, importing the files if they are still there and generating keys
+/// otherwise.
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -34,19 +34,6 @@ impl MigrationTrait for Migration {
                 )
                 .await?;
         }
-
-        let db = manager.get_connection();
-        let values = get_config_migration_values();
-        let mut stmt = Query::update();
-        stmt.table(parameters::Entity);
-        for kind in SshHostKeyKind::ALL {
-            let stored = values
-                .effective_stored_ssh_host_key(kind)
-                .map_err(|e| DbErr::Custom(e.to_string()))?;
-            stmt.value(column(kind), stored);
-        }
-        db.execute(backend.build(&stmt)).await?;
-
         Ok(())
     }
 

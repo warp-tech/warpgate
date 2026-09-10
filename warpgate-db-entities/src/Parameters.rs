@@ -8,11 +8,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_aws::S3StorageConfig;
 use warpgate_common::auth::CredentialKind;
-use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
-use warpgate_common::{
-    GlobalParams, PasswordPolicy, Protocol, SshHostKeyKind, UserAuthCredential,
-    UserRequireCredentialsPolicy, WarpgateError,
-};
+use warpgate_common::{PasswordPolicy, Protocol, UserAuthCredential, UserRequireCredentialsPolicy};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
@@ -151,50 +147,16 @@ pub struct ConfigMigrationValues {
     pub recordings_enable: bool,
     pub recordings_path: String,
     pub ssh_host_key_verification: SshHostKeyVerificationMode,
-    /// The on-disk SSH host keys (PEM) if still configured
-    pub ssh_host_key_ed25519: Option<String>,
-    pub ssh_host_key_rsa: Option<String>,
 }
 
 impl ConfigMigrationValues {
-    pub fn from_config(
-        config: &warpgate_common::WarpgateConfig,
-        params: &GlobalParams,
-    ) -> std::io::Result<Self> {
+    pub fn from_config(config: &warpgate_common::WarpgateConfig) -> Self {
         let recordings = config.store.recordings.clone().unwrap_or_default();
-        let keys_path = config.store.ssh.keys_path(params);
-        let read_key = |kind: SshHostKeyKind| -> std::io::Result<Option<String>> {
-            match std::fs::read_to_string(keys_path.join(format!("host-{}", kind.name()))) {
-                Ok(pem) => Ok(Some(pem)),
-                // missing file -> ok
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                // other errors fatal
-                Err(e) => Err(e),
-            }
-        };
-        Ok(Self {
+        Self {
             recordings_enable: recordings.enable,
             recordings_path: recordings.path,
             ssh_host_key_verification: config.store.ssh.host_key_verification.into(),
-            ssh_host_key_ed25519: read_key(SshHostKeyKind::Ed25519)?,
-            ssh_host_key_rsa: read_key(SshHostKeyKind::Rsa)?,
-        })
-    }
-
-    /// Either the legacy key PEM from disk or a fresh one, encrypted
-    pub fn effective_stored_ssh_host_key(
-        &self,
-        kind: SshHostKeyKind,
-    ) -> Result<String, WarpgateError> {
-        let on_disk = match kind {
-            SshHostKeyKind::Ed25519 => &self.ssh_host_key_ed25519,
-            SshHostKeyKind::Rsa => &self.ssh_host_key_rsa,
-        };
-        let pem = match on_disk {
-            Some(pem) => pem.clone(),
-            None => kind.generate_pem()?,
-        };
-        Ok(idempotent_maybe_encrypt_secret(&pem)?)
+        }
     }
 }
 
@@ -403,12 +365,6 @@ impl Entity {
     /// The single parameters row. Migration m00027 creates it and the later
     /// migrations fill it in, so it exists on every migrated database.
     pub async fn get(db: &DatabaseConnection) -> Result<Model, DbErr> {
-        fn stored_ssh_host_key(kind: SshHostKeyKind) -> Result<String, DbErr> {
-            get_config_migration_values()
-                .effective_stored_ssh_host_key(kind)
-                .map_err(|e| DbErr::Custom(e.to_string()))
-        }
-
         Self::find().one(db).await?.ok_or_else(|| {
             DbErr::RecordNotFound(
                 "the parameters row is missing; run the database migrations".into(),
