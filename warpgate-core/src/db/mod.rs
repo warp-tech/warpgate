@@ -102,7 +102,7 @@ pub async fn connect_to_db_and_migrate(
     // so the migrations can copy them into the DB; afterwards the config file's
     // copies are ignored.
     warpgate_db_entities::Parameters::set_config_migration_values(
-        ConfigMigrationValues::from_config(config),
+        ConfigMigrationValues::from_config(config, params)?,
     );
     migrate_database(&connection).await?;
     Ok(connection)
