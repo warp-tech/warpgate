@@ -1,23 +1,22 @@
-use futures::TryStreamExt;
-use tokio_stream::wrappers::ReceiverStream;
+use std::future::Future;
+use std::sync::Arc;
+use std::vec;
 
-use std::{future::Future, sync::Arc, vec};
-use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    sync::{
-        mpsc::{
-            channel,
-            error::{TryRecvError, TrySendError},
-            Receiver, Sender,
-        },
-        oneshot, Mutex,
-    },
-};
+use futures::TryStreamExt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::{oneshot, Mutex};
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::compat::*;
 use tracing::*;
 
 use crate::{codec, PixelFormat, Rect, VncEncoding, VncError, VncEvent, X11Event};
 const CHANNEL_SIZE: usize = 4096;
+
+/// Warpgate fork: cap the target-driven ServerInit desktop-name length before allocating.
+/// Comparable to the Warpgate VNC server's `MAX_STRING_LEN`. See PATCHES.md.
+const MAX_NAME_LEN: usize = 4096;
 
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
@@ -129,9 +128,7 @@ impl VncInner {
             };
 
             let pf = pixel_format.as_ref().unwrap();
-            if let Err(e) =
-                decode_loop(&mut conn_ch_rx, pf, &output_func, decoding_stop_rx).await
-            {
+            if let Err(e) = decode_loop(&mut conn_ch_rx, pf, &output_func, decoding_stop_rx).await {
                 if let VncError::IoError(e) = e {
                     if let std::io::ErrorKind::UnexpectedEof = e.kind() {
                         // this should be a normal case when the network connection disconnects
@@ -358,8 +355,14 @@ where
         send_our_pf = true;
     }
 
-    let name_len = stream.read_u32().await?;
-    let mut name_buf = vec![0_u8; name_len as usize];
+    // Warpgate fork: cap the target-driven name length before allocating. See PATCHES.md.
+    let name_len = stream.read_u32().await? as usize;
+    if name_len > MAX_NAME_LEN {
+        return Err(VncError::General(format!(
+            "ServerInit name too long ({name_len} bytes)"
+        )));
+    }
+    let mut name_buf = vec![0_u8; name_len];
     stream.read_exact(&mut name_buf).await?;
     let name = String::from_utf8_lossy(&name_buf).into_owned();
 

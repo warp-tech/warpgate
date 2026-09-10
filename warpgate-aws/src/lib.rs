@@ -8,12 +8,17 @@ mod eks;
 mod error;
 mod rds;
 mod region;
+mod s3;
 
 pub use ec2::{Ec2InstanceInfo, find_instance_by_ip, is_running_on_ec2, send_ssh_public_key};
 pub use eks::{EksClusterInfo, find_eks_cluster_by_url, generate_eks_token};
 pub use error::AwsError;
 pub use rds::generate_rds_auth_token;
 pub use region::{get_imds_region, parse_eks_region, parse_rds_region};
+pub use s3::{
+    AutoCredentials, S3Credentials, S3MultipartUpload, S3Storage, S3StorageConfig,
+    StaticCredentials,
+};
 
 /// Cached EC2 detection result
 static EC2_DETECTION: OnceCell<bool> = OnceCell::const_new();

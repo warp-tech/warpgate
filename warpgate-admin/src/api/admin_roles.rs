@@ -1,16 +1,14 @@
-use poem::web::Data;
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, AdminRole as AdminRoleConfig, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_db_entities::{AdminRole, User};
 
-use super::AnySecurityScheme;
-use crate::api::common::{case_insensitive_search, require_admin_permission};
+use super::AdminContext;
+use crate::api::common::case_insensitive_search;
 
 #[derive(Object)]
 struct AdminRoleDataRequest {
@@ -32,6 +30,7 @@ struct AdminRoleDataRequest {
 
     sessions_view: bool,
     sessions_terminate: bool,
+    approve_sessions: bool,
 
     recordings_view: bool,
 
@@ -42,7 +41,7 @@ struct AdminRoleDataRequest {
 
     admin_roles_manage: bool,
 
-    ticket_requests_manage: Option<bool>,
+    ticket_requests_manage: bool,
 }
 
 #[derive(ApiResponse)]
@@ -102,20 +101,18 @@ impl ListApi {
     )]
     async fn api_get_all_admin_roles(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         search: Query<Option<String>>,
-        _sec: AnySecurityScheme,
     ) -> Result<GetAdminRolesResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
-
-        let db = ctx.services().db.lock().await;
+        // Obtaining `AdminContext` already proved admin access (the old `None` check).
+        let db = &admin.services().db;
         let mut roles = AdminRole::Entity::find().order_by_asc(AdminRole::Column::Name);
 
         if let Some(ref search) = *search {
             roles = roles.filter(case_insensitive_search(search, [AdminRole::Column::Name]));
         }
 
-        let roles = roles.all(&*db).await?;
+        let roles = roles.all(db).await?;
         Ok(GetAdminRolesResponse::Ok(Json(
             roles.into_iter().map(Into::into).collect(),
         )))
@@ -128,13 +125,12 @@ impl ListApi {
     )]
     async fn api_create_admin_role(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<AdminRoleDataRequest>,
-        _sec: AnySecurityScheme,
     ) -> Result<CreateAdminRoleResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
+        admin.require(AdminPermission::AdminRolesManage)?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &admin.services().db;
         let values = AdminRole::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
@@ -151,15 +147,16 @@ impl ListApi {
             access_roles_assign: Set(body.access_roles_assign),
             sessions_view: Set(body.sessions_view),
             sessions_terminate: Set(body.sessions_terminate),
+            approve_sessions: Set(body.approve_sessions),
             recordings_view: Set(body.recordings_view),
             tickets_create: Set(body.tickets_create),
             tickets_delete: Set(body.tickets_delete),
             config_edit: Set(body.config_edit),
             admin_roles_manage: Set(body.admin_roles_manage),
-            ticket_requests_manage: Set(body.ticket_requests_manage.unwrap_or_default()),
+            ticket_requests_manage: Set(body.ticket_requests_manage),
         };
 
-        let role = values.insert(&*db).await?;
+        let role = values.insert(db).await?;
         let role_config: AdminRoleConfig = role.into();
         Ok(CreateAdminRoleResponse::Created(Json(role_config)))
     }
@@ -176,14 +173,11 @@ impl DetailApi {
     )]
     async fn api_get_admin_role(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         id: Path<Uuid>,
-        _sec: AnySecurityScheme,
     ) -> Result<GetAdminRoleResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
-
-        let db = ctx.services().db.lock().await;
-        let role = AdminRole::Entity::find_by_id(id.0).one(&*db).await?;
+        let db = &admin.services().db;
+        let role = AdminRole::Entity::find_by_id(id.0).one(db).await?;
         Ok(match role {
             Some(r) => GetAdminRoleResponse::Ok(Json(r.into())),
             None => GetAdminRoleResponse::NotFound,
@@ -197,15 +191,14 @@ impl DetailApi {
     )]
     async fn api_update_admin_role(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<AdminRoleDataRequest>,
         id: Path<Uuid>,
-        _sec: AnySecurityScheme,
     ) -> Result<UpdateAdminRoleResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
+        admin.require(AdminPermission::AdminRolesManage)?;
 
-        let db = ctx.services().db.lock().await;
-        let Some(role) = AdminRole::Entity::find_by_id(id.0).one(&*db).await? else {
+        let db = &admin.services().db;
+        let Some(role) = AdminRole::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateAdminRoleResponse::NotFound);
         };
 
@@ -224,13 +217,14 @@ impl DetailApi {
         model.access_roles_assign = Set(body.access_roles_assign);
         model.sessions_view = Set(body.sessions_view);
         model.sessions_terminate = Set(body.sessions_terminate);
+        model.approve_sessions = Set(body.approve_sessions);
         model.recordings_view = Set(body.recordings_view);
         model.tickets_create = Set(body.tickets_create);
         model.tickets_delete = Set(body.tickets_delete);
         model.config_edit = Set(body.config_edit);
         model.admin_roles_manage = Set(body.admin_roles_manage);
-        model.ticket_requests_manage = Set(body.ticket_requests_manage.unwrap_or_default());
-        let role = model.update(&*db).await?;
+        model.ticket_requests_manage = Set(body.ticket_requests_manage);
+        let role = model.update(db).await?;
         Ok(UpdateAdminRoleResponse::Ok(Json(role.into())))
     }
 
@@ -241,14 +235,13 @@ impl DetailApi {
     )]
     async fn api_delete_admin_role(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         id: Path<Uuid>,
-        _sec: AnySecurityScheme,
     ) -> Result<DeleteAdminRoleResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::AdminRolesManage)).await?;
+        admin.require(AdminPermission::AdminRolesManage)?;
 
-        let db = ctx.services().db.lock().await;
-        let Some(role) = AdminRole::Entity::find_by_id(id.0).one(&*db).await? else {
+        let db = &admin.services().db;
+        let Some(role) = AdminRole::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteAdminRoleResponse::NotFound);
         };
 
@@ -257,7 +250,7 @@ impl DetailApi {
             return Ok(DeleteAdminRoleResponse::Forbidden);
         }
 
-        role.delete(&*db).await?;
+        role.delete(db).await?;
         Ok(DeleteAdminRoleResponse::Deleted)
     }
 
@@ -268,16 +261,13 @@ impl DetailApi {
     )]
     async fn api_get_admin_role_users(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         id: Path<Uuid>,
-        _sec: AnySecurityScheme,
     ) -> Result<GetAdminRoleUsersResponse, WarpgateError> {
-        require_admin_permission(&ctx, None).await?;
-
-        let db = ctx.services().db.lock().await;
+        let db = &admin.services().db;
         let Some((_, users)) = AdminRole::Entity::find_by_id(id.0)
             .find_with_related(User::Entity)
-            .all(&*db)
+            .all(db)
             .await
             .map(|x| x.into_iter().next())
             .map_err(WarpgateError::from)?

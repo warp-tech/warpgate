@@ -23,7 +23,7 @@ $light: transparent;
 $info: $blue;
 
 
-$component-active-bg: $primary;
+$component-active-bg: #192528;
 
 $input-bg: #1c1c24;
 $input-border-color: #ced4da40;
@@ -64,7 +64,8 @@ $alert-bg-scale: 100%;
 $alert-border-scale: 50%;
 $alert-color-scale: 0%;
 
-$code-color: #84f1fe;
+$code-color: #84d3fe;
+$code-bg: #19242b;
 
 $form-check-input-border: 2px solid $input-border-color;
 $form-switch-color: $secondary;
@@ -103,3 +104,4 @@ $danger-text-emphasis:    tint-color($danger, 60%);
 $nav-link-color: $body-color;
 $nav-pills-link-active-color: $body-color;
 $nav-pills-link-active-bg: $component-active-bg;
+$dropdown-link-active-bg: $component-active-bg;

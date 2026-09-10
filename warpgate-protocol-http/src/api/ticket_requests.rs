@@ -1,22 +1,20 @@
-use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{Secret, WarpgateError};
+use warpgate_common::{Secret, Target as TargetConfig, WarpgateError};
 use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_core::ticket_requests::{
     ActivateTicketRequestError, CreateTicketRequestError, CreateTicketRequestParams,
-    activate_ticket_request, create_ticket_request,
+    activate_ticket_request, create_ticket_request, delete_ticket,
 };
 use warpgate_db_entities::{Target, Ticket, TicketRequest};
 
 use super::common::get_user;
-use crate::api::AnySecurityScheme;
-use crate::common::endpoint_auth;
+use crate::api::auth_scheme::AuthedSession;
 
 const fn is_ticket_session(ctx: &AuthenticatedRequestContext) -> bool {
     matches!(
@@ -37,7 +35,35 @@ struct CreateTicketRequestBody {
 #[derive(Object)]
 struct ActivatedTicketModel {
     request: TicketRequest::Model,
+    target: ActivatedTicketTargetInfo,
     secret: Option<String>,
+}
+
+/// Just the slim view of fields that the UI needs to show connection instructions
+/// since the user might not have full role based access to the target
+#[derive(Object)]
+struct ActivatedTicketTargetInfo {
+    pub name: String,
+    pub kind: Target::TargetKind,
+    pub external_host: Option<String>,
+    pub default_database_name: Option<String>,
+}
+
+impl TryFrom<Target::Model> for ActivatedTicketTargetInfo {
+    type Error = WarpgateError;
+
+    fn try_from(model: Target::Model) -> Result<Self, Self::Error> {
+        let target = TargetConfig::try_from(model)?;
+        Ok(Self {
+            name: target.name,
+            kind: (&target.options).into(),
+            external_host: target.options.external_host().map(ToString::to_string),
+            default_database_name: target
+                .options
+                .default_database_name()
+                .map(ToString::to_string),
+        })
+    }
 }
 
 #[derive(Object)]
@@ -74,6 +100,7 @@ struct MyTicketModel {
 #[derive(Object)]
 struct CreatedRequest {
     pub request: TicketRequest::Model,
+    pub target: ActivatedTicketTargetInfo,
     pub auto_approved_ticket_secret: Option<Secret<String>>,
 }
 
@@ -144,14 +171,12 @@ impl Api {
     #[oai(
         path = "/ticket-requests",
         method = "post",
-        operation_id = "create_ticket_request",
-        transform = "endpoint_auth"
+        operation_id = "create_ticket_request"
     )]
     async fn api_create_ticket_request(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<CreateTicketRequestBody>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateTicketRequestResponse, WarpgateError> {
         if is_ticket_session(&ctx) {
             return Ok(CreateTicketRequestResponse::Forbidden(Json(
@@ -159,11 +184,13 @@ impl Api {
             )));
         }
 
-        let db = ctx.services().db.lock().await;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let db = &ctx.services().db;
+        let Some(full) = ctx.auth.as_full_user() else {
             return Ok(CreateTicketRequestResponse::Unauthorized);
         };
-        drop(db);
+        let Some(user_model) = get_user(&full, db).await? else {
+            return Ok(CreateTicketRequestResponse::Unauthorized);
+        };
 
         let target_name = body.target_name.trim().to_string();
         if target_name.is_empty() {
@@ -188,6 +215,7 @@ impl Api {
         match result {
             Ok(result) => Ok(CreateTicketRequestResponse::Created(Json(CreatedRequest {
                 request: result.request,
+                target: result.target.try_into()?,
                 auto_approved_ticket_secret: result.auto_approved_secret,
             }))),
             Err(CreateTicketRequestError::InvalidInput(msg)) => {
@@ -200,33 +228,34 @@ impl Api {
     #[oai(
         path = "/ticket-requests",
         method = "get",
-        operation_id = "get_my_ticket_requests",
-        transform = "endpoint_auth"
+        operation_id = "get_my_ticket_requests"
     )]
     async fn api_get_my_ticket_requests(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        ctx: AuthedSession,
     ) -> Result<GetTicketRequestsResponse, WarpgateError> {
         if is_ticket_session(&ctx) {
             return Ok(GetTicketRequestsResponse::Unauthorized);
         }
-        let db = ctx.services().db.lock().await;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let db = &ctx.services().db;
+        let Some(full) = ctx.auth.as_full_user() else {
+            return Ok(GetTicketRequestsResponse::Unauthorized);
+        };
+        let Some(user_model) = get_user(&full, db).await? else {
             return Ok(GetTicketRequestsResponse::Unauthorized);
         };
 
         let requests = TicketRequest::Entity::find()
             .filter(TicketRequest::Column::UserId.eq(user_model.id))
             .order_by_desc(TicketRequest::Column::Created)
-            .all(&*db)
+            .all(db)
             .await?;
 
         let mut views = Vec::with_capacity(requests.len());
         for req in requests {
             let target_name = req
                 .find_related(Target::Entity)
-                .one(&*db)
+                .one(db)
                 .await?
                 .map(|t| t.name)
                 .unwrap_or_default();
@@ -252,26 +281,27 @@ impl Api {
     #[oai(
         path = "/ticket-requests/:id",
         method = "get",
-        operation_id = "get_my_ticket_request",
-        transform = "endpoint_auth"
+        operation_id = "get_my_ticket_request"
     )]
     async fn api_get_my_ticket_request(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetTicketRequestResponse, WarpgateError> {
         if is_ticket_session(&ctx) {
             return Ok(GetTicketRequestResponse::Unauthorized);
         }
-        let db = ctx.services().db.lock().await;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let db = &ctx.services().db;
+        let Some(full) = ctx.auth.as_full_user() else {
+            return Ok(GetTicketRequestResponse::Unauthorized);
+        };
+        let Some(user_model) = get_user(&full, db).await? else {
             return Ok(GetTicketRequestResponse::Unauthorized);
         };
 
         let Some(request) = TicketRequest::Entity::find_by_id(id.0)
             .filter(TicketRequest::Column::UserId.eq(user_model.id))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(GetTicketRequestResponse::NotFound);
@@ -285,29 +315,30 @@ impl Api {
     #[oai(
         path = "/ticket-requests/:id/activate",
         method = "post",
-        operation_id = "activate_ticket_request",
-        transform = "endpoint_auth"
+        operation_id = "activate_ticket_request"
     )]
     async fn api_activate_ticket_request(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<ActivateTicketRequestResponse, WarpgateError> {
         if is_ticket_session(&ctx) {
             return Ok(ActivateTicketRequestResponse::Unauthorized);
         }
-        let db = ctx.services().db.lock().await;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let db = &ctx.services().db;
+        let Some(full) = ctx.auth.as_full_user() else {
             return Ok(ActivateTicketRequestResponse::Unauthorized);
         };
-        drop(db);
+        let Some(user_model) = get_user(&full, db).await? else {
+            return Ok(ActivateTicketRequestResponse::Unauthorized);
+        };
 
         match activate_ticket_request(&ctx.services().db, id.0, user_model.id).await {
-            Ok((request, secret)) => Ok(ActivateTicketRequestResponse::Ok(Json(
+            Ok(activated) => Ok(ActivateTicketRequestResponse::Ok(Json(
                 ActivatedTicketModel {
-                    request,
-                    secret: Some(secret.expose_secret().clone()),
+                    request: activated.request,
+                    target: activated.target.try_into()?,
+                    secret: Some(activated.secret.expose_secret().clone()),
                 },
             ))),
             Err(ActivateTicketRequestError::NotFound) => {
@@ -327,22 +358,19 @@ impl Api {
         }
     }
 
-    #[oai(
-        path = "/my-tickets",
-        method = "get",
-        operation_id = "get_my_tickets",
-        transform = "endpoint_auth"
-    )]
+    #[oai(path = "/my-tickets", method = "get", operation_id = "get_my_tickets")]
     async fn api_get_my_tickets(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        ctx: AuthedSession,
     ) -> Result<GetMyTicketsResponse, WarpgateError> {
         if is_ticket_session(&ctx) {
             return Ok(GetMyTicketsResponse::Unauthorized);
         }
-        let db = ctx.services().db.lock().await;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let db = &ctx.services().db;
+        let Some(full) = ctx.auth.as_full_user() else {
+            return Ok(GetMyTicketsResponse::Unauthorized);
+        };
+        let Some(user_model) = get_user(&full, db).await? else {
             return Ok(GetMyTicketsResponse::Unauthorized);
         };
 
@@ -351,14 +379,14 @@ impl Api {
             .filter(Ticket::Column::UserId.eq(user_model.id))
             .filter(Ticket::Column::SelfService.eq(true))
             .order_by_desc(Ticket::Column::Created)
-            .all(&*db)
+            .all(db)
             .await?;
 
         let mut result = Vec::with_capacity(tickets.len());
         for ticket in tickets {
             let target_name = ticket
                 .find_related(Target::Entity)
-                .one(&*db)
+                .one(db)
                 .await?
                 .map(|t| t.name)
                 .unwrap_or_default();
@@ -378,20 +406,21 @@ impl Api {
     #[oai(
         path = "/my-tickets/:id",
         method = "delete",
-        operation_id = "delete_my_ticket",
-        transform = "endpoint_auth"
+        operation_id = "delete_my_ticket"
     )]
     async fn api_delete_my_ticket(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteMyTicketResponse, WarpgateError> {
         if is_ticket_session(&ctx) {
             return Ok(DeleteMyTicketResponse::Unauthorized);
         }
-        let db = ctx.services().db.lock().await;
-        let Some(user_model) = get_user(&ctx.auth, &db).await? else {
+        let db = &ctx.services().db;
+        let Some(full) = ctx.auth.as_full_user() else {
+            return Ok(DeleteMyTicketResponse::Unauthorized);
+        };
+        let Some(user_model) = get_user(&full, db).await? else {
             return Ok(DeleteMyTicketResponse::Unauthorized);
         };
 
@@ -399,17 +428,13 @@ impl Api {
         let Some(ticket) = Ticket::Entity::find_by_id(id.0)
             .filter(Ticket::Column::UserId.eq(user_model.id))
             .filter(Ticket::Column::SelfService.eq(true))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteMyTicketResponse::NotFound);
         };
 
-        TicketRequest::Entity::delete_many()
-            .filter(TicketRequest::Column::TicketId.eq(Some(ticket.id)))
-            .exec(&*db)
-            .await?;
-        ticket.delete(&*db).await?;
+        delete_ticket(db, ticket.id).await?;
         Ok(DeleteMyTicketResponse::Deleted)
     }
 }

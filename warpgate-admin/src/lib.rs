@@ -1,4 +1,6 @@
 pub mod api;
+pub mod approvals;
+pub use api::common::require_admin_permission;
 use poem::http::header::CONTENT_SECURITY_POLICY;
 use poem::middleware::SetHeader;
 use poem::{EndpointExt, IntoEndpoint, Route};
@@ -23,31 +25,27 @@ pub fn admin_api_app() -> impl IntoEndpoint {
         .nest("/playground", ui)
         .nest("/openapi.json", spec)
         .at(
-            "/recordings/:id/cast",
-            crate::api::recordings_detail::api_get_recording_cast,
-        )
-        .at(
             "/recordings/:id/stream",
-            crate::api::recordings_detail::api_get_recording_terminal_stream,
+            crate::api::recordings_detail::api_get_recording_stream,
         )
         .at(
             "/recordings/:id/tcpdump",
             crate::api::recordings_detail::api_get_recording_tcpdump,
         )
         .at(
-            "/recordings/:id/desktop",
-            crate::api::recordings_detail::api_get_recording_desktop,
+            "/recordings/:id/data",
+            crate::api::recordings_detail::api_get_recording_data,
         )
         .at(
-            "/recordings/:id/desktop/index",
-            crate::api::recordings_detail::api_get_recording_desktop_index,
-        )
-        .at(
-            "/recordings/:id/desktop-stream",
-            crate::api::recordings_detail::api_get_recording_desktop_stream,
+            "/recordings/:id/index",
+            crate::api::recordings_detail::api_get_recording_index,
         )
         .at(
             "/sessions/changes",
             crate::api::sessions_list::api_get_sessions_changes_stream,
+        )
+        .at(
+            "/session-approvals/changes",
+            crate::api::session_approvals::api_get_session_approvals_stream,
         )
 }

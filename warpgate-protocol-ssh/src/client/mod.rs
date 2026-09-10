@@ -3,7 +3,7 @@ mod channel_session;
 mod error;
 mod handler;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -29,14 +29,14 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::{
-    SSHTargetAuth, SessionId, TargetOptions, TargetSSHOptions, WarpgateError,
+    SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserSessionId, WarpgateError,
 };
-use warpgate_core::{ConfigProvider, Services};
+use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
 use crate::client::handler::ClientHandlerError;
-use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_keys, load_preferred_key};
+use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_client_keys};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
@@ -75,11 +75,8 @@ pub enum ConnectionError {
     #[error("Jump host target not found")]
     JumpHostTargetNotFound,
 
-    #[error("secret backend: {0}")]
-    SecretBackend(#[from] warpgate_common::SecretError),
-
     #[error(transparent)]
-    Warpgate(#[from] warpgate_common::WarpgateError),
+    Warpgate(#[from] WarpgateError),
 }
 
 pub struct ResolvedSshChainHost {
@@ -87,44 +84,109 @@ pub struct ResolvedSshChainHost {
     pub ssh_options: TargetSSHOptions,
 }
 
+/// A jump host that names a deleted or non-SSH target: a broken configuration
+/// that must fail the connection rather than silently shorten the chain, which
+/// would dial the target more directly than the operator intended.
+fn unresolvable_jump_host(id: Uuid) -> WarpgateError {
+    WarpgateError::InconsistentState(format!(
+        "SSH jump host {id} does not resolve to an SSH target"
+    ))
+}
+
+/// Follow `jump_host` links from `start`, returning the ordered target ids of
+/// the chain (the target itself first, then each successive jump host).
+///
+/// `lookup` resolves a target id: `Some(Some(jump))` — an SSH target that jumps
+/// through `jump`; `Some(None)` — an SSH target with no jump host, ending the
+/// chain; `None` — the id does not resolve to an SSH target. An unresolvable id,
+/// or one that repeats (a cycle), fails resolution.
+fn resolve_chain_ids(
+    start: Uuid,
+    lookup: impl Fn(Uuid) -> Option<Option<Uuid>>,
+) -> Result<Vec<Uuid>, WarpgateError> {
+    let mut ids = vec![];
+    let mut visited = HashSet::new();
+    let mut current = Some(start);
+    while let Some(id) = current {
+        if !visited.insert(id) {
+            return Err(WarpgateError::InconsistentState(format!(
+                "SSH jump host chain contains a cycle at target {id}"
+            )));
+        }
+        let Some(jump_host) = lookup(id) else {
+            return Err(unresolvable_jump_host(id));
+        };
+        ids.push(id);
+        current = jump_host;
+    }
+    Ok(ids)
+}
+
 /// Resolve the full ordered SSH jump chain for a target
 /// `logged_in_username` is used to substitute empty dynamic usernames
 /// in targets' configs
-pub async fn resolve_ssh_chain(
+async fn resolve_ssh_chain(
     services: &Services,
     target_id: Uuid,
     logged_in_username: Option<&String>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
+    let targets = services.config_provider.list_targets().await?;
+
+    let chain_ids = resolve_chain_ids(target_id, |id| {
+        targets
+            .iter()
+            .find(|t| t.id == id)
+            .and_then(|t| TargetSSHOptions::extract(&t.options).map(|opts| opts.jump_host))
+    })?;
+
     let mut jumps = vec![];
-    let mut current_jump_id = Some(target_id);
-    let targets = services.config_provider.lock().await.list_targets().await?;
-    while let Some(id) = current_jump_id {
+    for id in chain_ids {
         let Some(t) = targets.iter().find(|t| t.id == id) else {
-            break;
+            return Err(unresolvable_jump_host(id));
         };
-        let name = t.name.clone();
-        match &t.options {
-            TargetOptions::Ssh(opts) => {
-                let mut opts = opts.clone();
-                current_jump_id = opts.jump_host;
+        let Some(opts) = TargetSSHOptions::extract(&t.options) else {
+            return Err(unresolvable_jump_host(id));
+        };
+        let mut opts = opts.clone();
 
-                // Forward username from the authenticated user to the target, if target has no username
-                if let Some(logged_in_username) = logged_in_username
-                    && opts.username.is_empty()
-                {
-                    opts.username = logged_in_username.clone();
-                }
-
-                jumps.push(ResolvedSshChainHost {
-                    name,
-                    ssh_options: opts.clone(),
-                });
-            }
-            _ => break,
+        // Forward username from the authenticated user to the target, if target has no username
+        if let Some(logged_in_username) = logged_in_username
+            && opts.username.is_empty()
+        {
+            opts.username = logged_in_username.clone();
         }
+
+        jumps.push(ResolvedSshChainHost {
+            name: t.name.clone(),
+            ssh_options: opts,
+        });
     }
     jumps.reverse();
     Ok(jumps)
+}
+
+/// Resolve a chain for the administrator-only host-key diagnostic. User
+/// connection paths must use [`resolve_approved_ssh_chain`] instead.
+pub async fn resolve_ssh_chain_for_admin(
+    services: &Services,
+    target_id: Uuid,
+    admin_username: Option<&String>,
+) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
+    resolve_ssh_chain(services, target_id, admin_username).await
+}
+
+/// Resolve the target-side connection plan while consuming the capability
+/// minted for this target session.
+pub async fn resolve_approved_ssh_chain(
+    services: &Services,
+    admitted: AdmittedTarget<TargetSSHOptions>,
+) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
+    resolve_ssh_chain(
+        services,
+        admitted.target().id,
+        Some(&admitted.user_info().username),
+    )
+    .await
 }
 
 #[derive(Debug)]
@@ -153,8 +215,8 @@ pub enum RCEvent {
     HopConnected,
     // ForwardedTCPIP(Uuid, DirectTCPIPParams),
     Done,
-    HostKeyReceived(PublicKey),
-    HostKeyUnknown(PublicKey, oneshot::Sender<bool>),
+    HostKeyReceived(PublicKey, String, u16),
+    HostKeyUnknown(PublicKey, String, u16, oneshot::Sender<bool>),
     ForwardedTcpIp(Uuid, ForwardedTcpIpParams),
     ForwardedStreamlocal(Uuid, ForwardedStreamlocalParams),
     ForwardedAgent(Uuid),
@@ -163,6 +225,10 @@ pub enum RCEvent {
 
 impl RCEvent {
     /// The already-open channel this event refers to, if any.
+    ///
+    /// Deliberately a total match: event deferral during pending channel
+    /// opens keys off this (#1459), so a new variant must explicitly decide
+    /// whether it names a channel rather than silently defaulting to "no".
     pub(crate) const fn channel(&self) -> Option<Uuid> {
         match self {
             Self::Output(channel, _)
@@ -173,12 +239,31 @@ impl RCEvent {
             | Self::ExitStatus(channel, _)
             | Self::ExitSignal { channel, .. }
             | Self::ExtendedData { channel, .. } => Some(*channel),
-            _ => None,
+            // The Forwarded*/X11 variants carry a channel id but *establish*
+            // the channel — they must not wait for their own open to resolve.
+            Self::State(_)
+            | Self::Error(_)
+            | Self::ConnectionError(_)
+            | Self::HopConnected
+            | Self::Done
+            | Self::HostKeyReceived(..)
+            | Self::HostKeyUnknown(..)
+            | Self::ForwardedTcpIp(..)
+            | Self::ForwardedStreamlocal(..)
+            | Self::ForwardedAgent(_)
+            | Self::X11(..) => None,
         }
     }
 }
 
 pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
+
+/// subset of ChannelOperation
+enum ChannelOpen {
+    Session,
+    DirectTcpIp(DirectTCPIPParams),
+    DirectStreamlocal(String),
+}
 
 #[derive(Clone, Debug)]
 pub enum RCCommand {
@@ -206,9 +291,9 @@ enum InnerEvent {
 }
 
 pub struct RemoteClient {
-    id: SessionId,
+    id: UserSessionId,
     tx: Sender<RCEvent>,
-    session: Option<Arc<Mutex<Handle<ClientHandler>>>>,
+    session: Option<Arc<Handle<ClientHandler>>>,
     channel_pipes: Arc<Mutex<HashMap<Uuid, UnboundedSender<ChannelOperation>>>>,
     pending_ops: Vec<(Uuid, ChannelOperation)>,
     pending_forwards: Vec<(String, u32)>,
@@ -228,7 +313,7 @@ pub struct RemoteClientHandles {
 }
 
 impl RemoteClient {
-    pub fn create(id: SessionId, services: Services) -> io::Result<RemoteClientHandles> {
+    pub fn create(id: UserSessionId, services: Services) -> io::Result<RemoteClientHandles> {
         let (event_tx, event_rx) = channel(1024);
         let (command_tx, mut command_rx) = unbounded_channel();
         let (abort_tx, abort_rx) = unbounded_channel();
@@ -313,6 +398,7 @@ impl RemoteClient {
         &mut self,
         channel_id: Uuid,
         op: ChannelOperation,
+        reply: &mut Option<RCCommandReply>,
     ) -> Result<(), SshClientError> {
         if self.state != RCState::Connected {
             self.pending_ops.push((channel_id, op));
@@ -321,13 +407,20 @@ impl RemoteClient {
 
         match op {
             ChannelOperation::OpenShell => {
-                self.open_shell(channel_id).await?;
+                self.open_channel(channel_id, ChannelOpen::Session, reply.take())
+                    .await?;
             }
             ChannelOperation::OpenDirectTCPIP(params) => {
-                self.open_direct_tcpip(channel_id, params).await?;
+                self.open_channel(channel_id, ChannelOpen::DirectTcpIp(params), reply.take())
+                    .await?;
             }
             ChannelOperation::OpenDirectStreamlocal(path) => {
-                self.open_direct_streamlocal(channel_id, path).await?;
+                self.open_channel(
+                    channel_id,
+                    ChannelOpen::DirectStreamlocal(path),
+                    reply.take(),
+                )
+                .await?;
             }
             op => {
                 let mut channel_pipes = self.channel_pipes.lock().await;
@@ -381,8 +474,8 @@ impl RemoteClient {
 
     async fn handle_event(&mut self, event: InnerEvent) -> Result<bool> {
         match event {
-            InnerEvent::RCCommand(cmd, reply) => {
-                let result = self.handle_command(cmd).await;
+            InnerEvent::RCCommand(cmd, mut reply) => {
+                let result = self.handle_command(cmd, &mut reply).await;
                 let brk = matches!(result, Ok(true));
                 if let Some(reply) = reply {
                     let _ = reply.send(result.map(|_| ()));
@@ -450,27 +543,28 @@ impl RemoteClient {
         Ok(id)
     }
 
-    async fn handle_command(&mut self, cmd: RCCommand) -> Result<bool, SshClientError> {
+    async fn handle_command(
+        &mut self,
+        cmd: RCCommand,
+        reply: &mut Option<RCCommandReply>,
+    ) -> Result<bool, SshClientError> {
         match cmd {
             RCCommand::Connect(options) => match self.connect(options).await {
                 Ok(()) => {
                     self.set_state(RCState::Connected)
                         .await
                         .map_err(SshClientError::other)?;
-                    let ops = self.pending_ops.drain(..).collect::<Vec<_>>();
+                    let ops = std::mem::take(&mut self.pending_ops);
                     for (id, op) in ops {
-                        self.apply_channel_op(id, op).await?;
+                        self.apply_channel_op(id, op, &mut None).await?;
                     }
 
-                    let forwards = self.pending_forwards.drain(..).collect::<Vec<_>>();
+                    let forwards = std::mem::take(&mut self.pending_forwards);
                     for (address, port) in forwards {
                         self.tcpip_forward(address, port).await?;
                     }
 
-                    let forwards = self
-                        .pending_streamlocal_forwards
-                        .drain(..)
-                        .collect::<Vec<_>>();
+                    let forwards = std::mem::take(&mut self.pending_streamlocal_forwards);
                     for socket_path in forwards {
                         self.streamlocal_forward(socket_path).await?;
                     }
@@ -484,7 +578,7 @@ impl RemoteClient {
                 }
             },
             RCCommand::Channel(ch, op) => {
-                self.apply_channel_op(ch, op).await?;
+                self.apply_channel_op(ch, op, reply).await?;
             }
             RCCommand::ForwardTCPIP(address, port) => {
                 self.tcpip_forward(address, port).await?;
@@ -507,7 +601,7 @@ impl RemoteClient {
     }
 
     async fn build_ssh_config(&self, ssh_options: &TargetSSHOptions) -> Arc<russh::client::Config> {
-        let algos = if ssh_options.allow_insecure_algos.unwrap_or(false) {
+        let algos = if ssh_options.allow_insecure_algos {
             Preferred {
                 kex: Cow::Borrowed(&[
                     kex::MLKEM768X25519_SHA256,
@@ -543,6 +637,7 @@ impl RemoteClient {
                         hash: Some(russh::keys::HashAlg::Sha512),
                     },
                     russh::keys::Algorithm::Rsa { hash: None },
+                    russh::keys::Algorithm::Dsa,
                 ]),
                 cipher: Cow::Borrowed(&[
                     russh::cipher::CHACHA20_POLY1305,
@@ -581,7 +676,7 @@ impl RemoteClient {
             keepalive_interval: ssh_config.keepalive_interval,
             ..Default::default()
         };
-        if ssh_options.allow_insecure_algos.unwrap_or(false)
+        if ssh_options.allow_insecure_algos
             && let Ok(gex) = russh::client::GexParams::new(2048, 2048, 8192)
         {
             config.gex = gex;
@@ -661,7 +756,7 @@ impl RemoteClient {
     async fn connect(&mut self, chain: Vec<TargetSSHOptions>) -> Result<(), ConnectionError> {
         let (session, mut event_rx) = self.connect_chain(chain).boxed().await?;
 
-        self.session = Some(Arc::new(Mutex::new(session)));
+        self.session = Some(Arc::new(session));
 
         info!("Connected");
 
@@ -699,10 +794,10 @@ impl RemoteClient {
                 Some(event) = event_rx.recv() => {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
-                            self.tx.send(RCEvent::HostKeyReceived(key)).await.map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyReceived(key, ssh_options.host.clone(), ssh_options.port)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
-                            self.tx.send(RCEvent::HostKeyUnknown(key, reply)).await.map_err(|_| ConnectionError::Internal)?;
+                            self.tx.send(RCEvent::HostKeyUnknown(key, ssh_options.host.clone(), ssh_options.port, reply)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         _ => {}
                     }
@@ -731,7 +826,7 @@ impl RemoteClient {
                         &ssh_options.host,
                         &ssh_options.username,
                         &ssh_options.auth,
-                        ssh_options.allow_insecure_algos.unwrap_or(false)
+                        ssh_options.allow_insecure_algos
                     ).await?;
 
                     return Ok((session, event_rx));
@@ -752,7 +847,10 @@ impl RemoteClient {
         let mut auth_error_msg: Option<String> = None;
         match auth {
             SSHTargetAuth::Password(auth) => {
-                let password = auth.password.resolve(&*self.services.secret_backend).await?;
+                let password = auth
+                    .password
+                    .resolve(&*self.services.secret_backend)
+                    .await?;
                 let response = session
                     .authenticate_password(username.to_string(), password.expose_secret())
                     .await?;
@@ -767,16 +865,12 @@ impl RemoteClient {
                         Some("Password authentication was rejected by the SSH target".to_string());
                 }
             }
-            SSHTargetAuth::PublicKey(_) => {
+            SSHTargetAuth::PublicKey(auth) => {
                 let best_hash = session.best_supported_rsa_hash().await?.flatten();
-                let config = self.services.config.lock().await.clone();
-                let keys = load_keys(
-                    &config,
-                    &self.services.global_params,
-                    &*self.services.secret_backend,
-                    "client",
-                )
-                .await?;
+                let keys = load_client_keys(&self.services.db, auth.key_id).await?;
+                if keys.is_empty() {
+                    auth_error_msg = Some("No SSH client keys are configured".into());
+                }
                 for key in keys {
                     let key = Arc::new(key);
                     if key.key_data().is_rsa() && best_hash.is_none() && !allow_insecure_algos {
@@ -827,14 +921,13 @@ impl RemoteClient {
             SSHTargetAuth::IamRole(_) => {
                 let instance_info = warpgate_aws::find_instance_by_ip(host).await?;
 
-                let config = self.services.config.lock().await.clone();
-                let key = load_preferred_key(
-                    &config,
-                    &self.services.global_params,
-                    &*self.services.secret_backend,
-                    "client",
-                )
-                .await?;
+                let key = load_client_keys(&self.services.db, None)
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        WarpgateError::InconsistentState("No SSH client keys are configured".into())
+                    })?;
 
                 let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
 
@@ -967,83 +1060,89 @@ impl RemoteClient {
         Ok(false)
     }
 
-    async fn open_shell(&mut self, channel_id: Uuid) -> Result<(), SshClientError> {
-        if let Some(session) = &self.session {
-            let session = session.lock().await;
-            let channel = session.channel_open_session().await?;
-
-            let (tx, rx) = unbounded_channel();
-            self.channel_pipes.lock().await.insert(channel_id, tx);
-
-            let channel = SessionChannel::new(channel, channel_id, rx, self.tx.clone(), self.id);
-            self.child_tasks.push(
-                tokio::task::Builder::new()
-                    .name(&format!("SSH {} {:?} ops", self.id, channel_id))
-                    .spawn(channel.run())
-                    .map_err(|e| SshClientError::Other(Box::new(e)))?,
-            );
-        }
-        Ok(())
-    }
-
-    async fn open_direct_tcpip(
+    /// open a channel and run it in a separate task
+    async fn open_channel(
         &mut self,
         channel_id: Uuid,
-        params: DirectTCPIPParams,
+        op: ChannelOpen,
+        reply: Option<RCCommandReply>,
     ) -> Result<(), SshClientError> {
-        if let Some(session) = &self.session {
-            let session = session.lock().await;
-            let channel = session
-                .channel_open_direct_tcpip(
-                    params.host_to_connect,
-                    params.port_to_connect,
-                    params.originator_address,
-                    params.originator_port,
-                )
-                .await?;
+        let Some(session) = self.session.clone() else {
+            if let Some(reply) = reply {
+                let _ = reply.send(Ok(()));
+            }
+            return Ok(());
+        };
 
-            let (tx, rx) = unbounded_channel();
-            self.channel_pipes.lock().await.insert(channel_id, tx);
+        let (ops_tx, ops_rx) = unbounded_channel();
+        // Registered before the open completes so that operations arriving for
+        // this channel meanwhile are buffered instead of reported as unknown.
+        self.channel_pipes.lock().await.insert(channel_id, ops_tx);
 
-            let channel =
-                DirectTCPIPChannel::new(channel, channel_id, rx, self.tx.clone(), self.id);
-            self.child_tasks.push(
-                tokio::task::Builder::new()
-                    .name(&format!("SSH {} {:?} ops", self.id, channel_id))
-                    .spawn(channel.run())
-                    .map_err(|e| SshClientError::Other(Box::new(e)))?,
-            );
-        }
-        Ok(())
-    }
+        let channel_pipes = self.channel_pipes.clone();
+        let events_tx = self.tx.clone();
+        let session_id = self.id;
 
-    async fn open_direct_streamlocal(
-        &mut self,
-        channel_id: Uuid,
-        path: String,
-    ) -> Result<(), SshClientError> {
-        if let Some(session) = &self.session {
-            let session = session.lock().await;
-            let channel = session.channel_open_direct_streamlocal(path).await?;
+        let task = async move {
+            let is_session = matches!(op, ChannelOpen::Session);
+            let opened = match op {
+                ChannelOpen::Session => session.channel_open_session().await,
+                ChannelOpen::DirectTcpIp(params) => {
+                    session
+                        .channel_open_direct_tcpip(
+                            params.host_to_connect,
+                            params.port_to_connect,
+                            params.originator_address,
+                            params.originator_port,
+                        )
+                        .await
+                }
+                ChannelOpen::DirectStreamlocal(path) => {
+                    session.channel_open_direct_streamlocal(path).await
+                }
+            };
 
-            let (tx, rx) = unbounded_channel();
-            self.channel_pipes.lock().await.insert(channel_id, tx);
+            let channel = match opened {
+                Ok(channel) => channel,
+                Err(error) => {
+                    channel_pipes.lock().await.remove(&channel_id);
+                    if let Some(reply) = reply {
+                        let _ = reply.send(Err(error.into()));
+                    } else {
+                        error!(channel=%channel_id, ?error, "Failed to open channel");
+                        let _ = events_tx.send(RCEvent::Close(channel_id)).await;
+                    }
+                    return Ok(());
+                }
+            };
 
-            let channel =
-                DirectTCPIPChannel::new(channel, channel_id, rx, self.tx.clone(), self.id);
-            self.child_tasks.push(
-                tokio::task::Builder::new()
-                    .name(&format!("SSH {} {:?} ops", self.id, channel_id))
-                    .spawn(channel.run())
-                    .map_err(|e| SshClientError::Other(Box::new(e)))?,
-            );
-        }
+            if let Some(reply) = reply {
+                let _ = reply.send(Ok(()));
+            }
+
+            if is_session {
+                SessionChannel::new(channel, channel_id, ops_rx, events_tx, session_id)
+                    .run()
+                    .await
+            } else {
+                DirectTCPIPChannel::new(channel, channel_id, ops_rx, events_tx, session_id)
+                    .run()
+                    .await
+            }
+        };
+
+        self.child_tasks.push(
+            tokio::task::Builder::new()
+                .name(&format!("SSH {} {:?} ops", self.id, channel_id))
+                .spawn(task)
+                .map_err(|e| SshClientError::Other(Box::new(e)))?,
+        );
+
         Ok(())
     }
 
     async fn tcpip_forward(&mut self, address: String, port: u32) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let session = session.lock().await;
             session.tcpip_forward(address, port).await?;
         } else {
             self.pending_forwards.push((address, port));
@@ -1057,7 +1156,6 @@ impl RemoteClient {
         port: u32,
     ) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let session = session.lock().await;
             session.cancel_tcpip_forward(address, port).await?;
         } else {
             self.pending_forwards
@@ -1068,7 +1166,6 @@ impl RemoteClient {
 
     async fn streamlocal_forward(&mut self, socket_path: String) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let session = session.lock().await;
             session.streamlocal_forward(socket_path).await?;
         } else {
             self.pending_streamlocal_forwards.push(socket_path);
@@ -1081,7 +1178,6 @@ impl RemoteClient {
         socket_path: String,
     ) -> Result<(), SshClientError> {
         if let Some(session) = &self.session {
-            let session = session.lock().await;
             session.cancel_streamlocal_forward(socket_path).await?;
         } else {
             self.pending_streamlocal_forwards
@@ -1093,8 +1189,6 @@ impl RemoteClient {
     async fn disconnect(&mut self) {
         if let Some(session) = &mut self.session {
             let _ = session
-                .lock()
-                .await
                 .disconnect(russh::Disconnect::ByApplication, "", "")
                 .await;
             self.set_disconnected().await;
@@ -1113,5 +1207,38 @@ impl Drop for RemoteClient {
         }
         info!("Closed connection");
         debug!("Dropped");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use uuid::Uuid;
+
+    use super::resolve_chain_ids;
+
+    #[test]
+    fn resolve_chain_ids_returns_ordered_chain() {
+        let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let jumps: HashMap<Uuid, Option<Uuid>> =
+            HashMap::from([(a, Some(b)), (b, Some(c)), (c, None)]);
+        let ids = resolve_chain_ids(a, |id| jumps.get(&id).copied()).unwrap();
+        assert_eq!(ids, vec![a, b, c]);
+    }
+
+    #[test]
+    fn resolve_chain_ids_detects_cycle() {
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let jumps: HashMap<Uuid, Option<Uuid>> = HashMap::from([(a, Some(b)), (b, Some(a))]);
+        assert!(resolve_chain_ids(a, |id| jumps.get(&id).copied()).is_err());
+    }
+
+    #[test]
+    fn resolve_chain_ids_rejects_unresolvable_jump_host() {
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        // `a` jumps through `b`, but `b` resolves to no SSH target.
+        let jumps: HashMap<Uuid, Option<Uuid>> = HashMap::from([(a, Some(b))]);
+        assert!(resolve_chain_ids(a, |id| jumps.get(&id).copied()).is_err());
     }
 }

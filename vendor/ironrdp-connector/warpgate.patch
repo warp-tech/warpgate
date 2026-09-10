@@ -1,0 +1,38 @@
+diff -ru ironrdp-connector-0.10.0/src/credssp.rs base/src/credssp.rs
+--- ironrdp-connector-0.10.0/src/credssp.rs	2006-07-24 03:21:28.000000000 +0200
++++ base/src/credssp.rs	2026-08-31 14:40:19.309622712 +0200
+@@ -98,6 +98,7 @@
+         server_name: ServerName,
+         server_public_key: Vec<u8>,
+         kerberos_config: Option<KerberosConfig>,
++        credentialless: bool,
+     ) -> ConnectorResult<(Self, credssp::TsRequest)> {
+         let credentials: sspi::Credentials = match &credentials {
+             Credentials::UsernamePassword { username, password } => {
+@@ -158,7 +159,11 @@
+         let client = CredSspClient::new(
+             server_public_key,
+             credentials,
+-            credssp::CredSspMode::WithCredentials,
++            if credentialless {
++                credssp::CredSspMode::CredentialLess
++            } else {
++                credssp::CredSspMode::WithCredentials
++            },
+             client_mode,
+             service_principal_name,
+         )
+diff -ru ironrdp-connector-0.10.0/src/lib.rs base/src/lib.rs
+--- ironrdp-connector-0.10.0/src/lib.rs	2006-07-24 03:21:28.000000000 +0200
++++ base/src/lib.rs	2026-08-31 14:40:05.290365898 +0200
+@@ -224,6 +224,10 @@
+     pub request_data: Option<NegoRequestData>,
+     /// If true, the INFO_AUTOLOGON flag is set in the [`ClientInfoPdu`](ironrdp_pdu::rdp::ClientInfoPdu)
+     pub autologon: bool,
++    /// If true, CredSSP delegates no credentials to the server (empty TSPasswordCreds):
++    /// NLA still authenticates the connection, but the server is left with nothing to log
++    /// the session on with and presents its own logon UI instead.
++    pub credssp_credentialless: bool,
+     /// If true, the INFO_NOAUDIOPLAYBACK flag is set in the [`ClientInfoPdu`](ironrdp_pdu::rdp::ClientInfoPdu)
+     pub enable_audio_playback: bool,
+     pub performance_flags: PerformanceFlags,

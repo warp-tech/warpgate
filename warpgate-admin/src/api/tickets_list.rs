@@ -1,21 +1,18 @@
 use anyhow::Context;
 use poem::session::Session;
-use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::helpers::hash::generate_ticket_secret;
+use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_common_http::auth::web_reauth_required;
 use warpgate_core::logging::AuditEvent;
 use warpgate_db_entities::{Target, Ticket, User};
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 pub struct Api;
 
@@ -108,19 +105,16 @@ impl Api {
     #[oai(path = "/tickets", method = "get", operation_id = "get_tickets")]
     async fn api_get_all_tickets(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        _sec_scheme: AnySecurityScheme,
+        admin: AdminContext,
     ) -> Result<GetTicketsResponse, WarpgateError> {
         use warpgate_db_entities::Ticket;
 
-        require_admin_permission(&ctx, None).await?;
-
-        let db = ctx.services().db.lock().await;
-        let tickets = Ticket::Entity::find().all(&*db).await?;
+        let db = &admin.services().db;
+        let tickets = Ticket::Entity::find().all(db).await?;
         let tickets = futures::future::join_all(
             tickets
                 .into_iter()
-                .map(|ticket| TicketModel::from_entity(ticket, &db)),
+                .map(|ticket| TicketModel::from_entity(ticket, db)),
         )
         .await
         .into_iter()
@@ -132,26 +126,25 @@ impl Api {
     async fn api_create_ticket(
         &self,
         session: &Session,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<CreateTicketRequest>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateTicketResponse, WarpgateError> {
         use warpgate_db_entities::Ticket;
 
-        require_admin_permission(&ctx, Some(AdminPermission::TicketsCreate)).await?;
+        admin.require(AdminPermission::TicketsCreate)?;
 
-        if web_reauth_required(&ctx, session).await? {
+        if web_reauth_required(&admin, session).await? {
             return Ok(CreateTicketResponse::ReauthRequired);
         }
 
-        let db = ctx.services().db.lock().await;
+        let db = &admin.services().db;
 
         let Some(user) = (if let Some(user_id) = body.user_id {
-            User::Entity::find_by_id(user_id).one(&*db).await?
+            User::Entity::find_by_id(user_id).one(db).await?
         } else if let Some(username) = &body.username {
             User::Entity::find()
                 .filter(User::Entity::username_eq_ci(username))
-                .one(&*db)
+                .one(db)
                 .await?
         } else {
             return Ok(CreateTicketResponse::BadRequest(Json(
@@ -162,11 +155,11 @@ impl Api {
         };
 
         let Some(target) = (if let Some(target_id) = body.target_id {
-            Target::Entity::find_by_id(target_id).one(&*db).await?
+            Target::Entity::find_by_id(target_id).one(db).await?
         } else if let Some(target_name) = &body.target_name {
             Target::Entity::find()
                 .filter(Target::Column::Name.eq(target_name.clone()))
-                .one(&*db)
+                .one(db)
                 .await?
         } else {
             return Ok(CreateTicketResponse::BadRequest(Json(
@@ -179,7 +172,7 @@ impl Api {
         let secret = generate_ticket_secret();
         let values = Ticket::ActiveModel {
             id: Set(Uuid::new_v4()),
-            secret: Set(secret.expose_secret().clone()),
+            secret_hash: Set(hash_secret(secret.expose_secret())),
             user_id: Set(user.id),
             target_id: Set(target.id),
             created: Set(OffsetDateTime::now_utc()),
@@ -189,20 +182,20 @@ impl Api {
             self_service: Set(false),
         };
 
-        let ticket = values.insert(&*db).await.context("Error saving ticket")?;
+        let ticket = values.insert(db).await.context("Error saving ticket")?;
 
         AuditEvent::TicketCreated {
             ticket_id: ticket.id,
             user_id: user.id,
             username: user.username.clone(),
             target: target.name.clone(),
-            actor_user_id: ctx.auth.user_id(),
+            actor_user_id: admin.auth.user_id(),
         }
         .emit();
 
         Ok(CreateTicketResponse::Created(Json(TicketAndSecret {
             secret: secret.expose_secret().clone(),
-            ticket: TicketModel::from_entity(ticket, &db).await?,
+            ticket: TicketModel::from_entity(ticket, db).await?,
         })))
     }
 }

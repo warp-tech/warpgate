@@ -1,7 +1,9 @@
 pub mod api;
+pub mod audit;
 pub mod auth;
 mod config;
 pub mod consts;
+pub mod encryption;
 mod error;
 pub mod eventhub;
 pub mod helpers;
@@ -19,6 +21,5 @@ pub use secrets::{
     DbSecretBackend, MaybeSecretRef, SecretBackend, SecretBackendRef, SecretError, SecretRef,
     SecretValue,
 };
-
 pub use state::GlobalParams;
 pub use types::*;

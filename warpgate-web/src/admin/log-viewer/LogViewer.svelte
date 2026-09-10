@@ -502,7 +502,7 @@
                                 <div class="session">
                                     {#if item.sessionId}
                                         <a
-                                            href="/sessions/{item.sessionId}"
+                                            href="/status/sessions/{item.sessionId}"
                                             use:link
                                         >
                                             {item.sessionId}
@@ -600,9 +600,9 @@
                                     </div>
                                 {:else if richEntry?._type === 'UserAuthenticationFailed1'}
                                     <div class="rich-entry auth-failed">
-                                        <span class="event-label"
-                                            >Authentication failed</span
-                                        >
+                                        <span class="event-label">
+                                            Authentication failed
+                                        </span>
                                         {#if richEntry.user_id}
                                             <UserBadge
                                                 id={richEntry.user_id}
@@ -673,9 +673,9 @@
                                             name={richEntry.username}
                                         />
                                         {#if richEntry.via === 'self-service'}
-                                            <span class="badge bg-secondary"
-                                                >self-service</span
-                                            >
+                                            <span class="badge bg-secondary">
+                                                self-service
+                                            </span>
                                         {/if}
                                     </div>
                                 {:else if richEntry?._type === 'CredentialDeleted1'}
@@ -694,9 +694,9 @@
                                             name={richEntry.username}
                                         />
                                         {#if richEntry.via === 'self-service'}
-                                            <span class="badge bg-secondary"
-                                                >self-service</span
-                                            >
+                                            <span class="badge bg-secondary">
+                                                self-service
+                                            </span>
                                         {/if}
                                     </div>
                                 {:else if richEntry?._type === 'TicketCreated1'}
@@ -780,7 +780,7 @@
 
     .table-wrapper {
         flex: 1 0 0;
-        min-height: 300px;
+        min-height: 500px;
         max-width: 100%;
         overflow-x: auto;
         position: relative;
@@ -850,18 +850,17 @@
             align-items: center;
             min-width: 0;
             white-space: normal;
+            column-gap: 1rem;
 
             .text {
                 font-weight: bold;
-                margin-right: 0.6em;
             }
 
             .key-value {
                 white-space: nowrap;
+                gap: .75rem;
 
                 .key {
-                    margin-left: 0.5em;
-                    margin-right: 0.3em;
                     opacity: .5;
                     font-style: italic;
                 }

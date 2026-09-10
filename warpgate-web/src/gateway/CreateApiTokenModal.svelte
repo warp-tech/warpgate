@@ -98,12 +98,13 @@
                 color="primary"
                 class="modal-button"
                 on:click={() => validated = true}
-                >Create</Button
             >
+                Create
+            </Button>
 
-            <Button color="danger" class="modal-button" on:click={_cancel}
-                >Cancel</Button
-            >
+            <Button color="danger" class="modal-button" on:click={_cancel}>
+                Cancel
+            </Button>
         </ModalFooter>
     </Form>
 </Modal>

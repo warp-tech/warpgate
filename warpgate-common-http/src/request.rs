@@ -1,7 +1,10 @@
 use poem::Request;
 use poem::http::header::HOST;
 use poem::http::uri::Scheme;
+use warpgate_common::Secret;
 use warpgate_common::http_headers::{X_FORWARDED_FOR, X_FORWARDED_HOST, X_FORWARDED_PROTO};
+
+use crate::{X_WARPGATE_CLUSTER_CLIENT_IP, is_cluster_peer_request};
 
 pub fn first_forwarded_header_value(value: &str) -> Option<&str> {
     value
@@ -43,10 +46,15 @@ pub fn trusted_proto(should_trust_x_forwarded: bool, req: &Request) -> Scheme {
 
 pub fn trusted_client_ip(
     req: &Request,
+    cluster_token: &Secret<String>,
     remote_ip: Option<String>,
     trust_x_forwarded: bool,
 ) -> Option<String> {
-    if trust_x_forwarded
+    if is_cluster_peer_request(req, cluster_token)
+        && let Some(ip) = req.header(&X_WARPGATE_CLUSTER_CLIENT_IP)
+    {
+        Some(ip.to_string())
+    } else if trust_x_forwarded
         && let Some(ip) = req
             .header(&X_FORWARDED_FOR)
             .and_then(first_forwarded_header_value)
@@ -63,6 +71,7 @@ mod tests {
     use poem::http::header::HOST;
 
     use super::*;
+    use crate::X_WARPGATE_CLUSTER_TOKEN;
 
     fn trusted_header_request(
         forwarded_host: Option<&str>,
@@ -125,7 +134,12 @@ mod tests {
             .finish();
 
         assert_eq!(
-            trusted_client_ip(&req, Some("10.0.0.1".to_string()), true),
+            trusted_client_ip(
+                &req,
+                &Secret::new("".into()),
+                Some("10.0.0.1".to_string()),
+                true
+            ),
             Some("203.0.113.10".to_string())
         );
     }
@@ -135,7 +149,12 @@ mod tests {
         let req = Request::builder().header(&X_FORWARDED_FOR, " , ").finish();
 
         assert_eq!(
-            trusted_client_ip(&req, Some("10.0.0.1".to_string()), true),
+            trusted_client_ip(
+                &req,
+                &Secret::new("".into()),
+                Some("10.0.0.1".to_string()),
+                true
+            ),
             Some("10.0.0.1".to_string())
         );
     }
@@ -147,7 +166,48 @@ mod tests {
             .finish();
 
         assert_eq!(
-            trusted_client_ip(&req, Some("10.0.0.1".to_string()), false),
+            trusted_client_ip(
+                &req,
+                &Secret::new("".into()),
+                Some("10.0.0.1".to_string()),
+                false
+            ),
+            Some("10.0.0.1".to_string())
+        );
+    }
+
+    #[test]
+    fn client_ip_takes_the_forwarding_peers_word_for_it() {
+        let req = Request::builder()
+            .header(&X_WARPGATE_CLUSTER_TOKEN, "s3cret")
+            .header(&X_WARPGATE_CLUSTER_CLIENT_IP, "203.0.113.10")
+            .finish();
+
+        assert_eq!(
+            trusted_client_ip(
+                &req,
+                &Secret::new("s3cret".into()),
+                Some("10.0.0.1".to_string()),
+                false
+            ),
+            Some("203.0.113.10".to_string())
+        );
+    }
+
+    #[test]
+    fn client_ip_ignores_a_forged_cluster_client_ip() {
+        let req = Request::builder()
+            .header(&X_WARPGATE_CLUSTER_TOKEN, "guess")
+            .header(&X_WARPGATE_CLUSTER_CLIENT_IP, "203.0.113.10")
+            .finish();
+
+        assert_eq!(
+            trusted_client_ip(
+                &req,
+                &Secret::new("s3cret".into()),
+                Some("10.0.0.1".to_string()),
+                false
+            ),
             Some("10.0.0.1".to_string())
         );
     }

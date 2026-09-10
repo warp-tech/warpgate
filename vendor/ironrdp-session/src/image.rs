@@ -809,6 +809,68 @@ impl DecodedImage {
         }
     }
 
+    #[cfg(feature = "qoi")]
+    fn apply_rgba32_iter<'a, I>(
+        &mut self,
+        rgba32: I,
+        update_rectangle: &InclusiveRectangle,
+    ) -> SessionResult<InclusiveRectangle>
+    where
+        I: Iterator<Item = &'a [u8]>,
+    {
+        if !self.rect_fits(update_rectangle) {
+            debug!(
+                "Skipping rgba32 update {:?} outside image bounds {}x{}",
+                update_rectangle, self.width, self.height,
+            );
+            return Ok(InclusiveRectangle::empty());
+        }
+
+        const SRC_COLOR_DEPTH: usize = 4;
+        const DST_COLOR_DEPTH: usize = 4;
+
+        let image_width = usize::from(self.width);
+        let top = usize::from(update_rectangle.top);
+        let left = usize::from(update_rectangle.left);
+        let [ri, gi, bi, ai] = self.pixel_format.channel_offsets();
+
+        let pointer_rendering_state = self.pointer_rendering_begin(update_rectangle)?;
+
+        rgba32.enumerate().for_each(|(row_idx, row)| {
+            row.chunks_exact(SRC_COLOR_DEPTH)
+                .enumerate()
+                .for_each(|(col_idx, src_pixel)| {
+                    let dst_idx = ((top + row_idx) * image_width + left + col_idx) * DST_COLOR_DEPTH;
+
+                    self.data[dst_idx + ri] = src_pixel[0];
+                    self.data[dst_idx + gi] = src_pixel[1];
+                    self.data[dst_idx + bi] = src_pixel[2];
+                    self.data[dst_idx + ai] = src_pixel[3];
+                })
+        });
+
+        let update_rectangle = self.pointer_rendering_end(pointer_rendering_state)?;
+
+        Ok(update_rectangle)
+    }
+
+    #[cfg(feature = "qoi")]
+    pub(crate) fn apply_rgba32(
+        &mut self,
+        rgba32: &[u8],
+        update_rectangle: &InclusiveRectangle,
+        flip: bool,
+    ) -> SessionResult<InclusiveRectangle> {
+        const SRC_COLOR_DEPTH: usize = 4;
+        let rectangle_width = usize::from(update_rectangle.width());
+        let lines = rgba32.chunks_exact(rectangle_width * SRC_COLOR_DEPTH);
+        if flip {
+            self.apply_rgba32_iter(lines.rev(), update_rectangle)
+        } else {
+            self.apply_rgba32_iter(lines, update_rectangle)
+        }
+    }
+
     pub(crate) fn apply_rgb32_bitmap(
         &mut self,
         rgb32: &[u8],

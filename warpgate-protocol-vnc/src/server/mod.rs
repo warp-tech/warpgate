@@ -15,24 +15,20 @@ use futures::future::BoxFuture;
 use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, timeout_at};
 use tokio_rustls::TlsAcceptor;
-use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
-use warpgate_common::helpers::net::detect_port_knock;
-use warpgate_common::{ListenEndpoint, Target, TargetOptions, TargetVncOptions};
+use warpgate_common::helpers::net::accept_loop;
+use warpgate_common::{ListenEndpoint, TargetVncOptions};
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{Services, SessionStateInit, State, WarpgateServerHandle};
-use warpgate_desktop_auth::{
-    DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
-};
+use warpgate_core::{Services, State, UserSessionStateInit, WarpgateServerHandle};
+use warpgate_desktop_auth::{DesktopAuthOutcome, authenticate, finalize_user_auth};
 use warpgate_desktop_ui as ui;
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
 use self::bridge::{run_proxy_session, wait_for_backend_size};
-use self::hold_screen::{collect_additional_credentials, render_while};
+use self::hold_screen::{collect_additional_credentials, render_while, show_banner};
 use self::protocol::{
     ClientEvent, DEFAULT_PIXEL_FORMAT, PixelFormat, pack_rgb, read_client_messages,
     write_desktop_size, write_raw_rect, write_server_init,
@@ -60,69 +56,57 @@ pub async fn bind_server(
     ))));
     let tls_config = Arc::new(tls_config);
 
-    let mut listener = address.tcp_accept_stream().await?;
+    let listener = address.tcp_accept_stream().await?;
 
     Ok(async move {
-        while let Some(mut stream) = listener.next().await {
-            let _ = stream.set_nodelay(true);
-            if detect_port_knock(&stream).await {
-                continue;
-            }
-            let remote_address = match warpgate_common::helpers::proxy_protocol::remote_address(
-                &mut stream,
-                proxy_protocol,
-            )
-            .await
-            {
-                Ok(remote_address) => remote_address,
-                Err(error) => {
-                    warn!(%error, "Failed to read PROXY protocol header");
-                    continue;
-                }
-            };
+        accept_loop(
+            "VNC connection",
+            listener,
+            proxy_protocol,
+            move |stream, remote_address| {
+                let tls_config = tls_config.clone();
+                let services = services.clone();
+                async move {
+                    let (session_handle, mut abort_rx) = VncSessionHandle::new();
 
-            let tls_config = tls_config.clone();
-            let services = services.clone();
-            tokio::spawn(async move {
-                let (session_handle, mut abort_rx) = VncSessionHandle::new();
-
-                let server_handle = match State::register_session(
-                    &services.state,
-                    &PROTOCOL_NAME,
-                    SessionStateInit {
-                        remote_address: Some(remote_address),
-                        handle: Box::new(session_handle),
-                    },
-                )
-                .await
-                {
-                    Ok(h) => h,
-                    Err(error) => {
-                        error!(%error, "Failed to register session");
-                        return;
-                    }
-                };
-
-                let span = info_span!("VNC", session=%server_handle.lock().await.id());
-
-                tokio::select! {
-                    result = handle_connection(
-                        services,
-                        server_handle.clone(),
+                    let (server_handle, viewer_stream) = State::register_user_session_with_stream(
+                        &services.state,
+                        PROTOCOL_NAME,
+                        UserSessionStateInit {
+                            remote_address: Some(remote_address),
+                            handle: Box::new(session_handle),
+                        },
                         stream,
-                        tls_config,
-                        remote_address,
-                    ).instrument(span) => match result {
-                        Ok(()) => info!("Session ended"),
-                        Err(error) => error!(%error, "Session failed"),
-                    },
-                    _ = abort_rx.recv() => {
-                        warn!("Session aborted by admin");
-                    }
-                }
-            });
-        }
+                    )
+                    .await
+                    .context("registering session")?;
 
+                    let span =
+                        info_span!("VNC", session=%server_handle.lock().await.user_session_id());
+
+                    // The outcome logs run in the span too: anything logged outside it is
+                    // not attributed to the session. They are synchronous, so they enter the
+                    // span directly rather than nesting another future in this one.
+                    tokio::select! {
+                        result = handle_connection(
+                            services,
+                            server_handle.clone(),
+                            viewer_stream,
+                            tls_config,
+                            remote_address,
+                        ).instrument(span.clone()) => span.in_scope(|| match result {
+                            Ok(()) => info!("Session ended"),
+                            Err(error) => error!(%error, "Session failed"),
+                        }),
+                        _ = abort_rx.recv() => span.in_scope(|| {
+                            warn!("Session aborted by admin");
+                        }),
+                    }
+                    Ok(())
+                }
+            },
+        )
+        .await;
         Ok(())
     }
     .boxed())
@@ -142,15 +126,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> ViewerStream for T {}
 async fn handle_connection(
     services: Services,
     server_handle: Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
-    stream: TcpStream,
+    stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     tls_config: Arc<ServerConfig>,
     remote_address: SocketAddr,
 ) -> Result<()> {
-    let stream = {
-        let guard = server_handle.lock().await;
-        guard.wrap_stream(stream).await?
-    };
-
     // Bound the whole handshake + auth phase with a single timeout, so a viewer that
     // can't speak our auth (or stalls) is dropped with an error instead of hanging.
     // The relay afterwards is intentionally untimed.
@@ -212,7 +191,7 @@ async fn negotiate_and_authorize(
             }
         };
 
-    let authenticated = match authenticate::<VncProto>(
+    let authenticated = match authenticate::<TargetVncOptions>(
         services,
         server_handle,
         &username,
@@ -260,14 +239,10 @@ async fn negotiate_and_authorize(
 
     let mut render = RenderState::new();
 
-    let (user_info, target, vnc_options) = match authenticated {
-        DesktopAuthOutcome::Authorized {
-            user_info,
-            target,
-            options,
-        } => (user_info, target, options),
+    let authorization = match authenticated {
+        DesktopAuthOutcome::Authorized { authorization } => authorization,
         DesktopAuthOutcome::NeedsInteractive(interactive) => {
-            collect_additional_credentials(
+            let identity = collect_additional_credentials(
                 &mut viewer_wr,
                 &mut events_rx,
                 &mut render,
@@ -278,19 +253,9 @@ async fn negotiate_and_authorize(
             )
             .await?;
 
-            let user_info = services
-                .auth_state_store
-                .lock()
-                .await
-                .get(&interactive.state_id)
-                .context("auth state expired during approval")?
-                .lock()
-                .await
-                .user_info()
-                .clone();
-            let (target, options) = finalize_user_auth::<VncProto>(
+            let authorization = finalize_user_auth::<TargetVncOptions>(
                 services,
-                &interactive.username,
+                &identity,
                 &interactive.target_name,
             )
             .await?;
@@ -299,34 +264,44 @@ async fn negotiate_and_authorize(
             // the SSH baseline, which clears counters once 2FA completes. Fail open.
             let _ = services
                 .login_protection
-                .clear_failed_attempts(&interactive.remote_ip, &user_info.username)
+                .clear_failed_attempts(&interactive.remote_ip, &identity.username)
                 .await;
-            (user_info, target, options)
+            authorization
         }
         // Already handled before the security handshake above.
         DesktopAuthOutcome::Failed => return Ok(None),
     };
 
-    {
-        let handle = server_handle.lock().await;
-        handle.set_user_info(user_info).await?;
-        handle.set_target(&target).await?;
-    }
+    // The viewer is held under the hold screen for the whole gate: VNC only paints when
+    // asked, so without it the viewer's frame requests would go unanswered and its screen
+    // would sit frozen for as long as the administrator takes to decide.
+    let admitted = render_while(
+        &mut viewer_wr,
+        &mut events_rx,
+        &mut render,
+        warpgate_desktop_auth::admit_desktop_session(
+            services,
+            server_handle,
+            authorization,
+            Some(remote_address.ip()),
+        ),
+    )
+    .await??;
 
-    info!(target=%target.name, "Authorized");
+    info!(target=%admitted.target().name, "Authorized");
+
+    show_banner(&mut viewer_wr, &mut events_rx, &mut render, services).await?;
 
     // Start a recording if enabled; `None` just means we don't tap the decoded stream.
     // Either way the session takes the same decode-and-re-encode path below, so the
     // interactive-auth / connecting screens (which render into the viewer framebuffer)
     // keep working and the viewer never needs a JPEG decoder.
-    let session_id = server_handle.lock().await.id();
-    let recorder = warpgate_desktop_auth::start_recording(services, &session_id, "vnc").await;
+    let recorder = warpgate_desktop_auth::start_recording(services, &admitted.id(), "vnc").await;
 
     // A single backend client connection decodes every update (Tight/JPEG included, see
     // PROXY_ENCODINGS); we both record it and re-encode it toward the viewer as RFB Raw.
-    debug!(host = %vnc_options.host, port = vnc_options.port, "connecting to backend");
-    let mut backend =
-        crate::client::connect_for_proxy(vnc_options.clone(), services.secret_backend.clone());
+    debug!(host = %admitted.options().host, port = admitted.options().port, "connecting to backend");
+    let mut backend = crate::client::connect_for_proxy(admitted, services.secret_backend.clone())?;
 
     // Wait under the hold screen for the backend's initial geometry, recording every
     // event consumed so nothing is dropped from the recording.
@@ -334,12 +309,12 @@ async fn negotiate_and_authorize(
         &mut viewer_wr,
         &mut events_rx,
         &mut render,
-        wait_for_backend_size(&mut backend.event_rx, &recorder),
+        wait_for_backend_size(&mut backend.event_rx, recorder.as_ref()),
     )
     .await??;
 
     // Resize the viewer to match backend geometry (only if it advertised DesktopSize).
-    if render.supports_desktop_size {
+    if render.caps.supports_desktop_size {
         write_desktop_size(&mut viewer_wr, backend_w, backend_h).await?;
     } else {
         warn!(
@@ -368,17 +343,37 @@ struct ProxySession {
     reader: tokio::task::JoinHandle<Result<tokio::io::ReadHalf<Box<dyn ViewerStream>>>>,
     stop_tx: oneshot::Sender<()>,
     render: RenderState,
-    backend: crate::client::VncClientHandles,
+    backend: warpgate_core::DesktopClientHandles,
     recorder: Option<DesktopRecorder>,
 }
 
-/// Shared state for the hold screen
-struct RenderState {
+/// The viewer's negotiated capabilities, updated from its handshake / control messages and
+/// read wherever we re-encode toward it (the hold screen and the proxy loop).
+#[derive(Clone)]
+struct ViewerCaps {
     pixel_format: PixelFormat,
     supports_desktop_size: bool,
     /// The viewer negotiated the Tight encoding, so backend JPEG rects can be forwarded
     /// through as Tight/JPEG instead of being decoded and re-encoded as Raw.
     viewer_supports_tight: bool,
+}
+
+impl ViewerCaps {
+    const fn new() -> Self {
+        Self {
+            pixel_format: DEFAULT_PIXEL_FORMAT,
+            supports_desktop_size: false,
+            viewer_supports_tight: false,
+        }
+    }
+}
+
+/// Viewer-facing render state: the negotiated [`ViewerCaps`], whether the viewer has an
+/// outstanding frame request (VNC is pull-based, so we only paint when it asks), whether its
+/// reader task has ended, and the hold-screen animation tick.
+#[derive(Clone)]
+struct RenderState {
+    caps: ViewerCaps,
     pending_request: bool,
     reader_done: bool,
     tick: u64,
@@ -387,29 +382,27 @@ struct RenderState {
 impl RenderState {
     const fn new() -> Self {
         Self {
-            pixel_format: DEFAULT_PIXEL_FORMAT,
-            supports_desktop_size: false,
-            viewer_supports_tight: false,
+            caps: ViewerCaps::new(),
             pending_request: false,
             reader_done: false,
             tick: 0,
         }
     }
 
-    /// Update state from a viewer message
-    /// Returns keysym of a keypress (the only interesting action)
-    fn note_event(&mut self, event: Option<ClientEvent>) -> Option<u32> {
+    /// Update state from a viewer message. Returns the keysym of a keypress — the only event
+    /// the hold screen acts on — or `None`.
+    const fn note_event(&mut self, event: Option<&ClientEvent>) -> Option<u32> {
         match event {
-            Some(ClientEvent::PixelFormat(pf)) => self.pixel_format = pf,
+            Some(ClientEvent::PixelFormat(pf)) => self.caps.pixel_format = *pf,
             Some(ClientEvent::Encodings {
                 desktop_size,
                 tight,
             }) => {
-                self.supports_desktop_size = desktop_size;
-                self.viewer_supports_tight = tight;
+                self.caps.supports_desktop_size = *desktop_size;
+                self.caps.viewer_supports_tight = *tight;
             }
             Some(ClientEvent::WantsFrame) => self.pending_request = true,
-            Some(ClientEvent::Key { down: true, keysym }) => return Some(keysym),
+            Some(ClientEvent::Key { down: true, keysym }) => return Some(*keysym),
             // A key release, pointer motion or clipboard update is irrelevant to the
             // hold screen; the recording session loop handles input once it takes over.
             Some(
@@ -423,29 +416,15 @@ impl RenderState {
     async fn paint<W, R>(&mut self, viewer_wr: &mut W, render_frame: R) -> Result<()>
     where
         W: AsyncWrite + Unpin,
-        R: FnOnce(u64) -> Result<Vec<u8>, Infallible>,
+        R: FnOnce(ui::Screen, u64) -> Result<Vec<u8>, Infallible>,
     {
-        let image = render_frame(self.tick)?;
-        let pixels = pack_rgb(&self.pixel_format, &image);
-        write_raw_rect(viewer_wr, 0, 0, ui::SCREEN_W, ui::SCREEN_H, &pixels).await?;
+        // VNC dictates the framebuffer size in its ServerInit, so it is always the default.
+        let screen = ui::Screen::default();
+        let image = render_frame(screen, self.tick)?;
+        let pixels = pack_rgb(&self.caps.pixel_format, &image);
+        write_raw_rect(viewer_wr, 0, 0, screen.width, screen.height, &pixels).await?;
         self.tick += 1;
         self.pending_request = false;
         Ok(())
-    }
-}
-
-/// VNC's binding to the shared desktop-auth flow.
-struct VncProto;
-
-impl DesktopProtocol for VncProto {
-    type Options = TargetVncOptions;
-    const NAME: &'static str = PROTOCOL_NAME;
-    const LABEL: &'static str = "vnc";
-
-    fn options(target: &Target) -> Option<TargetVncOptions> {
-        match &target.options {
-            TargetOptions::Vnc(options) => Some(options.clone()),
-            _ => None,
-        }
     }
 }

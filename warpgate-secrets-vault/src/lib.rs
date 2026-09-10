@@ -16,7 +16,6 @@ pub struct VaultBackend {
 }
 
 impl VaultBackend {
-
     pub async fn new(config: &SecretBackendConfig) -> Result<Self, SecretError> {
         let mut builder = VaultClientSettingsBuilder::default();
         builder.address(&config.address);
@@ -28,9 +27,7 @@ impl VaultBackend {
         builder.verify(!config.tls.skip_verify);
 
         if let Some(ca) = &config.tls.ca_cert {
-            builder.ca_certs(vec![
-                ca.to_string_lossy().into_owned(),
-            ]);
+            builder.ca_certs(vec![ca.to_string_lossy().into_owned()]);
         }
 
         let settings = builder
@@ -119,41 +116,9 @@ impl VaultBackend {
             })
     }
 
-    async fn fetch_with_version(
-        &self,
-        mount: &str,
-        kv_path: &str,
-    ) -> Result<(SecretDataMap, u64), SecretError> {
-        use vaultrs::api::kv2::requests::ReadSecretRequest;
-
-        let endpoint = ReadSecretRequest::builder()
-            .mount(mount)
-            .path(kv_path)
-            .build()
-            .expect("mount and path are always set");
-
-        let client = self.client.lock().await;
-        match vaultrs::api::exec_with_result(&*client, endpoint).await {
-            Ok(res) => {
-                let data = serde_json::from_value(res.data).map_err(|e| {
-                    SecretError::Backend(format!("KV v2 read {mount}/{kv_path}: {e}"))
-                })?;
-                Ok((data, res.metadata.version))
-            }
-            Err(vaultrs::error::ClientError::APIError { code: 404, .. }) => {
-                Ok((SecretDataMap::new(), 0))
-            }
-            Err(other) => Err(SecretError::Backend(format!(
-                "KV v2 read {mount}/{kv_path}: {other}"
-            ))),
-        }
-    }
-
     fn split_path<'a>(path: &'a str) -> Result<(&'a str, &'a str), SecretError> {
         path.split_once('/').ok_or_else(|| {
-            SecretError::InvalidRef(format!(
-                "path must be 'mount/kv_path', got '{path}'"
-            ))
+            SecretError::InvalidRef(format!("path must be 'mount/kv_path', got '{path}'"))
         })
     }
 }
@@ -187,76 +152,6 @@ impl SecretBackend for VaultBackend {
             .ok_or_else(|| SecretError::NotFound {
                 path: reference.path.clone(),
             })
-    }
-
-    async fn store(&self, reference: &SecretRef, value: &SecretValue) -> Result<(), SecretError> {
-        let field = reference.field.as_deref().ok_or_else(|| {
-            SecretError::InvalidRef(format!(
-                "a #field is required for Vault references (got '{reference}')"
-            ))
-        })?;
-
-        let (mount, kv_path) = Self::split_path(&reference.path)?;
-
-        use vaultrs::api::kv2::requests::SetSecretRequestOptions;
-
-        const MAX_ATTEMPTS: u32 = 10;
-        let mut reauthenticated = false;
-
-        for attempt in 0..MAX_ATTEMPTS {
-            let (mut data, version) = match self.fetch_with_version(mount, kv_path).await {
-                Ok(v) => v,
-                Err(e) if !reauthenticated => {
-                    // On auth failure, try to re-authenticate once and retry.
-                    warn!("Vault read failed ({e}), attempting re-authentication");
-                    let mut locked = self.client.lock().await;
-                    authenticate(&mut locked, &self.auth_config).await?;
-                    drop(locked);
-                    reauthenticated = true;
-                    self.fetch_with_version(mount, kv_path).await?
-                }
-                Err(e) => return Err(e),
-            };
-
-            data.insert(
-                field.to_string(),
-                serde_json::Value::String(value.expose().to_string()),
-            );
-
-            let options = SetSecretRequestOptions {
-                cas: u32::try_from(version).unwrap_or(u32::MAX),
-            };
-
-            let result = {
-                let client = self.client.lock().await;
-                vaultrs::kv2::set_with_options(&*client, mount, kv_path, &data, options).await
-            };
-
-            match result {
-                Ok(_) => return Ok(()),
-                Err(vaultrs::error::ClientError::APIError { code: 400, errors })
-                    if errors
-                        .iter()
-                        .any(|e| e.to_lowercase().contains("check-and-set")) =>
-                {
-                    debug!(
-                        attempt,
-                        "Vault CAS conflict writing {mount}/{kv_path}, retrying with fresh data"
-                    );
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                    continue;
-                }
-                Err(e) => {
-                    return Err(SecretError::Backend(format!(
-                        "KV v2 write {mount}/{kv_path}: {e}"
-                    )))
-                }
-            }
-        }
-
-        Err(SecretError::Backend(format!(
-            "KV v2 write {mount}/{kv_path}: gave up after {MAX_ATTEMPTS} attempts due to concurrent writers"
-        )))
     }
 
     async fn health(&self) -> Result<(), SecretError> {
@@ -308,42 +203,37 @@ async fn authenticate(
             mount,
         } => {
             let role_id = tokio::fs::read_to_string(role_id_file).await.map_err(|e| {
-                SecretError::Backend(format!(
-                    "read role_id from {}: {e}",
-                    role_id_file.display()
-                ))
+                SecretError::Backend(format!("read role_id from {}: {e}", role_id_file.display()))
             })?;
-            let secret_id =
-                tokio::fs::read_to_string(secret_id_file)
-                    .await
-                    .map_err(|e| {
-                        SecretError::Backend(format!(
-                            "read secret_id from {}: {e}",
-                            secret_id_file.display()
-                        ))
-                    })?;
+            let secret_id = tokio::fs::read_to_string(secret_id_file)
+                .await
+                .map_err(|e| {
+                    SecretError::Backend(format!(
+                        "read secret_id from {}: {e}",
+                        secret_id_file.display()
+                    ))
+                })?;
 
-            let info = vaultrs::auth::approle::login(
-                client,
-                mount,
-                role_id.trim(),
-                secret_id.trim(),
-            )
-            .await
-            .map_err(|e| SecretError::Backend(format!("AppRole login: {e}")))?;
+            let info =
+                vaultrs::auth::approle::login(client, mount, role_id.trim(), secret_id.trim())
+                    .await
+                    .map_err(|e| SecretError::Backend(format!("AppRole login: {e}")))?;
 
             client.set_token(&info.client_token);
             Ok(Some(Duration::from_secs(info.lease_duration)))
         }
-        VaultAuthConfig::Kubernetes { role, jwt_path, mount } => {
+        VaultAuthConfig::Kubernetes {
+            role,
+            jwt_path,
+            mount,
+        } => {
             let jwt = tokio::fs::read_to_string(jwt_path).await.map_err(|e| {
                 SecretError::Backend(format!("read JWT from {}: {e}", jwt_path.display()))
             })?;
 
-            let info =
-                vaultrs::auth::kubernetes::login(client, mount, role, jwt.trim())
-                    .await
-                    .map_err(|e| SecretError::Backend(format!("Kubernetes login: {e}")))?;
+            let info = vaultrs::auth::kubernetes::login(client, mount, role, jwt.trim())
+                .await
+                .map_err(|e| SecretError::Backend(format!("Kubernetes login: {e}")))?;
 
             client.set_token(&info.client_token);
             Ok(Some(Duration::from_secs(info.lease_duration)))

@@ -1,6 +1,6 @@
-use sea_orm::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ForeignKeyAction;
+use sea_orm::Set;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{UserAuthCredential, UserSsoCredential};
@@ -62,5 +62,14 @@ impl From<UserSsoCredential> for ActiveModel {
             email: Set(credential.email),
             ..Default::default()
         }
+    }
+}
+
+impl Model {
+    pub fn as_fingerprintable_bytes(&self) -> Vec<u8> {
+        let mut buf = self.provider.clone().unwrap_or_default().into_bytes();
+        buf.push(0);
+        buf.extend_from_slice(self.email.as_bytes());
+        buf
     }
 }

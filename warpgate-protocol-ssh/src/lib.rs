@@ -1,22 +1,24 @@
+mod channel_audit;
 mod client;
+mod command_detector;
 mod common;
-mod compat;
 mod keys;
 pub mod known_hosts;
 mod server;
 use std::fmt::Debug;
 
 use anyhow::Result;
+pub use channel_audit::ChannelAudit;
 pub use client::*;
 pub use common::*;
 use futures::future::BoxFuture;
 pub use keys::*;
 pub use server::bind_server;
-use warpgate_common::{ListenEndpoint, ProtocolName};
+use warpgate_common::{ListenEndpoint, Protocol, emit_runtime_warning};
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
-pub static PROTOCOL_NAME: ProtocolName = "SSH";
+pub const PROTOCOL_NAME: Protocol = Protocol::Ssh;
 
 #[derive(Clone)]
 pub struct SSHProtocolServer {
@@ -26,14 +28,18 @@ pub struct SSHProtocolServer {
 impl SSHProtocolServer {
     pub async fn new(services: &Services) -> Result<Self> {
         let config = services.config.lock().await;
-        ensure_keys(&config, &services.global_params, &*services.secret_backend, "host").await?;
-        ensure_keys(
-            &config,
-            &services.global_params,
-            &*services.secret_backend,
-            "client",
-        )
-        .await?;
+        let keys_path = config.store.ssh.keys_path(&services.global_params);
+        ensure_host_keys(&services.db, &keys_path).await?;
+        ensure_client_keys(&services.db, &keys_path).await?;
+        if any_host_key_files_present(&keys_path) {
+            emit_runtime_warning(format!(
+                "SSH host keys are still read from {keys_path:?} and imported into the database. Remove the `ssh.keys` config option and delete the key files to complete the migration; in the future Warpgate will stop reading these files."
+            ));
+        } else if config.store.ssh.keys.is_some() {
+            emit_runtime_warning(format!(
+                "`ssh.keys` points to {keys_path:?} but holds no host keys; the database keys are used. Remove this option from the config."
+            ));
+        }
         Ok(Self {
             services: services.clone(),
         })

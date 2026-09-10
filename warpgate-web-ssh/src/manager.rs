@@ -1,23 +1,22 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use russh::keys::PublicKeyBase64;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, debug, error, info_span, warn};
-use uuid::Uuid;
-use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{
-    SshHostKeyVerificationMode, Target, TargetOptions, TargetSSHOptions, WarpgateError,
-};
-use warpgate_core::recordings::TerminalRecordingStreamId;
-use warpgate_core::{ConfigProvider, Services, SessionStateInit, State};
+use warpgate_common::{TargetSSHOptions, UserSessionId, WarpgateError};
+use warpgate_core::{Services, State, TargetAuthorization, UserSessionStateInit};
+use warpgate_db_entities::Parameters;
+use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
-use warpgate_protocol_ssh::known_hosts::KnownHosts;
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RCState, RemoteClient, resolve_ssh_chain};
-use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
+use warpgate_protocol_ssh::{
+    RCCommand, RCEvent, RCState, RemoteClient, resolve_approved_ssh_chain,
+};
+use warpgate_web_clients_common::{
+    ClientManager, SessionRemover, WebSessionHandle, admit_web_client_session,
+};
 
 use crate::protocol::ServerMessage;
 use crate::session::WebSshSession;
@@ -35,7 +34,7 @@ impl std::ops::Deref for WebSshClientManager {
 }
 
 impl SessionRemover for WebSshClientManager {
-    async fn remove_session(&self, id: Uuid) {
+    async fn remove_session(&self, id: UserSessionId) {
         self.0.remove_session(id).await;
     }
 }
@@ -48,37 +47,25 @@ impl WebSshClientManager {
     pub async fn create_session(
         &self,
         services: &Services,
-        user_id: Uuid,
-        username: &str,
-        target_name: &str,
+        authorization: TargetAuthorization,
         remote_address: Option<SocketAddr>,
-    ) -> Result<Uuid, WarpgateError> {
-        if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
-            return Err(WarpgateError::SessionLimitReached);
-        }
+    ) -> Result<UserSessionId, WarpgateError> {
+        let user_id = authorization.user_info().id;
+        // Guard held until the session running
+        let _slot = self.reserve_slot(user_id, MAX_SESSIONS_PER_USER).await?;
 
-        let target: Target = {
-            let mut cp = services.config_provider.lock().await;
-            cp.get_target_by_name(target_name)
-                .await?
-                .ok_or_else(|| anyhow!("SSH target {target_name:?} not found"))?
-        };
-
-        let TargetOptions::Ssh(mut ssh_options) = target.options.clone() else {
-            return Err(WarpgateError::InvalidTarget);
-        };
-
-        if ssh_options.username.is_empty() {
-            ssh_options.username = username.to_owned();
-        }
+        let authorization = authorization.narrow::<TargetSSHOptions>()?;
+        let username = authorization.user_info().username.clone();
+        let target_name = authorization.target().name.clone();
+        let target_kind = TargetKind::from(&authorization.target().options);
 
         let (abort_tx, mut abort_rx) = mpsc::unbounded_channel::<()>();
         let session_handle = WebSessionHandle::new(abort_tx);
 
-        let server_handle = State::register_session(
+        let server_handle = State::register_node_local_user_session(
             &services.state,
-            &warpgate_protocol_ssh::PROTOCOL_NAME,
-            SessionStateInit {
+            warpgate_protocol_ssh::PROTOCOL_NAME,
+            UserSessionStateInit {
                 remote_address,
                 handle: Box::new(session_handle),
             },
@@ -86,32 +73,20 @@ impl WebSshClientManager {
         .await
         .context("registering webSSH session")?;
 
-        {
-            let server_handle = server_handle.lock().await;
+        let admitted =
+            admit_web_client_session(services, &server_handle, authorization, remote_address)
+                .await?;
 
-            server_handle
-                .set_user_info(AuthStateUserInfo {
-                    id: user_id,
-                    username: username.to_owned(),
-                })
-                .await
-                .context("setting user info on server handle")?;
-
-            server_handle
-                .set_target(&target)
-                .await
-                .context("setting target on server handle")?;
-        }
-
-        let session_id = server_handle.lock().await.id();
+        let session_id = server_handle.lock().await.user_session_id();
         let rc_handles = RemoteClient::create(session_id, services.clone())
             .context("creating SSH remote client")?;
 
         let session = Arc::new(WebSshSession::new(
             session_id,
             user_id,
-            target_name.to_owned(),
-            TargetKind::from(&target.options),
+            target_name.clone(),
+            target_kind,
+            admitted.id(),
             server_handle,
             rc_handles.command_tx.clone(),
             rc_handles.abort_tx.clone(),
@@ -133,7 +108,7 @@ impl WebSshClientManager {
 
         self.insert(session.clone()).await;
 
-        let ssh_chain = resolve_ssh_chain(services, target.id, Some(&username.to_string()))
+        let ssh_chain = resolve_approved_ssh_chain(services, admitted)
             .await?
             .into_iter()
             .map(|x| x.ssh_options)
@@ -146,9 +121,8 @@ impl WebSshClientManager {
         spawn_event_loop(
             session.clone(),
             rc_handles.event_rx,
-            self.sessions(),
+            self.0.clone(),
             services.clone(),
-            ssh_options,
         );
 
         debug!(session=%session_id, user=%username, target=%target_name, "Web-SSH session created");
@@ -160,9 +134,8 @@ impl WebSshClientManager {
 fn spawn_event_loop(
     session: Arc<WebSshSession>,
     mut event_rx: Receiver<RCEvent>,
-    sessions: Arc<Mutex<HashMap<Uuid, Arc<WebSshSession>>>>,
+    manager: ClientManager<WebSshSession>,
     services: Services,
-    ssh_options: TargetSSHOptions,
 ) {
     let session_id = session.id();
     let span = info_span!("WebSSH", session=%session_id);
@@ -177,16 +150,7 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::Output(channel_id, data) => {
-                            {
-                                session.with_recorder(channel_id, async |r| {
-                                    if let Err(e) = r
-                                        .write(TerminalRecordingStreamId::Output, &data)
-                                        .await
-                                    {
-                                        error!(%channel_id, ?e, "Failed to record terminal data");
-                                    }
-                                }).await;
-                            }
+                            session.on_output(channel_id, &data).await;
                             session
                                 .push(ServerMessage::Output {
                                     channel_id,
@@ -205,7 +169,7 @@ fn spawn_event_loop(
                         }
                         RCEvent::Close(channel_id) |
                         RCEvent::ChannelFailure(channel_id) => {
-                            session.stop_recording(channel_id).await;
+                            session.end_channel(channel_id).await;
                             session
                                 .push(ServerMessage::ChannelClosed { channel_id })
                                 .await;
@@ -229,37 +193,28 @@ fn spawn_event_loop(
                                 })
                                 .await;
                         }
-                        RCEvent::HostKeyReceived(key) => {
-                            debug!(%session_id, "Host key received: {}", key.algorithm());
+                        RCEvent::HostKeyReceived(key, host, port) => {
+                            debug!(%session_id, "Host key received for {host}:{port}: {}", key.algorithm());
                         }
-                        RCEvent::HostKeyUnknown(key, reply) => {
-                            let mode = services
-                                .config
-                                .lock()
-                                .await
-                                .store
-                                .ssh
-                                .host_key_verification;
+                        RCEvent::HostKeyUnknown(key, host, port, reply) => {
+                            let mode = match Parameters::Entity::get(&services.db).await {
+                                Ok(p) => p.ssh_host_key_verification,
+                                Err(e) => {
+                                    error!(%session_id, ?e, "Failed to read the host key verification mode");
+                                    let _ = reply.send(false);
+                                    continue;
+                                }
+                            };
                             match mode {
-                                SshHostKeyVerificationMode::AutoAccept => {
-                                    let known_hosts = KnownHosts::new(&services.db);
-                                    if let Err(e) = known_hosts
-                                        .trust(
-                                            &ssh_options.host,
-                                            ssh_options.port,
-                                            &key,
-                                        )
-                                        .await
-                                    {
-                                        error!(%session_id, ?e, "Failed to save host key");
-                                    }
+                                SshHostKeyVerificationMode::Ignore
+                                | SshHostKeyVerificationMode::AutoAccept => {
                                     let _ = reply.send(true);
                                 }
                                 SshHostKeyVerificationMode::Prompt => {
                                     session
                                         .push(ServerMessage::HostKeyUnknown {
-                                            host: ssh_options.host.clone(),
-                                            port: ssh_options.port,
+                                            host,
+                                            port,
                                             key_type: key.algorithm().to_string(),
                                             key_base64: key.public_key_base64(),
                                         })
@@ -267,9 +222,6 @@ fn spawn_event_loop(
                                     session
                                         .set_pending_host_key(crate::session::PendingHostKey {
                                             reply,
-                                            key,
-                                            host: ssh_options.host.clone(),
-                                            port: ssh_options.port,
                                         })
                                         .await;
                                 }
@@ -288,7 +240,7 @@ fn spawn_event_loop(
 
                 // remote client is gone now
                 session.close();
-                sessions.lock().await.remove(&session.id());
+                manager.remove_session(session.id()).await;
                 anyhow::Ok(())
             }
             .instrument(span),

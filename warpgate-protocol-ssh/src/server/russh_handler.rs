@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use bytes::Bytes;
 use russh::keys::PublicKey;
 use russh::server::{Auth, ChannelOpenHandle, Handle, Msg, Session};
-use russh::{Channel, ChannelId, ChannelOpenFailure, Pty, Sig};
+use russh::{Channel, ChannelId, Pty, Sig};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
@@ -20,10 +20,21 @@ impl Debug for HandleWrapper {
     }
 }
 
+/// Carries a channel-open reply handle into the session event loop so the
+/// confirmation is sent from the same task that writes channel data, keeping
+/// `CHANNEL_OPEN_CONFIRMATION` ahead of the target's first bytes (#2328).
+pub struct ChannelOpenHandleWrapper(pub ChannelOpenHandle);
+
+impl Debug for ChannelOpenHandleWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ChannelOpenHandleWrapper")
+    }
+}
+
 #[derive(Debug)]
 pub enum ServerHandlerEvent {
     Authenticated(HandleWrapper),
-    ChannelOpenSession(ServerChannelId, oneshot::Sender<bool>),
+    ChannelOpenSession(ServerChannelId, ChannelOpenHandleWrapper),
     SubsystemRequest(ServerChannelId, String, oneshot::Sender<bool>),
     PtyRequest(ServerChannelId, PtyRequest, oneshot::Sender<()>),
     ShellRequest(ServerChannelId, oneshot::Sender<bool>),
@@ -38,8 +49,8 @@ pub enum ServerHandlerEvent {
     WindowChangeRequest(ServerChannelId, PtyRequest, oneshot::Sender<()>),
     Signal(ServerChannelId, Sig, oneshot::Sender<()>),
     ExecRequest(ServerChannelId, Bytes, oneshot::Sender<bool>),
-    ChannelOpenDirectTcpIp(ServerChannelId, DirectTCPIPParams, oneshot::Sender<bool>),
-    ChannelOpenDirectStreamlocal(ServerChannelId, String, oneshot::Sender<bool>),
+    ChannelOpenDirectTcpIp(ServerChannelId, DirectTCPIPParams, ChannelOpenHandleWrapper),
+    ChannelOpenDirectStreamlocal(ServerChannelId, String, ChannelOpenHandleWrapper),
     EnvRequest(ServerChannelId, String, String, oneshot::Sender<()>),
     X11Request(ServerChannelId, X11Request, oneshot::Sender<()>),
     TcpIpForward(String, u32, oneshot::Sender<bool>),
@@ -53,6 +64,10 @@ pub enum ServerHandlerEvent {
 impl ServerHandlerEvent {
     /// The already-open channel this event refers to, if any.
     /// Channel open events establish new channels and are not included.
+    ///
+    /// Deliberately a total match: event deferral during pending channel
+    /// opens keys off this (#1459), so a new variant must explicitly decide
+    /// whether it names a channel rather than silently defaulting to "no".
     pub(crate) const fn existing_channel(&self) -> Option<ServerChannelId> {
         match self {
             Self::SubsystemRequest(channel, ..)
@@ -68,7 +83,19 @@ impl ServerHandlerEvent {
             | Self::EnvRequest(channel, ..)
             | Self::X11Request(channel, ..)
             | Self::AgentForward(channel, ..) => Some(*channel),
-            _ => None,
+            Self::Authenticated(_)
+            | Self::ChannelOpenSession(..)
+            | Self::AuthPublicKey(..)
+            | Self::AuthPublicKeyOffer(..)
+            | Self::AuthPassword(..)
+            | Self::AuthKeyboardInteractive(..)
+            | Self::ChannelOpenDirectTcpIp(..)
+            | Self::ChannelOpenDirectStreamlocal(..)
+            | Self::TcpIpForward(..)
+            | Self::CancelTcpIpForward(..)
+            | Self::StreamlocalForward(..)
+            | Self::CancelStreamlocalForward(..)
+            | Self::Disconnect => None,
         }
     }
 }
@@ -112,14 +139,10 @@ impl russh::server::Handler for ServerHandler {
         reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let (tx, rx) = oneshot::channel();
-
         self.send_event(ServerHandlerEvent::ChannelOpenSession(
             ServerChannelId(channel.id()),
-            tx,
+            ChannelOpenHandleWrapper(reply),
         ))?;
-
-        reply_channel_open(reply, rx.await.unwrap_or(false)).await;
         Ok(())
     }
 
@@ -433,7 +456,6 @@ impl russh::server::Handler for ServerHandler {
     ) -> Result<(), Self::Error> {
         let host_to_connect = host_to_connect.to_string();
         let originator_address = originator_address.to_string();
-        let (tx, rx) = oneshot::channel();
         self.send_event(ServerHandlerEvent::ChannelOpenDirectTcpIp(
             ServerChannelId(channel.id()),
             DirectTCPIPParams {
@@ -442,9 +464,8 @@ impl russh::server::Handler for ServerHandler {
                 originator_address,
                 originator_port,
             },
-            tx,
+            ChannelOpenHandleWrapper(reply),
         ))?;
-        reply_channel_open(reply, rx.await.unwrap_or(false)).await;
         Ok(())
     }
 
@@ -456,13 +477,11 @@ impl russh::server::Handler for ServerHandler {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let socket_path = socket_path.to_string();
-        let (tx, rx) = oneshot::channel();
         self.send_event(ServerHandlerEvent::ChannelOpenDirectStreamlocal(
             ServerChannelId(channel.id()),
             socket_path,
-            tx,
+            ChannelOpenHandleWrapper(reply),
         ))?;
-        reply_channel_open(reply, rx.await.unwrap_or(false)).await;
         Ok(())
     }
 
@@ -583,16 +602,6 @@ impl russh::server::Handler for ServerHandler {
             session.request_failure();
         }
         Ok(allowed)
-    }
-}
-
-async fn reply_channel_open(reply: ChannelOpenHandle, allowed: bool) {
-    if allowed {
-        reply.accept().await;
-    } else {
-        reply
-            .reject(ChannelOpenFailure::AdministrativelyProhibited)
-            .await;
     }
 }
 

@@ -5,69 +5,60 @@
         faTerminal,
     } from '@fortawesome/free-solid-svg-icons'
     import {
+        Alert,
         Button,
         Dropdown,
         DropdownItem,
         DropdownMenu,
         DropdownToggle,
+        Input,
         Modal,
         ModalBody,
         ModalFooter,
+        Tooltip,
     } from '@sveltestrap/sveltestrap'
+    import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import EmptyState from 'common/EmptyState.svelte'
+    import { stringifyError } from 'common/errors'
     import GettingStarted from 'common/GettingStarted.svelte'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import { resolveGroup } from 'common/groups'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
-    import { handleReauthError } from 'common/reauth'
+    import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
     import {
         api,
-        BootstrapThemeColor,
         TargetClickAction,
         TargetKind,
         type TargetSnapshot,
     } from 'gateway/lib/api'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
+    import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
     import { firstBy } from 'thenby'
-    import { serverInfo } from './lib/store'
+    import {
+        collapsedTargetGroups,
+        openTargetsInNewTab,
+        openTargetsInNewTabForced,
+        serverInfo,
+        setOpenTargetsInNewTab,
+    } from './lib/store'
+    import { openWebDesktopSession, openWebSshSession } from './lib/webSessions'
 
     let instructionsTarget: TargetSnapshot | undefined = $state()
+    // The target an in-browser session is being opened for. Opening one can
+    // take as long as an administrator takes to approve it, and until then
+    // there is nothing else on screen to say the click did anything.
+    let openingTarget: TargetSnapshot | undefined = $state()
+    let openError: string | undefined = $state()
 
     const canEditTargets = $derived(
         $serverInfo?.adminPermissions?.targetsEdit ?? false,
     )
     const webClientsEnabled = $derived($serverInfo?.webClientsEnabled ?? true)
-
-    async function openWebSsh(target: TargetSnapshot) {
-        try {
-            const { sessionId } = await api.createWebSshSession({
-                createWebSshSessionBody: { targetId: target.id },
-            })
-            window.open(`/@warpgate#/web-ssh/${sessionId}`, '_blank')
-        } catch (err) {
-            if (!(await handleReauthError(err))) {
-                throw err
-            }
-        }
-    }
-
-    async function openWebDesktop(target: TargetSnapshot) {
-        try {
-            const { sessionId } = await api.createWebDesktopSession({
-                createWebDesktopSessionBody: { targetId: target.id },
-            })
-            window.open(`/@warpgate#/web-desktop/${sessionId}`, '_blank')
-        } catch (err) {
-            if (!(await handleReauthError(err))) {
-                throw err
-            }
-        }
-    }
 
     function loadTargets(
         options: LoadOptions,
@@ -105,14 +96,28 @@
         )
     }
 
-    function selectTarget(target: TargetSnapshot) {
+    function urlForTarget(target: TargetSnapshot): string | undefined {
         if (target.kind === TargetKind.Http) {
             if (target.externalHost) {
                 const port = location.port ? `:${location.port}` : ''
-                loadURL(`${location.protocol}//${target.externalHost}${port}`)
+                return `${location.protocol}//${target.externalHost}${port}`
             } else {
-                loadURL(`/?warpgate-target=${target.name}`)
+                return `/?warpgate-target=${target.name}`
             }
+        } else if (target.kind === TargetKind.Ssh) {
+            return `/@warpgate/#/web-ssh/start/${target.id}`
+        } else if (
+            target.kind === TargetKind.Vnc ||
+            target.kind === TargetKind.Rdp
+        ) {
+            return `/@warpgate/#/web-desktop/start/${target.id}`
+        }
+    }
+
+    function selectTarget(target: TargetSnapshot) {
+        if (target.kind === TargetKind.Http) {
+            // biome-ignore lint/style/noNonNullAssertion: .
+            loadURL(urlForTarget(target)!)
         } else if (target.kind === TargetKind.Ssh) {
             const targetClickAction = $serverInfo?.targetClickAction
             if (
@@ -121,7 +126,7 @@
             ) {
                 instructionsTarget = target
             } else {
-                openWebSsh(target)
+                void openInBrowser(target, () => openWebSshSession(target.id))
             }
         } else if (
             target.kind === TargetKind.Vnc ||
@@ -130,10 +135,28 @@
             if (!webClientsEnabled) {
                 instructionsTarget = target
             } else {
-                openWebDesktop(target)
+                openWebDesktopSession(target.id)
             }
         } else {
             instructionsTarget = target
+        }
+    }
+
+    // A target that needs administrator approval holds this until someone
+    // decides, and answers 403 if they say no — so it needs both a sign that
+    // it is in progress and somewhere for the refusal to land.
+    async function openInBrowser(
+        target: TargetSnapshot,
+        open: () => void | Promise<void>,
+    ) {
+        openError = undefined
+        openingTarget = target
+        try {
+            await open()
+        } catch (err) {
+            openError = await stringifyError(err)
+        } finally {
+            openingTarget = undefined
         }
     }
 
@@ -142,28 +165,18 @@
     }
 
     function loadURL(url: string) {
-        location.href = url
+        // Only HTTP targets navigate via loadURL. Honour the opt-in preference
+        // to open them in a new tab (mirrors how SSH/desktop targets already
+        // use window.open) so the target list isn't lost.
+        if (get(openTargetsInNewTab)) {
+            window.open(url, '_blank')
+        } else {
+            location.href = url
+        }
     }
 
-    interface GroupInfo {
-        id: string
-        name: string
-        color: BootstrapThemeColor
-    }
-
-    function groupInfoFromTarget(target: TargetSnapshot): GroupInfo {
-        if (!target.group) {
-            return {
-                id: '$ungrouped',
-                name: 'Ungrouped',
-                color: BootstrapThemeColor.Secondary,
-            }
-        }
-        return {
-            id: target.group.id,
-            name: target.group.name,
-            color: target.group.color ?? BootstrapThemeColor.Secondary,
-        }
+    function groupInfoFromTarget(target: TargetSnapshot) {
+        return resolveGroup(target.group)
     }
 </script>
 
@@ -171,29 +184,70 @@
     <GettingStarted setupState={$serverInfo?.setupState} />
 {/if}
 
+{#if openingTarget}
+    <Alert color="info">
+        Connecting to {openingTarget.name}. If this target needs approval, it
+        will start once an administrator approves it.
+    </Alert>
+{/if}
+
+{#if openError}
+    <Alert color="danger">{openError}</Alert>
+{/if}
+
 <ItemList
     load={loadTargets}
     showSearch={true}
     groupObject={groupInfoFromTarget}
     groupKey={group => group.id}
+    bind:collapsedGroups={$collapsedTargetGroups}
 >
+    {#snippet header(items, groupControls)}
+        {#if items?.length}
+            <ListOverflowMenu {groupControls}>
+                <div class="dropdown-header">Preferences</div>
+                <DropdownItem>
+                    <!-- A disabled input doesn't emit the pointer events the
+                    tooltip needs, so the wrapper carries the target id. -->
+                    <div id="openTargetsInNewTabSwitch">
+                        <Input
+                            type="switch"
+                            checked={$openTargetsInNewTab}
+                            disabled={$openTargetsInNewTabForced}
+                            label="Open targets in a new tab"
+                            onchange={e =>
+                                setOpenTargetsInNewTab(
+                                    (e.currentTarget as HTMLInputElement).checked,
+                                )}
+                            onmousedown={e => e.stopPropagation()}
+                        />
+                    </div>
+                    {#if $openTargetsInNewTabForced}
+                        <Tooltip
+                            delay="250"
+                            target="openTargetsInNewTabSwitch"
+                            animation
+                        >
+                            Managed by the administrator
+                        </Tooltip>
+                    {/if}
+                </DropdownItem>
+            </ListOverflowMenu>
+        {/if}
+    {/snippet}
     {#snippet empty()}
         <EmptyState title="You don't have access to any targets yet" />
     {/snippet}
-    {#snippet groupHeader(group)}
-        <div class="d-flex align-items-center gap-2 mb-2 mt-4">
-            <GroupColorCircle color={group.color} />
-            <div class="h5 mb-0">{group.name}</div>
-        </div>
+    {#snippet groupHeader(group, state)}
+        <CollapsibleGroupHeader {group} {state} />
     {/snippet}
     {#snippet item(target)}
         <a
             class="list-group-item list-group-item-action target-item gap-3"
-            href={target.kind === TargetKind.Http
-                    ? (target.externalHost
-                        ? `${location.protocol}//${target.externalHost}${location.port ? `:${location.port}` : ''}`
-                        : `/?warpgate-target=${target.name}`)
-                    : '/@warpgate/admin'}
+            href={urlForTarget(target)}
+            target={target.kind === TargetKind.Http && $openTargetsInNewTab
+                ? '_blank'
+                : undefined}
             onclick={e => {
                 if (e.metaKey || e.ctrlKey) {
                     return
@@ -253,22 +307,25 @@
                     {#if target.kind === TargetKind.Ssh && webClientsEnabled}
                         <DropdownItem
                             onclick={e => {
-                            openWebSsh(target)
+                            void openInBrowser(target, () =>
+                                openWebSshSession(target.id))
                             e.preventDefault()
                             e.stopPropagation()
                         }}
-                            >Web terminal</DropdownItem
                         >
+                            Web terminal
+                        </DropdownItem>
                     {/if}
                     {#if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) && webClientsEnabled}
                         <DropdownItem
                             onclick={e => {
-                            openWebDesktop(target)
+                            openWebDesktopSession(target.id)
                             e.preventDefault()
                             e.stopPropagation()
                         }}
-                            >Web desktop</DropdownItem
                         >
+                            Web desktop
+                        </DropdownItem>
                     {/if}
                     <DropdownItem
                         onclick={e => {
@@ -276,14 +333,16 @@
                         e.preventDefault()
                         e.stopPropagation()
                     }}
-                        >Connection instructions</DropdownItem
                     >
+                        Connection instructions
+                    </DropdownItem>
                     {#if canEditTargets}
                         <DropdownItem
                             href={`/@warpgate/admin#/config/targets/${target.id}`}
                             onclick={e => e.stopPropagation()}
-                            >Edit target</DropdownItem
                         >
+                            Edit target
+                        </DropdownItem>
                     {/if}
                 </DropdownMenu>
             </Dropdown>
@@ -320,10 +379,11 @@
             <Button
                 color="primary"
                 class="d-flex align-items-center justify-content-center gap-2 modal-button"
-                onclick={() => openWebSsh(sshTarget)}
+                onclick={() => openInBrowser(sshTarget, () =>
+                    openWebSshSession(sshTarget.id))}
             >
                 <Fa icon={faTerminal} />
-                Open Web Terminal
+                Web terminal
             </Button>
         {/if}
         <Button
@@ -341,5 +401,6 @@
     .target-item {
         display: flex;
         align-items: center;
+        cursor: pointer;
     }
 </style>

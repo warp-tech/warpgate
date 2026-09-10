@@ -1,15 +1,23 @@
 <script lang="ts">
+    import BannerModal from 'common/BannerModal.svelte'
     import { api } from 'gateway/lib/api'
     import { onMount } from 'svelte'
     import logo from '../../public/assets/favicon.svg'
+
+    // Movement in pixels before a press turns into a drag rather than a menu toggle.
+    const DRAG_THRESHOLD = 5
 
     let ready = false
     let menuVisible = false
     let dragging = false
     let savedPosition = { x: 0.1, y: 0.8 }
     let position = { x: 0.1, y: 0.8 }
-    let dragStartCoords = { x: 0, y: 0 }
+    let dragStartCoords: { x: number; y: number } | undefined
     let externalHost: string | undefined
+    let banner = ''
+    // The embedded UI is also injected when only the banner is enabled, so the
+    // floating menu renders separately from it.
+    let showMenu = false
 
     if (localStorage.warpgateMenuLocation) {
         position = JSON.parse(localStorage.warpgateMenuLocation)
@@ -19,17 +27,29 @@
     onMount(async () => {
         ready = true
         const info = await api.getInfo()
+        banner = info.banner
+        showMenu = info.showSessionMenu
         externalHost = `${info.externalHosts?.http ?? info.externalHost}:${info.ports.http ?? 443}`
     })
 
-    function drag(e: MouseEvent) {
-        if (!dragging) {
+    function startDragging(e: PointerEvent) {
+        dragStartCoords = { x: e.clientX, y: e.clientY }
+        dragging = false
+        // Capture guarantees the matching pointerup/pointermove reach the icon even
+        // if the pointer leaves the window, so a release outside can't strand `dragging`.
+        ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
+    }
+
+    function drag(e: PointerEvent) {
+        if (!dragStartCoords) {
             return
         }
-        const { x, y } = dragStartCoords
-        const { clientX, clientY } = e
-        const dx = clientX - x
-        const dy = clientY - y
+        const dx = e.clientX - dragStartCoords.x
+        const dy = e.clientY - dragStartCoords.y
+        if (!dragging && Math.hypot(dx, dy) < DRAG_THRESHOLD) {
+            return
+        }
+        dragging = true
         position = {
             x: Math.max(
                 0,
@@ -42,15 +62,12 @@
         }
     }
 
-    function startDragging(e: MouseEvent) {
-        dragStartCoords = { x: e.clientX, y: e.clientY }
-        dragging = true
-    }
-
-    function stopDragging() {
-        dragging = false
-        savedPosition = position
-        localStorage.warpgateMenuLocation = JSON.stringify(position)
+    function endDragging() {
+        if (dragging) {
+            savedPosition = position
+            localStorage.warpgateMenuLocation = JSON.stringify(position)
+        }
+        dragStartCoords = undefined
     }
 
     function goHome() {
@@ -67,46 +84,40 @@
     }
 </script>
 
-<svelte:window
-    on:mousemove|passive={drag}
-    on:mouseup={() => {
-        menuVisible = false
-        stopDragging()
-    }}
-/>
+<svelte:window on:pointerup={() => (menuVisible = false)} />
 
-<div
-    class="embedded-ui"
-    class:wg-hidden={!ready}
-    style="left: {position.x * 100}%; top: {position.y * 100}%"
->
-    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-    <img
-        class="menu-toggle"
-        src={logo}
-        alt="Warpgate"
-        on:mouseup|stopPropagation|preventDefault={() => {
+<BannerModal {banner} />
+
+{#if showMenu}
+    <div
+        class="embedded-ui"
+        class:wg-hidden={!ready}
+        style="left: {position.x * 100}%; top: {position.y * 100}%"
+    >
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <img
+            class="menu-toggle"
+            src={logo}
+            alt="Warpgate"
+            on:pointerdown|preventDefault={startDragging}
+            on:pointermove={drag}
+            on:pointerup|stopPropagation|preventDefault={() => {
             if (!dragging) {
                 menuVisible = !menuVisible
-            } else {
-                stopDragging()
             }
+            endDragging()
         }}
-        on:mousedown|preventDefault
-        on:mousemove|preventDefault={e => {
-            if (e.buttons && !dragging) {
-                startDragging(e)
-            }
-        }}
-    >
+            on:pointercancel={endDragging}
+        >
 
-    {#if menuVisible}
-        <div class="menu">
-            <button type="button" on:mouseup={goHome}>Home</button>
-            <button type="button" on:mouseup={logout}>Log out</button>
-        </div>
-    {/if}
-</div>
+        {#if menuVisible}
+            <div class="menu">
+                <button type="button" on:pointerup={goHome}>Home</button>
+                <button type="button" on:pointerup={logout}>Log out</button>
+            </div>
+        {/if}
+    </div>
+{/if}
 
 <style lang="scss">
     .embedded-ui {

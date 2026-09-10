@@ -89,11 +89,14 @@
       }
     },
     "recordings": {
-      "$ref": "#/$defs/RecordingsConfig",
-      "default": {
-        "enable": false,
-        "path": "./data/recordings"
-      }
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecordingsConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "secrets": {
       "$ref": "#/$defs/SecretsConfig",
@@ -110,7 +113,6 @@
         "host_key_verification": "prompt",
         "inactivity_timeout": "5m",
         "keepalive_interval": null,
-        "keys": "./data/keys",
         "listen": "[::]:2222",
         "proxy_protocol": false
       }
@@ -142,25 +144,6 @@
       "enum": [
         "vault",
         "openbao"
-      ]
-    },
-    "Duration": {
-      "type": "object",
-      "properties": {
-        "nanos": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "secs": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "secs",
-        "nanos"
       ]
     },
     "HttpConfig": {
@@ -552,6 +535,7 @@
           "minimum": 0
         },
         "host_key_verification": {
+          "description": "Only seeds the `ssh_host_key_verification` parameter when the database\nrow is first created; the admin UI owns the setting afterwards.",
           "$ref": "#/$defs/SshHostKeyVerificationMode",
           "default": "prompt"
         },
@@ -560,19 +544,18 @@
           "default": "5m"
         },
         "keepalive_interval": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Duration"
-            },
-            {
-              "type": "null"
-            }
+          "type": [
+            "string",
+            "null"
           ],
           "default": null
         },
         "keys": {
-          "$ref": "#/$defs/SshKeysSource",
-          "default": "./data/keys"
+          "description": "Legacy directory for the SSH host keys (`host-ed25519`, `host-rsa`).\nIf set, key files are re-imported into the database, after which the option can be removed from the config.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",
@@ -590,32 +573,8 @@
       "enum": [
         "prompt",
         "auto_accept",
-        "auto_reject"
-      ]
-    },
-    "SshKeysBackend": {
-      "type": "object",
-      "properties": {
-        "backend": {
-          "type": "string"
-        },
-        "path": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "backend",
-        "path"
-      ]
-    },
-    "SshKeysSource": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "$ref": "#/$defs/SshKeysBackend"
-        }
+        "auto_reject",
+        "ignore"
       ]
     },
     "SsoInternalProviderConfig": {

@@ -1,4 +1,6 @@
+import pytest
 import requests
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import time
 
@@ -23,9 +25,13 @@ def _create_test_user(api, echo_server_port):
     target = api.create_target(
         sdk.TargetDataRequest(
             name=f"echo-{uuid4()}",
+            require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetHTTPOptions(
                     kind="Http",
+                    headers={},
                     url=f"http://localhost:{echo_server_port}",
                     tls=sdk.Tls(mode=sdk.TlsMode.DISABLED, verify=False),
                 )
@@ -189,7 +195,115 @@ class TestLoginProtection:
             f"Expected success after unblock, got {resp.status_code}"
         )
 
+    def test_ip_blocking_blocks_ticket_auth(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """Presenting a ticket is still a login, so a blocked IP can't spend a valid one."""
+        wg = _lp_wg(processes, ip_max=3, user_max=100)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, target = _create_test_user(api, echo_server_port)
+            secret = api.create_ticket(
+                sdk.CreateTicketRequest(target_name=target.name, username=user.username)
+            ).secret
+
+        def _get_with_ticket():
+            s = requests.Session()
+            s.verify = False
+            return s.get(
+                f"{url}/some/path?warpgate-ticket={secret}", allow_redirects=False
+            )
+
+        # The ticket is good to begin with.
+        assert _get_with_ticket().status_code // 100 == 2
+
+        # 3 wrong passwords from this IP → threshold hit
+        for _ in range(3):
+            _post_login(url, user.username, "wrong")
+        time.sleep(0.2)
+
+        assert _get_with_ticket().status_code // 100 != 2, (
+            "blocked IP was still able to use a valid ticket"
+        )
+
+        # Unblocking restores it — proving the ticket itself was never consumed or
+        # invalidated, and the refusal above came from the IP block alone.
+        with admin_client(url) as api:
+            api.unblock_ip(sdk.UnblockIpRequest(ip="::1"))
+        assert _get_with_ticket().status_code // 100 == 2
+
+    def test_ip_blocking_with_password_login_disabled(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """Password attempts against the disabled method still trigger IP blocking."""
+        wg = _lp_wg(processes, ip_max=3, user_max=100)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, _ = _create_test_user(api, echo_server_port)
+            api.update_parameters(
+                sdk.ParameterUpdate(password_login_mode=sdk.PasswordLoginMode.DISABLED)
+            )
+
+        for _ in range(3):
+            resp, _ = _post_login(url, user.username, "wrong")
+            assert resp.status_code // 100 != 2
+        time.sleep(0.2)
+
+        resp, _ = _post_login(url, user.username, "wrong")
+        body = resp.json()
+        assert body.get("state") == "IpBlocked", f"Expected IpBlocked, got {body}"
+
+        with admin_client(url) as api:
+            assert any(b.ip_address == "::1" for b in api.list_blocked_ips()), (
+                "IP was not blocked despite repeated attempts on the disabled method"
+            )
+
     # ── user lockout ────────────────────────────────────────────────────────
+
+    def test_user_lockout_blocks_api_token_auth(
+        self, processes: ProcessManager, echo_server_port, timeout
+    ):
+        """An API token is only as good as its user, so a lockout disables it too."""
+        wg = _lp_wg(processes, ip_max=100, user_max=3)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user, _ = _create_test_user(api, echo_server_port)
+
+        _, session = _post_login(url, user.username, "correct_password")
+        minted = session.post(
+            f"{url}/@warpgate/api/profile/api-tokens",
+            json={
+                "label": "test",
+                "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            },
+        )
+        minted.raise_for_status()
+        token = minted.json()["secret"]
+
+        def _username_seen_by_token():
+            return requests.get(
+                f"{url}/@warpgate/api/info",
+                headers={"X-Warpgate-Token": token},
+                verify=False,
+            ).json()["username"]
+
+        assert _username_seen_by_token() == user.username
+
+        for _ in range(3):
+            _post_login(url, user.username, "wrong")
+        time.sleep(0.2)
+
+        assert _username_seen_by_token() is None, (
+            "locked user was still able to authenticate with an API token"
+        )
+
+        # Unlocking restores it, proving the refusal came from the lockout alone.
+        with admin_client(url) as api:
+            api.unlock_user(user.username)
+        assert _username_seen_by_token() == user.username
 
     def test_user_lockout_triggers_and_blocks_correct_password(
         self, processes: ProcessManager, echo_server_port, timeout
@@ -367,14 +481,20 @@ class TestLoginProtection:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
                             kind="Ssh",
+                            allow_insecure_algos=False,
                             host="localhost",
                             port=ssh_port,
                             username="root",
                             auth=sdk.SSHTargetAuth(
-                                sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                                sdk.SSHTargetAuthSshTargetPublicKeyAuth(
+                                    kind="PublicKey"
+                                )
                             ),
                         )
                     ),
@@ -448,14 +568,20 @@ class TestLoginProtection:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
                             kind="Ssh",
+                            allow_insecure_algos=False,
                             host="localhost",
                             port=ssh_port,
                             username="root",
                             auth=sdk.SSHTargetAuth(
-                                sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                                sdk.SSHTargetAuthSshTargetPublicKeyAuth(
+                                    kind="PublicKey"
+                                )
                             ),
                         )
                     ),
@@ -493,6 +619,69 @@ class TestLoginProtection:
             assert blocked, "expected a blocked IP after unknown-username brute force"
             for entry in blocked:
                 api.unblock_ip(sdk.UnblockIpRequest(ip=entry.ip_address))
+
+    @pytest.mark.parametrize(
+        "ssh_options",
+        [
+            pytest.param(
+                [
+                    "-o",
+                    "IdentityFile=ssh-keys/id_rsa",
+                    "-o",
+                    "PreferredAuthentications=publickey",
+                    "-o",
+                    "BatchMode=yes",
+                ],
+                id="publickey",
+            ),
+            # BatchMode would skip keyboard-interactive entirely; without a
+            # prompt from the server the client needs no tty anyway.
+            pytest.param(
+                ["-o", "PreferredAuthentications=keyboard-interactive"],
+                id="keyboard-interactive",
+            ),
+        ],
+    )
+    def test_probe_only_session_recorded_over_ssh(
+        self,
+        processes: ProcessManager,
+        timeout,
+        ssh_options,
+    ):
+        """A client that only probes an auth method (offers unknown keys, opens
+        keyboard-interactive) and disconnects without submitting a credential
+        is recorded as one failed login for the connection."""
+        wg = _lp_wg(processes, ip_max=100, user_max=100)
+        url = f"https://localhost:{wg.http_port}"
+
+        with admin_client(url) as api:
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+            api.create_password_credential(
+                user.id, sdk.NewPasswordCredential(password="correct_password")
+            )
+            before = api.get_security_status().failed_attempts_last_hour
+
+        client = processes.start_ssh_client(
+            f"{user.username}@localhost",
+            "-p",
+            str(wg.ssh_port),
+            *ssh_options,
+        )
+        client.communicate(timeout=timeout)
+        assert client.returncode != 0
+
+        # The attempt is recorded when the session closes — poll briefly.
+        with admin_client(url) as api:
+            deadline = time.time() + 10
+            after = before
+            while time.time() < deadline:
+                after = api.get_security_status().failed_attempts_last_hour
+                if after > before:
+                    break
+                time.sleep(0.5)
+            assert after == before + 1, (
+                "a probe-only session should record exactly one failed attempt"
+            )
 
     # ── admin exemption ──────────────────────────────────────────────────────
 

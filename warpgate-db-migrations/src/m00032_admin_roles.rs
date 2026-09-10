@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::m00007_targets_and_roles::{target, target_role_assignment};
 use crate::m00008_users::user_role_assignment;
-use crate::m00022_user_ldap_link::user;
+use crate::m00021_user_ldap_link::user;
 
 pub mod admin_role {
     use super::*;

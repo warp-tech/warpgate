@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::{error, info};
 use warpgate_common::{
-    BackendType, SecretBackend, SecretBackendRef, SecretError, SecretRef,
-    SecretValue, SecretsConfig, WarpgateError,
+    BackendType, SecretBackend, SecretBackendRef, SecretError, SecretRef, SecretValue,
+    SecretsConfig, WarpgateError,
 };
 use warpgate_secrets_vault::VaultBackend;
 
@@ -17,7 +17,6 @@ pub struct SecretBackendRegistry {
 }
 
 impl SecretBackendRegistry {
-    
     pub async fn from_config(config: &SecretsConfig) -> Result<Self, WarpgateError> {
         Ok(Self {
             backends: RwLock::new(Self::build_backends(config).await),
@@ -97,28 +96,6 @@ impl SecretBackend for SecretBackendRegistry {
         result
     }
 
-    async fn store(
-        &self,
-        reference: &SecretRef,
-        value: &SecretValue,
-    ) -> Result<(), SecretError> {
-        let result = match self.get(&reference.backend).await {
-            Some(b) => b.store(reference, value).await,
-            None => Err(SecretError::BackendNotConfigured {
-                backend: reference.backend.clone(),
-            }),
-        };
-
-        AuditEvent::SecretStored {
-            backend: reference.backend.clone(),
-            reference: reference.to_string(),
-            success: result.is_ok(),
-        }
-        .emit();
-
-        result
-    }
-
     async fn health(&self) -> Result<(), SecretError> {
         let backends: Vec<(String, SecretBackendRef)> = self
             .backends
@@ -128,13 +105,11 @@ impl SecretBackend for SecretBackendRegistry {
             .map(|(name, backend)| (name.clone(), backend.clone()))
             .collect();
 
-        let results = futures::future::join_all(backends.iter().map(|(name, backend)| async move {
-            backend
-                .health()
-                .await
-                .map_err(|e| format!("{name}: {e}"))
-        }))
-        .await;
+        let results =
+            futures::future::join_all(backends.iter().map(|(name, backend)| async move {
+                backend.health().await.map_err(|e| format!("{name}: {e}"))
+            }))
+            .await;
 
         let errors: Vec<String> = results.into_iter().filter_map(Result::err).collect();
         if errors.is_empty() {
@@ -151,11 +126,5 @@ impl SecretBackend for SecretBackendRegistry {
                 backend: name.to_string(),
             }),
         }
-    }
-
-    async fn reload(&self, config: &SecretsConfig) {
-        let new_backends = Self::build_backends(config).await;
-        *self.backends.write().await = new_backends;
-        info!("Secret backends reloaded");
     }
 }

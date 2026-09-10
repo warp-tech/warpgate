@@ -8,7 +8,6 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
-    import RelativeDate from 'admin/RelativeDate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import {
@@ -17,14 +16,15 @@
     } from 'common/duration'
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
+    import { routeQueryParams } from 'common/helpers'
     import InfoBox from 'common/InfoBox.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import { statusColor, statusIcon } from 'common/ticketRequestStatus'
     import {
+        type ActivatedTicketTargetInfo,
         api,
         type MyTicketModel,
-        TargetKind,
-        type TargetSnapshot,
         type TicketRequestModel,
         TicketRequestStatus,
         type TicketRequestTarget,
@@ -32,15 +32,26 @@
     import { serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
 
+    // Matches the server-side limit in warpgate-core/src/ticket_requests.rs
+    const DESCRIPTION_MAX_LENGTH = 2000
+
+    // Prefill from #/ticket-requests?target=x&description=y&duration=8h
+    // `target` is what makes such a link meaningful; the other params are only
+    // honoured alongside it, so a link can't open a plausible-looking prefilled
+    // request against whichever target happens to be first in the dropdown.
+    const urlParams = routeQueryParams()
+    const paramTarget = urlParams.get('target')
+    const paramDescription = paramTarget ? urlParams.get('description') : null
+    const paramDuration = paramTarget ? urlParams.get('duration') : null
+
     let error: string | undefined = $state()
     let success: string | undefined = $state()
     let lastSecret: string | undefined = $state()
-    let lastTargetName: string | undefined = $state()
+    let lastTarget: ActivatedTicketTargetInfo | undefined = $state()
     let requests: TicketRequestModel[] | undefined = $state()
     let tickets: MyTicketModel[] | undefined = $state()
     let ticketRequestTargets: TicketRequestTarget[] | undefined = $state()
-    let targets: TargetSnapshot[] | undefined = $state()
-    let showForm = $state(false)
+    let showForm = $state(!!paramTarget)
     let showAllRequests = $state(false)
 
     const REQUEST_PAGE_SIZE = 25
@@ -54,12 +65,23 @@
         return requests.slice(0, REQUEST_PAGE_SIZE)
     })
 
-    let selectedTarget = $state('')
-    let description = $state('')
+    let selectedTarget = $state(paramTarget ?? '')
+    let description = $state(
+        [...(paramDescription ?? '')].slice(0, DESCRIPTION_MAX_LENGTH).join(''),
+    )
     let descriptionTouched = $state(false)
-    let durationText = $state('8h')
+    let durationText = $state(paramDuration || '8h')
 
     let maxDurationSeconds = $derived($serverInfo?.ticketMaxDurationSeconds)
+
+    let unavailableTarget = $derived.by(() => {
+        if (!selectedTarget || !ticketRequestTargets) {
+            return undefined
+        }
+        return ticketRequestTargets.some(t => t.name === selectedTarget)
+            ? undefined
+            : selectedTarget
+    })
 
     let durationSeconds = $derived(parseHumantimeDuration(durationText))
 
@@ -83,19 +105,20 @@
         descriptionRequired && !description.trim(),
     )
 
-    let formInvalid = $derived(!!durationError || descriptionMissing)
+    let formInvalid = $derived(
+        !!durationError || descriptionMissing || !!unavailableTarget,
+    )
 
     async function load() {
-        const [r, t, trt, tgts] = await Promise.all([
+        const [r, t, trt] = await Promise.all([
             api.getMyTicketRequests(),
             api.getMyTickets(),
             api.getTicketRequestTargets(),
-            api.getTargets({ search: '' }),
         ])
         requests = r
         tickets = t
         ticketRequestTargets = trt
-        targets = tgts
+        // Never override an explicit selection
         if (ticketRequestTargets[0] && !selectedTarget) {
             selectedTarget = ticketRequestTargets[0].name
         }
@@ -110,7 +133,7 @@
         error = undefined
         success = undefined
         lastSecret = undefined
-        lastTargetName = undefined
+        lastTarget = undefined
         try {
             const result = await api.createTicketRequest({
                 createTicketRequestBody: {
@@ -122,7 +145,7 @@
             if (result.autoApprovedTicketSecret) {
                 success = 'Ticket was auto-approved'
                 lastSecret = result.autoApprovedTicketSecret
-                lastTargetName = selectedTarget
+                lastTarget = result.target
             } else {
                 success = 'Request submitted and is pending admin approval'
             }
@@ -141,7 +164,7 @@
         error = undefined
         success = undefined
         lastSecret = undefined
-        lastTargetName = undefined
+        lastTarget = undefined
         descriptionTouched = false
     }
 
@@ -149,13 +172,13 @@
         error = undefined
         success = undefined
         lastSecret = undefined
-        lastTargetName = undefined
+        lastTarget = undefined
         try {
             const result = await api.activateTicketRequest({ id: request.id })
             if (result.secret) {
                 success = 'Ticket activated'
                 lastSecret = result.secret
-                lastTargetName = request.targetName
+                lastTarget = result.target
             }
             showForm = false
             await load()
@@ -194,30 +217,26 @@
     <Alert color="success" fade={false}>
         {success}
     </Alert>
-    {#if lastSecret && lastTargetName}
-        {@const targetData = targets?.find(t => t.name === lastTargetName)}
-        {#if targetData}
-            <div class="my-5">
-                <InfoBox class="mb-2" variant="warning">
-                    <strong>Personal use only</strong>
-                    &mdash; do not share this secret. It grants access as your
-                    account.
-                </InfoBox>
-                <InfoBox class="mb-3" icon={faEyeSlash}>
-                    The secret is only shown once &mdash; you won't be able to
-                    see it again.
-                </InfoBox>
-                <ConnectionInstructions
-                    targetName={lastTargetName}
-                    targetKind={targetData.kind}
-                    username={$serverInfo?.username}
-                    ticketSecret={lastSecret}
-                    targetExternalHost={targetData.kind === TargetKind.Http ? targetData.externalHost : undefined}
-                    targetDefaultDatabaseName={(targetData.kind === TargetKind.MySql || targetData.kind === TargetKind.Postgres)
-                        ? targetData.defaultDatabaseName : undefined}
-                />
-            </div>
-        {/if}
+    {#if lastSecret && lastTarget}
+        <div class="my-5">
+            <InfoBox class="mb-2" variant="warning">
+                <strong>Personal use only</strong>
+                &mdash; do not share this secret. It grants access as your
+                account.
+            </InfoBox>
+            <InfoBox class="mb-3" icon={faEyeSlash}>
+                The secret is only shown once &mdash; you won't be able to see
+                it again.
+            </InfoBox>
+            <ConnectionInstructions
+                targetName={lastTarget.name}
+                targetKind={lastTarget.kind}
+                username={$serverInfo?.username}
+                ticketSecret={lastSecret}
+                targetExternalHost={lastTarget.externalHost}
+                targetDefaultDatabaseName={lastTarget.defaultDatabaseName}
+            />
+        </div>
     {/if}
 {/if}
 
@@ -227,6 +246,14 @@
             <h4 class="mb-3">Request a ticket</h4>
 
             {#if ticketRequestTargets?.length}
+                {#if unavailableTarget}
+                    <Alert color="warning" fade={false}>
+                        <strong>{unavailableTarget}</strong>
+                        is not available for ticket requests. Select a target
+                        below.
+                    </Alert>
+                {/if}
+
                 <form onsubmit={e => e.preventDefault()}>
                     <FormGroup floating label="Target">
                         <select
@@ -256,9 +283,9 @@
                             onblur={() => descriptionTouched = true}
                         >
                         {#if descriptionMissing}
-                            <small class="form-text text-muted"
-                                >A description is required for ticket requests.</small
-                            >
+                            <small class="form-text text-muted">
+                                A description is required for ticket requests.
+                            </small>
                         {/if}
                     </FormGroup>
 
@@ -273,19 +300,22 @@
                         {#if durationError}
                             <div class="invalid-feedback">{durationError}</div>
                         {:else if maxDurationSeconds}
-                            <small class="form-text text-muted"
-                                >Maximum:
-                                {formatDurationAsHumantime(maxDurationSeconds)}</small
-                            >
+                            <small class="form-text text-muted">
+                                Maximum:
+                                {formatDurationAsHumantime(maxDurationSeconds)}
+                            </small>
                         {:else}
-                            <small class="form-text text-muted"
-                                >Examples: 30m, 8h, 1d, 2h30m</small
-                            >
+                            <small class="form-text text-muted">
+                                Examples: 30m, 8h, 1d, 2h30m
+                            </small>
                         {/if}
                     </FormGroup>
                 </form>
             {:else if ticketRequestTargets}
-                <EmptyState title="No targets available" />
+                <EmptyState
+                    title="No targets available"
+                    hint={unavailableTarget ? `${unavailableTarget} is not available for ticket requests.` : ''}
+                />
             {/if}
         </ModalBody>
         <ModalFooter>
@@ -338,8 +368,9 @@
                             <AsyncButton
                                 color="success"
                                 click={() => activateRequest(request)}
-                                >Activate</AsyncButton
                             >
+                                Activate
+                            </AsyncButton>
                         {/if}
                         <small class="text-muted flex-shrink-0">
                             <RelativeDate date={request.created} />
@@ -391,8 +422,9 @@
                             color="link"
                             size="sm"
                             onclick={() => deleteTicket(ticket)}
-                            >Revoke</Button
                         >
+                            Revoke
+                        </Button>
                     </div>
                 {/each}
             </div>

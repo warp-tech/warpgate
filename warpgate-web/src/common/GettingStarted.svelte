@@ -49,10 +49,10 @@
             <Fa icon={setupState.hasTargets ? faCircleCheck : faCircle} />
             <div class="item-text">
                 <div>Add a target</div>
-                <small
-                    >Targets are the servers and services that your users will
-                    connect to through Warpgate</small
-                >
+                <small>
+                    Targets are the servers and services that your users will
+                    connect to through Warpgate
+                </small>
             </div>
         </a>
 
@@ -63,9 +63,9 @@
             <Fa icon={setupState.hasUsers ? faCircleCheck : faCircle} />
             <div class="item-text">
                 <div>Add a non-admin user</div>
-                <small
-                    >Create separate non-admin user accounts for your users</small
-                >
+                <small>
+                    Create separate non-admin user accounts for your users
+                </small>
             </div>
         </a>
     </ListGroup>
@@ -74,9 +74,10 @@
 <style lang="scss">
     .getting-started-help {
         margin-bottom: 3rem;
-        border-top: 1px solid transparent;
-        border-bottom: 1px solid transparent;
+        border: 1px solid transparent;
         padding: 1.5rem 0.5rem;
+        border-radius: 20px;
+        padding: 25px 30px;
 
         h2 {
             font-family: 'Poppins';

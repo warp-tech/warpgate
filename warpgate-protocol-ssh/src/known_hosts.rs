@@ -1,13 +1,10 @@
-use std::sync::Arc;
-
 use russh::keys::{PublicKey, PublicKeyBase64};
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_db_entities::KnownHost;
 
 pub struct KnownHosts {
-    db: Arc<Mutex<DatabaseConnection>>,
+    db: DatabaseConnection,
 }
 
 pub enum KnownHostValidationResult {
@@ -20,7 +17,7 @@ pub enum KnownHostValidationResult {
 }
 
 impl KnownHosts {
-    pub fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
+    pub fn new(db: &DatabaseConnection) -> Self {
         Self { db: db.clone() }
     }
 
@@ -30,12 +27,12 @@ impl KnownHosts {
         port: u16,
         key: &PublicKey,
     ) -> Result<KnownHostValidationResult, sea_orm::DbErr> {
-        let db = self.db.lock().await;
+        let db = &self.db;
         let entries = KnownHost::Entity::find()
             .filter(KnownHost::Column::Host.eq(host))
             .filter(KnownHost::Column::Port.eq(port))
             .filter(KnownHost::Column::KeyType.eq(key.algorithm().as_str()))
-            .all(&*db)
+            .all(db)
             .await?;
 
         let key_base64 = key.public_key_base64();
@@ -67,8 +64,8 @@ impl KnownHosts {
             key_base64: Set(key.public_key_base64()),
         };
 
-        let db = self.db.lock().await;
-        values.insert(&*db).await?;
+        let db = &self.db;
+        values.insert(db).await?;
 
         Ok(())
     }

@@ -8,7 +8,7 @@ use poem_openapi::registry::{MetaSchemaRef, Registry};
 use poem_openapi::types::{ParseError, ParseFromJSON, ToJSON};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::Secret;
+use crate::{Secret, StoredSecret, WarpgateError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SecretError {
@@ -20,8 +20,6 @@ pub enum SecretError {
     BackendNotConfigured { backend: String },
     #[error("secret not found at '{path}'")]
     NotFound { path: String },
-    #[error("this backend does not support write-back")]
-    StoreNotSupported,
     #[error("secret backend error: {0}")]
     Backend(String),
 }
@@ -102,29 +100,16 @@ impl FromStr for SecretRef {
 
 #[async_trait]
 pub trait SecretBackend: Send + Sync {
-
     async fn resolve(&self, reference: &SecretRef) -> Result<SecretValue, SecretError>;
-
-    async fn store(
-        &self,
-        reference: &SecretRef,
-        value: &SecretValue,
-    ) -> Result<(), SecretError> {
-        let _ = (reference, value);
-        Err(SecretError::StoreNotSupported)
-    }
 
     async fn health(&self) -> Result<(), SecretError>;
 
     async fn health_for(&self, _name: &str) -> Result<(), SecretError> {
         self.health().await
     }
-
-    async fn reload(&self, _config: &crate::SecretsConfig) {}
 }
 
 pub type SecretBackendRef = Arc<dyn SecretBackend>;
-
 
 pub struct DbSecretBackend;
 
@@ -145,12 +130,11 @@ const REFERENCE_SCHEMES: &[&str] = &["vault://", "openbao://"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MaybeSecretRef {
-    Inline(Secret<String>),
+    Inline(StoredSecret),
     Reference(SecretRef),
 }
 
 impl MaybeSecretRef {
-
     pub fn as_reference(&self) -> Option<&SecretRef> {
         match self {
             Self::Inline(_) => None,
@@ -158,20 +142,24 @@ impl MaybeSecretRef {
         }
     }
 
-    pub async fn resolve(&self, backend: &dyn SecretBackend) -> Result<Secret<String>, SecretError> {
+    /// The credential itself: the inline value decrypted, or the referenced secret fetched
+    pub async fn resolve(
+        &self,
+        backend: &dyn SecretBackend,
+    ) -> Result<Secret<String>, WarpgateError> {
         match self {
-            Self::Inline(v) => Ok(v.clone()),
-            Self::Reference(r) => backend
+            Self::Inline(v) => Ok(v.reveal()?),
+            Self::Reference(r) => Ok(backend
                 .resolve(r)
                 .await
-                .map(|v| Secret::new(v.expose().to_string())),
+                .map(|v| Secret::new(v.expose().to_string()))?),
         }
     }
 }
 
 impl Default for MaybeSecretRef {
     fn default() -> Self {
-        Self::Inline(Secret::new(String::new()))
+        Self::Inline(StoredSecret::default())
     }
 }
 
@@ -182,7 +170,7 @@ impl FromStr for MaybeSecretRef {
         if REFERENCE_SCHEMES.iter().any(|prefix| s.starts_with(prefix)) {
             SecretRef::from_str(s).map(Self::Reference)
         } else {
-            Ok(Self::Inline(Secret::new(s.to_string())))
+            Ok(Self::Inline(StoredSecret::from(s.to_string())))
         }
     }
 }
@@ -222,7 +210,7 @@ impl poem_openapi::types::Type for MaybeSecretRef {
 
     fn as_raw_value(&self) -> Option<&Self::RawValueType> {
         match self {
-            Self::Inline(v) => Some(v.expose_secret()),
+            Self::Inline(v) => v.as_raw_value(),
             Self::Reference(_) => None,
         }
     }
@@ -235,7 +223,7 @@ impl poem_openapi::types::Type for MaybeSecretRef {
 
     fn is_empty(&self) -> bool {
         match self {
-            Self::Inline(v) => v.expose_secret().is_empty(),
+            Self::Inline(v) => poem_openapi::types::Type::is_empty(v),
             Self::Reference(_) => false,
         }
     }
@@ -247,8 +235,7 @@ impl poem_openapi::types::Type for MaybeSecretRef {
 
 impl ParseFromJSON for MaybeSecretRef {
     fn parse_from_json(value: Option<serde_json::Value>) -> poem_openapi::types::ParseResult<Self> {
-        let s = String::parse_from_json(value)
-            .map_err(|e| ParseError::custom(e.into_message()))?;
+        let s = String::parse_from_json(value).map_err(|e| ParseError::custom(e.into_message()))?;
         MaybeSecretRef::from_str(&s).map_err(|e| ParseError::custom(e.to_string()))
     }
 }
@@ -256,7 +243,7 @@ impl ParseFromJSON for MaybeSecretRef {
 impl ToJSON for MaybeSecretRef {
     fn to_json(&self) -> Option<serde_json::Value> {
         match self {
-            Self::Inline(v) => Some(serde_json::Value::String(v.expose_secret().clone())),
+            Self::Inline(v) => v.to_json(),
             Self::Reference(r) => Some(serde_json::Value::String(r.to_string())),
         }
     }
@@ -343,7 +330,7 @@ mod tests {
     fn maybe_secret_ref_plain_string_is_inline() {
         let v = MaybeSecretRef::from_str("hunter2").unwrap();
         match &v {
-            MaybeSecretRef::Inline(s) => assert_eq!(s.expose_secret(), "hunter2"),
+            MaybeSecretRef::Inline(s) => assert_eq!(s.reveal().unwrap().expose_secret(), "hunter2"),
             MaybeSecretRef::Reference(_) => panic!("expected Inline"),
         }
         assert_eq!(v.as_reference(), None);
@@ -376,14 +363,14 @@ mod tests {
     fn maybe_secret_ref_default_is_empty_inline() {
         let v = MaybeSecretRef::default();
         match v {
-            MaybeSecretRef::Inline(s) => assert_eq!(s.expose_secret(), ""),
+            MaybeSecretRef::Inline(s) => assert_eq!(s.reveal().unwrap().expose_secret(), ""),
             MaybeSecretRef::Reference(_) => panic!("expected Inline"),
         }
     }
 
     #[test]
     fn maybe_secret_ref_inline_serializes_as_plain_string() {
-        let v = MaybeSecretRef::Inline(Secret::new("hunter2".to_string()));
+        let v = MaybeSecretRef::Inline("hunter2".to_string().into());
         let json = serde_json::to_string(&v).unwrap();
         assert_eq!(json, "\"hunter2\"");
     }
@@ -401,7 +388,7 @@ mod tests {
             let json = serde_json::to_string(raw).unwrap();
             let v: MaybeSecretRef = serde_json::from_str(&json).unwrap();
             let round_tripped = match &v {
-                MaybeSecretRef::Inline(s) => s.expose_secret().clone(),
+                MaybeSecretRef::Inline(s) => s.reveal().unwrap().expose_secret().clone(),
                 MaybeSecretRef::Reference(r) => r.to_string(),
             };
             assert_eq!(round_tripped, raw);
@@ -442,7 +429,10 @@ mod tests {
     async fn resolve_reference_against_unconfigured_backend_errors() {
         let v = MaybeSecretRef::from_str("vault://vault-prod/secret/db#password").unwrap();
         let err = v.resolve(&DbSecretBackend).await.unwrap_err();
-        assert!(matches!(err, SecretError::BackendNotConfigured { backend } if backend == "vault-prod"));
+        assert!(matches!(
+            err,
+            WarpgateError::SecretBackend(SecretError::BackendNotConfigured { backend }) if backend == "vault-prod"
+        ));
     }
 
     #[tokio::test]

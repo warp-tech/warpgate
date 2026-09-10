@@ -35,6 +35,27 @@ def assert_401():
     assert e.value.status == 401
 
 
+def _ssh_target_request(name: str) -> sdk.TargetDataRequest:
+    return sdk.TargetDataRequest(
+        name=name,
+        require_approval=False,
+        ticket_requests_disabled=False,
+        ticket_require_approval=False,
+        options=sdk.TargetOptions(
+            sdk.TargetOptionsTargetSSHOptions(
+                kind="Ssh",
+                allow_insecure_algos=False,
+                host="127.0.0.1",
+                port=22,
+                username="user",
+                auth=sdk.SSHTargetAuth(
+                    sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                ),
+            )
+        ),
+    )
+
+
 def make_limited_admin_role_payload(**overrides):
     return {
         "name": overrides.get("name", f"limited-{uuid4()}"),
@@ -51,6 +72,7 @@ def make_limited_admin_role_payload(**overrides):
         "access_roles_assign": False,
         "sessions_view": False,
         "sessions_terminate": False,
+        "approve_sessions": False,
         "recordings_view": False,
         "tickets_create": False,
         "tickets_delete": False,
@@ -93,17 +115,34 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={201},
     ),
     AdminApiTestCase(
-        id="get_recording",
-        permission="recordings_view",
-        call=lambda api, r: api.get_recording_with_http_info(r["recording_id"]),
+        id="get_session_approvals",
+        permission="approve_sessions",
+        call=lambda api, r: api.get_session_approvals_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="approve_session",
+        permission="approve_sessions",
+        call=lambda api, r: api.approve_session_with_http_info(
+            r["session_id"],
+            sdk.ApproveSessionRequest(
+                scope=sdk.ApprovalScope.ONCE, target="no-such-target"
+            ),
+        ),
         expected_statuses={200, 404},
     ),
     AdminApiTestCase(
-        id="get_kubernetes_recording",
-        permission="recordings_view",
-        call=lambda api, r: api.get_kubernetes_recording_with_http_info(
-            r["recording_id"]
+        id="reject_session",
+        permission="approve_sessions",
+        call=lambda api, r: api.reject_session_with_http_info(
+            r["session_id"], sdk.RejectSessionRequest(target="no-such-target")
         ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="get_recording",
+        permission="recordings_view",
+        call=lambda api, r: api.get_recording_with_http_info(r["recording_id"]),
         expected_statuses={200, 404},
     ),
     AdminApiTestCase(
@@ -243,9 +282,52 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200},
     ),
     AdminApiTestCase(
+        id="import_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.import_ssh_own_key_with_http_info(
+            sdk.ImportSSHClientKeyRequest(
+                label=f"key-{uuid4()}",
+                secret_key=open("ssh-keys/id_ed25519").read(),
+                is_default=False,
+            )
+        ),
+        expected_statuses={201, 409},
+    ),
+    AdminApiTestCase(
+        id="generate_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.generate_ssh_own_key_with_http_info(
+            sdk.GenerateSSHClientKeyRequest(
+                label=f"key-{uuid4()}", kind=sdk.SSHClientKeyKind.ED25519
+            )
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="update_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.update_ssh_own_key_with_http_info(
+            r["ssh_client_key_id"],
+            sdk.UpdateSSHClientKeyRequest(label=f"key-{uuid4()}", is_default=False),
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="delete_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.delete_ssh_own_key_with_http_info(
+            r["ssh_client_key_id"]
+        ),
+        expected_statuses={204, 400, 404},
+    ),
+    AdminApiTestCase(
         id="get_logs",
         permission=None,
-        call=lambda api, r: api.get_logs_with_http_info(sdk.GetLogsRequest(search="")),
+        # A non-empty search is what actually exercises the filter - an empty one
+        # is skipped, hiding e.g. Postgres rejecting lower() on the JSON column
+        call=lambda api, r: api.get_logs_with_http_info(
+            sdk.GetLogsRequest(search="test")
+        ),
         expected_statuses={200},
     ),
     AdminApiTestCase(
@@ -258,20 +340,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         id="create_target",
         permission="targets_create",
         call=lambda api, r: api.create_target_with_http_info(
-            sdk.TargetDataRequest(
-                name=f"target-{uuid4()}",
-                options=sdk.TargetOptions(
-                    sdk.TargetOptionsTargetSSHOptions(
-                        kind="Ssh",
-                        host="127.0.0.1",
-                        port=22,
-                        username="user",
-                        auth=sdk.SSHTargetAuth(
-                            sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
-                        ),
-                    )
-                ),
-            ),
+            _ssh_target_request(f"target-{uuid4()}"),
         ),
         expected_statuses={201},
     ),
@@ -286,20 +355,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         permission="targets_edit",
         call=lambda api, r: api.update_target_with_http_info(
             r["target_id"],
-            sdk.TargetDataRequest(
-                name=f"target-{uuid4()}",
-                options=sdk.TargetOptions(
-                    sdk.TargetOptionsTargetSSHOptions(
-                        kind="Ssh",
-                        host="127.0.0.1",
-                        port=22,
-                        username="user",
-                        auth=sdk.SSHTargetAuth(
-                            sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
-                        ),
-                    )
-                ),
-            ),
+            _ssh_target_request(f"target-{uuid4()}"),
         ),
         expected_statuses={200},
     ),
@@ -664,7 +720,6 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         call=lambda api, r: api.update_parameters_with_http_info(
             sdk.ParameterUpdate(
                 allow_own_credential_management=True,
-                minimize_password_login=False,
                 rate_limit_bytes_per_second=None,
                 ssh_client_auth_keyboard_interactive=True,
                 ssh_client_auth_password=True,
@@ -677,6 +732,18 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
             ),
         ),
         expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="test_recordings_storage",
+        permission="config_edit",
+        call=lambda api, r: api.test_recordings_storage_with_http_info(
+            sdk.RecordingsStorageConfig(
+                sdk.RecordingsStorageConfigRecordingsDiskConfig(
+                    kind="Disk", path="/tmp/recordings-test"
+                )
+            )
+        ),
+        expected_statuses={200},
     ),
     AdminApiTestCase(
         id="get_analytics_preview",
@@ -763,7 +830,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="update_user_role",
-        permission=None,
+        permission="access_roles_assign",
         call=lambda api, r: api.update_user_role_with_http_info(
             r["user_id"],
             r["role_id"],
@@ -832,6 +899,18 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         permission="config_edit",
         call=lambda api, r: api.unlock_user_with_http_info("nonexistent-user"),
         expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="get_listener_states",
+        permission="config_edit",
+        call=lambda api, r: api.get_listener_states_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_ip_echo",
+        permission="config_edit",
+        call=lambda api, r: api.get_ip_echo_with_http_info(),
+        expected_statuses={200},
     ),
 ]
 
@@ -948,24 +1027,10 @@ def api_test_resources(
     resources["session_id"] = str(uuid4())
     resources["recording_id"] = str(uuid4())
     resources["ssh_known_host_id"] = str(uuid4())
+    resources["ssh_client_key_id"] = str(uuid4())
     resources["ticket_request_id"] = str(uuid4())
 
-    target = ac.create_target(
-        sdk.TargetDataRequest(
-            name=f"target-{uuid4()}",
-            options=sdk.TargetOptions(
-                sdk.TargetOptionsTargetSSHOptions(
-                    kind="Ssh",
-                    host="127.0.0.1",
-                    port=22,
-                    username="user",
-                    auth=sdk.SSHTargetAuth(
-                        sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
-                    ),
-                )
-            ),
-        )
-    )
+    target = ac.create_target(_ssh_target_request(f"target-{uuid4()}"))
     resources["target_id"] = target.id
     resources["target_name"] = target.name
 
@@ -1031,8 +1096,10 @@ def test_admin_api_permission_enforcement(
 ):
     url = f"https://localhost:{pg_wg.http_port}"
 
+    # Base-check endpoints (permission=None) admit any admin. An admin holds at least one
+    # permission — a permissionless role is not a real admin — so grant a benign baseline.
     allow_payload = make_limited_admin_role_payload(
-        **({case.permission: True} if case.permission else {})
+        **({case.permission: True} if case.permission else {"sessions_view": True})
     )
     allowed_role = _create_admin_role(admin_client, allow_payload)
     allowed_user = _create_user_with_role(admin_client, allowed_role.id)
@@ -1066,3 +1133,94 @@ def test_admin_api_permission_enforcement(
         assert status in {401, 403}, (
             f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
         )
+
+
+def test_update_target_must_state_the_approval_gate(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    # The gate is a required field of every target write: a client that
+    # predates it — or simply doesn't set it — is rejected outright rather
+    # than silently taking the gate off a target by saving the rest of it.
+    # The generated client can't express the omission, so raw JSON it is.
+    gated = _ssh_target_request(f"gated-{uuid4()}")
+    gated.require_approval = True
+    target = admin_client.create_target(gated)
+    assert target.require_approval
+
+    url = f"https://localhost:{pg_wg.http_port}"
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    body = admin_client.get_target(target.id).to_dict()
+    del body["require_approval"]
+    silent = session.put(
+        f"{url}/@warpgate/admin/api/targets/{target.id}", json=body
+    )
+    assert silent.status_code == 400, (
+        "an update that says nothing about the gate must be refused, "
+        f"got {silent.status_code}"
+    )
+    assert admin_client.get_target(target.id).require_approval, (
+        "and must not have touched it"
+    )
+
+    # Turning it off is an ordinary, explicit edit.
+    off = _ssh_target_request(target.name)
+    off.require_approval = False
+    admin_client.update_target(target.id, off)
+    assert not admin_client.get_target(target.id).require_approval
+
+
+def test_approval_parameters_can_be_cleared_and_reject_nonsense(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    # The generated clients omit a `None` field rather than sending `null`, so
+    # clearing one is only reachable over raw JSON — which is what the admin UI
+    # sends when the field is blanked.
+    url = f"https://localhost:{pg_wg.http_port}"
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    endpoint = f"{url}/@warpgate/admin/api/parameters"
+
+    def put(**overrides):
+        body = admin_client.get_parameters().to_dict()
+        body.update(overrides)
+        return session.put(endpoint, json=body)
+
+    assert put(admin_approval_grace_period_seconds=300).status_code // 100 == 2
+    assert admin_client.get_parameters().admin_approval_grace_period_seconds == 300
+
+    assert put(admin_approval_grace_period_seconds=None).status_code // 100 == 2
+    assert admin_client.get_parameters().admin_approval_grace_period_seconds is None, (
+        "an explicit null must turn approval caching off, not be ignored"
+    )
+
+    for field in (
+        "admin_approval_grace_period_seconds",
+        "admin_approval_timeout_seconds",
+    ):
+        assert put(**{field: -1}).status_code == 400, (
+            f"{field} must reject a negative window"
+        )
+
+
+def test_update_target_rejects_duplicate_name(admin_client: sdk.DefaultApi):
+    first = admin_client.create_target(_ssh_target_request(f"dup-a-{uuid4()}"))
+    second = admin_client.create_target(_ssh_target_request(f"dup-b-{uuid4()}"))
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.update_target(second.id, _ssh_target_request(first.name))
+    assert err.value.status == 409
+    still = admin_client.get_target(second.id)
+    assert still.name == second.name
+
+    renamed = admin_client.update_target(second.id, _ssh_target_request(second.name))
+    assert renamed.name == second.name
+
+
+def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
+    target = admin_client.create_target(_ssh_target_request(f"empty-{uuid4()}"))
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.update_target(target.id, _ssh_target_request(""))
+    assert err.value.status == 400
+    assert admin_client.get_target(target.id).name == target.name

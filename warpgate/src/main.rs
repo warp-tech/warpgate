@@ -49,6 +49,10 @@ pub(crate) enum Commands {
         /// Database URL
         #[clap(long)]
         database_url: Option<String>,
+
+        /// Import SSH key files (host-ed25519, host-rsa, client-ed25519, client-rsa) from this dir
+        #[clap(long)]
+        import_ssh_keys: Option<PathBuf>,
     },
     /// Run first-time setup non-interactively
     UnattendedSetup {
@@ -92,6 +96,10 @@ pub(crate) enum Commands {
         #[clap(long)]
         record_sessions: bool,
 
+        /// How to handle unknown SSH host keys of the targets
+        #[clap(long, value_enum, default_value_t)]
+        host_key_verification: warpgate_common::SshHostKeyVerificationMode,
+
         /// Password for the initial user (required if WARPGATE_ADMIN_PASSWORD env var is not set)
         #[clap(long)]
         admin_password: Option<String>,
@@ -99,6 +107,10 @@ pub(crate) enum Commands {
         /// External host used to construct URLs (without a port or scheme)
         #[clap(long)]
         external_host: Option<String>,
+
+        /// Import existing SSH keys (host-ed25519, host-rsa, client-ed25519, client-rsa) from this directory
+        #[clap(long)]
+        import_ssh_keys: Option<PathBuf>,
     },
     /// Show Warpgate's SSH client keys
     ClientKeys,
@@ -125,6 +137,12 @@ pub(crate) enum Commands {
         #[clap(action=ArgAction::Set)]
         username: Option<String>,
     },
+    /// Copy the current database contents into another database
+    CopyDatabase {
+        /// Target database URL
+        #[clap(action=ArgAction::Set)]
+        target_url: String,
+    },
     /// Run database migrations
     #[clap(allow_negative_numbers = true)]
     MigrateDatabase {
@@ -143,6 +161,11 @@ pub(crate) enum Commands {
 async fn _main() -> Result<()> {
     let cli = Cli::parse();
     let params = cli.into_global_params()?;
+
+    // Development convenience only, and having no `.env` at all is the normal case -
+    // so a failure to find one must not stop the process.
+    #[cfg(debug_assertions)]
+    let _ = dotenv::dotenv();
 
     init_logging(load_config(&params, false).ok().as_ref(), &cli).await?;
 
@@ -189,7 +212,7 @@ async fn _main() -> Result<()> {
         Commands::Setup { .. } | Commands::UnattendedSetup { .. } => {
             crate::commands::setup::command(&cli, &params).await
         }
-        Commands::ClientKeys => crate::commands::client_keys::command(&params),
+        Commands::ClientKeys => crate::commands::client_keys::command(&params).await,
         Commands::RecoverAccess { username } => {
             crate::commands::recover_access::command(&params, username.as_ref()).await
         }
@@ -202,6 +225,9 @@ async fn _main() -> Result<()> {
                 std::process::exit(1);
             }
             crate::commands::migrate::command(&params, *steps).await
+        }
+        Commands::CopyDatabase { target_url } => {
+            crate::commands::copy_database::command(&params, target_url).await
         }
     }
 }

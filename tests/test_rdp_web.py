@@ -42,9 +42,14 @@ class Test:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"rdp-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetRdpOptions(
                             kind="Rdp",
+                            compression=sdk.RdpTargetCompression.REMOTEFX,
+                            tls_security=sdk.RdpTlsSecurity.TLS12,
                             host="localhost",
                             port=rdp_backend_port,
                             username="user",  # the xrdp login baked into the image
@@ -54,6 +59,7 @@ class Test:
                                 )
                             ),
                             verify_tls=False,
+                            interactive_logon=False,
                         )
                     ),
                 )
@@ -146,7 +152,7 @@ class Test:
 
         # Fetch the recording's ndjson and confirm it actually captured the desktop —
         # it must parse and contain at least one framebuffer item, not just be an empty file.
-        rec_url = f"{url}/@warpgate/admin/api/recordings/{desktop[0].id}/desktop"
+        rec_url = f"{url}/@warpgate/admin/api/recordings/{desktop[0].id}/data"
         items = []
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline and not items:

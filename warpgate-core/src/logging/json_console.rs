@@ -47,7 +47,7 @@ where
         {
             for span in span.scope().from_root() {
                 if let Some(other_values) = span.extensions().get::<SerializedRecordValues>() {
-                    values.extend((*other_values).clone().into_iter());
+                    values.extend((*other_values).clone());
                 }
             }
         }

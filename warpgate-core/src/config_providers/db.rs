@@ -1,25 +1,24 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use data_encoding::BASE64;
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, Func, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
     EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use time::OffsetDateTime;
-use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
     AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialKind,
-    CredentialPolicy, PerProtocolCredentialPolicy,
+    CredentialPolicy, MfaEnforcementPolicy, PerProtocolCredentialPolicy, StoredCredential,
+    StoredCredentialFingerprint, StoredCredentialKind,
 };
-use warpgate_common::helpers::hash::verify_password_hash;
+use warpgate_common::helpers::hash::{hash_secret, verify_password_hash};
 use warpgate_common::helpers::otp::verify_totp;
 use warpgate_common::{
-    Role, Target, User, UserAuthCredential, UserPasswordCredential, UserPublicKeyCredential,
-    UserRequireCredentialsPolicy, UserSsoCredential, UserTotpCredential, WarpgateError,
+    Protocol, Target, User, UserAuthCredential, UserPublicKeyCredential,
+    UserRequireCredentialsPolicy, UserSsoCredential, WarpgateError,
 };
 use warpgate_db_entities as entities;
 use warpgate_sso::SsoProviderConfig;
@@ -27,11 +26,127 @@ use warpgate_sso::SsoProviderConfig;
 use super::ConfigProvider;
 
 pub struct DatabaseConfigProvider {
-    db: Arc<Mutex<DatabaseConnection>>,
+    db: DatabaseConnection,
+}
+
+/// Joins active (non-revoked, non-expired) user role assignments to target
+/// role assignments; callers add the authorization predicates and selection.
+fn active_role_assignment_query() -> sea_orm::sea_query::SelectStatement {
+    let now = OffsetDateTime::now_utc();
+    Query::select()
+        .from(entities::UserRoleAssignment::Entity)
+        .inner_join(
+            entities::TargetRoleAssignment::Entity,
+            Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::RoleId,
+            ))
+            .equals((
+                entities::TargetRoleAssignment::Entity,
+                entities::TargetRoleAssignment::Column::RoleId,
+            )),
+        )
+        .and_where(
+            Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::RevokedAt,
+            ))
+            .is_null(),
+        )
+        .and_where(
+            Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::ExpiresAt,
+            ))
+            .is_null()
+            .or(Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::ExpiresAt,
+            ))
+            .gt(now)),
+        )
+        .to_owned()
+}
+
+/// SQL `EXISTS`-style check for a query built with [`Query::select`].
+trait SelectExists {
+    /// Whether the query matches at least one row; selects a constant instead
+    /// of any column data.
+    async fn exists(&mut self, db: &DatabaseConnection) -> Result<bool, WarpgateError>;
+}
+
+impl SelectExists for sea_orm::sea_query::SelectStatement {
+    async fn exists(&mut self, db: &DatabaseConnection) -> Result<bool, WarpgateError> {
+        self.expr(Expr::val(1)).limit(1);
+        Ok(db
+            .query_one(db.get_database_backend().build(&*self))
+            .await?
+            .is_some())
+    }
+}
+
+/// What one reconcile did, for the caller's log line.
+struct SshKeySync {
+    unchanged: usize,
+    added: usize,
+    removed: usize,
+}
+
+/// LDAP keys need reconcillation because key IDs are used for approval bypass matching
+async fn reconcile_ldap_ssh_keys(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    desired: HashSet<String>,
+) -> Result<SshKeySync, WarpgateError> {
+    let existing = entities::PublicKeyCredential::Entity::find()
+        .filter(entities::PublicKeyCredential::Column::UserId.eq(user_id))
+        .all(db)
+        .await?;
+
+    let mut present = HashSet::new();
+    let mut withdrawn = vec![];
+    for row in existing {
+        if desired.contains(&row.openssh_public_key) {
+            present.insert(row.openssh_public_key);
+        } else {
+            withdrawn.push(row.id);
+        }
+    }
+
+    let removed = withdrawn.len();
+    if !withdrawn.is_empty() {
+        entities::PublicKeyCredential::Entity::delete_many()
+            .filter(entities::PublicKeyCredential::Column::Id.is_in(withdrawn))
+            .exec(db)
+            .await?;
+    }
+
+    let mut added = 0;
+    for openssh_key in desired.difference(&present) {
+        entities::PublicKeyCredential::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user_id),
+            date_added: Set(Some(OffsetDateTime::now_utc())),
+            last_used: Set(None),
+            label: Set("Public key synchronized from LDAP".to_string()),
+            ..entities::PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential {
+                key: openssh_key.clone().into(),
+            })
+        }
+        .insert(db)
+        .await?;
+        added += 1;
+    }
+
+    Ok(SshKeySync {
+        unchanged: present.len(),
+        added,
+        removed,
+    })
 }
 
 impl DatabaseConfigProvider {
-    pub fn new(db: &Arc<Mutex<DatabaseConnection>>) -> Self {
+    pub fn new(db: &DatabaseConnection) -> Self {
         Self { db: db.clone() }
     }
 
@@ -71,46 +186,35 @@ impl DatabaseConfigProvider {
             return Ok(());
         };
 
-        // Delete existing public key credentials for this user
-        entities::PublicKeyCredential::Entity::delete_many()
-            .filter(entities::PublicKeyCredential::Column::UserId.eq(user_id))
-            .exec(db)
-            .await?;
-
-        // Insert SSH keys from LDAP
+        // Normalised so a key that differs only by its comment is the same key.
+        let mut desired = HashSet::new();
         for ssh_key in &ldap_user.ssh_public_keys {
             let ssh_key = ssh_key.trim();
             if ssh_key.is_empty() {
                 continue;
             }
-
-            // Parse and validate the SSH key
-            let key_result = russh::keys::PublicKey::from_openssh(ssh_key);
-            if let Ok(mut key) = key_result {
-                key.set_comment("");
-                let openssh_key = key.to_openssh().map_err(russh::keys::Error::from)?;
-
-                entities::PublicKeyCredential::ActiveModel {
-                    id: Set(Uuid::new_v4()),
-                    user_id: Set(user_id),
-                    date_added: Set(Some(OffsetDateTime::now_utc())),
-                    last_used: Set(None),
-                    label: Set("Public key synchronized from LDAP".to_string()),
-                    ..entities::PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential {
-                        key: openssh_key.into(),
-                    })
+            match russh::keys::PublicKey::from_openssh(ssh_key) {
+                Ok(mut key) => {
+                    key.set_comment("");
+                    desired.insert(
+                        key.to_openssh()
+                            .map_err(russh::keys::Error::from)?
+                            .to_string(),
+                    );
                 }
-                .insert(db)
-                .await?;
-            } else {
-                warn!("Invalid SSH key from LDAP: {}", ssh_key);
+                Err(_) => warn!("Invalid SSH key from LDAP: {}", ssh_key),
             }
         }
 
+        let SshKeySync {
+            unchanged,
+            added,
+            removed,
+        } = reconcile_ldap_ssh_keys(db, user_id, desired).await?;
+
         info!(
-            "Synced {} SSH key(s) from LDAP for {}",
-            ldap_user.ssh_public_keys.len(),
-            ldap_user.username
+            "Synced SSH keys from LDAP for {}: {unchanged} unchanged, {added} added, {removed} removed",
+            ldap_user.username,
         );
 
         Ok(())
@@ -179,13 +283,19 @@ impl DatabaseConfigProvider {
             return Err(WarpgateError::UserAlreadyExists(preferred_username));
         }
 
+        let default_credential_policy = match default_credential_policy {
+            Some(x) => x,
+            None => {
+                let parameters = entities::Parameters::Entity::get(db).await?;
+                serde_json::to_value(parameters.default_credential_policy()?)?
+            }
+        };
+
         let user = entities::User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(preferred_username.clone()),
             description: Set("".into()),
-            credential_policy: Set(default_credential_policy.unwrap_or_else(|| {
-                serde_json::to_value(UserRequireCredentialsPolicy::default()).unwrap_or_default()
-            })),
+            credential_policy: Set(default_credential_policy),
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(ldap_server_id),
             ldap_object_uuid: Set(ldap_object_uuid),
@@ -232,12 +342,12 @@ impl DatabaseConfigProvider {
 }
 
 impl ConfigProvider for DatabaseConfigProvider {
-    async fn list_users(&mut self) -> Result<Vec<User>, WarpgateError> {
-        let db = self.db.lock().await;
+    async fn list_users(&self) -> Result<Vec<User>, WarpgateError> {
+        let db = &self.db;
 
         let users = entities::User::Entity::find()
             .order_by_asc(entities::User::Column::Username)
-            .all(&*db)
+            .all(db)
             .await?;
 
         let users: Result<Vec<User>, _> = users.into_iter().map(TryInto::try_into).collect();
@@ -245,12 +355,12 @@ impl ConfigProvider for DatabaseConfigProvider {
         users
     }
 
-    async fn list_targets(&mut self) -> Result<Vec<Target>, WarpgateError> {
-        let db = self.db.lock().await;
+    async fn list_targets(&self) -> Result<Vec<Target>, WarpgateError> {
+        let db = &self.db;
 
         let targets = entities::Target::Entity::find()
             .order_by_asc(entities::Target::Column::Name)
-            .all(&*db)
+            .all(db)
             .await?;
 
         let targets: Result<Vec<Target>, _> = targets.into_iter().map(TryInto::try_into).collect();
@@ -258,12 +368,12 @@ impl ConfigProvider for DatabaseConfigProvider {
         Ok(targets?)
     }
 
-    async fn get_target_by_name(&mut self, name: &str) -> Result<Option<Target>, WarpgateError> {
-        let db = self.db.lock().await;
+    async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, WarpgateError> {
+        let db = &self.db;
 
         let target = entities::Target::Entity::find()
             .filter(entities::Target::Column::Name.eq(name))
-            .one(&*db)
+            .one(db)
             .await?;
 
         target
@@ -272,11 +382,20 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map_err(Into::into)
     }
 
+    async fn get_target_by_id(&self, id: Uuid) -> Result<Option<Target>, WarpgateError> {
+        entities::Target::Entity::find_by_id(id)
+            .one(&self.db)
+            .await?
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(Into::into)
+    }
+
     async fn get_target_by_hostname(
-        &mut self,
+        &self,
         hostname: &str,
     ) -> Result<Option<Target>, WarpgateError> {
-        let db: tokio::sync::MutexGuard<'_, DatabaseConnection> = self.db.lock().await;
+        let db = &self.db;
 
         let hostname_query = match db.get_database_backend() {
             DatabaseBackend::MySql => {
@@ -288,7 +407,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let target = entities::Target::Entity::find()
             .filter(hostname_query.eq(hostname))
-            .one(&*db)
+            .one(db)
             .await?;
 
         target
@@ -298,15 +417,15 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn get_credential_policy(
-        &mut self,
+        &self,
         username: &str,
         supported_credential_types: &[CredentialKind],
     ) -> Result<Option<Box<dyn CredentialPolicy + Sync + Send>>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let user_model = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
-            .one(&*db)
+            .one(db)
             .await?;
 
         let Some(user_model) = user_model else {
@@ -314,7 +433,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             return Ok(None);
         };
 
-        let user = user_model.load_details(&db).await?;
+        let user = user_model.load_details(db).await?;
 
         let mut available_credential_types = user
             .credentials
@@ -345,82 +464,83 @@ impl ConfigProvider for DatabaseConfigProvider {
             },
         }) as Box<dyn CredentialPolicy + Sync + Send>;
 
-        if let Some(req) = user.credential_policy.clone() {
+        let policy = if let Some(req) = user.credential_policy.clone() {
             let mut policy = PerProtocolCredentialPolicy {
                 default: default_policy,
                 protocols: HashMap::new(),
             };
 
-            if let Some(p) = req.http {
-                policy.protocols.insert(
-                    "HTTP",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.mysql {
-                policy.protocols.insert(
-                    "MySQL",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.postgres {
-                policy.protocols.insert(
-                    "PostgreSQL",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.ssh {
-                policy.protocols.insert(
-                    "SSH",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.vnc {
-                policy.protocols.insert(
-                    "VNC",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types: supported_credential_types.clone(),
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
-            }
-            if let Some(p) = req.rdp {
-                policy.protocols.insert(
-                    "RDP",
-                    Box::new(AllCredentialsPolicy {
-                        supported_credential_types,
-                        required_credential_types: p.into_iter().collect(),
-                    }),
-                );
+            // Only HTTP performs an SSO exchange inline; no other protocol can
+            // carry one on the wire, so there a required `Sso` is satisfied by
+            // the in-browser approval flow instead. Keyed off the protocol
+            // rather than a per-entry flag so the rule has one statement.
+            let make_policy = |protocol: Protocol, required: Vec<CredentialKind>| {
+                let required_credential_types = required
+                    .into_iter()
+                    .map(|kind| match (kind, protocol) {
+                        (CredentialKind::Sso, Protocol::Http) => CredentialKind::Sso,
+                        (CredentialKind::Sso, _) => CredentialKind::WebUserApproval,
+                        (kind, _) => kind,
+                    })
+                    .collect();
+                Box::new(AllCredentialsPolicy {
+                    supported_credential_types: supported_credential_types.clone(),
+                    required_credential_types,
+                }) as Box<dyn CredentialPolicy + Sync + Send>
+            };
+
+            // Full destructuring so a new per-protocol config field can't be
+            // silently left out of the policy map.
+            let UserRequireCredentialsPolicy {
+                http,
+                kubernetes,
+                ssh,
+                mysql,
+                postgres,
+                vnc,
+                rdp,
+            } = req;
+
+            for (protocol, required) in [
+                (Protocol::Http, http),
+                (Protocol::Kubernetes, kubernetes),
+                (Protocol::Ssh, ssh),
+                (Protocol::MySql, mysql),
+                (Protocol::Postgres, postgres),
+                (Protocol::Vnc, vnc),
+                (Protocol::Rdp, rdp),
+            ] {
+                if let Some(required) = required {
+                    policy
+                        .protocols
+                        .insert(protocol, make_policy(protocol, required));
+                }
             }
 
-            Ok(Some(
-                Box::new(policy) as Box<dyn CredentialPolicy + Sync + Send>
-            ))
+            Box::new(policy) as Box<dyn CredentialPolicy + Sync + Send>
         } else {
-            Ok(Some(default_policy))
+            default_policy
+        };
+
+        let parameters = entities::Parameters::Entity::get(db).await?;
+        let mfa_factors = parameters.mfa_required_factors(&user.credentials);
+        if mfa_factors.is_empty() {
+            Ok(Some(policy))
+        } else {
+            Ok(Some(Box::new(MfaEnforcementPolicy {
+                inner: policy,
+                required: mfa_factors,
+            })))
         }
     }
 
     async fn username_for_sso_credential(
-        &mut self,
+        &self,
         client_credential: &AuthCredential,
         preferred_username: Option<String>,
         sso_config: SsoProviderConfig,
     ) -> Result<Option<String>, WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let AuthCredential::Sso {
             provider: client_provider,
@@ -438,11 +558,11 @@ impl ConfigProvider for DatabaseConfigProvider {
                         .or(entities::SsoCredential::Column::Provider.is_null()),
                 ),
             )
-            .one(&*db)
+            .one(db)
             .await?;
 
         if let Some(cred) = cred {
-            let user = cred.find_related(entities::User::Entity).one(&*db).await?;
+            let user = cred.find_related(entities::User::Entity).one(db).await?;
 
             if let Some(user) = user {
                 return Ok(Some(user.username));
@@ -456,7 +576,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             };
             return self
                 .maybe_autocreate_sso_user(
-                    &db,
+                    db,
                     UserSsoCredential {
                         email: client_email.clone(),
                         provider: Some(client_provider.clone()),
@@ -471,20 +591,20 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn validate_credential(
-        &mut self,
+        &self,
         username: &str,
         client_credential: &AuthCredential,
-    ) -> Result<bool, WarpgateError> {
-        let db = self.db.lock().await;
+    ) -> Result<Option<StoredCredential>, WarpgateError> {
+        let db = &self.db;
 
         let user_model = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
-            .one(&*db)
+            .one(db)
             .await?;
 
         let Some(user_model) = user_model else {
             error!("Selected user not found: {}", username);
-            return Ok(false);
+            return Ok(None);
         };
 
         // Sync SSH keys from LDAP if user is linked
@@ -492,7 +612,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             && let (Some(ldap_server_id), Some(ldap_object_uuid)) =
                 (user_model.ldap_server_id, &user_model.ldap_object_uuid)
             && let Err(e) = self
-                .sync_ldap_ssh_keys(&db, user_model.id, ldap_server_id, ldap_object_uuid)
+                .sync_ldap_ssh_keys(db, user_model.id, ldap_server_id, ldap_object_uuid)
                 .await
         {
             warn!(
@@ -501,156 +621,234 @@ impl ConfigProvider for DatabaseConfigProvider {
             );
         }
 
-        let user_details = user_model.load_details(&db).await?;
-
-        match client_credential {
+        let matched: Option<StoredCredential> = match client_credential {
             AuthCredential::PublicKey {
                 kind,
                 public_key_bytes,
             } => {
-                let base64_bytes = BASE64.encode(public_key_bytes);
-                let openssh_public_key = format!("{kind} {base64_bytes}");
+                let openssh_public_key = format!("{kind} {}", BASE64.encode(public_key_bytes));
                 debug!(
-                    username = &user_details.username[..],
-                    "Client key: {}", openssh_public_key
+                    username = &user_model.username[..],
+                    "Client key: {openssh_public_key}"
                 );
 
-                Ok(user_details
-                    .credentials
-                    .iter()
-                    .any(|credential| match credential {
-                        UserAuthCredential::PublicKey(UserPublicKeyCredential {
-                            key: user_key,
-                        }) => &openssh_public_key == user_key.expose_secret(),
-                        _ => false,
-                    }))
-            }
-            AuthCredential::Password(client_password) => {
-                Ok(user_details
-                    .credentials
-                    .iter()
-                    .any(|credential| match credential {
-                        UserAuthCredential::Password(UserPasswordCredential {
-                            hash: user_password_hash,
-                        }) => verify_password_hash(
-                            client_password.expose_secret(),
-                            user_password_hash.expose_secret(),
+                user_model
+                    .find_related(entities::PublicKeyCredential::Entity)
+                    .order_by_asc(entities::PublicKeyCredential::Column::Id)
+                    .all(db)
+                    .await?
+                    .into_iter()
+                    .find(|c| c.openssh_public_key == openssh_public_key)
+                    .map(|c| {
+                        StoredCredential::new(
+                            StoredCredentialKind::PublicKey,
+                            c.id,
+                            StoredCredentialFingerprint::of_stored_verifier(
+                                c.openssh_public_key.as_bytes(),
+                            ),
                         )
+                    })
+            }
+
+            AuthCredential::Password(client_password) => user_model
+                .find_related(entities::PasswordCredential::Entity)
+                .order_by_asc(entities::PasswordCredential::Column::Id)
+                .all(db)
+                .await?
+                .into_iter()
+                .find(|c| {
+                    verify_password_hash(client_password.expose_secret(), &c.argon_hash)
                         .unwrap_or_else(|e| {
                             error!(
-                                username = &user_details.username[..],
-                                "Error verifying password hash: {}", e
+                                username = &user_model.username[..],
+                                "Error verifying password hash: {e}"
                             );
                             false
-                        }),
-                        _ => false,
-                    }))
-            }
-            AuthCredential::Otp(client_otp) => {
-                Ok(user_details
-                    .credentials
-                    .iter()
-                    .any(|credential| match credential {
-                        UserAuthCredential::Totp(UserTotpCredential { key: user_otp_key }) => {
-                            verify_totp(client_otp.expose_secret(), user_otp_key)
-                        }
-                        _ => false,
-                    }))
-            }
+                        })
+                })
+                .map(|c| {
+                    StoredCredential::new(
+                        StoredCredentialKind::Password,
+                        c.id,
+                        // Fingerprint the hash, not the password
+                        StoredCredentialFingerprint::of_stored_verifier(c.argon_hash.as_bytes()),
+                    )
+                }),
+
+            AuthCredential::Otp(client_otp) => user_model
+                .find_related(entities::OtpCredential::Entity)
+                .order_by_asc(entities::OtpCredential::Column::Id)
+                .all(db)
+                .await?
+                .into_iter()
+                .find(|c| verify_totp(client_otp.expose_secret(), &c.secret_key.clone().into()))
+                .map(|c| {
+                    StoredCredential::new(
+                        StoredCredentialKind::Totp,
+                        c.id,
+                        StoredCredentialFingerprint::of_stored_verifier(&c.secret_key),
+                    )
+                }),
+
             AuthCredential::Sso {
                 provider: client_provider,
                 email: client_email,
-            } => {
-                for credential in &user_details.credentials {
-                    if let UserAuthCredential::Sso(UserSsoCredential { provider, email }) =
-                        credential
-                        && provider.as_ref().unwrap_or(client_provider) == client_provider
-                        && email == client_email
-                    {
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
-            }
-            _ => Err(WarpgateError::InvalidCredentialType),
-        }
+            } => user_model
+                .find_related(entities::SsoCredential::Entity)
+                .order_by_asc(entities::SsoCredential::Column::Id)
+                .all(db)
+                .await?
+                .into_iter()
+                // A stored credential naming no provider still matches any of
+                // them, as before.
+                .find(|c| {
+                    &c.email == client_email
+                        && c.provider.as_ref().is_none_or(|p| p == client_provider)
+                })
+                .map(|c| {
+                    StoredCredential::new(
+                        StoredCredentialKind::Sso,
+                        c.id,
+                        // The stored row, so nothing the client supplied reaches
+                        // the approval rows.
+                        StoredCredentialFingerprint::of_stored_verifier(
+                            &c.as_fingerprintable_bytes(),
+                        ),
+                    )
+                }),
+
+            _ => return Err(WarpgateError::InvalidCredentialType),
+        };
+
+        Ok(matched)
     }
 
     async fn authorize_target(
-        &mut self,
+        &self,
         username: &str,
         target_name: &str,
     ) -> Result<bool, WarpgateError> {
-        let db = self.db.lock().await;
-
-        let target_model = entities::Target::Entity::find()
-            .filter(entities::Target::Column::Name.eq(target_name))
-            .one(&*db)
+        let authorized = active_role_assignment_query()
+            .inner_join(
+                entities::User::Entity,
+                Expr::col((
+                    entities::UserRoleAssignment::Entity,
+                    entities::UserRoleAssignment::Column::UserId,
+                ))
+                .equals((entities::User::Entity, entities::User::Column::Id)),
+            )
+            .inner_join(
+                entities::Target::Entity,
+                Expr::col((
+                    entities::TargetRoleAssignment::Entity,
+                    entities::TargetRoleAssignment::Column::TargetId,
+                ))
+                .equals((entities::Target::Entity, entities::Target::Column::Id)),
+            )
+            .and_where(
+                Expr::expr(Func::lower(Expr::col((
+                    entities::User::Entity,
+                    entities::User::Column::Username,
+                ))))
+                .eq(username.to_lowercase()),
+            )
+            .and_where(
+                Expr::col((entities::Target::Entity, entities::Target::Column::Name))
+                    .eq(target_name),
+            )
+            .exists(&self.db)
             .await?;
 
-        let user_model = entities::User::Entity::find()
-            .filter(entities::User::Entity::username_eq_ci(username))
-            .one(&*db)
-            .await?;
+        if !authorized {
+            // Cold path: distinguish a missing user/target from missing role
+            // grants for diagnosability.
+            if entities::User::Entity::find()
+                .filter(entities::User::Entity::username_eq_ci(username))
+                .one(&self.db)
+                .await?
+                .is_none()
+            {
+                error!("Selected user not found: {username}");
+            } else if entities::Target::Entity::find()
+                .filter(entities::Target::Column::Name.eq(target_name))
+                .one(&self.db)
+                .await?
+                .is_none()
+            {
+                warn!("Selected target not found: {target_name}");
+            }
+        }
 
-        let Some(user_model) = user_model else {
-            error!("Selected user not found: {}", username);
-            return Ok(false);
-        };
+        Ok(authorized)
+    }
 
-        let Some(target_model) = target_model else {
-            warn!("Selected target not found: {}", target_name);
-            return Ok(false);
-        };
+    async fn authorize_target_by_id(
+        &self,
+        user_id: Uuid,
+        target_id: Uuid,
+    ) -> Result<bool, WarpgateError> {
+        active_role_assignment_query()
+            .and_where(
+                Expr::col((
+                    entities::UserRoleAssignment::Entity,
+                    entities::UserRoleAssignment::Column::UserId,
+                ))
+                .eq(user_id),
+            )
+            .and_where(
+                Expr::col((
+                    entities::TargetRoleAssignment::Entity,
+                    entities::TargetRoleAssignment::Column::TargetId,
+                ))
+                .eq(target_id),
+            )
+            .exists(&self.db)
+            .await
+    }
 
-        let target_roles: HashSet<String> = target_model
-            .find_related(entities::Role::Entity)
-            .all(&*db)
+    async fn authorized_target_ids(&self, user_id: Uuid) -> Result<HashSet<Uuid>, WarpgateError> {
+        let query = active_role_assignment_query()
+            .column((
+                entities::TargetRoleAssignment::Entity,
+                entities::TargetRoleAssignment::Column::TargetId,
+            ))
+            .distinct()
+            .and_where(
+                Expr::col((
+                    entities::UserRoleAssignment::Entity,
+                    entities::UserRoleAssignment::Column::UserId,
+                ))
+                .eq(user_id),
+            )
+            .to_owned();
+
+        self.db
+            .query_all(self.db.get_database_backend().build(&query))
             .await?
-            .into_iter()
-            .map(Into::<Role>::into)
-            .map(|x| x.name)
-            .collect();
-
-        let user_assignments = entities::UserRoleAssignment::Entity::find_active()
-            .filter(entities::UserRoleAssignment::Column::UserId.eq(user_model.id))
-            .all(&*db)
-            .await?;
-
-        let user_role_ids: HashSet<Uuid> = user_assignments.iter().map(|a| a.role_id).collect();
-
-        let user_roles: HashSet<String> = entities::Role::Entity::find()
-            .filter(entities::Role::Column::Id.is_in(user_role_ids))
-            .all(&*db)
-            .await?
-            .into_iter()
-            .map(Into::<Role>::into)
-            .map(|x| x.name)
-            .collect();
-
-        let intersect = user_roles.intersection(&target_roles).count() > 0;
-
-        Ok(intersect)
+            .iter()
+            .map(|row| row.try_get_by_index(0))
+            .collect::<Result<HashSet<Uuid>, _>>()
+            .map_err(Into::into)
     }
 
     async fn apply_sso_role_mappings(
-        &mut self,
+        &self,
         username: &str,
         managed_role_names: Option<Vec<String>>,
         assigned_role_names: Vec<String>,
     ) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let user = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
-            .one(&*db)
+            .one(db)
             .await?
             .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;
 
         let managed_role_names = match managed_role_names {
             Some(x) => x,
             None => entities::Role::Entity::find()
-                .all(&*db)
+                .all(db)
                 .await?
                 .into_iter()
                 .map(|x| x.name)
@@ -660,7 +858,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         for role_name in managed_role_names {
             let Some(role) = entities::Role::Entity::find()
                 .filter(entities::Role::Column::Name.eq(role_name.clone()))
-                .one(&*db)
+                .one(db)
                 .await?
             else {
                 warn!("SSO role mapping references non-existent role {role_name:?}, skipping");
@@ -670,14 +868,14 @@ impl ConfigProvider for DatabaseConfigProvider {
             let assignment = entities::UserRoleAssignment::Entity::find_active()
                 .filter(entities::UserRoleAssignment::Column::UserId.eq(user.id))
                 .filter(entities::UserRoleAssignment::Column::RoleId.eq(role.id))
-                .one(&*db)
+                .one(db)
                 .await?;
 
             match (assignment, assigned_role_names.contains(&role_name)) {
                 (None, true) => {
                     info!("Adding role {role_name} for user {username} (from SSO)");
                     entities::UserRoleAssignment::Entity::idempotent_grant(
-                        &db, user.id, role.id, None,
+                        db, user.id, role.id, None,
                     )
                     .await?;
                 }
@@ -685,7 +883,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                     info!("Removing role {role_name} for user {username} (from SSO)");
                     let mut model: entities::UserRoleAssignment::ActiveModel = assignment.into();
                     model.revoked_at = Set(Some(OffsetDateTime::now_utc()));
-                    model.update(&*db).await?;
+                    model.update(db).await?;
                 }
                 _ => (),
             }
@@ -695,23 +893,23 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn apply_sso_admin_role_mappings(
-        &mut self,
+        &self,
         username: &str,
         managed_admin_role_names: Option<Vec<String>>,
         assigned_admin_role_names: Vec<String>,
     ) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let user = entities::User::Entity::find()
             .filter(entities::User::Entity::username_eq_ci(username))
-            .one(&*db)
+            .one(db)
             .await?
             .ok_or_else(|| WarpgateError::UserNotFound(username.into()))?;
 
         let managed_admin_role_names = match managed_admin_role_names {
             Some(x) => x,
             None => entities::AdminRole::Entity::find()
-                .all(&*db)
+                .all(db)
                 .await?
                 .into_iter()
                 .map(|x| x.name)
@@ -721,14 +919,14 @@ impl ConfigProvider for DatabaseConfigProvider {
         for role_name in managed_admin_role_names {
             let role = entities::AdminRole::Entity::find()
                 .filter(entities::AdminRole::Column::Name.eq(role_name.clone()))
-                .one(&*db)
+                .one(db)
                 .await?
                 .ok_or_else(|| WarpgateError::RoleNotFound(role_name.clone()))?;
 
             let assignment = entities::UserAdminRoleAssignment::Entity::find()
                 .filter(entities::UserAdminRoleAssignment::Column::UserId.eq(user.id))
                 .filter(entities::UserAdminRoleAssignment::Column::AdminRoleId.eq(role.id))
-                .one(&*db)
+                .one(db)
                 .await?;
 
             match (assignment, assigned_admin_role_names.contains(&role_name)) {
@@ -737,14 +935,13 @@ impl ConfigProvider for DatabaseConfigProvider {
                     let values = entities::UserAdminRoleAssignment::ActiveModel {
                         user_id: Set(user.id),
                         admin_role_id: Set(role.id),
-                        ..Default::default()
                     };
 
-                    values.insert(&*db).await?;
+                    values.insert(db).await?;
                 }
                 (Some(assignment), false) => {
                     info!("Removing admin role {role_name} for user {username} (from SSO)");
-                    assignment.delete(&*db).await?;
+                    assignment.delete(db).await?;
                 }
                 _ => (),
             }
@@ -757,7 +954,7 @@ impl ConfigProvider for DatabaseConfigProvider {
         &self,
         credential: Option<AuthCredential>,
     ) -> Result<(), WarpgateError> {
-        let db = self.db.lock().await;
+        let db = &self.db;
 
         let Some(AuthCredential::PublicKey {
             kind,
@@ -783,7 +980,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 entities::PublicKeyCredential::Column::OpensshPublicKey
                     .eq(openssh_public_key.clone()),
             )
-            .one(&*db)
+            .one(db)
             .await?;
 
         let Some(public_key_credential) = public_key_credential else {
@@ -799,7 +996,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             public_key_credential.into();
         active_model.last_used = Set(Some(OffsetDateTime::now_utc()));
 
-        active_model.update(&*db).await.map_err(|e| {
+        active_model.update(db).await.map_err(|e| {
             error!("Failed to update last_used for public key: {:?}", e);
             WarpgateError::DatabaseError(e)
         })?;
@@ -807,15 +1004,15 @@ impl ConfigProvider for DatabaseConfigProvider {
         Ok(())
     }
 
-    async fn validate_api_token(&mut self, token: &str) -> Result<Option<User>, WarpgateError> {
-        let db = self.db.lock().await;
+    async fn validate_api_token(&self, token: &str) -> Result<Option<User>, WarpgateError> {
+        let db = &self.db;
         let Some(api_token) = entities::ApiToken::Entity::find()
             .filter(
-                entities::ApiToken::Column::Secret
-                    .eq(token)
+                entities::ApiToken::Column::SecretHash
+                    .eq(hash_secret(token))
                     .and(entities::ApiToken::Column::Expiry.gt(OffsetDateTime::now_utc())),
             )
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(None);
@@ -823,14 +1020,366 @@ impl ConfigProvider for DatabaseConfigProvider {
 
         let Some(user) = api_token
             .find_related(entities::User::Entity)
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Err(WarpgateError::InconsistentState(
-                "No user matching the ticket username".into(),
+                "No user matching the API token".into(),
             ));
         };
 
         Ok(Some(user.try_into()?))
+    }
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod tests {
+    use sea_orm::ActiveValue::Set;
+    use sea_orm::{ActiveModelTrait, Database};
+    use warpgate_common::auth::StoredCredentials;
+    use warpgate_common::helpers::hash::hash_password;
+    use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+    use warpgate_db_migrations::migrate_database;
+
+    use super::*;
+
+    async fn user_with_password(db: &DatabaseConnection, username: &str, password: &str) {
+        let user = entities::User::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            username: Set(username.to_owned()),
+            description: Set(String::new()),
+            credential_policy: Set(serde_json::json!(null)),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        entities::PasswordCredential::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user.id),
+            argon_hash: Set(hash_password(password)),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    async fn user_with_key(db: &DatabaseConnection, key: &str) -> (Uuid, Uuid) {
+        let user = entities::User::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            username: Set("ldap-user".to_owned()),
+            description: Set(String::new()),
+            credential_policy: Set(serde_json::json!(null)),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        let credential = entities::PublicKeyCredential::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user.id),
+            label: Set("from LDAP".to_owned()),
+            date_added: Set(Some(OffsetDateTime::UNIX_EPOCH)),
+            last_used: Set(Some(OffsetDateTime::UNIX_EPOCH)),
+            openssh_public_key: Set(key.to_owned()),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        (user.id, credential.id)
+    }
+
+    /// The sync runs on *every* public-key login. Replacing the rows wholesale
+    /// would give a key a new id each time — and the id is what a remembered
+    /// approval is keyed on — as well as resetting when the key was added and
+    /// wiping when it was last used.
+    #[tokio::test]
+    async fn re_syncing_leaves_an_unchanged_key_alone() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        let (user_id, credential_id) = user_with_key(&db, "ssh-ed25519 AAAAkept").await;
+
+        let sync = reconcile_ldap_ssh_keys(
+            &db,
+            user_id,
+            [
+                "ssh-ed25519 AAAAkept".to_owned(),
+                "ssh-ed25519 AAAAnew".to_owned(),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .await
+        .unwrap();
+        assert_eq!((sync.unchanged, sync.added, sync.removed), (1, 1, 0));
+
+        let kept = entities::PublicKeyCredential::Entity::find_by_id(credential_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .expect("the unchanged key must keep its row, and so its identity");
+        assert_eq!(kept.openssh_public_key, "ssh-ed25519 AAAAkept");
+        assert_eq!(kept.date_added, Some(OffsetDateTime::UNIX_EPOCH));
+        assert_eq!(
+            kept.last_used,
+            Some(OffsetDateTime::UNIX_EPOCH),
+            "a re-sync must not forget when the key was last used",
+        );
+    }
+
+    /// The other half: LDAP is the authority, so a key it stops listing goes.
+    #[tokio::test]
+    async fn re_syncing_removes_a_withdrawn_key() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        let (user_id, credential_id) = user_with_key(&db, "ssh-ed25519 AAAAold").await;
+
+        let sync = reconcile_ldap_ssh_keys(&db, user_id, HashSet::new())
+            .await
+            .unwrap();
+        assert_eq!((sync.unchanged, sync.added, sync.removed), (0, 0, 1));
+        assert!(
+            entities::PublicKeyCredential::Entity::find_by_id(credential_id)
+                .one(&db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    async fn user_named(db: &DatabaseConnection, username: &str) -> Uuid {
+        entities::User::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            username: Set(username.to_owned()),
+            description: Set(String::new()),
+            credential_policy: Set(serde_json::json!(null)),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .unwrap()
+        .id
+    }
+
+    async fn add_key(db: &DatabaseConnection, user_id: Uuid, key: &str) -> Uuid {
+        entities::PublicKeyCredential::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user_id),
+            label: Set(String::new()),
+            date_added: Set(None),
+            last_used: Set(None),
+            openssh_public_key: Set(key.to_owned()),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+        .id
+    }
+
+    /// What production actually compares: the digest the approval row carries,
+    /// not the struct. A field missing from the encoding is invisible to `==`.
+    fn identity_digest(credential: StoredCredential) -> String {
+        StoredCredentials::new(vec![credential]).unwrap().digest()
+    }
+
+    fn offered_key(key: &str) -> AuthCredential {
+        let (kind, base64) = key.split_once(' ').unwrap();
+        AuthCredential::PublicKey {
+            kind: kind.parse().unwrap(),
+            public_key_bytes: BASE64.decode(base64.as_bytes()).unwrap().into(),
+        }
+    }
+
+    /// Two users may enrol the very same public key. Keyed on the material
+    /// alone they would be one credential, and an approval remembered for one
+    /// would be matched by the other.
+    #[tokio::test]
+    async fn one_key_enrolled_twice_is_two_credentials() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+
+        let key =
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKp8kMhTHrJRfKPQD5vJ3vRZ0F3sZbXQ0m5vZ8xJvVQe";
+        let alice = user_named(&db, "alice").await;
+        let bob = user_named(&db, "bob").await;
+        add_key(&db, alice, key).await;
+        add_key(&db, bob, key).await;
+
+        let provider = DatabaseConfigProvider::new(&db);
+        let offered = offered_key(key);
+        let for_alice = provider
+            .validate_credential("alice", &offered)
+            .await
+            .unwrap();
+        let for_bob = provider.validate_credential("bob", &offered).await.unwrap();
+
+        let for_alice = for_alice.expect("alice's key is accepted");
+        let for_bob = for_bob.expect("bob's key is accepted");
+        assert_ne!(
+            identity_digest(for_alice),
+            identity_digest(for_bob),
+            "the same key in two rows is two credentials",
+        );
+    }
+
+    /// The admin endpoint replaces a key's material while keeping its row, so
+    /// the id alone cannot notice a rotation — an approval remembered for the
+    /// old key would carry over to whatever replaced it.
+    #[tokio::test]
+    async fn replacing_a_keys_material_in_place_changes_its_identity() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+
+        let old =
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKp8kMhTHrJRfKPQD5vJ3vRZ0F3sZbXQ0m5vZ8xJvVQe";
+        let new =
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB2vQ8kZ0F3sZbXQ0m5vZ8xJvVQeKp8kMhTHrJRfKPQD";
+        let user_id = user_named(&db, "alice").await;
+        let credential_id = add_key(&db, user_id, old).await;
+
+        let provider = DatabaseConfigProvider::new(&db);
+        let before = provider
+            .validate_credential("alice", &offered_key(old))
+            .await
+            .unwrap()
+            .expect("the enrolled key is accepted");
+
+        // Exactly what `PUT .../public-keys/:id` does: same row, new material.
+        entities::PublicKeyCredential::ActiveModel {
+            id: Set(credential_id),
+            openssh_public_key: Set(new.to_owned()),
+            ..Default::default()
+        }
+        .update(&db)
+        .await
+        .unwrap();
+
+        let after = provider
+            .validate_credential("alice", &offered_key(new))
+            .await
+            .unwrap()
+            .expect("the replacement is accepted");
+
+        assert_ne!(
+            identity_digest(before),
+            identity_digest(after),
+            "a rotated key must not inherit the old key's remembered approvals",
+        );
+    }
+
+    /// Re-hashing a password produces a different Argon2 string for the very
+    /// same password. The identity must follow that stored string, so it
+    /// changes — which is the only assertion that can tell a verifier taken
+    /// from the stored side from one taken from the client's submission.
+    ///
+    /// It matters because the submitted password must never be digested into
+    /// an approval row: that would place a cheap second representation of a
+    /// live password beside the Argon2 hash meant to protect it.
+    #[tokio::test]
+    async fn rehashing_a_password_changes_its_identity() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        user_with_password(&db, "alice", "same-password").await;
+
+        let provider = DatabaseConfigProvider::new(&db);
+        let submitted = AuthCredential::Password("same-password".to_string().into());
+        let before = provider
+            .validate_credential("alice", &submitted)
+            .await
+            .unwrap()
+            .expect("the password is accepted");
+
+        // Same row, same password, freshly hashed — so only the stored string
+        // differs.
+        let stored = entities::PasswordCredential::Entity::find()
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        entities::PasswordCredential::ActiveModel {
+            id: Set(stored.id),
+            argon_hash: Set(hash_password("same-password")),
+            ..Default::default()
+        }
+        .update(&db)
+        .await
+        .unwrap();
+
+        let after = provider
+            .validate_credential("alice", &submitted)
+            .await
+            .unwrap()
+            .expect("the password is still accepted");
+
+        assert_ne!(
+            identity_digest(before),
+            identity_digest(after),
+            "the identity must follow the stored hash, not the submitted password",
+        );
+    }
+
+    /// The fingerprint an accepted password produces must follow the *stored*
+    /// credential, not the password itself.
+    ///
+    /// Two accounts sharing a password are two different stored rows, so they
+    /// must not share an identity.
+    ///
+    /// Note this alone does *not* prove the identity avoids the submitted
+    /// password — the two rows differ by id whatever the verifier is derived
+    /// from. `rehashing_a_password_changes_its_identity` is what pins that.
+    #[tokio::test]
+    async fn a_password_is_identified_by_its_stored_row() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        user_with_password(&db, "alice", "same-password").await;
+        user_with_password(&db, "bob", "same-password").await;
+
+        let provider = DatabaseConfigProvider::new(&db);
+        let submitted = AuthCredential::Password("same-password".to_string().into());
+
+        let alice = provider
+            .validate_credential("alice", &submitted)
+            .await
+            .unwrap()
+            .expect("the password should be accepted");
+        let bob = provider
+            .validate_credential("bob", &submitted)
+            .await
+            .unwrap()
+            .expect("the password should be accepted");
+
+        assert_ne!(
+            identity_digest(alice),
+            identity_digest(bob),
+            "one password must not identify two stored credentials",
+        );
+        assert_eq!(
+            alice,
+            provider
+                .validate_credential("alice", &submitted)
+                .await
+                .unwrap()
+                .unwrap(),
+            "the same stored credential must stay recognisable, or no approval could be remembered",
+        );
+        assert_eq!(
+            provider
+                .validate_credential(
+                    "alice",
+                    &AuthCredential::Password("wrong".to_string().into())
+                )
+                .await
+                .unwrap(),
+            None,
+        );
     }
 }

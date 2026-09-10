@@ -1,4 +1,5 @@
 use bytes::{Bytes, BytesMut};
+use mysql_common::constants::DEFAULT_MAX_ALLOWED_PACKET;
 use mysql_common::proto::codec::PacketCodec;
 use mysql_common::proto::codec::error::PacketCodecError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -80,6 +81,14 @@ where
         self.codec.reset_seq_id();
     }
 
+    /// Raises the codec's packet-size ceiling to the value negotiated in the
+    /// handshake, never below MySQL's default. Without this the proxy keeps the
+    /// 4 MiB `PacketCodec` default and aborts mid-stream on any larger packet
+    /// (a wide row, a large BLOB) even though both peers agreed on more.
+    pub fn set_max_packet_size(&mut self, negotiated: u32) {
+        self.codec.max_allowed_packet = effective_max_packet(negotiated);
+    }
+
     pub async fn upgrade(
         mut self,
         config: <S as UpgradableStream<TS>>::UpgradeConfig,
@@ -99,4 +108,8 @@ where
             MaybeTlsStream::Raw(_) | MaybeTlsStream::Upgrading => false,
         }
     }
+}
+
+fn effective_max_packet(negotiated: u32) -> usize {
+    (negotiated as usize).max(DEFAULT_MAX_ALLOWED_PACKET)
 }

@@ -30,7 +30,7 @@ impl MigrationTrait for Migration {
             ColumnDef::new(Alias::new("login_protection_retention_seconds"))
                 .integer()
                 .not_null()
-                .default(2592000)
+                .default(2_592_000) // 30d
                 .to_owned(),
             ColumnDef::new(Alias::new("lp_ip_max_attempts"))
                 .integer()

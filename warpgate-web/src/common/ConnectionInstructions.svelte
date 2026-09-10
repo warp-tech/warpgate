@@ -9,6 +9,7 @@
         Tooltip,
     } from '@sveltestrap/sveltestrap'
     import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
+    import CollapsibleBlock from 'common/CollapsibleBlock.svelte'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import {
         makeCommonSelectorUsername,
@@ -206,16 +207,29 @@
 </script>
 
 {#if targetKind === TargetKind.Ssh}
-    <CopyableTextArea label="SSH endpoint" value={protocolEndpoint('ssh')} />
-    <CopyableTextArea label="SSH username" value={commonSelectorUsername} />
     <CopyableTextArea
         label="Example SSH command"
         value={makeExampleSSHCommand(opts)}
     />
-    <CopyableTextArea
-        label="Example SCP command"
-        value={makeExampleSCPCommand(opts)}
-    />
+    <CollapsibleBlock
+        label="Advanced"
+        persistKey="connectionInstructionsAdvancedOpen"
+    >
+        <div class="mt-3">
+            <CopyableTextArea
+                label="Example SCP command"
+                value={makeExampleSCPCommand(opts)}
+            />
+            <CopyableTextArea
+                label="SSH endpoint"
+                value={protocolEndpoint('ssh')}
+            />
+            <CopyableTextArea
+                label="SSH username"
+                value={commonSelectorUsername}
+            />
+        </div>
+    </CollapsibleBlock>
 {/if}
 
 {#if targetKind === TargetKind.Http}
@@ -233,20 +247,30 @@
 
 {#if targetKind === TargetKind.MySql}
     <CopyableTextArea
-        label="MySQL endpoint"
-        value={protocolEndpoint('mysql')}
-    />
-    <CopyableTextArea label="MySQL username" value={makeMySQLUsername(opts)} />
-    <CopyableTextArea
         label="Example MySQL command"
         value={makeExampleMySQLCommand(opts)}
     />
-    <CopyableTextArea
-        label="Example database URL"
-        value={makeExampleMySQLURI(opts)}
-    />
+    <CollapsibleBlock
+        label="Advanced"
+        persistKey="connectionInstructionsAdvancedOpen"
+    >
+        <div class="mt-3">
+            <CopyableTextArea
+                label="Example database URL"
+                value={makeExampleMySQLURI(opts)}
+            />
+            <CopyableTextArea
+                label="MySQL endpoint"
+                value={protocolEndpoint('mysql')}
+            />
+            <CopyableTextArea
+                label="MySQL username"
+                value={makeMySQLUsername(opts)}
+            />
+        </div>
+    </CollapsibleBlock>
 
-    <Alert color="info">
+    <Alert color="info" class="mt-3">
         Make sure you've set your client to require TLS and allowed cleartext
         password authentication.
     </Alert>
@@ -254,23 +278,30 @@
 
 {#if targetKind === TargetKind.Postgres}
     <CopyableTextArea
-        label="PostgreSQL endpoint"
-        value={protocolEndpoint('postgres')}
-    />
-    <CopyableTextArea
-        label="PostgreSQL username"
-        value={makePostgreSQLUsername(opts)}
-    />
-    <CopyableTextArea
         label="Example PostgreSQL command"
         value={makeExamplePostgreSQLCommand(opts)}
     />
-    <CopyableTextArea
-        label="Example database URL"
-        value={makeExamplePostgreSQLURI(opts)}
-    />
+    <CollapsibleBlock
+        label="Advanced"
+        persistKey="connectionInstructionsAdvancedOpen"
+    >
+        <div class="mt-3">
+            <CopyableTextArea
+                label="Example database URL"
+                value={makeExamplePostgreSQLURI(opts)}
+            />
+            <CopyableTextArea
+                label="PostgreSQL endpoint"
+                value={protocolEndpoint('postgres')}
+            />
+            <CopyableTextArea
+                label="PostgreSQL username"
+                value={makePostgreSQLUsername(opts)}
+            />
+        </div>
+    </CollapsibleBlock>
 
-    <Alert color="info">
+    <Alert color="info" class="mt-3">
         Make sure you've set your client to require TLS and allowed cleartext
         password authentication.
     </Alert>
@@ -302,9 +333,9 @@
 
     {#if kubeconfigMode === 'oidc' && k8sOidcConfigs.length > 0}
         {#if k8sOidcConfigs.length > 1}
-            <label class="form-label" for="oidc-provider-select"
-                >SSO provider</label
-            >
+            <label class="form-label" for="oidc-provider-select">
+                SSO provider
+            </label>
             <select
                 id="oidc-provider-select"
                 class="form-select mb-3"
@@ -322,8 +353,9 @@
                 href="https://github.com/int128/kubelogin"
                 target="_blank"
                 rel="noreferrer noopener"
-                >kubelogin</a
             >
+                kubelogin
+            </a>
             (oidc-login) kubectl plugin.
         </div>
     {/if}
@@ -360,14 +392,16 @@
                                         <Badge
                                             id="cert-status-badge-{cert.credential.id}"
                                             color="success"
-                                            >Key available</Badge
                                         >
+                                            Key available
+                                        </Badge>
                                     {:else}
                                         <Badge
                                             id="cert-status-badge-{cert.credential.id}"
                                             color="warning"
-                                            >No private key</Badge
                                         >
+                                            No private key
+                                        </Badge>
                                     {/if}
                                     <Tooltip
                                         target={`cert-status-badge-${cert.credential.id}`}

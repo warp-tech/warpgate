@@ -5,10 +5,10 @@
     import { parseHumantimeDuration } from 'common/duration'
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
+    import { routeQueryParams } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
     import { api, type ExistingApiToken } from 'gateway/lib/api'
     import Fa from 'svelte-fa'
-    import { router } from 'svelte-spa-router'
     import CreateApiTokenModal from './CreateApiTokenModal.svelte'
 
     let tokens: ExistingApiToken[] = $state([])
@@ -17,7 +17,7 @@
     let error: string | undefined = $state()
     const now = Date.now()
 
-    const urlParams = new URLSearchParams(router.querystring ?? '')
+    const urlParams = routeQueryParams()
     const autoCreate = urlParams.get('create') === 'true'
     const paramLabel = urlParams.get('label') ?? ''
     const paramExpiry = urlParams.get('expiry')
@@ -59,8 +59,9 @@
         creatingToken = true
         e.preventDefault()
     }}
-        >Create token</Button
     >
+        Create token
+    </Button>
 </div>
 
 {#if error}

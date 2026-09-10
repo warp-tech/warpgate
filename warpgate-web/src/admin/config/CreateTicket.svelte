@@ -145,9 +145,9 @@
                 >
             </FormGroup>
 
-            <AsyncButton color="primary" click={create}
-                >Create ticket</AsyncButton
-            >
+            <AsyncButton color="primary" click={create}>
+                Create ticket
+            </AsyncButton>
         </div>
     {/if}
 </div>

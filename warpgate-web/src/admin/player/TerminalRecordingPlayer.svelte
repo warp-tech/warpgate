@@ -1,32 +1,40 @@
 <script lang="ts">
     import { faPlay } from '@fortawesome/free-solid-svg-icons'
     import { Spinner } from '@sveltestrap/sveltestrap'
-    import { SerializeAddon } from '@xterm/addon-serialize'
     import { Terminal } from '@xterm/xterm'
     import type { Recording } from 'admin/lib/api'
     import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
-    import { latestWins } from './latestWins'
     import PlayerToolbar from './PlayerToolbar.svelte'
+    import { PlaybackController } from './playbackController'
+    import { type Keyframe, RangeStream } from './rangeStream'
 
     export let recording: Recording
 
-    let url: string
+    // The first generation whose terminal recordings carry an `index.ndjson` sidecar.
+    const INDEXED_GENERATION = 3
+    // Replayed bytes are batched into xterm rather than written per recorded chunk.
+    const WRITE_BATCH_CHARS = 8192
+
+    const DATA_URL = `/@warpgate/admin/api/recordings/${recording.id}/data`
+    const INDEX_URL = `/@warpgate/admin/api/recordings/${recording.id}/index`
+    const STREAM_URL = `wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/stream`
+
     let containerElement: HTMLDivElement
     let rootElement: HTMLDivElement
-    let timestamp = 0
     let seekInputValue = 0
-    let duration = 0
     let resizeObserver: ResizeObserver | undefined
-    let events: (DataEvent | SizeEvent | SnapshotEvent)[] = []
-    let playing = false
     let loading = true
-    let sessionIsLive: boolean | null = null
-    let socket: WebSocket | null = null
-    let isStreaming = false
     let ptyMode = false
 
-    $: isStreaming = timestamp === duration && playing
+    // Terminal sizes over time, from the index: a snapshot has to be restored at the size
+    // it was taken at.
+    let sizes: { time: number; cols: number; rows: number }[] = []
+    // Set while the stream sits exactly on a keyframe, so the snapshot there is applied.
+    // Snapshots met while playing forward are redundant — the screen already holds that
+    // state — and applying one would reset the terminal, throwing away the scrollback.
+    let atKeyframe = false
+    let pendingWrite = ''
 
     const COLOR_NAMES = [
         'black',
@@ -75,56 +83,92 @@
         theme[COLOR_NAMES[i]!] = colors[i]!
     }
 
-    interface AsciiCastHeader {
-        time: number
-        version: number
-        width: number
-        height: number
-    }
-    type AsciiCastData = [number, 'o', string]
-    type AsciiCastItem = AsciiCastData | AsciiCastHeader
+    // The raw stored items: `data`/`snapshot` are base64 of the exact terminal bytes
+    // (lossless at rest). The lossy decode for display happens on the way to xterm.
+    // A `snapshot` is a seek anchor: escape codes reproducing the whole screen.
+    type TerminalItem =
+        | { time: number; snapshot: string }
+        | { time: number; stream?: 'Input' | 'Output' | 'Error'; data: string }
+        | { time: number; cols: number; rows: number }
 
-    function isAsciiCastHeader(data: AsciiCastItem): data is AsciiCastHeader {
-        return 'version' in data
-    }
+    // Lines of the append-only `index.ndjson`: seek anchors, the size to restore them at,
+    // and a final duration marker.
+    type IndexLine =
+        | { type: 'keyframe'; time: number; offset: number }
+        | { type: 'resize'; time: number; cols: number; rows: number }
+        | { type: 'end'; time: number }
 
-    function isAsciiCastData(data: AsciiCastItem): data is AsciiCastData {
-        if (Array.isArray(data)) {
-            return data[1] === 'o' || data[1] === 'e'
-        } else {
-            return false
+    function decodeBase64Lossy(b64: string): string {
+        const bin = atob(b64)
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) {
+            bytes[i] = bin.charCodeAt(i)
         }
-    }
-
-    interface SizeEvent {
-        time: number
-        cols: number
-        rows: number
-    }
-    interface DataEvent {
-        time: number
-        data: string
-    }
-    interface SnapshotEvent {
-        time: number
-        snapshot: string
+        // fatal:false replaces invalid sequences with U+FFFD — same as the
+        // server's former from_utf8_lossy.
+        return new TextDecoder('utf-8', { fatal: false }).decode(bytes)
     }
 
     const term = new Terminal()
-    const serializeAddon = new SerializeAddon()
 
-    onDestroy(() => socket?.close())
+    const player = new PlaybackController<TerminalItem>(
+        { data: DATA_URL, stream: STREAM_URL },
+        {
+            // The anchor's snapshot repaints the screen at the size it was taken; reset
+            // first so nothing from the position we're leaving survives.
+            reset: async (kf: Keyframe) => {
+                const size = sizeAt(kf.time)
+                if (size) {
+                    resize(size.cols, size.rows)
+                }
+                pendingWrite = ''
+                await writeToTerminal('\x1bc')
+                atKeyframe = true
+            },
+            apply: async item => {
+                if ('cols' in item) {
+                    await flush()
+                    ptyMode ||= Boolean(item.cols)
+                    resize(item.cols, item.rows)
+                } else if ('snapshot' in item) {
+                    if (atKeyframe) {
+                        pendingWrite += decodeBase64Lossy(item.snapshot)
+                    }
+                } else if (item.stream !== 'Input') {
+                    pendingWrite += decodeBase64Lossy(item.data)
+                }
+                atKeyframe = false
+                if (pendingWrite.length > WRITE_BATCH_CHARS) {
+                    await flush()
+                }
+            },
+            // Snapshots are skipped: they only restate what the stream already put on screen.
+            applyLive: async item => {
+                if ('cols' in item) {
+                    ptyMode ||= Boolean(item.cols)
+                    resize(item.cols, item.rows)
+                } else if ('data' in item && item.stream !== 'Input') {
+                    await writeToTerminal(decodeBase64Lossy(item.data))
+                }
+            },
+            flush,
+        },
+    )
+
+    const { mode, timestamp, duration, seekPercent, sessionIsLive } = player
+    $: seekInputValue = $seekPercent
+
+    onDestroy(() => {
+        player.destroy()
+        resizeObserver?.disconnect()
+    })
 
     onMount(async () => {
         if (recording.kind !== 'Terminal') {
             throw new Error('Invalid recording type')
         }
 
-        url = `/@warpgate/admin/api/recordings/${recording.id}/cast`
-
-        term.loadAddon(serializeAddon)
         term.open(containerElement)
-
         term.options.theme = theme
         term.options.scrollback = 100
 
@@ -132,44 +176,77 @@
         resizeObserver = new ResizeObserver(fitSize)
         resizeObserver.observe(containerElement)
 
-        const data = await fetch(url).then(r => r.text())
-        for (const line of data.split('\n')) {
-            addData(JSON.parse(line))
+        if (recording.generation >= INDEXED_GENERATION) {
+            await loadIndex()
+        } else {
+            await fakeIndex()
         }
 
-        // Await the first paint directly (nothing else is seeking yet) so `loading` clears
-        // only once the terminal reflects the recording.
-        await _seekInternal(duration)
-
-        socket = new WebSocket(
-            `wss://${location.host}/@warpgate/admin/api/recordings/${recording.id}/stream`,
-        )
-        socket.addEventListener('message', event => {
-            let message = JSON.parse(event.data)
-            if ('data' in message) {
-                let item: AsciiCastItem = message.data
-                addData(item)
-            }
-            if ('start' in message) {
-                sessionIsLive = message.live
-                if (!sessionIsLive) {
-                    seek(0)
-                } else {
-                    playing = true
-                }
-            }
-            if ('end' in message) {
-                sessionIsLive = false
-            } else {
-                console.log('Message from server ', message)
-            }
-        })
-        socket.addEventListener('close', () =>
-            console.info('Live stream closed'),
-        )
-
+        // Hold the spinner until the terminal reflects the recording.
+        await player.paintInitial()
+        player.start()
         loading = false
     })
+
+    // Parse the whole (small) index once: seek anchors, the sizes to restore them at, and
+    // the total duration.
+    async function loadIndex() {
+        const response = await fetch(INDEX_URL)
+        if (!response.ok) {
+            throw new Error(
+                `Failed to fetch index: ${response.status} ${response.statusText}`,
+            )
+        }
+        const keyframes: Keyframe[] = []
+        let total = 0
+        for (const line of (await response.text()).split('\n')) {
+            if (!line.trim()) {
+                continue
+            }
+            let entry: IndexLine
+            try {
+                entry = JSON.parse(line) as IndexLine
+            } catch {
+                continue
+            }
+            total = Math.max(total, entry.time)
+            switch (entry.type) {
+                case 'keyframe':
+                    keyframes.push({ time: entry.time, offset: entry.offset })
+                    break
+                case 'resize':
+                    sizes.push(entry)
+                    ptyMode ||= Boolean(entry.cols)
+                    break
+                case 'end':
+                    total = entry.time
+                    break
+            }
+        }
+        player.setIndex(keyframes, total)
+    }
+
+    // Recordings written before the index existed get one trivial anchor at the start of
+    // the file, which is always valid — a fresh terminal replayed from byte 0 is correct.
+    // Their duration isn't recorded anywhere, so stream the file once to find it (the
+    // items are parsed for their timestamps and dropped, never retained).
+    async function fakeIndex() {
+        const scan = new RangeStream(DATA_URL)
+        await scan.openAt(0, new AbortController().signal)
+        let total = 0
+        for (;;) {
+            const item = await scan.next<TerminalItem>()
+            if (!item) {
+                break
+            }
+            total = Math.max(total, item.time)
+            if ('cols' in item) {
+                ptyMode ||= Boolean(item.cols)
+            }
+        }
+        scan.abort()
+        player.setIndex([{ time: 0, offset: 0 }], total)
+    }
 
     async function writeToTerminal(data: string) {
         if (!ptyMode) {
@@ -178,34 +255,25 @@
         await new Promise<void>(r => term.write(data, r))
     }
 
-    function addData(data: AsciiCastItem) {
-        if (isAsciiCastHeader(data)) {
-            if (data.width) {
-                ptyMode = true
-            }
-            events.push({
-                time: data.time,
-                cols: data.width,
-                rows: data.height,
-            })
-            if (isStreaming) {
-                resize(data.width, data.height)
-                timestamp = data.time
-            }
-            duration = Math.max(duration, data.time)
+    async function flush() {
+        const pending = pendingWrite
+        pendingWrite = ''
+        if (pending) {
+            await writeToTerminal(pending)
         }
-        if (isAsciiCastData(data)) {
-            let dataEvent = {
-                time: data[0],
-                data: data[2],
+    }
+
+    // The terminal size in effect at `time`, or null when the recording has no size
+    // information before it (an exec channel, or a pre-index recording).
+    function sizeAt(time: number): { cols: number; rows: number } | null {
+        let best: { cols: number; rows: number } | null = null
+        for (const size of sizes) {
+            if (size.time > time) {
+                break
             }
-            events.push(dataEvent)
-            if (isStreaming) {
-                writeToTerminal(dataEvent.data)
-                timestamp = dataEvent.time
-            }
-            duration = Math.max(duration, dataEvent.time)
+            best = size
         }
+        return best
     }
 
     let metricsCanvas: HTMLCanvasElement
@@ -215,96 +283,24 @@
         if (!context) {
             throw new Error('Failed to get canvas context')
         }
-        context.font = `10px ${term.options.fontFamily ?? 'monospace'}`
-        const metrics = context.measureText('abcdef')
+        const probeFontSize = 100
+        context.font = `${probeFontSize}px ${term.options.fontFamily ?? 'monospace'}`
+        const metrics = context.measureText('W')
 
-        const fontWidth = containerElement.clientWidth / term.cols
-        term.options.fontSize = (fontWidth / (metrics.width / 6)) * 10
-    }
-
-    // Shared latest-wins runner: serializes seeks and coalesces rapid scrubs to the newest
-    // target (replaying the terminal to an intermediate position we're about to leave is
-    // wasted work). Reconstructing state at `time` is independent of skipped seeks.
-    const runSeek = latestWins((time: number) => _seekInternal(time))
-
-    function seek(time: number) {
-        runSeek(time)
-    }
-
-    async function _seekInternal(time: number) {
-        let nearestSnapshot: SnapshotEvent | null = null
-
-        for (const event of events) {
-            if (event.time > time) {
-                break
-            }
-            if ('snapshot' in event) {
-                nearestSnapshot = event
-            }
-        }
-
-        let index = nearestSnapshot ? events.indexOf(nearestSnapshot) : 0
-        if (time >= timestamp) {
-            const nextEventIndex = events.findIndex(e => e.time > timestamp)
-            if (nextEventIndex === -1) {
-                return
-            }
-            index = Math.max(index, nextEventIndex)
-        }
-        let lastSize = { cols: term.cols, rows: term.rows }
-
-        for (let i = 0; i <= index; i++) {
-            // biome-ignore lint/style/noNonNullAssertion: x
-            let event = events[i]!
-            if ('cols' in event) {
-                lastSize = { cols: event.cols, rows: event.rows }
-            }
-        }
-
-        resize(lastSize.cols, lastSize.rows)
-
-        let output = ''
-
-        async function flush() {
-            await writeToTerminal(output)
-            output = ''
-        }
-
-        for (let i = index; i < events.length; i++) {
-            let shouldSnapshot = false
-            // biome-ignore lint/style/noNonNullAssertion: x
-            let event = events[i]!
-            if (event.time > time) {
-                break
-            }
-            if ('snapshot' in event) {
-                output += `\x1bc${event.snapshot}`
-            }
-            if ('cols' in event) {
-                await flush()
-                resize(event.cols, event.rows)
-                shouldSnapshot = true
-            }
-            if ('data' in event) {
-                output += event.data
-            }
-
-            shouldSnapshot ||= output.length > 1000
-
-            if (shouldSnapshot) {
-                await flush()
-                events.splice(i + 1, 0, {
-                    time: event.time,
-                    snapshot: serializeAddon.serialize(),
-                })
-                i++
-            }
-        }
-
-        await flush()
-
-        timestamp = time
-        seekInputValue = (100 * time) / duration
+        const fontWidthRatio = metrics.width / probeFontSize
+        const fontHeightRatio =
+            (metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent) /
+            probeFontSize
+        const fontMaxWidth = containerElement.clientWidth / term.cols
+        const fontMaxHeight = containerElement.clientHeight / term.rows
+        term.options.fontSize = Math.floor(
+            Math.min(
+                fontMaxWidth / fontWidthRatio,
+                fontMaxHeight /
+                    fontHeightRatio /
+                    (term.options.lineHeight ?? 1),
+            ),
+        )
     }
 
     function resize(cols: number, rows: number) {
@@ -316,33 +312,6 @@
         }
         fitSize()
     }
-
-    onDestroy(() => resizeObserver?.disconnect())
-
-    let destroyed = false
-    onDestroy(() => (destroyed = true))
-
-    function step() {
-        if (destroyed) {
-            return
-        }
-        if (playing) {
-            seek(Math.min(duration, timestamp + 0.1))
-        }
-        setTimeout(step, 100)
-    }
-
-    function togglePlaying() {
-        playing = !playing
-    }
-
-    function keyPressHandler(event: KeyboardEvent) {
-        if (event.key === ' ') {
-            togglePlaying()
-        }
-    }
-
-    step()
 
     function toggleFullscreen() {
         if (document.fullscreenElement) {
@@ -362,33 +331,37 @@
         <Spinner color="primary" />
     {/if}
 
-    {#if !loading && !playing}
-        <div class="pause-overlay">
+    {#if !loading && $mode === 'paused'}
+        <button
+            type="button"
+            class="pause-overlay"
+            on:click={() => player.togglePlaying()}
+        >
             <Fa icon={faPlay} size="2x" fw />
-        </div>
+        </button>
     {/if}
 
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
     <div
         class="container"
         class:invisible={loading}
-        on:click={togglePlaying}
-        on:keypress={keyPressHandler}
+        on:click={() => player.togglePlaying()}
         role="img"
         bind:this={containerElement}
     ></div>
 
     <PlayerToolbar
-        {playing}
-        {timestamp}
+        playing={$mode !== 'paused'}
+        timestamp={$timestamp}
         bind:seekInputValue
         hidden={loading}
-        isLive={sessionIsLive === true}
-        liveActive={isStreaming}
-        onTogglePlaying={togglePlaying}
+        isLive={$sessionIsLive === true}
+        liveActive={$mode === 'live'}
+        onTogglePlaying={() => player.togglePlaying()}
         onToggleFullscreen={toggleFullscreen}
-        onGoLive={() => seek(duration)}
-        onSeek={pct => seek(duration * pct / 100)}
+        onGoLive={() => player.goLive()}
+        onSeek={pct => player.scrub($duration * pct / 100)}
     />
 </div>
 
@@ -402,18 +375,35 @@
         contain: content;
         display: flex;
         flex-direction: column;
+        flex: 1 0 0;
+        min-height: 300px;
     }
 
     .container {
         padding: 5px;
         margin: auto;
+        min-height: 0;
+        flex-grow: 1;
+
+        display: flex;
+        align-items: center;
     }
 
     :global(.xterm) {
         cursor: pointer !important;
+        margin:auto;
+    }
+
+    :global(.xterm-viewport) {
+        background: none;
     }
 
     :global(.spinner-border), .pause-overlay {
+        appearance: none;
+        -webkit-appearance: none;
+        background: none;
+        border: none;
+
         position: absolute;
         left: 50%;
         top: 50%;

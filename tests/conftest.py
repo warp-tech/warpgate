@@ -309,6 +309,26 @@ class ProcessManager:
 
         return port
 
+    def start_minio(self, user, password):
+        port = alloc_port()
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-p",
+                f"{port}:9000",
+                "-e",
+                f"MINIO_ROOT_USER={user}",
+                "-e",
+                f"MINIO_ROOT_PASSWORD={password}",
+                "minio/minio",
+                "server",
+                "/data",
+            ]
+        )
+        return port
+
     def start_mariadb_server(self):
         port = alloc_port()
         self.start(
@@ -860,18 +880,41 @@ class ProcessManager:
         stdout=None,
         http_port=None,
         database_url=None,
+        env=None,
     ) -> WarpgateProcess:
         args = args or ["run", "--enable-admin-token"]
 
         if share_with:
-            config_path = share_with.config_path
-            ssh_port = share_with.ssh_port
-            mysql_port = share_with.mysql_port
-            postgres_port = share_with.postgres_port
-            http_port = share_with.http_port
-            kubernetes_port = share_with.kubernetes_port
-            vnc_port = share_with.vnc_port
-            rdp_port = share_with.rdp_port
+            import yaml
+
+            # A second node sharing the first's database (and certs/keys) but
+            # listening on its own ports, for multi-node/cluster tests.
+            ssh_port = alloc_port()
+            http_port = alloc_port()
+            mysql_port = alloc_port()
+            postgres_port = alloc_port()
+            kubernetes_port = alloc_port()
+            vnc_port = alloc_port()
+            rdp_port = alloc_port()
+
+            config = yaml.safe_load(share_with.config_path.open())
+            for section, port in [
+                ("ssh", ssh_port),
+                ("http", http_port),
+                ("mysql", mysql_port),
+                ("postgres", postgres_port),
+                ("kubernetes", kubernetes_port),
+                ("vnc", vnc_port),
+                ("rdp", rdp_port),
+            ]:
+                if isinstance(config.get(section), dict):
+                    config[section]["listen"] = f"0.0.0.0:{port}"
+            if config_patch:
+                always_merger.merge(config, config_patch)
+            # Same directory as the shared config so relative DB/cert paths resolve.
+            config_path = share_with.config_path.parent / f"warpgate-{uuid.uuid4()}.yaml"
+            with config_path.open("w") as f:
+                yaml.safe_dump(config, f)
         else:
             ssh_port = alloc_port()
             http_port = http_port or alloc_port()
@@ -883,16 +926,6 @@ class ProcessManager:
 
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
-
-            keys_dir = data_dir / "ssh-keys"
-            keys_dir.mkdir(parents=True)
-            for k in [
-                Path("ssh-keys/wg/client-ed25519"),
-                Path("ssh-keys/wg/client-rsa"),
-                Path("ssh-keys/wg/host-ed25519"),
-                Path("ssh-keys/wg/host-rsa"),
-            ]:
-                shutil.copy(k, keys_dir / k.name)
 
             for k in [
                 Path("certs/tls.certificate.pem"),
@@ -906,6 +939,7 @@ class ProcessManager:
             return self.start(
                 [
                     os.path.join(cargo_root, binary_path),
+                    "--debug",
                     "--config",
                     str(config_path),
                     *args,
@@ -916,7 +950,6 @@ class ProcessManager:
                     "LLVM_PROFILE_FILE": f"{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw",
                     "WARPGATE_ADMIN_TOKEN": "token-value",
                     "WARPGATE_UNDER_TEST": "1",
-                    "RUST_LOG": "debug",
                     **env,
                 },
                 stop_signal=signal.SIGINT,
@@ -942,6 +975,16 @@ class ProcessManager:
                 data_dir,
                 "--external-host",
                 "external-host",
+                # Record all sessions so tests can assert on recordings. Enablement
+                # lives in the DB (seeded from config at setup-time migration), so it
+                # must be set here rather than patched into the config file afterwards.
+                "--record-sessions",
+                # Likewise a DB parameter seeded from the config at setup time.
+                "--host-key-verification",
+                "auto-accept",
+                # Fixed host/client keys, stored in the DB.
+                "--import-ssh-keys",
+                str(Path(os.getcwd()) / "ssh-keys/wg"),
             ]
             if database_url:
                 setup_args += ["--database-url", database_url]
@@ -956,7 +999,6 @@ class ProcessManager:
             import yaml
 
             config = yaml.safe_load(config_path.open())
-            config["ssh"]["host_key_verification"] = "auto_accept"
             # unattended-setup has no --vnc-port, so enable the VNC listener here,
             # reusing the TLS cert/key already copied into the data dir (for VeNCrypt).
             config["vnc"] = {
@@ -973,15 +1015,16 @@ class ProcessManager:
                 "certificate": "tls.certificate.pem",
                 "key": "tls.key.pem",
             }
-            # Record all sessions so tests can assert on recordings (unattended-setup
-            # already picked a path under the data dir; just turn it on).
-            config.setdefault("recordings", {})["enable"] = True
             if config_patch:
                 always_merger.merge(config, config_patch)
             with config_path.open("w") as f:
                 yaml.safe_dump(config, f)
 
-        p = run(args)
+        # A deterministic, reachable self-address so cross-node proxying can find us.
+        p = run(
+            args,
+            env={"WARPGATE_PEER_ADDRESS": f"127.0.0.1:{http_port}", **(env or {})},
+        )
         return WarpgateProcess(
             process=p,
             config_path=config_path,
@@ -1112,6 +1155,18 @@ def shared_ssh_port(processes, wg_c_ed25519_pubkey):
     """
     port = processes.start_ssh_server(trusted_keys=[wg_c_ed25519_pubkey.read_text()])
     wait_port(port)
+    return port
+
+
+@pytest.fixture(scope="session")
+def shared_postgres_port(processes: ProcessManager):
+    """Shared PostgreSQL server for tests that only read from it.
+
+    The approval tests each need their own warpgate node, but the database
+    behind the target is stateless as far as they are concerned.
+    """
+    port = processes.start_postgres_server()
+    wait_port(port, recv=False)
     return port
 
 

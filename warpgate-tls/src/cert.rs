@@ -7,6 +7,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::ResolvesServerCert;
 use rustls::sign::{CertifiedKey, SigningKey};
 use rustls_pki_types::pem::PemObject;
+use time::OffsetDateTime;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use x509_parser::prelude::{FromDer, GeneralName, ParsedExtension, X509Certificate};
@@ -138,6 +139,13 @@ impl TlsCertificateBundle {
         }
 
         Ok(unique_names)
+    }
+
+    /// Expiry (notAfter) of the leaf certificate.
+    pub fn not_after(&self) -> Option<OffsetDateTime> {
+        let cert_der = self.certificates.first()?;
+        let (_, cert) = X509Certificate::from_der(cert_der).ok()?;
+        Some(cert.validity().not_after.to_datetime())
     }
 }
 

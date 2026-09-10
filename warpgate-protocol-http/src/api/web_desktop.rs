@@ -1,28 +1,35 @@
 use std::sync::Arc;
 
-use anyhow::Context;
+use poem::http::StatusCode;
 use poem::session::Session;
 use poem::web::{Data, RemoteAddr};
+use poem::{Request, Response};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::EntityTrait;
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
-use warpgate_common_http::auth::{AuthenticatedRequestContext, web_reauth_required};
-use warpgate_core::ConfigProvider;
-use warpgate_db_entities::Parameters;
-use warpgate_db_entities::Target::{self, TargetKind};
+use warpgate_admin::api::cluster_proxy::{
+    ReparseForwardedResponse, forwarded_error, parse_forwarded_body, proxy_or_serve,
+};
+use warpgate_common::{UserSessionId, WarpgateError};
+use warpgate_db_entities::Target::TargetKind;
+use warpgate_web_clients_common::SessionAccess;
 use warpgate_web_desktop::WebDesktopClientManager;
 
-use crate::api::AnySecurityScheme;
-use crate::common::endpoint_auth;
+use crate::api::auth_scheme::AuthedSession;
+use crate::api::common::{
+    WebClientTargetAccess, authorize_web_client_target, web_client_session_owner,
+};
 
 pub struct Api;
 
 #[derive(Object)]
 struct CreateWebDesktopSessionBody {
     target_id: Uuid,
+    /// Initial desktop resolution to request from the target, measured by the browser.
+    /// Both must be present to take effect; otherwise a default is used.
+    width: Option<u16>,
+    height: Option<u16>,
 }
 
 #[derive(Object)]
@@ -73,62 +80,37 @@ impl Api {
     #[oai(
         path = "/web-desktop/sessions",
         method = "post",
-        operation_id = "create_web_desktop_session",
-        transform = "endpoint_auth"
+        operation_id = "create_web_desktop_session"
     )]
     async fn api_create_web_desktop_session(
         &self,
         remote_addr: &RemoteAddr,
         session: &Session,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
         body: Json<CreateWebDesktopSessionBody>,
         manager: Data<&Arc<WebDesktopClientManager>>,
-        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<CreateWebDesktopSessionResponse> {
-        let (Some(username), user_id) = (ctx.auth.username(), ctx.auth.user_id()) else {
-            return Ok(CreateWebDesktopSessionResponse::Forbidden);
-        };
-
-        if web_reauth_required(&ctx, session).await? {
-            return Ok(CreateWebDesktopSessionResponse::ReauthRequired);
-        }
-
-        // Same global gate as web SSH: the in-browser RDP/VNC desktop clients.
-        if !Parameters::Entity::get(&*ctx.services().db.lock().await)
-            .await
-            .map_err(WarpgateError::from)?
-            .web_clients_enabled
+        let authorization = match authorize_web_client_target(&ctx, session, body.target_id).await?
         {
-            return Ok(CreateWebDesktopSessionResponse::Forbidden);
-        }
-
-        let Some(target) = Target::Entity::find_by_id(body.target_id)
-            .one(&*ctx.services().db.lock().await)
-            .await
-            .context("querying target")?
-        else {
-            return Ok(CreateWebDesktopSessionResponse::NotFound);
+            WebClientTargetAccess::Authorized(authorization) => authorization,
+            WebClientTargetAccess::ReauthRequired => {
+                return Ok(CreateWebDesktopSessionResponse::ReauthRequired);
+            }
+            WebClientTargetAccess::Forbidden => {
+                return Ok(CreateWebDesktopSessionResponse::Forbidden);
+            }
+            WebClientTargetAccess::NotFound => {
+                return Ok(CreateWebDesktopSessionResponse::NotFound);
+            }
         };
 
-        let services = ctx.services();
-        let authorized: bool = services
-            .config_provider
-            .lock()
-            .await
-            .authorize_target(username, &target.name)
-            .await?;
-
-        if !authorized {
-            return Ok(CreateWebDesktopSessionResponse::Forbidden);
-        }
-
+        let size = body.width.zip(body.height);
         let session_id = manager
             .create_session(
-                services,
-                user_id,
-                username,
-                &target.name,
-                remote_addr.0.as_socket_addr().cloned(),
+                ctx.services(),
+                authorization,
+                remote_addr.0.as_socket_addr().copied(),
+                size,
             )
             .await;
 
@@ -143,61 +125,91 @@ impl Api {
             Err(e) => return Err(e.into()),
         };
         Ok(CreateWebDesktopSessionResponse::Created(Json(
-            WebDesktopSessionCreated { session_id },
-        )))
-    }
-
-    #[oai(
-        path = "/web-desktop/sessions/:session_id",
-        method = "get",
-        operation_id = "get_web_desktop_session",
-        transform = "endpoint_auth"
-    )]
-    async fn api_get_web_desktop_session(
-        &self,
-        ctx: Data<&AuthenticatedRequestContext>,
-        session_id: Path<Uuid>,
-        manager: Data<&Arc<WebDesktopClientManager>>,
-        _sec_scheme: AnySecurityScheme,
-    ) -> poem::Result<GetWebDesktopSessionResponse> {
-        let Some(session) = manager.get_session(*session_id).await else {
-            return Ok(GetWebDesktopSessionResponse::NotFound);
-        };
-
-        if session.user_id() != ctx.auth.user_id() {
-            return Ok(GetWebDesktopSessionResponse::NotFound);
-        }
-
-        Ok(GetWebDesktopSessionResponse::Ok(Json(
-            WebDesktopSessionInfo {
-                target_name: session.target_name().into(),
-                target_kind: *session.target_kind(),
+            WebDesktopSessionCreated {
+                session_id: session_id.0,
             },
         )))
     }
 
     #[oai(
         path = "/web-desktop/sessions/:session_id",
+        method = "get",
+        operation_id = "get_web_desktop_session"
+    )]
+    async fn api_get_web_desktop_session(
+        &self,
+        ctx: AuthedSession,
+        req: &Request,
+        session_id: Path<Uuid>,
+        manager: Data<&Arc<WebDesktopClientManager>>,
+    ) -> poem::Result<GetWebDesktopSessionResponse> {
+        let owner = web_client_session_owner(&ctx, UserSessionId(*session_id)).await?;
+        proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
+            match manager
+                .access(UserSessionId(*session_id), ctx.auth.user_id())
+                .await
+            {
+                SessionAccess::Granted(session) => Ok(GetWebDesktopSessionResponse::Ok(Json(
+                    WebDesktopSessionInfo {
+                        target_name: session.target_name().into(),
+                        target_kind: *session.target_kind(),
+                    },
+                ))),
+                SessionAccess::NotFound | SessionAccess::Forbidden => {
+                    Ok(GetWebDesktopSessionResponse::NotFound)
+                }
+            }
+        })
+        .await
+    }
+
+    #[oai(
+        path = "/web-desktop/sessions/:session_id",
         method = "delete",
-        operation_id = "delete_web_desktop_session",
-        transform = "endpoint_auth"
+        operation_id = "delete_web_desktop_session"
     )]
     async fn api_delete_web_desktop_session(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        ctx: AuthedSession,
+        req: &Request,
         session_id: Path<Uuid>,
         manager: Data<&Arc<WebDesktopClientManager>>,
-        _sec_scheme: AnySecurityScheme,
     ) -> poem::Result<DeleteWebDesktopSessionResponse> {
-        let Some(session) = manager.get_session(*session_id).await else {
-            return Ok(DeleteWebDesktopSessionResponse::NotFound);
-        };
+        let owner = web_client_session_owner(&ctx, UserSessionId(*session_id)).await?;
+        proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
+            match manager
+                .access(UserSessionId(*session_id), ctx.auth.user_id())
+                .await
+            {
+                SessionAccess::Granted(_) => {
+                    manager.remove_session(UserSessionId(*session_id)).await;
+                    Ok(DeleteWebDesktopSessionResponse::Deleted)
+                }
+                SessionAccess::Forbidden => Ok(DeleteWebDesktopSessionResponse::Forbidden),
+                SessionAccess::NotFound => Ok(DeleteWebDesktopSessionResponse::NotFound),
+            }
+        })
+        .await
+    }
+}
 
-        if session.user_id() != ctx.auth.user_id() {
-            return Ok(DeleteWebDesktopSessionResponse::Forbidden);
+impl ReparseForwardedResponse for GetWebDesktopSessionResponse {
+    async fn reparse_forwarded_response(response: Response) -> poem::Result<Self> {
+        match response.status() {
+            StatusCode::OK => Ok(Self::Ok(Json(parse_forwarded_body(response).await?))),
+            StatusCode::NOT_FOUND => Ok(Self::NotFound),
+            _ => Err(forwarded_error(response).await),
         }
+    }
+}
 
-        manager.remove_session(*session_id).await;
-        Ok(DeleteWebDesktopSessionResponse::Deleted)
+impl ReparseForwardedResponse for DeleteWebDesktopSessionResponse {
+    async fn reparse_forwarded_response(response: Response) -> poem::Result<Self> {
+        match response.status() {
+            StatusCode::NO_CONTENT => Ok(Self::Deleted),
+            StatusCode::FORBIDDEN => Ok(Self::Forbidden),
+            StatusCode::NOT_FOUND => Ok(Self::NotFound),
+            _ => Err(forwarded_error(response).await),
+        }
     }
 }

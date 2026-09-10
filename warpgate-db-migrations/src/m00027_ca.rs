@@ -65,7 +65,7 @@ impl MigrationTrait for Migration {
             .await?;
 
         info!("Generating root CA certificate");
-        let (cert_pem, pk_pem) = warpgate_ca::generate_root_certificate_rcgen()
+        let (cert_pem, pk_pem) = warpgate_ca::issue_ca_root_certificate()
             .map_err(|e| DbErr::Custom(format!("Failed to generate CA certificate: {e}")))?;
 
         let db = manager.get_connection();

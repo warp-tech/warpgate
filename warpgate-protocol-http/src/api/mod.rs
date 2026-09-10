@@ -2,7 +2,8 @@ use poem_openapi::OpenApi;
 
 mod api_tokens;
 pub mod auth;
-mod common;
+mod auth_scheme;
+pub(crate) mod common;
 mod credentials;
 pub mod info;
 pub mod sso_provider_detail;
@@ -12,8 +13,6 @@ pub mod ticket_request_targets;
 pub mod ticket_requests;
 mod web_desktop;
 mod web_ssh;
-
-pub use warpgate_common::api::AnySecurityScheme;
 
 pub fn get() -> impl OpenApi {
     (

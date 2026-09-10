@@ -1,16 +1,19 @@
+mod channel_registry;
 mod channel_writer;
+mod event_intake;
 mod russh_handler;
 mod service_output;
 mod session;
 mod session_handle;
 mod target_menu;
 use std::borrow::Cow;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use futures::FutureExt;
 use futures::future::BoxFuture;
-use futures::{FutureExt, StreamExt};
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use russh::{MethodKind, MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
@@ -20,11 +23,11 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::net::detect_port_knock;
-use warpgate_core::{Services, SessionStateInit, State};
+use warpgate_common::helpers::net::accept_loop;
+use warpgate_core::{Services, State, UserSessionStateInit};
 use warpgate_db_entities::Parameters;
 
-use crate::keys::load_keys;
+use crate::keys::load_host_keys;
 use crate::server::session_handle::SSHSessionHandle;
 
 #[derive(Clone)]
@@ -38,31 +41,27 @@ pub async fn bind_server(
     proxy_protocol: bool,
 ) -> Result<BoxFuture<'static, Result<()>>> {
     let russh_config_init = Arc::new({
-        let config = services.config.lock().await;
         RusshConfigInit {
-            keys: load_keys(&config, &services.global_params, &*services.secret_backend, "host")
-                .await?,
+            keys: load_host_keys(&services.db, &*services.secret_backend).await?,
         }
     });
 
-    let mut listener = address.tcp_accept_stream().await?;
+    let listener = address.tcp_accept_stream().await?;
 
     Ok(async move {
-        while let Some(stream) = listener.next().await {
-            let russh_config_init = russh_config_init.clone();
-            let services = services.clone();
-
-            tokio::task::Builder::new()
-                .name("SSH new connection setup")
-                .spawn(async move {
-                    if let Err(e) =
-                        _handle_connection(services, russh_config_init, stream, proxy_protocol)
-                            .await
-                    {
-                        error!(%e, "Connection handling failed");
-                    }
-                })?;
-        }
+        accept_loop(
+            "SSH connection",
+            listener,
+            proxy_protocol,
+            move |stream, remote_address| {
+                let russh_config_init = russh_config_init.clone();
+                let services = services.clone();
+                async move {
+                    _handle_connection(services, russh_config_init, stream, remote_address).await
+                }
+            },
+        )
+        .await;
         Ok(())
     }
     .boxed())
@@ -71,55 +70,37 @@ pub async fn bind_server(
 async fn _handle_connection(
     services: Services,
     russh_config_init: Arc<RusshConfigInit>,
-    mut stream: TcpStream,
-    proxy_protocol: bool,
+    stream: TcpStream,
+    remote_address: SocketAddr,
 ) -> Result<()> {
-    stream.set_nodelay(true)?;
-
-    if detect_port_knock(&stream).await {
-        return Ok(());
-    }
-
-    let remote_address =
-        warpgate_common::helpers::proxy_protocol::remote_address(&mut stream, proxy_protocol)
-            .await?;
-
     let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
-    let server_handle = State::register_session(
+    let (server_handle, wrapped_stream) = State::register_user_session_with_stream(
         &services.state,
-        &crate::PROTOCOL_NAME,
-        SessionStateInit {
+        crate::PROTOCOL_NAME,
+        UserSessionStateInit {
             remote_address: Some(remote_address),
             handle: Box::new(session_handle),
         },
+        stream,
     )
     .await
     .context("registering session")?;
 
-    let id = server_handle.lock().await.id();
+    let id = server_handle.lock().await.user_session_id();
 
     let (event_tx, event_rx) = unbounded_channel();
 
     let banner = {
-        let db = services.db.lock().await;
-        let text = Parameters::Entity::get(&db).await?.ssh_banner;
-        if text.trim().is_empty() {
-            None
-        } else {
-            // Normalize line endings for terminal display.
-            Some(format!(
-                "{}\r\n",
-                text.replace("\r\n", "\n").replace('\n', "\r\n")
-            ))
-        }
+        let db = &services.db;
+        // Normalize line endings for terminal display.
+        Parameters::Entity::get(db)
+            .await?
+            .banner_text()
+            .map(|text| format!("{}\r\n", text.replace("\r\n", "\n").replace('\n', "\r\n")))
     };
 
     let handler = ServerHandler { event_tx, banner };
-    let wrapped_stream = {
-        let guard = server_handle.lock().await;
-        guard.wrap_stream(stream).await?
-    };
 
     let session = match ServerSession::start(
         remote_address,
@@ -143,8 +124,14 @@ async fn _handle_connection(
         russh::server::Config {
             auth_rejection_time: Duration::from_secs(1),
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
-            // Extra time for the "closing due to inactivity" message to be sent
-            inactivity_timeout: Some(config.store.ssh.inactivity_timeout + Duration::from_secs(10)),
+            inactivity_timeout: Some(
+                config.store.ssh.inactivity_timeout
+                // There is no traffic during admin approval hold that would
+                // reset the inactivity timer, so the timeout needs to be at least that long
+                + services.admin_approval_timeout().await?
+                // Extra time for the "closing due to inactivity" message to be sent
+                + Duration::from_secs(10),
+            ),
             keepalive_interval: config.store.ssh.keepalive_interval,
             methods: get_allowed_auth_methods(&services).await?,
             keys: russh_config_init.keys.clone(),
@@ -204,8 +191,8 @@ where
 
 pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> {
     let parameters = {
-        let db = services.db.lock().await;
-        Parameters::Entity::get(&db).await?
+        let db = &services.db;
+        Parameters::Entity::get(db).await?
     };
 
     let mut methods_vec: Vec<MethodKind> = Vec::new();

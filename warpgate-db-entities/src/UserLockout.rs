@@ -1,4 +1,5 @@
 use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::{Func, IntoCondition};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -29,3 +30,12 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl Entity {
+    /// Usernames are case-insensitive; match the lockout row the same way
+    /// authentication resolves the account, so lockout can't be sidestepped
+    /// by varying the case of the username.
+    pub fn username_eq_ci(username: &str) -> impl IntoCondition {
+        Expr::expr(Func::lower(Expr::col(Column::Username))).eq(username.to_lowercase())
+    }
+}

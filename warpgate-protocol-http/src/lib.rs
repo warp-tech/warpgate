@@ -1,15 +1,18 @@
 pub mod api;
+mod approval_gate;
 mod catchall;
+mod client_cache;
 mod common;
 mod error;
+mod internal_page;
 mod middleware;
 pub mod proxy;
 mod session;
 mod session_handle;
+mod session_storage;
 
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use common::inject_request_authorization;
@@ -20,37 +23,42 @@ use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::listener::{AcceptorExt, Listener, RustlsConfig};
 use poem::middleware::SetHeader;
-use poem::session::{CookieConfig, MemoryStorage, ServerSession};
+use poem::session::ServerSession;
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
-use tracing::{Instrument, debug};
+use tracing::{Instrument, debug, warn};
 use warpgate_admin::admin_api_app;
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::proxy_protocol::ProxyProtocolAcceptor;
+use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
+use warpgate_common_http::warpgate_csp_with_connect_src;
 use warpgate_core::{ProtocolServer, Services};
-use warpgate_tls::TlsCertificateAndPrivateKey;
+use warpgate_db_entities::Parameters::RecordingsStorageConfig;
+use warpgate_tls::{TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey};
 use warpgate_web::Assets;
 use warpgate_web_desktop::WebDesktopClientManager;
 use warpgate_web_desktop::api::ws_handler as desktop_web_client_ws_handler;
 use warpgate_web_ssh::WebSshClientManager;
 use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 
-use crate::common::{SESSION_COOKIE_NAME, endpoint_auth, page_auth};
+use crate::api::common::forward_ws_to_session_owner;
+use crate::client_cache::{HTTP_CLIENT_CACHE_VACUUM_INTERVAL, HttpClientCache};
+use crate::common::{endpoint_auth, page_auth};
 use crate::error::error_page;
 use crate::middleware::{
     ContentSecurityPolicyMiddleware, CookieHostMiddleware, TicketMiddleware,
     WARPGATE_PLAYGROUND_CSP,
 };
-use crate::session::{SessionStore, SharedSessionStorage};
+use crate::session::SessionStore;
 use crate::session_handle::warpgate_server_handle_for_request;
+use crate::session_storage::SharedSessionStorage;
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -64,8 +72,20 @@ impl HTTPProtocolServer {
     }
 }
 
-fn make_session_storage() -> SharedSessionStorage {
-    SharedSessionStorage(Arc::new(Mutex::new(Box::<MemoryStorage>::default())))
+/// The S3 bucket origin to allow-list in the admin document CSP, or `None` when
+/// recordings are on disk (or the config can't be read). Read live so a storage
+/// config change takes effect on the next admin page load.
+async fn recordings_s3_browser_origin(ctx: &UnauthenticatedRequestContext) -> Option<String> {
+    match ctx
+        .parameters()
+        .await
+        .ok()?
+        .recordings_storage_config()
+        .ok()?
+    {
+        RecordingsStorageConfig::S3(s3) => s3.browser_origin(),
+        RecordingsStorageConfig::Disk(_) => None,
+    }
 }
 
 fn make_rustls_config(tls: Vec<TlsCertificateAndPrivateKey>) -> Result<RustlsConfig> {
@@ -89,10 +109,25 @@ impl ProtocolServer for HTTPProtocolServer {
         self,
         address: ListenEndpoint,
         proxy_protocol: bool,
-        tls: Vec<TlsCertificateAndPrivateKey>,
+        mut tls: Vec<TlsCertificateAndPrivateKey>,
     ) -> Result<BoxFuture<'static, Result<()>>> {
-        let session_storage = make_session_storage();
+        // Present the cluster identity certificate along other SNI certs
+        if !tls.is_empty() {
+            // catch the weird case of no cert at all
+            let identity = &self.services.cluster.tls_identity;
+            tls.push(TlsCertificateAndPrivateKey {
+                certificate: TlsCertificateBundle::from_bytes(
+                    identity.certificate_pem.clone().into_bytes(),
+                )?,
+                private_key: TlsPrivateKey::from_bytes(
+                    identity.private_key_pem.clone().into_bytes(),
+                )?,
+            });
+        }
+
+        let session_storage = SharedSessionStorage::new(self.services.db.clone());
         let session_store = SessionStore::new();
+        let http_client_cache = HttpClientCache::default();
 
         let cache_bust = || {
             SetHeader::new().overriding(
@@ -196,7 +231,24 @@ impl ProtocolServer for HTTPProtocolServer {
                     // auth-gated, and the SPA redirects to login client-side so the login
                     // `next` can include its hash route (a server redirect can't see it).
                     "/admin",
-                    EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html").with(cache_bust()),
+                    EmbeddedFileEndpoint::<Assets>::new("src/admin/index.html")
+                        .with(cache_bust())
+                        .around(move |ep, req| async move {
+                            // The recording player fetches S3-backed recordings directly
+                            // via presigned URLs, so the bucket origin must be allow-listed
+                            // in this document's CSP.
+                            let origin = match Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await {
+                                Ok(ctx) => recordings_s3_browser_origin(ctx.0).await,
+                                Err(_) => None,
+                            };
+                            let mut resp = ep.call(req).await?.into_response();
+                            let csp = warpgate_csp_with_connect_src(origin.as_deref());
+                            if let Ok(value) = HeaderValue::from_str(&csp) {
+                                resp.headers_mut()
+                                    .insert(http::header::CONTENT_SECURITY_POLICY, value);
+                            }
+                            Ok(resp)
+                        }),
                 )
                 .at(
                     "/api/auth/web-auth-requests/stream",
@@ -204,11 +256,11 @@ impl ProtocolServer for HTTPProtocolServer {
                 )
                 .at(
                     "/api/web-ssh/sessions/:session_id/stream",
-                    endpoint_auth(ssh_web_client_ws_handler),
+                    endpoint_auth(forward_ws_to_session_owner(ssh_web_client_ws_handler)),
                 )
                 .at(
                     "/api/web-desktop/sessions/:session_id/stream",
-                    endpoint_auth(desktop_web_client_ws_handler),
+                    endpoint_auth(forward_ws_to_session_owner(desktop_web_client_ws_handler)),
                 )
                 .at(
                     "",
@@ -282,21 +334,32 @@ impl ProtocolServer for HTTPProtocolServer {
             )
             .with(TicketMiddleware::new())
             .with(ServerSession::new(
-                CookieConfig::default()
-                    .secure(false)
-                    .max_age(cookie_max_age)
-                    .name(SESSION_COOKIE_NAME),
+                crate::common::session_cookie_config().max_age(cookie_max_age),
                 session_storage.clone(),
             ))
             .with(CookieHostMiddleware::new(base_cookie_domain))
             .data(UnauthenticatedRequestContext::new(self.services.clone()).await)
+            .data(http_client_cache.clone())
             .data(session_store.clone())
-            .data(session_storage);
+            .data(session_storage.clone());
 
         tokio::spawn(async move {
             loop {
-                session_store.lock().await.vacuum(session_max_age);
-                tokio::time::sleep(Duration::from_secs(60)).await;
+                let live = {
+                    let mut store = session_store.lock().await;
+                    store.vacuum(session_max_age);
+                    store.live_session_ids()
+                };
+                // Before the sweep below, so a session whose only traffic is a
+                // long-lived connection doesn't age out of its stored row.
+                if let Err(error) = session_storage.touch(&live).await {
+                    warn!(%error, "Failed to refresh active HTTP sessions");
+                }
+                if let Err(error) = session_storage.gc(cookie_max_age).await {
+                    warn!(%error, "Failed to expire stored HTTP sessions");
+                }
+                http_client_cache.vacuum().await;
+                tokio::time::sleep(HTTP_CLIENT_CACHE_VACUUM_INTERVAL).await;
             }
         });
 
@@ -305,7 +368,7 @@ impl ProtocolServer for HTTPProtocolServer {
         // Bind the socket now (errors here are non-fatal to the supervisor); the
         // returned future drives the accept loop (errors there restart the listener).
         let acceptor = address.poem_listener()?.into_acceptor().await?;
-        let acceptor = ProxyProtocolAcceptor::new(acceptor, proxy_protocol)
+        let acceptor = MaybeProxyProtocolAcceptor::new(acceptor, proxy_protocol)
             .rustls(stream::once(future::ready(rustls_config)));
 
         Ok(async move {

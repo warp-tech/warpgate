@@ -128,9 +128,9 @@
         <div class="list-group list-group-flush mb-3">
             <div class="list-group-item credential">
                 {#if creds.password === PasswordState.Unset}
-                    <span class="label ms-3"
-                        >Your account has no password set</span
-                    >
+                    <span class="label ms-3">
+                        Your account has no password set
+                    </span>
                 {/if}
                 {#if creds.password === PasswordState.Set}
                     <Fa fw icon={faKeyboard} />
@@ -179,8 +179,9 @@
             creatingOtpCredential = true
             e.preventDefault()
         }}
-                >Add device</Button
             >
+                Add device
+            </Button>
         </div>
 
         <div class="list-group list-group-flush mb-3">
@@ -192,6 +193,12 @@
                     <Button
                         class="ms-2"
                         color="link"
+                        disabled={($serverInfo?.otpSetupEnforced ?? false) &&
+                            creds.otp.length === 1}
+                        title={($serverInfo?.otpSetupEnforced ?? false) &&
+                        creds.otp.length === 1
+                            ? 'One-time passwords are required on this server - add another device first'
+                            : ''}
                         onclick={e => {
                     deleteOtp(credential)
                     e.preventDefault()
@@ -207,6 +214,10 @@
             <Alert color="warning">
                 Your credential policy requires using a one-time password for
                 authentication. Without one, you won't be able to log in.
+            </Alert>
+        {:else if $serverInfo?.otpSetupEnforced}
+            <Alert color="info">
+                One-time passwords are required on this server.
             </Alert>
         {/if}
 
@@ -224,11 +235,16 @@
                 creatingPublicKeyCredential = true
                 e.preventDefault()
             }}
-                >Add key</Button
             >
-            <Tooltip delay="250" target="addPublicKeyCredentialButton" animation
-                >Public key credentials will be loaded from LDAP</Tooltip
+                Add key
+            </Button>
+            <Tooltip
+                delay="250"
+                target="addPublicKeyCredentialButton"
+                animation
             >
+                Public key credentials will be loaded from LDAP
+            </Tooltip>
         </div>
 
         <div class="list-group list-group-flush mb-3">
@@ -275,8 +291,9 @@
             issuingCertificateCredential = true
             e.preventDefault()
         }}
-                >Issue certificate</Button
             >
+                Issue certificate
+            </Button>
         </div>
 
         <div class="list-group list-group-flush mb-3">

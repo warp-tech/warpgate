@@ -5,6 +5,7 @@ use warpgate_common::WarpgateError;
 use super::RateLimiterDirection;
 use super::shared_limiter::SharedWarpgateRateLimiter;
 
+#[derive(Clone)]
 pub struct SwappableLimiterCellHandle {
     sender: watch::Sender<Option<SharedWarpgateRateLimiter>>,
 }

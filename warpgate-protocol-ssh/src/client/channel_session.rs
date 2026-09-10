@@ -5,7 +5,7 @@ use russh::client::Msg;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::SessionId;
+use warpgate_common::UserSessionId;
 
 use super::error::SshClientError;
 use crate::{ChannelOperation, RCEvent};
@@ -15,7 +15,7 @@ pub struct SessionChannel {
     channel_id: Uuid,
     ops_rx: UnboundedReceiver<ChannelOperation>,
     events_tx: Sender<RCEvent>,
-    session_id: SessionId,
+    session_id: UserSessionId,
     closed: bool,
 }
 
@@ -25,7 +25,7 @@ impl SessionChannel {
         channel_id: Uuid,
         ops_rx: UnboundedReceiver<ChannelOperation>,
         events_tx: Sender<RCEvent>,
-        session_id: SessionId,
+        session_id: UserSessionId,
     ) -> Self {
         Self {
             client_channel,
@@ -155,10 +155,24 @@ impl SessionChannel {
                 }
             }
         }
-        self.close();
+        self.close_and_wait().await;
         Ok(())
     }
 
+    /// Delivers the close, rather than attempting it.
+    ///
+    /// `events_tx` holds 1024 events and every chunk of target output takes one
+    /// of them, so a session that has just streamed a large amount leaves the
+    /// queue full at exactly the moment the channel ends. `try_send` then fails,
+    /// the close is discarded, and the client is never told its channel is over.
+    async fn close_and_wait(&mut self) {
+        if !self.closed {
+            let _ = self.events_tx.send(RCEvent::Close(self.channel_id)).await;
+            self.closed = true;
+        }
+    }
+
+    /// The same, for `Drop`, where there is nothing to await with.
     fn close(&mut self) {
         if !self.closed {
             let _ = self.events_tx.try_send(RCEvent::Close(self.channel_id));

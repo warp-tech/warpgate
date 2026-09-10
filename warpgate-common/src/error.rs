@@ -5,11 +5,10 @@ use poem_openapi::ApiResponse;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_ca::CaError;
-use crate::SecretError;
 use warpgate_sso::SsoError;
 use warpgate_tls::RustlsSetupError;
 
-use crate::AdminPermission;
+use crate::{AdminPermission, SecretError};
 
 #[derive(thiserror::Error, Debug)]
 pub enum WarpgateError {
@@ -41,6 +40,11 @@ pub enum WarpgateError {
     NoHostInUrl,
     #[error("Inconsistent state: {0}")]
     InconsistentState(String),
+    /// Somebody called WarpgateServerHandle::set_user_info twice
+    #[error("user session is already attributed to another user")]
+    UserSessionAlreadyAttributed,
+    #[error("user session is no longer open")]
+    UserSessionEnded,
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
     #[error(transparent)]
@@ -79,6 +83,10 @@ pub enum WarpgateError {
     SessionLimitReached,
     #[error("secret backend: {0}")]
     SecretBackend(#[from] SecretError),
+    #[error("an administrator did not approve this session")]
+    SessionNotApproved,
+    #[error(transparent)]
+    Encryption(#[from] crate::encryption::EncryptionError),
 }
 
 impl ResponseError for WarpgateError {
@@ -91,6 +99,7 @@ impl ResponseError for WarpgateError {
             Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
             Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
             Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
+            Self::SessionNotApproved => poem::http::StatusCode::FORBIDDEN,
             _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

@@ -1,6 +1,7 @@
-import { CredentialKind } from 'admin/lib/api'
+import { CredentialKind, type ParameterValues } from 'admin/lib/api'
 import type { Info } from 'gateway/lib/api'
 import { shellEscape } from 'gateway/lib/shellEscape'
+import { SvelteSet } from 'svelte/reactivity'
 
 export interface ConnectionOptions {
     targetName?: string
@@ -26,14 +27,7 @@ export function makeCommonSelectorUsername(opt: ConnectionOptions): string {
 
 export function protocolHost(
     opt: ConnectionOptions,
-    protocol:
-        | 'ssh'
-        | 'http'
-        | 'mysql'
-        | 'postgres'
-        | 'kubernetes'
-        | 'rdp'
-        | 'vnc',
+    protocol: ProtocolID,
 ): string {
     const globalHost = opt.serverInfo?.externalHost ?? 'warpgate-host'
     const hosts = opt.serverInfo?.externalHosts
@@ -42,28 +36,14 @@ export function protocolHost(
 
 export function protocolPort(
     opt: ConnectionOptions,
-    protocol:
-        | 'ssh'
-        | 'http'
-        | 'mysql'
-        | 'postgres'
-        | 'kubernetes'
-        | 'rdp'
-        | 'vnc',
+    protocol: ProtocolID,
 ): number | undefined {
     return opt.serverInfo?.ports[protocol]
 }
 
 export function protocolPortString(
     opt: ConnectionOptions,
-    protocol:
-        | 'ssh'
-        | 'http'
-        | 'mysql'
-        | 'postgres'
-        | 'kubernetes'
-        | 'rdp'
-        | 'vnc',
+    protocol: ProtocolID,
 ): string {
     return (
         protocolPort(opt, protocol)?.toString() ?? `warpgate-${protocol}-port`
@@ -223,18 +203,18 @@ export function makeKubeconfig(opt: ConnectionOptions): string {
 kind: Config
 clusters:
 - cluster:
-    server: ${clusterUrl}
+    server: ${JSON.stringify(clusterUrl)}
     insecure-skip-tls-verify: true
-  name: warpgate-${opt.targetName ?? 'target'}
+  name: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
 contexts:
 - context:
-    cluster: warpgate-${opt.targetName ?? 'target'}
-    namespace: ${namespace}
-    user: ${context}
-  name: ${context}
-current-context: ${context}
+    cluster: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
+    namespace: ${JSON.stringify(namespace)}
+    user: ${JSON.stringify(context)}
+  name: ${JSON.stringify(context)}
+current-context: ${JSON.stringify(context)}
 users:
-- name: ${context}
+- name: ${JSON.stringify(context)}
   user:
     token: ${opt.ticketSecret}
 `
@@ -244,18 +224,18 @@ users:
 kind: Config
 clusters:
 - cluster:
-    server: ${clusterUrl}
+    server: ${JSON.stringify(clusterUrl)}
     insecure-skip-tls-verify: true
-  name: warpgate-${opt.targetName ?? 'target'}
+  name: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
 contexts:
 - context:
-    cluster: warpgate-${opt.targetName ?? 'target'}
-    namespace: ${namespace}
-    user: ${context}
-  name: ${context}
-current-context: ${context}
+    cluster: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
+    namespace: ${JSON.stringify(namespace)}
+    user: ${JSON.stringify(context)}
+  name: ${JSON.stringify(context)}
+current-context: ${JSON.stringify(context)}
 users:
-- name: ${context}
+- name: ${JSON.stringify(context)}
   user:
     client-certificate-data: ${opt.clientCertificatePem ? btoa(opt.clientCertificatePem) : '<your-client-certificate-base64>'}
     client-key-data: ${opt.clientPrivateKeyPem ? btoa(opt.clientPrivateKeyPem) : '<your-private-key-base64>'}
@@ -289,18 +269,18 @@ export function makeOidcKubeconfig(opt: ConnectionOptions): string {
 kind: Config
 clusters:
 - cluster:
-    server: ${clusterUrl}
+    server: ${JSON.stringify(clusterUrl)}
     insecure-skip-tls-verify: true
-  name: warpgate-${opt.targetName ?? 'target'}
+  name: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
 contexts:
 - context:
-    cluster: warpgate-${opt.targetName ?? 'target'}
+    cluster: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
     namespace: ${namespace}
-    user: ${context}
-  name: ${context}
-current-context: ${context}
+    user: ${JSON.stringify(context)}
+  name: ${JSON.stringify(context)}
+current-context: ${JSON.stringify(context)}
 users:
-- name: ${context}
+- name: ${JSON.stringify(context)}
   user:
     exec:
       apiVersion: client.authentication.k8s.io/v1beta1
@@ -333,4 +313,57 @@ export const PROTOCOL_PROPERTIES: Record<string, ProtocolProperties> = {
     Kubernetes: { sessionsCanBeClosed: false },
     VNC: { sessionsCanBeClosed: true },
     RDP: { sessionsCanBeClosed: true },
+}
+
+export type ProtocolID =
+    | 'http'
+    | 'ssh'
+    | 'mysql'
+    | 'postgres'
+    | 'kubernetes'
+    | 'vnc'
+    | 'rdp'
+
+// Get effective possible credentials for a protocol, considering global SSH auth settings
+export function getEffectivePossibleCredentials(
+    protocolId: ProtocolID,
+    globalParameters?: ParameterValues,
+): SvelteSet<CredentialKind> {
+    const base = possibleCredentials[protocolId]
+    if (!base) {
+        return new SvelteSet()
+    }
+
+    // For SSH, filter based on global auth method settings
+    if (protocolId === 'ssh' && globalParameters) {
+        const filtered = new SvelteSet<CredentialKind>()
+        for (const kind of base) {
+            // PublicKey requires publickey auth enabled
+            if (
+                kind === CredentialKind.PublicKey &&
+                !globalParameters.sshClientAuthPublickey
+            ) {
+                continue
+            }
+            // Password requires password auth enabled
+            if (
+                kind === CredentialKind.Password &&
+                !globalParameters.sshClientAuthPassword
+            ) {
+                continue
+            }
+            // Totp and WebUserApproval require keyboard-interactive auth enabled
+            if (
+                (kind === CredentialKind.Totp ||
+                    kind === CredentialKind.WebUserApproval) &&
+                !globalParameters.sshClientAuthKeyboardInteractive
+            ) {
+                continue
+            }
+            filtered.add(kind)
+        }
+        return filtered
+    }
+
+    return new SvelteSet(base)
 }

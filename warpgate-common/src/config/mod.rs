@@ -1,6 +1,8 @@
 mod defaults;
 mod secrets;
+mod specific_target;
 mod target;
+mod warnings;
 
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -11,15 +13,16 @@ use defaults::{
     _default_http_listen, _default_kubernetes_listen, _default_mysql_advertised_version,
     _default_mysql_listen, _default_postgres_listen, _default_rdp_listen, _default_recordings_path,
     _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
-    _default_ssh_keys_path, _default_ssh_listen, _default_vnc_listen,
+    _default_ssh_listen, _default_vnc_listen,
 };
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 pub use secrets::*;
+use serde::{Deserialize, Serialize};
+pub use specific_target::*;
 pub use target::*;
-use tracing::warn;
 use uuid::Uuid;
+pub use warnings::{clear_config_warnings, emit_config_warning, emit_runtime_warning, warnings};
 use warpgate_sso::SsoProviderConfig;
 use warpgate_tls::IntoTlsCertificateRelativePaths;
 
@@ -27,7 +30,7 @@ use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
 use crate::helpers::ipnet::WarpgateIpNet;
 use crate::helpers::otp::OtpSecretKey;
-use crate::{ListenEndpoint, Secret};
+use crate::{GlobalParams, ListenEndpoint, Secret};
 
 #[derive(Debug, Clone, PartialEq, Eq, Union)]
 #[oai(discriminator_name = "kind", one_of)]
@@ -84,21 +87,26 @@ impl UserAuthCredential {
     }
 }
 
+/// Coerce [] to None
+fn credential_entry_is_unset(entry: &Option<Vec<CredentialKind>>) -> bool {
+    entry.as_ref().is_none_or(Vec::is_empty)
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct UserRequireCredentialsPolicy {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub http: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub kubernetes: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub ssh: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub mysql: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub postgres: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub vnc: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub rdp: Option<Vec<CredentialKind>>,
 }
 
@@ -198,6 +206,7 @@ pub struct AdminRole {
 
     pub sessions_view: bool,
     pub sessions_terminate: bool,
+    pub approve_sessions: bool,
 
     pub recordings_view: bool,
 
@@ -211,7 +220,7 @@ pub struct AdminRole {
     pub ticket_requests_manage: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema, strum::EnumIter)]
 #[serde(rename_all = "snake_case")]
 pub enum AdminPermission {
     TargetsCreate,
@@ -226,6 +235,7 @@ pub enum AdminPermission {
     AccessRolesAssign,
     SessionsView,
     SessionsTerminate,
+    ApproveSessions,
     RecordingsView,
     TicketsCreate,
     TicketsDelete,
@@ -249,6 +259,7 @@ impl AdminRole {
             AdminPermission::AccessRolesAssign => self.access_roles_assign,
             AdminPermission::SessionsView => self.sessions_view,
             AdminPermission::SessionsTerminate => self.sessions_terminate,
+            AdminPermission::ApproveSessions => self.approve_sessions,
             AdminPermission::RecordingsView => self.recordings_view,
             AdminPermission::TicketsCreate => self.tickets_create,
             AdminPermission::TicketsDelete => self.tickets_delete,
@@ -259,7 +270,137 @@ impl AdminRole {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema)]
+use strum::IntoEnumIterator;
+
+impl AdminPermission {
+    /// The bit this permission occupies in an [`AdminPermissionSet`].
+    const fn bit(self) -> u32 {
+        1 << self as u32
+    }
+}
+
+/// The set of admin permissions a principal holds, folded from their assigned roles once so
+/// every consumer — the endpoint gate, the "is this an admin?" checks, and the UI
+/// serialization — reads one value instead of re-deriving the model three different ways.
+///
+/// An administrator is a principal holding at least one permission: a role that grants nothing
+/// confers no admin standing (there is no such thing as a permissionless admin).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdminPermissionSet(u32);
+
+impl AdminPermissionSet {
+    /// No permissions — the principal is not an administrator.
+    #[must_use]
+    pub const fn none() -> Self {
+        Self(0)
+    }
+
+    /// Every permission, e.g. for an admin token.
+    #[must_use]
+    pub fn all() -> Self {
+        Self(AdminPermission::iter().fold(0, |bits, perm| bits | perm.bit()))
+    }
+
+    /// The union of the permissions granted by `roles`.
+    #[must_use]
+    pub fn from_roles(roles: impl IntoIterator<Item = AdminRole>) -> Self {
+        let mut bits = 0;
+        for role in roles {
+            for perm in AdminPermission::iter() {
+                if role.has_permission(perm) {
+                    bits |= perm.bit();
+                }
+            }
+        }
+        Self(bits)
+    }
+
+    #[must_use]
+    pub const fn contains(self, perm: AdminPermission) -> bool {
+        self.0 & perm.bit() != 0
+    }
+
+    /// Holding any permission at all makes the principal an administrator.
+    #[must_use]
+    pub const fn is_admin(self) -> bool {
+        self.0 != 0
+    }
+}
+
+#[cfg(test)]
+mod admin_permission_set_tests {
+    use strum::IntoEnumIterator;
+    use uuid::Uuid;
+
+    use super::{AdminPermission, AdminPermissionSet, AdminRole};
+
+    fn empty_role() -> AdminRole {
+        AdminRole {
+            id: Uuid::nil(),
+            name: String::new(),
+            description: String::new(),
+            targets_create: false,
+            targets_edit: false,
+            targets_delete: false,
+            users_create: false,
+            users_edit: false,
+            users_delete: false,
+            access_roles_create: false,
+            access_roles_edit: false,
+            access_roles_delete: false,
+            access_roles_assign: false,
+            sessions_view: false,
+            sessions_terminate: false,
+            approve_sessions: false,
+            recordings_view: false,
+            tickets_create: false,
+            tickets_delete: false,
+            config_edit: false,
+            admin_roles_manage: false,
+            ticket_requests_manage: false,
+        }
+    }
+
+    #[test]
+    fn empty_is_not_admin() {
+        let set = AdminPermissionSet::from_roles([]);
+        assert_eq!(set, AdminPermissionSet::none());
+        assert!(!set.is_admin());
+        assert!(!set.contains(AdminPermission::ConfigEdit));
+    }
+
+    #[test]
+    fn unions_roles_and_reports_admin() {
+        let mut a = empty_role();
+        a.targets_create = true;
+        let mut b = empty_role();
+        b.config_edit = true;
+        let set = AdminPermissionSet::from_roles([a, b]);
+        assert!(set.is_admin());
+        assert!(set.contains(AdminPermission::TargetsCreate));
+        assert!(set.contains(AdminPermission::ConfigEdit));
+        assert!(!set.contains(AdminPermission::UsersDelete));
+    }
+
+    #[test]
+    fn all_contains_every_permission() {
+        let all = AdminPermissionSet::all();
+        for perm in AdminPermission::iter() {
+            assert!(all.contains(perm), "missing {perm:?}");
+        }
+    }
+
+    #[test]
+    fn role_granting_nothing_is_not_admin() {
+        let set = AdminPermissionSet::from_roles([empty_role()]);
+        assert!(!set.is_admin());
+        assert_eq!(set, AdminPermissionSet::none());
+    }
+}
+
+#[derive(
+    Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema, clap::ValueEnum,
+)]
 pub enum SshHostKeyVerificationMode {
     #[serde(rename = "prompt")]
     #[default]
@@ -268,6 +409,8 @@ pub enum SshHostKeyVerificationMode {
     AutoAccept,
     #[serde(rename = "auto_reject")]
     AutoReject,
+    #[serde(rename = "ignore")]
+    Ignore,
 }
 
 #[derive(
@@ -278,25 +421,6 @@ pub enum LogFormat {
     #[default]
     Text,
     Json,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
-#[serde(untagged)]
-pub enum SshKeysSource {
-    Path(String),
-    Backend(SshKeysBackend),
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
-pub struct SshKeysBackend {
-    pub backend: String,
-    pub path: String,
-}
-
-impl Default for SshKeysSource {
-    fn default() -> Self {
-        SshKeysSource::Path(_default_ssh_keys_path())
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
@@ -317,9 +441,13 @@ pub struct SshConfig {
     #[serde(default)]
     pub external_host: Option<String>,
 
-    #[serde(default)]
-    pub keys: SshKeysSource,
+    /// Legacy directory for the SSH host keys (`host-ed25519`, `host-rsa`).
+    /// If set, key files are re-imported into the database, after which the option can be removed from the config.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<String>,
 
+    /// Only seeds the `ssh_host_key_verification` parameter when the database
+    /// row is first created; the admin UI owns the setting afterwards.
     #[serde(default)]
     pub host_key_verification: SshHostKeyVerificationMode,
 
@@ -327,7 +455,8 @@ pub struct SshConfig {
     #[schemars(with = "String")]
     pub inactivity_timeout: Duration,
 
-    #[serde(default)]
+    #[serde(default, with = "humantime_serde")]
+    #[schemars(with = "Option<String>")]
     pub keepalive_interval: Option<Duration>,
 }
 
@@ -336,8 +465,8 @@ impl Default for SshConfig {
         Self {
             enable: false,
             listen: _default_ssh_listen(),
-            keys: SshKeysSource::default(),
             proxy_protocol: false,
+            keys: None,
             host_key_verification: <_>::default(),
             external_port: None,
             external_host: None,
@@ -354,6 +483,12 @@ impl SshConfig {
 
     pub fn external_host(&self) -> Option<String> {
         self.external_host.clone()
+    }
+
+    pub fn keys_path(&self, params: &GlobalParams) -> PathBuf {
+        params
+            .paths_relative_to()
+            .join(self.keys.as_deref().unwrap_or("./data/keys"))
     }
 }
 
@@ -759,8 +894,8 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub sso_providers: Vec<SsoProviderConfig>,
 
-    #[serde(default)]
-    pub recordings: RecordingsConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recordings: Option<RecordingsConfig>,
 
     #[serde(default)]
     pub external_host: Option<String>,
@@ -827,11 +962,8 @@ impl WarpgateConfig {
         if let Some(ref ext) = self.store.external_host
             && ext.contains(':')
         {
-            warn!(
-                "Looks like your `external_host` config option contains a port - it will be ignored."
-            );
-            warn!(
-                "Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options."
+            emit_config_warning(
+                "Your `external_host` config option contains a port - it will be ignored. Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options.".to_owned()
             );
         }
     }
@@ -839,45 +971,26 @@ impl WarpgateConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::time::Duration;
+
+    use super::{SshConfig, WarpgateConfigStore};
 
     #[test]
-    fn ssh_keys_source_deserializes_string_as_path() {
-        let s: SshKeysSource = serde_json::from_str("\"/var/lib/warpgate/ssh-keys\"").unwrap();
-        assert!(matches!(s, SshKeysSource::Path(p) if p == "/var/lib/warpgate/ssh-keys"));
+    fn keepalive_interval_is_a_humantime_string() {
+        let config = serde_json::from_str::<SshConfig>(r#"{"keepalive_interval": "1m"}"#).unwrap();
+        assert_eq!(config.keepalive_interval, Some(Duration::from_secs(60)));
+        assert!(
+            serde_json::to_string(&config)
+                .unwrap()
+                .contains(r#""keepalive_interval":"1m""#)
+        );
     }
 
     #[test]
-    fn ssh_keys_source_deserializes_map_as_backend() {
-        let s: SshKeysSource =
-            serde_json::from_str(r#"{"backend":"vault-prod","path":"secret/warpgate/ssh-keys"}"#)
-                .unwrap();
-        match s {
-            SshKeysSource::Backend(b) => {
-                assert_eq!(b.backend, "vault-prod");
-                assert_eq!(b.path, "secret/warpgate/ssh-keys");
-            }
-            SshKeysSource::Path(_) => panic!("expected Backend, got Path"),
-        }
-    }
+    fn default_config_store_omits_recordings() {
+        let config = serde_json::to_value(WarpgateConfigStore::default()).unwrap();
+        let config = config.as_object().unwrap();
 
-    #[test]
-    fn ssh_keys_source_round_trips() {
-        for src in [
-            SshKeysSource::Path("./data/keys".into()),
-            SshKeysSource::Backend(SshKeysBackend {
-                backend: "vault-prod".into(),
-                path: "secret/warpgate/ssh-keys".into(),
-            }),
-        ] {
-            let json = serde_json::to_string(&src).unwrap();
-            let back: SshKeysSource = serde_json::from_str(&json).unwrap();
-            assert_eq!(format!("{src:?}"), format!("{back:?}"));
-        }
-    }
-
-    #[test]
-    fn ssh_keys_source_default_is_path() {
-        assert!(matches!(SshKeysSource::default(), SshKeysSource::Path(_)));
+        assert!(!config.contains_key("recordings"));
     }
 }

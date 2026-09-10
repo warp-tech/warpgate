@@ -1,3 +1,11 @@
+import type { IconDefinition } from '@fortawesome/free-brands-svg-icons'
+import {
+    faArrowRightArrowLeft,
+    faDesktop,
+    faList,
+    faSquare,
+    faTerminal,
+} from '@fortawesome/free-solid-svg-icons'
 import type { Recording } from 'admin/lib/api'
 
 export type RecordingMetadata =
@@ -92,26 +100,54 @@ export function recordingTypeLabel(recording: Recording): string {
     const metadata = JSON.parse(recording.metadata) as RecordingMetadata | null
     switch (metadata?.type) {
         case 'kubernetes-api':
-            return 'API'
+            return 'API session'
         case 'kubernetes-exec':
-            return 'Exec'
+            return 'Pod exec session'
         case 'kubernetes-attach':
-            return 'Attach'
+            return 'Pod attach session'
         case 'ssh-shell':
-            return 'Shell'
+            return 'Shell session'
         case 'ssh-exec':
-            return 'Exec'
+            return 'SSH exec request'
         case 'ssh-direct-tcpip':
-            return 'Local TCP forwarding'
+            return 'Local TCP forward'
         case 'ssh-direct-socket':
-            return 'Local UNIX socket forwarding'
+            return 'Local UNIX socket forward'
         case 'ssh-forwarded-tcpip':
-            return 'Remote TCP forwarding'
+            return 'Remote TCP forward'
         case 'ssh-forwarded-socket':
-            return 'Remote UNIX socket forwarding'
+            return 'Remote UNIX socket forward'
         case 'desktop':
-            return 'Desktop'
+            return 'Desktop session'
     }
 
-    return 'Unknown type'
+    return 'Unknown session type'
+}
+
+export function recordingTypeIcon(recording: Recording): IconDefinition {
+    const metadata = JSON.parse(recording.metadata) as RecordingMetadata | null
+    switch (metadata?.type) {
+        case 'kubernetes-api':
+            return faList
+        case 'kubernetes-exec':
+            return faTerminal
+        case 'kubernetes-attach':
+            return faTerminal
+        case 'ssh-shell':
+            return faTerminal
+        case 'ssh-exec':
+            return faTerminal
+        case 'ssh-direct-tcpip':
+            return faArrowRightArrowLeft
+        case 'ssh-direct-socket':
+            return faArrowRightArrowLeft
+        case 'ssh-forwarded-tcpip':
+            return faArrowRightArrowLeft
+        case 'ssh-forwarded-socket':
+            return faArrowRightArrowLeft
+        case 'desktop':
+            return faDesktop
+    }
+
+    return faSquare
 }

@@ -2,7 +2,7 @@ use openidconnect::url::Url;
 use openidconnect::{CsrfToken, Nonce, PkceCodeVerifier, RedirectUrl};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::{
     GroupClaim, SsoClient, SsoError, SsoInternalProviderConfig, SsoLoginResponse, SsoResult,
@@ -91,8 +91,16 @@ pub async fn map_sso_result(
         match crate::google_groups::fetch_groups_if_configured(config, email.as_deref()).await {
             Ok(Some(google_groups)) => (Some(google_groups.clone()), Some(google_groups)),
             Ok(None) => (
-                extract_groups(&result, config.roles_claim()),
-                extract_groups(&result, config.admin_roles_claim()),
+                extract_groups(
+                    &result,
+                    config.roles_claim(),
+                    config.role_mappings().is_some(),
+                ),
+                extract_groups(
+                    &result,
+                    config.admin_roles_claim(),
+                    config.admin_role_mappings().is_some(),
+                ),
             ),
             Err(e) => {
                 error!("Failed to fetch Google groups: {e}");
@@ -111,16 +119,37 @@ pub async fn map_sso_result(
     }
 }
 
-/// Read a configurable group claim from the token (ID token first, then
-/// userinfo) and flatten it to a list of role-name strings.
-fn extract_groups(result: &SsoResult, claim: &str) -> Option<Vec<String>> {
-    let raw = result.claims.additional_claims().0.get(claim).or_else(|| {
-        result
-            .userinfo_claims
-            .as_ref()
-            .and_then(|u| u.additional_claims().0.get(claim))
-    })?;
-    serde_json::from_value::<GroupClaim>(raw.clone())
-        .ok()
-        .map(flatten_group_claim)
+fn extract_groups(result: &SsoResult, claim: &str, warn_if_missing: bool) -> Option<Vec<String>> {
+    let userinfo_claims = result
+        .userinfo_claims
+        .as_ref()
+        .map(|u| &u.additional_claims().0);
+    let Some(raw) = result
+        .claims
+        .additional_claims()
+        .0
+        .get(claim)
+        .or_else(|| userinfo_claims.and_then(|c| c.get(claim)))
+    else {
+        if warn_if_missing {
+            warn!(
+                "Claim {claim:?} not found - roles will not be synced. ID token claims: {:?}, userinfo claims: {:?}",
+                result
+                    .claims
+                    .additional_claims()
+                    .0
+                    .keys()
+                    .collect::<Vec<_>>(),
+                userinfo_claims.map(|c| c.keys().collect::<Vec<_>>()),
+            );
+        }
+        return None;
+    };
+    match serde_json::from_value::<GroupClaim>(raw.clone()) {
+        Ok(claim) => Some(flatten_group_claim(claim)),
+        Err(e) => {
+            warn!("Claim {claim:?} is not a list of role names, ignoring: {e}");
+            None
+        }
+    }
 }

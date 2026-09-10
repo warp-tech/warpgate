@@ -121,8 +121,9 @@
             type="button"
             class="modal-button btn btn-success"
             click={save}
-            >Save selection</AsyncButton
         >
+            Save selection
+        </AsyncButton>
     </ModalFooter>
 </Modal>
 

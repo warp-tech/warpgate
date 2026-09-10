@@ -1,10 +1,20 @@
 <script lang="ts">
-    import { Alert } from '@sveltestrap/sveltestrap'
-    import RelativeDate from 'admin/RelativeDate.svelte'
+    import {
+        Alert,
+        ButtonGroup,
+        Dropdown,
+        DropdownItem,
+        DropdownMenu,
+        DropdownToggle,
+    } from '@sveltestrap/sveltestrap'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import { formatDurationAsHumantime } from 'common/duration'
+    import { errorStatus } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import {
         ApiAuthState,
+        ApprovalScope,
         type AuthStateResponseInternal,
         api,
     } from 'gateway/lib/api'
@@ -17,24 +27,49 @@
 
     let authState: AuthStateResponseInternal | undefined = $state()
 
-    async function reload() {
-        authState = await api.getAuthState({ id: params.stateId })
-    }
+    let cachingGrace = $derived(authState?.webApprovalCachingGraceSeconds ?? 0)
+    let cachingEnabled = $derived(cachingGrace > 0)
+    let graceLabel = $derived(formatDurationAsHumantime(cachingGrace))
 
     async function init() {
-        await reload()
+        try {
+            authState = await api.getAuthState({ id: params.stateId })
+        } catch (err) {
+            // The link is printed by a client and followed later, in whatever
+            // browser session the user happens to have — so landing on a
+            // request that has finished, or on someone else's, is ordinary.
+            if (errorStatus(err) === 404) {
+                throw new Error(
+                    'This request is no longer waiting. It may have been answered already, timed out, or belong to a different account than the one you are signed in as.',
+                )
+            }
+            throw err
+        }
     }
 
-    async function approve() {
-        api.approveAuth({ id: params.stateId })
-        await reload()
+    // The endpoints return only whether the decision was recorded, and the
+    // request is no longer pending afterwards, so re-reading it would 404 on
+    // any node that isn't holding the login. `window.close()` is a courtesy —
+    // a browser that refuses it for a page the user opened themselves leaves
+    // this showing the outcome.
+    function resolved(state: ApiAuthState) {
+        if (authState) {
+            authState = { ...authState, state }
+        }
         window.close()
+    }
+
+    async function approve(scope: ApprovalScope) {
+        await api.approveAuth({
+            id: params.stateId,
+            approveAuthRequest: { scope },
+        })
+        resolved(ApiAuthState.Success)
     }
 
     async function reject() {
-        api.rejectAuth({ id: params.stateId })
-        await reload()
-        window.close()
+        await api.rejectAuth({ id: params.stateId })
+        resolved(ApiAuthState.Failed)
     }
 </script>
 
@@ -86,13 +121,44 @@
             <Alert color="danger"> Rejected </Alert>
         {:else}
             <div class="d-flex">
-                <AsyncButton
-                    color="primary"
-                    class="d-flex align-items-center ms-auto"
-                    click={approve}
-                >
-                    Authorize
-                </AsyncButton>
+                <div class="ms-auto"></div>
+                {#if cachingEnabled}
+                    <ButtonGroup>
+                        <AsyncButton
+                            color="primary"
+                            click={() => approve(ApprovalScope.Target)}
+                        >
+                            Authorize & remember for {graceLabel}
+                        </AsyncButton>
+                        <Dropdown class="btn-group">
+                            <DropdownToggle
+                                color="primary"
+                                caret
+                                class="ps-2"
+                            />
+                            <DropdownMenu end>
+                                <DropdownItem
+                                    onclick={() => approve(ApprovalScope.AllTargets)}
+                                >
+                                    Authorize for all targets & remember for
+                                    {graceLabel}
+                                </DropdownItem>
+                                <DropdownItem
+                                    onclick={() => approve(ApprovalScope.Once)}
+                                >
+                                    Authorize this time only
+                                </DropdownItem>
+                            </DropdownMenu>
+                        </Dropdown>
+                    </ButtonGroup>
+                {:else}
+                    <AsyncButton
+                        color="primary"
+                        click={() => approve(ApprovalScope.Once)}
+                    >
+                        Authorize
+                    </AsyncButton>
+                {/if}
                 <AsyncButton
                     color="secondary"
                     class="d-flex align-items-center ms-2"

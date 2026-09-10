@@ -1,6 +1,7 @@
 mod client;
 mod common;
 mod error;
+mod relay;
 mod session;
 mod session_handle;
 mod stream;
@@ -8,14 +9,14 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use futures::FutureExt;
 use futures::future::BoxFuture;
-use futures::{FutureExt, StreamExt};
 use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::net::detect_port_knock;
-use warpgate_core::{ProtocolServer, Services, SessionStateInit, State};
+use warpgate_common::helpers::net::accept_loop;
+use warpgate_core::{ProtocolServer, Services, State, UserSessionStateInit};
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
 use crate::session::MySqlSession;
@@ -54,75 +55,58 @@ impl ProtocolServer for MySQLProtocolServer {
             certificate_and_key.into(),
         ))));
 
-        let mut listener = address.tcp_accept_stream().await?;
+        let listener = address.tcp_accept_stream().await?;
 
         let services = self.services;
         Ok(async move {
-            loop {
-                let Some(mut stream) = listener.next().await else {
-                    return Ok(());
-                };
+            accept_loop(
+                "MySQL connection",
+                listener,
+                proxy_protocol,
+                move |stream, remote_address| {
+                    let tls_config = tls_config.clone();
+                    let services = services.clone();
+                    async move {
+                        let (session_handle, mut abort_rx) = MySqlSessionHandle::new();
 
-                let _ = stream.set_nodelay(true);
-                if detect_port_knock(&stream).await {
-                    continue;
-                }
-                let remote_address = match warpgate_common::helpers::proxy_protocol::remote_address(
-                    &mut stream,
-                    proxy_protocol,
-                )
-                .await
-                {
-                    Ok(remote_address) => remote_address,
-                    Err(error) => {
-                        warn!(%error, "Failed to read PROXY protocol header");
-                        continue;
+                        let (server_handle, wrapped_stream) =
+                            State::register_user_session_with_stream(
+                                &services.state,
+                                crate::common::PROTOCOL_NAME,
+                                UserSessionStateInit {
+                                    remote_address: Some(remote_address),
+                                    handle: Box::new(session_handle),
+                                },
+                                stream,
+                            )
+                            .await
+                            .context("registering session")?;
+
+                        let session = MySqlSession::new(
+                            server_handle,
+                            services,
+                            wrapped_stream,
+                            tls_config,
+                            remote_address,
+                        )
+                        .await;
+                        let span = session.make_logging_span();
+                        tokio::select! {
+                            result = session.run().instrument(span) => match result {
+                                Ok(()) => info!("Session ended"),
+                                Err(e) => error!(error=%e, "Session failed"),
+                            },
+                            _ = abort_rx.recv() => {
+                                warn!("Session aborted by admin");
+                            },
+                        }
+
+                        Ok(())
                     }
-                };
-
-                let tls_config = tls_config.clone();
-                let services = services.clone();
-                tokio::spawn(async move {
-                    let (session_handle, mut abort_rx) = MySqlSessionHandle::new();
-
-                    let server_handle = State::register_session(
-                        &services.state,
-                        &crate::common::PROTOCOL_NAME,
-                        SessionStateInit {
-                            remote_address: Some(remote_address),
-                            handle: Box::new(session_handle),
-                        },
-                    )
-                    .await
-                    .context("registering session")?;
-
-                    let wrapped_stream = {
-                        let guard = server_handle.lock().await;
-                        guard.wrap_stream(stream).await?
-                    };
-
-                    let session = MySqlSession::new(
-                        server_handle,
-                        services,
-                        wrapped_stream,
-                        tls_config,
-                        remote_address,
-                    )
-                    .await;
-                    let span = session.make_logging_span();
-                    tokio::select! {
-                        result = session.run().instrument(span) => match result {
-                            Ok(()) => info!("Session ended"),
-                            Err(e) => error!(error=%e, "Session failed"),
-                        },
-                        _ = abort_rx.recv() => {
-                            warn!("Session aborted by admin");
-                        },
-                    }
-
-                    Ok::<(), anyhow::Error>(())
-                });
-            }
+                },
+            )
+            .await;
+            Ok(())
         }
         .boxed())
     }

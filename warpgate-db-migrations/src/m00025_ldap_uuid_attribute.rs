@@ -1,6 +1,6 @@
 use sea_orm_migration::prelude::*;
 
-use super::m00021_ldap_server::ldap_server;
+use super::m00020_ldap_server::ldap_server;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;

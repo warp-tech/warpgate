@@ -8,6 +8,7 @@
         DropdownToggle,
     } from '@sveltestrap/sveltestrap'
 
+    import { navigateToExternalUrl } from 'common/helpers'
     import { api } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
@@ -20,7 +21,7 @@
 
     async function singleLogout() {
         const response = await api.initiateSsoLogout()
-        location.href = response.url
+        navigateToExternalUrl(response.url)
     }
 </script>
 

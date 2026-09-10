@@ -31,12 +31,20 @@ pub trait PostgresDecode {
 pub enum PgWireStartupOrSslRequest {
     Startup(pgwire::messages::startup::Startup),
     SslRequest(pgwire::messages::startup::SslRequest),
+    GssEncRequest(pgwire::messages::startup::GssEncRequest),
 }
 
 impl PostgresDecode for PgWireStartupOrSslRequest {
     fn decode(buf: &mut BytesMut, ctx: &DecodeContext) -> PgWireResult<Option<Self>> {
-        if let Ok(Some(result)) = pgwire::messages::startup::SslRequest::decode(buf, ctx) {
-            return Ok(Some(Self::SslRequest(result)));
+        // All three are distinguished by the magic number in their 8-byte header;
+        // a shorter buffer isn't decodable as any of them yet.
+        if pgwire::messages::startup::SslRequest::is_ssl_request_packet(buf) {
+            return pgwire::messages::startup::SslRequest::decode(buf, ctx)
+                .map(|x| x.map(Self::SslRequest));
+        }
+        if pgwire::messages::startup::GssEncRequest::is_gss_enc_request_packet(buf) {
+            return pgwire::messages::startup::GssEncRequest::decode(buf, ctx)
+                .map(|x| x.map(Self::GssEncRequest));
         }
         pgwire::messages::startup::Startup::decode(buf, ctx).map(|x| x.map(Self::Startup))
     }

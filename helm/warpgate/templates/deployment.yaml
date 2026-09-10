@@ -34,6 +34,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      serviceAccountName: {{ include "warpgate.serviceAccountName" . }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -65,23 +66,18 @@ spec:
             - |
               set -e
 
+              # For legacy installs that include SSH key files on disk - current version generates and stores keys in the DB
               if [ -d /ssh-keys ]; then
                 mkdir -p /data/ssh-keys
                 cp /ssh-keys/client-ed25519 /ssh-keys/client-rsa /ssh-keys/host-ed25519 /ssh-keys/host-rsa /data/ssh-keys/
                 chmod -R 600 /data/ssh-keys/*
               fi
 
-              if [ -d /tls-cert ]; then
-                cp /tls-cert/tls.crt /data/tls.certificate.pem
-                cp /tls-cert/tls.key /data/tls.key.pem
-                chmod 600 /data/tls.certificate.pem
-                chmod 600 /data/tls.key.pem
-              fi
-
               {{- if .Values.setup.enabled }}
               {{- if eq .Values.setup.type "podinit" }}
               if [ ! -f /data/warpgate.yaml ]; then
                 warpgate -c /data/warpgate.yaml  unattended-setup --data-path /data
+                  {{- if .Values.ssh_keys_secret }} --import-ssh-keys /ssh-keys {{- end }}
                   {{- if .Values.setup.http }} --http-port {{ .Values.setup.http }} {{- end }}
                   {{- if .Values.setup.ssh }} --ssh-port {{ .Values.setup.ssh }} {{- end }}
                   {{- if .Values.setup.mysql }} --mysql-port {{ .Values.setup.mysql }} {{- end }}
@@ -96,6 +92,15 @@ spec:
               fi
               {{- end }}
               {{- end }}
+
+              # After setup: unattended-setup writes a self-signed cert unconditionally,
+              # so the provided cert must be copied in afterwards to take effect.
+              if [ -d /tls-cert ]; then
+                cp /tls-cert/tls.crt /data/tls.certificate.pem
+                cp /tls-cert/tls.key /data/tls.key.pem
+                chmod 600 /data/tls.certificate.pem
+                chmod 600 /data/tls.key.pem
+              fi
 
               if [ -d /override ]; then
                 cp /override/warpgate.yaml /data/warpgate.yaml
@@ -136,6 +141,18 @@ spec:
           {{- end }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          {{- range $key, $val := .Values.envFromSecret }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ (split "/" $val)._0 }}
+                  key: {{ (split "/" $val)._1 }}
+          {{- end }}
           command:
             - warpgate
             - -c

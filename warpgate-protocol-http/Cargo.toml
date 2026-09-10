@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-protocol-http"
-version = "0.26.1"
+version = "0.28.5"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -23,6 +23,7 @@ sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 subtle.workspace = true
+thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
@@ -30,8 +31,6 @@ tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
 warpgate-admin = { path = "../warpgate-admin", default-features = false }
-warpgate-web-ssh = { path = "../warpgate-web-ssh", default-features = false }
-warpgate-web-desktop = { path = "../warpgate-web-desktop", default-features = false }
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-ca = { path = "../warpgate-ca", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
@@ -41,3 +40,14 @@ warpgate-db-entities = { path = "../warpgate-db-entities", default-features = fa
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
 warpgate-web = { path = "../warpgate-web", default-features = false }
+warpgate-web-clients-common = { path = "../warpgate-web-clients-common" }
+warpgate-web-desktop = { path = "../warpgate-web-desktop", default-features = false }
+warpgate-web-ssh = { path = "../warpgate-web-ssh", default-features = false }
+
+[dev-dependencies]
+poem = { workspace = true, features = ["test"] }
+rustls = { workspace = true, features = ["aws_lc_rs"] }
+sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
+warpgate-db-migrations = { path = "../warpgate-db-migrations", features = [
+    "sqlite",
+] }

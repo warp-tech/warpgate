@@ -12,9 +12,9 @@ $dropdown-link-hover-bg: transparent;
 $btn-padding-x: 1.5rem;
 
 $btn-bg-shade-amount: 75%;
-$btn-bg-tint-amount: 60%;
+$btn-bg-tint-amount: 80%;
 $btn-border-shade-amount: 75%;
-$btn-border-tint-amount: 65%;
+$btn-border-tint-amount: 70%;
 $btn-color-shade-amount: 10%;
 $btn-color-tint-amount: 50%;
 
@@ -40,3 +40,6 @@ $alert-border-scale: -30%;
 
 $table-color: var(--bs-body-color);
 $table-bg: var(--bs-body-bg);
+
+$input-btn-border-width: 1px;
+$input-border-width: 1px;

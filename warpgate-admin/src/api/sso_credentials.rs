@@ -1,16 +1,13 @@
-use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserSsoCredential, WarpgateError};
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{SsoCredential, User};
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 #[derive(Object)]
 struct ExistingSsoCredential {
@@ -77,17 +74,16 @@ impl ListApi {
     )]
     async fn api_get_all(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         user_id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<GetSsoCredentialsResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &admin.services().db;
 
         let objects = SsoCredential::Entity::find()
             .filter(SsoCredential::Column::UserId.eq(*user_id))
-            .all(&*db)
+            .all(db)
             .await?;
 
         Ok(GetSsoCredentialsResponse::Ok(Json(
@@ -102,25 +98,24 @@ impl ListApi {
     )]
     async fn api_create(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<NewSsoCredential>,
         user_id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CreateSsoCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &admin.services().db;
 
         let object = SsoCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(*user_id),
             ..SsoCredential::ActiveModel::from(UserSsoCredential::from(&*body))
         }
-        .insert(&*db)
+        .insert(db)
         .await
         .map_err(WarpgateError::from)?;
 
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(CreateSsoCredentialResponse::NotFound);
         };
 
@@ -131,7 +126,7 @@ impl ListApi {
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username,
-            actor_user_id: ctx.auth.user_id(),
+            actor_user_id: admin.auth.user_id(),
         }
         .emit();
 
@@ -158,22 +153,21 @@ impl DetailApi {
     )]
     async fn api_update(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<NewSsoCredential>,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<UpdateSsoCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &admin.services().db;
 
         let model = SsoCredential::ActiveModel {
             id: Set(id.0),
             user_id: Set(*user_id),
             ..<_>::from(UserSsoCredential::from(&*body))
         }
-        .update(&*db)
+        .update(db)
         .await;
 
         match model {
@@ -190,30 +184,29 @@ impl DetailApi {
     )]
     async fn api_delete(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         user_id: Path<Uuid>,
         id: Path<Uuid>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::UsersEdit)).await?;
+        admin.require(AdminPermission::UsersEdit)?;
 
-        let db = ctx.services().db.lock().await;
+        let db = &admin.services().db;
 
         let Some(role) = SsoCredential::Entity::find_by_id(id.0)
             .filter(SsoCredential::Column::UserId.eq(*user_id))
-            .one(&*db)
+            .one(db)
             .await?
         else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        let Some(user) = User::Entity::find_by_id(*user_id).one(&*db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
         let credential_name = role.email.clone();
 
-        role.delete(&*db).await?;
+        role.delete(db).await?;
 
         AuditEvent::CredentialDeleted {
             credential_type: "sso".to_string(),
@@ -221,7 +214,7 @@ impl DetailApi {
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
             username: user.username.clone(),
-            actor_user_id: ctx.auth.user_id(),
+            actor_user_id: admin.auth.user_id(),
         }
         .emit();
 

@@ -32,6 +32,10 @@ pub struct UserLockInfo {
 /// common case (a check that finds nothing) never touches the database. It is
 /// kept in sync incrementally: warmed once on startup, then updated in place
 /// whenever a block/lockout is created or cleared — never reloaded wholesale.
+///
+/// Usernames are case-insensitive, so `locked_users` is keyed on the lowercased
+/// username; every accessor normalizes its argument. The original casing is
+/// preserved in the stored [`UserLockInfo`] for display.
 #[derive(Default)]
 pub struct LoginProtectionCache {
     blocked_ips: RwLock<HashMap<IpAddr, IpBlockInfo>>,
@@ -77,7 +81,7 @@ impl LoginProtectionCache {
         for lockout in lockouts {
             if lockout.expires_at.is_none_or(|e| e > now) {
                 locked_users.insert(
-                    lockout.username.clone(),
+                    lockout.username.to_lowercase(),
                     UserLockInfo {
                         username: lockout.username,
                         locked_at: lockout.locked_at,
@@ -108,7 +112,7 @@ impl LoginProtectionCache {
         self.locked_users
             .read()
             .await
-            .get(username)
+            .get(&username.to_lowercase())
             .filter(|info| info.expires_at.is_none_or(|e| e > now))
             .cloned()
     }
@@ -120,7 +124,10 @@ impl LoginProtectionCache {
 
     /// Record a lockout in the cache.
     pub async fn lock_user(&self, username: String, info: UserLockInfo) {
-        self.locked_users.write().await.insert(username, info);
+        self.locked_users
+            .write()
+            .await
+            .insert(username.to_lowercase(), info);
     }
 
     /// Remove a block from the cache.
@@ -130,7 +137,10 @@ impl LoginProtectionCache {
 
     /// Remove a lockout from the cache.
     pub async fn unlock_user(&self, username: &str) {
-        self.locked_users.write().await.remove(username);
+        self.locked_users
+            .write()
+            .await
+            .remove(&username.to_lowercase());
     }
 
     /// Drop expired entries from the cache.
@@ -215,6 +225,18 @@ mod tests {
             .lock_user("testuser".to_string(), user_lock(None))
             .await;
         assert!(cache.is_user_locked("testuser").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_is_user_locked_is_case_insensitive() {
+        let cache = LoginProtectionCache::new();
+        cache.lock_user("Admin".to_string(), user_lock(None)).await;
+        // A lock must not be sidestepped by rotating the case of the username.
+        assert!(cache.is_user_locked("admin").await.is_some());
+        assert!(cache.is_user_locked("ADMIN").await.is_some());
+        // ...and unlocking under a different case must still clear it.
+        cache.unlock_user("aDmIn").await;
+        assert!(cache.is_user_locked("Admin").await.is_none());
     }
 
     #[tokio::test]

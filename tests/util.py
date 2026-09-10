@@ -2,9 +2,12 @@ import logging
 import os
 import requests
 import socket
+import sqlite3
 import subprocess
 import threading
 import time
+
+import yaml
 
 
 last_port = 1234
@@ -79,6 +82,17 @@ def wait_mysql_port(port):
     t.join(timeout=60)
     if t.is_alive():
         raise Exception(f"Port {port} is not up")
+
+
+def open_wg_sqlite_db(config_path):
+    """A read connection to a node's sqlite database. A sqlite: URL names a
+    directory (relative to the config dir) that holds db.sqlite3."""
+    config = yaml.safe_load(config_path.open())
+    db_url = config["database_url"]
+    assert db_url.startswith("sqlite:")
+    db_file = config_path.parent / db_url.removeprefix("sqlite:") / "db.sqlite3"
+    # busy timeout: the nodes write to the same file concurrently
+    return sqlite3.connect(db_file, timeout=5)
 
 
 def create_ticket(url, username, target_name):

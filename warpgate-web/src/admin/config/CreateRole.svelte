@@ -44,9 +44,9 @@
                 >
             </FormGroup>
 
-            <AsyncButton color="primary" click={create}
-                >Create role</AsyncButton
-            >
+            <AsyncButton color="primary" click={create}>
+                Create role
+            </AsyncButton>
         </Form>
     </div>
 </div>

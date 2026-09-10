@@ -1,0 +1,28 @@
+name: Lockfile
+
+on: [pull_request]
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+
+      - name: Every package-lock entry has resolved + integrity
+        working-directory: warpgate-web
+        run: |
+          missing=$(jq -r '.packages | to_entries[]
+            | select(.key != "")
+            | select((.value.resolved | not) or (.value.integrity | not))
+            | .key' package-lock.json)
+          if [ -n "$missing" ]; then
+            echo "::error::package-lock.json entries missing resolved/integrity:"
+            echo "$missing"
+            exit 1
+          fi

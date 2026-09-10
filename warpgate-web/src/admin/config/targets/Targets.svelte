@@ -7,17 +7,20 @@
         DropdownToggle,
     } from '@sveltestrap/sveltestrap'
     import { api, type Target, type TargetGroup } from 'admin/lib/api'
+    import { autosave } from 'common/autosave'
+    import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import GroupColorIcon from 'common/GroupColorIcon.svelte'
+    import { resolveGroup } from 'common/groups'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
+    import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
-    import { onMount } from 'svelte'
     import { link } from 'svelte-spa-router'
     import { firstBy } from 'thenby'
     import { adminPermissions } from '../../lib/store'
@@ -26,48 +29,48 @@
     let groups: TargetGroup[] = $state([])
     let selectedGroup: TargetGroup | undefined = $state()
 
-    onMount(async () => {
-        try {
-            const natural = naturalCompareFactory()
+    const [collapsedGroups] = autosave<string[]>(
+        'admin-target-list:collapsed-groups',
+        [],
+    )
 
-            groups = (await api.listTargetGroups()).sort((a, b) =>
+    const groupsPromise = api
+        .listTargetGroups()
+        .then(result => {
+            const natural = naturalCompareFactory()
+            groups = result.sort((a, b) =>
                 natural(a.name.toLowerCase(), b.name.toLowerCase()),
             )
-        } catch (err) {
+        })
+        .catch(async err => {
             error = await stringifyError(err)
-        }
-    })
+            groups = []
+        })
 
     function getTargets(
         options: LoadOptions,
     ): Observable<PaginatedResponse<Target>> {
         return from(
-            api.getTargets({
-                search: options.search,
-                groupId: selectedGroup?.id,
-            }),
+            Promise.all([
+                groupsPromise,
+                api.getTargets({
+                    search: options.search,
+                    groupId: selectedGroup?.id,
+                }),
+            ]),
         ).pipe(
-            map(targets => {
-                if (options.search) {
-                    return targets
-                }
-
+            map(([_, targets]) => {
                 const natural = naturalCompareFactory()
+                const groupName = (target: Target) =>
+                    (
+                        groups.find(g => g.id === target.groupId)?.name ?? ''
+                    ).toLowerCase()
 
                 return targets.sort(
                     firstBy((x: Target) => !x.groupId)
                         // Natural sort between groups
                         .thenBy((a: Target, b: Target) =>
-                            natural(
-                                (
-                                    groups.find(g => g.id === a.groupId)
-                                        ?.name ?? ''
-                                ).toLowerCase(),
-                                (
-                                    groups.find(g => g.id === b.groupId)
-                                        ?.name ?? ''
-                                ).toLowerCase(),
-                            ),
+                            natural(groupName(a), groupName(b)),
                         )
                         // Natural sort within a group
                         .thenBy((a, b) =>
@@ -81,6 +84,10 @@
                 total: targets.length,
             })),
         )
+    }
+
+    function groupInfoFromTarget(target: Target) {
+        return resolveGroup(groups.find(g => g.id === target.groupId))
     }
 </script>
 
@@ -96,20 +103,20 @@
                     <DropdownMenu>
                         <DropdownItem
                             onclick={() => {
-                        selectedGroup = undefined
-                    }}
+                                selectedGroup = undefined
+                            }}
                         >
                             All groups
                         </DropdownItem>
                         {#each groups as group (group.id)}
                             <DropdownItem
                                 onclick={() => {
-                            selectedGroup = group
-                        }}
+                                    selectedGroup = group
+                                }}
                                 class="d-flex align-items-center gap-2"
                             >
                                 {#if group.color}
-                                    <GroupColorCircle color={group.color} />
+                                    <GroupColorIcon color={group.color} />
                                 {/if}
                                 {group.name}
                             </DropdownItem>
@@ -133,12 +140,24 @@
     {/if}
 
     {#key selectedGroup}
-        <ItemList load={getTargets} showSearch={true}>
+        <ItemList
+            load={getTargets}
+            showSearch={true}
+            groupObject={groupInfoFromTarget}
+            groupKey={group => group.id}
+            bind:collapsedGroups={$collapsedGroups}
+        >
+            {#snippet header(_items, groupControls)}
+                <ListOverflowMenu {groupControls} />
+            {/snippet}
             {#snippet empty()}
                 <EmptyState
                     title="No targets yet"
                     hint="Targets are destinations on the internal network that your users will connect to"
                 />
+            {/snippet}
+            {#snippet groupHeader(group, state)}
+                <CollapsibleGroupHeader {group} {state} />
             {/snippet}
             {#snippet item(target)}
                 <a
@@ -148,17 +167,6 @@
                 >
                     <div class="me-auto">
                         <div class="d-flex align-items-center gap-2">
-                            {#if target.groupId}
-                                {@const group = groups.find(g => g.id === target.groupId)}
-                                {#if group}
-                                    {#if group.color}
-                                        <GroupColorCircle color={group.color} />
-                                    {/if}
-                                    <small class="text-muted"
-                                        >{group.name}</small
-                                    >
-                                {/if}
-                            {/if}
                             <strong>
                                 {target.name}
                             </strong>

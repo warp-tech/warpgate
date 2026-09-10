@@ -54,6 +54,9 @@ class Test:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"vnc-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetVncOptions(
                             kind="Vnc",
@@ -128,7 +131,7 @@ class Test:
                 raise AssertionError("web approval was never the only remaining factor")
 
             r = await session.post(
-                f"{url}/@warpgate/api/auth/state/{auth_id}/approve", ssl=False
+                f"{url}/@warpgate/api/auth/state/{auth_id}/approve", json={"scope": "Once"}, ssl=False
             )
             assert r.status == 200
 

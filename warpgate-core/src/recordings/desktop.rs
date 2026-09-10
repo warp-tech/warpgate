@@ -1,16 +1,20 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
+use tracing::error;
+use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Recording::RecordingKind;
 
-use super::framebuffer::{Framebuffer, Rect, decode_jpeg_rgb, encode_png_rgba};
 use super::{Error, Recorder, Result};
+use crate::protocols::framebuffer::{
+    Framebuffer, Rect, decode_jpeg_rgb, decode_png_rgba, encode_png_rgba,
+};
 use crate::recordings::RecordingWriterOpener;
 use crate::recordings::writer::NDJsonRecordingWriter;
-use crate::{DesktopEvent, DesktopInput, DesktopRect};
+use crate::{DesktopEvent, DesktopInput, DesktopRect, LogonState};
 
 const MAX_GOP_BYTES: usize = 2_000_000;
 const MAX_GOP_SECONDS: f32 = 10.0;
@@ -192,13 +196,29 @@ fn take_dirty_region(st: &mut RecorderState, out: &mut Vec<u8>) -> Option<Rect> 
 }
 
 pub struct DesktopRecorder {
-    data_writer: NDJsonRecordingWriter,
-    index_writer: NDJsonRecordingWriter,
+    data_writer: Arc<NDJsonRecordingWriter>,
+    index_writer: Arc<NDJsonRecordingWriter>,
     started_at: Instant,
     state: Arc<Mutex<RecorderState>>,
+
+    // we do not record keyboard inputs at windows logon screen
+    sign_in: OnceLock<LogonState>,
+    record_keyboard: bool,
 }
 
 impl DesktopRecorder {
+    pub fn track_logon_state(&self, state: LogonState) {
+        let _ = self.sign_in.set(state);
+    }
+
+    fn should_record_keyboard(&self) -> bool {
+        self.record_keyboard
+            && !self
+                .sign_in
+                .get()
+                .is_some_and(LogonState::still_at_logon_screen)
+    }
+
     fn get_time(&self) -> f32 {
         self.started_at.elapsed().as_secs_f32()
     }
@@ -248,7 +268,7 @@ impl DesktopRecorder {
     ) -> (Vec<u8>, Vec<u8>, Result<()>) {
         if rgba.len() >= PNG_OFFLOAD_ENCODING_ABOVE_SIZE {
             match tokio::task::spawn_blocking(move || {
-                let r = encode_png_rgba(w, h, &rgba, &mut out);
+                let r = encode_png_rgba(w, h, &rgba, &mut out).map_err(Error::PngEncode);
                 (rgba, out, r)
             })
             .await
@@ -257,7 +277,7 @@ impl DesktopRecorder {
                 Err(e) => (Vec::new(), Vec::new(), Err(Error::Codec(e.to_string()))),
             }
         } else {
-            let r = encode_png_rgba(w, h, &rgba, &mut out);
+            let r = encode_png_rgba(w, h, &rgba, &mut out).map_err(Error::PngEncode);
             (rgba, out, r)
         }
     }
@@ -357,6 +377,29 @@ impl DesktopRecorder {
                 };
                 self.write_data_item(&mut st, &item).await?;
             }
+            DesktopEvent::PngImage { rect, data } => {
+                // Ordered before this PNG in the stream: flush any pending raw pixels.
+                self.flush_delta(&mut st, time).await?;
+                let rect: RecordingRect = (*rect).into();
+                // Composite so keyframes carry the refined pixels, and pass the already
+                // lossless PNG through to the stream unchanged.
+                if let Some((_, _, rgba)) = decode_png_rgba(data) {
+                    st.fb.blit_rgba(
+                        u32::from(rect.x),
+                        u32::from(rect.y),
+                        u32::from(rect.width),
+                        u32::from(rect.height),
+                        &rgba,
+                    );
+                }
+                let item = DesktopRecordingItem::PngImage {
+                    time,
+                    rect,
+                    keyframe: false,
+                    data: data.clone(),
+                };
+                self.write_data_item(&mut st, &item).await?;
+            }
             DesktopEvent::CopyRect { dst, src_x, src_y } => {
                 // The copy applies after the pixels it moves: flush them first.
                 self.flush_delta(&mut st, time).await?;
@@ -388,6 +431,38 @@ impl DesktopRecorder {
 
         self.maybe_keyframe(&mut st, time).await?;
         Ok(())
+    }
+
+    /// Record a JPEG tile whose source pixels are still at hand (a tile the gateway itself
+    /// re-encoded from raw): composites the keyframe surface from the BGRA directly, with
+    /// no decode round-trip, and passes the JPEG through to the stream unchanged.
+    pub async fn write_jpeg_with_raw(
+        &self,
+        rect: DesktopRect,
+        jpeg: &Bytes,
+        raw_bgra: &[u8],
+    ) -> Result<()> {
+        let time = self.get_time();
+        let mut st = self.state.lock().await;
+        st.duration = st.duration.max(time);
+
+        // Ordered before this JPEG in the stream: flush any pending raw pixels.
+        self.flush_delta(&mut st, time).await?;
+        let rect: RecordingRect = rect.into();
+        st.fb.blit_bgra(
+            u32::from(rect.x),
+            u32::from(rect.y),
+            u32::from(rect.width),
+            u32::from(rect.height),
+            raw_bgra,
+        );
+        let item = DesktopRecordingItem::JpegImage {
+            time,
+            rect,
+            data: jpeg.clone(),
+        };
+        self.write_data_item(&mut st, &item).await?;
+        self.maybe_keyframe(&mut st, time).await
     }
 
     /// Inject a full-frame keyframe between packets when enough has changed, and flush the
@@ -435,21 +510,30 @@ impl DesktopRecorder {
     /// Record a viewer input (client -> server) for audit: written to the stream and added
     /// to the index input track. `Refresh` is a redraw request, not a user action.
     pub async fn write_input(&self, input: &DesktopInput) -> Result<()> {
+        if matches!(input, DesktopInput::Key { .. }) && !self.should_record_keyboard() {
+            return Ok(());
+        }
         let time = self.get_time();
         let item = match input {
-            DesktopInput::Key { keysym, down } => DesktopRecordingItem::KeyInput {
+            // Prefer the keysym: it is what the user actually typed, whereas the scancode
+            // only names a key position that the target's layout reinterprets.
+            DesktopInput::Key {
+                keysym: Some(keysym),
+                down,
+                ..
+            } => DesktopRecordingItem::KeyInput {
                 time,
                 keysym: *keysym,
                 down: *down,
             },
-            DesktopInput::Scancode {
-                code,
-                extended,
+            DesktopInput::Key {
+                scancode: Some(scancode),
                 down,
+                ..
             } => DesktopRecordingItem::ScancodeInput {
                 time,
-                code: *code,
-                extended: *extended,
+                code: scancode.code,
+                extended: scancode.extended,
                 down: *down,
             },
             DesktopInput::Pointer { x, y, buttons } => DesktopRecordingItem::PointerInput {
@@ -474,7 +558,11 @@ impl DesktopRecorder {
                 time,
                 text: text.clone(),
             },
-            DesktopInput::Refresh => return Ok(()),
+            // The target's response to a resize arrives as a recorded DesktopEvent::Resize,
+            // so the request itself carries no playback value.
+            DesktopInput::Refresh | DesktopInput::Resize { .. } |
+            // A key with neither representation carries nothing to replay.
+            DesktopInput::Key { .. } => return Ok(()),
         };
         let mut st = self.state.lock().await;
         st.duration = st.duration.max(time);
@@ -519,8 +607,9 @@ impl Drop for DesktopRecorder {
             let entry = IndexEntry::End {
                 time: state.duration,
             };
-            index_writer.write_json_line(&entry).await?;
-            Result::Ok(())
+            if let Err(error) = index_writer.write_json_line(&entry).await {
+                error!(%error, "Failed to write the recording index footer");
+            }
         });
     }
 }
@@ -532,10 +621,14 @@ impl Recorder for DesktopRecorder {
 
     async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
         Ok(Self {
-            data_writer: opener.open_ndjson_data().await?,
-            index_writer: opener.open_index().await?,
+            data_writer: Arc::new(opener.open_ndjson_data().await?),
+            index_writer: Arc::new(opener.open_index().await?),
             started_at: Instant::now(),
             state: Arc::new(Mutex::new(RecorderState::default())),
+            sign_in: OnceLock::new(),
+            record_keyboard: Parameters::Entity::get(&opener.db)
+                .await?
+                .record_desktop_keyboard_input,
         })
     }
 }

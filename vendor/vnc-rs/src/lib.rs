@@ -213,10 +213,8 @@ pub mod config;
 pub mod error;
 pub mod event;
 
-pub use client::VncClient;
-pub use client::VncConnector;
 // Warpgate fork addition (see PATCHES.md): expose the decode loop for proxy recording.
-pub use client::decode_loop;
+pub use client::{decode_loop, VncClient, VncConnector};
 pub use config::*;
 pub use error::*;
 pub use event::*;

@@ -12,7 +12,6 @@ from uuid import uuid4
 
 import aiohttp
 import pytest
-import yaml
 
 from .api_client import admin_client, sdk
 from .conftest import VNC_BACKEND_SIZE, ProcessManager, VaultInstance, WarpgateProcess
@@ -859,85 +858,43 @@ class TestSecretBackendVault:
         assert b"tbl" in out
         assert client.returncode == 0
 
-    def test_config_reload_picks_up_new_backend(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
+    def test_ssh_host_keys_from_vault(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
         vault: VaultInstance = processes.start_vault(engine=backend_engine)
         stop_at_end(lambda: _stop_vault(vault))
-        vault.kv_put("secret", "myapp", password="hunter2")
-        reference = f"{vault.backend_type}://vault-test/secret/myapp#password"
 
-        # start with NO secrets.backends configured at all
-        wg = processes.start_wg()
-        stop_at_end(lambda: _stop_wg(wg))
-        wait_port(wg.http_port, for_process=wg.process, recv=False)
-        url = f"https://localhost:{wg.http_port}"
-
-        with admin_client(url) as api:
-            resp = api.test_secret_resolve(sdk.TestResolveRequest(reference=reference))
-            assert resp.ok is False
-            assert "not configured" in resp.error
-
-        # edit warpgate.yaml on disk to add the backend while the process keeps running
-        config = yaml.safe_load(wg.config_path.open())
-        config.setdefault("secrets", {})["backends"] = [
-            _vault_backend("vault-test", vault.addr, token=vault.root_token, backend_type=vault.backend_type)
-        ]
-        with wg.config_path.open("w") as f:
-            yaml.safe_dump(config, f)
-
-        def wait_reload():
-            while True:
-                with admin_client(url) as api:
-                    resp = api.test_secret_resolve(sdk.TestResolveRequest(reference=reference))
-                if resp.ok:
-                    return
-                time.sleep(0.2)
-
-        _wait_timeout(
-            wait_reload, "config reload did not pick up the new secret backend", timeout=timeout
+        key_path = processes.ctx.tmpdir / f"host-key-{uuid4()}"
+        subprocess.check_call(
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-m", "PKCS8", "-f", str(key_path)],
+            stdout=subprocess.DEVNULL,
         )
-
-    def test_ssh_host_and_client_keys_stored_in_vault(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
-        vault: VaultInstance = processes.start_vault(engine=backend_engine)
-        stop_at_end(lambda: _stop_vault(vault))
+        public_key = key_path.with_suffix(".pub").read_text().split()[1]
+        vault.kv_put("secret", "warpgate-host-keys", ed25519=key_path.read_text())
 
         wg = _start_wg_with_backends(
             processes,
             [_vault_backend("vault-test", vault.addr, token=vault.root_token, backend_type=vault.backend_type)],
         )
         wait_port(wg.ssh_port, for_process=wg.process)
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            api.update_parameters(
+                sdk.ParameterUpdate(
+                    ssh_host_key_secret_ref=f"{vault.backend_type}://vault-test/secret/warpgate-host-keys"
+                )
+            )
+        _stop_wg(wg)
 
-        # switch `ssh.keys` from its default disk path to the configured backend directly on
-        # disk (a plain string -> mapping change, done by editing the YAML dict in place rather
-        # than via config_patch) and reboot against the same data dir.
-        wg.process.terminate()
-        wg.process.wait()
+        # the parameter is read when the SSH listener binds
+        wg = processes.start_wg(share_with=wg)
+        stop_at_end(lambda: _stop_wg(wg))
+        wait_port(wg.ssh_port, for_process=wg.process)
 
-        config = yaml.safe_load(wg.config_path.open())
-        config["ssh"]["keys"] = {"backend": "vault-test", "path": "secret/warpgate-keys"}
-        with wg.config_path.open("w") as f:
-            yaml.safe_dump(config, f)
-
-        wg1 = processes.start_wg(share_with=wg)
-        wait_port(wg1.http_port, for_process=wg1.process, recv=False)
-        wait_port(wg1.ssh_port, for_process=wg1.process)
-
-        data, _version = vault.kv_get("secret", "warpgate-keys")
-        for field in ["host-ed25519", "host-rsa", "client-ed25519", "client-rsa"]:
-            assert field in data, f"{field} was not generated into Vault"
-            assert "PRIVATE KEY" in data[field]
-
-        # restart again against the same config; keys must be reused, not regenerated
-        wg1.process.terminate()
-        wg1.process.wait()
-
-        wg2 = processes.start_wg(share_with=wg)
-        stop_at_end(lambda: _stop_wg(wg2))
-        wait_port(wg2.http_port, for_process=wg2.process, recv=False)
-        wait_port(wg2.ssh_port, for_process=wg2.process)
-
-        data_after, _version_after = vault.kv_get("secret", "warpgate-keys")
-        for field in ["host-ed25519", "host-rsa", "client-ed25519", "client-rsa"]:
-            assert data_after[field] == data[field], f"{field} was regenerated across restart"
+        scanned = subprocess.run(
+            ["ssh-keyscan", "-t", "ed25519", "-p", str(wg.ssh_port), "localhost"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        ).stdout
+        assert public_key in scanned, scanned
 
     # ── AppRole auth method (not just static Token) ──────────────────────────
 
