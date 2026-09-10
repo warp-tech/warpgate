@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-base64 = { version = "0.22", default-features = false }
+base64 = { version = "0.23", default-features = false }
 bytes.workspace = true
 dashmap = { version = "6.2", default-features = false }
 futures.workspace = true
