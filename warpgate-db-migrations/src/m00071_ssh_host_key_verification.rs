@@ -25,8 +25,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Carry over the config-file setting of an existing install. A fresh
-        // install has no row yet and is seeded by `Parameters::Entity::get`.
         let db = manager.get_connection();
         let backend = db.get_database_backend();
         let stmt = Query::update()

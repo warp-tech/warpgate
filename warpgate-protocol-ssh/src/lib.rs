@@ -29,8 +29,6 @@ impl SSHProtocolServer {
     pub async fn new(services: &Services) -> Result<Self> {
         let config = services.config.lock().await;
         let keys_path = config.store.ssh.keys_path(&services.global_params);
-        ensure_host_keys(&services.db, &keys_path).await?;
-        ensure_client_keys(&services.db, &keys_path).await?;
         if any_host_key_files_present(&keys_path) {
             emit_runtime_warning(format!(
                 "SSH host keys are still read from {keys_path:?} and imported into the database. Remove the `ssh.keys` config option and delete the key files to complete the migration; in the future Warpgate will stop reading these files."
