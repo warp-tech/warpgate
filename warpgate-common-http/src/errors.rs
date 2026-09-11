@@ -81,12 +81,28 @@ pub async fn render_errors<E: Endpoint + 'static>(
     })
 }
 
+/// [`render_errors`] for a listener no browser ever reaches.
+///
+/// `is_navigation_request` answers "no `Sec-Fetch-Mode`" with "navigation",
+/// which is right for a gateway that still has to serve old browsers and
+/// wrong for an API a `kubectl` speaks to: every failing request would be
+/// answered with a styled page.
+pub async fn render_errors_plain<E: Endpoint + 'static>(
+    ep: Arc<E>,
+    req: Request,
+) -> poem::Result<Response> {
+    Ok(match ep.call(req).await {
+        Ok(response) => response.into_response(),
+        Err(error) => render_error(&error, false),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use poem::http::StatusCode;
     use warpgate_common::WarpgateError;
 
-    use super::render_error;
+    use super::{render_error, render_errors, render_errors_plain};
 
     const LEAK: &str = "no such table: credentials";
 
@@ -176,5 +192,45 @@ mod tests {
             "the message was not escaped: {body}"
         );
         assert!(body.contains("&lt;script&gt;"));
+    }
+
+    /// The `kubectl` case. A client that sends no `Sec-Fetch-Mode` is read as
+    /// a navigation by the shared classifier, so the layer the gateway uses
+    /// would answer a machine with a styled page. Asserted through the layer
+    /// rather than through `render_error(_, false)`, because what is at stake
+    /// is which of the two the Kubernetes listener is wired to.
+    #[tokio::test]
+    async fn a_header_less_client_is_not_handed_a_page() {
+        use poem::{Endpoint, EndpointExt, handler};
+
+        #[handler]
+        fn always_fails() -> poem::Result<&'static str> {
+            Err(WarpgateError::UserNotFound("someone".into()).into())
+        }
+
+        // First the control: the gateway's own layer does hand this exact
+        // request a document, or the assertion below would hold for a request
+        // that was never classified as a navigation at all.
+        let as_document = always_fails
+            .around(render_errors)
+            .call(poem::Request::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            as_document.content_type(),
+            Some("text/html; charset=utf-8"),
+            "the premise is gone: a header-less request is no longer a navigation"
+        );
+
+        let plain = always_fails
+            .around(render_errors_plain)
+            .call(poem::Request::default())
+            .await
+            .unwrap();
+        assert_eq!(plain.status(), StatusCode::UNAUTHORIZED);
+        assert_ne!(plain.content_type(), Some("text/html; charset=utf-8"));
+        let body = body_of(plain).await;
+        assert!(!body.contains("<!DOCTYPE html>"), "got a page: {body}");
+        assert!(body.contains("someone"), "the message was lost: {body}");
     }
 }

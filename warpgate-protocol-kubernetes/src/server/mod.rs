@@ -22,7 +22,7 @@ mod client_certs;
 mod handlers;
 
 use client_certs::CertificateExtractorMiddleware;
-use warpgate_common_http::errors::render_errors;
+use warpgate_common_http::errors::render_errors_plain;
 
 pub async fn bind_server(
     services: Services,
@@ -39,8 +39,10 @@ pub async fn bind_server(
         .data(UnauthenticatedRequestContext::new(services.clone()).await)
         .data(correlator)
         // This listener has its own app, so the gateway's layer does not
-        // reach it.
-        .around(render_errors);
+        // reach it. Plain, not the gateway's: the shared classifier reads a
+        // missing `Sec-Fetch-Mode` as a navigation, and a `kubectl` sends
+        // none.
+        .around(render_errors_plain);
 
     info!(?address, "Kubernetes protocol listening");
 
