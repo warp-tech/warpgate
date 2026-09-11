@@ -110,6 +110,7 @@ poem = { version = "3.1", features = [
     "server",
 ], default-features = false }
 ppp = { version = "2.3", default-features = false }
+qrcode = { version = "0.14", default-features = false }
 hex = { version = "0.4", default-features = false }
 html-escape = { version = "0.2", default-features = false }
 poem-openapi = { version = "5.1", features = [
