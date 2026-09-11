@@ -415,6 +415,9 @@ mod tests {
             ticket_requests_disabled: Set(false),
             ticket_require_approval: Set(false),
             ticket_max_uses: Set(None),
+            // The schema at this migration level predates the column; leaving
+            // it NotSet keeps it out of the INSERT.
+            ..Default::default()
         })
         .exec_without_returning(&db)
         .await

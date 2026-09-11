@@ -15,6 +15,7 @@
 //! the viewer while recording them — so native RDP records exactly like the in-browser
 //! path.
 
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,7 +28,7 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unb
 use tokio::time::{Instant, timeout_at};
 use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::accept_loop;
-use warpgate_common::{ListenEndpoint, TargetRdpOptions};
+use warpgate_common::{ListenEndpoint, TargetRdpOptions, WarpgateError};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{
     DesktopInput, Services, State, TargetAuthorization, UserSessionStateInit, WarpgateServerHandle,
@@ -47,7 +48,9 @@ mod rdp;
 use bridge::connect_backend;
 use hold_screen::{run_banner_screen, run_hold_screen};
 use protocol::{AuthVerdict, Event as ServerEvent, Input as ServerInput};
-use warpgate_desktop_auth::{DesktopAuthOutcome, authenticate, finalize_user_auth};
+use warpgate_desktop_auth::{
+    DesktopAuthOutcome, admit_desktop_session, authenticate, finalize_user_auth,
+};
 
 /// Depth of the feed into the viewer-facing RDP server. Bounded so a slow viewer
 /// backpressures `frame_bridge` (and through it the target) rather than letting delta
@@ -275,15 +278,20 @@ async fn control_loop(
                         {
                             BannerOutcome::NotShown => (),
                             BannerOutcome::Acknowledged => {
-                                dial_if_pending(
+                                if !dial_if_pending(
                                     &mut backend,
                                     &mut pending_dial,
                                     &services,
                                     &server_handle,
                                     &server_in_tx,
-                                    screen,
+                                    remote_address,
+                                    &mut events,
+                                    &mut screen,
                                 )
-                                .await?;
+                                .await?
+                                {
+                                    break;
+                                }
                             }
                             BannerOutcome::Disconnected => break,
                         }
@@ -328,15 +336,20 @@ async fn control_loop(
                                         ) {
                                             break;
                                         }
-                                        dial_if_pending(
+                                        if !dial_if_pending(
                                             &mut backend,
                                             &mut pending_dial,
                                             &services,
                                             &server_handle,
                                             &server_in_tx,
-                                            screen,
+                                            remote_address,
+                                            &mut events,
+                                            &mut screen,
                                         )
-                                        .await?;
+                                        .await?
+                                        {
+                                            break;
+                                        }
                                     }
                                     Err(error) => {
                                         warn!(%error, "Authorization failed after second factor");
@@ -370,15 +383,20 @@ async fn control_loop(
             }
             ServerEvent::Size { width, height } => {
                 screen = warpgate_desktop_ui::Screen { width, height };
-                dial_if_pending(
+                if !dial_if_pending(
                     &mut backend,
                     &mut pending_dial,
                     &services,
                     &server_handle,
                     &server_in_tx,
-                    screen,
+                    remote_address,
+                    &mut events,
+                    &mut screen,
                 )
-                .await?;
+                .await?
+                {
+                    break;
+                }
                 // A target dialed before this arrived is running at the advertised default,
                 // so bring it to the resolution the viewer actually negotiated. `take` spends
                 // the reconciliation whether or not it resizes anything, so the `Size` a
@@ -428,15 +446,20 @@ async fn control_loop(
         // viewer sent during the handshake is delivered ahead of the negotiated size, so this
         // also fires for viewers that do negotiate one — the `Size` arm resizes the target once
         // that size arrives.
-        dial_if_pending(
+        if !dial_if_pending(
             &mut backend,
             &mut pending_dial,
             &services,
             &server_handle,
             &server_in_tx,
-            screen,
+            remote_address,
+            &mut events,
+            &mut screen,
         )
-        .await?;
+        .await?
+        {
+            break;
+        }
 
         // Reached only for the viewer-input variants above.
         let Some(backend) = &backend else {
@@ -492,21 +515,194 @@ async fn acknowledge_banner(
     )
 }
 
-/// Dial the pending target, if there is one and it hasn't been dialed yet, at `screen`.
+/// Await `hold` while consuming client events. Returns None if the client disconnects before `hold` resolves
+///
+/// This prevents unbounded channel growth while the session is waiting for approval
+///
+/// All events are discarded except resizes which are applied to `screen`
+async fn hold_draining_viewer<T>(
+    hold: impl Future<Output = T>,
+    events: &mut UnboundedReceiver<ServerEvent>,
+    screen: &mut warpgate_desktop_ui::Screen,
+) -> Option<T> {
+    tokio::pin!(hold);
+    loop {
+        tokio::select! {
+            held = &mut hold => return Some(held),
+            event = events.recv() => match event {
+                Some(ServerEvent::Size { width, height }) => {
+                    *screen = warpgate_desktop_ui::Screen { width, height };
+                }
+                Some(_) => (),
+                None => return None,
+            },
+        }
+    }
+}
+
+/// Connect to target (idempotent) and wait for approval if needed
+///
+/// Returns `false` if an approval is denied
 async fn dial_if_pending(
     backend: &mut Option<BackendBridge>,
     pending: &mut Option<PendingDial>,
     services: &Services,
     server_handle: &Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
     server_in_tx: &Sender<ServerInput>,
-    screen: warpgate_desktop_ui::Screen,
-) -> Result<()> {
+    remote_address: SocketAddr,
+    events: &mut UnboundedReceiver<ServerEvent>,
+    screen: &mut warpgate_desktop_ui::Screen,
+) -> Result<bool> {
     if backend.is_none()
         && let Some(authorization) = pending.take()
     {
-        *backend = Some(
-            connect_backend(services, server_handle, server_in_tx, authorization, screen).await?,
+        // Held inline: the viewer keeps its last frame while the administrator
+        // decides, exactly as it does for the 2FA hold.
+        let admitting = admit_desktop_session(
+            services,
+            server_handle,
+            authorization,
+            Some(remote_address.ip()),
+        );
+        let Some(admitted) = hold_draining_viewer(admitting, events, screen).await else {
+            // The viewer went away mid-hold. Dropping the hold released what it
+            // was holding: the request row is closed and any ticket use
+            // refunded.
+            return Ok(false);
+        };
+
+        let admitted = match admitted {
+            Ok(admitted) => admitted,
+            Err(WarpgateError::SessionNotApproved) => {
+                warn!("Session was not approved by an administrator");
+                let _ = server_in_tx.send(ServerInput::Shutdown).await;
+                return Ok(false);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        *backend = Some(connect_backend(services, server_in_tx, admitted, *screen).await?);
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::mpsc::unbounded_channel;
+    use warpgate_core::DesktopInput;
+
+    use super::*;
+
+    fn pointer() -> ServerEvent {
+        ServerEvent::Input(DesktopInput::Pointer {
+            x: 1,
+            y: 1,
+            buttons: 0,
+        })
+    }
+
+    /// The channel is unbounded and the hold lasts as long as an administrator
+    /// takes, so anything the viewer sends meanwhile has to be taken off it —
+    /// otherwise a client that keeps typing grows the gateway's memory for the
+    /// length of the window.
+    ///
+    /// The hold here never resolves, which is the case that matters: the drain
+    /// has to happen *during* the wait, not after it.
+    #[tokio::test]
+    async fn viewer_input_does_not_pile_up_behind_the_hold() {
+        let (tx, mut events) = unbounded_channel();
+        let mut screen = warpgate_desktop_ui::Screen {
+            width: 800,
+            height: 600,
+        };
+
+        for _ in 0..1000 {
+            tx.send(pointer()).unwrap();
+        }
+
+        let held = std::future::pending::<()>();
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(200),
+                hold_draining_viewer(held, &mut events, &mut screen),
+            )
+            .await
+            .is_err(),
+            "the hold does not resolve, so the pump should still be waiting",
+        );
+
+        assert!(
+            events.try_recv().is_err(),
+            "every event sent during the hold must have been taken off the channel",
         );
     }
-    Ok(())
+
+    /// What the hold produced still reaches the caller.
+    #[tokio::test]
+    async fn the_held_outcome_is_returned() {
+        let (_tx, mut events) = unbounded_channel::<ServerEvent>();
+        let mut screen = warpgate_desktop_ui::Screen {
+            width: 800,
+            height: 600,
+        };
+
+        assert_eq!(
+            hold_draining_viewer(std::future::ready(7), &mut events, &mut screen).await,
+            Some(7),
+        );
+    }
+
+    /// A viewer can settle a new size mid-hold; the target has to be dialled at
+    /// the size actually being shown, not the one negotiated before the wait.
+    #[tokio::test]
+    async fn a_size_settled_during_the_hold_is_kept() {
+        let (tx, mut events) = unbounded_channel();
+        let mut screen = warpgate_desktop_ui::Screen {
+            width: 800,
+            height: 600,
+        };
+
+        tx.send(ServerEvent::Size {
+            width: 1024,
+            height: 768,
+        })
+        .unwrap();
+        tx.send(pointer()).unwrap();
+        tx.send(ServerEvent::Size {
+            width: 1920,
+            height: 1080,
+        })
+        .unwrap();
+
+        let held = std::future::pending::<()>();
+        let _ = tokio::time::timeout(
+            Duration::from_millis(200),
+            hold_draining_viewer(held, &mut events, &mut screen),
+        )
+        .await;
+
+        assert_eq!(screen.width, 1920);
+        assert_eq!(screen.height, 1080);
+    }
+
+    /// Nothing is left to admit once the viewer is gone, and the caller has to
+    /// hear about it: holding on would keep the approval request standing for a
+    /// connection that no longer exists.
+    #[tokio::test]
+    async fn a_departed_viewer_ends_the_hold() {
+        let (tx, mut events) = unbounded_channel::<ServerEvent>();
+        let mut screen = warpgate_desktop_ui::Screen {
+            width: 800,
+            height: 600,
+        };
+
+        tx.send(pointer()).unwrap();
+        drop(tx);
+
+        assert!(
+            hold_draining_viewer(std::future::pending::<()>(), &mut events, &mut screen)
+                .await
+                .is_none(),
+            "the hold must end when the viewer disconnects, not wait out the window",
+        );
+    }
 }

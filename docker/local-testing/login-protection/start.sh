@@ -55,16 +55,11 @@ ok "SSH target ready"
 
 # ── prepare data directory ───────────────────────────────────────────────────
 info "Preparing data directory: $DATA_DIR"
-mkdir -p "$DATA_DIR/ssh-keys"
+mkdir -p "$DATA_DIR"
 
 # Copy test TLS certs
 cp "$REPO_ROOT/tests/certs/tls.certificate.pem" "$DATA_DIR/"
 cp "$REPO_ROOT/tests/certs/tls.key.pem"         "$DATA_DIR/"
-
-# Copy SSH host keys (warpgate uses these for the SSH listener)
-for k in client-ed25519 client-ed25519.pub client-rsa client-rsa.pub host-ed25519 host-ed25519.pub host-rsa; do
-  cp "$REPO_ROOT/tests/ssh-keys/wg/$k" "$DATA_DIR/ssh-keys/"
-done
 
 # ── unattended-setup (only if not already initialised) ───────────────────────
 CONFIG="$DATA_DIR/warpgate.yaml"
@@ -77,6 +72,7 @@ if [[ ! -f "$CONFIG" ]]; then
       --ssh-port   "$SSH_PORT" \
       --mysql-port "$MYSQL_PORT" \
       --postgres-port "$PG_PORT" \
+      --import-ssh-keys "$REPO_ROOT/tests/ssh-keys/wg" \
       --external-host localhost
   # Accept any SSH host key from targets automatically (test environment only)
   python3 -c "

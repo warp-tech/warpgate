@@ -3,7 +3,9 @@ use std::fmt::Write;
 use std::future::Future;
 use std::net::IpAddr;
 
+use data_encoding::HEXLOWER;
 use rand::RngExt;
+use sha2::Digest;
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use tracing::{debug, info};
@@ -11,8 +13,8 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{
-    AuthCredential, AuthCredentialFingerprint, CredentialKind, CredentialPolicy,
-    CredentialPolicyResponse,
+    ApprovalKind, AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
+    StoredCredential, ValidCredential,
 };
 use crate::helpers::logging::format_related_ids;
 use crate::{Protocol, User, UserSessionId, WarpgateError};
@@ -81,10 +83,9 @@ pub struct AuthStateUserInfo {
     pub username: String,
 }
 
-/// Cache matching key for web approval bypass.
-/// What a remembered web approval covers — and, on the lookup side, what a login
-/// is asking for. Kept as three explicit states because "no target yet" and
-/// "every target" are different things that a single `Option` would conflate.
+/// What a login is asking a remembered approval for. Explicit rather than an
+/// `Option`, because "no target yet" is a real bucket of its own: an untargeted
+/// grant must not stand in for approval of an actual target.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WebApprovalScopeKey {
     /// The flow isn't target-scoped: an HTTP portal sign-in, or SSH before the
@@ -92,27 +93,156 @@ pub enum WebApprovalScopeKey {
     Untargeted,
     /// Bound to a single target.
     Target(String),
-    /// Granted for every target.
-    AllTargets,
+}
+
+/// A non-empty, sorted, deduplicated, equatable set of the stored credentials
+/// an authentication was made with — what a "remember approval" decision is
+/// keyed on.
+///
+/// A web approval cannot appear here by construction: the set is built through
+/// [`ValidCredential::stored`], and an approval has no stored row.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StoredCredentials(Vec<StoredCredential>);
+
+impl StoredCredentials {
+    #[must_use]
+    pub fn new(mut credentials: Vec<StoredCredential>) -> Option<Self> {
+        credentials.sort_unstable();
+        credentials.dedup();
+        (!credentials.is_empty()).then_some(Self(credentials))
+    }
+
+    /// A stable digest for the credential set (for matching)
+    #[must_use]
+    pub fn digest(&self) -> String {
+        // Version 2 keys on stored rows; version 1 keyed on verifier hashes
+        // alone. Bump this with any encoding change — every remembered approval
+        // in flight stops matching, which is the intended, fail-closed effect.
+        let mut bytes = vec![2];
+
+        for credential in &self.0 {
+            credential.write_canonical_bytes(&mut bytes);
+        }
+
+        let digest = sha2::Sha256::digest(&bytes);
+        HEXLOWER.encode(&digest)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RememberApprovalBy {
+    /// Approval can be reused if this credential set matches
+    Credentials(StoredCredentials),
+    /// Cannot be remembered because there are no credentials to match
+    Nothing,
+}
+
+impl RememberApprovalBy {
+    #[must_use]
+    pub fn from_credentials(credentials: Vec<StoredCredential>) -> Self {
+        StoredCredentials::new(credentials).map_or(Self::Nothing, Self::Credentials)
+    }
+
+    #[must_use]
+    pub const fn credentials(&self) -> Option<&StoredCredentials> {
+        match self {
+            Self::Credentials(credentials) => Some(credentials),
+            Self::Nothing => None,
+        }
+    }
+}
+
+/// The exact identity half of a remember approval key
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WebApprovalIdentity {
+    kind: ApprovalKind,
+    remote_ip: IpAddr,
+    protocol: Protocol,
+    username: String,
+    other_credentials: StoredCredentials,
+}
+
+impl WebApprovalIdentity {
+    #[must_use]
+    pub fn digest(&self) -> String {
+        let mut bytes = vec![1]; // version tag
+        // Length-prefix everything to avoid collisions via string boundaries
+        let mut push = |part: &[u8]| {
+            bytes.extend_from_slice(&(part.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(part);
+        };
+
+        push(&[self.kind as u8]);
+        push(self.remote_ip.to_string().as_bytes());
+        push(self.protocol.to_string().as_bytes());
+        push(self.username.as_bytes());
+        push(self.other_credentials.digest().as_bytes());
+
+        HEXLOWER.encode(&sha2::Sha256::digest(&bytes))
+    }
+
+    pub fn kind(&self) -> ApprovalKind {
+        self.kind
+    }
+
+    pub fn remote_ip(&self) -> IpAddr {
+        self.remote_ip
+    }
+
+    pub fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
+    pub fn other_credentials(&self) -> &StoredCredentials {
+        &self.other_credentials
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebApprovalMatchKey {
-    pub remote_ip: IpAddr,
-    pub protocol: Protocol,
-    pub username: String,
-    pub scope: WebApprovalScopeKey,
-    pub other_credentials: Vec<AuthCredentialFingerprint>,
+    // compared by "scope is narrower", so it cannot be a part of the digest
+    scope: WebApprovalScopeKey,
+    // compared by equality
+    identity: WebApprovalIdentity,
 }
 
 impl WebApprovalMatchKey {
-    /// A copy of this key that matches an approval remembered for all targets.
     #[must_use]
-    pub fn for_all_targets(&self) -> Self {
-        Self {
-            scope: WebApprovalScopeKey::AllTargets,
-            ..self.clone()
-        }
+    pub fn build(
+        kind: ApprovalKind,
+        remote_ip: IpAddr,
+        protocol: Protocol,
+        username: &str,
+        target_name: &str,
+        remember_by: &RememberApprovalBy,
+    ) -> Option<Self> {
+        Some(Self {
+            scope: if target_name.is_empty() {
+                // currenrly, only the SSH menu can do this
+                WebApprovalScopeKey::Untargeted
+            } else {
+                WebApprovalScopeKey::Target(target_name.to_string())
+            },
+            identity: WebApprovalIdentity {
+                kind,
+                remote_ip,
+                protocol,
+                username: username.to_lowercase(),
+                other_credentials: remember_by.credentials()?.clone(),
+            },
+        })
+    }
+
+    pub fn identity(&self) -> &WebApprovalIdentity {
+        &self.identity
+    }
+
+    pub fn scope(&self) -> &WebApprovalScopeKey {
+        &self.scope
     }
 }
 
@@ -133,7 +263,7 @@ pub struct AuthState {
     target_name: String,
     force_rejected: bool,
     policy: Box<dyn CredentialPolicy + Sync + Send>,
-    valid_credentials: Vec<AuthCredential>,
+    valid_credentials: Vec<ValidCredential>,
     started: OffsetDateTime,
     identification_string: String,
     last_result: Option<AuthResult>,
@@ -200,35 +330,30 @@ impl AuthState {
         &self.target_name
     }
 
+    /// Best possible "remember by" key for approving this AuthState
+    #[must_use]
+    pub fn remembered_by(&self) -> RememberApprovalBy {
+        RememberApprovalBy::from_credentials(
+            self.valid_credentials
+                .iter()
+                .filter_map(ValidCredential::stored)
+                .copied()
+                .collect(),
+        )
+    }
+
     /// Builds the key used to match this attempt against a remembered web
     /// approval.
     pub fn web_approval_match_key(&self) -> Option<WebApprovalMatchKey> {
-        let remote_ip = self.remote_ip?;
-
-        // `WebUserApproval` itself is excluded so the key describes the
-        // *other* credentials presented, and is identical whether computed before
-        // the approval is added (check) or after (save)
-        let mut other_credentials: Vec<AuthCredentialFingerprint> = self
-            .valid_credentials
-            .iter()
-            .filter(|c| c.kind() != CredentialKind::WebUserApproval)
-            .map(Into::into)
-            .collect();
-        other_credentials.sort_unstable();
-        other_credentials.dedup();
-
-        Some(WebApprovalMatchKey {
-            remote_ip,
-            protocol: self.protocol,
-            username: self.user_info.username.to_lowercase(),
-            // An empty target name means the flow hasn't picked one (HTTP sign-in,
-            // SSH menu) — which is not the same as an approval covering all targets.
-            scope: if self.target_name.is_empty() {
-                WebApprovalScopeKey::Untargeted
-            } else {
-                WebApprovalScopeKey::Target(self.target_name.clone())
-            },
-            other_credentials,
+        self.remote_ip.and_then(|ip| {
+            WebApprovalMatchKey::build(
+                ApprovalKind::User,
+                ip,
+                self.protocol,
+                &self.user_info.username,
+                &self.target_name,
+                &self.remembered_by(),
+            )
         })
     }
 
@@ -243,6 +368,8 @@ impl AuthState {
     /// Runs `validate` on the credential and records it only if it passes.
     /// This is the sole path for adding a credential that requires validation,
     /// so a credential in `valid_credentials` is validated by construction.
+    ///
+    /// validate() should return None for rejected credentials
     pub async fn submit_credential<F, Fut>(
         &mut self,
         credential: AuthCredential,
@@ -250,10 +377,10 @@ impl AuthState {
     ) -> Result<SubmitOutcome, WarpgateError>
     where
         F: FnOnce(String, AuthCredential) -> Fut,
-        Fut: Future<Output = Result<bool, WarpgateError>>,
+        Fut: Future<Output = Result<Option<StoredCredential>, WarpgateError>>,
     {
-        if validate(self.user_info.username.clone(), credential.clone()).await? {
-            self.valid_credentials.push(credential);
+        if let Some(stored) = validate(self.user_info.username.clone(), credential.clone()).await? {
+            self.valid_credentials.push(ValidCredential::Stored(stored));
             Ok(SubmitOutcome::Valid(self.maybe_update_verification_state()))
         } else {
             self.emit_authentication_failed_event(Some(&credential), "invalid credential");
@@ -264,7 +391,8 @@ impl AuthState {
     /// Records a web user approval. Unlike other credential kinds, the act of
     /// approval is itself the validation, so there is nothing to check.
     pub fn add_web_user_approval(&mut self) -> AuthResult {
-        self.valid_credentials.push(AuthCredential::WebUserApproval);
+        self.valid_credentials
+            .push(ValidCredential::WebUserApproval);
         self.maybe_update_verification_state()
     }
 
@@ -284,10 +412,17 @@ impl AuthState {
         self.state_change_signal.subscribe()
     }
 
+    fn valid_credential_kinds(&self) -> HashSet<CredentialKind> {
+        self.valid_credentials
+            .iter()
+            .map(ValidCredential::kind)
+            .collect()
+    }
+
     fn valid_credentials_description(&self) -> String {
         self.valid_credentials
             .iter()
-            .map(AuthCredential::safe_description)
+            .map(ValidCredential::readable_description)
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -341,8 +476,10 @@ impl AuthState {
         credential: Option<&AuthCredential>,
         reason: &str,
     ) {
-        let credentials =
-            credential.map_or_else(|| "<unknown>".to_string(), AuthCredential::safe_description);
+        let credentials = credential.map_or_else(
+            || "<unknown>".to_string(),
+            AuthCredential::readable_description,
+        );
 
         info!(
             target: "audit",
@@ -364,7 +501,7 @@ impl AuthState {
         }
         match self
             .policy
-            .is_sufficient(self.protocol, &self.valid_credentials[..])
+            .is_sufficient(self.protocol, &self.valid_credential_kinds())
         {
             CredentialPolicyResponse::Ok => AuthResult::Accepted {
                 user_info: self.user_info.clone(),
@@ -399,6 +536,89 @@ impl AuthState {
 mod tests {
     use super::*;
     use crate::Secret;
+    use crate::auth::{StoredCredentialFingerprint, StoredCredentialKind};
+
+    fn stored_credential(byte: u8) -> StoredCredential {
+        StoredCredential::new(
+            StoredCredentialKind::Password,
+            Uuid::from_u128(u128::from(byte)),
+            StoredCredentialFingerprint::of_stored_verifier([byte; 32].as_slice()),
+        )
+    }
+
+    fn fingerprints(byte: u8) -> StoredCredentials {
+        #[allow(clippy::expect_used)]
+        StoredCredentials::new(vec![stored_credential(byte)]).expect("non-empty")
+    }
+
+    fn identity() -> WebApprovalIdentity {
+        WebApprovalIdentity {
+            kind: ApprovalKind::Admin,
+            remote_ip: "10.0.0.1".parse().unwrap(),
+            protocol: Protocol::Ssh,
+            username: "someone".into(),
+            other_credentials: fingerprints(1),
+        }
+    }
+
+    /// The digest is what a remembered approval is matched by, so two sessions
+    /// differing in any part of their identity must not share one.
+    #[test]
+    fn every_part_of_the_identity_reaches_the_digest() {
+        let base = identity();
+        let differing = [
+            WebApprovalIdentity {
+                kind: ApprovalKind::User,
+                ..identity()
+            },
+            WebApprovalIdentity {
+                remote_ip: "10.0.0.2".parse().unwrap(),
+                ..identity()
+            },
+            WebApprovalIdentity {
+                protocol: Protocol::Http,
+                ..identity()
+            },
+            WebApprovalIdentity {
+                username: "someone-else".into(),
+                ..identity()
+            },
+            WebApprovalIdentity {
+                other_credentials: fingerprints(2),
+                ..identity()
+            },
+        ];
+
+        for altered in differing {
+            assert_ne!(
+                base.digest(),
+                altered.digest(),
+                "identities differing in one field must not share a digest: {altered:?}",
+            );
+        }
+    }
+
+    /// The whole point of the type: a session with nothing to pin a grant to
+    /// must produce no key, not a key that matches on origin and username
+    /// alone. A policy whose only factor is the approval itself lands here.
+    #[test]
+    fn an_empty_credential_set_is_not_remembered() {
+        assert_eq!(
+            RememberApprovalBy::from_credentials(vec![]),
+            RememberApprovalBy::Nothing
+        );
+        assert!(StoredCredentials::new(vec![]).is_none());
+    }
+
+    #[test]
+    fn credential_sets_key_the_same_whatever_the_order() {
+        let a = stored_credential(1);
+        let b = stored_credential(2);
+        assert_eq!(
+            StoredCredentials::new(vec![a, b, a]),
+            StoredCredentials::new(vec![b, a]),
+        );
+    }
 
     struct RequireAll(HashSet<CredentialKind>);
 
@@ -406,11 +626,10 @@ mod tests {
         fn is_sufficient(
             &self,
             _protocol: Protocol,
-            valid_credentials: &[AuthCredential],
+            valid_credentials: &HashSet<CredentialKind>,
         ) -> CredentialPolicyResponse {
-            let have: HashSet<CredentialKind> =
-                valid_credentials.iter().map(AuthCredential::kind).collect();
-            let needed: HashSet<CredentialKind> = self.0.difference(&have).copied().collect();
+            let needed: HashSet<CredentialKind> =
+                self.0.difference(valid_credentials).copied().collect();
             if needed.is_empty() {
                 CredentialPolicyResponse::Ok
             } else {
@@ -442,7 +661,7 @@ mod tests {
     async fn valid_credential_is_recorded() {
         let mut state = make_state(&[CredentialKind::Password]);
         let outcome = state
-            .submit_credential(password(), |_, _| async { Ok(true) })
+            .submit_credential(password(), |_, _| async { Ok(Some(stored_credential(1))) })
             .await
             .unwrap();
         assert!(outcome.is_valid());
@@ -454,7 +673,7 @@ mod tests {
     async fn invalid_credential_leaves_state_unchanged() {
         let mut state = make_state(&[CredentialKind::Password]);
         let outcome = state
-            .submit_credential(password(), |_, _| async { Ok(false) })
+            .submit_credential(password(), |_, _| async { Ok(None) })
             .await
             .unwrap();
         assert!(!outcome.is_valid());
@@ -472,11 +691,11 @@ mod tests {
     async fn invalid_extra_credential_keeps_accepted_state() {
         let mut state = make_state(&[CredentialKind::Password]);
         let _ = state
-            .submit_credential(password(), |_, _| async { Ok(true) })
+            .submit_credential(password(), |_, _| async { Ok(Some(stored_credential(1))) })
             .await
             .unwrap();
         let outcome = state
-            .submit_credential(password(), |_, _| async { Ok(false) })
+            .submit_credential(password(), |_, _| async { Ok(None) })
             .await
             .unwrap();
         assert!(!outcome.is_valid());
@@ -493,7 +712,7 @@ mod tests {
     async fn into_accepted_yields_user_only_on_valid_success() {
         let mut state = make_state(&[CredentialKind::Password]);
         let outcome = state
-            .submit_credential(password(), |_, _| async { Ok(true) })
+            .submit_credential(password(), |_, _| async { Ok(Some(stored_credential(1))) })
             .await
             .unwrap();
         assert!(outcome.into_accepted().is_ok());

@@ -17,6 +17,7 @@ use warpgate_core::{
     ConfigProvider, TargetAuthorization, TargetSessionStart, authorize_for_target,
 };
 
+use crate::approval_gate::resolve_admin_approval;
 use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
@@ -72,7 +73,7 @@ pub async fn catchall_endpoint(
         .await
         .start_target_session(authorization)
         .await;
-    let (target_session_id, approved) = match started {
+    let admitted = match started {
         Err(WarpgateError::UserSessionEnded) => {
             // got revoked in the meantime
             session.purge();
@@ -82,10 +83,12 @@ pub async fn catchall_endpoint(
         }
         Ok(TargetSessionStart::Started(started)) => started,
         Err(error) => return Err(error.into()),
-        Ok(TargetSessionStart::NeedsApproval) => {
-            return Ok(Response::builder()
-                .status(poem::http::StatusCode::SERVICE_UNAVAILABLE)
-                .body("Target approval required"));
+        Ok(TargetSessionStart::NeedsApproval(authorization)) => {
+            // Fail early, before we get to websocket
+            match resolve_admin_approval(req, &ctx, &handle, authorization).await? {
+                Ok(started) => started,
+                Err(response) => return Ok(response),
+            }
         }
     };
     let keepalive_guard = Data::<&SessionKeepalive>::from_request_without_body(req)
@@ -94,10 +97,10 @@ pub async fn catchall_endpoint(
         .map(|keepalive| keepalive.guard());
 
     // `session` field is UserSession, not this
-    let span = info_span!("", target_session=%target_session_id, target=%approved.target().name);
+    let span = info_span!("", target_session=%admitted.id(), target=%admitted.target().name);
 
     Ok(match ws {
-        Some(ws) => proxy_websocket_request(req, ws, &ctx, approved, close_rx)
+        Some(ws) => proxy_websocket_request(req, ws, &ctx, admitted, close_rx)
             .instrument(span)
             .await?
             .into_response(),
@@ -106,7 +109,7 @@ pub async fn catchall_endpoint(
             *ctx,
             body,
             *http_client_cache,
-            approved,
+            admitted,
             close_rx,
             keepalive_guard,
         )
@@ -137,6 +140,7 @@ async fn get_target_for_request(
         username,
         target_id,
         ticket_id,
+        ..
     }) = &ctx.auth
     {
         let Some(target) = config_provider.get_target_by_id(*target_id).await? else {

@@ -27,7 +27,7 @@ use warpgate_common::helpers::net::accept_loop;
 use warpgate_core::{Services, State, UserSessionStateInit};
 use warpgate_db_entities::Parameters;
 
-use crate::keys::load_keys;
+use crate::keys::load_host_keys;
 use crate::server::session_handle::SSHSessionHandle;
 
 #[derive(Clone)]
@@ -41,9 +41,8 @@ pub async fn bind_server(
     proxy_protocol: bool,
 ) -> Result<BoxFuture<'static, Result<()>>> {
     let russh_config_init = Arc::new({
-        let config = services.config.lock().await;
         RusshConfigInit {
-            keys: load_keys(&config, &services.global_params, "host")?,
+            keys: load_host_keys(&services.db).await?,
         }
     });
 
@@ -125,8 +124,14 @@ async fn _handle_connection(
         russh::server::Config {
             auth_rejection_time: Duration::from_secs(1),
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
-            // Extra time for the "closing due to inactivity" message to be sent
-            inactivity_timeout: Some(config.store.ssh.inactivity_timeout + Duration::from_secs(10)),
+            inactivity_timeout: Some(
+                config.store.ssh.inactivity_timeout
+                // There is no traffic during admin approval hold that would
+                // reset the inactivity timer, so the timeout needs to be at least that long
+                + services.admin_approval_timeout().await?
+                // Extra time for the "closing due to inactivity" message to be sent
+                + Duration::from_secs(10),
+            ),
             keepalive_interval: config.store.ssh.keepalive_interval,
             methods: get_allowed_auth_methods(&services).await?,
             keys: russh_config_init.keys.clone(),

@@ -10,6 +10,7 @@ use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::authorize_and_spend_ticket;
+use warpgate_db_entities::Ticket;
 
 use crate::common::SessionExt;
 
@@ -98,24 +99,40 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
 
         if let Some(ticket) = ticket_value {
             let ticket_secret = Secret::new(ticket);
-            let client_ip: Option<IpAddr> = get_client_ip(&req, ctx.services())
-                .await
-                .and_then(|s| s.parse().ok());
-            if let Some(authorization) = authorize_and_spend_ticket(
-                &ctx.services().db,
-                &ctx.services().login_protection,
-                &ticket_secret,
-                client_ip,
-                crate::common::PROTOCOL_NAME,
-            )
-            .await?
-            {
-                session.set_auth(SessionAuthorization::Ticket {
-                    user_id: authorization.user_info().id,
-                    username: authorization.user_info().username.clone(),
-                    target_id: authorization.target().id,
-                    ticket_id: authorization.ticket_id(),
-                });
+
+            let presented = Ticket::for_secret(&ctx.services().db, &ticket_secret).await?;
+            // Do not re-spend the ticket if it has authenticated the current session already
+            let already_this_ticket = matches!(
+                (session.get_auth(), presented),
+                (
+                    Some(SessionAuthorization::Ticket {
+                        ticket_id: Some(session_ticket),
+                        ..
+                    }),
+                    Some(presented),
+                ) if session_ticket == presented
+            );
+
+            if !already_this_ticket {
+                let client_ip: Option<IpAddr> = get_client_ip(&req, ctx.services())
+                    .await
+                    .and_then(|s| s.parse().ok());
+                if let Some(authorization) = authorize_and_spend_ticket(
+                    &ctx.services().db,
+                    &ctx.services().login_protection,
+                    &ticket_secret,
+                    client_ip,
+                    crate::common::PROTOCOL_NAME,
+                )
+                .await?
+                {
+                    session.set_auth(SessionAuthorization::Ticket {
+                        user_id: authorization.user_info().id,
+                        username: authorization.user_info().username.clone(),
+                        target_id: authorization.target().id,
+                        ticket_id: authorization.ticket_id(),
+                    });
+                }
             }
         }
 

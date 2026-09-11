@@ -6,10 +6,12 @@
 //! Only the message type and the protocol-specific `create_session`/event-loop differ,
 //! so those live in each crate; everything here is generic over the message type `M`.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
-use std::sync::Arc;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::futures::Notified;
@@ -17,8 +19,12 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-use warpgate_common::UserSessionId;
-use warpgate_core::{SessionHandle, WarpgateServerHandle};
+use warpgate_common::auth::RememberApprovalBy;
+use warpgate_common::{UserSessionId, WarpgateError};
+use warpgate_core::approvals::{admit_target_session, GatedConnection};
+use warpgate_core::{
+    AdmittedTarget, Services, SessionHandle, TargetAuthorization, WarpgateServerHandle,
+};
 use warpgate_db_entities::Target::TargetKind;
 
 /// Session grace period: how long a session lingers after the WebSocket drops before the
@@ -198,16 +204,65 @@ pub enum SessionAccess<S> {
     Forbidden,
 }
 
+/// Starts a target session, waiting for approval if needed
+pub async fn admit_web_client_session<O: Send + Sync>(
+    services: &Services,
+    server_handle: &Arc<Mutex<WarpgateServerHandle>>,
+    authorization: TargetAuthorization<O>,
+    remote_address: Option<SocketAddr>,
+) -> Result<AdmittedTarget<O>, WarpgateError> {
+    server_handle.lock().await.mark_provisional();
+
+    let admitted = admit_target_session(
+        services,
+        server_handle,
+        authorization,
+        GatedConnection {
+            remote_ip: remote_address.map(|address| address.ip()),
+            credentials: RememberApprovalBy::Nothing,
+        },
+    )
+    .await?;
+
+    server_handle.lock().await.confirm();
+    Ok(admitted)
+}
+
+/// Session slot guard, slots limit the number of parallel approval attempts
+#[must_use = "dropping the reservation immediately releases the slot it holds"]
+pub struct SessionSlot {
+    user_id: Uuid,
+    reservations: Arc<Mutex<HashMap<Uuid, usize>>>,
+}
+
+impl Drop for SessionSlot {
+    fn drop(&mut self) {
+        let user_id = self.user_id;
+        let reservations = self.reservations.clone();
+        tokio::spawn(async move {
+            if let Entry::Occupied(mut entry) = reservations.lock().await.entry(user_id) {
+                *entry.get_mut() -= 1;
+                if *entry.get() == 0 {
+                    entry.remove();
+                }
+            }
+        });
+    }
+}
+
 /// In-memory registry of live sessions, keyed by id. Each crate wraps this and adds its own
 /// protocol-specific `create_session`.
 pub struct ClientManager<S> {
     sessions: Arc<Mutex<HashMap<UserSessionId, Arc<S>>>>,
+    /// Setup slots for not yet running sessions
+    reservations: Arc<Mutex<HashMap<Uuid, usize>>>,
 }
 
 impl<S> Default for ClientManager<S> {
     fn default() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            reservations: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -217,6 +272,7 @@ impl<S> Clone for ClientManager<S> {
     fn clone(&self) -> Self {
         Self {
             sessions: self.sessions.clone(),
+            reservations: self.reservations.clone(),
         }
     }
 }
@@ -242,13 +298,32 @@ impl<S: ManagedSession> ClientManager<S> {
         SessionAccess::Granted(session)
     }
 
-    pub async fn count_for_user(&self, user_id: Uuid) -> usize {
-        self.sessions
+    /// Claim a future session slot for user
+    pub async fn reserve_slot(
+        &self,
+        user_id: Uuid,
+        max_per_user: usize,
+    ) -> Result<SessionSlot, WarpgateError> {
+        // Reservations lock before sessions lock
+        let mut reservations = self.reservations.lock().await;
+        let live = self
+            .sessions
             .lock()
             .await
             .values()
             .filter(|s| s.user_id() == user_id)
-            .count()
+            .count();
+
+        let claimed = reservations.entry(user_id).or_default();
+        if live + *claimed >= max_per_user {
+            return Err(WarpgateError::SessionLimitReached);
+        }
+        *claimed += 1;
+
+        Ok(SessionSlot {
+            user_id,
+            reservations: self.reservations.clone(),
+        })
     }
 
     pub async fn insert(&self, session: Arc<S>) {

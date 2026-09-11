@@ -57,9 +57,6 @@
             api.getTarget({ id: params.id }),
             api.listTargetGroups(),
         ])
-        if (target.options.kind === 'Postgres') {
-            target.options.protocolVersion ??= '3.2'
-        }
         return target
     }
 
@@ -522,6 +519,34 @@
                             </FormGroup>
                         </Section>
                     {/if}
+
+                    <Section id="access-control" title="Access control">
+                        <label
+                            for="requireApproval"
+                            class="d-flex align-items-center mb-2"
+                        >
+                            <Input
+                                id="requireApproval"
+                                class="mb-0 me-2"
+                                type="switch"
+                                on:change={() => {
+                                    target.requireApproval = !target.requireApproval
+                                    update()
+                                }}
+                                checked={target.requireApproval}
+                            />
+                            <div>
+                                Require administrator approval for each
+                                connection
+                            </div>
+                        </label>
+                        <small class="form-text text-muted">
+                            Sessions are held after authentication — including
+                            ticket connections — until an administrator approves
+                            them. HTTP and Kubernetes requests are refused with
+                            a retryable response until then.
+                        </small>
+                    </Section>
 
                     {#if $serverInfo?.ticketSelfServiceEnabled}
                         <Section
