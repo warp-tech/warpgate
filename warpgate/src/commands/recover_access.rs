@@ -15,7 +15,7 @@ pub async fn command(params: &GlobalParams, username: Option<&String>) -> Result
     assert_interactive_terminal();
 
     let config = load_config(params, true)?;
-    let services = Services::new(config.clone(), None, params.clone()).await?;
+    let services = Services::new_without_vault(config.clone(), None, params.clone()).await?;
     let keys_path = config.store.ssh.keys_path(params);
     warpgate_protocol_ssh::ensure_host_keys(&services.db, &keys_path).await?;
     warpgate_protocol_ssh::ensure_client_keys(&services.db, &keys_path).await?;

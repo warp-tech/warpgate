@@ -1303,6 +1303,7 @@ mod delivery {
             global_params: Arc::new(params),
             listener_status: Default::default(),
             admin_approval_request_tx: broadcast::channel(8).0,
+            vault: crate::vault_cell::VaultCell::new(None),
         }
     }
 

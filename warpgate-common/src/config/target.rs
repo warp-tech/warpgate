@@ -51,6 +51,8 @@ pub enum SSHTargetAuth {
     Password(SshTargetPasswordAuth),
     #[serde(rename = "publickey")]
     PublicKey(SshTargetPublicKeyAuth),
+    #[serde(rename = "certificate")]
+    Certificate(SshTargetCertificateAuth),
     #[serde(rename = "iam_role")]
     IamRole(SshTargetIamRoleAuth),
 }
@@ -66,6 +68,80 @@ pub struct SshTargetPublicKeyAuth {
     /// marked default.
     #[serde(default)]
     pub key_id: Option<Uuid>,
+}
+
+/// Whether a Vault mount or role name is one Vault can address.
+///
+/// The rule lives here rather than in `warpgate-vault` because two crates need
+/// it and only one of them can hold a Vault client: the admin API accepts a
+/// role at save time, and accepting one the signing path would reject at
+/// connect time leaves the operator to learn of the typo from a broken session
+/// rather than from the form that took it.
+#[must_use]
+pub fn vault_name_is_well_formed(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct SshTargetCertificateAuth {
+    /// Vault signing role for this target; `None` uses the configured default
+    /// role. The role is what constrains which principals may be requested, so
+    /// targets of differing privilege belong to differing roles.
+    #[serde(default)]
+    pub role: Option<String>,
+
+    /// Critical options this target's certificates may carry.
+    ///
+    /// Anything not listed here is refused, because the target's sshd enforces
+    /// whatever arrives: a `force-command` decides what the session runs, under
+    /// the connecting user's own principal and key ID.
+    ///
+    /// Pinning a `value` also makes the option **mandatory** — a certificate
+    /// without it is refused. Otherwise someone who can write the Vault role
+    /// but not sign with it removes the pinned `force-command` instead of
+    /// adding an option, and a target locked to one command hands out a shell.
+    /// A bare name only permits, which is how a role that sometimes sets an
+    /// option is expressed.
+    #[serde(default)]
+    #[oai(default)]
+    pub allowed_critical_options: Vec<SshCertificateCriticalOption>,
+
+    /// Certificate extensions this target's certificates may carry.
+    ///
+    /// A separate authorization mechanism from critical options, and the one
+    /// that decides what a session can *do* rather than what it runs. OpenSSH
+    /// opens `direct-tcpip` only for `permit-port-forwarding` and reaches the
+    /// connecting user's own SSH agent only for `permit-agent-forwarding`, both
+    /// judged purely on what the certificate carries. So a pinned
+    /// `force-command` does not confine a session on its own: it governs the
+    /// shell and exec channels and nothing else.
+    ///
+    /// Defaults to `permit-pty` alone — enough for an interactive session and
+    /// nothing more. Anything else has to be named here, because the alternative
+    /// is that a Vault role's `default_extensions`, set deliberately or written
+    /// by someone with role-write and no signing right, silently grants
+    /// forwarding on a target that was supposed to be locked down.
+    #[serde(default = "_default_allowed_extensions")]
+    #[oai(default = "_default_allowed_extensions")]
+    pub allowed_extensions: Vec<String>,
+}
+
+fn _default_allowed_extensions() -> Vec<String> {
+    vec!["permit-pty".to_owned()]
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct SshCertificateCriticalOption {
+    /// Option name as it appears in the certificate, e.g. `force-command`.
+    pub name: String,
+
+    /// The exact value required. Unset accepts any value for this name — worth
+    /// avoiding for `force-command`, whose value is the command that runs.
+    #[serde(default)]
+    pub value: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
