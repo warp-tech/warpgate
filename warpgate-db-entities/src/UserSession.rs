@@ -72,7 +72,7 @@ impl EndedTargetSessions {
             return;
         };
         for child in &self.children {
-            TargetSession::emit_ended(child, user_id, &username);
+            TargetSession::emit_ended_audit_event(child, user_id, &username);
         }
     }
 }
@@ -173,4 +173,3 @@ pub async fn revoke_all(db: &DatabaseConnection) -> Result<(), WarpgateError> {
     }
     Ok(())
 }
-

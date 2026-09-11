@@ -12,7 +12,7 @@ use defaults::{
     _default_http_listen, _default_kubernetes_listen, _default_mysql_advertised_version,
     _default_mysql_listen, _default_postgres_listen, _default_rdp_listen, _default_recordings_path,
     _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
-    _default_ssh_keys_path, _default_ssh_listen, _default_vnc_listen,
+    _default_ssh_listen, _default_vnc_listen,
 };
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
@@ -28,7 +28,7 @@ use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
 use crate::helpers::ipnet::WarpgateIpNet;
 use crate::helpers::otp::OtpSecretKey;
-use crate::{ListenEndpoint, Secret};
+use crate::{GlobalParams, ListenEndpoint, Secret};
 
 #[derive(Debug, Clone, PartialEq, Eq, Union)]
 #[oai(discriminator_name = "kind", one_of)]
@@ -85,21 +85,26 @@ impl UserAuthCredential {
     }
 }
 
+/// Coerce [] to None
+fn credential_entry_is_unset(entry: &Option<Vec<CredentialKind>>) -> bool {
+    entry.as_ref().is_none_or(Vec::is_empty)
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct UserRequireCredentialsPolicy {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub http: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub kubernetes: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub ssh: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub mysql: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub postgres: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub vnc: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub rdp: Option<Vec<CredentialKind>>,
 }
 
@@ -199,6 +204,7 @@ pub struct AdminRole {
 
     pub sessions_view: bool,
     pub sessions_terminate: bool,
+    pub approve_sessions: bool,
 
     pub recordings_view: bool,
 
@@ -227,6 +233,7 @@ pub enum AdminPermission {
     AccessRolesAssign,
     SessionsView,
     SessionsTerminate,
+    ApproveSessions,
     RecordingsView,
     TicketsCreate,
     TicketsDelete,
@@ -250,6 +257,7 @@ impl AdminRole {
             AdminPermission::AccessRolesAssign => self.access_roles_assign,
             AdminPermission::SessionsView => self.sessions_view,
             AdminPermission::SessionsTerminate => self.sessions_terminate,
+            AdminPermission::ApproveSessions => self.approve_sessions,
             AdminPermission::RecordingsView => self.recordings_view,
             AdminPermission::TicketsCreate => self.tickets_create,
             AdminPermission::TicketsDelete => self.tickets_delete,
@@ -341,6 +349,7 @@ mod admin_permission_set_tests {
             access_roles_assign: false,
             sessions_view: false,
             sessions_terminate: false,
+            approve_sessions: false,
             recordings_view: false,
             tickets_create: false,
             tickets_delete: false,
@@ -430,8 +439,10 @@ pub struct SshConfig {
     #[serde(default)]
     pub external_host: Option<String>,
 
-    #[serde(default = "_default_ssh_keys_path")]
-    pub keys: String,
+    /// Legacy directory for the SSH host keys (`host-ed25519`, `host-rsa`).
+    /// If set, key files are re-imported into the database, after which the option can be removed from the config.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<String>,
 
     /// Only seeds the `ssh_host_key_verification` parameter when the database
     /// row is first created; the admin UI owns the setting afterwards.
@@ -453,7 +464,7 @@ impl Default for SshConfig {
             enable: false,
             listen: _default_ssh_listen(),
             proxy_protocol: false,
-            keys: _default_ssh_keys_path(),
+            keys: None,
             host_key_verification: <_>::default(),
             external_port: None,
             external_host: None,
@@ -470,6 +481,12 @@ impl SshConfig {
 
     pub fn external_host(&self) -> Option<String> {
         self.external_host.clone()
+    }
+
+    pub fn keys_path(&self, params: &GlobalParams) -> PathBuf {
+        params
+            .paths_relative_to()
+            .join(self.keys.as_deref().unwrap_or("./data/keys"))
     }
 }
 

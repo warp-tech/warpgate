@@ -10,7 +10,7 @@ pub async fn command(params: &GlobalParams, steps: i32) -> Result<()> {
     let config = load_config(params, true)?;
     let connection = connect_to_db(&config, params).await?;
 
-    set_config_migration_values(ConfigMigrationValues::from_config(&config));
+    set_config_migration_values(ConfigMigrationValues::from_config(&config, params)?);
 
     let steps_abs = steps.unsigned_abs();
     if steps < 0 {

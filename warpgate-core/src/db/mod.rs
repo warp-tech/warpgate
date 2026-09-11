@@ -102,7 +102,7 @@ pub async fn connect_to_db_and_migrate(
     // so the migrations can copy them into the DB; afterwards the config file's
     // copies are ignored.
     warpgate_db_entities::Parameters::set_config_migration_values(
-        ConfigMigrationValues::from_config(config),
+        ConfigMigrationValues::from_config(config, params)?,
     );
     migrate_database(&connection).await?;
     Ok(connection)
@@ -132,9 +132,13 @@ pub async fn cleanup_db(
     retention: &Duration,
     audit_retention: &Duration,
 ) -> Result<()> {
-    use warpgate_db_entities::{LogEntry, Recording, Ticket, TicketRequest};
+    use warpgate_db_entities::{
+        LogEntry, Recording, SessionApprovalRequest, Ticket, TicketRequest,
+    };
     let audit_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*audit_retention)?;
     let recording_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*retention)?;
+
+    SessionApprovalRequest::delete_all_before(db, audit_cutoff).await?;
 
     LogEntry::Entity::delete_many()
         .filter(Expr::col(LogEntry::Column::Target).eq("audit"))

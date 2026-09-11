@@ -7,6 +7,7 @@
     import Brand from 'common/Brand.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import RequestsButton from 'common/RequestsButton.svelte'
     import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { get } from 'svelte/store'
@@ -42,6 +43,24 @@
             push(`/login?next=${encodeURIComponent(url)}`)
             return false
         }
+        if (
+            get(serverInfo)?.needsMfaSetup &&
+            detail.location !== '/mfa-setup'
+        ) {
+            push('/mfa-setup')
+            return false
+        }
+        return true
+    }
+
+    async function requireMfaSetupPending(detail: RouteDetail) {
+        if (!(await requireLogin(detail))) {
+            return false
+        }
+        if (!get(serverInfo)?.needsMfaSetup) {
+            push('/')
+            return false
+        }
         return true
     }
 
@@ -68,6 +87,10 @@
         '/ticket-requests': wrap({
             asyncComponent: () => import('./TicketRequests.svelte'),
             conditions: [requireLogin],
+        }),
+        '/mfa-setup': wrap({
+            asyncComponent: () => import('./MfaSetup.svelte'),
+            conditions: [requireMfaSetupPending],
         }),
         '/login': wrap({
             asyncComponent: () => import('./Login.svelte'),
@@ -125,7 +148,7 @@
                 </a>
 
                 <div class="ms-auto d-flex align-items-center">
-                    {#if $hasAdminAccess}
+                    {#if $hasAdminAccess && !$serverInfo?.needsMfaSetup}
                         <a
                             href="/@warpgate/admin"
                             class="btn btn-warning btn-sm d-flex align-items-center gap-1 me-3"
@@ -139,7 +162,9 @@
                 </div>
             </div>
 
-            {#if !doNotShowAuthRequests}
+            {#if !doNotShowAuthRequests && !$serverInfo?.needsMfaSetup}
+                <RequestsButton class="mb-4" />
+
                 {#each webAuthRequests as authRequest (authRequest.id)}
                     <Button
                         color="success"

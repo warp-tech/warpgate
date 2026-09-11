@@ -9,7 +9,7 @@ use warpgate_tls::TlsCertificateAndPrivateKey;
 mod client;
 mod server;
 
-pub use client::{VncClientHandles, connect};
+pub use client::connect;
 pub use server::bind_server;
 
 pub const PROTOCOL_NAME: Protocol = Protocol::Vnc;

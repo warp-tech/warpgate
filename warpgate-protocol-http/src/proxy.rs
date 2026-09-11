@@ -27,7 +27,7 @@ use warpgate_common_http::logging::{get_client_ip, log_request_result};
 use warpgate_common_http::{
     AuthenticatedRequestContext, SessionAuthorization, SessionKeepalive, SessionKeepaliveGuard,
 };
-use warpgate_core::ApprovedTarget;
+use warpgate_core::AdmittedTarget;
 use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
@@ -184,10 +184,8 @@ fn copy_client_response<R: SomeResponse>(
 }
 
 fn rewrite_request<B: SomeRequestBuilder>(mut req: B, options: &TargetHTTPOptions) -> Result<B> {
-    if let Some(ref headers) = options.headers {
-        for (k, v) in headers {
-            req = req.set_header(HeaderName::try_from(k)?, HeaderValue::try_from(v)?);
-        }
+    for (k, v) in &options.headers {
+        req = req.set_header(HeaderName::try_from(k)?, HeaderValue::try_from(v)?);
     }
     Ok(req)
 }
@@ -320,17 +318,18 @@ pub async fn proxy_normal_request(
     ctx: &AuthenticatedRequestContext,
     body: Body,
     client_cache: &HttpClientCache,
-    approved: ApprovedTarget<TargetHTTPOptions>,
+    admitted: AdmittedTarget<TargetHTTPOptions>,
     mut close_rx: broadcast::Receiver<()>,
     keepalive_guard: Option<SessionKeepaliveGuard>,
 ) -> poem::Result<Response> {
-    let (_, target) = approved.into_parts();
-    let (target, options) = target.into_parts();
+    let options = admitted.specific_target().options().clone();
     let uri = construct_uri(req, &options, false)?;
 
     tracing::debug!("URI: {:?}", uri);
 
-    let client = client_cache.client_for(&target.name, &options).await?;
+    let client = client_cache
+        .client_for(&admitted.target().name, &options)
+        .await?;
 
     let (authorization_header, uri) = extract_basic_auth(uri)?;
 
@@ -471,11 +470,10 @@ pub async fn proxy_websocket_request(
     req: &Request,
     ws: WebSocket,
     ctx: &AuthenticatedRequestContext,
-    approved: ApprovedTarget<TargetHTTPOptions>,
+    admitted: AdmittedTarget<TargetHTTPOptions>,
     close_rx: broadcast::Receiver<()>,
 ) -> poem::Result<impl IntoResponse> {
-    let (_, target) = approved.into_parts();
-    let (_, options) = target.into_parts();
+    let options = admitted.specific_target().options().clone();
     let uri = construct_uri(req, &options, true)?;
     proxy_ws_inner(req, ws, uri.clone(), ctx, options, close_rx)
         .await
@@ -700,7 +698,7 @@ mod tests {
         TargetHTTPOptions {
             url: url.to_string(),
             tls: Default::default(),
-            headers: None,
+            headers: Default::default(),
             external_host: None,
         }
     }
@@ -708,10 +706,10 @@ mod tests {
     #[test]
     fn rewrite_request_replaces_websocket_host() {
         let mut options = make_options("http://ingress.internal");
-        options.headers = Some(std::collections::HashMap::from([(
+        options.headers = std::collections::HashMap::from([(
             "Host".to_string(),
             "backend.example.com".to_string(),
-        )]));
+        )]);
 
         let request = rewrite_request(
             http::Request::builder().header(http::header::HOST, "ingress.internal"),

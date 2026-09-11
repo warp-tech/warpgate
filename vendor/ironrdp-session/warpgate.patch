@@ -1,6 +1,14 @@
 --- ironrdp-session-0.11.0/src/active_stage.rs
 +++ base/src/active_stage.rs
-@@ -229,10 +229,11 @@
+@@ -11,6 +11,7 @@
+ use ironrdp_pdu::rdp::client_info::CompressionType as PduCompressionType;
+ use ironrdp_pdu::rdp::headers::ShareDataPdu;
+ use ironrdp_pdu::rdp::multitransport::MultitransportRequestPdu;
++use ironrdp_pdu::rdp::session_info::SaveSessionInfoPdu;
+ use ironrdp_pdu::slow_path::{self, GraphicsUpdateType};
+ use ironrdp_pdu::{Action, mcs};
+ use ironrdp_svc::{StaticChannelSet, SvcMessage, SvcProcessor, SvcProcessorMessages};
+@@ -229,10 +230,11 @@
          self.fast_path_processor = processor;
      }
 
@@ -13,6 +21,25 @@
      }
 
      pub fn set_enable_server_pointer(&mut self, enable_server_pointer: bool) {
+@@ -369,6 +371,10 @@
+     ///
+     /// [\[MS-RDPBCGR\] 2.2.14.1.5]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/228ffc5c-b60c-4d3e-9781-ac613f822fdf
+     AutoDetect(AutoDetectRequest),
++    /// The server reported that the session logged on ([MS-RDPBCGR] 2.2.10.1). Before this
++    /// arrives the session is at the target's own sign-in screen; the PDU optionally names
++    /// the account that was logged on.
++    SaveSessionInfo(SaveSessionInfoPdu),
+ }
+
+ impl TryFrom<x224::ProcessorOutput> for ActiveStageOutput {
+@@ -392,6 +398,7 @@
+             x224::ProcessorOutput::DeactivateAll => Ok(Self::DeactivateAll),
+             x224::ProcessorOutput::MultitransportRequest(pdu) => Ok(Self::MultitransportRequest(pdu)),
+             x224::ProcessorOutput::AutoDetect(request) => Ok(Self::AutoDetect(request)),
++            x224::ProcessorOutput::SaveSessionInfo(pdu) => Ok(Self::SaveSessionInfo(pdu)),
+             // GraphicsUpdate and PointerUpdate are consumed in ActiveStage::process()
+             // before reaching this conversion.
+             x224::ProcessorOutput::GraphicsUpdate(_) | x224::ProcessorOutput::PointerUpdate(_) => Err(
 --- ironrdp-session-0.11.0/src/fast_path.rs
 +++ base/src/fast_path.rs
 @@ -21,6 +21,32 @@
@@ -59,7 +86,7 @@
      pub fn update_mouse_pos(&mut self, x: u16, y: u16) {
          self.mouse_pos_update = Some((x, y));
      }
-@@ -192,6 +218,22 @@
+@@ -192,6 +222,22 @@
              trace!("{update:?}");
              buf.clear();
 
@@ -82,7 +109,7 @@
              // Bitmap data is either compressed or uncompressed, depending
              // on whether the BITMAP_COMPRESSION flag is present in the
              // flags field.
-@@ -211,7 +253,10 @@
+@@ -211,7 +257,10 @@
                          usize::from(update.width),
                          usize::from(update.height),
                      ) {
@@ -94,7 +121,7 @@
                          Err(err) => {
                              warn!("Invalid RDP6_BITMAP_STREAM: {err}");
                              update.rectangle.clone()
-@@ -230,11 +275,25 @@
+@@ -230,11 +279,25 @@
                          usize::from(update.height),
                          usize::from(update.bits_per_pixel),
                      ) {
@@ -124,7 +151,7 @@
                          }
 
                          Err(e) => {
-@@ -251,46 +310,18 @@
+@@ -251,46 +314,18 @@
                  trace!("Uncompressed raw bitmap");
 
                  let bpp = usize::from(update.bits_per_pixel);
@@ -184,7 +211,26 @@
              };
 --- ironrdp-session-0.11.0/src/x224/mod.rs
 +++ base/src/x224/mod.rs
-@@ -146,6 +146,35 @@
+@@ -5,6 +5,7 @@
+ use ironrdp_pdu::rdp::headers::ShareDataPdu;
+ use ironrdp_pdu::rdp::multitransport::MultitransportRequestPdu;
+ use ironrdp_pdu::rdp::server_error_info::{ErrorInfo, ProtocolIndependentCode, ServerSetErrorInfoPdu};
++use ironrdp_pdu::rdp::session_info::SaveSessionInfoPdu;
+ use ironrdp_pdu::x224::X224;
+ use ironrdp_svc::{StaticChannelSet, SvcMessage, SvcProcessor, SvcProcessorMessages, client_encode_svc_messages};
+ use tracing::debug;
+@@ -45,6 +46,10 @@
+     /// Slow-path pointer update ([MS-RDPBCGR] 2.2.9.1.1.4).
+     /// Raw pointer payload starting with `messageType(u16) + pad(u16)`.
+     PointerUpdate(Vec<u8>),
++    /// Server Save Session Info PDU ([MS-RDPBCGR] 2.2.10.1): the server reporting that the
++    /// session has logged on, optionally naming the account it logged on as. Until it
++    /// arrives, the session is sitting at the target's own sign-in screen.
++    SaveSessionInfo(SaveSessionInfoPdu),
+ }
+
+ #[derive(Debug, Clone)]
+@@ -146,6 +151,35 @@
      fn process_io_channel(&self, data_ctx: SendDataIndicationCtx<'_>) -> SessionResult<Vec<ProcessorOutput>> {
          debug_assert_eq!(data_ctx.channel_id, self.io_channel_id);
 
@@ -220,7 +266,16 @@
          let io_channel = ironrdp_pdu::rdp::headers::decode_io_channel(data_ctx).map_err(SessionError::decode)?;
 
          match io_channel {
-@@ -279,6 +308,55 @@
+@@ -153,7 +187,7 @@
+                 match ctx.pdu {
+                     ShareDataPdu::SaveSessionInfo(session_info) => {
+                         debug!("Got Session Save Info PDU: {session_info:?}");
+-                        Ok(Vec::new())
++                        Ok(vec![ProcessorOutput::SaveSessionInfo(session_info)])
+                     }
+                     // FIXME: workaround fix to not terminate the session on "unhandled PDU: Set Keyboard Indicators PDU"
+                     ShareDataPdu::SetKeyboardIndicators(data) => {
+@@ -279,6 +313,55 @@
      }
  }
 

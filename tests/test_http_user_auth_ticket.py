@@ -22,8 +22,12 @@ class TestHTTPUserAuthTicket:
             api.add_user_role(user.id, role.id)
             echo_target = api.create_target(sdk.TargetDataRequest(
                 name=f"echo-{uuid4()}",
+                require_approval=False,
+                ticket_requests_disabled=False,
+                ticket_require_approval=False,
                 options=sdk.TargetOptions(sdk.TargetOptionsTargetHTTPOptions(
                     kind="Http",
+                    headers={},
                     url=f"http://localhost:{echo_server_port}",
                     tls=sdk.Tls(
                         mode=sdk.TlsMode.DISABLED,
@@ -36,9 +40,13 @@ class TestHTTPUserAuthTicket:
             other_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"other-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetHTTPOptions(
                             kind="Http",
+                            headers={},
                             url="http://badhost",
                             tls=sdk.Tls(
                                 mode=sdk.TlsMode.DISABLED,

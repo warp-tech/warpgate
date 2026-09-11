@@ -84,6 +84,9 @@ pub async fn bind_server(
                     let span =
                         info_span!("VNC", session=%server_handle.lock().await.user_session_id());
 
+                    // The outcome logs run in the span too: anything logged outside it is
+                    // not attributed to the session. They are synchronous, so they enter the
+                    // span directly rather than nesting another future in this one.
                     tokio::select! {
                         result = handle_connection(
                             services,
@@ -91,13 +94,13 @@ pub async fn bind_server(
                             viewer_stream,
                             tls_config,
                             remote_address,
-                        ).instrument(span) => match result {
+                        ).instrument(span.clone()) => span.in_scope(|| match result {
                             Ok(()) => info!("Session ended"),
                             Err(error) => error!(%error, "Session failed"),
-                        },
-                        _ = abort_rx.recv() => {
+                        }),
+                        _ = abort_rx.recv() => span.in_scope(|| {
                             warn!("Session aborted by admin");
-                        }
+                        }),
                     }
                     Ok(())
                 }
@@ -269,14 +272,23 @@ async fn negotiate_and_authorize(
         DesktopAuthOutcome::Failed => return Ok(None),
     };
 
-    let (target_session_id, approved) = server_handle
-        .lock()
-        .await
-        .start_target_session(authorization)
-        .await?
-        .admitted()?;
+    // The viewer is held under the hold screen for the whole gate: VNC only paints when
+    // asked, so without it the viewer's frame requests would go unanswered and its screen
+    // would sit frozen for as long as the administrator takes to decide.
+    let admitted = render_while(
+        &mut viewer_wr,
+        &mut events_rx,
+        &mut render,
+        warpgate_desktop_auth::admit_desktop_session(
+            services,
+            server_handle,
+            authorization,
+            Some(remote_address.ip()),
+        ),
+    )
+    .await??;
 
-    info!(target=%approved.target().name, "Authorized");
+    info!(target=%admitted.target().name, "Authorized");
 
     show_banner(&mut viewer_wr, &mut events_rx, &mut render, services).await?;
 
@@ -284,13 +296,12 @@ async fn negotiate_and_authorize(
     // Either way the session takes the same decode-and-re-encode path below, so the
     // interactive-auth / connecting screens (which render into the viewer framebuffer)
     // keep working and the viewer never needs a JPEG decoder.
-    let recorder =
-        warpgate_desktop_auth::start_recording(services, &target_session_id, "vnc").await;
+    let recorder = warpgate_desktop_auth::start_recording(services, &admitted.id(), "vnc").await;
 
     // A single backend client connection decodes every update (Tight/JPEG included, see
     // PROXY_ENCODINGS); we both record it and re-encode it toward the viewer as RFB Raw.
-    debug!(host = %approved.options().host, port = approved.options().port, "connecting to backend");
-    let mut backend = crate::client::connect_for_proxy(approved)?;
+    debug!(host = %admitted.options().host, port = admitted.options().port, "connecting to backend");
+    let mut backend = crate::client::connect_for_proxy(admitted)?;
 
     // Wait under the hold screen for the backend's initial geometry, recording every
     // event consumed so nothing is dropped from the recording.
@@ -332,7 +343,7 @@ struct ProxySession {
     reader: tokio::task::JoinHandle<Result<tokio::io::ReadHalf<Box<dyn ViewerStream>>>>,
     stop_tx: oneshot::Sender<()>,
     render: RenderState,
-    backend: crate::client::VncClientHandles,
+    backend: warpgate_core::DesktopClientHandles,
     recorder: Option<DesktopRecorder>,
 }
 

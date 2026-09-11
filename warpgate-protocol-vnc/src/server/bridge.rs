@@ -118,10 +118,11 @@ pub(super) async fn run_proxy_session(session: ProxySession) -> Result<()> {
         backend,
         recorder,
     } = session;
-    let crate::client::VncClientHandles {
+    let warpgate_core::DesktopClientHandles {
         mut event_rx,
         input_tx,
         abort_tx,
+        logon_state: _,
     } = backend;
 
     let mut queue: VecDeque<DesktopEvent> = VecDeque::new();

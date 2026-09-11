@@ -24,6 +24,7 @@ macro_rules! with_every_entity {
             Recording,
             Role,
             SessionCommand,
+            SessionApprovalRequest,
             SshClientKey,
             SsoCredential,
             Target,

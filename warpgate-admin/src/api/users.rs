@@ -100,10 +100,9 @@ impl ListApi {
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(body.username.clone()),
-            credential_policy: Set(
-                serde_json::to_value(UserRequireCredentialsPolicy::default())
-                    .map_err(WarpgateError::from)?,
-            ),
+            credential_policy: Set(serde_json::to_value(
+                admin.parameters().await?.default_credential_policy()?,
+            )?),
             description: Set(body.description.clone().unwrap_or_default()),
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(None),

@@ -5,6 +5,7 @@
         faTerminal,
     } from '@fortawesome/free-solid-svg-icons'
     import {
+        Alert,
         Button,
         Dropdown,
         DropdownItem,
@@ -19,6 +20,7 @@
     import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import EmptyState from 'common/EmptyState.svelte'
+    import { stringifyError } from 'common/errors'
     import GettingStarted from 'common/GettingStarted.svelte'
     import { resolveGroup } from 'common/groups'
     import ItemList, {
@@ -47,6 +49,11 @@
     import { openWebDesktopSession, openWebSshSession } from './lib/webSessions'
 
     let instructionsTarget: TargetSnapshot | undefined = $state()
+    // The target an in-browser session is being opened for. Opening one can
+    // take as long as an administrator takes to approve it, and until then
+    // there is nothing else on screen to say the click did anything.
+    let openingTarget: TargetSnapshot | undefined = $state()
+    let openError: string | undefined = $state()
 
     const canEditTargets = $derived(
         $serverInfo?.adminPermissions?.targetsEdit ?? false,
@@ -119,7 +126,7 @@
             ) {
                 instructionsTarget = target
             } else {
-                openWebSshSession(target.id)
+                void openInBrowser(target, () => openWebSshSession(target.id))
             }
         } else if (
             target.kind === TargetKind.Vnc ||
@@ -132,6 +139,24 @@
             }
         } else {
             instructionsTarget = target
+        }
+    }
+
+    // A target that needs administrator approval holds this until someone
+    // decides, and answers 403 if they say no — so it needs both a sign that
+    // it is in progress and somewhere for the refusal to land.
+    async function openInBrowser(
+        target: TargetSnapshot,
+        open: () => void | Promise<void>,
+    ) {
+        openError = undefined
+        openingTarget = target
+        try {
+            await open()
+        } catch (err) {
+            openError = await stringifyError(err)
+        } finally {
+            openingTarget = undefined
         }
     }
 
@@ -157,6 +182,17 @@
 
 {#if $serverInfo?.setupState}
     <GettingStarted setupState={$serverInfo?.setupState} />
+{/if}
+
+{#if openingTarget}
+    <Alert color="info">
+        Connecting to {openingTarget.name}. If this target needs approval, it
+        will start once an administrator approves it.
+    </Alert>
+{/if}
+
+{#if openError}
+    <Alert color="danger">{openError}</Alert>
 {/if}
 
 <ItemList
@@ -271,7 +307,8 @@
                     {#if target.kind === TargetKind.Ssh && webClientsEnabled}
                         <DropdownItem
                             onclick={e => {
-                            openWebSshSession(target.id)
+                            void openInBrowser(target, () =>
+                                openWebSshSession(target.id))
                             e.preventDefault()
                             e.stopPropagation()
                         }}
@@ -342,7 +379,8 @@
             <Button
                 color="primary"
                 class="d-flex align-items-center justify-content-center gap-2 modal-button"
-                onclick={() => openWebSshSession(sshTarget.id)}
+                onclick={() => openInBrowser(sshTarget, () =>
+                    openWebSshSession(sshTarget.id))}
             >
                 <Fa icon={faTerminal} />
                 Web terminal

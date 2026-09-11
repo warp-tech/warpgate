@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.28.4-7-gaf79537e-modified"
+    "version": "v0.28.5-14-g4f033556-modified"
   },
   "servers": [
     {
@@ -224,14 +224,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -268,14 +261,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -694,6 +680,9 @@
           "401": {
             "description": ""
           },
+          "403": {
+            "description": ""
+          },
           "404": {
             "description": ""
           }
@@ -737,6 +726,9 @@
           },
           "401": {
             "description": ""
+          },
+          "403": {
+            "description": ""
           }
         },
         "security": [
@@ -773,6 +765,9 @@
             "description": ""
           },
           "401": {
+            "description": ""
+          },
+          "403": {
             "description": ""
           },
           "404": {
@@ -1647,6 +1642,7 @@
           "access_roles_assign",
           "sessions_view",
           "sessions_terminate",
+          "approve_sessions",
           "recordings_view",
           "tickets_create",
           "tickets_delete",
@@ -1691,6 +1687,9 @@
           "sessions_terminate": {
             "type": "boolean"
           },
+          "approve_sessions": {
+            "type": "boolean"
+          },
           "recordings_view": {
             "type": "boolean"
           },
@@ -1727,6 +1726,15 @@
           "IpRejected"
         ]
       },
+      "ApprovalScope": {
+        "type": "string",
+        "description": "\"Remember decision\" scope for approvals",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
+      },
       "ApproveAuthRequest": {
         "type": "object",
         "title": "ApproveAuthRequest",
@@ -1735,7 +1743,7 @@
         ],
         "properties": {
           "scope": {
-            "$ref": "#/components/schemas/WebApprovalScope"
+            "$ref": "#/components/schemas/ApprovalScope"
           }
         }
       },
@@ -2108,7 +2116,6 @@
         "required": [
           "ports",
           "password_login_mode",
-          "minimize_password_login",
           "authorized_via_ticket",
           "authorized_via_sso_with_single_logout",
           "own_credential_management_allowed",
@@ -2119,6 +2126,8 @@
           "open_targets_in_new_tab",
           "web_clients_enabled",
           "has_ldap",
+          "needs_mfa_setup",
+          "otp_setup_enforced",
           "should_prompt_analytics",
           "banner",
           "show_session_menu"
@@ -2144,10 +2153,6 @@
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
-          },
-          "minimize_password_login": {
-            "type": "boolean",
-            "description": "Deprecated in 0.26: superseded by `password_login_mode`"
           },
           "authorized_via_ticket": {
             "type": "boolean"
@@ -2189,6 +2194,12 @@
             "type": "boolean"
           },
           "has_ldap": {
+            "type": "boolean"
+          },
+          "needs_mfa_setup": {
+            "type": "boolean"
+          },
+          "otp_setup_enforced": {
             "type": "boolean"
           },
           "setup_state": {
@@ -2859,15 +2870,6 @@
             }
           }
         }
-      },
-      "WebApprovalScope": {
-        "type": "string",
-        "description": "How an web approval should be remembered for bypass",
-        "enum": [
-          "Once",
-          "Target",
-          "AllTargets"
-        ]
       },
       "WebDesktopSessionCreated": {
         "type": "object",

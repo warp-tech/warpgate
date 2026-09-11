@@ -13,6 +13,9 @@
         '/commands': wrap({
             asyncComponent: () => import('./Commands.svelte'),
         }),
+        '/requests': wrap({
+            asyncComponent: () => import('./Requests.svelte'),
+        }),
         '/login-protection': wrap({
             asyncComponent: () => import('./LoginProtection.svelte'),
         }),
@@ -31,7 +34,6 @@
             description="Active and past connections"
             href="/status/sessions"
         />
-
         <NavListItem
             small
             class="mb-2"
@@ -39,7 +41,13 @@
             description="Search shell commands recorded in SSH sessions"
             href="/status/commands"
         />
-
+        <NavListItem
+            small
+            class="mb-2"
+            title="Requests"
+            description="Users awaiting your action"
+            href="/status/requests"
+        />
         <NavListItem
             small
             class="mb-2"
@@ -47,7 +55,6 @@
             description="View blocked IPs and locked users"
             href="/status/login-protection"
         />
-
         <NavListItem
             small
             class="mb-2"

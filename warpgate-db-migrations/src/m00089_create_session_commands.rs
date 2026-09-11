@@ -6,7 +6,7 @@ pub mod session_command {
     use time::OffsetDateTime;
     use uuid::Uuid;
 
-    use crate::m00083_create_session_commands::target_session;
+    use crate::m00089_create_session_commands::target_session;
 
     #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
     #[sea_orm(table_name = "session_commands")]
