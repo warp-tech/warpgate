@@ -45,6 +45,7 @@ url.workspace = true
 uuid.workspace = true
 vt100 = "0.16"
 warpgate-aws = { path = "../warpgate-aws" }
+warpgate-azure = { path = "../warpgate-azure" }
 warpgate-ca = { path = "../warpgate-ca" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-common-cache = { path = "../warpgate-common-cache" }
