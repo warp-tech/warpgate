@@ -65,6 +65,7 @@ struct ParameterValues {
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
     pub ssh_host_key_verification: Parameters::SshHostKeyVerificationMode,
+    pub ssh_show_qr_code: bool,
     pub password_login_mode: Parameters::PasswordLoginMode,
     pub mfa_enforcement: Parameters::MfaEnforcement,
     pub mfa_policy_exempt_sso_users: bool,
@@ -117,6 +118,7 @@ struct ParameterUpdate {
     pub ssh_client_auth_password: Option<bool>,
     pub ssh_client_auth_keyboard_interactive: Option<bool>,
     pub ssh_host_key_verification: Option<Parameters::SshHostKeyVerificationMode>,
+    pub ssh_show_qr_code: Option<bool>,
     pub password_login_mode: Option<Parameters::PasswordLoginMode>,
     pub mfa_enforcement: Option<Parameters::MfaEnforcement>,
     pub mfa_policy_exempt_sso_users: Option<bool>,
@@ -230,6 +232,7 @@ impl Api {
             ssh_client_auth_password: parameters.ssh_client_auth_password,
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
             ssh_host_key_verification: parameters.ssh_host_key_verification,
+            ssh_show_qr_code: parameters.ssh_show_qr_code,
             password_login_mode: parameters.password_login_mode,
             mfa_enforcement: parameters.mfa_enforcement,
             mfa_policy_exempt_sso_users: parameters.mfa_policy_exempt_sso_users,
@@ -329,6 +332,7 @@ impl Api {
             .ssh_client_auth_keyboard_interactive
             .map_or(NotSet, Set);
         parameters.ssh_host_key_verification = body.ssh_host_key_verification.map_or(NotSet, Set);
+        parameters.ssh_show_qr_code = body.ssh_show_qr_code.map_or(NotSet, Set);
         parameters.password_login_mode = body.password_login_mode.map_or(NotSet, Set);
         parameters.mfa_enforcement = body.mfa_enforcement.map_or(NotSet, Set);
         parameters.mfa_policy_exempt_sso_users =

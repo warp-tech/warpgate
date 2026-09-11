@@ -232,6 +232,7 @@ pub struct Model {
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
     pub ssh_host_key_verification: SshHostKeyVerificationMode,
+    pub ssh_show_qr_code: bool,
     pub password_login_mode: PasswordLoginMode,
     pub mfa_enforcement: MfaEnforcement,
     pub mfa_policy_exempt_sso_users: bool,
@@ -423,6 +424,7 @@ impl Entity {
                     ssh_host_key_verification: Set(
                         get_config_migration_values().ssh_host_key_verification
                     ),
+                    ssh_show_qr_code: Set(true),
                     password_login_mode: Set(PasswordLoginMode::Enabled),
                     mfa_enforcement: Set(MfaEnforcement::Off),
                     mfa_policy_exempt_sso_users: Set(false),
@@ -528,6 +530,7 @@ mod tests {
             ssh_client_auth_password: true,
             ssh_client_auth_keyboard_interactive: true,
             ssh_host_key_verification: SshHostKeyVerificationMode::Prompt,
+            ssh_show_qr_code: true,
             password_login_mode: PasswordLoginMode::Enabled,
             mfa_enforcement: MfaEnforcement::Off,
             mfa_policy_exempt_sso_users: false,
