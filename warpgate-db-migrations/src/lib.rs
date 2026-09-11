@@ -92,6 +92,7 @@ mod m00085_default_credential_policy;
 mod m00086_jit_session_approval;
 mod m00087_drop_null_target_options;
 mod m00088_ssh_host_keys;
+mod m00089_create_session_commands;
 
 pub(crate) mod helpers;
 
@@ -189,6 +190,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00086_jit_session_approval::Migration),
             Box::new(m00087_drop_null_target_options::Migration),
             Box::new(m00088_ssh_host_keys::Migration),
+            Box::new(m00089_create_session_commands::Migration),
         ]
     }
 }
