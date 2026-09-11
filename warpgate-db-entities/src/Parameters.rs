@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use poem_openapi::{Enum, Object, Union};
-use sea_orm::Set;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;

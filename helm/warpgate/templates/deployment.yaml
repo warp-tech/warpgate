@@ -77,7 +77,7 @@ spec:
               {{- if eq .Values.setup.type "podinit" }}
               if [ ! -f /data/warpgate.yaml ]; then
                 warpgate -c /data/warpgate.yaml  unattended-setup --data-path /data
-                  {{- if .Values.ssh_keys_secret }} --import-ssh-keys /ssh-keys {{- end }}
+                  {{- if .Values.ssh_keys_secret }} --import-ssh-host-keys /ssh-keys --import-ssh-client-keys /ssh-keys {{- end }}
                   {{- if .Values.setup.http }} --http-port {{ .Values.setup.http }} {{- end }}
                   {{- if .Values.setup.ssh }} --ssh-port {{ .Values.setup.ssh }} {{- end }}
                   {{- if .Values.setup.mysql }} --mysql-port {{ .Values.setup.mysql }} {{- end }}

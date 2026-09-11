@@ -10,9 +10,9 @@ class Test:
         timeout,
         wg_c_ed25519_pubkey,
     ):
-        # A node set up with no key files to import generates its own host
-        # keys into the database, and the SSH listener has to come up on them.
-        wg = processes.start_wg(import_ssh_keys=False)
+        # A node set up with no host key files to import generates its own
+        # into the database, and the SSH listener has to come up on them.
+        wg = processes.start_wg(import_host_keys=False)
         wait_port(wg.http_port, recv=False)
         wait_port(wg.ssh_port)
         user, target = setup_user_and_target(processes, wg, wg_c_ed25519_pubkey)
