@@ -195,17 +195,39 @@ fn shell_recording_metadata(server_channel_id: ServerChannelId) -> SshRecordingM
     }
 }
 
-fn format_web_auth_instructions(login_url: Option<Url>, identification_string: &str) -> String {
+fn format_web_auth_instructions(
+    login_url: Option<Url>,
+    identification_string: &str,
+    show_qr_code: bool,
+) -> String {
     let spaced_key = identification_string
         .chars()
         .map(|c| c.to_string())
         .collect::<Vec<_>>()
         .join(" ");
-    let url_line = login_url.map(|u| format!("{u}\n")).unwrap_or_default();
+
+    let (url_line, qr_section) = if let Some(ref u) = login_url {
+        let qr = if show_qr_code {
+            match warpgate_common::render_qr_code_terminal(u.as_str()) {
+                Ok(rendered) => format!("\n{rendered}\n"),
+                Err(err) => {
+                    tracing::debug!(?err, "Failed to render terminal QR code for URL");
+                    String::new()
+                }
+            }
+        } else {
+            String::new()
+        };
+        (format!("{u}\n"), qr)
+    } else {
+        (String::new(), String::new())
+    };
+
     format!(
         "-----------------------------------------------------------------------\n\
          Please verify the SSH authentication request in your browser.\n\
-         {url_line}\n\
+         {url_line}\
+         {qr_section}\
          Make sure you're seeing this security key: {spaced_key}\n\
          -----------------------------------------------------------------------\n"
     )
@@ -221,8 +243,9 @@ fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::s
 #[cfg(test)]
 mod tests {
     use russh::{MethodKind, MethodSet};
+    use url::Url;
 
-    use super::reject_with_allowed_auth_methods;
+    use super::{format_web_auth_instructions, reject_with_allowed_auth_methods};
 
     #[test]
     fn rejected_public_key_auth_advertises_only_configured_methods() {
@@ -240,6 +263,32 @@ mod tests {
         assert_eq!(advertised_methods, configured_methods);
         assert!(!advertised_methods.contains(&MethodKind::Password));
         assert!(!advertised_methods.contains(&MethodKind::KeyboardInteractive));
+    }
+
+    #[test]
+    fn test_format_web_auth_instructions_with_qr() {
+        let url = Url::parse("https://warpgate.example.com/auth").unwrap();
+        let output = format_web_auth_instructions(Some(url), "ABCD", true);
+        assert!(output.contains("https://warpgate.example.com/auth"));
+        assert!(output.contains("A B C D"));
+        // Should contain ANSI styling or Unicode blocks from the QR code
+        assert!(output.contains('\u{2584}'));
+    }
+
+    #[test]
+    fn test_format_web_auth_instructions_without_qr() {
+        let url = Url::parse("https://warpgate.example.com/auth").unwrap();
+        let output = format_web_auth_instructions(Some(url), "ABCD", false);
+        assert!(output.contains("https://warpgate.example.com/auth"));
+        assert!(output.contains("A B C D"));
+        assert!(!output.contains('\u{2584}'));
+    }
+
+    #[test]
+    fn test_format_web_auth_instructions_no_url() {
+        let output = format_web_auth_instructions(None, "ABCD", true);
+        assert!(!output.contains('\u{2584}'));
+        assert!(output.contains("A B C D"));
     }
 }
 
@@ -2225,13 +2274,19 @@ impl ServerSession {
                     let identification_string =
                         auth_state.lock().await.identification_string().to_owned();
 
-                    let ext_url =
-                        construct_external_url(None, &*self.services.config.lock().await, None)
+                    let (ext_url, show_qr_code) = {
+                        let config = self.services.config.lock().await;
+                        let url = construct_external_url(None, &config, None)
                             .await
                             .inspect_err(|error| {
                                 warn!(?error, "Failed to construct external URL");
                             })
                             .ok();
+                        let show_qr = Parameters::Entity::get(&self.services.db)
+                            .await
+                            .map_or(true, |p| p.ssh_show_qr_code);
+                        (url, show_qr)
+                    };
 
                     let auth_state = auth_state.lock().await;
                     let login_url =
@@ -2240,6 +2295,7 @@ impl ServerSession {
                     auth_instructions.push_str(&format_web_auth_instructions(
                         login_url,
                         &identification_string,
+                        show_qr_code,
                     ));
                     auth_prompts.push(("Press Enter when done: ".into(), true));
 
