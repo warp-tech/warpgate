@@ -11,6 +11,7 @@ just as happily if the endpoint had never run, or if the fix had discarded
 the error instead of relocating it.
 """
 
+import html
 import re
 import sqlite3
 import subprocess
@@ -44,6 +45,36 @@ REFERENCE = re.compile(
     r"^[^()]+ \(reference: "
     r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)$"
 )
+
+# The error layer renders a document for a navigation request and plain text
+# otherwise, and `is_navigation_request` calls a request with no
+# `Sec-Fetch-Mode` header a navigation -- which is every `requests` call here.
+# So the assertions below have to read the message out of either shape, or
+# they stop being about what the caller was told and start being about which
+# rendering they happened to get. That is not hypothetical: anchoring on the
+# plain form made the negative assertion in
+# `test_the_same_endpoint_still_says_what_it_can_say` pass for any body at
+# all.
+MESSAGE_IN_DOCUMENT = re.compile(r"<p>(.*?)</p>", re.S)
+
+# What a 500 says when nothing Warpgate-authored survived to say it: the
+# status's own canonical name. `client_facing_reason` falls back to this for
+# any server error it cannot downcast to a `WarpgateError`.
+GENERIC_500 = re.compile(r"^Internal Server Error \(reference: ")
+
+
+def _client_message(response: requests.Response) -> str:
+    """The one line the caller was shown, whichever rendering carried it.
+
+    Leak assertions stay on the whole body -- a leak anywhere in the document
+    is still a leak. This is only for the assertions about the *message*.
+    """
+    body = response.text
+    if "text/html" not in response.headers.get("content-type", ""):
+        return body.strip()
+    found = MESSAGE_IN_DOCUMENT.search(body)
+    assert found, f"the error document carried no message at all: {body!r}"
+    return html.unescape(found.group(1)).strip()
 
 
 def _start_wg_with_log(processes: ProcessManager, tmp_path: Path, config_patch: dict):
@@ -148,7 +179,7 @@ def test_the_configured_whitelist_never_reaches_an_anonymous_caller(
         )
     assert SPOOFED_HOST not in body, f"the request was reflected back: {body!r}"
 
-    match = REFERENCE.match(body.strip())
+    match = REFERENCE.match(_client_message(response))
     assert match, f"no correlation id to hand an operator: {body!r}"
 
     # The other half. Without it this test would also pass if the request had
@@ -210,7 +241,7 @@ def test_an_anonymous_caller_gets_no_database_error_from_the_info_endpoint(
             f"({fragment!r}): {body!r}"
         )
 
-    match = REFERENCE.match(body.strip())
+    match = REFERENCE.match(_client_message(response))
     assert match, f"no correlation id to hand an operator: {body!r}"
 
     log = _log_after(log_path)
@@ -274,12 +305,21 @@ def test_the_same_endpoint_still_says_what_it_can_say(
         f"expected the same status as the leaking case: "
         f"{response.status_code} {body!r}"
     )
-    assert "external_host" in body, (
+    # Asserted on the message the caller was shown rather than on the whole
+    # response: `external_host` occurring anywhere in the error document would
+    # satisfy `in body` without the refusal itself having survived.
+    message = _client_message(response)
+    assert "external_host" in message, (
         f"the caller was not told what to configure: {body!r}"
     )
-    assert "is not set" in body, f"the refusal lost its meaning: {body!r}"
-    assert not REFERENCE.match(body.strip()), (
-        f"a message written for the caller was flattened away: {body!r}"
+    assert "is not set" in message, f"the refusal lost its meaning: {body!r}"
+    # Not "carries no reference": `client_facing_reason` mints and logs a
+    # correlation id for every server error, Warpgate-authored or not, and
+    # this endpoint answers 500 either way -- so a reference distinguishes
+    # nothing. What distinguishes them is the reason in front of it.
+    assert not GENERIC_500.match(message), (
+        f"a message written for the caller was flattened to the status text: "
+        f"{body!r}"
     )
     # And it did not quietly leak the whitelist by another route.
     for domain in WHITELIST:
@@ -325,7 +365,7 @@ def test_a_database_failure_does_not_hand_its_sql_to_the_client(
             f"the database's own words reached the client ({fragment!r}): {body!r}"
         )
 
-    match = REFERENCE.match(body.strip())
+    match = REFERENCE.match(_client_message(response))
     assert match, f"no correlation id to hand an operator: {body!r}"
 
     log = _log_after(log_path)
@@ -340,4 +380,27 @@ def test_a_database_failure_does_not_hand_its_sql_to_the_client(
     )
     assert "no such table" in line, (
         f"the database error did not survive into the log either: {line!r}"
+    )
+
+    # The other arm of the same layer. Every request above omits
+    # `Sec-Fetch-Mode`, so all of them take the document branch and none of
+    # them had ever reached the plain one -- which is the branch an API client
+    # and the admin UI's own `fetch` actually get.
+    plain = requests.get(
+        url,
+        headers={**ADMIN_TOKEN_HEADER, "Sec-Fetch-Mode": "cors"},
+        verify=False,
+        timeout=10,
+    )
+    assert "text/html" not in plain.headers.get("content-type", ""), (
+        "asking for a non-navigation rendering still returned a document: "
+        f"{plain.headers.get('content-type')!r}"
+    )
+    for fragment in ("no such table", "targets", "SELECT", "sqlx", "sea_orm"):
+        assert fragment not in plain.text, (
+            f"the database's own words reached a non-navigation caller "
+            f"({fragment!r}): {plain.text!r}"
+        )
+    assert REFERENCE.match(_client_message(plain)), (
+        f"the plain rendering handed no correlation id: {plain.text!r}"
     )
