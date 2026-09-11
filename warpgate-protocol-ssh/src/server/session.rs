@@ -48,6 +48,7 @@ use super::event_intake::EventIntake;
 use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
+use super::transport_abort::TransportAbort;
 use crate::server::get_allowed_auth_methods;
 use crate::server::service_output::{VisualConnectionChainItem, paint_fg};
 use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
@@ -69,6 +70,11 @@ const MAX_NESTED_COMMAND_WAITS: usize = 16;
 /// i.e. for `Handle::close`/`Handle::disconnect` to have been *sent* — before
 /// giving up on them.
 const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Ceiling on how long a teardown waits for `protocol_done_rx`, i.e. for
+/// russh's own session loop to exit. Bounds a real signal rather than
+/// standing in for one: the wait normally ends when the signal fires.
+const DISCONNECT_DRAIN_GRACE: Duration = Duration::from_millis(250);
 
 #[allow(clippy::large_enum_variant)]
 enum TargetSelection {
@@ -155,6 +161,9 @@ pub struct ServerSession {
     /// from a wait can await a command of its own, so the pump re-enters itself
     /// one stack level deeper per concurrent request.
     command_wait_depth: usize,
+    /// Set when a teardown ran nested inside the command pump and so
+    /// could not wait for russh. The pump finishes it on the way out.
+    transport_release_pending: bool,
     rc_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
     rc_abort_tx: UnboundedSender<()>,
     rc_state: RCState,
@@ -183,6 +192,13 @@ pub struct ServerSession {
     allowed_auth_methods: MethodSet,
     /// Track the state of a client snooping around pre-auth
     probe: ProbeState,
+    /// Fires once the wire protocol task's `run()` loop has exited.
+    /// `disconnect_server` waits on it rather than guessing with a sleep
+    /// (#2520). `None` once consumed.
+    protocol_done_rx: Option<oneshot::Receiver<()>>,
+    /// Closes the client's connection outright. The last resort in
+    /// `disconnect_server`, for the client that cannot be told anything.
+    transport_abort: TransportAbort,
 }
 
 fn session_debug_tag(id: &UserSessionId, remote_address: &SocketAddr) -> String {
@@ -257,6 +273,8 @@ impl ServerSession {
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
         mut handler_event_rx: UnboundedReceiver<ServerHandlerEvent>,
+        protocol_done_rx: oneshot::Receiver<()>,
+        transport_abort: TransportAbort,
     ) -> Result<impl Future<Output = Result<()>> + use<>> {
         let id = server_handle.lock().await.user_session_id();
 
@@ -282,6 +300,7 @@ impl ServerSession {
             deferred_server_events: vec![],
             pending_events: VecDeque::new(),
             command_wait_depth: 0,
+            transport_release_pending: false,
             rc_tx: rc_handles.command_tx.clone(),
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
@@ -302,6 +321,8 @@ impl ServerSession {
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
             probe: ProbeState::NoAttempt,
+            protocol_done_rx: Some(protocol_done_rx),
+            transport_abort,
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -2650,6 +2671,9 @@ impl ServerSession {
             }
         };
         self.command_wait_depth -= 1;
+        if self.command_wait_depth == 0 && self.transport_release_pending {
+            self.release_transport_if_unread().await;
+        }
         result
     }
 
@@ -2678,6 +2702,7 @@ impl ServerSession {
             .filter_map(Channel::server_id)
             .collect::<Vec<_>>();
 
+        let had_handle = self.session_handle.is_some();
         if let Some(handle) = self.session_handle.clone() {
             for ch in channels {
                 let _ = self.channel_writer.close(handle.clone(), ch.0);
@@ -2697,7 +2722,45 @@ impl ServerSession {
         // drain, and this runs on the event loop.
         let _ = tokio::time::timeout(DISCONNECT_FLUSH_TIMEOUT, self.channel_writer.flush()).await;
 
+        if had_handle {
+            if self.command_wait_depth == 0 {
+                self.release_transport_if_unread().await;
+            } else {
+                // Deferred rather than dropped: the pump is what the fallback
+                // would be waiting on, so it has to run after it, not instead
+                // of it.
+                self.transport_release_pending = true;
+            }
+        }
+
         self.session_handle = None;
+    }
+
+    /// Waits for russh's session task to report it has finished, and ends the
+    /// connection underneath it when it does not.
+    ///
+    /// Split out of `disconnect_server` because a teardown nested inside the
+    /// command pump has to run this later: russh is blocked in the callback
+    /// that got us there, so the signal cannot arrive until the pump returns.
+    async fn release_transport_if_unread(&mut self) {
+        self.transport_release_pending = false;
+        // `flush()` only proves the messages reached russh's `Handle`, not
+        // that its session task has written them, so wait for the task to
+        // say it has (#2520).
+        let Some(protocol_done_rx) = self.protocol_done_rx.take() else {
+            return;
+        };
+        if tokio::time::timeout(DISCONNECT_DRAIN_GRACE, protocol_done_rx)
+            .await
+            .is_err()
+        {
+            // Everything above asks russh to end the session, and russh can
+            // only act on it while the client is reading. Reaching here means
+            // the flush already failed and russh's loop is still running, so
+            // the connection is ended from underneath instead.
+            warn!("Client did not accept the session teardown; closing its connection");
+            self.transport_abort.abort();
+        }
     }
 }
 
