@@ -27,7 +27,7 @@ use warpgate_common::helpers::net::accept_loop;
 use warpgate_core::{Services, State, UserSessionStateInit};
 use warpgate_db_entities::Parameters;
 
-use crate::keys::load_keys;
+use crate::keys::load_host_keys;
 use crate::server::session_handle::SSHSessionHandle;
 
 #[derive(Clone)]
@@ -41,9 +41,8 @@ pub async fn bind_server(
     proxy_protocol: bool,
 ) -> Result<BoxFuture<'static, Result<()>>> {
     let russh_config_init = Arc::new({
-        let config = services.config.lock().await;
         RusshConfigInit {
-            keys: load_keys(&config, &services.global_params, "host")?,
+            keys: load_host_keys(&services.db).await?,
         }
     });
 

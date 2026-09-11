@@ -829,16 +829,6 @@ class ProcessManager:
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
 
-            keys_dir = data_dir / "ssh-keys"
-            keys_dir.mkdir(parents=True)
-            for k in [
-                Path("ssh-keys/wg/client-ed25519"),
-                Path("ssh-keys/wg/client-rsa"),
-                Path("ssh-keys/wg/host-ed25519"),
-                Path("ssh-keys/wg/host-rsa"),
-            ]:
-                shutil.copy(k, keys_dir / k.name)
-
             for k in [
                 Path("certs/tls.certificate.pem"),
                 Path("certs/tls.key.pem"),
@@ -894,6 +884,9 @@ class ProcessManager:
                 # Likewise a DB parameter seeded from the config at setup time.
                 "--host-key-verification",
                 "auto-accept",
+                # Fixed host/client keys, stored in the DB.
+                "--import-ssh-keys",
+                str(Path(os.getcwd()) / "ssh-keys/wg"),
             ]
             if database_url:
                 setup_args += ["--database-url", database_url]

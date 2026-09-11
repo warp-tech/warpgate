@@ -107,7 +107,6 @@
         "host_key_verification": "prompt",
         "inactivity_timeout": "5m",
         "keepalive_interval": null,
-        "keys": "./data/keys",
         "listen": "[::]:2222",
         "proxy_protocol": false
       }
@@ -501,8 +500,11 @@
           "default": null
         },
         "keys": {
-          "type": "string",
-          "default": "./data/keys"
+          "description": "Legacy directory for the SSH host keys (`host-ed25519`, `host-rsa`).\nIf set, key files are re-imported into the database, after which the option can be removed from the config.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",

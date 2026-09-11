@@ -43,3 +43,6 @@ warpgate-db-entities = { path = "../warpgate-db-entities", default-features = fa
 warpgate-tls = { path = "../warpgate-tls" }
 warpgate-vault = { path = "../warpgate-vault" }
 zeroize = { version = "^1.5", default-features = false }
+
+[dev-dependencies]
+warpgate-db-migrations = { path = "../warpgate-db-migrations", features = ["sqlite"] }

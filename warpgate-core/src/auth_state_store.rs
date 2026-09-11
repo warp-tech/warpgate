@@ -363,12 +363,12 @@ impl AuthStateStore {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
     use std::str::FromStr;
 
     use ipnet::IpNet;
     use uuid::Uuid;
-    use warpgate_common::auth::{AuthCredential, AuthStateUserInfo, CredentialPolicyResponse};
+    use warpgate_common::auth::{AuthStateUserInfo, CredentialPolicyResponse};
 
     use super::*;
 

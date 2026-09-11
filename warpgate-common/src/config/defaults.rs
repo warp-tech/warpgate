@@ -142,10 +142,6 @@ pub fn _default_ssh_listen() -> ListenEndpoint {
     ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2222))
 }
 
-pub fn _default_ssh_keys_path() -> String {
-    "./data/keys".to_owned()
-}
-
 pub const fn _default_ssh_inactivity_timeout() -> Duration {
     Duration::from_mins(5)
 }

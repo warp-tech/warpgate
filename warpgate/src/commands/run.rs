@@ -92,7 +92,8 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     // Runs even when the SSH listener is disabled so that the admin UI can
     // manage the keys and other protocols' features relying on them work.
-    warpgate_protocol_ssh::ensure_client_keys(&services.db, &config, params).await?;
+    warpgate_protocol_ssh::ensure_client_keys(&services.db, &config.store.ssh.keys_path(params))
+        .await?;
 
     // Encrypt before listeners start
     if warpgate_core::backfill_credential_encryption(&services.db).await?

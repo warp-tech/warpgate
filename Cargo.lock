@@ -9538,6 +9538,7 @@ dependencies = [
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-db-migrations",
  "warpgate-tls",
  "warpgate-vault",
  "zeroize",
