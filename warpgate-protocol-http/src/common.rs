@@ -26,7 +26,7 @@ use warpgate_common_http::{
 };
 use warpgate_core::{ConfigProvider, vet_credential_bearer};
 use warpgate_db_entities::User;
-use warpgate_sso::WarpgateIdToken;
+use warpgate_sso::{SsoProviderConfig, SsoReturnUrlDomainPreference, WarpgateIdToken};
 
 use crate::middleware::assert_mfa_setup_gate;
 use crate::session::SessionStore;
@@ -65,15 +65,44 @@ pub fn host_is_subdomain_of_or_equal(host: &str, base_domain: &str) -> bool {
     host == base || host.ends_with(&format!(".{base}"))
 }
 
+/// Whitelisted return domains of the providers that build their return URL from
+/// the request. An `ExternalHost` provider's whitelist is inert for routing.
+fn sso_return_domains(providers: &[SsoProviderConfig]) -> Vec<String> {
+    providers
+        .iter()
+        .filter(|provider| {
+            matches!(
+                provider.return_url_domain,
+                SsoReturnUrlDomainPreference::HostHeader
+            )
+        })
+        .filter_map(|provider| provider.return_domain_whitelist.as_deref())
+        .flatten()
+        .cloned()
+        .collect()
+}
+
 /// Whether a request may present a session cookie, given the configured base
-/// host: the base host itself, its subdomains, or localhost (for development
-/// against a non-localhost deployment). A request whose host cannot be
-/// determined proves nothing and is refused — this check must not fail open.
-fn session_host_is_authorized(request_host: Option<&str>, base_host: &str) -> bool {
+/// host: the base host itself, its subdomains, localhost (for development
+/// against a non-localhost deployment), or a host an SSO provider is
+/// configured to return to. A request whose host cannot be determined proves
+/// nothing and is refused — this check must not fail open.
+///
+/// `sso_return_domains` is matched exactly, as `construct_external_url` does.
+/// It is the union across providers; the session does not record which provider
+/// authenticated it.
+fn session_host_is_authorized(
+    request_host: Option<&str>,
+    base_host: &str,
+    sso_return_domains: &[String],
+) -> bool {
     let Some(host) = request_host else {
         return false;
     };
     host_is_subdomain_of_or_equal(host, base_host)
+        || sso_return_domains
+            .iter()
+            .any(|domain| host == domain.as_str())
         || (is_localhost_host(host) && base_host != "localhost" && base_host != "127.0.0.1")
 }
 
@@ -450,16 +479,22 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     if session_auth.is_some() && !is_cluster_peer {
         // Host binding only means something when `external_host` pins an
         // origin. Without it the external URL is derived from Host header
-        let base_host = {
+        let (base_host, sso_return_domains) = {
             let config = ctx.services().config.lock().await;
-            construct_external_url(None, &config, None)
+            let base_host = construct_external_url(None, &config, None)
                 .await
                 .ok()
-                .and_then(|url| url.host_str().map(str::to_owned))
+                .and_then(|url| url.host_str().map(str::to_owned));
+            let sso_return_domains = base_host
+                .is_some()
+                .then(|| sso_return_domains(&config.store.sso_providers))
+                .unwrap_or_default();
+            (base_host, sso_return_domains)
         };
         if let Some(base_host) = base_host {
             let request_host = ctx.trusted_hostname(&req);
-            if !session_host_is_authorized(request_host.as_deref(), &base_host) {
+            if !session_host_is_authorized(request_host.as_deref(), &base_host, &sso_return_domains)
+            {
                 tracing::warn!(
                     "Session cookie rejected: request host {:?} is not authorized (base host: '{}'). Clearing session.",
                     request_host,
@@ -552,25 +587,149 @@ mod tests {
     fn session_host_check_fails_closed() {
         use super::session_host_is_authorized;
 
+        const NO_SSO: &[String] = &[];
+
         assert!(session_host_is_authorized(
             Some("example.com"),
-            "example.com"
+            "example.com",
+            NO_SSO
         ));
         assert!(session_host_is_authorized(
             Some("app.example.com"),
-            "example.com"
+            "example.com",
+            NO_SSO
         ));
-        assert!(session_host_is_authorized(Some("localhost"), "example.com"));
+        assert!(session_host_is_authorized(
+            Some("localhost"),
+            "example.com",
+            NO_SSO
+        ));
         assert!(!session_host_is_authorized(
             Some("evil-example.com"),
-            "example.com"
+            "example.com",
+            NO_SSO
         ));
-        assert!(session_host_is_authorized(Some("localhost"), "localhost"));
+        assert!(session_host_is_authorized(
+            Some("localhost"),
+            "localhost",
+            NO_SSO
+        ));
         // The localhost exception is for developing against a real deployment,
         // not a blanket pass when the deployment itself is localhost.
-        assert!(!session_host_is_authorized(Some("127.0.0.5"), "localhost"));
+        assert!(!session_host_is_authorized(
+            Some("127.0.0.5"),
+            "localhost",
+            NO_SSO
+        ));
         // A host that cannot be determined proves nothing.
-        assert!(!session_host_is_authorized(None, "example.com"));
+        assert!(!session_host_is_authorized(None, "example.com", NO_SSO));
+    }
+
+    #[test]
+    fn sso_return_domains_only_uses_host_header_providers() {
+        use warpgate_sso::SsoProviderConfig;
+
+        use super::sso_return_domains;
+
+        // `SsoProviderConfig` has no constructor.
+        fn provider(return_url_domain: &str, domain: &str) -> SsoProviderConfig {
+            serde_json::from_value(serde_json::json!({
+                "name": format!("p-{domain}"),
+                "provider": {
+                    "type": "custom",
+                    "client_id": "id",
+                    "client_secret": "secret",
+                    "issuer_url": "https://idp.example.com",
+                    "scopes": ["email"],
+                },
+                "return_url_domain": return_url_domain,
+                "return_domain_whitelist": [domain],
+            }))
+            .unwrap()
+        }
+
+        let host_header = vec![provider("host_header", "portal.example.net")];
+        assert_eq!(
+            sso_return_domains(&host_header),
+            vec!["portal.example.net".to_owned()]
+        );
+
+        // Inert: no login can return here.
+        let external = vec![provider("external_host", "inert.example.net")];
+        assert!(sso_return_domains(&external).is_empty());
+
+        let mixed = vec![
+            provider("external_host", "inert.example.net"),
+            provider("host_header", "portal.example.net"),
+        ];
+        assert_eq!(
+            sso_return_domains(&mixed),
+            vec!["portal.example.net".to_owned()]
+        );
+
+        assert!(sso_return_domains(&[]).is_empty());
+    }
+
+    #[test]
+    fn session_host_allows_sso_return_domains() {
+        use super::session_host_is_authorized;
+
+        let whitelist = vec!["portal.example.net".to_owned()];
+
+        assert!(session_host_is_authorized(
+            Some("portal.example.net"),
+            "example.com",
+            &whitelist
+        ));
+        // Exact match: a subdomain of a whitelisted host is not authorized.
+        assert!(!session_host_is_authorized(
+            Some("evil.portal.example.net"),
+            "example.com",
+            &whitelist
+        ));
+        assert!(!session_host_is_authorized(
+            Some("portal.example.net.evil.com"),
+            "example.com",
+            &whitelist
+        ));
+        assert!(!session_host_is_authorized(
+            Some("notportal.example.net"),
+            "example.com",
+            &whitelist
+        ));
+        assert!(session_host_is_authorized(
+            Some("example.com"),
+            "example.com",
+            &whitelist
+        ));
+        assert!(!session_host_is_authorized(None, "example.com", &whitelist));
+        let empty: Vec<String> = vec![];
+        assert!(!session_host_is_authorized(
+            Some("portal.example.net"),
+            "example.com",
+            &empty
+        ));
+        // Case and trailing dot are not normalized on either side.
+        assert!(!session_host_is_authorized(
+            Some("PORTAL.EXAMPLE.NET"),
+            "example.com",
+            &whitelist
+        ));
+        assert!(!session_host_is_authorized(
+            Some("portal.example.net."),
+            "example.com",
+            &whitelist
+        ));
+        // Union across providers.
+        let two_providers = vec![
+            "portal-a.example.net".to_owned(),
+            "portal-b.example.org".to_owned(),
+        ];
+        assert!(session_host_is_authorized(
+            Some("portal-b.example.org"),
+            "example.com",
+            &two_providers
+        ));
     }
 
     #[test]
