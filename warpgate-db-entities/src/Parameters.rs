@@ -1,18 +1,13 @@
 use std::collections::HashMap;
 
 use poem_openapi::{Enum, Object, Union};
-use sea_orm::Set;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_aws::S3StorageConfig;
 use warpgate_common::auth::CredentialKind;
-use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
-use warpgate_common::{
-    GlobalParams, PasswordPolicy, Protocol, SshHostKeyKind, UserAuthCredential,
-    UserRequireCredentialsPolicy, WarpgateError,
-};
+use warpgate_common::{PasswordPolicy, Protocol, UserAuthCredential, UserRequireCredentialsPolicy};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
@@ -145,56 +140,22 @@ impl Default for RecordingsStorageConfig {
 
 /// The config-file settings that have since moved into the parameters row,
 /// published by the process before migrations run so that the migrations can
-/// copy them into the row of an existing install.
+/// copy them into the row.
 #[derive(Default)]
 pub struct ConfigMigrationValues {
     pub recordings_enable: bool,
     pub recordings_path: String,
     pub ssh_host_key_verification: SshHostKeyVerificationMode,
-    /// The on-disk SSH host keys (PEM) if still configured
-    pub ssh_host_key_ed25519: Option<String>,
-    pub ssh_host_key_rsa: Option<String>,
 }
 
 impl ConfigMigrationValues {
-    pub fn from_config(
-        config: &warpgate_common::WarpgateConfig,
-        params: &GlobalParams,
-    ) -> std::io::Result<Self> {
+    pub fn from_config(config: &warpgate_common::WarpgateConfig) -> Self {
         let recordings = config.store.recordings.clone().unwrap_or_default();
-        let keys_path = config.store.ssh.keys_path(params);
-        let read_key = |kind: SshHostKeyKind| -> std::io::Result<Option<String>> {
-            match std::fs::read_to_string(keys_path.join(format!("host-{}", kind.name()))) {
-                Ok(pem) => Ok(Some(pem)),
-                // missing file -> ok
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                // other errors fatal
-                Err(e) => Err(e),
-            }
-        };
-        Ok(Self {
+        Self {
             recordings_enable: recordings.enable,
             recordings_path: recordings.path,
             ssh_host_key_verification: config.store.ssh.host_key_verification.into(),
-            ssh_host_key_ed25519: read_key(SshHostKeyKind::Ed25519)?,
-            ssh_host_key_rsa: read_key(SshHostKeyKind::Rsa)?,
-        })
-    }
-
-    /// Either the legacy key PEM from disk or a fresh one, encrypted
-    pub fn effective_stored_ssh_host_key(
-        &self,
-        kind: SshHostKeyKind,
-    ) -> Result<String, WarpgateError> {
-        let on_disk = match kind {
-            SshHostKeyKind::Ed25519 => &self.ssh_host_key_ed25519,
-            SshHostKeyKind::Rsa => &self.ssh_host_key_rsa,
-        };
-        let pem = match on_disk {
-            Some(pem) => pem.clone(),
-            None => kind.generate_pem()?,
-        };
-        Ok(idempotent_maybe_encrypt_secret(&pem)?)
+        }
     }
 }
 
@@ -400,93 +361,14 @@ impl Model {
 }
 
 impl Entity {
+    /// The single parameters row. Migration m00027 creates it and the later
+    /// migrations fill it in, so it exists on every migrated database.
     pub async fn get(db: &DatabaseConnection) -> Result<Model, DbErr> {
-        fn stored_ssh_host_key(kind: SshHostKeyKind) -> Result<String, DbErr> {
-            get_config_migration_values()
-                .effective_stored_ssh_host_key(kind)
-                .map_err(|e| DbErr::Custom(e.to_string()))
-        }
-
-        match Self::find().one(db).await? {
-            Some(model) => Ok(model),
-            None => {
-                #[allow(clippy::unwrap_used, reason = "can't fail")]
-                ActiveModel {
-                    id: Set(Uuid::new_v4()),
-                    allow_own_credential_management: Set(true),
-                    rate_limit_bytes_per_second: Set(None),
-                    ca_certificate_pem: Set("".into()),
-                    ca_private_key_pem: Set("".into()),
-                    ssh_client_auth_publickey: Set(true),
-                    ssh_client_auth_password: Set(true),
-                    ssh_client_auth_keyboard_interactive: Set(true),
-                    ssh_host_key_verification: Set(
-                        get_config_migration_values().ssh_host_key_verification
-                    ),
-                    password_login_mode: Set(PasswordLoginMode::Enabled),
-                    mfa_enforcement: Set(MfaEnforcement::Off),
-                    mfa_policy_exempt_sso_users: Set(false),
-                    ticket_self_service_enabled: Set(false),
-                    ticket_auto_approve_existing_access: Set(true),
-                    ticket_max_duration_seconds: Set(Some(28800)),
-                    ticket_max_uses: Set(None),
-                    ticket_require_description: Set(false),
-                    ticket_request_show_all_targets: Set(false),
-                    target_click_action: Set(TargetClickAction::Connect),
-                    open_targets_in_new_tab: Set(OpenTargetsInNewTabMode::DefaultOn),
-                    show_session_menu: Set(true),
-                    password_policy_min_length: Set(0),
-                    password_policy_require_uppercase: Set(false),
-                    password_policy_require_lowercase: Set(false),
-                    password_policy_require_digits: Set(false),
-                    password_policy_require_special: Set(false),
-                    max_api_token_duration_seconds: Set(None),
-                    record_scp: Set(true),
-                    record_desktop_keyboard_input: Set(true),
-                    tutorial_dismissed: Set(false),
-                    login_protection_enabled: Set(true),
-                    login_protection_retention_seconds: Set(2_592_000), // 30d
-                    lp_ip_max_attempts: Set(5),
-                    lp_ip_time_window_seconds: Set(900),
-                    lp_ip_base_block_duration_seconds: Set(1800),
-                    lp_ip_block_duration_multiplier: Set(2.0),
-                    lp_ip_max_block_duration_seconds: Set(86400),
-                    lp_ip_cooldown_reset_seconds: Set(86400),
-                    lp_user_max_attempts: Set(10),
-                    lp_user_time_window_seconds: Set(3600),
-                    lp_user_auto_unlock: Set(true),
-                    lp_user_lockout_duration_seconds: Set(3600),
-                    lp_user_exempt_admins: Set(true),
-                    banner: Set("".into()),
-                    web_clients_enabled: Set(true),
-                    analytics_consent: Set(AnalyticsConsent::Undecided),
-                    analytics_normal: Set(false),
-                    analytics_instance_id: Set(Uuid::new_v4().to_string()),
-                    instance_created_at: Set(OffsetDateTime::now_utc()),
-                    web_auth_max_age_seconds: Set(None),
-                    web_approval_grace_period_seconds: Set(None),
-                    admin_approval_timeout_seconds: Set(None),
-                    admin_approval_grace_period_seconds: Set(None),
-                    recordings_enable: Set(false),
-                    recordings_storage: Set(serde_json::to_string(
-                        &RecordingsStorageConfig::default(),
-                    )
-                    .unwrap()),
-                    default_credential_policy: Set(serde_json::to_string(
-                        &UserRequireCredentialsPolicy::default(),
-                    )
-                    .unwrap()),
-
-                    cluster_token: Set(None),
-                    encryption_key_fp: Set(None),
-                    retiring_key_fp: Set(None),
-                    ssh_host_key_ed25519: Set(stored_ssh_host_key(SshHostKeyKind::Ed25519)?),
-                    ssh_host_key_rsa: Set(stored_ssh_host_key(SshHostKeyKind::Rsa)?),
-                }
-                .insert(db)
-                .await
-            }
-        }
+        Self::find().one(db).await?.ok_or_else(|| {
+            DbErr::RecordNotFound(
+                "the parameters row is missing; run the database migrations".into(),
+            )
+        })
     }
 }
 

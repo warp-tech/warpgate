@@ -51,7 +51,6 @@ const APPROVAL_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 /// Upsert the token without conflicts from multiple nodes
 /// starting at the same time
 async fn resolve_cluster_token(db: &DatabaseConnection) -> Result<Secret<String>> {
-    // Ensures the row exists before the conditional update.
     let params = Parameters::Entity::get(db).await?;
     if let Some(token) = params.cluster_token {
         return Ok(Secret::new(token));
