@@ -104,11 +104,15 @@ pub async fn handle_api_request(
             _handle_websocket_request_inner(ws, req, admitted, &path, ctx.services())
                 .await
                 .map(IntoResponse::into_response)
+                .map_err(poem::Error::from)
         } else {
+            // Not `.context(...)`: that converts the `WarpgateError` to an
+            // `anyhow::Error`, which poem renders through `Display` instead
+            // of `as_response()`.
             _handle_normal_request_inner(req, body, admitted, &path, ctx.services())
                 .await
                 .map(IntoResponse::into_response)
-                .context("handling Kubernetes API request")
+                .map_err(poem::Error::from)
         };
 
         let client_ip = get_client_ip(req, ctx.services()).await;

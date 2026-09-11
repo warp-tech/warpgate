@@ -352,7 +352,7 @@ pub async fn proxy_normal_request(
     let client_request = client_request.build().context("Could not build request")?;
     let client_response = tokio::select! {
         result = client.execute(client_request) => {
-            result.map_err(|e| anyhow::anyhow!("Could not execute request: {e}"))?
+            result.map_err(poem::error::BadGateway)?
         }
         _ = close_rx.recv() => {
             return Err(poem::Error::from_status(StatusCode::GONE));

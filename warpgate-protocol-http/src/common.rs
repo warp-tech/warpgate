@@ -18,7 +18,7 @@ use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, Credential
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Protocol, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
-use warpgate_common_http::ext::construct_external_url;
+use warpgate_common_http::ext::{construct_external_url, is_navigation_request};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
@@ -167,12 +167,6 @@ pub fn page_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
             .await?
             .map_or(err_resp, IntoResponse::into_response))
     })
-}
-
-pub fn is_navigation_request(req: &Request) -> bool {
-    req.headers()
-        .get(HeaderName::from_static("sec-fetch-mode"))
-        .is_none_or(|mode| mode == "navigate")
 }
 
 pub fn redirect_navigations(

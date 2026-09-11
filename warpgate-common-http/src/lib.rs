@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod errors;
 pub mod ext;
 mod keepalive;
 pub mod logging;
