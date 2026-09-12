@@ -134,7 +134,7 @@
                 >
                     <ModalHeader>Access instructions</ModalHeader>
                     <ModalBody>
-                        {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres' || target.options.kind === 'Kubernetes'}
+                        {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres' || target.options.kind === 'Mongo' || target.options.kind === 'Kubernetes'}
                             <Loadable promise={api.getUsers()}>
                                 {#snippet children(users)}
                                     <FormGroup floating label="Select a user">
@@ -185,6 +185,9 @@
                             {/if}
                             {#if target.options.kind === 'Postgres'}
                                 PostgreSQL target
+                            {/if}
+                            {#if target.options.kind === 'Mongo'}
+                                MongoDB target
                             {/if}
                             {#if target.options.kind === 'Ssh'}
                                 SSH target
@@ -282,7 +285,7 @@
                             />
                         {/if}
 
-                        {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+                        {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres' || target.options.kind === 'Mongo'}
                             <div class="row">
                                 <div class="col-8">
                                     <FormGroup floating label="Target host">
@@ -347,6 +350,22 @@
                                         autocomplete="off"
                                         bind:value={target.options.auth.password}
                                     >
+                                </FormGroup>
+                            {/if}
+
+                            {#if target.options.kind === 'Mongo'}
+                                <FormGroup floating label="Auth source database">
+                                    <input
+                                        class="form-control"
+                                        placeholder="admin"
+                                        bind:value={target.options.authSource}
+                                    >
+                                    <small class="form-text text-muted">
+                                        The database the target's credentials
+                                        are verified against
+                                        (<code>authSource</code>). Leave empty
+                                        to use <code>admin</code>.
+                                    </small>
                                 </FormGroup>
                             {/if}
 

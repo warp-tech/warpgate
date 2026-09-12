@@ -106,6 +106,31 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 * Web approval (browser link prompt)
 `,
 
+    [TargetKind.Mongo]: `
+## Warpgate ↔ target
+
+* Authenticates against the target with SCRAM-SHA-256 using the stored password.
+* TLS at target is optional.
+* The credentials are verified against the \`auth source\` database (default: \`admin\`).
+
+## Warpgate ↔ client
+
+* Warpgate requires TLS from the client.
+* Client authenticates with SASL PLAIN (cleartext password) over the mandatory TLS.
+
+## MongoDB protocol
+
+* OP_MSG messages are proxied; the legacy \`hello\`/\`isMaster\` handshake is answered by Warpgate.
+* Minimum target: MongoDB 4.0+ (SCRAM-SHA-256), minimum client: MongoDB 3.6+ (OP_MSG).
+* Compression and checksums are not negotiated.
+* Users connect with \`authMechanism=PLAIN\` and a \`user#target\` username.
+
+## Supported Warpgate credentials
+
+* Password
+* Ticket
+`,
+
     [TargetKind.Kubernetes]: `
 ## Warpgate ↔ target
 

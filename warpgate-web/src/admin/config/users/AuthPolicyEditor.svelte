@@ -37,6 +37,7 @@
         { id: 'http', name: 'HTTP' },
         { id: 'mysql', name: 'MySQL' },
         { id: 'postgres', name: 'PostgreSQL' },
+        { id: 'mongo', name: 'MongoDB' },
         { id: 'kubernetes', name: 'Kubernetes' },
         { id: 'vnc', name: 'VNC' },
         { id: 'rdp', name: 'RDP' },
@@ -75,6 +76,7 @@
         ]),
         http: new Map(),
         mysql: new Map(),
+        mongo: new Map(),
         ssh: new Map(),
         vnc: new Map([
             [
