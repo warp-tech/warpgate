@@ -1619,6 +1619,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc32c"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47"
+dependencies = [
+ "rustc_version",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4442,6 +4451,42 @@ dependencies = [
  "ctutils",
  "hybrid-array",
  "num-traits",
+]
+
+[[package]]
+name = "mongo_common"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d9516e74f77bc577282cff03c579b65446aba088e903cf2a4f3d3c6a1035e9"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "crc32c",
+ "hmac 0.12.1",
+ "md-5 0.10.6",
+ "pbkdf2 0.12.2",
+ "rand 0.8.6",
+ "sha1 0.10.6",
+ "sha2 0.10.9",
+ "subtle",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "mongowire"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45ec3e3070171250d79667859867113c47fb0db4cc0e2f8146b7c09704da5201"
+dependencies = [
+ "async-trait",
+ "bitflags 2.13.1",
+ "bytes",
+ "futures",
+ "mongo_common",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "wirebson",
 ]
 
 [[package]]
@@ -8936,6 +8981,7 @@ dependencies = [
  "warpgate-db-entities",
  "warpgate-protocol-http",
  "warpgate-protocol-kubernetes",
+ "warpgate-protocol-mongo",
  "warpgate-protocol-mysql",
  "warpgate-protocol-postgres",
  "warpgate-protocol-rdp",
@@ -9337,6 +9383,28 @@ dependencies = [
  "warpgate-db-entities",
  "warpgate-sso",
  "warpgate-tls",
+]
+
+[[package]]
+name = "warpgate-protocol-mongo"
+version = "0.28.5"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "mongo_common",
+ "mongowire",
+ "rustls 0.23.43",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tracing",
+ "url",
+ "warpgate-common",
+ "warpgate-common-http",
+ "warpgate-core",
+ "warpgate-tls",
+ "wirebson",
 ]
 
 [[package]]
@@ -10341,6 +10409,17 @@ dependencies = [
  "tracing",
  "uuid",
  "widestring",
+]
+
+[[package]]
+name = "wirebson"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "353042ae464dccb125ff034ccd6bc6b56e0e31bf4bb850d9397fcd48789ee616"
+dependencies = [
+ "bytes",
+ "mongo_common",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

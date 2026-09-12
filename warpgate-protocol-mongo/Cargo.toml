@@ -1,0 +1,24 @@
+[package]
+name = "warpgate-protocol-mongo"
+version = "0.28.5"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+mongo_common = "0.1.1"
+mongowire = { version = "0.1.1", features = ["server"] }
+rustls.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+tracing.workspace = true
+url.workspace = true
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
+wirebson = "0.1.2"
