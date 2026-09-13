@@ -279,7 +279,7 @@ class ProcessManager:
                 f"MINIO_ROOT_USER={user}",
                 "-e",
                 f"MINIO_ROOT_PASSWORD={password}",
-                "minio/minio",
+                "quay.io/minio/minio",
                 "server",
                 "/data",
             ]

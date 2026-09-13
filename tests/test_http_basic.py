@@ -47,8 +47,11 @@ class Test:
         session = requests.Session()
         session.verify = False
 
+        # A browser navigation; anything else gets a 401 instead of a redirect.
         response = session.get(
-            f"{url}/?warpgate-target={target.name}", allow_redirects=False
+            f"{url}/?warpgate-target={target.name}",
+            headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"},
+            allow_redirects=False,
         )
         assert response.status_code == 307
         redirect = response.headers["location"]
