@@ -27,8 +27,8 @@ def alloc_port():
 
 
 def _wait_timeout(fn, msg, timeout=60):
-    # A thread that died from an exception is not alive either, so testing
-    # `is_alive()` alone reported every failed wait as a successful one.
+    # A thread that died from an exception is not alive either; capture the
+    # exception so the failure is re-raised instead of read as success.
     failure = []
 
     def run():
@@ -50,7 +50,7 @@ def _wait_timeout(fn, msg, timeout=60):
 def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None, connect_timeout=5, read_timeout=5):
     logging.debug(f"Waiting for port {port}")
     # What the last attempt saw, so that a timeout names a symptom.
-    last_seen = ["nothing is listening on it"]
+    last_seen = ["no attempt completed"]
 
     def wait():
         while True:
@@ -80,8 +80,6 @@ def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None,
                     for_process.wait(timeout=0.1)
                 except subprocess.TimeoutExpired:
                     continue
-                # Outside the `try`: raised inside it, this was swallowed
-                # by the `except` above and never reached the caller.
                 raise Exception(
                     f"Process exited with code {for_process.returncode} "
                     f"while waiting for port {port}"

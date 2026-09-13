@@ -1,10 +1,4 @@
-"""What `wait_port` tells the caller when the wait does not succeed.
-
-Every case here failed silently before: the caller was told the port was up.
-On 2026-09-13 that turned `minio/minio` disappearing from Docker Hub into
-`Port 1903 is not up` after a 60s timeout, with `docker: pull access denied`
-visible only in pytest's captured stderr.
-"""
+"""What `wait_port` tells the caller when the wait does not succeed."""
 
 import socket
 import subprocess
@@ -17,11 +11,6 @@ from .util import alloc_port, wait_port
 
 
 def test_a_child_that_exits_is_named_rather_than_timed_out():
-    """The case the `for_process` argument exists for.
-
-    It raised inside a `try` whose `except` caught `TimeoutExpired`, so the
-    exception was swallowed, the wait thread died, and the caller was told the
-    port had come up."""
     port = alloc_port()
     child = subprocess.Popen(["sh", "-c", "exit 3"])
     started = time.monotonic()
@@ -40,9 +29,7 @@ def test_a_port_that_never_opens_still_times_out():
 
 def test_a_listener_that_is_not_serving_yet_is_waited_out():
     """Warpgate's SSH port accepts connections before it serves them, and so
-    does a published Docker port. Upstream raised a plain `Exception` there --
-    not a `socket.error`, so it escaped the retry loop -- and that raise was
-    inert only for as long as a dead waiter counted as a successful one."""
+    does a published Docker port: an unanswered accept means keep waiting."""
     server = socket.socket()
     server.bind(("127.0.0.1", 0))
     server.listen(1)
@@ -65,9 +52,6 @@ def test_a_listener_that_is_not_serving_yet_is_waited_out():
 
 
 def test_a_port_that_only_ever_closes_says_that_when_it_times_out():
-    """The same observation, once it is the reason the wait ran out: it
-    belongs in the timeout message rather than in a raise that stops the
-    wait."""
     server = socket.socket()
     server.bind(("127.0.0.1", 0))
     server.listen(1)
@@ -90,8 +74,7 @@ def test_a_port_that_only_ever_closes_says_that_when_it_times_out():
 
 
 def test_a_port_that_is_up_is_still_reported_as_up():
-    """The control. Without it the four above pass on a `wait_port` that
-    always raises."""
+    """The control: the four above also pass on a `wait_port` that always raises."""
     server = socket.socket()
     server.bind(("127.0.0.1", 0))
     server.listen(1)
