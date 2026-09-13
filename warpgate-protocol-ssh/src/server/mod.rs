@@ -6,10 +6,9 @@ mod service_output;
 mod session;
 mod session_handle;
 mod target_menu;
-mod transport_abort;
-
 use std::borrow::Cow;
 use std::net::SocketAddr;
+use std::os::fd::AsFd;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,9 +22,7 @@ pub use session::ServerSession;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
-use tokio::sync::oneshot;
 use tracing::*;
-use transport_abort::AbortableStream;
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::net::accept_loop;
 use warpgate_core::{Services, State, UserSessionStateInit};
@@ -79,6 +76,12 @@ async fn _handle_connection(
 ) -> Result<()> {
     let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
+    // A second descriptor on the client socket. Everything else Warpgate can
+    // say to a client goes through russh, which cannot act on any of it while
+    // its loop is parked in a write the client never drains; `shutdown(2)`
+    // through this descriptor fails that write from underneath.
+    let client_socket = std::net::TcpStream::from(stream.as_fd().try_clone_to_owned()?);
+
     let (server_handle, wrapped_stream) = State::register_user_session_with_stream(
         &services.state,
         crate::PROTOCOL_NAME,
@@ -90,10 +93,6 @@ async fn _handle_connection(
     )
     .await
     .context("registering session")?;
-
-    // The last resort for a client that has stopped reading. See
-    // `transport_abort`.
-    let (wrapped_stream, transport_abort) = AbortableStream::new(wrapped_stream);
 
     let id = server_handle.lock().await.user_session_id();
 
@@ -110,19 +109,13 @@ async fn _handle_connection(
 
     let handler = ServerHandler { event_tx, banner };
 
-    // The only link between the session and the wire protocol tasks: it lets
-    // a teardown find out when russh's loop has actually shut the stream
-    // down, instead of guessing with a sleep (#2520).
-    let (protocol_done_tx, protocol_done_rx) = oneshot::channel();
-
     let session = match ServerSession::start(
         remote_address,
         &services,
         server_handle,
         session_handle_rx,
         event_rx,
-        protocol_done_rx,
-        transport_abort,
+        client_socket,
     )
     .await
     {
@@ -177,12 +170,7 @@ async fn _handle_connection(
 
     tokio::task::Builder::new()
         .name(&format!("SSH {id} protocol"))
-        .spawn(_run_stream(
-            russh_config,
-            wrapped_stream,
-            handler,
-            protocol_done_tx,
-        ))?;
+        .spawn(_run_stream(russh_config, wrapped_stream, handler))?;
 
     Ok(())
 }
@@ -191,7 +179,6 @@ async fn _run_stream<R>(
     config: Arc<russh::server::Config>,
     socket: R,
     handler: ServerHandler,
-    protocol_done_tx: oneshot::Sender<()>,
 ) -> Result<()>
 where
     R: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -202,10 +189,6 @@ where
         Ok(())
     }
     .await;
-
-    // Sent on both outcomes: the session side only cares that this task is
-    // done, not why. A dropped receiver makes it a no-op.
-    let _ = protocol_done_tx.send(());
 
     if let Err(ref error) = ret {
         error!(%error, "Session failed");
@@ -243,4 +226,42 @@ pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> 
     }
 
     Ok(MethodSet::from(&methods_vec[..]))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Shutdown;
+    use std::os::fd::AsFd;
+
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::{TcpListener, TcpStream};
+
+    /// A write parked on a peer that never reads must fail once the duplicate
+    /// descriptor is shut down; that wake-up is what ends a stalled client.
+    #[tokio::test]
+    async fn shutdown_through_duplicate_fd_releases_parked_write() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let _client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        let dup = std::net::TcpStream::from(server.as_fd().try_clone_to_owned().unwrap());
+
+        let writer = tokio::spawn(async move {
+            let chunk = vec![0u8; 65536];
+            loop {
+                if let Err(e) = server.write_all(&chunk).await {
+                    return e;
+                }
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(!writer.is_finished(), "write never parked");
+
+        dup.shutdown(Shutdown::Both).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), writer)
+            .await
+            .expect("write still parked after shutdown")
+            .unwrap();
+    }
 }
