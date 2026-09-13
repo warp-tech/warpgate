@@ -25,6 +25,11 @@ pub struct AllCredentialsPolicy {
     pub supported_credential_types: HashSet<CredentialKind>,
 }
 
+pub struct MultipleCombinationsCredentialPolicy {
+    pub supported_credential_types: HashSet<CredentialKind>,
+    pub paths: Vec<HashSet<CredentialKind>>,
+}
+
 pub struct PerProtocolCredentialPolicy {
     pub protocols: HashMap<Protocol, Box<dyn CredentialPolicy + Send + Sync>>,
     pub default: Box<dyn CredentialPolicy + Send + Sync>,
@@ -72,6 +77,45 @@ impl CredentialPolicy for AllCredentialsPolicy {
                     .copied()
                     .collect(),
             )
+        }
+    }
+}
+
+impl CredentialPolicy for MultipleCombinationsCredentialPolicy {
+    fn is_sufficient(
+        &self,
+        _protocol: Protocol,
+        valid_credentials: &HashSet<CredentialKind>,
+    ) -> CredentialPolicyResponse {
+        if self.paths.is_empty() {
+            if valid_credentials.is_empty() {
+                return CredentialPolicyResponse::Need(self.supported_credential_types.clone());
+            }
+            return CredentialPolicyResponse::Ok;
+        }
+
+        // Check if ANY path is fully satisfied
+        if !valid_credentials.is_empty()
+            && self
+                .paths
+                .iter()
+                .any(|path| !path.is_empty() && valid_credentials.is_superset(path))
+        {
+            return CredentialPolicyResponse::Ok;
+        }
+
+        // Collect all missing credentials needed across all paths
+        let needed: HashSet<CredentialKind> = self
+            .paths
+            .iter()
+            .flat_map(|path| path.difference(valid_credentials))
+            .copied()
+            .collect();
+
+        if needed.is_empty() {
+            CredentialPolicyResponse::Ok
+        } else {
+            CredentialPolicyResponse::Need(needed)
         }
     }
 }
@@ -187,5 +231,86 @@ mod tests {
                 .into_iter()
                 .collect()
         );
+    }
+
+    #[test]
+    fn multiple_combinations_policy_tests() {
+        // Paths:
+        // 1. WebUserApproval only
+        // 2. Password + Totp
+        // 3. PublicKey only
+        let policy = MultipleCombinationsCredentialPolicy {
+            supported_credential_types: [
+                CredentialKind::Password,
+                CredentialKind::Totp,
+                CredentialKind::PublicKey,
+                CredentialKind::WebUserApproval,
+            ]
+            .into_iter()
+            .collect(),
+            paths: vec![
+                [CredentialKind::WebUserApproval].into_iter().collect(),
+                [CredentialKind::Password, CredentialKind::Totp]
+                    .into_iter()
+                    .collect(),
+                [CredentialKind::PublicKey].into_iter().collect(),
+            ],
+        };
+
+        // Initially no credentials -> Needs any of the factors
+        let CredentialPolicyResponse::Need(needed) =
+            policy.is_sufficient(Protocol::Ssh, &kinds(&[]))
+        else {
+            panic!("expected Need");
+        };
+        assert_eq!(
+            needed,
+            [
+                CredentialKind::WebUserApproval,
+                CredentialKind::Password,
+                CredentialKind::Totp,
+                CredentialKind::PublicKey
+            ]
+            .into_iter()
+            .collect()
+        );
+
+        // Offer PublicKey -> Path 3 satisfied -> Ok
+        assert!(matches!(
+            policy.is_sufficient(Protocol::Ssh, &kinds(&[CredentialKind::PublicKey])),
+            CredentialPolicyResponse::Ok
+        ));
+
+        // Offer WebUserApproval -> Path 1 satisfied -> Ok
+        assert!(matches!(
+            policy.is_sufficient(Protocol::Ssh, &kinds(&[CredentialKind::WebUserApproval])),
+            CredentialPolicyResponse::Ok
+        ));
+
+        // Offer Password only -> Needs Totp (or Web/Key for other paths)
+        let CredentialPolicyResponse::Need(needed) =
+            policy.is_sufficient(Protocol::Ssh, &kinds(&[CredentialKind::Password]))
+        else {
+            panic!("expected Need");
+        };
+        assert_eq!(
+            needed,
+            [
+                CredentialKind::Totp,
+                CredentialKind::WebUserApproval,
+                CredentialKind::PublicKey
+            ]
+            .into_iter()
+            .collect()
+        );
+
+        // Offer Password + Totp -> Path 2 satisfied -> Ok
+        assert!(matches!(
+            policy.is_sufficient(
+                Protocol::Ssh,
+                &kinds(&[CredentialKind::Password, CredentialKind::Totp])
+            ),
+            CredentialPolicyResponse::Ok
+        ));
     }
 }

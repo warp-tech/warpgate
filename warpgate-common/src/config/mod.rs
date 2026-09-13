@@ -86,26 +86,88 @@ impl UserAuthCredential {
 }
 
 /// Coerce [] to None
-fn credential_entry_is_unset(entry: &Option<Vec<CredentialKind>>) -> bool {
+fn credential_entry_is_unset(entry: &Option<Vec<Vec<CredentialKind>>>) -> bool {
     entry.as_ref().is_none_or(Vec::is_empty)
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
+fn deserialize_credential_policy_entry<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<Vec<CredentialKind>>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Entry {
+        Multi(Vec<Vec<CredentialKind>>),
+        Single(Vec<CredentialKind>),
+    }
+
+    let opt: Option<Entry> = Option::deserialize(deserializer)?;
+    Ok(opt.and_then(|entry| match entry {
+        Entry::Multi(m) => {
+            let filtered: Vec<Vec<CredentialKind>> =
+                m.into_iter().filter(|p| !p.is_empty()).collect();
+            if filtered.is_empty() {
+                None
+            } else {
+                Some(filtered)
+            }
+        }
+        Entry::Single(s) => {
+            if s.is_empty() {
+                None
+            } else {
+                Some(vec![s])
+            }
+        }
+    }))
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Object, Default, PartialEq, Eq)]
 pub struct UserRequireCredentialsPolicy {
-    #[serde(skip_serializing_if = "credential_entry_is_unset")]
-    pub http: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "credential_entry_is_unset")]
-    pub kubernetes: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "credential_entry_is_unset")]
-    pub ssh: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "credential_entry_is_unset")]
-    pub mysql: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "credential_entry_is_unset")]
-    pub postgres: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "credential_entry_is_unset")]
-    pub vnc: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "credential_entry_is_unset")]
-    pub rdp: Option<Vec<CredentialKind>>,
+    #[serde(
+        default,
+        skip_serializing_if = "credential_entry_is_unset",
+        deserialize_with = "deserialize_credential_policy_entry"
+    )]
+    pub http: Option<Vec<Vec<CredentialKind>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "credential_entry_is_unset",
+        deserialize_with = "deserialize_credential_policy_entry"
+    )]
+    pub kubernetes: Option<Vec<Vec<CredentialKind>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "credential_entry_is_unset",
+        deserialize_with = "deserialize_credential_policy_entry"
+    )]
+    pub ssh: Option<Vec<Vec<CredentialKind>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "credential_entry_is_unset",
+        deserialize_with = "deserialize_credential_policy_entry"
+    )]
+    pub mysql: Option<Vec<Vec<CredentialKind>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "credential_entry_is_unset",
+        deserialize_with = "deserialize_credential_policy_entry"
+    )]
+    pub postgres: Option<Vec<Vec<CredentialKind>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "credential_entry_is_unset",
+        deserialize_with = "deserialize_credential_policy_entry"
+    )]
+    pub vnc: Option<Vec<Vec<CredentialKind>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "credential_entry_is_unset",
+        deserialize_with = "deserialize_credential_policy_entry"
+    )]
+    pub rdp: Option<Vec<Vec<CredentialKind>>>,
 }
 
 impl UserRequireCredentialsPolicy {
@@ -113,8 +175,16 @@ impl UserRequireCredentialsPolicy {
     pub fn upgrade_to_otp(&self, with_existing_credentials: &[UserAuthCredential]) -> Self {
         let mut copy = self.clone();
 
+        let add_totp_to_paths = |paths: &mut Vec<Vec<CredentialKind>>| {
+            for path in paths.iter_mut() {
+                if !path.contains(&CredentialKind::Totp) {
+                    path.push(CredentialKind::Totp);
+                }
+            }
+        };
+
         if let Some(policy) = &mut copy.http {
-            policy.push(CredentialKind::Totp);
+            add_totp_to_paths(policy);
         } else {
             // Upgrade to OTP only if there is a password credential
             let mut kinds = vec![];
@@ -126,12 +196,12 @@ impl UserRequireCredentialsPolicy {
             }
             if !kinds.is_empty() {
                 kinds.push(CredentialKind::Totp);
-                copy.http = Some(kinds);
+                copy.http = Some(vec![kinds]);
             }
         }
 
         if let Some(policy) = &mut copy.ssh {
-            policy.push(CredentialKind::Totp);
+            add_totp_to_paths(policy);
         } else {
             // Upgrade to OTP only if there is a password or public key credential
             let mut kinds = vec![];
@@ -142,7 +212,7 @@ impl UserRequireCredentialsPolicy {
             }
             if !kinds.is_empty() {
                 kinds.push(CredentialKind::Totp);
-                copy.ssh = Some(kinds);
+                copy.ssh = Some(vec![kinds]);
             }
         }
         copy
@@ -986,5 +1056,40 @@ mod tests {
         let config = config.as_object().unwrap();
 
         assert!(!config.contains_key("recordings"));
+    }
+
+    #[test]
+    fn user_require_credentials_policy_serde_backwards_compatible() {
+        use super::UserRequireCredentialsPolicy;
+        use crate::auth::CredentialKind;
+
+        // Legacy 1D array format
+        let legacy_json = r#"{"ssh": ["password", "otp"]}"#;
+        let policy: UserRequireCredentialsPolicy = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(
+            policy.ssh,
+            Some(vec![vec![CredentialKind::Password, CredentialKind::Totp]])
+        );
+
+        // New 2D array format
+        let multi_json = r#"{"ssh": [["web"], ["password", "otp"], ["publickey"]]}"#;
+        let policy: UserRequireCredentialsPolicy = serde_json::from_str(multi_json).unwrap();
+        assert_eq!(
+            policy.ssh,
+            Some(vec![
+                vec![CredentialKind::WebUserApproval],
+                vec![CredentialKind::Password, CredentialKind::Totp],
+                vec![CredentialKind::PublicKey],
+            ])
+        );
+
+        // Empty array coerces to None
+        let empty_json = r#"{"ssh": []}"#;
+        let policy: UserRequireCredentialsPolicy = serde_json::from_str(empty_json).unwrap();
+        assert_eq!(policy.ssh, None);
+
+        // Roundtrip serialization
+        let serialized = serde_json::to_string(&policy).unwrap();
+        assert_eq!(serialized, "{}");
     }
 }
