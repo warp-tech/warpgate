@@ -430,7 +430,7 @@
                                         style="width: auto; cursor: pointer;"
                                         value={kind}
                                         disabled={mandatory}
-                                        on:change={(e) => {
+                                        onchange={e => {
                                             const target = e.currentTarget as HTMLSelectElement
                                             changeFactor(protocol.id, comboIndex, factorIndex, target.value as CredentialKind)
                                         }}
@@ -455,7 +455,7 @@
                                             class="btn btn-link text-muted p-0 ms-1 border-0"
                                             style="line-height: 1;"
                                             title="Remove factor"
-                                            on:click={() => removeFactor(protocol.id, comboIndex, factorIndex)}
+                                            onclick={() => removeFactor(protocol.id, comboIndex, factorIndex)}
                                         >
                                             <Fa icon={faTimes} />
                                         </button>
@@ -495,7 +495,7 @@
                                     class="form-select form-select-sm py-0 ps-2 pe-4 shadow-none text-muted"
                                     style="width: auto; height: 31px; cursor: pointer; border-style: dashed;"
                                     value=""
-                                    on:change={(e) => {
+                                    onchange={e => {
                                         const target = e.currentTarget as HTMLSelectElement
                                         if (target.value) {
                                             addFactor(protocol.id, comboIndex, target.value as CredentialKind)

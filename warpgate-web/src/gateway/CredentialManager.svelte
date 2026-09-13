@@ -117,6 +117,18 @@
             await deleteCertificateKey(credential.id)
         }
     }
+
+    function policyRequires(kind: CredentialKind): boolean {
+        if (!creds?.credentialPolicy) {
+            return false
+        }
+        return Object.values(creds.credentialPolicy).some(
+            (combos?: CredentialKind[][]) =>
+                combos?.some((combo: CredentialKind[]) =>
+                    combo.includes(kind),
+                ) ?? false,
+        )
+    }
 </script>
 
 <Loadable promise={initPromise}>
@@ -163,7 +175,7 @@
             </div>
         </div>
 
-        {#if creds.publicKeys.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.some(c => c.includes(CredentialKind.Password)))}
+        {#if creds.publicKeys.length === 0 && policyRequires(CredentialKind.Password)}
             <Alert color="warning">
                 Your credential policy requires using a password for
                 authentication. Without one, you won't be able to log in.
@@ -210,7 +222,7 @@
             {/each}
         </div>
 
-        {#if creds.otp.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.some(c => c.includes(CredentialKind.Totp)))}
+        {#if creds.otp.length === 0 && policyRequires(CredentialKind.Totp)}
             <Alert color="warning">
                 Your credential policy requires using a one-time password for
                 authentication. Without one, you won't be able to log in.
