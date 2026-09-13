@@ -19,7 +19,9 @@ use tracing::warn;
 use warpgate_common::auth::ApprovalKind;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::{SessionApprovalRequestSnapshot, TargetSessionSnapshot, UserSessionSnapshot};
+use warpgate_core::{
+    SessionApprovalRequestSnapshot, State, TargetSessionSnapshot, UserSessionSnapshot,
+};
 use warpgate_db_entities::{Node, SessionApprovalRequest, Target, TargetSession, UserSession};
 
 use super::pagination::PaginatedResponse;
@@ -113,15 +115,7 @@ impl Api {
                 .map_err(poem::error::InternalServerError)?;
         }
 
-        {
-            let user_states = {
-                let state = admin.services().state.lock().await;
-                state.user_sessions.values().cloned().collect::<Vec<_>>()
-            };
-            for state in user_states {
-                state.lock().await.handle.close();
-            }
-        }
+        State::close_local_sessions(&admin.services().state, |_| true).await;
 
         session.purge();
 

@@ -181,6 +181,25 @@ impl State {
         )))
     }
 
+    pub async fn close_local_sessions(
+        this: &Arc<Mutex<Self>>,
+        matches: impl Fn(&UserSessionState) -> bool,
+    ) {
+        let user_states = this
+            .lock()
+            .await
+            .user_sessions
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for state in user_states {
+            let state = state.lock().await;
+            if matches(&state) {
+                state.handle.close();
+            }
+        }
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
         self.change_sender.subscribe()
     }
@@ -386,6 +405,9 @@ mod tests {
         assert!(matches!(refused, Err(WarpgateError::UserSessionEnded)));
     }
 
+    /// Closing by user must reach exactly that user's live connections: a
+    /// deleted account keeps no open handle, and nobody else's is touched.
+    #[tokio::test]
     #[tokio::test]
     async fn target_open_racing_session_end_cannot_leave_an_open_access() {
         set_config_migration_values(ConfigMigrationValues::default());
