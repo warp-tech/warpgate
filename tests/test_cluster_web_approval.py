@@ -37,7 +37,7 @@ class Test:
                 sdk.UserDataRequest(
                     username=user.username,
                     credential_policy=sdk.UserRequireCredentialsPolicy(
-                        ssh=[sdk.CredentialKind.WEBUSERAPPROVAL],
+                        ssh=[[sdk.CredentialKind.WEBUSERAPPROVAL]],
                     ),
                 ),
             )

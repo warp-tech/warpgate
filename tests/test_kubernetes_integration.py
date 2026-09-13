@@ -458,7 +458,7 @@ class TestKubernetesIntegration:
                 sdk.UserDataRequest(
                     username=user.username,
                     credential_policy=sdk.UserRequireCredentialsPolicy(
-                        kubernetes=[sdk.CredentialKind.WEBUSERAPPROVAL],
+                        kubernetes=[[sdk.CredentialKind.WEBUSERAPPROVAL]],
                     ),
                 ),
             )
