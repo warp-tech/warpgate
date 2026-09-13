@@ -33,6 +33,7 @@
             name: 'MongoDB',
             value: TargetKind.Mongo,
             description: 'Expose access to a database server',
+            experimental: true,
         },
         {
             name: 'Kubernetes',
