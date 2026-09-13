@@ -29,17 +29,32 @@ from .util import _wait_timeout, alloc_port, wait_port
 from .test_http_common import echo_server_port  # noqa
 
 # OpenAPI Generator's Python (pydantic-v2) generator has an upstream bug where 2D
-# arrays (list of list) unconditionally call `.to_dict()` on inner items without
-# checking if they are Enums or Models.
-# CredentialKind is an Enum and does not have `.to_dict()`, so we patch it here
-# to return its value (e.g. "Password").
+# arrays (list of list) unconditionally call `.to_dict()` and `.from_dict()` on inner
+# items without checking if they are Enums or Models.
+# CredentialKind is an Enum and does not have `.to_dict()` or `.from_dict()`, so we
+# patch it here.
+def _patch_credential_kind(cls):
+    cls.to_dict = lambda self: self.value  # type: ignore
+
+    def _from_dict(c, obj):
+        if obj is None:
+            return None
+        if isinstance(obj, c):
+            return obj
+        if isinstance(obj, dict):
+            return c(obj.get("value", obj))
+        return c(obj)
+
+    cls.from_dict = classmethod(_from_dict)  # type: ignore
+
+
 try:
     from openapi_client.models.credential_kind import CredentialKind
-    CredentialKind.to_dict = lambda self: self.value  # type: ignore
+    _patch_credential_kind(CredentialKind)
 except ImportError:
     try:
         from api_sdk.openapi_client.models.credential_kind import CredentialKind
-        CredentialKind.to_dict = lambda self: self.value  # type: ignore
+        _patch_credential_kind(CredentialKind)
     except ImportError:
         pass
 
