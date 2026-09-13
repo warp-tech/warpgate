@@ -38,33 +38,59 @@ def test_a_port_that_never_opens_still_times_out():
         wait_port(port, timeout=1)
 
 
-def test_an_open_port_that_closes_on_us_reaches_the_caller():
-    """`recv=True` raises a plain `Exception`, which is not a `socket.error`,
-    so it escaped the retry loop and killed the wait thread.
+def test_a_listener_that_is_not_serving_yet_is_waited_out():
+    """Warpgate's SSH port accepts connections before it serves them, and so
+    does a published Docker port. Upstream raised a plain `Exception` there --
+    not a `socket.error`, so it escaped the retry loop -- and that raise was
+    inert only for as long as a dead waiter counted as a successful one."""
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
 
-    The peer has to accept and close: a peer that accepts and stays silent
-    makes `recv` time out, and `socket.timeout` IS a `socket.error`, so that
-    one is retried rather than reported -- which is the intended behaviour and
-    is why this test closes instead of holding."""
+    def close_twice_then_answer():
+        for attempt in range(3):
+            conn, _ = server.accept()
+            if attempt < 2:
+                conn.close()
+                continue
+            conn.send(b"SSH-2.0-Warpgate\r\n")
+            conn.close()
+
+    threading.Thread(target=close_twice_then_answer, daemon=True).start()
+    try:
+        wait_port(port, timeout=10)
+    finally:
+        server.close()
+
+
+def test_a_port_that_only_ever_closes_says_that_when_it_times_out():
+    """The same observation, once it is the reason the wait ran out: it
+    belongs in the timeout message rather than in a raise that stops the
+    wait."""
     server = socket.socket()
     server.bind(("127.0.0.1", 0))
     server.listen(1)
     port = server.getsockname()[1]
 
     def accept_and_close():
-        conn, _ = server.accept()
-        conn.close()
+        while True:
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                return
+            conn.close()
 
     threading.Thread(target=accept_and_close, daemon=True).start()
     try:
-        with pytest.raises(Exception, match="not responding"):
-            wait_port(port, timeout=10)
+        with pytest.raises(Exception, match="closes them unanswered"):
+            wait_port(port, timeout=3)
     finally:
         server.close()
 
 
 def test_a_port_that_is_up_is_still_reported_as_up():
-    """The control. Without it the three above pass on a `wait_port` that
+    """The control. Without it the four above pass on a `wait_port` that
     always raises."""
     server = socket.socket()
     server.bind(("127.0.0.1", 0))

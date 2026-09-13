@@ -41,41 +41,55 @@ def _wait_timeout(fn, msg, timeout=60):
     t.start()
     t.join(timeout=timeout)
     if t.is_alive():
-        raise Exception(msg)
+        # Callable so the caller can describe what the wait kept seeing.
+        raise Exception(msg() if callable(msg) else msg)
     if failure:
         raise failure[0]
 
 
 def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None, connect_timeout=5, read_timeout=5):
     logging.debug(f"Waiting for port {port}")
+    # What the last attempt saw, so that a timeout names a symptom.
+    last_seen = ["nothing is listening on it"]
 
     def wait():
         while True:
             try:
                 s = socket.create_connection(("localhost", port), timeout=connect_timeout)
-                if recv:
-                    s.settimeout(read_timeout)
-                    if not s.recv(100):
-                        raise Exception("Port is open but not responding")
-                s.close()
-                logging.debug(f"Port {port} is up")
-                return
-            except socket.error:
-                if for_process:
-                    try:
-                        for_process.wait(timeout=0.1)
-                    except subprocess.TimeoutExpired:
-                        continue
-                    # Outside the `try`: raised inside it, this was swallowed
-                    # by the `except` above and never reached the caller.
-                    raise Exception(
-                        f"Process exited with code {for_process.returncode} "
-                        f"while waiting for port {port}"
-                    )
-                else:
-                    time.sleep(0.1)
+                try:
+                    if recv:
+                        s.settimeout(read_timeout)
+                        answered = bool(s.recv(100))
+                    else:
+                        answered = True
+                finally:
+                    s.close()
+                if answered:
+                    logging.debug(f"Port {port} is up")
+                    return
+                # Accepted and closed the connection unanswered. A listener
+                # that is up but not serving yet is the thing this loop waits
+                # for, so record it and keep waiting -- Warpgate's own SSH
+                # port does this for the first moments after it binds.
+                last_seen[0] = "it accepts connections and closes them unanswered"
+            except socket.error as e:
+                last_seen[0] = f"connecting to it raised {e!r}"
 
-    _wait_timeout(wait, f"Port {port} is not up", timeout=timeout)
+            if for_process:
+                try:
+                    for_process.wait(timeout=0.1)
+                except subprocess.TimeoutExpired:
+                    continue
+                # Outside the `try`: raised inside it, this was swallowed
+                # by the `except` above and never reached the caller.
+                raise Exception(
+                    f"Process exited with code {for_process.returncode} "
+                    f"while waiting for port {port}"
+                )
+            else:
+                time.sleep(0.1)
+
+    _wait_timeout(wait, lambda: f"Port {port} is not up: {last_seen[0]}", timeout=timeout)
 
 
 def wait_mysql_port(port):
