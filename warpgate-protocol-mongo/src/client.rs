@@ -114,7 +114,13 @@ impl MongoClient {
         sasl_start.add("$db", auth_db.clone());
         let (_, reply) = self.round_trip(sasl_start).await?;
         let doc = reply_doc(&reply)?;
-        require_ok(&doc, "saslStart")?;
+        require_ok(
+            &doc,
+            &format!(
+                "saslStart (authenticating user '{}' against authSource '{}')",
+                target.username, auth_db
+            ),
+        )?;
         let conversation_id = conversation_id(&doc)?;
         scram.receive_server_first(&payload_str(&doc)?)?;
 
