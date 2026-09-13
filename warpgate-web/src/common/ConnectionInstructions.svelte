@@ -337,9 +337,11 @@
 
     <Alert color="info" class="mt-3">
         Warpgate authenticates MongoDB clients with the PLAIN mechanism — add
-        <code>authMechanism=PLAIN</code> to your connection settings. TLS is
-        supported and recommended (<code>tls=true</code>); plain connections
-        are accepted but transmit the password unencrypted.
+        <code>authMechanism=PLAIN</code>
+        to your connection settings. TLS is supported and recommended (<code
+            >tls=true</code
+        >); plain connections are accepted but transmit the password
+        unencrypted.
     </Alert>
 {/if}
 

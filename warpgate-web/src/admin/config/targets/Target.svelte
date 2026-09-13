@@ -354,7 +354,10 @@
                             {/if}
 
                             {#if target.options.kind === 'Mongo'}
-                                <FormGroup floating label="Auth source database">
+                                <FormGroup
+                                    floating
+                                    label="Auth source database"
+                                >
                                     <input
                                         class="form-control"
                                         placeholder="admin"
@@ -362,9 +365,10 @@
                                     >
                                     <small class="form-text text-muted">
                                         The database the target's credentials
-                                        are verified against
-                                        (<code>authSource</code>). Leave empty
-                                        to use <code>admin</code>.
+                                        are verified against (<code
+                                            >authSource</code
+                                        >). Leave empty to use
+                                        <code>admin</code>.
                                     </small>
                                 </FormGroup>
                             {/if}
