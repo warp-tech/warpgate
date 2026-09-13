@@ -28,6 +28,22 @@ from deepmerge import always_merger
 from .util import _wait_timeout, alloc_port, wait_port
 from .test_http_common import echo_server_port  # noqa
 
+# OpenAPI Generator's Python (pydantic-v2) generator has an upstream bug where 2D
+# arrays (list of list) unconditionally call `.to_dict()` on inner items without
+# checking if they are Enums or Models.
+# CredentialKind is an Enum and does not have `.to_dict()`, so we patch it here
+# to return its value (e.g. "Password").
+try:
+    from openapi_client.models.credential_kind import CredentialKind
+    CredentialKind.to_dict = lambda self: self.value  # type: ignore
+except ImportError:
+    try:
+        from api_sdk.openapi_client.models.credential_kind import CredentialKind
+        CredentialKind.to_dict = lambda self: self.value  # type: ignore
+    except ImportError:
+        pass
+
+
 
 cargo_root = Path(os.getcwd()).parent
 enable_coverage = os.getenv("ENABLE_COVERAGE", "0") == "1"
