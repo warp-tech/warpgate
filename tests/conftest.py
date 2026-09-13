@@ -208,6 +208,8 @@ class ProcessManager:
                 f"MINIO_ROOT_PASSWORD={password}",
                 "quay.io/minio/minio",
                 "server",
+                "--address",
+                ":9000",
                 "/data",
             ]
         )
