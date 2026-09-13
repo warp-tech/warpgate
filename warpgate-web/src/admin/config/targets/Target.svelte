@@ -38,7 +38,7 @@
     import TargetRdpOptions from './rdp/Options.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
     import TargetVncOptions from './vnc/Options.svelte'
-    import SecretRefInput from 'common/SecretRefInput.svelte'
+    import SecretRefInput, { isSecretRef } from 'common/SecretRefInput.svelte'
 
     interface Props {
         params: { id: string }
@@ -53,14 +53,12 @@
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
 
-    const VAULT_PREFIXES = ['vault://', 'openbao://']
-
     let dbAuthMode = $derived.by(() => {
         const options = target?.options
         if (options?.kind !== 'MySql' && options?.kind !== 'Postgres') return undefined
         const auth = options.auth
         if (auth?.kind !== 'Password') return auth?.kind
-        return VAULT_PREFIXES.some(p => (auth.password ?? '').startsWith(p)) ? 'VaultRef' : 'Password'
+        return isSecretRef(auth.password) ? 'VaultRef' : 'Password'
     })
 
     function changeDbAuthKind (kind: string) {

@@ -4,7 +4,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, UnboundedReceiver, channel, unbounded_channel};
 use tracing::{Instrument, debug, error, info_span, warn};
 use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncEvent, X11Event};
-use warpgate_common::{SecretBackendRef, TargetVncOptions, VncTargetAuth, WarpgateError};
+use warpgate_common::{TargetVncOptions, VncTargetAuth, WarpgateError};
 use warpgate_core::{
     AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopEvent,
     DesktopInput, DesktopRect, DesktopState, LogonState,
@@ -90,9 +90,8 @@ const PROXY_ENCODINGS: &[VncEncoding] = &[
 /// [`DesktopEvent`]/[`DesktopInput`] streams.
 pub fn connect(
     admitted: AdmittedTarget<TargetVncOptions>,
-    secret_backend: SecretBackendRef,
 ) -> Result<DesktopClientHandles, WarpgateError> {
-    spawn_approved_client(admitted, secret_backend, BROWSER_ENCODINGS)
+    spawn_approved_client(admitted, BROWSER_ENCODINGS)
 }
 
 /// Like [`connect`], but negotiates the encodings ([`PROXY_ENCODINGS`]) used by the
@@ -101,23 +100,20 @@ pub fn connect(
 /// toward the viewer, and optionally recorded.
 pub fn connect_for_proxy(
     admitted: AdmittedTarget<TargetVncOptions>,
-    secret_backend: SecretBackendRef,
 ) -> Result<DesktopClientHandles, WarpgateError> {
-    spawn_approved_client(admitted, secret_backend, PROXY_ENCODINGS)
+    spawn_approved_client(admitted, PROXY_ENCODINGS)
 }
 
 fn spawn_approved_client(
     admitted: AdmittedTarget<TargetVncOptions>,
-    secret_backend: SecretBackendRef,
     encodings: &'static [VncEncoding],
 ) -> Result<DesktopClientHandles, WarpgateError> {
     let options = admitted.specific_target().options().clone();
-    Ok(spawn_client(options, secret_backend, encodings))
+    Ok(spawn_client(options, encodings))
 }
 
 fn spawn_client(
     options: TargetVncOptions,
-    secret_backend: SecretBackendRef,
     encodings: &'static [VncEncoding],
 ) -> DesktopClientHandles {
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
@@ -127,15 +123,7 @@ fn spawn_client(
     let span = info_span!("VNC-client", host = %options.host, port = options.port);
     tokio::spawn(
         async move {
-            if let Err(error) = run(
-                options,
-                secret_backend,
-                encodings,
-                event_tx.clone(),
-                input_rx,
-                abort_rx,
-            )
-            .await
+            if let Err(error) = run(options, encodings, event_tx.clone(), input_rx, abort_rx).await
             {
                 error!(%error, "VNC backend client failed");
                 let _ = event_tx.send(DesktopEvent::Error(error.to_string())).await;
@@ -158,7 +146,6 @@ fn spawn_client(
 
 async fn run(
     options: TargetVncOptions,
-    secret_backend: SecretBackendRef,
     encodings: &'static [VncEncoding],
     event_tx: tokio::sync::mpsc::Sender<DesktopEvent>,
     mut input_rx: Receiver<DesktopInput>,
@@ -174,12 +161,7 @@ async fn run(
         .context("connecting to VNC target")?;
 
     let password = match &options.auth {
-        VncTargetAuth::Password(auth) => auth
-            .password
-            .resolve(&*secret_backend)
-            .await?
-            .expose_secret()
-            .clone(),
+        VncTargetAuth::Password(auth) => auth.password.reveal()?.expose_secret().clone(),
         VncTargetAuth::None(_) => String::new(),
     };
 

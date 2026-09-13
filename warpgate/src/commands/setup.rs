@@ -15,9 +15,8 @@ use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
-    BackendType, GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig,
-    PostgresConfig, RdpConfig, Secret, SecretBackendConfig, SshConfig, VaultAuthConfig,
-    VaultTlsConfig, VncConfig, WarpgateConfigStore,
+    GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
+    RdpConfig, Secret, SshConfig, VncConfig, WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 use warpgate_core::db::connect_to_db_and_migrate;
@@ -48,112 +47,6 @@ fn prompt_endpoint(prompt: &str, default: &ListenEndpoint) -> ListenEndpoint {
             }
         }
     }
-}
-
-fn prompt_secret_backend(theme: &ColorfulTheme) -> Result<SecretBackendConfig> {
-    let backend_type = match dialoguer::Select::with_theme(theme)
-        .with_prompt("Secret backend type")
-        .items(&["Vault", "OpenBao"])
-        .default(0)
-        .interact()?
-    {
-        0 => BackendType::Vault,
-        _ => BackendType::OpenBao,
-    };
-
-    let name: String = dialoguer::Input::with_theme(theme)
-        .with_prompt("Secret backend name")
-        .default("vault".to_string())
-        .interact_text()?;
-
-    let address: String = dialoguer::Input::with_theme(theme)
-        .with_prompt("Address (e.g. https://vault.example.com:8200)")
-        .interact_text()?;
-
-    let namespace: String = dialoguer::Input::with_theme(theme)
-        .with_prompt("Namespace (leave empty for none)")
-        .allow_empty(true)
-        .interact_text()?;
-
-    let auth = match dialoguer::Select::with_theme(theme)
-        .with_prompt("Authentication method")
-        .items(&["Token", "AppRole", "Kubernetes"])
-        .default(0)
-        .interact()?
-    {
-        0 => VaultAuthConfig::Token {
-            token: Secret::new(
-                dialoguer::Password::with_theme(theme)
-                    .with_prompt("Token")
-                    .interact()?,
-            ),
-        },
-        1 => {
-            let role_id_file: String = dialoguer::Input::with_theme(theme)
-                .with_prompt("Path to the file containing the AppRole role_id")
-                .interact_text()?;
-            let secret_id_file: String = dialoguer::Input::with_theme(theme)
-                .with_prompt("Path to the file containing the AppRole secret_id")
-                .interact_text()?;
-            let mount: String = dialoguer::Input::with_theme(theme)
-                .with_prompt("AppRole auth mount path")
-                .default("approle".to_string())
-                .interact_text()?;
-            VaultAuthConfig::AppRole {
-                role_id_file: PathBuf::from(role_id_file),
-                secret_id_file: PathBuf::from(secret_id_file),
-                mount,
-            }
-        }
-        _ => {
-            let role: String = dialoguer::Input::with_theme(theme)
-                .with_prompt("Kubernetes auth role")
-                .interact_text()?;
-            let jwt_path: String = dialoguer::Input::with_theme(theme)
-                .with_prompt("Path to the Kubernetes service account JWT")
-                .default("/var/run/secrets/kubernetes.io/serviceaccount/token".to_string())
-                .interact_text()?;
-            let mount: String = dialoguer::Input::with_theme(theme)
-                .with_prompt("Kubernetes auth mount path")
-                .default("kubernetes".to_string())
-                .interact_text()?;
-            VaultAuthConfig::Kubernetes {
-                role,
-                jwt_path: PathBuf::from(jwt_path),
-                mount,
-            }
-        }
-    };
-
-    let skip_verify = dialoguer::Confirm::with_theme(theme)
-        .default(false)
-        .with_prompt("Skip TLS certificate verification?")
-        .interact()?;
-
-    let ca_cert: String = dialoguer::Input::with_theme(theme)
-        .with_prompt("Path to a custom CA certificate (leave empty to use the system trust store)")
-        .allow_empty(true)
-        .interact_text()?;
-
-    Ok(SecretBackendConfig {
-        name,
-        backend_type,
-        address,
-        namespace: if namespace.is_empty() {
-            None
-        } else {
-            Some(namespace)
-        },
-        auth,
-        tls: VaultTlsConfig {
-            ca_cert: if ca_cert.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(ca_cert))
-            },
-            skip_verify,
-        },
-    })
 }
 
 pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
@@ -472,21 +365,6 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
             .interact()?
     };
     let recordings_path = data_path.join("recordings").to_string_lossy().to_string();
-
-    // ---
-
-    if !matches!(cli.command, Commands::UnattendedSetup { .. }) && !is_docker() {
-        let configure_secret_backend = dialoguer::Confirm::with_theme(&theme)
-            .default(false)
-            .with_prompt(
-                "Configure a secret backend (Vault/OpenBao) to resolve secrets at runtime?",
-            )
-            .interact()?;
-
-        if configure_secret_backend {
-            store.secrets.backends.push(prompt_secret_backend(&theme)?);
-        }
-    }
 
     // ---
 

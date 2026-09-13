@@ -10,7 +10,7 @@ use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
 use warpgate_common::{
-    GlobalParams, Protocol, Secret, SecretBackendRef, UserSessionId, WarpgateConfig, WarpgateError,
+    GlobalParams, Protocol, Secret, UserSessionId, WarpgateConfig, WarpgateError,
 };
 use warpgate_db_entities::Parameters::MfaEnforcement;
 use warpgate_db_entities::{OtpCredential, Parameters, SsoCredential, UserSession};
@@ -42,7 +42,7 @@ pub struct Services {
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
     pub listener_status: ListenerStatusRegistry,
-    pub secret_backend: SecretBackendRef,
+    pub secret_backends: Arc<SecretBackendRegistry>,
     pub(crate) admin_approval_request_tx: broadcast::Sender<UserSessionId>,
 }
 
@@ -138,14 +138,18 @@ impl Services {
             });
         }
 
-        let secret_backend: SecretBackendRef =
-            Arc::new(SecretBackendRegistry::from_config(&config.lock().await.store.secrets).await?);
+        let secret_backends = Arc::new(SecretBackendRegistry::new(db.clone()));
 
         let services = Self {
             db: db.clone(),
             recordings,
             config: config.clone(),
-            state: State::new(&db, &rate_limiter_registry, cluster.node_id),
+            state: State::new(
+                &db,
+                &rate_limiter_registry,
+                cluster.node_id,
+                &secret_backends,
+            ),
             cluster,
             rate_limiter_registry,
             config_provider,
@@ -155,7 +159,7 @@ impl Services {
             login_protection,
             global_params: Arc::new(params),
             listener_status: Arc::default(),
-            secret_backend,
+            secret_backends,
             admin_approval_request_tx: broadcast::channel(100).0,
         };
 

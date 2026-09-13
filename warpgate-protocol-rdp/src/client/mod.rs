@@ -36,7 +36,7 @@ use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{debug, warn};
-use warpgate_common::{RdpTargetAuth, RdpTargetCompression, SecretBackendRef, TargetRdpOptions};
+use warpgate_common::{RdpTargetAuth, RdpTargetCompression, TargetRdpOptions};
 use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
 
 pub(crate) use self::logon::LogonWatcher;
@@ -78,7 +78,6 @@ impl ClipboardSink for ClientClipboardSink {
 pub async fn run(
     options: TargetRdpOptions,
     (width, height): (u16, u16),
-    secret_backend: SecretBackendRef,
     event_tx: Sender<DesktopEvent>,
     input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
@@ -94,7 +93,7 @@ pub async fn run(
     // the same bounds the Display Control resize path enforces.
     let (width, height) =
         MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
-    let password = auth.password.resolve(&*secret_backend).await?;
+    let password = auth.password.reveal()?;
     let config = build_config(
         &options,
         password.expose_secret(),

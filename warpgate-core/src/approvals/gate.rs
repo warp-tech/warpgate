@@ -6,7 +6,7 @@ use sea_orm::{EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use tracing::warn;
 use warpgate_common::auth::{ApprovalKind, RememberApprovalBy};
-use warpgate_common::{UserSessionId, WarpgateError};
+use warpgate_common::{TargetSecrets, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
     Advertised, UndecidedApprovalRequestStatus, close_request, mark_consumed,
@@ -78,7 +78,7 @@ impl GatedConnection {
 /// Refusal return WarpgateError::SessionNotApproved
 ///
 /// This wraps require_admin_approval()
-pub async fn admit_target_session<O: Send + Sync>(
+pub async fn admit_target_session<O: TargetSecrets + Send + Sync>(
     services: &Services,
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,

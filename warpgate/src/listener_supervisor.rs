@@ -59,6 +59,8 @@ pub type ServerFactory = Arc<
         + Sync,
 >;
 
+const BIND_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+
 /// Extracts a listener's desired state from the current config value.
 pub type ConfigSelector<C> = Arc<dyn Fn(&C) -> ListenerParams + Send + Sync>;
 
@@ -68,7 +70,8 @@ pub type ConfigSelector<C> = Arc<dyn Fn(&C) -> ListenerParams + Send + Sync>;
 /// * restarts it when a watched TLS cert/key file changes on disk — but only
 ///   after the new material loads and the key matches the certificate;
 /// * if the listener fails (e.g. the port is taken), pauses it and keeps the
-///   rest of the process running, retrying on the next config or cert change.
+///   rest of the process running, retrying periodically and on the next
+///   config or cert change.
 pub struct ListenerSupervisor<C> {
     name: &'static str,
     factory: ServerFactory,
@@ -130,7 +133,17 @@ impl<C: Send + 'static> ListenerSupervisor<C> {
         let mut watched_dirs: HashSet<PathBuf> = HashSet::new();
 
         loop {
+            // A listener that should be up but isn't (bind failed) is retried on a
+            // timer: a bind can fail for reasons that clear on their own, such as
+            // the SSH host keys' secret backend being briefly unreachable.
+            let bind_pending = task.is_none() && desired.as_ref().is_some_and(|d| d.enabled);
             tokio::select! {
+                _ = tokio::time::sleep(BIND_RETRY_INTERVAL), if bind_pending => {
+                    if let Some(params) = desired.clone() {
+                        info!(name = self.name, "Retrying listener bind");
+                        self.restart_with_new_params(&params, &mut task, &mut applied).await;
+                    }
+                }
                 maybe_config = config_stream.next() => {
                     let Some(config) = maybe_config else {
                         break;
@@ -252,7 +265,7 @@ impl<C: Send + 'static> ListenerSupervisor<C> {
                 .await;
             }
             Err(error) => {
-                error!(name = self.name, %error, "Listener failed to bind; paused until the next config or certificate change");
+                error!(name = self.name, %error, "Listener failed to bind; will retry");
                 self.report_status(
                     ListenerState::BindFailed,
                     &desired.endpoint,

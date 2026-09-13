@@ -8,7 +8,7 @@
         type TargetOptionsTargetSSHOptions,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
-    import SecretRefInput from 'common/SecretRefInput.svelte'
+    import SecretRefInput, { isSecretRef } from 'common/SecretRefInput.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { untrack } from 'svelte'
@@ -41,12 +41,11 @@
         )
     })
 
-    const VAULT_PREFIXES = ['vault://', 'openbao://']
-
     let authMode = $derived.by(() => {
         if (options.auth.kind !== 'Password') return options.auth.kind
-        const pw = (options.auth as { kind: 'Password'; password: string }).password
-        return VAULT_PREFIXES.some(p => pw.startsWith(p)) ? 'VaultRef' : 'Password'
+        const pw = (options.auth as { kind: 'Password'; password: string })
+            .password
+        return isSecretRef(pw) ? 'VaultRef' : 'Password'
     })
 
     function changeAuthKind(kind: string) {
@@ -163,20 +162,20 @@
     >
 </FormGroup>
 
-<div class="d-flex">
+<div class="d-flex align-items-center">
     <FormGroup floating label="Authenticate using" class="w-100">
         <select
-                value={authMode}
-                onchange={(e) => changeAuthKind((e.target as HTMLSelectElement).value)}
-                class="form-control"
-            >
-                <option value="PublicKey">Warpgate's own private keys</option>
-                <option value="Password">Password</option>
-                <option value="VaultRef">Password from Vault / OpenBao</option>
-                {#if $serverInfo?.runningOnEc2}
-                    <option value="IamRole">IAM Role (experimental)</option>
-                {/if}
-            </select>
+            value={authMode}
+            onchange={(e) => changeAuthKind((e.target as HTMLSelectElement).value)}
+            class="form-control"
+        >
+            <option value="PublicKey">Warpgate's own private keys</option>
+            <option value="Password">Password</option>
+            <option value="VaultRef">Password from Vault / OpenBao</option>
+            {#if $serverInfo?.runningOnEc2}
+                <option value="IamRole">IAM Role (experimental)</option>
+            {/if}
+        </select>
     </FormGroup>
     {#if options.auth.kind === 'PublicKey'}
         <FormGroup floating label="Key" class="w-100 ms-3">
@@ -208,16 +207,16 @@
             >
         </FormGroup>
     {/if}
-</div>
 
-{#if options.auth.kind === 'Password' && authMode === 'VaultRef'}
-    <div class="mb-3">
-        <SecretRefInput
-            bind:value={options.auth.password}
-            disabled={!$adminPermissions.targetsEdit}
-        />
-    </div>
-{/if}
+    {#if options.auth.kind === 'Password' && authMode === 'VaultRef'}
+        <FormGroup class="w-100 ms-3">
+            <SecretRefInput
+                bind:value={options.auth.password}
+                disabled={!$adminPermissions.targetsEdit}
+            />
+        </FormGroup>
+    {/if}
+</div>
 
 <div class="d-flex">
     <Input

@@ -8,7 +8,8 @@ use serde::Serialize;
 use serde_json::Value;
 use warpgate_aws::{S3Credentials, S3Storage};
 use warpgate_common::{
-    AdminPermission, PasswordPolicy, SecretRef, UserRequireCredentialsPolicy, WarpgateError,
+    AdminPermission, PasswordPolicy, SecretError, SecretRef, SecretResolver,
+    UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
@@ -180,6 +181,17 @@ struct ParameterUpdate {
     pub recordings_storage: Option<RecordingsStorageConfig>,
 }
 
+async fn validate_host_key_reference(
+    reference: &str,
+    secret_backend: &dyn SecretResolver,
+) -> Result<(), String> {
+    let reference: SecretRef = reference.parse().map_err(|e: SecretError| e.to_string())?;
+    warpgate_protocol_ssh::load_host_keys_from_backend(&reference, secret_backend)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("Could not load SSH host keys from {reference}: {e}"))
+}
+
 #[derive(Serialize, Object)]
 struct AnalyticsPreview {
     /// The target URL the report would be POSTed to.
@@ -336,12 +348,13 @@ impl Api {
             .ssh_client_auth_keyboard_interactive
             .map_or(NotSet, Set);
         parameters.ssh_host_key_verification = body.ssh_host_key_verification.map_or(NotSet, Set);
+        // Resolved here so a bad reference is refused instead of taking the SSH
+        // listener down on every node's next restart.
         if let Some(Some(reference)) = &body.ssh_host_key_secret_ref
-            && let Err(error) = reference.parse::<SecretRef>()
+            && let Err(error) =
+                validate_host_key_reference(reference, &*services.secret_backends).await
         {
-            return Ok(UpdateParametersResponse::BadRequest(Json(
-                error.to_string(),
-            )));
+            return Ok(UpdateParametersResponse::BadRequest(Json(error)));
         }
         parameters.ssh_host_key_secret_ref =
             body.ssh_host_key_secret_ref.clone().map_or(NotSet, Set);

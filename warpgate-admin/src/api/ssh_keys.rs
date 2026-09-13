@@ -8,7 +8,6 @@ use sea_orm::{ActiveModelTrait, EntityTrait, ModelTrait, PaginatorTrait, Set, Un
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::secrets::is_secret_reference;
 use warpgate_common::{AdminPermission, SecretRef, WarpgateError};
 use warpgate_db_entities::SshClientKey;
 
@@ -36,10 +35,7 @@ impl From<SshClientKey::Model> for SSHClientKey {
             .next()
             .unwrap_or_default()
             .into();
-        let backend = is_secret_reference(&model.secret_key)
-            .then(|| SecretRef::from_str(&model.secret_key).ok())
-            .flatten()
-            .map(|r| r.backend);
+        let backend = model.secret_key.as_reference().map(|r| r.backend.clone());
         Self {
             id: model.id,
             label: model.label,
@@ -90,9 +86,11 @@ struct GenerateSSHClientKeyRequest {
 
 #[derive(Object)]
 struct ImportSSHClientKeyReferenceRequest {
+    #[oai(validator(max_length = 255))]
     label: String,
     /// A `vault://backend/path#field` or `openbao://backend/path#field` reference;
     /// the field must resolve to a private key in OpenSSH or PKCS#8 PEM format.
+    #[oai(validator(max_length = 1024))]
     reference: String,
     is_default: bool,
 }
@@ -219,7 +217,7 @@ impl Api {
             &admin.services().db,
             &body.label,
             &reference,
-            &*admin.services().secret_backend,
+            &*admin.services().secret_backends,
             body.is_default,
         )
         .await;

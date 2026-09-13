@@ -366,7 +366,6 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 protocol_version: target_protocol_version,
                 parameters: startup.parameters,
             },
-            &*self.services.secret_backend,
         )
         .await
         {

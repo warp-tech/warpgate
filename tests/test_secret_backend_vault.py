@@ -30,19 +30,44 @@ from .vnc_client import VncClient, VncError
 FRAME_TIMEOUT = 40
 
 
-def _vault_backend(name: str, address: str, token: str = None, auth: dict = None, backend_type: str = "vault") -> dict:
-    return {
-        "name": name,
-        "type": backend_type,
-        "address": address,
-        "auth": auth or {"method": "token", "token": token},
-    }
+def _vault_backend(
+    name: str,
+    address: str,
+    token: str = None,
+    backend_type: str = "vault",
+    **auth,
+) -> sdk.SecretBackendRequest:
+    return sdk.SecretBackendRequest(
+        name=name,
+        backend_type=backend_type,
+        address=address,
+        auth_method=auth.pop("auth_method", "token"),
+        token=token,
+        **auth,
+    )
 
 
 def _start_wg_with_backends(processes: ProcessManager, backends, **kwargs):
-    wg = processes.start_wg(config_patch={"secrets": {"backends": backends}}, **kwargs)
+    wg = processes.start_wg(**kwargs)
     wait_port(wg.http_port, for_process=wg.process, recv=False)
+    with admin_client(f"https://localhost:{wg.http_port}") as api:
+        for backend in backends:
+            api.create_secret_backend(backend)
     return wg
+
+
+def _backend_ids(api) -> dict:
+    return {b.name: b.id for b in api.get_secret_backends()}
+
+
+def _resolve_status(api, reference: str) -> int:
+    """HTTP status of a resolve test: 204 when the reference resolves."""
+    try:
+        return api.test_secret_resolve_with_http_info(
+            sdk.TestResolveRequest(reference=reference)
+        ).status_code
+    except sdk.ApiException as e:
+        return e.status
 
 
 # `processes` (and the Docker containers / Warpgate binaries it spawns) is session-scoped, so
@@ -98,32 +123,16 @@ class TestSecretBackendVault:
         scheme = vault.backend_type
 
         with admin_client(url) as api:
-            resp = api.test_secret_resolve(
-                sdk.TestResolveRequest(reference=f"{scheme}://vault-test/secret/myapp#password")
-            )
-            assert resp.ok is True
-            assert resp.error is None
+            assert _resolve_status(api, f"{scheme}://vault-test/secret/myapp#password") == 204
 
             # wrong field within an existing secret -> NotFound
-            resp = api.test_secret_resolve(
-                sdk.TestResolveRequest(reference=f"{scheme}://vault-test/secret/myapp#nope")
-            )
-            assert resp.ok is False
-            assert resp.error
+            assert _resolve_status(api, f"{scheme}://vault-test/secret/myapp#nope") == 404
 
             # wrong KV path -> NotFound
-            resp = api.test_secret_resolve(
-                sdk.TestResolveRequest(reference=f"{scheme}://vault-test/secret/nope#password")
-            )
-            assert resp.ok is False
-            assert resp.error
+            assert _resolve_status(api, f"{scheme}://vault-test/secret/nope#password") == 404
 
             # reference to a backend name that isn't configured
-            resp = api.test_secret_resolve(
-                sdk.TestResolveRequest(reference=f"{scheme}://not-configured/secret/myapp#password")
-            )
-            assert resp.ok is False
-            assert "not configured" in resp.error
+            assert _resolve_status(api, f"{scheme}://not-configured/secret/myapp#password") == 404
 
             # malformed URI -> 400 Bad Request
             with pytest.raises(sdk.ApiException) as exc:
@@ -145,15 +154,13 @@ class TestSecretBackendVault:
             assert len(backends) == 1
             assert backends[0].name == "vault-test"
             assert backends[0].address == vault.addr
-            assert backends[0].health == "ok"
-            assert backends[0].health_error is None
 
-            health = api.check_secret_backend_health("vault-test")
-            assert health.health == "ok"
+            health = api.check_secret_backend_health(backends[0].id)
+            assert health.health == "ok", health.error
             assert health.error is None
 
             with pytest.raises(sdk.ApiException) as exc:
-                api.check_secret_backend_health("does-not-exist")
+                api.check_secret_backend_health(str(uuid4()))
             assert exc.value.status == 404
 
     def test_multiple_backends_resolve_independently(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
@@ -179,25 +186,16 @@ class TestSecretBackendVault:
             backends = api.get_secret_backends()
             assert {b.name for b in backends} == {"vault-a", "vault-b"}
             assert {b.address for b in backends} == {vault_a.addr, vault_b.addr}
-            assert all(b.health == "ok" for b in backends)
+            assert all(api.check_secret_backend_health(b.id).health == "ok" for b in backends)
 
             # each backend name routes to its own Vault instance, not to the other one's data
-            resp = api.test_secret_resolve(
-                sdk.TestResolveRequest(reference=f"{scheme}://vault-a/secret/myapp#password")
-            )
-            assert resp.ok is True
+            assert _resolve_status(api, f"{scheme}://vault-a/secret/myapp#password") == 204
 
-            resp = api.test_secret_resolve(
-                sdk.TestResolveRequest(reference=f"{scheme}://vault-b/secret/myapp#password")
-            )
-            assert resp.ok is True
+            assert _resolve_status(api, f"{scheme}://vault-b/secret/myapp#password") == 204
 
             # a path that only exists in vault_a is not visible through the vault-b backend
             vault_a.kv_put("secret", "only-in-a", password="secret")
-            resp = api.test_secret_resolve(
-                sdk.TestResolveRequest(reference=f"{scheme}://vault-b/secret/only-in-a#password")
-            )
-            assert resp.ok is False
+            assert _resolve_status(api, f"{scheme}://vault-b/secret/only-in-a#password") == 404
 
     def test_multiple_backends_independent_health(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
         vault: VaultInstance = processes.start_vault(engine=backend_engine)
@@ -220,64 +218,102 @@ class TestSecretBackendVault:
         url = f"https://localhost:{wg.http_port}"
 
         with admin_client(url) as api:
-            backends = {b.name: b for b in api.get_secret_backends()}
-            assert backends["vault-healthy"].health == "ok"
-            assert backends["vault-healthy"].health_error is None
-            assert backends["vault-unreachable"].health == "error"
-            assert backends["vault-unreachable"].health_error is not None
-
-            # per-name health check agrees with the listing
-            assert api.check_secret_backend_health("vault-healthy").health == "ok"
-            assert api.check_secret_backend_health("vault-unreachable").health == "error"
+            ids = _backend_ids(api)
+            healthy = api.check_secret_backend_health(ids["vault-healthy"])
+            assert healthy.health == "ok"
+            assert healthy.error is None
+            unreachable = api.check_secret_backend_health(ids["vault-unreachable"])
+            assert unreachable.health == "error"
+            assert unreachable.error is not None
 
             # the broken backend must not prevent resolving secrets from the healthy one
             vault.kv_put("secret", "myapp", password="hunter2")
-            resp = api.test_secret_resolve(
-                sdk.TestResolveRequest(reference=f"{vault.backend_type}://vault-healthy/secret/myapp#password")
+            assert _resolve_status(api, f"{vault.backend_type}://vault-healthy/secret/myapp#password") == 204
+
+    def test_duplicate_or_invalid_backend_name_is_rejected(self, processes: ProcessManager, shared_wg, timeout):
+        url = f"https://localhost:{shared_wg.http_port}"
+        name = f"vault-{uuid4().hex[:8]}"
+        with admin_client(url) as api:
+            created = api.create_secret_backend(
+                _vault_backend(name, "https://vault.invalid:8200", token="x")
             )
-            assert resp.ok is True
+            with pytest.raises(sdk.ApiException) as exc:
+                api.create_secret_backend(
+                    _vault_backend(name, "https://vault.invalid:8200", token="x")
+                )
+            assert exc.value.status == 409
 
-    def test_duplicate_backend_name_keeps_first_definition(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
-        vault_first: VaultInstance = processes.start_vault(engine=backend_engine)
-        stop_at_end(lambda: _stop_vault(vault_first))
-        vault_second: VaultInstance = processes.start_vault(engine=backend_engine)
-        stop_at_end(lambda: _stop_vault(vault_second))
-        vault_first.kv_put("secret", "myapp", password="from-first")
-        vault_second.kv_put("secret", "myapp", password="from-second")
+            api.delete_secret_backend(created.id)
+            assert name not in _backend_ids(api)
 
-        # two backend entries sharing the same name -- the registry keeps only the first and
-        # logs+skips the second, so resolution must always hit vault_first, never vault_second
+    def test_update_keeps_secret_when_omitted(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
+        vault: VaultInstance = processes.start_vault(engine=backend_engine)
+        stop_at_end(lambda: _stop_vault(vault))
+        vault.kv_put("secret", "myapp", password="hunter2")
         wg = _start_wg_with_backends(
             processes,
-            [
-                _vault_backend(
-                    "vault-test", vault_first.addr, token=vault_first.root_token, backend_type=vault_first.backend_type
-                ),
-                _vault_backend(
-                    "vault-test",
-                    vault_second.addr,
-                    token=vault_second.root_token,
-                    backend_type=vault_second.backend_type,
-                ),
-            ],
+            [_vault_backend("vault-test", vault.addr, token=vault.root_token, backend_type=vault.backend_type)],
         )
         stop_at_end(lambda: _stop_wg(wg))
-        url = f"https://localhost:{wg.http_port}"
-        scheme = vault_first.backend_type
+        reference = f"{vault.backend_type}://vault-test/secret/myapp#password"
 
-        with admin_client(url) as api:
-            resp = api.test_secret_resolve(
-                sdk.TestResolveRequest(reference=f"{scheme}://vault-test/secret/myapp#password")
-            )
-            assert resp.ok is True
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            backend_id = _backend_ids(api)["vault-test"]
+            assert _resolve_status(api, reference) == 204
 
-            # a path that only exists in the second (shadowed) Vault is unreachable, proving the
-            # first definition -- not the second -- is the one actually serving the name
-            vault_second.kv_put("secret", "only-in-second", password="x")
-            resp = api.test_secret_resolve(
-                sdk.TestResolveRequest(reference=f"{scheme}://vault-test/secret/only-in-second#password")
+            # no token in the update -> the stored one stays, and is picked up without a restart
+            api.update_secret_backend(
+                backend_id,
+                _vault_backend("vault-test", vault.addr, backend_type=vault.backend_type),
             )
-            assert resp.ok is False
+            assert _resolve_status(api, reference) == 204
+
+            api.update_secret_backend(
+                backend_id,
+                _vault_backend("vault-test", vault.addr, token="wrong", backend_type=vault.backend_type),
+            )
+            assert _resolve_status(api, reference) == 502
+
+            # switching the auth method without its secret is refused, not silently broken
+            with pytest.raises(sdk.ApiException) as exc:
+                api.update_secret_backend(
+                    backend_id,
+                    _vault_backend(
+                        "vault-test",
+                        vault.addr,
+                        backend_type=vault.backend_type,
+                        auth_method="app_role",
+                        app_role_id="role",
+                    ),
+                )
+            assert exc.value.status == 400
+
+            # a backend that a target references can't be deleted from under it
+            target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=f"ssh-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetSSHOptions(
+                            kind="Ssh",
+                            allow_insecure_algos=False,
+                            host="localhost",
+                            port=22,
+                            username="root",
+                            auth=sdk.SSHTargetAuth(
+                                sdk.SSHTargetAuthSshTargetPasswordAuth(kind="Password", password=reference)
+                            ),
+                        )
+                    ),
+                )
+            )
+            with pytest.raises(sdk.ApiException) as exc:
+                api.delete_secret_backend(backend_id)
+            assert exc.value.status == 409
+            api.delete_target(target.id)
+            api.delete_secret_backend(backend_id)
 
     def test_secret_reference_usage_reports_target(self, processes: ProcessManager, shared_wg, timeout):
         # secret_references() only inspects stored target config, so this doesn't need a
@@ -289,9 +325,13 @@ class TestSecretBackendVault:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
                             kind="Ssh",
+                            allow_insecure_algos=False,
                             host="localhost",
                             port=22,
                             username="root",
@@ -335,9 +375,13 @@ class TestSecretBackendVault:
             ssh_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
                             kind="Ssh",
+                            allow_insecure_algos=False,
                             host="localhost",
                             port=22,
                             username="root",
@@ -354,9 +398,13 @@ class TestSecretBackendVault:
             postgres_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"postgres-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetPostgresOptions(
                             kind="Postgres",
+                            protocol_version="3.2",
                             host="localhost",
                             port=5432,
                             username="user",
@@ -387,8 +435,7 @@ class TestSecretBackendVault:
             assert entry.target_count == 1
             assert entry.targets[0].id == postgres_target.id
 
-            resp = api.test_secret_resolve(sdk.TestResolveRequest(reference=reference))
-            assert resp.ok is True
+            assert _resolve_status(api, reference) == 204
 
     def test_postgres_target_password_from_vault(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
         db_port = processes.start_postgres_server()
@@ -411,9 +458,13 @@ class TestSecretBackendVault:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"postgres-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetPostgresOptions(
                             kind="Postgres",
+                            protocol_version="3.2",
                             host="localhost",
                             port=db_port,
                             username="user",
@@ -546,9 +597,13 @@ class TestSecretBackendVault:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
                             kind="Ssh",
+                            allow_insecure_algos=False,
                             host="localhost",
                             port=ssh_port,
                             username="root",
@@ -604,6 +659,9 @@ class TestSecretBackendVault:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"vnc-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetVncOptions(
                             kind="Vnc",
@@ -684,9 +742,15 @@ class TestSecretBackendVault:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"rdp-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetRdpOptions(
                             kind="Rdp",
+                            compression=sdk.RdpTargetCompression.REMOTEFX,
+                            tls_security=sdk.RdpTlsSecurity.TLS12,
+                            interactive_logon=False,
                             host="localhost",
                             port=rdp_backend_port,
                             username="user",  # the xrdp login baked into the image
@@ -774,41 +838,32 @@ class TestSecretBackendVault:
         )
         assert not got_error, f"unexpected error resolving the vault password: {messages}"
 
-    def test_unreachable_backend_does_not_block_startup(self, processes: ProcessManager, timeout, stop_at_end):
+    def test_unreachable_backend_is_isolated(self, processes: ProcessManager, timeout, stop_at_end):
         bogus_port = alloc_port()  # nothing is listening here
 
-        # AppRole (rather than Token) so the initial-authentication login actually goes over
-        # the network and fails -- exercising VaultBackend::new()'s documented "best-effort
-        # initial authentication" resilience, not just a backend that never touched the network.
-        role_id_file = processes.ctx.tmpdir / f"bogus-role-id-{uuid4()}"
-        secret_id_file = processes.ctx.tmpdir / f"bogus-secret-id-{uuid4()}"
-        role_id_file.write_text("bogus-role-id")
-        secret_id_file.write_text("bogus-secret-id")
-
+        # AppRole so building the client actually logs in over the network and fails; the
+        # failure must stay contained to that backend.
         wg = _start_wg_with_backends(
             processes,
             [
                 _vault_backend(
                     "unreachable",
                     f"http://127.0.0.1:{bogus_port}",
-                    auth={
-                        "method": "app_role",
-                        "role_id_file": str(role_id_file),
-                        "secret_id_file": str(secret_id_file),
-                    },
+                    auth_method="app_role",
+                    app_role_id="bogus-role-id",
+                    app_role_secret_id="bogus-secret-id",
                 )
             ],
         )
         stop_at_end(lambda: _stop_wg(wg))
-        # startup succeeded and the ssh listener came up fine despite the broken backend
         wait_port(wg.ssh_port, for_process=wg.process)
 
         url = f"https://localhost:{wg.http_port}"
         db_port = processes.start_postgres_server()
 
         with admin_client(url) as api:
-            backends = api.get_secret_backends()
-            assert backends[0].health == "error"
+            backend_id = _backend_ids(api)["unreachable"]
+            assert api.check_secret_backend_health(backend_id).health == "error"
 
             role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
             user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
@@ -817,9 +872,13 @@ class TestSecretBackendVault:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"postgres-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetPostgresOptions(
                             kind="Postgres",
+                            protocol_version="3.2",
                             host="localhost",
                             port=db_port,
                             username="user",
@@ -888,13 +947,100 @@ class TestSecretBackendVault:
         stop_at_end(lambda: _stop_wg(wg))
         wait_port(wg.ssh_port, for_process=wg.process)
 
-        scanned = subprocess.run(
-            ["ssh-keyscan", "-t", "ed25519", "-p", str(wg.ssh_port), "localhost"],
+        # The host key is exchanged before authentication, so a login attempt that
+        # goes nowhere still records it.
+        known_hosts = processes.ctx.tmpdir / f"known-hosts-{uuid4()}"
+        subprocess.run(
+            [
+                "ssh",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", f"UserKnownHostsFile={known_hosts}",
+                "-o", "HostKeyAlgorithms=ssh-ed25519",
+                "-o", "PreferredAuthentications=none",
+                "-o", "BatchMode=yes",
+                "-p", str(wg.ssh_port),
+                "nobody@localhost",
+                "true",
+            ],
             capture_output=True,
-            text=True,
             timeout=timeout,
-        ).stdout
-        assert public_key in scanned, scanned
+        )
+        assert public_key in known_hosts.read_text()
+
+    def test_ssh_client_key_from_vault(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
+        vault: VaultInstance = processes.start_vault(engine=backend_engine)
+        stop_at_end(lambda: _stop_vault(vault))
+
+        key_path = processes.ctx.tmpdir / f"client-key-{uuid4()}"
+        subprocess.check_call(
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key_path)],
+            stdout=subprocess.DEVNULL,
+        )
+        public_key = key_path.with_suffix(".pub").read_text().strip()
+        vault.kv_put("secret", "warpgate-client-key", private_key=key_path.read_text())
+
+        ssh_port = processes.start_ssh_server(trusted_keys=[public_key])
+        wait_port(ssh_port)
+
+        wg = _start_wg_with_backends(
+            processes,
+            [_vault_backend("vault-test", vault.addr, token=vault.root_token, backend_type=vault.backend_type)],
+        )
+        stop_at_end(lambda: _stop_wg(wg))
+        wait_port(wg.ssh_port, for_process=wg.process)
+
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            key = api.import_ssh_own_key_reference(
+                sdk.ImportSSHClientKeyReferenceRequest(
+                    label="vault-key",
+                    reference=f"{vault.backend_type}://vault-test/secret/warpgate-client-key#private_key",
+                    is_default=False,
+                )
+            )
+            assert key.backend == "vault-test"
+            assert key.public_key.split()[1] == public_key.split()[1]
+
+            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+            api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
+            api.add_user_role(user.id, role.id)
+            target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=f"ssh-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetSSHOptions(
+                            kind="Ssh",
+                            allow_insecure_algos=False,
+                            host="localhost",
+                            port=ssh_port,
+                            username="root",
+                            auth=sdk.SSHTargetAuth(
+                                sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey", key_id=key.id)
+                            ),
+                        )
+                    ),
+                )
+            )
+            api.add_target_role(target.id, role.id)
+
+        ssh_client = processes.start_ssh_client(
+            f"{user.username}:{target.name}@localhost",
+            "-p",
+            str(wg.ssh_port),
+            "-i",
+            "/dev/null",
+            "-o",
+            "PreferredAuthentications=password",
+            "echo",
+            "hello",
+            password="123",
+        )
+        output = ssh_client.communicate(timeout=timeout)[0]
+        assert b"hello" in output
+        assert ssh_client.returncode == 0
 
     # ── AppRole auth method (not just static Token) ──────────────────────────
 
@@ -911,22 +1057,15 @@ class TestSecretBackendVault:
             ),
         )
 
-        role_id_file = processes.ctx.tmpdir / f"vault-role-id-{uuid4()}"
-        secret_id_file = processes.ctx.tmpdir / f"vault-secret-id-{uuid4()}"
-        role_id_file.write_text(role_id)
-        secret_id_file.write_text(secret_id)
-
         wg = _start_wg_with_backends(
             processes,
             [
                 _vault_backend(
                     "vault-test",
                     vault.addr,
-                    auth={
-                        "method": "app_role",
-                        "role_id_file": str(role_id_file),
-                        "secret_id_file": str(secret_id_file),
-                    },
+                    auth_method="app_role",
+                    app_role_id=role_id,
+                    app_role_secret_id=secret_id,
                     backend_type=vault.backend_type,
                 )
             ],
@@ -935,7 +1074,4 @@ class TestSecretBackendVault:
         url = f"https://localhost:{wg.http_port}"
 
         with admin_client(url) as api:
-            resp = api.test_secret_resolve(
-                sdk.TestResolveRequest(reference=f"{vault.backend_type}://vault-test/secret/myapp#password")
-            )
-            assert resp.ok is True, resp.error
+            assert _resolve_status(api, f"{vault.backend_type}://vault-test/secret/myapp#password") == 204

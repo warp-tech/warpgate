@@ -358,7 +358,7 @@
                                     </label>
                                     {#if parameters.sshHostKeySecretRef != null}
                                         <div class="mb-3">
-                                            <SecretRefInput bind:value={parameters.sshHostKeySecretRef} />
+                                            <SecretRefInput bind:value={parameters.sshHostKeySecretRef} withKey={false} />
                                         </div>
                                     {/if}
                                     <HelpText>

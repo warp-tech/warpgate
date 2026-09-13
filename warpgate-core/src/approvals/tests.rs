@@ -1286,13 +1286,19 @@ mod delivery {
         let params = GlobalParams::new(PathBuf::from("/warpgate.yaml"), false).unwrap();
         let rate_limiter_registry = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
         let cluster = Arc::new(Cluster::new(db.clone(), 0).await.unwrap());
+        let secret_backends = Arc::new(crate::SecretBackendRegistry::new(db.clone()));
         Services {
             db: db.clone(),
             recordings: Arc::new(SessionRecordings::new(db.clone(), &params)),
             config: Arc::new(Mutex::new(WarpgateConfig {
                 store: WarpgateConfigStore::default(),
             })),
-            state: State::new(db, &rate_limiter_registry, cluster.node_id),
+            state: State::new(
+                db,
+                &rate_limiter_registry,
+                cluster.node_id,
+                &secret_backends,
+            ),
             cluster,
             rate_limiter_registry,
             config_provider: Arc::new(DatabaseConfigProvider::new(db).into()),
@@ -1303,6 +1309,7 @@ mod delivery {
             global_params: Arc::new(params),
             listener_status: Default::default(),
             admin_approval_request_tx: broadcast::channel(8).0,
+            secret_backends,
         }
     }
 

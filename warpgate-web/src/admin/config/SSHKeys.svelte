@@ -10,6 +10,7 @@
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
+    import { isSecretRef } from 'common/SecretRefInput.svelte'
     import ClientKeyModal from './ClientKeyModal.svelte'
     import GenerateClientKeyModal from './GenerateClientKeyModal.svelte'
 
@@ -51,8 +52,6 @@
         keyModalOpen = true
     }
 
-    const REFERENCE_PREFIXES = ['vault://', 'openbao://']
-
     function saveKey(label: string, secretKey: string, isDefault: boolean) {
         const key = editingKey
         run(async () => {
@@ -63,7 +62,7 @@
                 })
                 return
             }
-            if (REFERENCE_PREFIXES.some(p => secretKey.startsWith(p))) {
+            if (isSecretRef(secretKey)) {
                 await api.importSshOwnKeyReference({
                     importSSHClientKeyReferenceRequest: { label, reference: secretKey, isDefault },
                 })

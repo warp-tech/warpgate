@@ -174,7 +174,7 @@
         <NavListItem
             class="mb-2"
             title="Secret backends"
-            description="Vault / OpenBao settings"
+            description="Vault / OpenBao servers for secret references"
             href="/config/secret-backends"
             small={sidebarMode}
         />

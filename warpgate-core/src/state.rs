@@ -14,13 +14,14 @@ use warpgate_common::{NodeId, Protocol, Target, UserSessionId, WarpgateError};
 use warpgate_db_entities::{SessionApprovalRequest, TargetSession, UserSession};
 
 use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
-use crate::{SessionHandle, WarpgateServerHandle};
+use crate::{SecretBackendRegistry, SessionHandle, WarpgateServerHandle};
 
 pub struct State {
     pub user_sessions: HashMap<UserSessionId, Arc<Mutex<UserSessionState>>>,
     db: DatabaseConnection,
     node_id: NodeId,
     rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
+    secret_backends: Arc<SecretBackendRegistry>,
     change_sender: broadcast::Sender<()>,
 }
 
@@ -29,6 +30,7 @@ impl State {
         db: &DatabaseConnection,
         rate_limiter_registry: &Arc<Mutex<RateLimiterRegistry>>,
         node_id: NodeId,
+        secret_backends: &Arc<SecretBackendRegistry>,
     ) -> Arc<Mutex<Self>> {
         let sender = broadcast::channel(2).0;
         Arc::new(Mutex::new(Self {
@@ -36,6 +38,7 @@ impl State {
             db: db.clone(),
             node_id,
             rate_limiter_registry: rate_limiter_registry.clone(),
+            secret_backends: secret_backends.clone(),
             change_sender: sender,
         }))
     }
@@ -175,6 +178,7 @@ impl State {
             owner.clone(),
             state,
             self.rate_limiter_registry.clone(),
+            self.secret_backends.clone(),
             protocol,
             node_owned,
             self.node_id,
@@ -308,6 +312,7 @@ mod tests {
     use warpgate_db_migrations::migrate_database;
 
     use super::*;
+    use crate::SecretBackendRegistry;
 
     struct TestHandle;
 
@@ -346,7 +351,12 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
         let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
-        let state = State::new(&db, &rate_limiters, NodeId(Uuid::new_v4()));
+        let state = State::new(
+            &db,
+            &rate_limiters,
+            NodeId(Uuid::new_v4()),
+            &Arc::new(SecretBackendRegistry::new(db.clone())),
+        );
         let parent = State::register_nonlocal_user_session(
             &state,
             Protocol::Http,
@@ -392,7 +402,12 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
         let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
-        let state = State::new(&db, &rate_limiters, NodeId(Uuid::new_v4()));
+        let state = State::new(
+            &db,
+            &rate_limiters,
+            NodeId(Uuid::new_v4()),
+            &Arc::new(SecretBackendRegistry::new(db.clone())),
+        );
         let parent = State::register_nonlocal_user_session(
             &state,
             Protocol::Http,
@@ -450,7 +465,12 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
         let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
-        let state = State::new(&db, &rate_limiters, NodeId(Uuid::new_v4()));
+        let state = State::new(
+            &db,
+            &rate_limiters,
+            NodeId(Uuid::new_v4()),
+            &Arc::new(SecretBackendRegistry::new(db.clone())),
+        );
         let parent = State::register_node_local_user_session(
             &state,
             Protocol::Ssh,
@@ -509,7 +529,12 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
         let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
-        let state = State::new(&db, &rate_limiters, warpgate_common::NodeId(Uuid::new_v4()));
+        let state = State::new(
+            &db,
+            &rate_limiters,
+            warpgate_common::NodeId(Uuid::new_v4()),
+            &Arc::new(SecretBackendRegistry::new(db.clone())),
+        );
         let parent = State::register_nonlocal_user_session(
             &state,
             Protocol::Http,
@@ -601,7 +626,12 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
         let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
-        let state = State::new(&db, &rate_limiters, warpgate_common::NodeId(Uuid::new_v4()));
+        let state = State::new(
+            &db,
+            &rate_limiters,
+            warpgate_common::NodeId(Uuid::new_v4()),
+            &Arc::new(SecretBackendRegistry::new(db.clone())),
+        );
         let parent = State::register_nonlocal_user_session(
             &state,
             Protocol::Http,
@@ -685,8 +715,18 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
         let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
-        let first_state = State::new(&db, &rate_limiters, NodeId(Uuid::new_v4()));
-        let second_state = State::new(&db, &rate_limiters, NodeId(Uuid::new_v4()));
+        let first_state = State::new(
+            &db,
+            &rate_limiters,
+            NodeId(Uuid::new_v4()),
+            &Arc::new(SecretBackendRegistry::new(db.clone())),
+        );
+        let second_state = State::new(
+            &db,
+            &rate_limiters,
+            NodeId(Uuid::new_v4()),
+            &Arc::new(SecretBackendRegistry::new(db.clone())),
+        );
         let first_parent = State::register_nonlocal_user_session(
             &first_state,
             Protocol::Http,
@@ -769,7 +809,12 @@ mod tests {
         migrate_database(&db).await.unwrap();
         let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
         let node_id = NodeId(Uuid::new_v4());
-        let state = State::new(&db, &rate_limiters, node_id);
+        let state = State::new(
+            &db,
+            &rate_limiters,
+            node_id,
+            &Arc::new(SecretBackendRegistry::new(db.clone())),
+        );
 
         let init = || UserSessionStateInit {
             remote_address: None,
@@ -802,7 +847,12 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
         let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
-        let state = State::new(&db, &rate_limiters, warpgate_common::NodeId(Uuid::new_v4()));
+        let state = State::new(
+            &db,
+            &rate_limiters,
+            warpgate_common::NodeId(Uuid::new_v4()),
+            &Arc::new(SecretBackendRegistry::new(db.clone())),
+        );
         let parent = State::register_node_local_user_session(
             &state,
             Protocol::Ssh,

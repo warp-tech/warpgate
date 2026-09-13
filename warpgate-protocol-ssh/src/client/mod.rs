@@ -31,7 +31,7 @@ use warpgate_aws::AwsError;
 use warpgate_common::{
     SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserSessionId, WarpgateError,
 };
-use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
+use warpgate_core::{AdmittedTarget, ConfigProvider, Services, resolve_secrets};
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
@@ -125,10 +125,13 @@ fn resolve_chain_ids(
 /// Resolve the full ordered SSH jump chain for a target
 /// `logged_in_username` is used to substitute empty dynamic usernames
 /// in targets' configs
+/// `admitted_options` are the credentials already materialised for the target
+/// itself; the jump hosts are separate targets and get resolved here.
 async fn resolve_ssh_chain(
     services: &Services,
     target_id: Uuid,
     logged_in_username: Option<&String>,
+    mut admitted_options: Option<TargetSSHOptions>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
     let targets = services.config_provider.list_targets().await?;
 
@@ -144,10 +147,17 @@ async fn resolve_ssh_chain(
         let Some(t) = targets.iter().find(|t| t.id == id) else {
             return Err(unresolvable_jump_host(id));
         };
-        let Some(opts) = TargetSSHOptions::extract(&t.options) else {
-            return Err(unresolvable_jump_host(id));
+        let mut opts = match admitted_options.take_if(|_| id == target_id) {
+            Some(opts) => opts,
+            None => {
+                let Some(opts) = TargetSSHOptions::extract(&t.options) else {
+                    return Err(unresolvable_jump_host(id));
+                };
+                let mut opts = opts.clone();
+                resolve_secrets(&mut opts, &*services.secret_backends).await?;
+                opts
+            }
         };
-        let mut opts = opts.clone();
 
         // Forward username from the authenticated user to the target, if target has no username
         if let Some(logged_in_username) = logged_in_username
@@ -172,7 +182,7 @@ pub async fn resolve_ssh_chain_for_admin(
     target_id: Uuid,
     admin_username: Option<&String>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
-    resolve_ssh_chain(services, target_id, admin_username).await
+    resolve_ssh_chain(services, target_id, admin_username, None).await
 }
 
 /// Resolve the target-side connection plan while consuming the capability
@@ -181,10 +191,13 @@ pub async fn resolve_approved_ssh_chain(
     services: &Services,
     admitted: AdmittedTarget<TargetSSHOptions>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
+    let (user_info, target) = admitted.into_approved().into_parts();
+    let (target, options) = target.into_parts();
     resolve_ssh_chain(
         services,
-        admitted.target().id,
-        Some(&admitted.user_info().username),
+        target.id,
+        Some(&user_info.username),
+        Some(options),
     )
     .await
 }
@@ -847,10 +860,7 @@ impl RemoteClient {
         let mut auth_error_msg: Option<String> = None;
         match auth {
             SSHTargetAuth::Password(auth) => {
-                let password = auth
-                    .password
-                    .resolve(&*self.services.secret_backend)
-                    .await?;
+                let password = auth.password.reveal()?;
                 let response = session
                     .authenticate_password(username.to_string(), password.expose_secret())
                     .await?;
@@ -870,7 +880,7 @@ impl RemoteClient {
                 let keys = load_client_keys(
                     &self.services.db,
                     auth.key_id,
-                    &*self.services.secret_backend,
+                    &*self.services.secret_backends,
                 )
                 .await?;
                 if keys.is_empty() {
@@ -926,13 +936,16 @@ impl RemoteClient {
             SSHTargetAuth::IamRole(_) => {
                 let instance_info = warpgate_aws::find_instance_by_ip(host).await?;
 
-                let key = load_client_keys(&self.services.db, None, &*self.services.secret_backend)
-                    .await?
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| {
-                        WarpgateError::InconsistentState("No SSH client keys are configured".into())
-                    })?;
+                let key =
+                    load_client_keys(&self.services.db, None, &*self.services.secret_backends)
+                        .await?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| {
+                            WarpgateError::InconsistentState(
+                                "No SSH client keys are configured".into(),
+                            )
+                        })?;
 
                 let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
 

@@ -1,125 +1,159 @@
 <script lang="ts">
-    import { api, type SecretBackendStatus, type CheckHealthResponse } from 'admin/lib/api'
+    import { Alert, Badge, Button } from '@sveltestrap/sveltestrap'
+    import {
+        api,
+        type CheckHealthResponse,
+        type SecretBackendRequest,
+        type SecretBackendResponse,
+    } from 'admin/lib/api'
+    import { adminPermissions } from 'admin/lib/store'
+    import { stringifyError } from 'common/errors'
+    import InfoBox from 'common/InfoBox.svelte'
+    import { invalidateSecretBackends } from 'common/SecretRefInput.svelte'
+    import SecretBackendModal from './SecretBackendModal.svelte'
 
-    let backends = $state<SecretBackendStatus[]>([])
-    let loading = $state(true)
-    let loadError = $state<string | undefined>()
-    let checkingHealth = $state<Record<string, boolean>>({})
+    let error: string | undefined = $state()
+    let backends: SecretBackendResponse[] | undefined = $state()
+    let health: Record<string, CheckHealthResponse> = $state({})
+    let modalOpen = $state(false)
+    let editing: SecretBackendResponse | undefined = $state()
 
     async function load() {
-        loading = true
-        loadError = undefined
+        backends = await api.getSecretBackends()
+        // Probes run in the background so a slow backend doesn't hold up the page.
+        backends.forEach(backend => checkHealth(backend))
+    }
+
+    async function checkHealth(backend: SecretBackendResponse) {
         try {
-            backends = await api.getSecretBackends()
+            health[backend.id] = await api.checkSecretBackendHealth({ id: backend.id })
         } catch (e) {
-            loadError = String(e)
-        } finally {
-            loading = false
+            health[backend.id] = { health: 'error', error: await stringifyError(e) }
         }
     }
 
-    async function checkHealth(name: string) {
-        checkingHealth = { ...checkingHealth, [name]: true }
+    load().catch(async e => {
+        error = await stringifyError(e)
+    })
+
+    async function run(action: () => Promise<unknown>) {
+        error = undefined
         try {
-            const result: CheckHealthResponse = await api.checkSecretBackendHealth({ name })
-            backends = backends.map(b =>
-                b.name === name
-                    ? { ...b, health: result.health, healthError: result.error }
-                    : b,
-            )
+            await action()
+            invalidateSecretBackends()
+            await load()
         } catch (e) {
-            backends = backends.map(b =>
-                b.name === name
-                    ? { ...b, health: 'error', healthError: String(e) }
-                    : b,
-            )
-        } finally {
-            checkingHealth = { ...checkingHealth, [name]: false }
+            error = await stringifyError(e)
         }
     }
 
-    $effect(() => { load() })
+    function openCreate() {
+        editing = undefined
+        modalOpen = true
+    }
+
+    function openEdit(backend: SecretBackendResponse) {
+        editing = backend
+        modalOpen = true
+    }
+
+    function save(request: SecretBackendRequest) {
+        const backend = editing
+        run(async () => {
+            if (backend) {
+                await api.updateSecretBackend({ id: backend.id, secretBackendRequest: request })
+            } else {
+                await api.createSecretBackend({ secretBackendRequest: request })
+            }
+        })
+    }
+
+    function remove(backend: SecretBackendResponse) {
+        run(() => api.deleteSecretBackend({ id: backend.id }))
+    }
 </script>
 
-<div class="container-max-md">
-    <div class="page-header mb-3">
-        <h3>Secret Backends</h3>
-    </div>
-
-    <p class="text-muted mb-4">
-        Secret backends let targets pull secrets from HashiCorp Vault or OpenBao at connection
-        time, instead of storing passwords inline. On any credential field, switch to
-        reference mode and pick a backend, then fill in the secret path and the key (the field
-        inside the secret) — Warpgate composes these into a <code>vault://</code> /
-        <code>openbao://</code> reference for you. The path is the Vault CLI path
-        <em>without</em> the <code>data/</code> prefix — e.g. <code>vault kv get secret/myapp</code>
-        maps to path <code>secret/myapp</code>.
-        <br />
-        Backends are declared under <code>secrets:</code> in <code>warpgate.yaml</code>.
-        Warpgate watches that file and picks up changes automatically — no restart needed.
-        They cannot be managed from this UI.
-    </p>
-
-    {#if loading}
-        <p class="text-muted">Loading…</p>
-    {:else if loadError}
-        <div class="alert alert-danger">{loadError}</div>
-    {:else if backends.length === 0}
-        <div class="alert alert-secondary">
-            No secret backends are configured.
-            Add a <code>secrets:</code> section to <code>warpgate.yaml</code> to enable
-            Vault / OpenBao integration.
-        </div>
-    {:else}
-        {#each backends as backend (backend.name)}
-            {@const isChecking = checkingHealth[backend.name] ?? false}
-            <div class="card mb-3">
-                <div class="card-body">
-                    <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
-                        <div>
-                            <h5 class="card-title mb-1">
-                                {backend.name}
-                            </h5>
-                            <div class="text-muted small">
-                                <span class="badge bg-secondary text-uppercase me-2">
-                                    {backend.backendType}
-                                </span>
-                                {backend.address}
-                                {#if backend.namespace}
-                                    &nbsp;·&nbsp; namespace:&nbsp;<code>{backend.namespace}</code>
-                                {/if}
-                            </div>
-                        </div>
-
-                        <div class="d-flex align-items-center gap-2">
-                            {#if backend.health === 'ok'}
-                                <span class="badge bg-success">Healthy</span>
-                            {:else if backend.health === 'error'}
-                                <span class="badge bg-danger" title={backend.healthError ?? ''}>
-                                    Unhealthy
-                                </span>
-                            {:else}
-                                <span class="badge bg-secondary">○ Unknown</span>
-                            {/if}
-
-                            <button
-                                type="button"
-                                class="btn btn-outline-secondary btn-sm"
-                                disabled={isChecking}
-                                onclick={() => checkHealth(backend.name)}
-                            >
-                                {isChecking ? 'Checking…' : 'Check health'}
-                            </button>
-                        </div>
-                    </div>
-
-                    {#if backend.health === 'error' && backend.healthError}
-                        <div class="alert alert-danger alert-sm mb-0 mt-2 py-1 px-2 small">
-                            {backend.healthError}
-                        </div>
-                    {/if}
-                </div>
-            </div>
-        {/each}
+<div class="page-summary-bar">
+    <h1>Secret backends</h1>
+    {#if $adminPermissions.configEdit}
+        <Button class="ms-auto" color="primary" onclick={openCreate}>Add</Button>
     {/if}
 </div>
+
+{#if error}
+    <Alert color="danger">{error}</Alert>
+{/if}
+
+<InfoBox>
+    Target passwords and SSH keys can be a <code>vault://backend/path#field</code> reference,
+    resolved from HashiCorp Vault or OpenBao when a connection is made. The path is the KV v2
+    path without the <code>data/</code> segment.
+</InfoBox>
+
+{#if backends}
+    {#if !backends.length}
+        <p class="text-muted">No secret backends.</p>
+    {/if}
+    <div class="list-group list-group-flush">
+        {#each backends as backend (backend.id)}
+            {@const status = health[backend.id]}
+            <div class="list-group-item px-0">
+                <div class="d-flex align-items-center gap-2">
+                    <strong>{backend.name}</strong>
+                    <Badge color="secondary">{backend.backendType}</Badge>
+                    {#if status?.health === 'ok'}
+                        <Badge color="success">Healthy</Badge>
+                    {:else if status}
+                        <Badge color="danger" title={status.error ?? ''}>Unhealthy</Badge>
+                    {/if}
+                    <Button
+                        class="ms-auto"
+                        color="link px-0"
+                        onclick={e => {
+                            e.preventDefault()
+                            checkHealth(backend)
+                        }}
+                    >
+                        Check health
+                    </Button>
+                    {#if $adminPermissions.configEdit}
+                        <Button
+                            class="ms-3"
+                            color="link px-0"
+                            onclick={e => {
+                                e.preventDefault()
+                                openEdit(backend)
+                            }}
+                        >
+                            Edit
+                        </Button>
+                        <Button
+                            class="ms-3"
+                            color="link px-0"
+                            onclick={e => {
+                                e.preventDefault()
+                                remove(backend)
+                            }}
+                        >
+                            Delete
+                        </Button>
+                    {/if}
+                </div>
+                <div class="text-muted small">
+                    {backend.address}
+                    {#if backend.namespace}
+                        · namespace {backend.namespace}
+                    {/if}
+                    · {backend.authMethod}
+                </div>
+                {#if status?.health === 'error' && status.error}
+                    <div class="text-danger small">{status.error}</div>
+                {/if}
+            </div>
+        {/each}
+    </div>
+{/if}
+
+{#if modalOpen}
+    <SecretBackendModal bind:isOpen={modalOpen} instance={editing} {save} />
+{/if}

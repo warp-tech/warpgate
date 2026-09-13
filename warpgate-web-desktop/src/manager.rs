@@ -95,13 +95,7 @@ impl WebDesktopClientManager {
                 // Tight already picks JPEG for photographic tiles and keeps text and UI
                 // lossless, so re-encoding what it deliberately sent as raw would only
                 // degrade it.
-                Ok((
-                    warpgate_protocol_vnc::connect(
-                        admitted.narrow()?,
-                        services.secret_backend.clone(),
-                    )?,
-                    false,
-                ))
+                Ok((warpgate_protocol_vnc::connect(admitted.narrow()?)?, false))
             }
             TargetKind::Rdp => {
                 // Connect at the viewer's measured size when known, so the desktop fits the
@@ -109,7 +103,6 @@ impl WebDesktopClientManager {
                 let handles = warpgate_protocol_rdp::connect(
                     admitted.narrow()?,
                     size.unwrap_or(warpgate_protocol_rdp::DEFAULT_SIZE),
-                    services.secret_backend.clone(),
                 )?;
                 // The RDP helper only ever emits raw RGBA.
                 Ok((handles, true))

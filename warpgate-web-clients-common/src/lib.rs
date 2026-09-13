@@ -10,8 +10,8 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tokio::sync::futures::Notified;
@@ -20,8 +20,8 @@ use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 use warpgate_common::auth::RememberApprovalBy;
-use warpgate_common::{UserSessionId, WarpgateError};
-use warpgate_core::approvals::{admit_target_session, GatedConnection};
+use warpgate_common::{TargetSecrets, UserSessionId, WarpgateError};
+use warpgate_core::approvals::{GatedConnection, admit_target_session};
 use warpgate_core::{
     AdmittedTarget, Services, SessionHandle, TargetAuthorization, WarpgateServerHandle,
 };
@@ -205,7 +205,7 @@ pub enum SessionAccess<S> {
 }
 
 /// Starts a target session, waiting for approval if needed
-pub async fn admit_web_client_session<O: Send + Sync>(
+pub async fn admit_web_client_session<O: TargetSecrets + Send + Sync>(
     services: &Services,
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,

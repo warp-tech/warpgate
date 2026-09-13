@@ -1,5 +1,4 @@
 mod defaults;
-mod secrets;
 mod specific_target;
 mod target;
 mod warnings;
@@ -17,7 +16,6 @@ use defaults::{
 };
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
-pub use secrets::*;
 use serde::{Deserialize, Serialize};
 pub use specific_target::*;
 pub use target::*;
@@ -927,9 +925,6 @@ pub struct WarpgateConfigStore {
 
     #[serde(default)]
     pub log: LogConfig,
-
-    #[serde(default)]
-    pub secrets: SecretsConfig,
 }
 
 impl Default for WarpgateConfigStore {
@@ -947,7 +942,6 @@ impl Default for WarpgateConfigStore {
             vnc: <_>::default(),
             rdp: <_>::default(),
             log: <_>::default(),
-            secrets: <_>::default(),
         }
     }
 }

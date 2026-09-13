@@ -301,7 +301,7 @@ async fn negotiate_and_authorize(
     // A single backend client connection decodes every update (Tight/JPEG included, see
     // PROXY_ENCODINGS); we both record it and re-encode it toward the viewer as RFB Raw.
     debug!(host = %admitted.options().host, port = admitted.options().port, "connecting to backend");
-    let mut backend = crate::client::connect_for_proxy(admitted, services.secret_backend.clone())?;
+    let mut backend = crate::client::connect_for_proxy(admitted)?;
 
     // Wait under the hold screen for the backend's initial geometry, recording every
     // event consumed so nothing is dropped from the recording.

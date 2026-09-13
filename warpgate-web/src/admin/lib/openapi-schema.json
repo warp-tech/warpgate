@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-21-g3ffca395-modified"
+    "version": "v0.28.5-25-g7b5548a5-modified"
   },
   "servers": [
     {
@@ -4598,7 +4598,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/SecretBackendStatus"
+                    "$ref": "#/components/schemas/SecretBackendResponse"
                   }
                 }
               }
@@ -4614,6 +4614,252 @@
           }
         ],
         "operationId": "get_secret_backends"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretBackendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretBackendResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "create_secret_backend"
+      }
+    },
+    "/secret-backends/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretBackendResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_secret_backend"
+      },
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretBackendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretBackendResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_secret_backend"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_secret_backend"
+      }
+    },
+    "/secret-backends/{id}/health": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckHealthResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "check_secret_backend_health"
       }
     },
     "/secret-backends/resolve-test": {
@@ -4629,18 +4875,48 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "204": {
+            "description": "The reference resolved; the value itself is never returned"
+          },
+          "400": {
             "description": "",
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/TestResolveResponse"
+                  "type": "string"
                 }
               }
             }
           },
-          "400": {
-            "description": ""
+          "403": {
+            "description": "The path is outside the backend's allowed prefixes",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such backend, secret or field",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The backend could not be reached or refused the request",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -4680,46 +4956,6 @@
           }
         ],
         "operationId": "get_secret_reference_usage"
-      }
-    },
-    "/secret-backends/{name}/health": {
-      "post": {
-        "parameters": [
-          {
-            "name": "name",
-            "schema": {
-              "type": "string"
-            },
-            "in": "path",
-            "required": true,
-            "deprecated": false,
-            "explode": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckHealthResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "TokenSecurityScheme": []
-          },
-          {
-            "CookieSecurityScheme": []
-          }
-        ],
-        "operationId": "check_secret_backend_health"
       }
     }
   },
@@ -5015,6 +5251,14 @@
       "AutoCredentials": {
         "type": "object",
         "title": "AutoCredentials"
+      },
+      "BackendType": {
+        "type": "string",
+        "description": "The kind of server behind a backend; also the scheme of references to it.",
+        "enum": [
+          "vault",
+          "openbao"
+        ]
       },
       "BlockedIpInfo": {
         "type": "object",
@@ -5493,8 +5737,7 @@
         "type": "string",
         "enum": [
           "ok",
-          "error",
-          "unknown"
+          "error"
         ]
       },
       "ImportLdapUsersRequest": {
@@ -5522,11 +5765,13 @@
         ],
         "properties": {
           "label": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 255
           },
           "reference": {
             "type": "string",
-            "description": "A `vault://backend/path#field` or `openbao://backend/path#field` reference;\nthe field must resolve to a private key in OpenSSH or PKCS#8 PEM format."
+            "description": "A `vault://backend/path#field` or `openbao://backend/path#field` reference;\nthe field must resolve to a private key in OpenSSH or PKCS#8 PEM format.",
+            "maxLength": 1024
           },
           "is_default": {
             "type": "boolean"
@@ -6997,21 +7242,95 @@
           }
         ]
       },
-      "SecretBackendStatus": {
+      "SecretBackendRequest": {
         "type": "object",
-        "title": "SecretBackendStatus",
+        "title": "SecretBackendRequest",
+        "description": "Shared by create and update. The secret fields are write-only: mandatory\nwhen the row holds none for the chosen method, kept when omitted otherwise.",
         "required": [
           "name",
-          "backendType",
+          "backend_type",
           "address",
-          "health"
+          "auth_method"
         ],
         "properties": {
           "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._-]+$"
+          },
+          "backend_type": {
+            "$ref": "#/components/schemas/BackendType"
+          },
+          "address": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1
+          },
+          "namespace": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "auth_method": {
+            "$ref": "#/components/schemas/VaultAuthMethod"
+          },
+          "auth_mount": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "token": {
             "type": "string"
           },
-          "backendType": {
-            "$ref": "#/components/schemas/SecretBackendType"
+          "app_role_id": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "app_role_secret_id": {
+            "type": "string"
+          },
+          "kubernetes_role": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "tls_skip_verify": {
+            "type": "boolean",
+            "default": false
+          },
+          "allowed_paths": {
+            "type": "array",
+            "description": "KV path prefixes (`mount/path`), matched on whole segments",
+            "default": [],
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "maxItems": 256
+          }
+        }
+      },
+      "SecretBackendResponse": {
+        "type": "object",
+        "title": "SecretBackendResponse",
+        "required": [
+          "id",
+          "name",
+          "backend_type",
+          "address",
+          "auth_method",
+          "auth_mount",
+          "tls_skip_verify",
+          "allowed_paths"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "backend_type": {
+            "$ref": "#/components/schemas/BackendType"
           },
           "address": {
             "type": "string"
@@ -7019,20 +7338,29 @@
           "namespace": {
             "type": "string"
           },
-          "health": {
-            "$ref": "#/components/schemas/HealthStatus"
+          "auth_method": {
+            "$ref": "#/components/schemas/VaultAuthMethod"
           },
-          "health_error": {
+          "auth_mount": {
+            "type": "string",
+            "description": "Empty means the method's default mount"
+          },
+          "app_role_id": {
             "type": "string"
+          },
+          "kubernetes_role": {
+            "type": "string"
+          },
+          "tls_skip_verify": {
+            "type": "boolean"
+          },
+          "allowed_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
-      },
-      "SecretBackendType": {
-        "type": "string",
-        "enum": [
-          "vault",
-          "openbao"
-        ]
       },
       "SecretReferenceUsage": {
         "type": "object",
@@ -7924,22 +8252,8 @@
         ],
         "properties": {
           "reference": {
-            "type": "string"
-          }
-        }
-      },
-      "TestResolveResponse": {
-        "type": "object",
-        "title": "TestResolveResponse",
-        "required": [
-          "ok"
-        ],
-        "properties": {
-          "ok": {
-            "type": "boolean"
-          },
-          "error": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 1024
           }
         }
       },
@@ -8464,6 +8778,14 @@
             }
           }
         }
+      },
+      "VaultAuthMethod": {
+        "type": "string",
+        "enum": [
+          "token",
+          "app_role",
+          "kubernetes"
+        ]
       },
       "VncTargetAuth": {
         "type": "object",

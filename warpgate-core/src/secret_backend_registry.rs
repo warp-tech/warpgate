@@ -2,88 +2,99 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::RwLock;
-use tracing::{error, info};
+use sea_orm::{DatabaseConnection, EntityTrait};
+use tokio::sync::Mutex;
 use warpgate_common::{
-    BackendType, SecretBackend, SecretBackendRef, SecretError, SecretRef, SecretValue,
-    SecretsConfig, WarpgateError,
+    MaybeSecretRef, Secret, SecretError, SecretRef, SecretResolver, StoredSecret, TargetSecrets,
+    WarpgateError,
 };
+use warpgate_db_entities::SecretBackend as SecretBackendEntity;
 use warpgate_secrets_vault::VaultBackend;
 
 use crate::logging::AuditEvent;
 
+/// Resolves references against the backends stored in the database.
+///
+/// The row is re-read on every lookup (one indexed query per connection), so a
+/// backend created or changed through any node's admin API is used by every
+/// node on its next resolve, with no cross-node signalling. The connected
+/// client is cached per name and rebuilt whenever the row differs from the one
+/// it was built from.
 pub struct SecretBackendRegistry {
-    backends: RwLock<HashMap<String, SecretBackendRef>>,
+    db: DatabaseConnection,
+    // ponytail: one lock across the whole cache, held while a backend connects.
+    // Per-name locks if connect-time contention ever shows up.
+    cache: Mutex<HashMap<String, (SecretBackendEntity::Model, Arc<VaultBackend>)>>,
 }
 
 impl SecretBackendRegistry {
-    pub async fn from_config(config: &SecretsConfig) -> Result<Self, WarpgateError> {
-        Ok(Self {
-            backends: RwLock::new(Self::build_backends(config).await),
-        })
+    pub fn new(db: DatabaseConnection) -> Self {
+        Self {
+            db,
+            cache: Mutex::new(HashMap::new()),
+        }
     }
 
-    async fn build_backends(config: &SecretsConfig) -> HashMap<String, SecretBackendRef> {
-        let mut backends: HashMap<String, SecretBackendRef> = HashMap::new();
+    async fn get(&self, name: &str) -> Result<Option<Arc<VaultBackend>>, SecretError> {
+        let rows = SecretBackendEntity::Entity::find()
+            .all(&self.db)
+            .await
+            .map_err(|e| SecretError::Backend(e.to_string()))?;
 
-        for backend_config in &config.backends {
-            if backend_config.name.contains('/') {
-                error!(
-                    name = %backend_config.name,
-                    "Secret backend name contains '/', which is ambiguous with the backend/path \
-                     separator in `scheme://backend/path` references; skipping. Rename the \
-                     backend in `secrets.backends` to a name without '/'.",
-                );
-                continue;
-            }
+        let mut cache = self.cache.lock().await;
+        // Rows deleted since the last lookup take their client, and with it
+        // the token renewal task, with them.
+        cache.retain(|cached, _| rows.iter().any(|row| &row.name == cached));
 
-            if backends.contains_key(&backend_config.name) {
-                error!(
-                    name = %backend_config.name,
-                    "Duplicate secret backend name; keeping the first definition and \
-                     ignoring this one.",
-                );
-                continue;
-            }
-
-            let backend: SecretBackendRef = match backend_config.backend_type {
-                BackendType::Vault | BackendType::OpenBao => {
-                    match VaultBackend::new(backend_config).await {
-                        Ok(b) => Arc::new(b),
-                        Err(e) => {
-                            error!(
-                                name = %backend_config.name,
-                                error = %e,
-                                "Failed to initialise secret backend; skipping. \
-                                 References to this backend will fail until it is fixed \
-                                 and the config is reloaded.",
-                            );
-                            continue;
-                        }
-                    }
-                }
-            };
-
-            info!(name = %backend_config.name, "Secret backend registered");
-            backends.insert(backend_config.name.clone(), backend);
+        let Some(row) = rows.into_iter().find(|row| row.name == name) else {
+            return Ok(None);
+        };
+        if let Some((cached, backend)) = cache.get(name)
+            && *cached == row
+        {
+            return Ok(Some(backend.clone()));
         }
 
-        backends
+        let config = row
+            .config()
+            .map_err(|e| SecretError::Backend(e.to_string()))?;
+        let backend = Arc::new(VaultBackend::new(&config).await?);
+        cache.insert(name.to_owned(), (row, backend.clone()));
+        Ok(Some(backend))
     }
 
-    async fn get(&self, name: &str) -> Option<SecretBackendRef> {
-        self.backends.read().await.get(name).cloned()
+    async fn get_configured(&self, name: &str) -> Result<Arc<VaultBackend>, SecretError> {
+        self.get(name)
+            .await?
+            .ok_or_else(|| SecretError::BackendNotConfigured {
+                backend: name.to_owned(),
+            })
+    }
+
+    async fn get_for(&self, reference: &SecretRef) -> Result<Arc<VaultBackend>, SecretError> {
+        let backend = self.get_configured(&reference.backend).await?;
+        if backend.backend_type() != reference.scheme {
+            return Err(SecretError::Backend(format!(
+                "reference scheme '{}' does not match the '{}' backend '{}'",
+                reference.scheme,
+                backend.backend_type(),
+                reference.backend
+            )));
+        }
+        Ok(backend)
+    }
+
+    pub async fn health_of(&self, name: &str) -> Result<(), SecretError> {
+        self.get_configured(name).await?.health().await
     }
 }
 
 #[async_trait]
-impl SecretBackend for SecretBackendRegistry {
-    async fn resolve(&self, reference: &SecretRef) -> Result<SecretValue, SecretError> {
-        let result = match self.get(&reference.backend).await {
-            Some(b) => b.resolve(reference).await,
-            None => Err(SecretError::BackendNotConfigured {
-                backend: reference.backend.clone(),
-            }),
+impl SecretResolver for SecretBackendRegistry {
+    async fn resolve(&self, reference: &SecretRef) -> Result<Secret<String>, SecretError> {
+        let result = match self.get_for(reference).await {
+            Ok(backend) => backend.resolve(reference).await,
+            Err(e) => Err(e),
         };
 
         AuditEvent::SecretResolved {
@@ -97,34 +108,37 @@ impl SecretBackend for SecretBackendRegistry {
     }
 
     async fn health(&self) -> Result<(), SecretError> {
-        let backends: Vec<(String, SecretBackendRef)> = self
-            .backends
-            .read()
+        let rows = SecretBackendEntity::Entity::find()
+            .all(&self.db)
             .await
-            .iter()
-            .map(|(name, backend)| (name.clone(), backend.clone()))
-            .collect();
+            .map_err(|e| SecretError::Backend(e.to_string()))?;
 
-        let results =
-            futures::future::join_all(backends.iter().map(|(name, backend)| async move {
-                backend.health().await.map_err(|e| format!("{name}: {e}"))
-            }))
-            .await;
+        let mut errors = Vec::new();
+        for row in rows {
+            if let Err(e) = self.health_of(&row.name).await {
+                errors.push(format!("{}: {e}", row.name));
+            }
+        }
 
-        let errors: Vec<String> = results.into_iter().filter_map(Result::err).collect();
         if errors.is_empty() {
             Ok(())
         } else {
             Err(SecretError::Backend(errors.join("; ")))
         }
     }
+}
 
-    async fn health_for(&self, name: &str) -> Result<(), SecretError> {
-        match self.get(name).await {
-            Some(backend) => backend.health().await,
-            None => Err(SecretError::BackendNotConfigured {
-                backend: name.to_string(),
-            }),
+/// Replaces every reference among a target's credentials with the secret it
+/// names, so whatever consumes the options afterwards only ever sees values.
+pub async fn resolve_secrets<O: TargetSecrets>(
+    options: &mut O,
+    backend: &dyn SecretResolver,
+) -> Result<(), WarpgateError> {
+    for slot in options.secrets_mut() {
+        if slot.as_reference().is_some() {
+            let value = slot.resolve(backend).await?;
+            *slot = MaybeSecretRef::Inline(StoredSecret::from(value.expose_secret().clone()));
         }
     }
+    Ok(())
 }
