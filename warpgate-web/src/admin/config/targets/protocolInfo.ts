@@ -115,8 +115,8 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 
 ## Warpgate ↔ client
 
-* Warpgate requires TLS from the client.
-* Client authenticates with SASL PLAIN (cleartext password) over the mandatory TLS.
+* TLS is optional and detected automatically per connection (\`tls=true\` recommended).
+* Client authenticates with SASL PLAIN (cleartext password) — use TLS to protect it.
 
 ## MongoDB protocol
 

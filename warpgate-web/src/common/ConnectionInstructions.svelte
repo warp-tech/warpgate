@@ -336,10 +336,10 @@
     </CollapsibleBlock>
 
     <Alert color="info" class="mt-3">
-        Warpgate authenticates MongoDB clients with the PLAIN mechanism over
-        mandatory TLS — add
-        <code>authMechanism=PLAIN</code> and <code>tls=true</code> to your
-        connection settings.
+        Warpgate authenticates MongoDB clients with the PLAIN mechanism — add
+        <code>authMechanism=PLAIN</code> to your connection settings. TLS is
+        supported and recommended (<code>tls=true</code>); plain connections
+        are accepted but transmit the password unencrypted.
     </Alert>
 {/if}
 
