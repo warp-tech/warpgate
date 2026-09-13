@@ -163,7 +163,7 @@
             </div>
         </div>
 
-        {#if creds.publicKeys.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.includes(CredentialKind.Password))}
+        {#if creds.publicKeys.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.some(c => c.includes(CredentialKind.Password)))}
             <Alert color="warning">
                 Your credential policy requires using a password for
                 authentication. Without one, you won't be able to log in.
@@ -210,7 +210,7 @@
             {/each}
         </div>
 
-        {#if creds.otp.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.includes(CredentialKind.Totp))}
+        {#if creds.otp.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.some(c => c.includes(CredentialKind.Totp)))}
             <Alert color="warning">
                 Your credential policy requires using a one-time password for
                 authentication. Without one, you won't be able to log in.
@@ -275,7 +275,7 @@
             {/each}
         </div>
 
-        {#if creds.publicKeys.length === 0 && creds.credentialPolicy.ssh?.includes(CredentialKind.PublicKey)}
+        {#if creds.publicKeys.length === 0 && creds.credentialPolicy.ssh?.some(c => c.includes(CredentialKind.PublicKey))}
             <Alert color="warning">
                 Your credential policy requires using a public key for
                 authentication. Without one, you won't be able to log in.
@@ -323,7 +323,7 @@
             {/each}
         </div>
 
-        {#if creds.certificates.length === 0 && creds.credentialPolicy.kubernetes?.includes(CredentialKind.Certificate)}
+        {#if creds.certificates.length === 0 && creds.credentialPolicy.kubernetes?.some(c => c.includes(CredentialKind.Certificate))}
             <Alert color="warning">
                 Your credential policy requires using a certificate for
                 authentication. Without one, you won't be able to log in.

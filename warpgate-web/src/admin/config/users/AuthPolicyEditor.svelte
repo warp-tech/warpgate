@@ -231,7 +231,7 @@
 
     function addCombination(protocolId: ProtocolID) {
         const combos = getCombinations(protocolId) ?? []
-        let defaultKind = CredentialKind.Password
+        let defaultKind: CredentialKind = CredentialKind.Password
         if (!requiresPassword(protocolId)) {
             const possible = possibleCredentials(protocolId)
             const oneCred =
