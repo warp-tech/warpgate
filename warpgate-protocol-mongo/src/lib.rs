@@ -41,10 +41,18 @@ fn is_plaintext_mongo(chunk: &[u8]) -> bool {
     if chunk.len() < 16 {
         return false;
     }
-    let message_length = i32::from_le_bytes(chunk[0..4].try_into().expect("16 bytes checked"));
-    let op_code = i32::from_le_bytes(chunk[12..16].try_into().expect("16 bytes checked"));
+    let (Some(message_length), Some(op_code)) = (le_i32(chunk), chunk.get(12..).and_then(le_i32))
+    else {
+        return false;
+    };
     (16..=crate::stream::MAX_MESSAGE_SIZE).contains(&message_length)
         && Opcode::from_i32(op_code).is_some()
+}
+
+fn le_i32(chunk: &[u8]) -> Option<i32> {
+    let mut bytes = [0u8; 4];
+    bytes.copy_from_slice(chunk.get(..4)?);
+    Some(i32::from_le_bytes(bytes))
 }
 
 /// Reads from the socket until at least a wire header (or a TLS record
