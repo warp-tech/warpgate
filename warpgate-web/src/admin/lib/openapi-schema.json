@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-14-g4f033556-modified"
+    "version": "b266f320-modified"
   },
   "servers": [
     {
@@ -7093,6 +7093,39 @@
           }
         }
       },
+      "TargetMongoOptions": {
+        "type": "object",
+        "title": "TargetMongoOptions",
+        "required": [
+          "host",
+          "port",
+          "username",
+          "auth",
+          "tls"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "username": {
+            "type": "string"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/DatabaseTargetAuth"
+          },
+          "tls": {
+            "$ref": "#/components/schemas/Tls"
+          },
+          "auth_source": {
+            "type": "string",
+            "description": "The database the target's credentials are verified against\n(`authSource` in a MongoDB connection string). Defaults to `admin`."
+          }
+        }
+      },
       "TargetMySqlOptions": {
         "type": "object",
         "title": "TargetMySqlOptions",
@@ -7144,6 +7177,9 @@
             "$ref": "#/components/schemas/TargetOptions_TargetPostgresOptions"
           },
           {
+            "$ref": "#/components/schemas/TargetOptions_TargetMongoOptions"
+          },
+          {
             "$ref": "#/components/schemas/TargetOptions_TargetVncOptions"
           },
           {
@@ -7158,6 +7194,7 @@
             "Kubernetes": "#/components/schemas/TargetOptions_TargetKubernetesOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
             "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
+            "Mongo": "#/components/schemas/TargetOptions_TargetMongoOptions",
             "Vnc": "#/components/schemas/TargetOptions_TargetVncOptions",
             "Rdp": "#/components/schemas/TargetOptions_TargetRdpOptions"
           }
@@ -7204,6 +7241,28 @@
           },
           {
             "$ref": "#/components/schemas/TargetKubernetesOptions"
+          }
+        ]
+      },
+      "TargetOptions_TargetMongoOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Mongo"
+                ],
+                "example": "Mongo"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetMongoOptions"
           }
         ]
       },
@@ -7977,6 +8036,12 @@
             }
           },
           "postgres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "mongo": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

@@ -16,6 +16,7 @@ members = [
     "warpgate-ldap",
     "warpgate-protocol-http",
     "warpgate-protocol-kubernetes",
+    "warpgate-protocol-mongo",
     "warpgate-protocol-mysql",
     "warpgate-protocol-postgres",
     "warpgate-protocol-rdp",

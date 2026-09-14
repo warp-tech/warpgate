@@ -15,8 +15,8 @@ use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
-    GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
-    RdpConfig, Secret, SshConfig, VncConfig, WarpgateConfigStore,
+    GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MongoConfig, MySqlConfig,
+    PostgresConfig, RdpConfig, Secret, SshConfig, VncConfig, WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 use warpgate_core::db::connect_to_db_and_migrate;
@@ -251,6 +251,32 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
         }
     }
 
+    if let Commands::UnattendedSetup { mongo_port, .. } = &cli.command {
+        if let Some(mongo_port) = mongo_port {
+            store.mongo.enable = true;
+            store.mongo.listen = ListenEndpoint::from(SocketAddr::new(
+                Ipv6Addr::UNSPECIFIED.into(),
+                *mongo_port,
+            ));
+        }
+    } else {
+        if is_docker() {
+            store.mongo.enable = true;
+        } else {
+            store.mongo.enable = dialoguer::Confirm::with_theme(&theme)
+                .default(true)
+                .with_prompt("Accept MongoDB connections?")
+                .interact()?;
+
+            if store.mongo.enable {
+                store.mongo.listen = prompt_endpoint(
+                    "Endpoint to listen for MongoDB connections on",
+                    &MongoConfig::default().listen,
+                );
+            }
+        }
+    }
+
     if let Commands::UnattendedSetup {
         kubernetes_port, ..
     } = &cli.command
@@ -338,6 +364,9 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
 
     store.postgres.certificate = store.http.certificate.clone();
     store.postgres.key = store.http.key.clone();
+
+    store.mongo.certificate = store.http.certificate.clone();
+    store.mongo.key = store.http.key.clone();
 
     store.kubernetes.certificate = store.http.certificate.clone();
     store.kubernetes.key = store.http.key.clone();

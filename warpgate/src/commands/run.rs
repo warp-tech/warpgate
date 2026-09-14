@@ -19,6 +19,7 @@ use warpgate_core::logging::install_database_logger;
 use warpgate_core::{ListenerStatusRegistry, ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_kubernetes::KubernetesProtocolServer;
+use warpgate_protocol_mongo::MongoProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_postgres::PostgresProtocolServer;
 use warpgate_protocol_rdp::RdpProtocolServer;
@@ -226,6 +227,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         PostgresProtocolServer,
         postgres
     ));
+    supervisors.push(tls_listener!("MongoDB", MongoProtocolServer, mongo));
     supervisors.push(tls_listener!(
         "Kubernetes",
         KubernetesProtocolServer,

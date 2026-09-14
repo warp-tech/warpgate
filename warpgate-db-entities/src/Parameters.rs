@@ -325,7 +325,7 @@ impl Model {
             // Protocols that can't prompt for an OTP
             (
                 MfaEnforcement::Require,
-                Protocol::MySql | Protocol::Postgres | Protocol::Kubernetes,
+                Protocol::MySql | Protocol::Postgres | Protocol::Kubernetes | Protocol::Mongo,
             ) => Some(CredentialKind::WebUserApproval),
         }
     }
