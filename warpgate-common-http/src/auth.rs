@@ -237,6 +237,10 @@ impl FullUserAuthorization {
 pub const TOKEN_ATTRIBUTIONS: [&str; 2] = ["admin-token", "cluster-token"];
 
 impl RequestAuthorization {
+    pub const fn is_cluster_peer(&self) -> bool {
+        matches!(self, Self::ClusterToken)
+    }
+
     /// Returns a username if one is present (admin token has none)
     pub const fn username(&self) -> Option<&String> {
         match self {
