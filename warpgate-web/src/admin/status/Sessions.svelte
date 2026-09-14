@@ -9,6 +9,7 @@
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
+    import { PROTOCOL_PROPERTIES } from 'common/protocols'
     import RelativeDate from 'common/RelativeDate.svelte'
     import { formatDistance } from 'date-fns'
     import { serverInfo } from 'gateway/lib/store'
@@ -35,6 +36,14 @@
         'sessions-list:show-logged-in-only',
         true,
     )
+    let [protocolFilter, protocolFilter$] = autosave(
+        'sessions-list:protocol-filter',
+        '',
+    )
+    let [fromDate, fromDate$] = autosave('sessions-list:from-date', '')
+    let [toDate, toDate$] = autosave('sessions-list:to-date', '')
+
+    const PROTOCOLS = Object.keys(PROTOCOL_PROPERTIES)
 
     let activeSessionCount: number | undefined = $state()
 
@@ -43,6 +52,21 @@
     )
     let sessionChanges$ = fromEvent(socket, 'message')
     onDestroy(() => socket.close())
+
+    // A date input value ("YYYY-MM-DD") as an API timestamp bound; a `to` date
+    // includes the whole selected day. Returned as a Date — the API client
+    // serializes it to an ISO string.
+    function dateInputToDate(
+        value: string,
+        endOfDay: boolean,
+    ): Date | undefined {
+        if (!value) {
+            return undefined
+        }
+        const time = endOfDay ? '23:59:59.999' : '00:00:00.000'
+        const parsed = new Date(`${value}T${time}`)
+        return Number.isNaN(parsed.getTime()) ? undefined : parsed
+    }
 
     function loadSessions(
         opt: LoadOptions,
@@ -54,23 +78,31 @@
         return combineLatest([
             showActiveOnly$,
             showLoggedInOnly$,
+            protocolFilter$,
+            fromDate$,
+            toDate$,
             merge(timer(0, 60000), sessionChanges$),
         ]).pipe(
-            switchMap(([activeOnly, loggedInOnly]) => {
-                api.getSessions({
-                    activeOnly: true,
-                    limit: 1,
-                }).then(response => {
-                    activeSessionCount = response.total
-                })
-                return from(
+            switchMap(
+                ([activeOnly, loggedInOnly, protocol, fromValue, toValue]) => {
                     api.getSessions({
-                        activeOnly,
-                        loggedInOnly,
-                        ...opt,
-                    }),
-                )
-            }),
+                        activeOnly: true,
+                        limit: 1,
+                    }).then(response => {
+                        activeSessionCount = response.total
+                    })
+                    return from(
+                        api.getSessions({
+                            activeOnly,
+                            loggedInOnly,
+                            protocol: protocol || undefined,
+                            from: dateInputToDate(fromValue, false),
+                            to: dateInputToDate(toValue, true),
+                            ...opt,
+                        }),
+                    )
+                },
+            ),
         )
     }
 
@@ -128,22 +160,50 @@
         </div>
     {/if}
 
-    <ItemList load={loadSessions} pageSize={100}>
+    <ItemList load={loadSessions} pageSize={100} showSearch={true}>
         {#snippet header()}
-            <div class="d-flex align-items-center mb-1 w-100">
-                <div class="ms-auto"></div>
-                <Input
-                    class="ms-3"
-                    type="switch"
-                    label="Active only"
-                    bind:checked={$showActiveOnly}
-                />
-                <Input
-                    class="ms-3"
-                    type="switch"
-                    label="Logged in only"
-                    bind:checked={$showLoggedInOnly}
-                />
+            <div class="filter-bar">
+                <div class="filter-grid">
+                    <Input
+                        type="select"
+                        aria-label="Protocol filter"
+                        bind:value={$protocolFilter}
+                    >
+                        <option value="">All protocols</option>
+                        {#each PROTOCOLS as protocol (protocol)}
+                            <option value={protocol}>{protocol}</option>
+                        {/each}
+                    </Input>
+                    <Input type="date" label="From" bind:value={$fromDate} />
+                    <Input type="date" label="To" bind:value={$toDate} />
+                </div>
+                <div class="filter-actions">
+                    <Input
+                        type="switch"
+                        label="Active only"
+                        bind:checked={$showActiveOnly}
+                    />
+                    <Input
+                        type="switch"
+                        label="Logged in only"
+                        bind:checked={$showLoggedInOnly}
+                    />
+                    {#if $protocolFilter || $fromDate || $toDate || $showActiveOnly || $showLoggedInOnly}
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-outline-secondary ms-auto"
+                            onclick={() => {
+                                $protocolFilter = ''
+                                $fromDate = ''
+                                $toDate = ''
+                                $showActiveOnly = false
+                                $showLoggedInOnly = false
+                            }}
+                        >
+                            Clear filters
+                        </button>
+                    {/if}
+                </div>
             </div>
         {/snippet}
 
@@ -182,6 +242,24 @@
 </PermissionGate>
 
 <style lang="scss">
+    .filter-bar {
+        width: 100%;
+        margin-bottom: 0.75rem;
+    }
+
+    .filter-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.75rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .filter-actions {
+        display: flex;
+        align-items: center;
+        gap: 1.25rem;
+    }
+
     .list-group-item {
         .icon {
             display: flex;
