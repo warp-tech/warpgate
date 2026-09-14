@@ -677,3 +677,26 @@ mod desktop_size_tests {
         assert!(events.try_recv().is_err());
     }
 }
+
+#[cfg(test)]
+mod framed_tests {
+    use std::time::Duration;
+
+    use ironrdp::pdu::X224_HINT;
+    use ironrdp_tokio::TokioFramed;
+    use tokio::io::AsyncWriteExt as _;
+
+    /// A fast-path header whose length field is zero is a frame `X224_HINT` neither
+    /// matches nor can skip past. The reader has to fail it; looping on it would pin a
+    /// core for as long as the process lives, long after the sender has gone away.
+    #[tokio::test]
+    async fn zero_length_unmatched_frame_fails_instead_of_spinning() {
+        let (server_side, mut client_side) = tokio::io::duplex(64);
+        client_side.write_all(&[0x00, 0x00]).await.unwrap();
+        let mut framed = TokioFramed::new(server_side);
+        let result = tokio::time::timeout(Duration::from_secs(5), framed.read_by_hint(&X224_HINT))
+            .await
+            .expect("read_by_hint spun instead of returning");
+        assert!(result.is_err());
+    }
+}
