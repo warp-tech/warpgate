@@ -82,9 +82,13 @@ def test_the_terminal_is_told_what_happened_not_what_the_error_said(
         target = api.create_target(
             sdk.TargetDataRequest(
                 name=f"dead-{uuid4()}",
+                require_approval=False,
+                ticket_requests_disabled=False,
+                ticket_require_approval=False,
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
+                        allow_insecure_algos=False,
                         host="localhost",
                         port=dead_port,
                         username="root",
