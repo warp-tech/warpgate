@@ -408,7 +408,6 @@ mod tests {
     /// Closing by user must reach exactly that user's live connections: a
     /// deleted account keeps no open handle, and nobody else's is touched.
     #[tokio::test]
-    #[tokio::test]
     async fn target_open_racing_session_end_cannot_leave_an_open_access() {
         set_config_migration_values(ConfigMigrationValues::default());
         let db = Database::connect("sqlite::memory:").await.unwrap();

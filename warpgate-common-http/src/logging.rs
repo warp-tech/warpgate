@@ -35,7 +35,7 @@ pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String>
 
     trusted_client_ip(
         req,
-        &services.cluster_token,
+        &services.cluster.cluster_token,
         raw_remote_ip(req),
         trust_x_forwarded_headers,
     )
