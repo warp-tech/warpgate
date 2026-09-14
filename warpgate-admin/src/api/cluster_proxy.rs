@@ -13,26 +13,20 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 
-use anyhow::{Context, anyhow};
-use futures::future::join_all;
+use anyhow::Context;
 use futures::{StreamExt, TryStreamExt};
 use poem::http::header::{CONNECTION, CONTENT_LENGTH, COOKIE, HOST, TRANSFER_ENCODING, UPGRADE};
 use poem::http::{HeaderName, StatusCode};
 use poem::web::websocket::WebSocket;
 use poem::{Body, IntoResponse, Request, Response};
 use poem_openapi::types::ParseFromJSON;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::Serialize;
-use tokio::time::timeout;
 use tokio_tungstenite::{Connector, client_async_tls_with_config, tungstenite};
-use tracing::warn;
 use uuid::Uuid;
 use warpgate_ca::CLUSTER_TLS_SNI_NAME;
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::may_forward_header;
-use warpgate_common::{NodeId, Secret, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_common_http::{
@@ -40,67 +34,8 @@ use warpgate_common_http::{
     X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN, is_cluster_peer_request,
 };
 use warpgate_core::Services;
-use warpgate_db_entities::{Node, Parameters, TargetSession};
-use warpgate_tls::configure_cluster_tls_connector;
-
-pub struct RemoteNode {
-    pub address: String,
-    /// SPKI pin from the node's registry row; peer TLS verification fails
-    /// closed when a node has not published one.
-    pub tls_spki_sha256: Option<String>,
-}
-
-/// Which node owns a node-local resource (an in-progress recording, a live session)
-pub enum Owner {
-    Local,
-    Remote(RemoteNode),
-}
-
-impl From<Node::Model> for RemoteNode {
-    fn from(node: Node::Model) -> Self {
-        Self {
-            address: node.address,
-            tls_spki_sha256: node.tls_spki_sha256,
-        }
-    }
-}
-
-impl Owner {
-    pub const fn local() -> Self {
-        Self::Local
-    }
-
-    pub fn remote(node: Node::Model) -> Self {
-        Self::Remote(node.into())
-    }
-}
-
-/// resolve a node UUID into an [Owner::Local]/[Owner::Remote],
-/// handling invalid IDs (warn and fall back to local)
-pub async fn node_owner(
-    ctx: &UnauthenticatedRequestContext,
-    node_id: Option<NodeId>,
-) -> Result<Owner, WarpgateError> {
-    let services = ctx.services();
-    let Some(node_id) = node_id else {
-        return Ok(Owner::Local);
-    };
-    if node_id.0.is_nil() || node_id == services.cluster.node_id {
-        return Ok(Owner::Local);
-    }
-    let Some(node) = Node::Entity::find_by_id(node_id).one(&services.db).await? else {
-        warn!(%node_id, "Owner node is gone from the cluster; serving locally");
-        return Ok(Owner::Local);
-    };
-    Ok(Owner::remote(node))
-}
-
-pub async fn session_owner(
-    ctx: &UnauthenticatedRequestContext,
-    session: &TargetSession::Model,
-) -> Result<Owner, WarpgateError> {
-    node_owner(ctx, session.node_id).await
-}
+use warpgate_core::cluster::PeerConnection;
+pub use warpgate_core::cluster::{Owner, RemoteNode};
 
 /// Who a forwarded request acts as on the peer.
 enum ForwardIdentity<'a> {
@@ -194,7 +129,6 @@ where
                 req,
                 &path_and_query(req),
                 remote,
-                &ctx.services().cluster_token,
                 identity,
                 body.map(|b| serde_json::to_vec(&b))
                     .transpose()
@@ -220,16 +154,10 @@ where
     Fut: Future<Output = poem::Result<Response>>,
 {
     match owner {
-        Owner::Remote(remote) => {
-            forward_websocket(ctx, req, ws, remote, &ctx.services().cluster_token).await
-        }
+        Owner::Remote(remote) => forward_websocket(ctx, req, ws, remote).await,
         Owner::Local => serve_local(ws).await,
     }
 }
-
-/// How long a single peer gets to answer. A node that is registered but
-/// unreachable must not hold up the rest of a fan-out.
-const PEER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// [fan_out_to_peers] but expect a specific HTTP response code
 /// and return a list of (hostname, code) of responses that did not match
@@ -258,89 +186,20 @@ pub async fn fan_out_to_peers(
     req: &Request,
     path: &str,
 ) -> Vec<(String, Response)> {
-    let services = ctx.services();
-    let peers = Node::Entity::find()
-        .filter(Node::Column::Id.ne(services.cluster.node_id))
-        .all(&services.db)
-        .await;
-    let peers = match peers {
-        Ok(peers) => peers,
-        Err(error) => {
-            warn!(%error, "Failed to list cluster nodes");
-            return vec![];
-        }
-    };
-
-    // Concurrently, so the fan-out costs one slow peer rather than their sum.
-    join_all(peers.into_iter().map(|peer| {
-        let hostname = peer.hostname.clone();
-        async move {
-            let forward = forward_http_to(ctx, req, path, peer.into(), &services.cluster_token);
-            match timeout(PEER_TIMEOUT, forward).await {
-                Ok(Ok(response)) => Some((hostname, response)),
-                Ok(Err(error)) => {
-                    warn!(node = %hostname, %error, "Cluster node request failed");
-                    None
-                }
-                Err(_) => {
-                    warn!(node = %hostname, "Cluster node request timed out");
-                    None
-                }
-            }
-        }
-    }))
-    .await
-    .into_iter()
-    .flatten()
-    .collect()
+    ctx.services()
+        .cluster
+        .for_each_peer(|peer| forward_http_to(ctx, req, path, peer.into()))
+        .await
 }
 
 fn reject_second_hop(req: &Request, services: &Services) -> poem::Result<()> {
-    if is_cluster_peer_request(req, &services.cluster_token) {
+    if is_cluster_peer_request(req, &services.cluster.cluster_token) {
         return Err(poem::Error::from_string(
             "Refusing to forward an already-forwarded cluster request",
             StatusCode::BAD_GATEWAY,
         ));
     }
     Ok(())
-}
-
-/// Peer TLS config plus every address `owner.address` resolves to, so callers
-/// can try each rather than only the first record.
-async fn peer_connection(
-    services: &Services,
-    owner: &RemoteNode,
-) -> poem::Result<(rustls::ClientConfig, Vec<SocketAddr>)> {
-    let Some(pin) = owner.tls_spki_sha256.clone() else {
-        return Err(anyhow!(
-            "The peer node has not published a cluster TLS key pin (is it running an older version?)"
-        )
-        .into());
-    };
-    let params = Parameters::Entity::get(&services.db)
-        .await
-        .map_err(poem::error::InternalServerError)?;
-    let tls = configure_cluster_tls_connector(params.ca_certificate_pem.as_bytes(), pin)
-        .map_err(poem::error::InternalServerError)?;
-    let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&owner.address)
-        .await
-        .map_err(poem::error::BadGateway)?
-        .collect();
-    if addrs.is_empty() {
-        return Err(poem::error::BadGateway(std::io::Error::other(format!(
-            "cannot resolve peer address {}",
-            owner.address
-        ))));
-    }
-    Ok((tls, addrs))
-}
-
-/// The peer port, shared across every resolved address (they differ only by IP).
-fn peer_port(addrs: &[SocketAddr]) -> poem::Result<u16> {
-    addrs
-        .first()
-        .map(SocketAddr::port)
-        .ok_or_else(|| poem::error::BadGateway(std::io::Error::other("no peer address")))
 }
 
 /// Connect to the first reachable resolved address.
@@ -364,14 +223,12 @@ pub(crate) async fn forward_http_to(
     req: &Request,
     path: &str,
     owner: RemoteNode,
-    token: &Secret<String>,
 ) -> poem::Result<Response> {
     forward_http_inner(
         ctx.services(),
         req,
         path,
         owner,
-        token,
         ForwardIdentity::User(&ctx.auth),
         None,
     )
@@ -384,16 +241,10 @@ async fn forward_http_inner(
     req: &Request,
     path: &str,
     owner: RemoteNode,
-    token: &Secret<String>,
     identity: ForwardIdentity<'_>,
     body: Option<Vec<u8>>,
 ) -> poem::Result<Response> {
     reject_second_hop(req, services)?;
-    let (tls, addrs) = peer_connection(services, &owner).await?;
-    let url = format!(
-        "https://{CLUSTER_TLS_SNI_NAME}:{}{path}",
-        peer_port(&addrs)?,
-    );
 
     let mut headers = poem::http::HeaderMap::new();
     for (name, value) in req.headers() {
@@ -402,19 +253,11 @@ async fn forward_http_inner(
         }
     }
 
-    // Per-request client: the TLS config pins one specific peer, so a shared
-    // pooled client cannot be reused across nodes. reqwest tries the resolved
-    // addresses in order.
-    let client = reqwest::Client::builder()
-        .use_preconfigured_tls(tls)
-        .resolve_to_addrs(CLUSTER_TLS_SNI_NAME, &addrs)
-        .build()
-        .map_err(poem::error::InternalServerError)?;
-
-    let mut request = client
-        .request(req.method().clone(), &url)
-        .headers(headers)
-        .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret());
+    let mut request = services
+        .cluster
+        .peer_request(&owner, req.method().clone(), path)
+        .await?
+        .headers(headers);
     if let Some(user_id) = identity.user_id() {
         request = request.header(X_WARPGATE_CLUSTER_IDENTITY.clone(), user_id.to_string());
     }
@@ -443,11 +286,11 @@ pub async fn forward_websocket(
     req: &Request,
     ws: WebSocket,
     owner: RemoteNode,
-    token: &Secret<String>,
 ) -> poem::Result<Response> {
     reject_second_hop(req, ctx.services())?;
-    let (tls, addrs) = peer_connection(ctx.services(), &owner).await?;
-    let host = format!("{CLUSTER_TLS_SNI_NAME}:{}", peer_port(&addrs)?);
+    let PeerConnection { tls, addrs, port } =
+        ctx.services().cluster.peer_connection(&owner).await?;
+    let host = format!("{CLUSTER_TLS_SNI_NAME}:{port}");
     let url = format!("wss://{host}{}", path_and_query(req));
 
     let mut builder = poem::http::Request::builder()
@@ -460,7 +303,10 @@ pub async fn forward_websocket(
             tungstenite::handshake::client::generate_key(),
         )
         .header(HOST, host)
-        .header(X_WARPGATE_CLUSTER_TOKEN.clone(), token.expose_secret());
+        .header(
+            X_WARPGATE_CLUSTER_TOKEN.clone(),
+            ctx.services().cluster.cluster_token.expose_secret(),
+        );
     if let Some(user_id) = ctx.auth.as_full_user().map(|x| x.user_id()) {
         builder = builder.header(X_WARPGATE_CLUSTER_IDENTITY.clone(), user_id.to_string());
     }

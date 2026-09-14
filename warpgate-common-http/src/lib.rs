@@ -9,26 +9,12 @@ mod request;
 pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization};
 pub use keepalive::{SessionKeepalive, SessionKeepaliveGuard};
 use poem::Request;
-use poem::http::HeaderName;
 use subtle::ConstantTimeEq;
 use warpgate_common::Secret;
-
-pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
-pub static X_WARPGATE_CLUSTER_TOKEN: HeaderName =
-    HeaderName::from_static("x-warpgate-cluster-token");
-/// Set by the cluster proxy on a user-authenticated hop to carry the acting
-/// user's id, so the peer runs the forwarded request as that user rather than
-/// as an anonymous cluster peer. Honoured only alongside a valid cluster token;
-/// like every `x-warpgate-*` header it is stripped from untrusted requests, so a
-/// client cannot forge it.
-pub static X_WARPGATE_CLUSTER_IDENTITY: HeaderName =
-    HeaderName::from_static("x-warpgate-cluster-identity");
-/// Set by the cluster proxy to carry the origin node's view of the client's
-/// address: the peer's TCP peer is the forwarding node, so IP-sensitive logic
-/// (login protection, audit) would otherwise attribute the request to a node.
-/// Honoured only alongside a valid cluster token.
-pub static X_WARPGATE_CLUSTER_CLIENT_IP: HeaderName =
-    HeaderName::from_static("x-warpgate-cluster-client-ip");
+pub use warpgate_common::http_headers::{
+    X_WARPGATE_CLUSTER_CLIENT_IP, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN,
+    X_WARPGATE_TOKEN,
+};
 
 /// True if the request carries a valid cluster token, i.e. it was forwarded by
 /// a peer node. Gates every other `x-warpgate-cluster-*` header.

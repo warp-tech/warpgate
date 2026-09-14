@@ -84,6 +84,8 @@ pub enum WarpgateError {
     SessionLimitReached,
     #[error("an administrator did not approve this session")]
     SessionNotApproved,
+    #[error("cluster peer unreachable: {0}")]
+    ClusterPeerUnreachable(String),
     #[error(transparent)]
     Encryption(#[from] crate::encryption::EncryptionError),
 }
@@ -133,6 +135,7 @@ impl UserFacingReason for WarpgateError {
             Self::RcGen(_) => "certificate generation failed".into(),
             Self::TlsSetup(_) => "TLS setup failed".into(),
             Self::Reqwest(_) => "outbound HTTP request failed".into(),
+            Self::ClusterPeerUnreachable(_) => "cluster peer unreachable".into(),
             Self::Aws(_) => "AWS error".into(),
             Self::Ca(_) => "certificate authority error".into(),
             Self::RusshKeys(_) => "SSH key error".into(),
@@ -195,6 +198,7 @@ impl ResponseError for WarpgateError {
             Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
             Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
             Self::SessionNotApproved => poem::http::StatusCode::FORBIDDEN,
+            Self::ClusterPeerUnreachable(_) => poem::http::StatusCode::BAD_GATEWAY,
             _ => poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
