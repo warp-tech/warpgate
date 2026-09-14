@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::bail;
-use futures::{SinkExt, StreamExt};
 use poem::session::Session;
 use poem::web::Data;
 use poem::web::cookie::CookieJar;
-use poem::web::websocket::{Message, WebSocket};
+use poem::web::websocket::WebSocket;
 use poem::{FromRequest, IntoResponse, Request, handler};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -14,11 +13,11 @@ use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Serialize;
 use time::OffsetDateTime;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{
-    Owner, ReparseForwardedResponse, forwarded_error, node_owner, parse_forwarded_body,
+    Owner, ReparseForwardedResponse, forwarded_error, parse_forwarded_body,
     proxy_or_serve_pending_login,
 };
 use warpgate_admin::approvals::{Approver, PendingApproval, resolve_pending_approval};
@@ -31,6 +30,7 @@ use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::Services;
 use warpgate_core::approvals::{ApprovalDecision, ApprovalScope};
 use warpgate_core::auth::submit_credential;
+use warpgate_core::cluster::{ClusterNotification, refresh_notification_stream};
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_db_entities::{Parameters, SessionApprovalRequest as SAR, UserSession};
 
@@ -659,16 +659,18 @@ async fn auth_state_owner(
     id: Option<UserSessionId>,
 ) -> poem::Result<Owner> {
     let Some(id) = id else {
-        return Ok(Owner::local());
+        return Ok(Owner::Local);
     };
     let Some(session) = UserSession::Entity::find_by_id(id)
         .one(&ctx.services().db)
         .await
         .map_err(poem::error::InternalServerError)?
     else {
-        return Ok(Owner::local());
+        return Ok(Owner::Local);
     };
-    node_owner(ctx, session.auth_state_node_id.or(session.node_id))
+    ctx.services()
+        .cluster
+        .owner(session.auth_state_node_id.or(session.node_id))
         .await
         .map_err(Into::into)
 }
@@ -798,55 +800,24 @@ async fn serialize_auth_state_inner(
 }
 
 #[handler]
-pub async fn api_get_web_auth_requests_stream(
+pub fn api_get_web_auth_requests_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,
 ) -> anyhow::Result<impl IntoResponse> {
-    let services = ctx.services();
-    let auth_state_store = services.auth_state_store.clone();
-
-    let username = match &ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => {
-            username.clone()
-        }
+    let user_id = match &ctx.auth {
+        RequestAuthorization::Session(SessionAuthorization::User { user_id, .. }) => *user_id,
         _ => bail!("Only session-based user auth is supported for this endpoint"),
     };
 
-    let mut rx = {
-        let mut s = auth_state_store.lock().await;
-        s.subscribe_web_auth_request()
-    };
-
-    Ok(ws.on_upgrade(|socket| async move {
-        let (mut sink, _) = socket.split();
-
-        loop {
-            let id = match rx.recv().await {
-                Ok(id) => id,
-                // The signal channel only carries wake-ups; if we lag behind we
-                // can safely resync on the next event instead of tearing down.
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
-            };
-
-            // Clone the state handle under a brief store lock, then release it
-            // before locking the inner state, so we never hold the store lock
-            // across an inner-state lock (which protocol sessions hold across
-            // DB I/O) or the socket write.
-            let state_arc = {
-                let store = auth_state_store.lock().await;
-                store.get(&id)
-            };
-            let belongs_to_user = match state_arc {
-                Some(state) => username_eq_ci(&state.lock().await.user_info().username, &username),
-                None => false,
-            };
-
-            if belongs_to_user {
-                sink.send(Message::Text(id.to_string())).await?;
-            }
-        }
-
-        Ok::<(), anyhow::Error>(())
-    }))
+    Ok(refresh_notification_stream(
+        ws,
+        ctx.services().cluster.subscribe(),
+        move |msg| match msg {
+            ClusterNotification::WebAuthRequested {
+                session_id,
+                user_id: requester,
+            } if requester == user_id => Some(session_id.to_string()),
+            _ => None,
+        },
+    ))
 }

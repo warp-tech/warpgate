@@ -342,7 +342,7 @@ pub async fn authorize_session(
 
     // when auth is completed, we must rotate the cookie *on the first hop*
     // since cookies set by a forwarded request are not passed back to the client
-    if !warpgate_common_http::is_cluster_peer_request(req, &ctx.services().cluster_token) {
+    if !warpgate_common_http::is_cluster_peer_request(req, &ctx.services().cluster.cluster_token) {
         // we are the first hop
 
         let jar = <&CookieJar>::from_request_without_body(req)
@@ -436,7 +436,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         .await?
         .for_request();
     let session = <&Session>::from_request_without_body(&req).await?;
-    let is_cluster_peer = is_cluster_peer_request(&req, &ctx.services().cluster_token);
+    let is_cluster_peer = is_cluster_peer_request(&req, &ctx.services().cluster.cluster_token);
 
     let mut session_auth = session.get_auth();
     // A forwarded request's Host is the cluster SNI name by construction, so the
