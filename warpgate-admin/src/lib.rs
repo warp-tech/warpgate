@@ -7,6 +7,7 @@ use poem::{EndpointExt, IntoEndpoint, Route};
 use poem_openapi::OpenApiService;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::WARPGATE_PLAYGROUND_CSP;
+use warpgate_core::cluster::NOTIFICATIONS_ROUTE;
 
 pub fn admin_api_app() -> impl IntoEndpoint {
     let api_service =
@@ -47,5 +48,9 @@ pub fn admin_api_app() -> impl IntoEndpoint {
         .at(
             "/session-approvals/changes",
             crate::api::session_approvals::api_get_session_approvals_stream,
+        )
+        .at(
+            NOTIFICATIONS_ROUTE,
+            crate::api::cluster_notifications::api_post_cluster_notification,
         )
 }

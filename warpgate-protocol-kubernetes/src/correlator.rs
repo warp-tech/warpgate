@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use poem::Request;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberApprovalBy};
 use warpgate_common::{TargetKubernetesOptions, User, UserSessionId, WarpgateError};
 use warpgate_common_http::logging::get_client_ip;
@@ -16,7 +17,7 @@ use warpgate_core::{
 use crate::server::auth::{authorize_kubernetes_target, unauthorized};
 use crate::session_handle::KubernetesSessionHandle;
 
-type CorrelationKey = (String, String, Option<String>); // (username, target_name, ip)
+type CorrelationKey = (Uuid, String, Option<String>); // (user id, target_name, ip)
 
 /// Approval refusale are remembered because otherwise every API request would trigger a new one
 /// This is just long enough to cover a burst of API requests from a single kubectl
@@ -273,7 +274,7 @@ async fn correlation_key_for_request(
     target_name: &str,
 ) -> Result<CorrelationKey, WarpgateError> {
     let ip = get_client_ip(request, services).await;
-    Ok((user_info.username.clone(), target_name.into(), ip))
+    Ok((user_info.id, target_name.into(), ip))
 }
 
 impl RequestCorrelator {
