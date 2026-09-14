@@ -1,8 +1,6 @@
 use sea_orm::prelude::Expr;
 use sea_orm::sea_query::{Alias, Func, IntoCondition, SimpleExpr};
-use sea_orm::{
-    ColumnTrait, Condition, DbBackend, DbErr, EntityTrait, ModelTrait, QueryFilter, SqlErr,
-};
+use sea_orm::{ColumnTrait, Condition, DbBackend, DbErr, EntityTrait, ModelTrait, SqlErr};
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
 pub use warpgate_common_http::RequestAuthorization;
 use warpgate_db_entities::{AdminRole, User};
@@ -31,11 +29,7 @@ pub async fn admin_permission_set(
     };
 
     let db = &ctx.services().db;
-    let Some(user_model) = User::Entity::find()
-        .filter(User::Entity::username_eq_ci(full.username()))
-        .one(db)
-        .await?
-    else {
+    let Some(user_model) = User::Entity::find_by_id(full.user_id()).one(db).await? else {
         return Ok(AdminPermissionSet::none());
     };
 

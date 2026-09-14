@@ -1,7 +1,7 @@
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Response};
-use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{DatabaseConnection, EntityTrait};
 use tracing::info;
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{Owner, forward_websocket, node_owner};
@@ -105,19 +105,16 @@ const fn web_client_protocol(options: &TargetOptions) -> Option<Protocol> {
 /// [`FullUserAuthorization`] rather than a raw `RequestAuthorization` so a
 /// target-scoped ticket cannot be resolved to a full account here — the callers
 /// that manage credentials and tokens all route through this.
+///
+/// Keyed by id, not username: a username is reusable, so a session issued to a
+/// since-deleted account must not resolve to a new account carrying the same name.
 pub async fn get_user(
     auth: &FullUserAuthorization,
     db: &DatabaseConnection,
 ) -> Result<Option<entities::User::Model>, WarpgateError> {
-    let Some(user_model) = entities::User::Entity::find()
-        .filter(entities::User::Entity::username_eq_ci(auth.username()))
+    Ok(entities::User::Entity::find_by_id(auth.user_id())
         .one(db)
-        .await?
-    else {
-        return Ok(None);
-    };
-
-    Ok(Some(user_model))
+        .await?)
 }
 
 /// The node holding a web-client session's live state. Web-client sessions

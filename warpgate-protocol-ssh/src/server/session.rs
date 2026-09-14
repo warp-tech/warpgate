@@ -65,7 +65,8 @@ const EVENT_QUEUE_CAPACITY: usize = 128;
 /// concurrent channel requests can't grow the stack without bound.
 const MAX_NESTED_COMMAND_WAITS: usize = 16;
 
-/// How long a teardown waits for queued writes to reach the client before
+/// How long a teardown waits for the channel writer's own queue to drain —
+/// i.e. for `Handle::close`/`Handle::disconnect` to have been *sent* — before
 /// giving up on them.
 const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -182,6 +183,10 @@ pub struct ServerSession {
     allowed_auth_methods: MethodSet,
     /// Track the state of a client snooping around pre-auth
     probe: ProbeState,
+    /// A duplicate of the client's socket descriptor, shut down at teardown
+    /// so the connection ends with the session rather than with russh's
+    /// inactivity timer. `None` once used.
+    client_socket: Option<std::net::TcpStream>,
 }
 
 fn session_debug_tag(id: &UserSessionId, remote_address: &SocketAddr) -> String {
@@ -256,6 +261,7 @@ impl ServerSession {
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
         mut handler_event_rx: UnboundedReceiver<ServerHandlerEvent>,
+        client_socket: std::net::TcpStream,
     ) -> Result<impl Future<Output = Result<()>> + use<>> {
         let id = server_handle.lock().await.user_session_id();
 
@@ -301,6 +307,7 @@ impl ServerSession {
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
             probe: ProbeState::NoAttempt,
+            client_socket: Some(client_socket),
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -1348,8 +1355,14 @@ impl ServerSession {
                 }
             }
             RCEvent::Close(channel) => {
-                if let Ok(Some((handle, id))) = self.client_channel(&channel) {
-                    let _ = self.channel_writer.close(handle, id);
+                match self.client_channel(&channel) {
+                    Ok(Some((handle, id))) => self.channel_writer.close(handle, id)?,
+                    Ok(None) => {}
+                    Err(error) => {
+                        // Not necessarily a bug: this is reached from both
+                        // sides, so the client half may have closed first.
+                        debug!(%channel, ?error, "Target closed a channel already gone from the registry");
+                    }
                 }
                 self.channels.close(channel);
             }
@@ -2675,13 +2688,40 @@ impl ServerSession {
             for ch in channels {
                 let _ = self.channel_writer.close(handle.clone(), ch.0);
             }
+            // A channel close says nothing about the connection, so a dead
+            // target never gives the client a reason to let go of the socket
+            // (#2520). Queued behind the closes so the ordering holds.
+            let _ = self.channel_writer.disconnect(
+                handle,
+                russh::Disconnect::ByApplication,
+                String::new(),
+                String::new(),
+            );
         }
 
-        // Give queued writes — the closes above, and any error or timeout
-        // notice emitted before them — a chance to reach the client. Bounded:
-        // a client whose window is full never lets the queue drain, and this
-        // runs on the event loop.
-        let _ = tokio::time::timeout(DISCONNECT_FLUSH_TIMEOUT, self.channel_writer.flush()).await;
+        // Bounded: a client whose window is full never lets the queue
+        // drain, and this runs on the event loop.
+        let flushed = tokio::time::timeout(DISCONNECT_FLUSH_TIMEOUT, self.channel_writer.flush())
+            .await
+            .is_ok();
+
+        if let Some(socket) = self.client_socket.take() {
+            // A flush only proves the messages reached russh's queue, so a
+            // client that is reading gets a moment to receive them; one that
+            // is not gets nothing more and is cut immediately. Spawned rather
+            // than awaited: this can run inside a russh callback, and russh
+            // cannot write anything until that callback returns.
+            let delay = if flushed {
+                DISCONNECT_FLUSH_TIMEOUT
+            } else {
+                warn!("Client is not reading; closing its connection");
+                Duration::ZERO
+            };
+            tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
+                let _ = socket.shutdown(std::net::Shutdown::Both);
+            });
+        }
 
         self.session_handle = None;
     }

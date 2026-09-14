@@ -12,7 +12,9 @@ use warpgate_common::{
     UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_core::logging::{AuditEvent, format_related_ids};
-use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
+use warpgate_db_entities::{
+    AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment, UserSession,
+};
 
 use super::AdminContext;
 use crate::api::common::case_insensitive_search;
@@ -285,6 +287,8 @@ impl DetailApi {
         let Some(user) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteUserResponse::NotFound);
         };
+
+        UserSession::revoke_all_for_user(db, user.id).await?;
 
         UserRoleAssignment::Entity::delete_many()
             .filter(UserRoleAssignment::Column::UserId.eq(user.id))

@@ -14,11 +14,10 @@ use tokio::sync::Mutex;
 use warpgate_common::TargetHTTPOptions;
 use warpgate_common::auth::RememberApprovalBy;
 use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_common_http::internal_page::internal_page;
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_core::approvals::{GatedConnection, PolledGate};
 use warpgate_core::{AdmittedTarget, TargetAuthorization, WarpgateServerHandle};
-
-use crate::internal_page::internal_page;
 
 const RETRY_AFTER_SECONDS: u32 = 3;
 
