@@ -69,8 +69,6 @@ struct ParameterValues {
     pub mfa_enforcement: Parameters::MfaEnforcement,
     pub mfa_policy_exempt_sso_users: bool,
     pub default_credential_policy: UserRequireCredentialsPolicy,
-    /// Deprecated in 0.26: superseded by `password_login_mode`
-    pub minimize_password_login: bool,
     pub ticket_self_service_enabled: bool,
     pub ticket_auto_approve_existing_access: bool,
     pub ticket_max_duration_seconds: Option<i64>,
@@ -98,11 +96,12 @@ struct ParameterValues {
     pub lp_user_lockout_duration_seconds: i32,
     pub lp_user_exempt_admins: bool,
     pub banner: String,
-    /// Deprecated in 0.27: superseded by `web_clients_enabled`
-    pub web_ssh_enabled: bool,
     pub web_clients_enabled: bool,
     pub web_auth_max_age_seconds: Option<i64>,
     pub web_approval_grace_period_seconds: Option<i64>,
+    // None = AuthStateStore's TIMEOUT
+    pub admin_approval_timeout_seconds: Option<i64>,
+    pub admin_approval_grace_period_seconds: Option<i64>,
     pub analytics_consent: Parameters::AnalyticsConsent,
     pub analytics_normal: bool,
     pub recordings_enable: bool,
@@ -167,6 +166,10 @@ struct ParameterUpdate {
     pub web_auth_max_age_seconds: Option<Option<i64>>,
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub web_approval_grace_period_seconds: Option<Option<i64>>,
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
+    pub admin_approval_timeout_seconds: Option<Option<i64>>,
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
+    pub admin_approval_grace_period_seconds: Option<Option<i64>>,
     pub analytics_consent: Option<Parameters::AnalyticsConsent>,
     pub analytics_normal: Option<bool>,
     pub recordings_enable: Option<bool>,
@@ -231,8 +234,6 @@ impl Api {
             mfa_enforcement: parameters.mfa_enforcement,
             mfa_policy_exempt_sso_users: parameters.mfa_policy_exempt_sso_users,
             default_credential_policy: parameters.default_credential_policy()?,
-            minimize_password_login: parameters.password_login_mode
-                == Parameters::PasswordLoginMode::Minimized,
             ticket_self_service_enabled: parameters.ticket_self_service_enabled,
             ticket_auto_approve_existing_access: parameters.ticket_auto_approve_existing_access,
             ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
@@ -260,10 +261,11 @@ impl Api {
             lp_user_lockout_duration_seconds: parameters.lp_user_lockout_duration_seconds,
             lp_user_exempt_admins: parameters.lp_user_exempt_admins,
             banner: parameters.banner,
-            web_ssh_enabled: parameters.web_clients_enabled,
             web_clients_enabled: parameters.web_clients_enabled,
             web_auth_max_age_seconds: parameters.web_auth_max_age_seconds,
             web_approval_grace_period_seconds: parameters.web_approval_grace_period_seconds,
+            admin_approval_timeout_seconds: parameters.admin_approval_timeout_seconds,
+            admin_approval_grace_period_seconds: parameters.admin_approval_grace_period_seconds,
             analytics_consent: parameters.analytics_consent,
             analytics_normal: parameters.analytics_normal,
             recordings_enable: parameters.recordings_enable,
@@ -388,6 +390,10 @@ impl Api {
         parameters.web_auth_max_age_seconds = body.web_auth_max_age_seconds.map_or(NotSet, Set);
         parameters.web_approval_grace_period_seconds =
             body.web_approval_grace_period_seconds.map_or(NotSet, Set);
+        parameters.admin_approval_timeout_seconds =
+            body.admin_approval_timeout_seconds.map_or(NotSet, Set);
+        parameters.admin_approval_grace_period_seconds =
+            body.admin_approval_grace_period_seconds.map_or(NotSet, Set);
         parameters.analytics_consent = body.analytics_consent.map_or(NotSet, Set);
         parameters.analytics_normal = body.analytics_normal.map_or(NotSet, Set);
 

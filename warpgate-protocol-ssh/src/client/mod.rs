@@ -31,7 +31,7 @@ use warpgate_aws::AwsError;
 use warpgate_common::{
     SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserSessionId, WarpgateError,
 };
-use warpgate_core::{ApprovedTarget, ConfigProvider, Services};
+use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
@@ -206,10 +206,14 @@ pub async fn resolve_ssh_chain_for_admin(
 /// minted for this target session.
 pub async fn resolve_approved_ssh_chain(
     services: &Services,
-    approved: ApprovedTarget<TargetSSHOptions>,
+    admitted: AdmittedTarget<TargetSSHOptions>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
-    let (user_info, target) = approved.into_parts();
-    resolve_ssh_chain(services, target.id, Some(&user_info.username)).await
+    resolve_ssh_chain(
+        services,
+        admitted.target().id,
+        Some(&admitted.user_info().username),
+    )
+    .await
 }
 
 #[derive(Debug)]
@@ -626,7 +630,7 @@ impl RemoteClient {
     }
 
     async fn build_ssh_config(&self, ssh_options: &TargetSSHOptions) -> Arc<russh::client::Config> {
-        let algos = if ssh_options.allow_insecure_algos.unwrap_or(false) {
+        let algos = if ssh_options.allow_insecure_algos {
             Preferred {
                 kex: Cow::Borrowed(&[
                     kex::MLKEM768X25519_SHA256,
@@ -701,7 +705,7 @@ impl RemoteClient {
             keepalive_interval: ssh_config.keepalive_interval,
             ..Default::default()
         };
-        if ssh_options.allow_insecure_algos.unwrap_or(false)
+        if ssh_options.allow_insecure_algos
             && let Ok(gex) = russh::client::GexParams::new(2048, 2048, 8192)
         {
             config.gex = gex;
@@ -851,7 +855,7 @@ impl RemoteClient {
                         &ssh_options.host,
                         &ssh_options.username,
                         &ssh_options.auth,
-                        ssh_options.allow_insecure_algos.unwrap_or(false)
+                        ssh_options.allow_insecure_algos
                     ).await?;
 
                     return Ok((session, event_rx));

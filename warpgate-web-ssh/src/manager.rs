@@ -15,7 +15,9 @@ use warpgate_protocol_ssh::{
     ConnectionError, RCCommand, RCEvent, RCState, RemoteClient, client_error_message,
     resolve_approved_ssh_chain,
 };
-use warpgate_web_clients_common::{ClientManager, SessionRemover, WebSessionHandle};
+use warpgate_web_clients_common::{
+    ClientManager, SessionRemover, WebSessionHandle, admit_web_client_session,
+};
 
 use crate::protocol::ServerMessage;
 
@@ -59,9 +61,8 @@ impl WebSshClientManager {
         remote_address: Option<SocketAddr>,
     ) -> Result<UserSessionId, WarpgateError> {
         let user_id = authorization.user_info().id;
-        if self.count_for_user(user_id).await >= MAX_SESSIONS_PER_USER {
-            return Err(WarpgateError::SessionLimitReached);
-        }
+        // Guard held until the session running
+        let _slot = self.reserve_slot(user_id, MAX_SESSIONS_PER_USER).await?;
 
         let authorization = authorization.narrow::<TargetSSHOptions>()?;
         let username = authorization.user_info().username.clone();
@@ -82,13 +83,9 @@ impl WebSshClientManager {
         .await
         .context("registering webSSH session")?;
 
-        let (target_session_id, approved) = server_handle
-            .lock()
-            .await
-            .start_target_session(authorization)
-            .await
-            .context("starting target session")?
-            .admitted()?;
+        let admitted =
+            admit_web_client_session(services, &server_handle, authorization, remote_address)
+                .await?;
 
         let session_id = server_handle.lock().await.user_session_id();
         let rc_handles = RemoteClient::create(session_id, services.clone())
@@ -99,7 +96,7 @@ impl WebSshClientManager {
             user_id,
             target_name.clone(),
             target_kind,
-            target_session_id,
+            admitted.id(),
             server_handle,
             rc_handles.command_tx.clone(),
             rc_handles.abort_tx.clone(),
@@ -121,7 +118,7 @@ impl WebSshClientManager {
 
         self.insert(session.clone()).await;
 
-        let ssh_chain = resolve_approved_ssh_chain(services, approved)
+        let ssh_chain = resolve_approved_ssh_chain(services, admitted)
             .await?
             .into_iter()
             .map(|x| x.ssh_options)

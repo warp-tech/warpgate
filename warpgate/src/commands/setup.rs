@@ -87,6 +87,30 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
         );
     }
 
+    let (import_ssh_host_keys, import_ssh_client_keys) = match &cli.command {
+        Commands::Setup {
+            import_ssh_host_keys,
+            import_ssh_client_keys,
+            ..
+        }
+        | Commands::UnattendedSetup {
+            import_ssh_host_keys,
+            import_ssh_client_keys,
+            ..
+        } => (import_ssh_host_keys.clone(), import_ssh_client_keys.clone()),
+        _ => (None, None),
+    };
+    for (flag, dir) in [
+        ("--import-ssh-host-keys", &import_ssh_host_keys),
+        ("--import-ssh-client-keys", &import_ssh_client_keys),
+    ] {
+        if let Some(dir) = dir
+            && !dir.is_dir()
+        {
+            anyhow::bail!("{flag}: {} is not a directory", dir.display());
+        }
+    }
+
     // ---
 
     let data_path: String = if let Commands::UnattendedSetup { data_path, .. } = &cli.command {
@@ -326,8 +350,6 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
 
     // ---
 
-    store.ssh.keys = data_path.join("ssh-keys").to_string_lossy().to_string();
-
     if let Commands::UnattendedSetup {
         host_key_verification,
         ..
@@ -394,7 +416,6 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     info!("Saved into {}", cli.config.display());
 
     let config = load_config(params, true)?;
-    warpgate_protocol_ssh::generate_keys(&config, params, "host")?;
 
     // Create the admin user
     crate::commands::create_user::command(
@@ -415,7 +436,17 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     ))?);
     Parameters::Entity::update(parameters).exec(&db).await?;
 
-    warpgate_protocol_ssh::ensure_client_keys(&db, &config, params).await?;
+    let keys_path = config.store.ssh.keys_path(params);
+    warpgate_protocol_ssh::ensure_host_keys(
+        &db,
+        import_ssh_host_keys.as_deref().unwrap_or(&keys_path),
+    )
+    .await?;
+    warpgate_protocol_ssh::ensure_client_keys(
+        &db,
+        import_ssh_client_keys.as_deref().unwrap_or(&keys_path),
+    )
+    .await?;
 
     #[allow(clippy::expect_used)]
     let user = User::Entity::find()

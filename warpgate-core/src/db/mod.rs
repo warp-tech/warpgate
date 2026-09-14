@@ -132,9 +132,13 @@ pub async fn cleanup_db(
     retention: &Duration,
     audit_retention: &Duration,
 ) -> Result<()> {
-    use warpgate_db_entities::{LogEntry, Recording, Ticket, TicketRequest};
+    use warpgate_db_entities::{
+        LogEntry, Recording, SessionApprovalRequest, Ticket, TicketRequest,
+    };
     let audit_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*audit_retention)?;
     let recording_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*retention)?;
+
+    SessionApprovalRequest::delete_all_before(db, audit_cutoff).await?;
 
     LogEntry::Entity::delete_many()
         .filter(Expr::col(LogEntry::Column::Target).eq("audit"))
@@ -254,11 +258,19 @@ mod tests {
     use super::*;
 
     async fn open_session(db: &DatabaseConnection, node_id: Option<Uuid>) -> Uuid {
+        open_session_for_user(db, node_id, Uuid::new_v4()).await
+    }
+
+    async fn open_session_for_user(
+        db: &DatabaseConnection,
+        node_id: Option<Uuid>,
+        user_id: Uuid,
+    ) -> Uuid {
         let id = Uuid::new_v4();
         UserSession::Entity::insert(UserSession::ActiveModel {
             id: Set(warpgate_common::UserSessionId(id)),
             username: Set(Some("alice".into())),
-            user_id: Set(Some(Uuid::new_v4())),
+            user_id: Set(Some(user_id)),
             remote_address: Set("127.0.0.1:1".into()),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),

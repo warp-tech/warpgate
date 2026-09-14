@@ -8,9 +8,8 @@ use thiserror::Error;
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
+use warpgate_common_http::ext::is_navigation_request;
 use warpgate_db_entities::Parameters::MfaEnforcement;
-
-use crate::common::is_navigation_request;
 
 pub static MFA_SETUP_REQUIRED_HEADER: HeaderName =
     HeaderName::from_static("x-warpgate-mfa-setup-required");

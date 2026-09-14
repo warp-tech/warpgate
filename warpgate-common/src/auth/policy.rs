@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{AuthCredential, CredentialKind};
+use super::CredentialKind;
 use crate::Protocol;
 
 pub enum CredentialPolicyResponse {
@@ -12,7 +12,7 @@ pub trait CredentialPolicy {
     fn is_sufficient(
         &self,
         protocol: Protocol,
-        valid_credentials: &[AuthCredential],
+        valid_credentials: &HashSet<CredentialKind>,
     ) -> CredentialPolicyResponse;
 }
 
@@ -40,7 +40,7 @@ impl CredentialPolicy for AnySingleCredentialPolicy {
     fn is_sufficient(
         &self,
         _protocol: Protocol,
-        valid_credentials: &[AuthCredential],
+        valid_credentials: &HashSet<CredentialKind>,
     ) -> CredentialPolicyResponse {
         if valid_credentials.is_empty() {
             CredentialPolicyResponse::Need(
@@ -59,19 +59,16 @@ impl CredentialPolicy for AllCredentialsPolicy {
     fn is_sufficient(
         &self,
         _protocol: Protocol,
-        valid_credentials: &[AuthCredential],
+        valid_credentials: &HashSet<CredentialKind>,
     ) -> CredentialPolicyResponse {
-        let valid_credential_types: HashSet<CredentialKind> =
-            valid_credentials.iter().map(AuthCredential::kind).collect();
-
-        if !valid_credential_types.is_empty()
-            && valid_credential_types.is_superset(&self.required_credential_types)
+        if !valid_credentials.is_empty()
+            && valid_credentials.is_superset(&self.required_credential_types)
         {
             CredentialPolicyResponse::Ok
         } else {
             CredentialPolicyResponse::Need(
                 self.required_credential_types
-                    .difference(&valid_credential_types)
+                    .difference(valid_credentials)
                     .copied()
                     .collect(),
             )
@@ -83,7 +80,7 @@ impl CredentialPolicy for PerProtocolCredentialPolicy {
     fn is_sufficient(
         &self,
         protocol: Protocol,
-        valid_credentials: &[AuthCredential],
+        valid_credentials: &HashSet<CredentialKind>,
     ) -> CredentialPolicyResponse {
         // A protocol without a configured override intentionally falls back to
         // the default policy.
@@ -98,13 +95,13 @@ impl CredentialPolicy for MfaEnforcementPolicy {
     fn is_sufficient(
         &self,
         protocol: Protocol,
-        valid_credentials: &[AuthCredential],
+        valid_credentials: &HashSet<CredentialKind>,
     ) -> CredentialPolicyResponse {
         let response = self.inner.is_sufficient(protocol, valid_credentials);
         let Some(&factor) = self.required.get(&protocol) else {
             return response;
         };
-        if valid_credentials.iter().any(|c| c.kind() == factor) {
+        if valid_credentials.contains(&factor) {
             return response;
         }
         let mut needed = match response {
@@ -119,7 +116,6 @@ impl CredentialPolicy for MfaEnforcementPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Secret;
 
     fn wrapper(
         inner: Box<dyn CredentialPolicy + Send + Sync>,
@@ -137,19 +133,15 @@ mod tests {
         })
     }
 
-    fn password() -> AuthCredential {
-        AuthCredential::Password(Secret::new("p".into()))
-    }
-
-    fn otp() -> AuthCredential {
-        AuthCredential::Otp(Secret::new("000000".into()))
+    fn kinds(kinds: &[CredentialKind]) -> HashSet<CredentialKind> {
+        kinds.iter().copied().collect()
     }
 
     #[test]
     fn mfa_policy_passes_through_unlisted_protocols() {
         let policy = wrapper(permissive_inner(), &[(Protocol::Ssh, CredentialKind::Totp)]);
         assert!(matches!(
-            policy.is_sufficient(Protocol::Http, &[password()]),
+            policy.is_sufficient(Protocol::Http, &kinds(&[CredentialKind::Password])),
             CredentialPolicyResponse::Ok
         ));
     }
@@ -158,7 +150,7 @@ mod tests {
     fn mfa_policy_demands_missing_factor() {
         let policy = wrapper(permissive_inner(), &[(Protocol::Ssh, CredentialKind::Totp)]);
         let CredentialPolicyResponse::Need(needed) =
-            policy.is_sufficient(Protocol::Ssh, &[password()])
+            policy.is_sufficient(Protocol::Ssh, &kinds(&[CredentialKind::Password]))
         else {
             panic!("expected Need");
         };
@@ -169,7 +161,10 @@ mod tests {
     fn mfa_policy_accepts_presented_factor() {
         let policy = wrapper(permissive_inner(), &[(Protocol::Ssh, CredentialKind::Totp)]);
         assert!(matches!(
-            policy.is_sufficient(Protocol::Ssh, &[password(), otp()]),
+            policy.is_sufficient(
+                Protocol::Ssh,
+                &kinds(&[CredentialKind::Password, CredentialKind::Totp])
+            ),
             CredentialPolicyResponse::Ok
         ));
     }
@@ -181,7 +176,8 @@ mod tests {
             supported_credential_types: [CredentialKind::Password].into_iter().collect(),
         });
         let policy = wrapper(inner, &[(Protocol::Ssh, CredentialKind::Totp)]);
-        let CredentialPolicyResponse::Need(needed) = policy.is_sufficient(Protocol::Ssh, &[])
+        let CredentialPolicyResponse::Need(needed) =
+            policy.is_sufficient(Protocol::Ssh, &kinds(&[]))
         else {
             panic!("expected Need");
         };
