@@ -272,14 +272,23 @@ async fn negotiate_and_authorize(
         DesktopAuthOutcome::Failed => return Ok(None),
     };
 
-    let (target_session_id, approved) = server_handle
-        .lock()
-        .await
-        .start_target_session(authorization)
-        .await?
-        .admitted()?;
+    // The viewer is held under the hold screen for the whole gate: VNC only paints when
+    // asked, so without it the viewer's frame requests would go unanswered and its screen
+    // would sit frozen for as long as the administrator takes to decide.
+    let admitted = render_while(
+        &mut viewer_wr,
+        &mut events_rx,
+        &mut render,
+        warpgate_desktop_auth::admit_desktop_session(
+            services,
+            server_handle,
+            authorization,
+            Some(remote_address.ip()),
+        ),
+    )
+    .await??;
 
-    info!(target=%approved.target().name, "Authorized");
+    info!(target=%admitted.target().name, "Authorized");
 
     show_banner(&mut viewer_wr, &mut events_rx, &mut render, services).await?;
 
@@ -287,13 +296,12 @@ async fn negotiate_and_authorize(
     // Either way the session takes the same decode-and-re-encode path below, so the
     // interactive-auth / connecting screens (which render into the viewer framebuffer)
     // keep working and the viewer never needs a JPEG decoder.
-    let recorder =
-        warpgate_desktop_auth::start_recording(services, &target_session_id, "vnc").await;
+    let recorder = warpgate_desktop_auth::start_recording(services, &admitted.id(), "vnc").await;
 
     // A single backend client connection decodes every update (Tight/JPEG included, see
     // PROXY_ENCODINGS); we both record it and re-encode it toward the viewer as RFB Raw.
-    debug!(host = %approved.options().host, port = approved.options().port, "connecting to backend");
-    let mut backend = crate::client::connect_for_proxy(approved)?;
+    debug!(host = %admitted.options().host, port = admitted.options().port, "connecting to backend");
+    let mut backend = crate::client::connect_for_proxy(admitted)?;
 
     // Wait under the hold screen for the backend's initial geometry, recording every
     // event consumed so nothing is dropped from the recording.

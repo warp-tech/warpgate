@@ -19,22 +19,21 @@ struct SSHClientKey {
     pub label: String,
     pub kind: String,
     pub public_key: String,
-    /// The base64 body without the algorithm prefix — kept for the
-    /// backwards-compatible `own-keys` consumers.
-    pub public_key_base64: String,
     pub is_default: bool,
 }
 
 impl From<SshClientKey::Model> for SSHClientKey {
     fn from(model: SshClientKey::Model) -> Self {
-        let mut parts = model.public_key.split_whitespace();
-        let kind = parts.next().unwrap_or_default().into();
-        let public_key_base64 = parts.next().unwrap_or_default().into();
+        let kind = model
+            .public_key
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .into();
         Self {
             id: model.id,
             label: model.label,
             kind,
-            public_key_base64,
             public_key: model.public_key,
             is_default: model.is_default,
         }

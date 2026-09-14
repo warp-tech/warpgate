@@ -89,6 +89,14 @@ async fn build_properties(db: &DatabaseConnection, normal: bool) -> Result<Map<S
             )),
         );
         properties.insert(
+            "approximate_targets_rdp".into(),
+            json!(round_up_to_10(count_targets(db, TargetKind::Rdp).await?)),
+        );
+        properties.insert(
+            "approximate_targets_vnc".into(),
+            json!(round_up_to_10(count_targets(db, TargetKind::Vnc).await?)),
+        );
+        properties.insert(
             "approximate_users".into(),
             json!(round_up_to_10(User::Entity::find().count(db).await?)),
         );

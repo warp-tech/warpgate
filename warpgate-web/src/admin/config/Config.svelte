@@ -38,6 +38,9 @@
         '/parameters': wrap({
             asyncComponent: () => import('./Parameters.svelte'),
         }),
+        '/policies': wrap({
+            asyncComponent: () => import('./Policies.svelte'),
+        }),
         '/access-roles': wrap({
             asyncComponent: () => import('./AccessRoles.svelte'),
         }),
@@ -138,6 +141,14 @@
             title="SSH keys"
             description="Own keys and known hosts"
             href="/config/ssh"
+            small={sidebarMode}
+        />
+
+        <NavListItem
+            class="mb-2"
+            title="Policies"
+            description="Edit auth policies"
+            href="/config/policies"
             small={sidebarMode}
         />
 

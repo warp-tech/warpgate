@@ -4,17 +4,21 @@ use std::time::Duration;
 
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
-use tokio::sync::Mutex;
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter};
+use tokio::sync::{Mutex, broadcast};
 use tracing::warn;
-use warpgate_common::auth::{AuthState, CredentialKind};
+use uuid::Uuid;
+use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
 use warpgate_common::{
     GlobalParams, Protocol, Secret, UserSessionId, WarpgateConfig, WarpgateError,
 };
-use warpgate_db_entities::{Parameters, UserSession};
+use warpgate_db_entities::Parameters::MfaEnforcement;
+use warpgate_db_entities::{OtpCredential, Parameters, SsoCredential, UserSession};
 
-use crate::cluster::Cluster;
+use crate::auth_state_store::ApprovalRequestSink;
+use crate::cluster::{Cluster, ClusterNotification};
 use crate::db::connect_to_db_and_migrate;
+use crate::helpers::i64_seconds_to_duration;
 use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
@@ -32,37 +36,19 @@ pub struct Services {
     pub config_provider: Arc<ConfigProviderEnum>,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Option<Secret<String>>>,
-    pub cluster_token: Arc<Secret<String>>,
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
     pub listener_status: ListenerStatusRegistry,
 }
 
-/// Upsert the token without conflicts from multiple nodes
-/// starting at the same time
-async fn resolve_cluster_token(db: &DatabaseConnection) -> Result<Secret<String>> {
-    // Ensures the row exists before the conditional update.
-    let params = Parameters::Entity::get(db).await?;
-    if let Some(token) = params.cluster_token {
-        return Ok(Secret::new(token));
-    }
+/// How often a node picks up self approvals decided elsewhere. One query per
+/// node, so the interval is set by how long a user should wait after clicking.
+const APPROVAL_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 
-    Parameters::Entity::update_many()
-        .col_expr(
-            Parameters::Column::ClusterToken,
-            Expr::value(Secret::<String>::random().expose_secret().clone()),
-        )
-        .filter(Parameters::Column::ClusterToken.is_null())
-        .exec(db)
-        .await?;
-
-    Parameters::Entity::get(db)
-        .await?
-        .cluster_token
-        .map(Secret::new)
-        .ok_or_else(|| anyhow::anyhow!("cluster token missing after generation"))
-}
+/// Session changes arrive in bursts (a scan opening connections, a mass
+/// close); everything within this window becomes one cluster notification.
+const SESSION_CHANGE_COALESCE_WINDOW: Duration = Duration::from_millis(100);
 
 impl Services {
     pub async fn new(
@@ -81,13 +67,23 @@ impl Services {
 
         let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
 
-        let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new()));
+        let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new(ApprovalRequestSink {
+            db: db.clone(),
+            cluster: cluster.clone(),
+        })));
 
         tokio::spawn({
             let auth_state_store = auth_state_store.clone();
+            let db = db.clone();
             async move {
                 loop {
                     auth_state_store.lock().await.vacuum();
+                    // Approval requests are normally deleted by their resolver
+                    // or their waiter; rows whose owning node died are aged out
+                    // here.
+                    if let Err(error) = crate::approvals::reap_stale(&db).await {
+                        warn!("Failed to reap stale session approval requests: {error}");
+                    }
                     tokio::time::sleep(Duration::from_secs(60)).await;
                 }
             }
@@ -117,7 +113,7 @@ impl Services {
             });
         }
 
-        Ok(Self {
+        let services = Self {
             db: db.clone(),
             recordings,
             config: config.clone(),
@@ -127,11 +123,55 @@ impl Services {
             config_provider,
             auth_state_store,
             admin_token: Arc::new(admin_token.map(Secret::new)),
-            cluster_token: Arc::new(resolve_cluster_token(&db).await?),
             login_protection,
             global_params: Arc::new(params),
             listener_status: Arc::default(),
-        })
+        };
+
+        {
+            let mut rx = services.state.lock().await.subscribe();
+            let cluster = services.cluster.clone();
+            tokio::spawn(async move {
+                // A missed burst still means "changed" - one notification covers it
+                while let Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) = rx.recv().await {
+                    tokio::time::sleep(SESSION_CHANGE_COALESCE_WINDOW).await;
+                    while !matches!(
+                        rx.try_recv(),
+                        Err(broadcast::error::TryRecvError::Empty
+                            | broadcast::error::TryRecvError::Closed)
+                    ) {}
+                    cluster.notify_global(ClusterNotification::SessionsChanged);
+                }
+            });
+        }
+
+        // Asynchronously detect user approvals received by other nodes
+        // and apply them to our AuthStates
+        {
+            let services = services.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(APPROVAL_SWEEP_INTERVAL);
+                loop {
+                    interval.tick().await;
+                    if let Err(error) = services.apply_decided_user_approvals().await {
+                        warn!("Failed to apply resolved session approvals: {error}");
+                    }
+                }
+            });
+        }
+
+        Ok(services)
+    }
+
+    pub async fn admin_approval_timeout(&self) -> Result<Duration, WarpgateError> {
+        crate::approvals::admin_approval_timeout(&self.db).await
+    }
+
+    pub async fn admin_approval_grace_period(&self) -> Result<Option<Duration>, WarpgateError> {
+        Ok(Parameters::Entity::get(&self.db)
+            .await?
+            .admin_approval_grace_period_seconds
+            .and_then(i64_seconds_to_duration))
     }
 
     /// Resolves the user/policy (without the store lock) and inserts a new
@@ -180,18 +220,68 @@ impl Services {
         ))
     }
 
+    async fn user_has_sso_credential(&self, user_id: Uuid) -> Result<bool, WarpgateError> {
+        Ok(SsoCredential::Entity::find()
+            .filter(SsoCredential::Column::UserId.eq(user_id))
+            .count(&self.db)
+            .await?
+            > 0)
+    }
+
+    async fn user_has_otp_credential(&self, user_id: Uuid) -> Result<bool, WarpgateError> {
+        Ok(OtpCredential::Entity::find()
+            .filter(OtpCredential::Column::UserId.eq(user_id))
+            .count(&self.db)
+            .await?
+            > 0)
+    }
+
+    /// User's SSO credential can override MFA enforcement if configured
+    pub async fn effective_mfa_enforcement(
+        &self,
+        parameters: &Parameters::Model,
+        user_id: Uuid,
+    ) -> Result<MfaEnforcement, WarpgateError> {
+        let has_sso = self.user_has_sso_credential(user_id).await?;
+        Ok(parameters.effective_mfa_enforcement_for_user(has_sso))
+    }
+
+    pub async fn mfa_required_factor(
+        &self,
+        parameters: &Parameters::Model,
+        user_id: Uuid,
+        protocol: Protocol,
+    ) -> Result<Option<CredentialKind>, WarpgateError> {
+        if parameters.mfa_enforcement == MfaEnforcement::Off {
+            // quick exit without querying for creds
+            return Ok(None);
+        }
+        let has_sso = self.user_has_sso_credential(user_id).await?;
+        let has_totp = self.user_has_otp_credential(user_id).await?;
+        Ok(parameters.mfa_required_factor(protocol, has_sso, has_totp))
+    }
+
+    pub async fn mfa_setup_required(
+        &self,
+        parameters: &Parameters::Model,
+        user_id: Uuid,
+    ) -> Result<bool, WarpgateError> {
+        if self.effective_mfa_enforcement(parameters, user_id).await? == MfaEnforcement::Off {
+            return Ok(false);
+        }
+        Ok(!self.user_has_otp_credential(user_id).await?)
+    }
+
     /// Configured web-approval caching window, or `None` if caching is disabled.
     pub async fn web_approval_grace_period(&self) -> Result<Option<Duration>, WarpgateError> {
         Ok(Parameters::Entity::get(&self.db)
             .await?
             .web_approval_grace_period_seconds
-            .filter(|s| *s > 0)
-            .and_then(|s| u64::try_from(s).ok())
-            .map(Duration::from_secs))
+            .and_then(i64_seconds_to_duration))
     }
 
     /// If a matching web approval is still within the grace period, satisfies the
-    /// pending `WebUserApproval` requirement and logs an audit event
+    /// pending `WebUserApproval` requirement and logs an audit event.
     pub async fn try_web_approval_bypass(
         &self,
         state_arc: &Arc<Mutex<AuthState>>,
@@ -199,10 +289,23 @@ impl Services {
         let Some(grace) = self.web_approval_grace_period().await? else {
             return Ok(false);
         };
-        self.auth_state_store
-            .lock()
-            .await
-            .try_web_approval_bypass(state_arc, grace)
-            .await
+        let Some(key) = state_arc.lock().await.web_approval_match_key() else {
+            return Ok(false);
+        };
+        if !crate::approvals::approval_is_remembered(&self.db, &key, grace).await? {
+            return Ok(false);
+        }
+
+        let mut state = state_arc.lock().await;
+
+        // check that we are still waiting for an approval
+        if !matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval))
+        {
+            return Ok(false);
+        }
+
+        state.add_web_user_approval();
+        state.emit_web_approval_bypassed_event();
+        Ok(true)
     }
 }

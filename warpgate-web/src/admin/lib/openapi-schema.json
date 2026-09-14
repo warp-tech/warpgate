@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-4-g120feec4-modified"
+    "version": "v0.29.0-beta.1-1-g2f77f07b-modified"
   },
   "servers": [
     {
@@ -2256,6 +2256,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
           }
         ],
         "operationId": "delete_user"
@@ -4212,6 +4215,122 @@
         "operationId": "get_ip_echo"
       }
     },
+    "/session-approvals": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionApprovalItem"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_session_approvals"
+      }
+    },
+    "/session-approvals/{id}/approve": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "approve_session"
+      }
+    },
+    "/session-approvals/{id}/reject": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "reject_session"
+      }
+    },
     "/users/{user_id}/credentials/certificates": {
       "get": {
         "parameters": [
@@ -4466,6 +4585,7 @@
           "access_roles_assign",
           "sessions_view",
           "sessions_terminate",
+          "approve_sessions",
           "recordings_view",
           "tickets_create",
           "tickets_delete",
@@ -4520,6 +4640,9 @@
           "sessions_terminate": {
             "type": "boolean"
           },
+          "approve_sessions": {
+            "type": "boolean"
+          },
           "recordings_view": {
             "type": "boolean"
           },
@@ -4557,11 +4680,13 @@
           "access_roles_assign",
           "sessions_view",
           "sessions_terminate",
+          "approve_sessions",
           "recordings_view",
           "tickets_create",
           "tickets_delete",
           "config_edit",
-          "admin_roles_manage"
+          "admin_roles_manage",
+          "ticket_requests_manage"
         ],
         "properties": {
           "name": {
@@ -4604,6 +4729,9 @@
             "type": "boolean"
           },
           "sessions_terminate": {
+            "type": "boolean"
+          },
+          "approve_sessions": {
             "type": "boolean"
           },
           "recordings_view": {
@@ -4650,6 +4778,41 @@
           "payload": {
             "type": "string",
             "description": "Pretty-printed JSON request body that would be sent."
+          }
+        }
+      },
+      "ApprovalRequestStatus": {
+        "type": "string",
+        "enum": [
+          "Pending",
+          "Approved",
+          "Rejected",
+          "TimedOut",
+          "Abandoned"
+        ]
+      },
+      "ApprovalScope": {
+        "type": "string",
+        "description": "\"Remember decision\" scope for approvals",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
+      },
+      "ApproveSessionRequest": {
+        "type": "object",
+        "title": "ApproveSessionRequest",
+        "required": [
+          "scope",
+          "target"
+        ],
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/ApprovalScope"
+          },
+          "target": {
+            "type": "string"
           }
         }
       },
@@ -5540,6 +5703,14 @@
           }
         }
       },
+      "MfaEnforcement": {
+        "type": "string",
+        "enum": [
+          "Off",
+          "Enroll",
+          "Require"
+        ]
+      },
       "NewOtpCredential": {
         "type": "object",
         "title": "NewOtpCredential",
@@ -5661,6 +5832,15 @@
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
           },
+          "mfa_enforcement": {
+            "$ref": "#/components/schemas/MfaEnforcement"
+          },
+          "mfa_policy_exempt_sso_users": {
+            "type": "boolean"
+          },
+          "default_credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
           "ticket_self_service_enabled": {
             "type": "boolean"
           },
@@ -5781,6 +5961,16 @@
             "format": "int64",
             "minimum": 1.0
           },
+          "admin_approval_timeout_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1.0
+          },
+          "admin_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1.0
+          },
           "analytics_consent": {
             "$ref": "#/components/schemas/AnalyticsConsent"
           },
@@ -5805,7 +5995,9 @@
           "ssh_client_auth_keyboard_interactive",
           "ssh_host_key_verification",
           "password_login_mode",
-          "minimize_password_login",
+          "mfa_enforcement",
+          "mfa_policy_exempt_sso_users",
+          "default_credential_policy",
           "ticket_self_service_enabled",
           "ticket_auto_approve_existing_access",
           "ticket_require_description",
@@ -5830,7 +6022,6 @@
           "lp_user_lockout_duration_seconds",
           "lp_user_exempt_admins",
           "banner",
-          "web_ssh_enabled",
           "web_clients_enabled",
           "analytics_consent",
           "analytics_normal",
@@ -5860,9 +6051,14 @@
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
           },
-          "minimize_password_login": {
-            "type": "boolean",
-            "description": "Deprecated in 0.26: superseded by `password_login_mode`"
+          "mfa_enforcement": {
+            "$ref": "#/components/schemas/MfaEnforcement"
+          },
+          "mfa_policy_exempt_sso_users": {
+            "type": "boolean"
+          },
+          "default_credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
           },
           "ticket_self_service_enabled": {
             "type": "boolean"
@@ -5958,10 +6154,6 @@
           "banner": {
             "type": "string"
           },
-          "web_ssh_enabled": {
-            "type": "boolean",
-            "description": "Deprecated in 0.27: superseded by `web_clients_enabled`"
-          },
           "web_clients_enabled": {
             "type": "boolean"
           },
@@ -5970,6 +6162,14 @@
             "format": "int64"
           },
           "web_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "admin_approval_timeout_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "admin_approval_grace_period_seconds": {
             "type": "integer",
             "format": "int64"
           },
@@ -6239,6 +6439,18 @@
           }
         ]
       },
+      "RejectSessionRequest": {
+        "type": "object",
+        "title": "RejectSessionRequest",
+        "required": [
+          "target"
+        ],
+        "properties": {
+          "target": {
+            "type": "string"
+          }
+        }
+      },
       "Role": {
         "type": "object",
         "title": "Role",
@@ -6387,7 +6599,6 @@
           "label",
           "kind",
           "public_key",
-          "public_key_base64",
           "is_default"
         ],
         "properties": {
@@ -6403,10 +6614,6 @@
           },
           "public_key": {
             "type": "string"
-          },
-          "public_key_base64": {
-            "type": "string",
-            "description": "The base64 body without the algorithm prefix — kept for the\nbackwards-compatible `own-keys` consumers."
           },
           "is_default": {
             "type": "boolean"
@@ -6566,6 +6773,73 @@
           }
         }
       },
+      "SessionApprovalItem": {
+        "type": "object",
+        "title": "SessionApprovalItem",
+        "required": [
+          "id",
+          "protocol",
+          "username",
+          "target",
+          "started"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "caching_grace_seconds": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "SessionApprovalRequestSnapshot": {
+        "type": "object",
+        "title": "SessionApprovalRequestSnapshot",
+        "required": [
+          "target",
+          "status"
+        ],
+        "properties": {
+          "resolved_by_username": {
+            "type": "string"
+          },
+          "resolved_by_user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApprovalRequestStatus"
+          }
+        }
+      },
       "SshHostKeyVerificationMode": {
         "type": "string",
         "description": "What to do when a target's SSH host key isn't in the known hosts list.",
@@ -6629,7 +6903,8 @@
           "allow_roles",
           "options",
           "ticket_requests_disabled",
-          "ticket_require_approval"
+          "ticket_require_approval",
+          "require_approval"
         ],
         "properties": {
           "id": {
@@ -6669,6 +6944,9 @@
           "ticket_require_approval": {
             "type": "boolean"
           },
+          "require_approval": {
+            "type": "boolean"
+          },
           "ticket_max_uses": {
             "type": "integer",
             "format": "int16"
@@ -6687,7 +6965,10 @@
         "title": "TargetDataRequest",
         "required": [
           "name",
-          "options"
+          "options",
+          "ticket_requests_disabled",
+          "ticket_require_approval",
+          "require_approval"
         ],
         "properties": {
           "name": {
@@ -6712,9 +6993,13 @@
             "format": "int64"
           },
           "ticket_requests_disabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Required on every write, so that saving a target without mentioning a\ngate is refused rather than quietly taking it off."
           },
           "ticket_require_approval": {
+            "type": "boolean"
+          },
+          "require_approval": {
             "type": "boolean"
           },
           "ticket_max_uses": {
@@ -6770,7 +7055,8 @@
         "title": "TargetHTTPOptions",
         "required": [
           "url",
-          "tls"
+          "tls",
+          "headers"
         ],
         "properties": {
           "url": {
@@ -6817,6 +7103,7 @@
           "host",
           "port",
           "username",
+          "auth",
           "tls"
         ],
         "properties": {
@@ -6832,11 +7119,6 @@
           },
           "auth": {
             "$ref": "#/components/schemas/DatabaseTargetAuth"
-          },
-          "password": {
-            "type": "string",
-            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
-            "deprecated": true
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
@@ -7045,7 +7327,9 @@
           "host",
           "port",
           "username",
-          "tls"
+          "auth",
+          "tls",
+          "protocol_version"
         ],
         "properties": {
           "host": {
@@ -7060,11 +7344,6 @@
           },
           "auth": {
             "$ref": "#/components/schemas/DatabaseTargetAuth"
-          },
-          "password": {
-            "type": "string",
-            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
-            "deprecated": true
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
@@ -7089,7 +7368,9 @@
           "username",
           "auth",
           "verify_tls",
-          "interactive_logon"
+          "compression",
+          "interactive_logon",
+          "tls_security"
         ],
         "properties": {
           "host": {
@@ -7131,6 +7412,7 @@
           "host",
           "port",
           "username",
+          "allow_insecure_algos",
           "auth"
         ],
         "properties": {
@@ -7371,6 +7653,7 @@
       "TicketRequest": {
         "type": "object",
         "title": "TicketRequest",
+        "description": "ticket request with resolved username and target name",
         "required": [
           "id",
           "user_id",
@@ -7388,9 +7671,17 @@
             "type": "string",
             "format": "uuid"
           },
+          "username": {
+            "type": "string",
+            "description": "Empty if the user has been deleted"
+          },
           "target_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "target_name": {
+            "type": "string",
+            "description": "Empty if the target has been deleted"
           },
           "requested_duration_seconds": {
             "type": "integer",
@@ -7405,6 +7696,9 @@
           "resolved_by_user_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "resolved_by_username": {
+            "type": "string"
           },
           "ticket_id": {
             "type": "string",
@@ -7758,7 +8052,8 @@
           "started",
           "protocol",
           "remote_address",
-          "target_sessions"
+          "target_sessions",
+          "admin_approvals"
         ],
         "properties": {
           "id": {
@@ -7799,6 +8094,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TargetSessionSnapshot"
+            }
+          },
+          "admin_approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionApprovalRequestSnapshot"
             }
           }
         }

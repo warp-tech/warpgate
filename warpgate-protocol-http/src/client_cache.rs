@@ -153,7 +153,7 @@ mod tests {
         TargetHTTPOptions {
             url: url.to_string(),
             tls: Default::default(),
-            headers: None,
+            headers: Default::default(),
             external_host: None,
         }
     }

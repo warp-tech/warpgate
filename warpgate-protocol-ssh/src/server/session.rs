@@ -16,11 +16,13 @@ use russh::{ChannelId, ChannelOpenFailure, MethodKind, MethodSet, Sig};
 use termcolor::Color;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, broadcast, oneshot};
+use tokio_util::sync::CancellationToken;
 use tracing::*;
 use url::Url;
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthState, AuthStateUserInfo, CredentialKind,
+    RememberApprovalBy,
 };
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::helpers::username::username_eq_ci;
@@ -28,13 +30,14 @@ use warpgate_common::{
     Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_core::approvals::{GateOutcome, GatedConnection};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
 use warpgate_core::{
-    ApprovedTarget, AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization,
-    WarpgateServerHandle, authorize_and_spend_ticket, authorize_for_target,
-    authorize_for_target_by_name,
+    AdmittedTarget, ApprovedTarget, AuthorizedIdentity, ConfigProvider, Services,
+    TargetAuthorization, TargetSessionStart, WarpgateServerHandle, authorize_and_spend_ticket,
+    authorize_for_target, authorize_for_target_by_name,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
@@ -62,7 +65,8 @@ const EVENT_QUEUE_CAPACITY: usize = 128;
 /// concurrent channel requests can't grow the stack without bound.
 const MAX_NESTED_COMMAND_WAITS: usize = 16;
 
-/// How long a teardown waits for queued writes to reach the client before
+/// How long a teardown waits for the channel writer's own queue to drain —
+/// i.e. for `Handle::close`/`Handle::disconnect` to have been *sent* — before
 /// giving up on them.
 const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -71,9 +75,16 @@ enum TargetSelection {
     None,
     Menu,
     NotFound(String),
+    PendingApproval(TargetAuthorization<TargetSSHOptions>),
+    /// Held at the administrator gate: the authorization is riding on the
+    /// spawned wait, which reports back as [`Event::AdminApprovalResolved`].
+    /// Being a selection state is what makes the claim exclusive — a re-entry
+    /// finds this instead of [`Self::PendingApproval`] and cannot start a
+    /// duplicate wait, the same way [`Self::Connected`] cannot re-dial.
+    AwaitingApproval,
     /// Carries the capability minted for the target session, so being in this
     /// state means every pre-dial gate ran for exactly the host to be dialed.
-    Found(ApprovedTarget<TargetSSHOptions>),
+    Found(AdmittedTarget<TargetSSHOptions>),
     Connected,
 }
 
@@ -87,6 +98,10 @@ pub enum Event {
     MenuRedraw(u16, u16),
     Menu(MenuEvent),
     ServerChannelOpenResult(Uuid, Result<ServerChannelId, russh::Error>),
+    AdminApprovalPending,
+    AdminApprovalResolved {
+        approved: Option<ApprovedTarget<TargetSSHOptions>>,
+    },
 }
 
 struct PendingKeyboardInteractiveAuth {
@@ -161,11 +176,17 @@ pub struct ServerSession {
     /// state's `target_name` is fixed at construction and scopes web approvals,
     /// so it can only be reused for that same target.
     auth_state: Option<(Arc<Mutex<AuthState>>, String)>,
+    /// A disconnect event used for the approval waiter
+    disconnect_token: CancellationToken,
     keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
     /// Track the state of a client snooping around pre-auth
     probe: ProbeState,
+    /// A duplicate of the client's socket descriptor, shut down at teardown
+    /// so the connection ends with the session rather than with russh's
+    /// inactivity timer. `None` once used.
+    client_socket: Option<std::net::TcpStream>,
 }
 
 fn session_debug_tag(id: &UserSessionId, remote_address: &SocketAddr) -> String {
@@ -240,6 +261,7 @@ impl ServerSession {
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
         mut handler_event_rx: UnboundedReceiver<ServerHandlerEvent>,
+        client_socket: std::net::TcpStream,
     ) -> Result<impl Future<Output = Result<()>> + use<>> {
         let id = server_handle.lock().await.user_session_id();
 
@@ -280,10 +302,12 @@ impl ServerSession {
             service_output: ServiceOutput::new(),
             channel_writer,
             auth_state: None,
+            disconnect_token: CancellationToken::new(),
             keyboard_interactive_state: None,
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
             probe: ProbeState::NoAttempt,
+            client_socket: Some(client_socket),
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -309,12 +333,17 @@ impl ServerSession {
         let name = format!("SSH {id} session control");
         tokio::task::Builder::new().name(&name).spawn({
             let sender = event_sender.clone();
+            let disconnect_token = this.disconnect_token.clone();
             async move {
                 while let Some(command) = session_handle_rx.recv().await {
+                    if matches!(command, SessionHandleCommand::Close) {
+                        disconnect_token.cancel();
+                    }
                     if sender.send_once(Event::Command(command)).await.is_err() {
                         break;
                     }
                 }
+                disconnect_token.cancel();
             }
         })?;
 
@@ -333,12 +362,17 @@ impl ServerSession {
         let name = format!("SSH {id} server handler events");
         tokio::task::Builder::new().name(&name).spawn({
             let sender: EventSender<Event> = event_sender.clone();
+            let disconnect_token = this.disconnect_token.clone();
             async move {
                 while let Some(e) = handler_event_rx.recv().await {
+                    if matches!(e, ServerHandlerEvent::Disconnect) {
+                        disconnect_token.cancel();
+                    }
                     if sender.send_once(Event::ServerHandler(e)).await.is_err() {
                         break;
                     }
                 }
+                disconnect_token.cancel();
             }
         })?;
 
@@ -352,8 +386,20 @@ impl ServerSession {
                     }
                     continue;
                 }
+                let inactivity_timeout = if matches!(this.target, TargetSelection::AwaitingApproval)
+                {
+                    // Session waiting for approval will produce no events either way
+                    // and we don't want to kill it
+                    None
+                } else {
+                    Some(inactivity_timeout)
+                };
                 let next_event_fut = this.get_next_event();
-                match tokio::time::timeout(inactivity_timeout, next_event_fut).await {
+                let next_event = match inactivity_timeout {
+                    Some(timeout) => tokio::time::timeout(timeout, next_event_fut).await,
+                    None => Ok(next_event_fut.await),
+                };
+                match next_event {
                     Ok(Some(event)) => {
                         if let Err(error) = this.handle_event(event).await {
                             break Err(error);
@@ -599,7 +645,7 @@ impl ServerSession {
             return Ok(());
         }
 
-        let target = match std::mem::replace(&mut self.target, TargetSelection::None) {
+        let admitted = match std::mem::replace(&mut self.target, TargetSelection::None) {
             TargetSelection::None => {
                 anyhow::bail!("Invalid session state (target not set)")
             }
@@ -612,21 +658,78 @@ impl ServerSession {
                 self.disconnect_server().await;
                 anyhow::bail!("Target not found: {name}");
             }
-            TargetSelection::Found(approved) => approved,
+            // Claim the attempt: the gate runs off to the side with the
+            // authorization, and the selection state is the claim. Resumes in
+            // the `Event::AdminApprovalResolved` handler.
+            TargetSelection::PendingApproval(authorization) => {
+                self.target = TargetSelection::AwaitingApproval;
+                self.spawn_admin_approval_gate(authorization);
+                return Ok(());
+            }
+            // Nothing to dial while the gate holds the session.
+            TargetSelection::AwaitingApproval => {
+                self.target = TargetSelection::AwaitingApproval;
+                return Ok(());
+            }
+            TargetSelection::Found(admitted) => admitted,
             TargetSelection::Connected => {
                 self.target = TargetSelection::Connected;
                 return Ok(());
             }
         };
 
-        self.connect_remote(target).await?;
+        self.connect_remote(admitted).await?;
         self.target = TargetSelection::Connected;
         Ok(())
     }
 
+    /// Wait for approval in a background task, report back via Event::AdminApprovalResolved
+    fn spawn_admin_approval_gate(&mut self, authorization: TargetAuthorization<TargetSSHOptions>) {
+        let services = self.services.clone();
+        let session_id = self.id;
+        let remote_ip = self.remote_address.ip();
+        let cancel = self.disconnect_token.clone();
+        let event_sender = self.event_sender.clone();
+        let notify_sender = self.event_sender.clone();
+        let auth_state = self.auth_state.as_ref().map(|(state, _)| state.clone());
+
+        tokio::spawn(async move {
+            let credentials = match auth_state {
+                Some(state) => state.lock().await.remembered_by(),
+                None => RememberApprovalBy::Nothing,
+            };
+            let gate = services.require_admin_approval(
+                authorization,
+                session_id,
+                GatedConnection {
+                    remote_ip: Some(remote_ip),
+                    credentials,
+                },
+                || async move {
+                    let _ = notify_sender.send_once(Event::AdminApprovalPending).await;
+                    Ok::<_, WarpgateError>(())
+                },
+            );
+
+            let approved = tokio::select! {
+                () = cancel.cancelled() => None,
+                outcome = gate => outcome.map_or_else(
+                    |error| {
+                        error!(%error, "Failed to hold the session for administrator approval");
+                        None
+                    },
+                    GateOutcome::approved,
+                ),
+            };
+            let _ = event_sender
+                .send_once(Event::AdminApprovalResolved { approved })
+                .await;
+        });
+    }
+
     /// The dial consumes the capability minted when the target session started.
-    async fn connect_remote(&mut self, approved: ApprovedTarget<TargetSSHOptions>) -> Result<()> {
-        let ssh_chain = resolve_approved_ssh_chain(&self.services, approved).await?;
+    async fn connect_remote(&mut self, admitted: AdmittedTarget<TargetSSHOptions>) -> Result<()> {
+        let ssh_chain = resolve_approved_ssh_chain(&self.services, admitted).await?;
 
         let visual_chain = self.make_visual_connection_chain(&ssh_chain[..]).await?;
         self.rc_state = RCState::Connecting;
@@ -706,16 +809,20 @@ impl ServerSession {
                     self.disconnect_server().await;
                     return Ok(());
                 };
-                let (target_session_id, approved) = self
+                let started = self
                     .server_handle
                     .lock()
                     .await
                     .start_target_session(authorization)
-                    .await?
-                    .admitted()?;
-                self.target_session_id = Some(target_session_id);
-                self.target = TargetSelection::Found(approved);
-                self.start_recordings_for_pty_channels().await;
+                    .await?;
+                match started {
+                    TargetSessionStart::Started(admitted) => {
+                        self.stamp_approved_target(admitted).await;
+                    }
+                    TargetSessionStart::NeedsApproval(authorization) => {
+                        self.target = TargetSelection::PendingApproval(authorization);
+                    }
+                }
                 // clear screen ; cursor to 1;1
                 self.emit_pty_output(b"\x1b[2J\x1b[H")?;
                 self.maybe_connect_remote().await?;
@@ -793,6 +900,33 @@ impl ServerSession {
                         error!(?err, "Menu loop action handler error");
                     }
                 }
+                Event::AdminApprovalPending => {
+                    self.emit_service_message(
+                        "Waiting for an administrator to approve this session...",
+                    )?;
+                }
+                Event::AdminApprovalResolved { approved } => {
+                    if !matches!(self.target, TargetSelection::AwaitingApproval) {
+                        // The user has aborted the wait by now
+                        return Ok(());
+                    }
+                    self.target = TargetSelection::None;
+                    let Some(approved) = approved else {
+                        self.emit_service_message("Session was not approved by an administrator")?;
+                        self.request_disconnect();
+                        self.disconnect_server().await;
+                        return Ok(());
+                    };
+                    let admitted = self
+                        .server_handle
+                        .lock()
+                        .await
+                        .register_approved_target_session(approved)
+                        .await?;
+
+                    self.stamp_approved_target(admitted).await;
+                    self.maybe_connect_remote().await?;
+                }
                 Event::ServerChannelOpenResult(id, result) => {
                     match result {
                         Ok(server_channel_id) => {
@@ -821,6 +955,12 @@ impl ServerSession {
             Ok(())
         }
         .boxed()
+    }
+
+    async fn stamp_approved_target(&mut self, admitted: AdmittedTarget<TargetSSHOptions>) {
+        self.target_session_id = Some(admitted.id());
+        self.target = TargetSelection::Found(admitted);
+        self.start_recordings_for_pty_channels().await;
     }
 
     /// Confirm `channel` as open and re-dispatch everything held back while its
@@ -1215,8 +1355,14 @@ impl ServerSession {
                 }
             }
             RCEvent::Close(channel) => {
-                if let Ok(Some((handle, id))) = self.client_channel(&channel) {
-                    let _ = self.channel_writer.close(handle, id);
+                match self.client_channel(&channel) {
+                    Ok(Some((handle, id))) => self.channel_writer.close(handle, id)?,
+                    Ok(None) => {}
+                    Err(error) => {
+                        // Not necessarily a bug: this is reached from both
+                        // sides, so the client half may have closed first.
+                        debug!(%channel, ?error, "Target closed a channel already gone from the registry");
+                    }
                 }
                 self.channels.close(channel);
             }
@@ -1782,9 +1928,24 @@ impl ServerSession {
     async fn _data(&mut self, server_channel_id: ServerChannelId, data: Bytes) -> Result<()> {
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%server_channel_id.0, ?data, "Data");
-        if self.rc_state == RCState::Connecting && data.first() == Some(&3) {
+        if (
+            // aborting connection
+            self.rc_state == RCState::Connecting
+            // aborting admin approval wait
+            || matches!(self.target, TargetSelection::AwaitingApproval)
+        ) && data.first() == Some(&3)
+        {
             info!(channel=%channel_id, "User requested connection abort (Ctrl-C)");
+            let was_held = matches!(self.target, TargetSelection::AwaitingApproval);
+            if was_held {
+                self.target = TargetSelection::None;
+            }
+            self.disconnect_token.cancel();
             self.request_disconnect();
+            if was_held {
+                self.emit_service_message("Session closed")?;
+                self.disconnect_server().await;
+            }
             return Ok(());
         }
 
@@ -2176,7 +2337,12 @@ impl ServerSession {
                 let cp = self.services.config_provider.clone();
 
                 if let Some(credential) = credential {
-                    return Ok(cp.validate_credential(username, &credential).await?);
+                    // The offer phase only asks whether the key would work;
+                    // nothing is added to the auth state here.
+                    return Ok(cp
+                        .validate_credential(username, &credential)
+                        .await?
+                        .is_some());
                 }
 
                 Ok(false)
@@ -2284,6 +2450,9 @@ impl ServerSession {
                 if matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval))
                 {
                     drop(state);
+                    // An explicit decision recorded for this session wins over
+                    // a remembered grant, so it is pulled first.
+                    self.services.apply_recorded_user_decision(&self.id).await?;
                     self.services.try_web_approval_bypass(&state_arc).await?;
                     state = state_arc.lock().await;
                 }
@@ -2380,16 +2549,20 @@ impl ServerSession {
             return Ok(());
         };
 
-        let (target_session_id, approved) = self
+        let started = self
             .server_handle
             .lock()
             .await
             .start_target_session(authorization)
-            .await?
-            .admitted()?;
-        self.target_session_id = Some(target_session_id);
-        self.target = TargetSelection::Found(approved);
-        self.start_recordings_for_pty_channels().await;
+            .await?;
+        match started {
+            TargetSessionStart::Started(admitted) => {
+                self.stamp_approved_target(admitted).await;
+            }
+            TargetSessionStart::NeedsApproval(authorization) => {
+                self.target = TargetSelection::PendingApproval(authorization);
+            }
+        }
         Ok(())
     }
 
@@ -2515,13 +2688,40 @@ impl ServerSession {
             for ch in channels {
                 let _ = self.channel_writer.close(handle.clone(), ch.0);
             }
+            // A channel close says nothing about the connection, so a dead
+            // target never gives the client a reason to let go of the socket
+            // (#2520). Queued behind the closes so the ordering holds.
+            let _ = self.channel_writer.disconnect(
+                handle,
+                russh::Disconnect::ByApplication,
+                String::new(),
+                String::new(),
+            );
         }
 
-        // Give queued writes — the closes above, and any error or timeout
-        // notice emitted before them — a chance to reach the client. Bounded:
-        // a client whose window is full never lets the queue drain, and this
-        // runs on the event loop.
-        let _ = tokio::time::timeout(DISCONNECT_FLUSH_TIMEOUT, self.channel_writer.flush()).await;
+        // Bounded: a client whose window is full never lets the queue
+        // drain, and this runs on the event loop.
+        let flushed = tokio::time::timeout(DISCONNECT_FLUSH_TIMEOUT, self.channel_writer.flush())
+            .await
+            .is_ok();
+
+        if let Some(socket) = self.client_socket.take() {
+            // A flush only proves the messages reached russh's queue, so a
+            // client that is reading gets a moment to receive them; one that
+            // is not gets nothing more and is cut immediately. Spawned rather
+            // than awaited: this can run inside a russh callback, and russh
+            // cannot write anything until that callback returns.
+            let delay = if flushed {
+                DISCONNECT_FLUSH_TIMEOUT
+            } else {
+                warn!("Client is not reading; closing its connection");
+                Duration::ZERO
+            };
+            tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
+                let _ = socket.shutdown(std::net::Shutdown::Both);
+            });
+        }
 
         self.session_handle = None;
     }

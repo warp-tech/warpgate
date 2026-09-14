@@ -9,13 +9,14 @@
     } from '@sveltestrap/sveltestrap'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { formatDurationAsHumantime } from 'common/duration'
+    import { errorStatus } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
     import {
         ApiAuthState,
+        ApprovalScope,
         type AuthStateResponseInternal,
         api,
-        WebApprovalScope,
     } from 'gateway/lib/api'
 
     interface Props {
@@ -30,27 +31,45 @@
     let cachingEnabled = $derived(cachingGrace > 0)
     let graceLabel = $derived(formatDurationAsHumantime(cachingGrace))
 
-    async function reload() {
-        authState = await api.getAuthState({ id: params.stateId })
-    }
-
     async function init() {
-        await reload()
+        try {
+            authState = await api.getAuthState({ id: params.stateId })
+        } catch (err) {
+            // The link is printed by a client and followed later, in whatever
+            // browser session the user happens to have — so landing on a
+            // request that has finished, or on someone else's, is ordinary.
+            if (errorStatus(err) === 404) {
+                throw new Error(
+                    'This request is no longer waiting. It may have been answered already, timed out, or belong to a different account than the one you are signed in as.',
+                )
+            }
+            throw err
+        }
     }
 
-    async function approve(scope: WebApprovalScope) {
+    // The endpoints return only whether the decision was recorded, and the
+    // request is no longer pending afterwards, so re-reading it would 404 on
+    // any node that isn't holding the login. `window.close()` is a courtesy —
+    // a browser that refuses it for a page the user opened themselves leaves
+    // this showing the outcome.
+    function resolved(state: ApiAuthState) {
+        if (authState) {
+            authState = { ...authState, state }
+        }
+        window.close()
+    }
+
+    async function approve(scope: ApprovalScope) {
         await api.approveAuth({
             id: params.stateId,
             approveAuthRequest: { scope },
         })
-        await reload()
-        window.close()
+        resolved(ApiAuthState.Success)
     }
 
     async function reject() {
         await api.rejectAuth({ id: params.stateId })
-        await reload()
-        window.close()
+        resolved(ApiAuthState.Failed)
     }
 </script>
 
@@ -107,7 +126,7 @@
                     <ButtonGroup>
                         <AsyncButton
                             color="primary"
-                            click={() => approve(WebApprovalScope.Target)}
+                            click={() => approve(ApprovalScope.Target)}
                         >
                             Authorize & remember for {graceLabel}
                         </AsyncButton>
@@ -119,13 +138,13 @@
                             />
                             <DropdownMenu end>
                                 <DropdownItem
-                                    onclick={() => approve(WebApprovalScope.AllTargets)}
+                                    onclick={() => approve(ApprovalScope.AllTargets)}
                                 >
                                     Authorize for all targets & remember for
                                     {graceLabel}
                                 </DropdownItem>
                                 <DropdownItem
-                                    onclick={() => approve(WebApprovalScope.Once)}
+                                    onclick={() => approve(ApprovalScope.Once)}
                                 >
                                     Authorize this time only
                                 </DropdownItem>
@@ -135,7 +154,7 @@
                 {:else}
                     <AsyncButton
                         color="primary"
-                        click={() => approve(WebApprovalScope.Once)}
+                        click={() => approve(ApprovalScope.Once)}
                     >
                         Authorize
                     </AsyncButton>

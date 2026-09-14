@@ -85,7 +85,7 @@ uuid_newtype!(NodeId);
 /// protocol (credential policies, auth states) so that a protocol can't be
 /// misspelled or silently unmatched; the wire/DB/audit string form is
 /// [`Protocol::name`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::EnumIter)]
 pub enum Protocol {
     Http,
     Ssh,
@@ -97,6 +97,10 @@ pub enum Protocol {
 }
 
 impl Protocol {
+    pub fn all() -> impl Iterator<Item = Self> {
+        <Self as strum::IntoEnumIterator>::iter()
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             Self::Http => "HTTP",

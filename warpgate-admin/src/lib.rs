@@ -1,4 +1,5 @@
 pub mod api;
+pub mod approvals;
 pub use api::common::require_admin_permission;
 use poem::http::header::CONTENT_SECURITY_POLICY;
 use poem::middleware::SetHeader;
@@ -6,6 +7,7 @@ use poem::{EndpointExt, IntoEndpoint, Route};
 use poem_openapi::OpenApiService;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::WARPGATE_PLAYGROUND_CSP;
+use warpgate_core::cluster::NOTIFICATIONS_ROUTE;
 
 pub fn admin_api_app() -> impl IntoEndpoint {
     let api_service =
@@ -42,5 +44,13 @@ pub fn admin_api_app() -> impl IntoEndpoint {
         .at(
             "/sessions/changes",
             crate::api::sessions_list::api_get_sessions_changes_stream,
+        )
+        .at(
+            "/session-approvals/changes",
+            crate::api::session_approvals::api_get_session_approvals_stream,
+        )
+        .at(
+            NOTIFICATIONS_ROUTE,
+            crate::api::cluster_notifications::api_post_cluster_notification,
         )
 }

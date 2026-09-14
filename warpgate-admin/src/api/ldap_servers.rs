@@ -6,7 +6,7 @@ use sea_orm::{
 };
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, Secret, WarpgateError};
-use warpgate_db_entities::LdapServer;
+use warpgate_db_entities::{LdapServer, Parameters};
 use warpgate_ldap::LdapUsernameAttribute;
 use warpgate_tls::TlsMode;
 
@@ -51,6 +51,7 @@ impl ImportApi {
         }
 
         let db = &admin.services().db;
+        let parameters = Parameters::Entity::get(db).await?;
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(ImportLdapUsersResponse::NotFound);
         };
@@ -70,7 +71,7 @@ impl ImportApi {
                         id: Set(Uuid::new_v4()),
                         username: Set(user.username.clone()),
                         credential_policy: Set(serde_json::to_value(
-                            warpgate_common::UserRequireCredentialsPolicy::default(),
+                            parameters.default_credential_policy()?,
                         )?),
                         description: Set(user.display_name.clone().unwrap_or_default()),
                         rate_limit_bytes_per_second: Set(None),
@@ -447,12 +448,13 @@ impl ListApi {
                     // answer is the endpoint. What was missing is the record.
                     // This dials a host and port taken from the request body
                     // and left nothing behind saying it had run.
-                    tracing::warn!(host=%body.host, port=body.port, error=%e, "LDAP connection test failed");
+                    let detail = format!("{e:#}");
+                    tracing::warn!(host=%body.host, port=body.port, error=%detail, "LDAP connection test failed");
 
                     Ok(TestLdapServerConnectionResponse::Ok(Json(
                         TestLdapServerResponse {
                             success: false,
-                            message: format!("Connection failed: {e}"),
+                            message: format!("Connection failed: {detail}"),
                             base_dns: None,
                         },
                     )))

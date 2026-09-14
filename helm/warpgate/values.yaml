@@ -59,9 +59,15 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 
-# Secret with SSH host/client private keys:
-# expected keys: client-ed25519, client-rsa, host-ed25519, host-rsa
-# If not provided, Warpgate will generate them inside the PVC
+# Deprecated: current version will auto-import host keys in the database, after which the secret can be removed.
+# New installs generate them in the DB directly.
+#
+# Expected keys: client-ed25519, client-rsa, host-ed25519, host-rsa.
+#
+# job mode: copied to /data/ssh-keys, where the old config's `ssh.keys` still
+#   points, and mirrored into the database on start. Remove the `ssh.keys`
+#   option, the files and this value to finish the switch.
+# podinit mode: imported into the database by setup on every start.
 ssh_keys_secret: ""
 
 # Secret containing TLS certs (tls.key, tls.crt)
@@ -98,9 +104,9 @@ volume_mounts: []
 #  If you are using config_overrides, ca, ssh keyds form secrets and external databse you can use emptyDir
 data:
   pvc:
-    enabled: false          # true = use PersistentVolumeClaim, false = use emptyDir
-    claimName: ""           # if set, uses existing PVC instead of template
-    template: {}            # PVC template spec for dynamic provisioning
+    enabled: false # true = use PersistentVolumeClaim, false = use emptyDir
+    claimName: "" # if set, uses existing PVC instead of template
+    template: {} # PVC template spec for dynamic provisioning
       # accessModes:
       #   - ReadWriteOnce
       # resources:
@@ -125,7 +131,7 @@ setup:
   # Config options (overridden if overrides_config is used)
   disableIpV6: false
   recordSessions: true
-  databaseUrl: ""   # Optional: PostgreSQL connection string
+  databaseUrl: "" # Optional: PostgreSQL connection string
 
   # Ports to expose. Set to 0 or false to disable protocol.
   ssh: 2222

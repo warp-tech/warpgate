@@ -49,6 +49,14 @@ pub(crate) enum Commands {
         /// Database URL
         #[clap(long)]
         database_url: Option<String>,
+
+        /// Import SSH host key files (host-ed25519, host-rsa) from this dir
+        #[clap(long)]
+        import_ssh_host_keys: Option<PathBuf>,
+
+        /// Import SSH client key files (client-ed25519, client-rsa) from this dir
+        #[clap(long)]
+        import_ssh_client_keys: Option<PathBuf>,
     },
     /// Run first-time setup non-interactively
     UnattendedSetup {
@@ -103,6 +111,14 @@ pub(crate) enum Commands {
         /// External host used to construct URLs (without a port or scheme)
         #[clap(long)]
         external_host: Option<String>,
+
+        /// Import SSH host key files (host-ed25519, host-rsa) from this dir
+        #[clap(long)]
+        import_ssh_host_keys: Option<PathBuf>,
+
+        /// Import SSH client key files (client-ed25519, client-rsa) from this dir
+        #[clap(long)]
+        import_ssh_client_keys: Option<PathBuf>,
     },
     /// Show Warpgate's SSH client keys
     ClientKeys,

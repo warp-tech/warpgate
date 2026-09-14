@@ -11,7 +11,7 @@ use tracing::error;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{NodeId, Protocol, Target, UserSessionId, WarpgateError};
-use warpgate_db_entities::{TargetSession, UserSession};
+use warpgate_db_entities::{SessionApprovalRequest, TargetSession, UserSession};
 
 use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
 use crate::{SessionHandle, WarpgateServerHandle};
@@ -181,6 +181,25 @@ impl State {
         )))
     }
 
+    pub async fn close_local_sessions(
+        this: &Arc<Mutex<Self>>,
+        matches: impl Fn(&UserSessionState) -> bool,
+    ) {
+        let user_states = this
+            .lock()
+            .await
+            .user_sessions
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for state in user_states {
+            let state = state.lock().await;
+            if matches(&state) {
+                state.handle.close();
+            }
+        }
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
         self.change_sender.subscribe()
     }
@@ -204,6 +223,8 @@ impl State {
             error!(%error, %id, "Could not delete user session from the DB");
         }
 
+        self.abandon_session_approvals(id).await;
+
         let _ = self.change_sender.send(());
     }
 
@@ -221,6 +242,13 @@ impl State {
         }
     }
 
+    async fn abandon_session_approvals(&self, id: UserSessionId) {
+        if let Err(error) = SessionApprovalRequest::abandon_requests_for_session(&self.db, id).await
+        {
+            error!(%error, %id, "Could not close the session's approval requests");
+        }
+    }
+
     pub async fn remove_session(&mut self, id: UserSessionId) {
         // The row is ended whether or not this node still holds the state: a
         // handle dropped just before this call detaches the entry without
@@ -230,6 +258,8 @@ impl State {
         if let Err(error) = UserSession::mark_ended_including_target_sessions(&self.db, id).await {
             error!(%error, %id, "Could not end user session in the DB");
         }
+
+        self.abandon_session_approvals(id).await;
 
         let _ = self.change_sender.send(());
     }
@@ -313,7 +343,7 @@ mod tests {
             options: TargetOptions::Http(TargetHTTPOptions {
                 url: "http://target".into(),
                 tls: Tls::default(),
-                headers: None,
+                headers: Default::default(),
                 external_host: None,
             }),
             rate_limit_bytes_per_second: None,
@@ -321,6 +351,7 @@ mod tests {
             ticket_max_duration_seconds: None,
             ticket_requests_disabled: false,
             ticket_require_approval: false,
+            require_approval: false,
             ticket_max_uses: None,
         }
     }
@@ -374,6 +405,8 @@ mod tests {
         assert!(matches!(refused, Err(WarpgateError::UserSessionEnded)));
     }
 
+    /// Closing by user must reach exactly that user's live connections: a
+    /// deleted account keeps no open handle, and nobody else's is touched.
     #[tokio::test]
     async fn target_open_racing_session_end_cannot_leave_an_open_access() {
         set_config_migration_values(ConfigMigrationValues::default());
@@ -460,7 +493,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (target_session_id, _approved) = parent
+        let target_session_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -470,8 +503,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started()
+            .id();
 
         // The only reference the connection would have held.
         drop(parent);
@@ -522,7 +555,7 @@ mod tests {
         let other_target = target();
         let target = target();
 
-        let (first_id, _) = parent
+        let first_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -532,9 +565,9 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
-        let (second_id, _) = parent
+            .started()
+            .id();
+        let second_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -544,8 +577,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started()
+            .id();
         assert_eq!(first_id, second_id);
         assert_eq!(
             TargetSession::Entity::find()
@@ -556,7 +589,7 @@ mod tests {
             1
         );
 
-        let (other_id, _) = parent
+        let other_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -566,8 +599,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started()
+            .id();
         assert_ne!(first_id, other_id);
         assert_eq!(
             TargetSession::Entity::find()
@@ -607,7 +640,7 @@ mod tests {
         let parent_id: UserSessionId = parent.lock().await.user_session_id();
         let target = target();
 
-        let (first_id, _) = parent
+        let first_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -617,8 +650,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started()
+            .id();
 
         let adopted = State::adopt_user_session(
             &state,
@@ -630,7 +663,7 @@ mod tests {
             },
         )
         .await;
-        let (adopted_id, _) = adopted
+        let adopted_id = adopted
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -640,8 +673,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started()
+            .id();
 
         assert_eq!(first_id, adopted_id);
         assert_eq!(
@@ -719,9 +752,8 @@ mod tests {
                 .start_target_session(first_authorization)
                 .await
                 .unwrap()
-                .admitted()
-                .unwrap()
-                .0
+                .started()
+                .id()
         };
         let second = async {
             second_parent
@@ -730,9 +762,8 @@ mod tests {
                 .start_target_session(second_authorization)
                 .await
                 .unwrap()
-                .admitted()
-                .unwrap()
-                .0
+                .started()
+                .id()
         };
         let (first_id, second_id) = tokio::join!(first, second);
 
@@ -843,7 +874,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        let (target_session_id, approved) = parent
+        let admitted = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -853,8 +884,11 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started();
+
+        let target_session_id = admitted.id();
+        let approved = admitted.into_approved();
+
         assert_eq!(approved.target(), &target);
         let row = TargetSession::Entity::find_by_id(target_session_id)
             .one(&db)
@@ -866,7 +900,7 @@ mod tests {
         // parent's UUID.
         assert_ne!(target_session_id.0, parent_id.0);
 
-        let (again_id, _) = parent
+        let again_id = parent
             .lock()
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
@@ -876,8 +910,8 @@ mod tests {
             ))
             .await
             .unwrap()
-            .admitted()
-            .unwrap();
+            .started()
+            .id();
         assert_eq!(again_id, target_session_id);
     }
 }

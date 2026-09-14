@@ -6,7 +6,7 @@
     type Headers = Record<string, string>
 
     interface Props {
-        value?: Headers
+        value: Headers
     }
 
     interface HeaderRow {
@@ -21,9 +21,8 @@
     let headerRows: HeaderRow[] = $state([])
     let lastSerializedValue = $state('')
 
-    function serializeHeaders(headers: Headers | undefined): string {
-        const entries = Object.entries(headers ?? {}).sort()
-        return JSON.stringify(entries)
+    function serializeHeaders(headers: Headers): string {
+        return JSON.stringify(Object.entries(headers).sort())
     }
 
     function syncRowsFromValue() {
@@ -33,7 +32,7 @@
         }
 
         lastSerializedValue = serializedValue
-        headerRows = Object.entries(value ?? {}).map(([name, headerValue]) => ({
+        headerRows = Object.entries(value).map(([name, headerValue]) => ({
             id: nextHeaderId++,
             name,
             value: headerValue,
@@ -47,14 +46,13 @@
                 .filter(([name]) => name.length > 0),
         )
 
-        const nextValue = Object.keys(headers).length > 0 ? headers : undefined
-        const serializedValue = serializeHeaders(nextValue)
+        const serializedValue = serializeHeaders(headers)
         if (serializedValue === lastSerializedValue) {
             return
         }
 
         lastSerializedValue = serializedValue
-        value = nextValue
+        value = headers
     }
 
     function addHeaderRow() {

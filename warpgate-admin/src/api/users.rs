@@ -1,3 +1,4 @@
+use poem::http::StatusCode;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -11,10 +12,14 @@ use warpgate_common::{
     AdminPermission, AdminRole as AdminRoleConfig, User as UserConfig,
     UserRequireCredentialsPolicy, WarpgateError,
 };
+use warpgate_core::State;
 use warpgate_core::logging::{AuditEvent, format_related_ids};
-use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
+use warpgate_db_entities::{
+    AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment, UserSession,
+};
 
-use super::AdminContext;
+use super::{AdminContext, ClusterOrAdminContext};
+use crate::api::cluster_proxy::fan_out_to_peers_expecting;
 use crate::api::common::case_insensitive_search;
 
 #[derive(Object)]
@@ -100,10 +105,9 @@ impl ListApi {
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(body.username.clone()),
-            credential_policy: Set(
-                serde_json::to_value(UserRequireCredentialsPolicy::default())
-                    .map_err(WarpgateError::from)?,
-            ),
+            credential_policy: Set(serde_json::to_value(
+                admin.parameters().await?.default_credential_policy()?,
+            )?),
             description: Set(body.description.clone().unwrap_or_default()),
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(None),
@@ -276,16 +280,29 @@ impl DetailApi {
     #[oai(path = "/users/:id", method = "delete", operation_id = "delete_user")]
     async fn api_delete_user(
         &self,
-        admin: AdminContext,
+        admin: ClusterOrAdminContext,
         id: Path<Uuid>,
+        req: &poem::Request,
     ) -> Result<DeleteUserResponse, WarpgateError> {
         admin.require(AdminPermission::UsersDelete)?;
 
         let db = &admin.services().db;
 
+        let close_live_sessions = State::close_local_sessions(&admin.services().state, |s| {
+            s.user_info.as_ref().is_some_and(|u| u.id == id.0)
+        });
+        if admin.is_intra_cluster_request() {
+            close_live_sessions.await;
+            return Ok(DeleteUserResponse::Deleted);
+        }
+
         let Some(user) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteUserResponse::NotFound);
         };
+
+        // kill DB sessions before killing handles to avoid a race
+        UserSession::revoke_all_for_user(db, user.id).await?;
+        close_live_sessions.await;
 
         UserRoleAssignment::Entity::delete_many()
             .filter(UserRoleAssignment::Column::UserId.eq(user.id))
@@ -305,6 +322,11 @@ impl DetailApi {
         .emit();
 
         user.delete(db).await?;
+
+        for (node, status) in fan_out_to_peers_expecting(&admin, req, StatusCode::NO_CONTENT).await
+        {
+            warn!(%node, %status, "Failed to close the user's sessions on a cluster node");
+        }
 
         Ok(DeleteUserResponse::Deleted)
     }

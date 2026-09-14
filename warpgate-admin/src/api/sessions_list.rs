@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
-use futures::{SinkExt, StreamExt};
 use poem::http::StatusCode;
 use poem::session::Session;
 use poem::web::Data;
-use poem::web::websocket::{Message, WebSocket};
+use poem::web::websocket::WebSocket;
 use poem::{IntoResponse, handler};
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
@@ -16,10 +15,14 @@ use sea_orm::{
     QuerySelect,
 };
 use tracing::warn;
+use warpgate_common::auth::ApprovalKind;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::{TargetSessionSnapshot, UserSessionSnapshot};
-use warpgate_db_entities::{Node, TargetSession, UserSession};
+use warpgate_core::cluster::{ClusterNotification, refresh_notification_stream};
+use warpgate_core::{
+    SessionApprovalRequestSnapshot, State, TargetSessionSnapshot, UserSessionSnapshot,
+};
+use warpgate_db_entities::{Node, SessionApprovalRequest, Target, TargetSession, UserSession};
 
 use super::pagination::PaginatedResponse;
 use super::{AdminContext, ClusterOrAdminContext};
@@ -112,15 +115,7 @@ impl Api {
                 .map_err(poem::error::InternalServerError)?;
         }
 
-        {
-            let user_states = {
-                let state = admin.services().state.lock().await;
-                state.user_sessions.values().cloned().collect::<Vec<_>>()
-            };
-            for state in user_states {
-                state.lock().await.handle.close();
-            }
-        }
+        State::close_local_sessions(&admin.services().state, |_| true).await;
 
         session.purge();
 
@@ -140,11 +135,38 @@ pub(super) async fn user_session_snapshots(
     parents: Vec<UserSession::Model>,
 ) -> Result<Vec<UserSessionSnapshot>, WarpgateError> {
     let parent_ids = parents.iter().map(|session| session.id).collect::<Vec<_>>();
+
+    let approvals = if parent_ids.is_empty() {
+        vec![]
+    } else {
+        SessionApprovalRequest::Entity::find()
+            .filter(SessionApprovalRequest::Column::SessionId.is_in(parent_ids.clone()))
+            .filter(SessionApprovalRequest::Column::Kind.eq(ApprovalKind::Admin))
+            .all(db)
+            .await?
+    };
+
+    let approval_target_names = approvals
+        .iter()
+        .map(|a| a.target.clone())
+        .collect::<Vec<_>>();
+    let approval_targets = if approval_target_names.is_empty() {
+        HashMap::new()
+    } else {
+        Target::Entity::find()
+            .filter(Target::Column::Name.is_in(approval_target_names))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|t| (t.name.clone(), t))
+            .collect::<HashMap<_, _>>()
+    };
+
     let targets = if parent_ids.is_empty() {
         vec![]
     } else {
         TargetSession::Entity::find()
-            .filter(TargetSession::Column::UserSessionId.is_in(parent_ids))
+            .filter(TargetSession::Column::UserSessionId.is_in(parent_ids.clone()))
             .order_by_desc(TargetSession::Column::Started)
             .all(db)
             .await?
@@ -169,6 +191,20 @@ pub(super) async fn user_session_snapshots(
             .collect::<HashMap<_, _>>()
     };
 
+    let mut approvals_by_session: HashMap<_, Vec<_>> = HashMap::new();
+    for approval in approvals {
+        let parent_id = approval.session_id;
+        let target = approval.target.clone();
+        let mut snapshot: SessionApprovalRequestSnapshot = approval.into();
+        if let Some(target) = approval_targets.get(&target) {
+            snapshot.target_id = Some(target.id);
+        }
+        approvals_by_session
+            .entry(parent_id)
+            .or_default()
+            .push(snapshot);
+    }
+
     let mut targets_by_parent: HashMap<_, Vec<_>> = HashMap::new();
     for target in targets {
         let parent_id = target.user_session_id;
@@ -186,6 +222,9 @@ pub(super) async fn user_session_snapshots(
             let mut snapshot: UserSessionSnapshot = parent.into();
             snapshot.node_hostname = snapshot.node_id.and_then(|id| node_names.get(&id).cloned());
             snapshot.target_sessions = targets_by_parent.remove(&snapshot.id).unwrap_or_default();
+            snapshot.admin_approvals = approvals_by_session
+                .remove(&snapshot.id)
+                .unwrap_or_default();
             snapshot
         })
         .collect())
@@ -197,22 +236,11 @@ pub async fn api_get_sessions_changes_stream(
     ws: WebSocket,
 ) -> Result<impl IntoResponse, WarpgateError> {
     require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
-
-    let mut receiver = ctx.services().state.lock().await.subscribe();
-
-    Ok(ws
-        .on_upgrade(|socket| async move {
-            let (mut sink, _) = socket.split();
-
-            // TODO cluster broadcast
-
-            while receiver.recv().await.is_ok() {
-                sink.send(Message::Text("".into())).await?;
-            }
-
-            Ok::<(), anyhow::Error>(())
-        })
-        .into_response())
+    Ok(refresh_notification_stream(
+        ws,
+        ctx.services().cluster.subscribe(),
+        |msg| matches!(msg, ClusterNotification::SessionsChanged).then(String::new),
+    ))
 }
 
 #[cfg(test)]
