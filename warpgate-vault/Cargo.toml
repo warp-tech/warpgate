@@ -1,0 +1,29 @@
+[package]
+name = "warpgate-vault"
+version = "0.27.4"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+data-encoding.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "sync"] }
+tracing.workspace = true
+url.workspace = true
+warpgate-aws = { path = "../warpgate-aws" }
+warpgate-common = { path = "../warpgate-common" }
+zeroize = "1.8"
+
+[dev-dependencies]
+proptest = "1"
+rcgen.workspace = true
+rustls = { workspace = true, features = ["aws_lc_rs"] }
+rustls-pki-types.workspace = true
+tempfile = "3"
+tokio = { workspace = true, features = ["net", "time"] }
+tokio-rustls = { workspace = true, features = ["aws-lc-rs"] }
+
