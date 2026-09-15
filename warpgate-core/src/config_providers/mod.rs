@@ -416,6 +416,16 @@ pub async fn validate_ticket(
 
         let target = Target::try_from(ticket_target)?;
 
+        if target.options.protocol() != protocol {
+            warn!(
+                "Ticket {} is for a {:?} target, presented over {:?}",
+                &ticket.id,
+                target.options.protocol(),
+                protocol
+            );
+            return Ok(None);
+        }
+
         // A ticket binds user↔target directly, so it mints the proof without a
         // role check — that's what makes it a ticket.
         Ok(Some(ValidatedTicket {

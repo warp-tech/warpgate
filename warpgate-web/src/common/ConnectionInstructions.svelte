@@ -11,7 +11,6 @@
     import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
     import CollapsibleBlock from 'common/CollapsibleBlock.svelte'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
-    import { downloadBlob } from 'common/helpers'
     import {
         makeCommonSelectorUsername,
         makeExampleKubectlCommand,
@@ -309,25 +308,17 @@
 {/if}
 
 {#if targetKind === TargetKind.Kubernetes && ticketSecret}
-    <CopyableTextArea label="Ticket token" value={`ticket-${ticketSecret}`} />
     <CopyableTextArea label="Kubeconfig file" value={kubeconfig} />
-    <Button
-        color="secondary"
-        class="mb-3"
-        onclick={() => downloadBlob(kubeconfig, 'warpgate-kubeconfig.yaml')}
-    >
-        Download kubeconfig
-    </Button>
     <CopyableTextArea
         label="Example kubectl command"
         value={exampleKubectlCommand}
     />
     <InfoBox class="mb-3">
-        Save the kubeconfig as <code>warpgate-kubeconfig.yaml</code> and run the
-        command above. The ticket selects the target automatically; no password
-        or client certificate is needed. A use opens an access session for the
-        configured Kubernetes session lifetime, shared by requests using this
-        ticket from the same IP on the same Warpgate node.
+        The ticket already specifies the target and no other credentials are
+        needed. One ticket use opens a session that is shared by requests
+        matching the same source IP and the same Warpgate node for the
+        Kubernetes session lifetime. In a round-robin cluster, at least as many
+        uses are needed as there are nodes in the cluster.
     </InfoBox>
 {/if}
 

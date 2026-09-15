@@ -13,8 +13,9 @@ use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::{
-    Protocol, Secret, TargetKubernetesOptions, TargetOptions, User, UserSessionId, WarpgateError,
+    Protocol, Secret, TargetKubernetesOptions, User, UserSessionId, WarpgateError,
 };
+use warpgate_common_http::authorization_token;
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
@@ -57,12 +58,7 @@ pub fn unauthorized() -> poem::Error {
 /// `None` means no credential was presented at all — an unauthenticated probe,
 /// not a failed login attempt.
 fn presented_credential_kind(req: &Request) -> Option<&'static str> {
-    let has_bearer = req
-        .headers()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("Bearer "));
-    if has_bearer {
+    if authorization_token(req, "Bearer").is_some() {
         Some("token")
     } else if req.client_certificate().is_some() {
         Some("certificate")
@@ -112,11 +108,7 @@ pub async fn authenticate_kubernetes_user(
 
     let credential_kind = presented_credential_kind(req);
 
-    let ticket_secret = req
-        .headers()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer ticket-"));
+    let ticket_secret = authorization_token(req, "Bearer").and_then(|v| v.strip_prefix("ticket-"));
     let identity = if let Some(secret) = ticket_secret {
         validate_ticket(
             &services.db,
@@ -126,7 +118,6 @@ pub async fn authenticate_kubernetes_user(
             crate::PROTOCOL_NAME,
         )
         .await?
-        .filter(|ticket| matches!(ticket.target().options, TargetOptions::Kubernetes(_)))
         .map(KubernetesIdentity::Ticket)
     } else {
         authenticate(req, services)
@@ -153,7 +144,8 @@ pub async fn authenticate_kubernetes_user(
         return Err(unauthorized());
     };
 
-    // Account lockout and the user's IP allow-list, both fail-closed.
+    // Account lockout and the user's IP allow-list, both fail-closed. A ticket's
+    // bearer is vetted the same way inside `validate_ticket`.
     if let KubernetesIdentity::User(user) = &identity
         && !vet_credential_bearer(&services.login_protection, user, client_ip).await?
     {
@@ -302,10 +294,7 @@ async fn await_kubernetes_web_approval(
 /// failure.
 async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option<User>> {
     // Bearer token authentication (API tokens, then OIDC ID tokens).
-    if let Some(auth_header) = req.headers().get("authorization")
-        && let Ok(auth_str) = auth_header.to_str()
-        && let Some(token) = auth_str.strip_prefix("Bearer ")
-    {
+    if let Some(token) = authorization_token(req, "Bearer") {
         if let Ok(Some(user)) = services.config_provider.validate_api_token(token).await {
             return Ok(Some(user));
         }

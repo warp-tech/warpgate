@@ -14,8 +14,33 @@ use warpgate_core::{
 use crate::server::auth::{KubernetesIdentity, authorize_kubernetes_target, unauthorized};
 use crate::session_handle::KubernetesSessionHandle;
 
-// Ticket sessions must never share admission with another ticket or a normal login.
-type CorrelationKey = (String, String, Option<String>, Option<uuid::Uuid>);
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct CorrelationKey {
+    username: String,
+    target_name: String,
+    ip: Option<String>,
+    // Ticket sessions must never share admission with another ticket or a
+    // normal login by the same user.
+    ticket_id: Option<uuid::Uuid>,
+}
+
+impl CorrelationKey {
+    async fn for_request(
+        request: &poem::Request,
+        identity: &KubernetesIdentity,
+        services: &Services,
+        target_name: String,
+    ) -> Self {
+        let user_info = identity.user_info();
+        let ip = get_client_ip(request, services).await;
+        Self {
+            username: user_info.username.clone(),
+            target_name,
+            ip,
+            ticket_id: identity.ticket_id(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct AdmittedSession {
@@ -69,13 +94,7 @@ pub async fn correlated_authorization(
     services: &Services,
 ) -> poem::Result<(Arc<Mutex<WarpgateServerHandle>>, AdmittedSession)> {
     let user_info = identity.user_info();
-    let ip = get_client_ip(request, services).await;
-    let key = (
-        user_info.username.clone(),
-        target_name.into(),
-        ip,
-        identity.ticket_id(),
-    );
+    let key = CorrelationKey::for_request(request, &identity, services, target_name.into()).await;
     let max_age = services
         .config
         .lock()

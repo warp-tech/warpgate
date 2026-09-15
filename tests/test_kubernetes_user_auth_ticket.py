@@ -2,8 +2,9 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-import time
+import json
 import subprocess
+import time
 from uuid import uuid4
 
 import pytest
@@ -118,7 +119,6 @@ def test_kubectl_with_targetless_ticket_kubeconfig(shared_wg, ticket_setup, tmp_
         capture_output=True, text=True, timeout=15,
     )
     assert result.returncode == 0, result.stderr
-    import json
     assert json.loads(result.stdout)["path"] == "/version"
     assert uses_left(ticket_setup, ticket) == 0
 
