@@ -9628,7 +9628,7 @@ dependencies = [
  "proptest",
  "rcgen",
  "reqwest 0.13.4",
- "rustls 0.23.43",
+ "rustls 0.23.45",
  "rustls-pki-types",
  "serde",
  "serde_json",
