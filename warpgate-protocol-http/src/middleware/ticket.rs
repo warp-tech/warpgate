@@ -6,9 +6,9 @@ use poem::{Endpoint, Middleware, Request};
 use serde::Deserialize;
 use uuid::Uuid;
 use warpgate_common::Secret;
-use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
+use warpgate_common_http::{SessionAuthorization, authorization_token};
 use warpgate_core::authorize_and_spend_ticket;
 use warpgate_db_entities::Ticket;
 
@@ -79,14 +79,9 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
         let params: QueryParams = req.params()?;
         let mut ticket_value = params.ticket;
 
-        for h in req.headers().get_all(http::header::AUTHORIZATION) {
-            let header_value = h.to_str().unwrap_or("").to_string();
-            if let Some((token_type, token_value)) = header_value.split_once(' ')
-                && &token_type.to_lowercase() == "warpgate"
-            {
-                ticket_value = Some(token_value.to_string());
-                session_is_temporary = true;
-            }
+        if let Some(token_value) = authorization_token(&req, "Warpgate") {
+            ticket_value = Some(token_value.to_string());
+            session_is_temporary = true;
         }
 
         if session_is_temporary {
