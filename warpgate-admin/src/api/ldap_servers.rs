@@ -159,6 +159,7 @@ struct CreateLdapServerRequest {
     ssh_key_attribute: String,
     #[oai(default = "default_uuid_attribute")]
     uuid_attribute: String,
+    base_dns: Option<Vec<String>>,
 }
 
 const fn default_port() -> i32 {
@@ -213,6 +214,7 @@ struct UpdateLdapServerRequest {
     username_attribute: LdapUsernameAttribute,
     ssh_key_attribute: String,
     uuid_attribute: String,
+    base_dns: Option<Vec<String>>,
 }
 
 #[derive(Object)]
@@ -361,8 +363,18 @@ impl ListApi {
             },
         };
 
-        // Discover base DNs
-        let base_dns = if std::env::var("WARPGATE_UNDER_TEST")
+        let supplied_base_dns: Vec<String> = body
+            .base_dns
+            .iter()
+            .flatten()
+            .map(|dn| dn.trim().to_owned())
+            .filter(|dn| !dn.is_empty())
+            .collect();
+
+        // Discover base DNs unless the caller named them
+        let base_dns = if !supplied_base_dns.is_empty() {
+            supplied_base_dns
+        } else if std::env::var("WARPGATE_UNDER_TEST")
             .unwrap_or_default()
             .is_empty()
         {
@@ -556,7 +568,7 @@ impl DetailApi {
         model.ssh_key_attribute = Set(body.ssh_key_attribute.clone());
         model.uuid_attribute = Set(body.uuid_attribute.clone());
 
-        // Re-discover base DNs if connection details changed
+        // Base DNs the client sent win; discovery is only a fallback
         let ldap_config = warpgate_ldap::LdapConfig {
             host: body.host.clone(),
             port: body.port as u16,
@@ -574,8 +586,23 @@ impl DetailApi {
             uuid_attribute: None,
         };
 
-        if let Ok(base_dns) = warpgate_ldap::discover_base_dns(&ldap_config).await {
-            model.base_dns = Set(serde_json::to_value(&base_dns)?);
+        let supplied_base_dns: Vec<String> = body
+            .base_dns
+            .iter()
+            .flatten()
+            .map(|dn| dn.trim().to_owned())
+            .filter(|dn| !dn.is_empty())
+            .collect();
+
+        if supplied_base_dns.is_empty() {
+            // Nothing to keep, so fall back to the RootDSE. Hosted multi-tenant
+            // directories don't advertise a base DN that can be searched, which
+            // is why an explicit list has to be able to override this.
+            if let Ok(base_dns) = warpgate_ldap::discover_base_dns(&ldap_config).await {
+                model.base_dns = Set(serde_json::to_value(&base_dns)?);
+            }
+        } else {
+            model.base_dns = Set(serde_json::to_value(&supplied_base_dns)?);
         }
 
         let server = model.update(db).await?;
