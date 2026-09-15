@@ -131,8 +131,23 @@ impl Processor {
     /// Processes a received PDU. Returns a vector of [`ProcessorOutput`] that must be processed
     /// in the returned order.
     pub fn process(&mut self, frame: &[u8]) -> SessionResult<Vec<ProcessorOutput>> {
-        let data_ctx: SendDataIndicationCtx<'_> =
-            ironrdp_pdu::mcs::decode_send_data_indication(frame).map_err(SessionError::decode)?;
+        let data_ctx: SendDataIndicationCtx<'_> = match ironrdp_pdu::mcs::decode_send_data_indication(frame) {
+            Ok(data_ctx) => data_ctx,
+            Err(error) => {
+                // Some servers (xrdp) end the session with a plain MCS Disconnect Provider Ultimatum.
+                if let Ok(X224(McsMessage::DisconnectProviderUltimatum(ultimatum))) =
+                    decode::<X224<McsMessage<'_>>>(frame)
+                {
+                    debug!(reason = ?ultimatum.reason, "Received Disconnect Provider Ultimatum, session will be closed");
+
+                    return Ok(vec![ProcessorOutput::Disconnect(DisconnectDescription::McsDisconnect(
+                        ultimatum.reason,
+                    ))]);
+                }
+
+                return Err(SessionError::decode(error));
+            }
+        };
         let channel_id = data_ctx.channel_id;
 
         if channel_id == self.io_channel_id {

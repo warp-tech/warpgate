@@ -30,6 +30,20 @@ pub fn is_cluster_peer_request(req: &Request, cluster_token: &Secret<String>) ->
         .into()
 }
 
+/// The credential from the first `Authorization` header using `scheme`
+/// (compared case-insensitively, as RFC 7235 requires).
+pub fn authorization_token<'a>(req: &'a Request, scheme: &str) -> Option<&'a str> {
+    req.headers()
+        .get_all(poem::http::header::AUTHORIZATION)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find_map(|v| {
+            v.split_once(' ')
+                .filter(|(s, _)| s.eq_ignore_ascii_case(scheme))
+                .map(|(_, token)| token)
+        })
+}
+
 // style-src unsafe-inline for Svelte
 // img-src data: for TOTP codes
 pub const WARPGATE_CSP: &str = "default-src 'self'; \
