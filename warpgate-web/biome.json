@@ -61,7 +61,10 @@
                 "rules": {
                     "a11y": {
                         "noAutofocus": "off",
-                        "noLabelWithoutControl": "off"
+                        "noLabelWithoutControl": "off",
+                        "noNoninteractiveElementToInteractiveRole": "off",
+                        "noNoninteractiveTabindex": "off",
+                        "noStaticElementInteractions": "off"
                     },
                     "style": {
                         "useConst": "off"

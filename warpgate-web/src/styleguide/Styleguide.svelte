@@ -9,7 +9,9 @@
      */
     import { onMount } from 'svelte'
     import { currentTheme, setCurrentTheme } from 'theme'
+    import ToastHost from 'ui/ToastHost.svelte'
     import { contrast, grade, resolveToken } from './contrast'
+    import Primitives from './Primitives.svelte'
 
     const SURFACES = [
         ['--wg-surface-container-lowest', 'Recessed — terminals, log dumps'],
@@ -150,8 +152,8 @@
         <div>
             <h1>Warpgate design tokens</h1>
             <p class="sg-sub">
-                Phase 1 — token layer. Primitives arrive in Phase 2. Contrast
-                ratios are measured live from the painted values.
+                Phases 1–2 — tokens and primitives. Contrast ratios are measured
+                live from the painted values, for both.
             </p>
         </div>
         <fieldset class="sg-theme">
@@ -493,7 +495,20 @@
             </div>
         </div>
     </section>
+
+    <hr class="sg-rule">
+
+    <h1 class="sg-phase">Primitives</h1>
+    <p class="sg-sub">
+        Phase 2. Every entry shows hover, focus, disabled, loading and error
+        where the component has them — the states that break in production, not
+        just the happy path.
+    </p>
+
+    <Primitives />
 </div>
+
+<ToastHost />
 
 <style>
     .sg {
@@ -529,6 +544,16 @@
 
     section {
         margin-bottom: var(--wg-space-3xl);
+    }
+
+    .sg-rule {
+        border: 0;
+        border-top: var(--wg-border-width) solid var(--wg-border);
+        margin: var(--wg-space-3xl) 0 var(--wg-space-xl);
+    }
+
+    .sg-phase {
+        margin-bottom: var(--wg-space-xs);
     }
 
     .sg-sub,

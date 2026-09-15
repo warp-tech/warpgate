@@ -120,12 +120,21 @@
     --wg-row-selected: var(--wg-surface-container-highest);
     --wg-row-stripe: var(--wg-surface-container-low);
 
-    /* State colours — always paired with geometry AND a text label */
+    /*
+     * State colours — always paired with geometry AND a text label. The
+     * shapes live in ui/StatusMarker.svelte, which is the only thing that
+     * should reference these.
+     *
+     * `pending` is an addition to DESIGN.md's five-state matrix: approvals
+     * and ticket requests are a real state in this product and were not in
+     * the mockups. Logged in IMPLEMENTATION-NOTES.md.
+     */
     --wg-state-live: var(--wg-secondary);
     --wg-state-online: var(--wg-tertiary);
     --wg-state-blocked: var(--wg-error);
     --wg-state-ended: var(--wg-outline);
     --wg-state-failed: var(--wg-error);
+    --wg-state-pending: var(--wg-secondary);
 
     /* ---------------------------------------------------------------
      * Type

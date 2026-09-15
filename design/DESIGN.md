@@ -201,6 +201,19 @@ The design system employs an industrial, clipped corner radius matrix that reinf
 
 ## Components
 
+### The border rule
+
+**If a border is the only thing telling an operator where a control begins, it is border-strong.**
+
+Borders come in two tiers and the split is a requirement, not a preference:
+
+- **Divider tier** (`--wg-border`, the `outline-variant` hairline): decorative separation only — table row rules, cell hairlines, panel separators. Exempt from contrast rules because nothing depends on seeing it.
+- **Component tier** (`--wg-border-strong`, the `outline` value): anything that delimits an interactive control — inputs, selects, buttons, checkboxes, focusable cards. Must clear WCAG 1.4.11's 3:1 against its background.
+
+The rule is stated in terms of the border's *job* rather than its appearance so that it stays decidable at a call site nobody has written yet. When in doubt, ask what happens if the operator cannot see the border: if the answer is "they cannot tell where to click or type", it is component tier.
+
+This supersedes the `1px solid #2A323C` figure quoted under **Input Fields & Selects** below, which measures 1.98:1 against the canvas and fails 1.4.11. A mockup can afford an invisible input border; a form filled in at 3am on an ops-room monitor cannot.
+
 ### Buttons
 - **Primary:** Background `#7BA7F0`, text `#0F1317` (bold weight), border `1px solid transparent`. Hover: `#94B9F5`. Active: `#6392DE`. Radius: `6px`.
 - **Secondary (Default):** Background `#1A2028`, text `#E9EDF2`, border `1px solid #2A323C`. Hover: `#222A35`.
@@ -218,7 +231,7 @@ The design system employs an industrial, clipped corner radius matrix that reinf
 - **Cells:** Machine attributes render in `JetBrains Mono` at `13px`. Action cell anchors strictly on the far right.
 
 ### Input Fields & Selects
-- **Base State:** Height `32px`, background `#090C0F`, border `1px solid #2A323C`, text `#E9EDF2`, radius `6px`, padding `0 8px`.
+- **Base State:** Height `32px`, background `#090C0F`, border `1px solid` **border-strong** (see *The border rule* above — the `#2A323C` originally specified here fails 1.4.11), text `#E9EDF2`, radius `6px`, padding `0 8px`.
 - **Focus State:** Border `1px solid #7BA7F0`, no outer ring glow.
 - **Labels:** Typography `body-md` (`14px`), text `#A3AEBA`, positioned strictly above input with `4px` vertical separation.
 

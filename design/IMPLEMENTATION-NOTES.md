@@ -16,7 +16,7 @@ Newest entries at the top of each section.
 | 0 — Reconnaissance | ✅ done | Stack, serving model, API surface, routing map, theming, primitives. |
 | 0.5 — Baseline | ✅ done | `DESIGN.md` moved to `design/`, this file seeded, bundle baseline captured. |
 | 1 — Token layer | ✅ done | Tokens, both themes, fonts, `/styleguide`. +28.5 KB raw (+1.4%). |
-| 2 — Primitives | not started | |
+| 2 — Primitives | ✅ done | 18 primitives + styleguide entries + primitive contrast audit. +0.4 KB raw. |
 | 3 — Shell | not started | |
 | 4 — Screen migration | not started | |
 | 5 — Accessibility | not started | |
@@ -33,6 +33,7 @@ user-visible redesign with an env var and no git operation.
 |---|---|
 | 0.5 | `redesign/design-system` |
 | 1 | `redesign/phase-1-tokens` |
+| 2 | `redesign/phase-2-primitives` |
 
 ---
 
@@ -194,7 +195,104 @@ ASCII by definition.
 
 ---
 
+## Phase 2 — bundle delta
+
+| | Phase 1 | Phase 2 | delta |
+|---|---:|---:|---:|
+| Shipped raw | 2043.0 KB | 2043.4 KB | **+0.4 KB** |
+| Shipped gzip | 730.7 KB | 730.8 KB | +0.1 KB |
+| Embedded | 7961.1 KB | 7961.9 KB | +0.8 KB |
+
+**Effectively zero, and that is expected.** No shipping code imports the
+primitives yet — they exist only in `/styleguide`, which is stripped from
+production by `import.meta.env.DEV`. The real cost arrives in Phase 4 as
+screens migrate onto them, offset by Bootstrap components leaving at the same
+rate.
+
+Cumulative against the Phase 0.5 baseline: **+28.9 KB raw (+1.4%)**.
+
+`theme.dark` + `theme.light` unchanged at **356 KB raw / 52 KB gz of JS that is
+really CSS**. Still Phase 4's payoff; see the Phase 1 section for the
+projection and the parse-blocking argument.
+
+---
+
 ## Decisions
+
+### D12 — Table wraps ItemList through two new snippet props
+*Phase 2.*
+
+`ui/Table.svelte` owns none of the data behaviour. ItemList keeps the RxJS
+search debounce, pagination, adjacency grouping, persisted group collapse, the
+search-force-expand rule, and the empty/loading states. Table adds exactly
+five things: sticky header, sortable headers, density toggle, keyboard row
+navigation, and row selection.
+
+Making that possible needed two small additions to `common/ItemList.svelte`,
+both optional and both backwards compatible:
+
+- **`container?: Snippet<[Snippet, T[]]>`** — wraps the rendered rows, so a
+  caller can supply real `<table><tbody>` markup instead of the default
+  list-group div. Receives the items as well as the rows snippet, because the
+  select-all checkbox in `<thead>` sits outside the row loop and still has to
+  reflect them. Defaults to the existing div when omitted.
+- **`searchInput?: Snippet<[string, (v: string) => void]>`** — replaces the
+  built-in sveltestrap `Input` with the caller's own, without reaching into
+  the debounce pipeline.
+
+**Sorting is surfaced, not applied.** ItemList owns row order because grouping
+is adjacency-based — sorting inside Table would silently break groups. `sort`
+is a bindable prop; the caller feeds it into its own `load`. Third click on a
+sorted header clears the sort rather than cycling back to ascending, so an
+operator who sorted by mistake does not have to guess the original order.
+
+**The roving tab stop is keyed, not indexed.** ItemList can reorder or regroup
+rows underneath Table, and a captured integer index would quietly move the tab
+stop to a different record. An effect re-seats it on the first row whenever the
+row it was on disappears — a page change, a filter, a collapsed group.
+
+### D13 — StatusMarker makes shape structurally inescapable
+*Phase 2.*
+
+`ui/StatusMarker.svelte` has **no `colour` prop and no `shape` prop**. A call
+site picks a `kind` from a closed union and the geometry, colour and default
+label come with it, from a frozen map.
+
+This is enforcement, not convention. A component that accepted `colour` would
+eventually be handed one without a shape — not through carelessness but
+because at 3am the fastest way to say "this row is bad" is to make it red.
+Removing the prop removes the option. Adding a state means adding a row to the
+map, which is the review point.
+
+`label` is customisable, because timestamps belong in it ("Ended 12:04:31"),
+but it cannot be blanked — every kind carries a default and the label always
+renders as visible text. The text is the accessible name, so the shape is
+`aria-hidden`.
+
+**One addition to DESIGN.md's five-state matrix: `pending`** (diamond, amber).
+Approvals and ticket requests are a real state in this product — `/status/requests`,
+`/session-approvals`, `/ticket-requests` — and were not in the mockups.
+
+**One weakness inherited from DESIGN.md, noted not fixed:** `live` and `ended`
+are both filled 6px circles, distinguished only by colour and the pulse. The
+label carries the difference ("Live" vs "Ended 12:04:31"), which satisfies the
+system's own geometry+label+colour rule, but the geometry alone is ambiguous
+between them.
+
+### D14 — AsyncButton's state machine extracted verbatim
+*Phase 2.*
+
+Lifted into `ui/asyncAction.svelte.ts` unchanged: the 500ms delay before the
+spinner appears, the 1000ms hold on done/failed, the re-entrancy guard, the
+form-validation handshake, and the width **and** height pinning from pre-click
+measurements. Only the chrome around it is new.
+
+`common/AsyncButton.svelte` is untouched and keeps working; Phase 4 migrates
+its call sites and can then collapse the two.
+
+One addition: the state machine sets `wg-validated` alongside Bootstrap's
+`was-validated` on the parent form, so a form built from either generation
+styles correctly while the migration is in flight.
 
 ### D9 — IBM Plex Mono is the UI mono; Caskaydia Cove stays terminal-only
 *Phase 1. Resolves Q2.*
@@ -396,6 +494,33 @@ keep their `design/<screen>/{code.html,screen.png}` layout.
 
 ## Open questions
 
+### Q7 — Three Biome a11y rules disabled for all `.svelte` files
+*Raised Phase 2. Broader than intended; flagged for review.*
+
+`src/ui` implements raw ARIA patterns that three Biome rules mis-model:
+
+| rule | why it is wrong here |
+|---|---|
+| `noNoninteractiveElementToInteractiveRole` | ARIA in HTML explicitly permits `role="grid"` on `<table>`, and `ui/Table` **is** an interactive grid — roving tabindex, Space to select, `aria-selected` per row. Dropping the role would make `aria-selected` invalid. |
+| `noNoninteractiveTabindex` | The APG tabs pattern calls for a focusable tabpanel so a panel with no focusable content of its own stays reachable and scrollable by keyboard. |
+| `noStaticElementInteractions` | `ui/Tooltip`'s wrapper is a positioning context around arbitrary children. ARIA has no role for "element that reveals a tooltip about its child", and inventing one would be worse for a screen reader than the lint it silences. |
+
+**The scope is wider than it should be.** These are disabled for every
+`.svelte` file rather than just `src/ui/**`, because:
+
+1. Biome's HTML-comment suppressions **do not attach to Svelte template
+   nodes** — a `<!-- biome-ignore -->` above an element is reported as
+   `suppressions/unused` while the diagnostic still fires, so there is no
+   per-site way to express these.
+2. A scoped `"includes": ["src/ui/**"]` override **resets inherited formatter
+   and linter settings** for matched files rather than merging with them —
+   it reformatted 28 files to tabs and semicolons and re-enabled rules the
+   top-level config turns off.
+
+Narrow this if a later Biome release fixes either. Phase 5's runtime axe-core
+audit covers all three and is the stronger check — nothing here is exempt
+from it.
+
 ### Q5 — Third ink tier and the two border tiers diverge from DESIGN.md
 *Raised Phase 1. Implemented as described; flagged for review.*
 
@@ -521,6 +646,31 @@ export npm_config_script_shell="C:\\Users\\<you>\\AppData\\Local\\Programs\\Git\
 **3. Pipe your build commands through `set -o pipefail`.** `npm ci 2>&1 | tail`
 reports tail's exit code, not npm's, so a failed install looks clean. This is
 how failure 1 above was initially missed.
+
+### `//` comments in `biome.json` silently disable it
+
+Biome's config is **not** JSONC. A `//` line comment inside `biome.json` does
+not raise an error — Biome falls back to its built-in defaults and formats
+everything with **tabs, double quotes and semicolons**, against both
+`.editorconfig` and the project's own `javascript.formatter` settings. A
+`"//"` key *does* error loudly (`unknown key`), which makes the silent case
+easy to walk into after ruling the loud one out.
+
+Symptom: `biome format --write` reformats files to tabs and the diff looks
+like the formatter changed its mind. Check `biome.json` for comments first.
+This cost a 28-file reformat during Phase 2.
+
+### `npm run lint` does not run Biome
+
+`"lint": "npm run biome && svelte-check"` and `"biome": "biome"` — invoking
+Biome with no arguments prints help and exits 0. So `npm run lint` only ever
+runs `svelte-check`. The real Biome gate is CI's `biome ci`
+(`.github/workflows/biome.yml`), which is not reproduced by any npm script.
+
+Separately, `biome ci` reports thousands of findings against this checkout,
+overwhelmingly in untouched code (`src/admin` 2447, `src/gateway` 958,
+`src/common` 144) plus `dist/assets` 1290 when a build is present. Pre-existing;
+not investigated further.
 
 ### Missing toolchain
 
