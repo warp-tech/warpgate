@@ -20,10 +20,12 @@ use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
 use warpgate_core::Services;
+use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 
+use crate::audit::{StreamOperation, classify_mutating, classify_stream};
 use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
-use crate::recording::{deduce_exec_recording_metadata, start_recording_api, start_recording_exec};
+use crate::recording::{start_recording_api, start_recording_exec};
 use crate::server::auth::{authenticate_kubernetes_user, create_authenticated_client};
 
 /// A client-supplied impersonation header (`Impersonate-User`,
@@ -50,13 +52,40 @@ fn redact_headers(headers: &HashMap<String, String>) -> HashMap<String, String> 
         .collect()
 }
 
+/// Whether a pump failure only means a peer had already gone: a client killed
+/// mid-stream drops its TCP connection without a websocket close (how a
+/// `kubectl port-forward` ordinarily ends), and the close handshake itself can
+/// leave one direction writing into the socket the other has just closed.
+/// Neither is an error an operator needs to see.
+///
+/// `tungstenite`'s `AlreadyClosed` / `ConnectionClosed` are matched on text:
+/// poem stringifies them into `io::Error::other` on the server side, and the
+/// client side's `tungstenite` is a different version from the one this crate
+/// links, so a `downcast_ref` would never match either.
+fn is_peer_gone(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        if let Some(io_error) = cause.downcast_ref::<std::io::Error>() {
+            return matches!(
+                io_error.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    // rustls reports a peer that vanished without a TLS
+                    // close_notify as an unexpected EOF.
+                    | std::io::ErrorKind::UnexpectedEof
+            );
+        }
+        let text = cause.to_string();
+        text.contains("Trying to work with closed connection")
+            || text.contains("Connection closed normally")
+    })
+}
+
 fn construct_target_url(
     req: &Request,
-    path: &str,
+    api_path: &str,
     k8s_options: &TargetKubernetesOptions,
 ) -> Result<Url> {
-    let api_path = format!("/{path}");
-
     let query = req.uri().query().unwrap_or("");
 
     Ok(Url::parse(&if query.is_empty() {
@@ -89,30 +118,71 @@ pub async fn handle_api_request(
     // command's fan-out of requests only prompts for approval once.
     let user = authenticate_kubernetes_user(req, ctx.services()).await?;
 
+    // The path exactly as the API server will see it. The url crate resolves
+    // `.` and `..` segments, so a request cannot name one pod to the audit
+    // classifier and another to the cluster; the classifiers and the upstream
+    // URL are all built from this one value.
+    let api_path = Url::parse(&format!("http://localhost/{path}"))
+        .map_err(poem::error::BadRequest)?
+        .path()
+        .to_owned();
+
     let (handle, admitted) =
         correlated_authorization(correlator.0, req, &user, &target_name, ctx.services()).await?;
 
-    let log_span = {
+    let (user_session_id, log_span) = {
         // The user info is already on the session: it is set when the session is
         // registered, before its authorization is resolved.
         let handle = handle.lock().await;
-        span_for_request(req, ctx.services(), Some(&*handle)).await?
+        (
+            handle.user_session_id(),
+            span_for_request(req, ctx.services(), Some(&*handle)).await?,
+        )
+    };
+
+    // Built once per request and handed to both branches, so every Kubernetes
+    // audit event names the same actor, session and target. The *user* session
+    // id is the one the log layer keys entries by — recordings key off the
+    // target session id instead, and the two must not be confused.
+    let audit_subject = {
+        let target = admitted.target();
+        KubernetesAuditSubject {
+            session_id: user_session_id.0,
+            user_id: admitted.user_info().id,
+            username: admitted.user_info().username.clone(),
+            target_id: target.id,
+            target_name: target.name.clone(),
+        }
     };
 
     async {
         let response = if let Some(ws) = ws {
-            _handle_websocket_request_inner(ws, req, admitted, &path, ctx.services())
-                .await
-                .map(IntoResponse::into_response)
-                .map_err(poem::Error::from)
+            _handle_websocket_request_inner(
+                ws,
+                req,
+                admitted,
+                &api_path,
+                &audit_subject,
+                ctx.services(),
+            )
+            .await
+            .map(IntoResponse::into_response)
+            .map_err(poem::Error::from)
         } else {
             // Not `.context(...)`: that converts the `WarpgateError` to an
             // `anyhow::Error`, which poem renders through `Display` instead
             // of `as_response()`.
-            _handle_normal_request_inner(req, body, admitted, &path, ctx.services())
-                .await
-                .map(IntoResponse::into_response)
-                .map_err(poem::Error::from)
+            _handle_normal_request_inner(
+                req,
+                body,
+                admitted,
+                &api_path,
+                &audit_subject,
+                ctx.services(),
+            )
+            .await
+            .map(IntoResponse::into_response)
+            .map_err(poem::Error::from)
         };
 
         let client_ip = get_client_ip(req, ctx.services()).await;
@@ -138,7 +208,8 @@ async fn _handle_normal_request_inner(
     req: &Request,
     body: Body,
     admitted: AdmittedSession,
-    path: &str,
+    api_path: &str,
+    audit_subject: &KubernetesAuditSubject,
     services: &Services,
 ) -> Result<Response, WarpgateError> {
     let user_info = admitted.user_info();
@@ -161,7 +232,7 @@ async fn _handle_normal_request_inner(
     let method = req.method().as_str();
     // Construct the full URL to the Kubernetes API server (without target prefix)
     let full_url =
-        construct_target_url(req, path, k8s_options).context("constructing target URL")?;
+        construct_target_url(req, api_path, k8s_options).context("constructing target URL")?;
 
     // Extract headers
     let mut headers = HashMap::new();
@@ -264,6 +335,15 @@ async fn _handle_normal_request_inner(
 
     let status = response.status();
     let response_headers = response.headers().clone();
+
+    // Emitted after the response so a refused `kubectl debug` is audited as
+    // clearly as an accepted one, and before the body is consumed so a failure
+    // to read it cannot lose the event.
+    if let Some(operation) = classify_mutating(method, api_path, req.uri().query(), &body_bytes) {
+        for event in operation.audit_events(audit_subject, status.as_u16()) {
+            event.emit();
+        }
+    }
 
     debug!(
         method = method,
@@ -387,12 +467,13 @@ async fn _handle_websocket_request_inner(
     ws: WebSocket,
     req: &Request,
     admitted: AdmittedSession,
-    path: &str,
+    api_path: &str,
+    audit_subject: &KubernetesAuditSubject,
     services: &Services,
 ) -> anyhow::Result<impl IntoResponse> {
     let user_info = admitted.user_info();
     let k8s_options = admitted.options();
-    let mut full_url = construct_target_url(req, path, k8s_options)?;
+    let mut full_url = construct_target_url(req, api_path, k8s_options)?;
     if full_url.scheme() == "https" {
         let _ = full_url.set_scheme("wss");
     } else {
@@ -404,10 +485,18 @@ async fn _handle_websocket_request_inner(
         .http1_only()
         .build()?;
 
+    // Classified independently of recording: an audit trail must not depend on
+    // whether session recording happens to be switched on.
+    let operation = classify_stream(api_path, req.uri().query());
+
     let (recorder_tx, recorder_rx) = mpsc::channel::<Vec<u8>>(1000);
     {
         let enabled = services.recordings.is_enabled().await.unwrap_or(false);
-        if enabled && let Some(metadata) = deduce_exec_recording_metadata(&full_url) {
+        if enabled
+            && let Some(metadata) = operation
+                .as_ref()
+                .and_then(StreamOperation::recording_metadata)
+        {
             match start_recording_exec(&admitted.id(), &services.recordings, metadata).await {
                 Err(e) => {
                     error!("Failed to start recording: {}", e);
@@ -426,6 +515,8 @@ async fn _handle_websocket_request_inner(
         .context("missing Sec-Websocket-Protocol request header")?
         .to_string();
 
+    let audit_subject = audit_subject.clone();
+
     let ws_handler_inner = async move |socket: WebSocketStream| {
         let client_response = client
             .get(full_url.clone())
@@ -436,7 +527,20 @@ async fn _handle_websocket_request_inner(
             .context("sending websocket request to Kubernetes API")?;
 
         let status = client_response.status();
-        if status != http::StatusCode::SWITCHING_PROTOCOLS {
+        let established = status == http::StatusCode::SWITCHING_PROTOCOLS;
+        // Audited on the cluster's verdict, so a stream it refused (most often
+        // RBAC) and one it opened are told apart, and a stream that never
+        // reached it is not recorded as having started.
+        if let Some(operation) = &operation {
+            if established {
+                operation.audit_event(&audit_subject).emit();
+            } else {
+                operation
+                    .rejection_event(&audit_subject, status.as_u16())
+                    .emit();
+            }
+        }
+        if !established {
             let client_response = client_response.into_inner();
             let body = client_response.text().await?;
             bail!("Unexpected websocket response status from Kubernetes API: {status}: {body}");
@@ -448,11 +552,11 @@ async fn _handle_websocket_request_inner(
             .context("negotiating websocket connection with Kubernetes")?;
 
         let (client_sink, client_source) = client_socket.split();
-
         let (server_sink, server_source) = socket.split();
+
         let server_to_client = {
             let recorder_tx = recorder_tx.clone();
-            tokio::spawn(pump_websocket(server_source, client_sink, move |msg| {
+            pump_websocket(server_source, client_sink, move |msg| {
                 let recorder_tx = recorder_tx.clone();
                 async move {
                     tracing::debug!("Server: {:?}", msg);
@@ -461,26 +565,38 @@ async fn _handle_websocket_request_inner(
                     }
                     anyhow::Ok(msg)
                 }
-            }))
+            })
         };
 
-        let client_to_server =
-            tokio::spawn(pump_websocket(client_source, server_sink, move |msg| {
-                let recorder_tx = recorder_tx.clone();
-                async move {
-                    tracing::debug!("Client: {:?}", msg);
-                    if let tungstenite::Message::Binary(data) = &msg {
-                        let _ = recorder_tx.send(data.to_vec()).await;
-                    }
-                    anyhow::Ok(msg)
+        let client_to_server = pump_websocket(client_source, server_sink, move |msg| {
+            let recorder_tx = recorder_tx.clone();
+            async move {
+                tracing::debug!("Client: {:?}", msg);
+                if let tungstenite::Message::Binary(data) = &msg {
+                    let _ = recorder_tx.send(data.to_vec()).await;
                 }
-            }));
+                anyhow::Ok(msg)
+            }
+        });
 
-        server_to_client.await??;
-        client_to_server.await??;
+        // Whichever direction ends first takes the stream down; the other is
+        // dropped rather than left to fail writing into the closed socket.
+        let result = tokio::select! {
+            result = server_to_client => result,
+            result = client_to_server => result,
+        };
+        match result {
+            Err(error) if is_peer_gone(&error) => debug!("Websocket peer gone: {error:#}"),
+            result => result?,
+        }
         debug!("Closing Websocket stream");
         Ok::<(), anyhow::Error>(())
     };
+
+    // poem drives the upgraded stream after this handler has returned, so the
+    // request span is carried over explicitly; the database log layer keeps
+    // only events that fall under a session span.
+    let span = tracing::Span::current();
 
     Ok(ws
         .protocols(vec![
@@ -491,11 +607,13 @@ async fn _handle_websocket_request_inner(
             "v5.channel.k8s.io",
             "SPDY/3.1+portforward.k8s.io",
         ])
-        .on_upgrade(|socket| async move {
-            ws_handler_inner(socket).await.inspect_err(|e| {
-                error!("Websocket handling error: {e:?}");
-            })?;
-            Ok::<(), anyhow::Error>(())
+        .on_upgrade(move |socket| {
+            async move {
+                if let Err(error) = ws_handler_inner(socket).await {
+                    error!("Websocket handling error: {error:?}");
+                }
+            }
+            .instrument(span)
         })
         .into_response())
 }
@@ -505,6 +623,35 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{is_impersonation_header, redact_headers};
+
+    #[test]
+    fn normal_stream_teardown_is_not_an_error() {
+        // One direction closes, the other fails writing into it.
+        let closed =
+            anyhow::anyhow!("Trying to work with closed connection").context("tungstenite error");
+        assert!(super::is_peer_gone(&closed));
+
+        for kind in [
+            std::io::ErrorKind::BrokenPipe,
+            // A killed client: the TLS session ends without a close_notify.
+            std::io::ErrorKind::UnexpectedEof,
+        ] {
+            let error = anyhow::Error::new(std::io::Error::new(kind, "peer gone"));
+            assert!(super::is_peer_gone(&error), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn real_stream_failures_are_still_errors() {
+        let refused = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::ConnectionRefused,
+            "no route",
+        ));
+        assert!(!super::is_peer_gone(&refused));
+        assert!(!super::is_peer_gone(&anyhow::anyhow!(
+            "stream error: protocol violation"
+        )));
+    }
 
     #[test]
     fn impersonation_detection_is_case_insensitive() {
