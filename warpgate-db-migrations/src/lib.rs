@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use sea_orm::{DatabaseConnection, TransactionTrait};
+use sea_orm::{DatabaseBackend, DatabaseConnection, TransactionTrait};
 use sea_orm_migration::MigrationTrait;
 use sea_orm_migration::prelude::*;
 
@@ -246,9 +246,7 @@ async fn run_locked<
 /// might see different DB state
 pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbErr> {
     run_locked(connection, MIGRATION_LOCK_KEY, async move || {
-        let tx = connection.begin().await?;
-        Migrator::up(&tx, None).await?;
-        tx.commit().await
+        run_maybe_in_tx(connection, Direction::Up, None).await
     })
     .await?;
 
@@ -257,9 +255,7 @@ pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbE
 
 /// Apply `steps` pending migrations.
 pub async fn migrate_database_up(connection: &DatabaseConnection, steps: u32) -> Result<(), DbErr> {
-    let tx = connection.begin().await?;
-    Migrator::up(&tx, Some(steps)).await?;
-    tx.commit().await
+    run_maybe_in_tx(connection, Direction::Up, Some(steps)).await
 }
 
 /// Revert `steps` applied migrations.
@@ -267,9 +263,39 @@ pub async fn migrate_database_down(
     connection: &DatabaseConnection,
     steps: u32,
 ) -> Result<(), DbErr> {
-    let tx = connection.begin().await?;
-    Migrator::down(&tx, Some(steps)).await?;
-    tx.commit().await
+    run_maybe_in_tx(connection, Direction::Down, Some(steps)).await
+}
+
+enum Direction {
+    Up,
+    Down,
+}
+
+/// Migrations need an explicit TX on SQLite (only), otherwise pooled connections
+/// might see different DB state
+async fn run_maybe_in_tx(
+    connection: &DatabaseConnection,
+    direction: Direction,
+    steps: Option<u32>,
+) -> Result<(), DbErr> {
+    if connection.get_database_backend() == DatabaseBackend::Sqlite {
+        let tx = connection.begin().await?;
+        run(&tx, direction, steps).await?;
+        tx.commit().await
+    } else {
+        run(connection, direction, steps).await
+    }
+}
+
+async fn run<'c, C: IntoSchemaManagerConnection<'c>>(
+    db: C,
+    direction: Direction,
+    steps: Option<u32>,
+) -> Result<(), DbErr> {
+    match direction {
+        Direction::Up => Migrator::up(db, steps).await,
+        Direction::Down => Migrator::down(db, steps).await,
+    }
 }
 
 #[cfg(test)]
