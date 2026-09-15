@@ -80,6 +80,27 @@ def target_on(api, port):
     return make_user_and_target(api, port)
 
 
+def _anonymous_bytes(proc: psutil.Process) -> int:
+    """Resident memory the process itself allocated, not pages of its own
+    binary the kernel happens to have mapped in.
+
+    `psutil.rss` is VmRSS, which includes file-backed pages of the executable.
+    Under memory pressure the kernel evicts those and faults them back in on
+    the next burst of activity, so VmRSS of an idle-then-busy process can move
+    by hundreds of MiB with no allocation at all -- and a coverage-instrumented
+    debug binary has hundreds of MiB to move. An unbounded read shows up in
+    anonymous memory, so that is what this measures where the kernel reports
+    it; elsewhere it falls back to rss."""
+    try:
+        with open(f"/proc/{proc.pid}/status") as status:
+            for line in status:
+                if line.startswith("RssAnon:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    return proc.memory_info().rss
+
+
 # `silent_after_banner` is left out here and tested on its own: it is bounded by
 # the 30s handshake deadline rather than failing immediately, which needs a
 # longer client timeout than the rest of these want.
@@ -95,7 +116,7 @@ def test_a_hostile_target_cannot_hang_or_crash_the_gateway(
         user, target = target_on(api, server.port)
 
         gateway = psutil.Process(cert_wg.process.pid)
-        rss_before = gateway.memory_info().rss
+        rss_before = _anonymous_bytes(gateway)
 
         started = time.time()
         code, _ = connect(processes, cert_wg, user, target, timeout)
@@ -106,7 +127,7 @@ def test_a_hostile_target_cannot_hang_or_crash_the_gateway(
         assert elapsed < 60, f"{mode} held the session for {elapsed:.0f}s"
 
         # An unbounded read shows up here rather than in the exit code.
-        growth = gateway.memory_info().rss - rss_before
+        growth = _anonymous_bytes(gateway) - rss_before
         assert growth < 256 * 1024 * 1024, (
             f"{mode} grew the gateway by {growth // (1024 * 1024)} MiB"
         )
