@@ -295,8 +295,14 @@ mod tests {
         ));
 
         let shown = shown_to_the_browser(&leaky);
-        assert!(!shown.contains("SELECT"), "the raw error reached the browser: {shown}");
-        assert!(!shown.contains("database error"), "the raw error reached the browser: {shown}");
+        assert!(
+            !shown.contains("SELECT"),
+            "the raw error reached the browser: {shown}"
+        );
+        assert!(
+            !shown.contains("database error"),
+            "the raw error reached the browser: {shown}"
+        );
         assert_eq!(shown, leaky.client_message());
     }
 }

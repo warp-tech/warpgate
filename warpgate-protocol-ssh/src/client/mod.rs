@@ -3023,10 +3023,9 @@ mod tests {
             use crate::ConnectionError;
 
             let internals = "relation warpgate_user column password_hash";
-            let shown = ConnectionError::Warpgate(WarpgateError::other(std::io::Error::other(
-                internals,
-            )))
-            .client_message();
+            let shown =
+                ConnectionError::Warpgate(WarpgateError::other(std::io::Error::other(internals)))
+                    .client_message();
 
             assert!(
                 !shown.contains(internals),

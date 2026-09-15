@@ -359,7 +359,6 @@ mod tests {
         );
     }
 
-
     /// A target name is free text an operator types; it is drawn into the PTY of
     /// everyone who connects through that target.
     #[test]
