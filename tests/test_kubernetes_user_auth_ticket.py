@@ -18,6 +18,9 @@ from .util import alloc_port, wait_port
 def create_target(api, port):
     return api.create_target(sdk.TargetDataRequest(
         name=f"k8s-ticket-{uuid4()}",
+        require_approval=False,
+        ticket_requests_disabled=False,
+        ticket_require_approval=False,
         options=sdk.TargetOptions(sdk.TargetOptionsTargetKubernetesOptions(
             kind="Kubernetes",
             cluster_url=f"http://127.0.0.1:{port}",
@@ -181,8 +184,11 @@ def test_non_kubernetes_ticket_is_not_spent(shared_wg, ticket_setup):
     api, user, _ = ticket_setup
     target = api.create_target(sdk.TargetDataRequest(
         name=f"http-ticket-{uuid4()}",
+        require_approval=False,
+        ticket_requests_disabled=False,
+        ticket_require_approval=False,
         options=sdk.TargetOptions(sdk.TargetOptionsTargetHTTPOptions(
-            kind="Http", url="http://127.0.0.1:1",
+            kind="Http", url="http://127.0.0.1:1", headers={},
             tls=sdk.Tls(mode=sdk.TlsMode.DISABLED, verify=False),
         )),
     ))
