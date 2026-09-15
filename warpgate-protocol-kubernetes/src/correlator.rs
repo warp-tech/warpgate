@@ -6,7 +6,7 @@ use poem::Request;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberApprovalBy};
-use warpgate_common::{TargetKubernetesOptions, User, UserSessionId, WarpgateError};
+use warpgate_common::{TargetKubernetesOptions, UserSessionId, WarpgateError};
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::approvals::{GatedConnection, admit_target_session};
 use warpgate_core::{
@@ -14,10 +14,34 @@ use warpgate_core::{
     WarpgateServerHandle,
 };
 
-use crate::server::auth::{authorize_kubernetes_target, unauthorized};
+use crate::server::auth::{KubernetesIdentity, authorize_kubernetes_target, unauthorized};
 use crate::session_handle::KubernetesSessionHandle;
 
-type CorrelationKey = (Uuid, String, Option<String>); // (user id, target_name, ip)
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct CorrelationKey {
+    user_id: Uuid,
+    target_name: String,
+    ip: Option<String>,
+    // Ticket sessions must never share admission with another ticket or a
+    // normal login by the same user.
+    ticket_id: Option<Uuid>,
+}
+
+impl CorrelationKey {
+    async fn for_request(
+        request: &Request,
+        identity: &KubernetesIdentity,
+        services: &Services,
+        target_name: String,
+    ) -> Self {
+        Self {
+            user_id: identity.user_info().id,
+            target_name,
+            ip: get_client_ip(request, services).await,
+            ticket_id: identity.ticket_id(),
+        }
+    }
+}
 
 /// Approval refusale are remembered because otherwise every API request would trigger a new one
 /// This is just long enough to cover a burst of API requests from a single kubectl
@@ -68,12 +92,19 @@ pub struct RequestCorrelator {
 pub async fn correlated_authorization(
     correlator: &Arc<Mutex<RequestCorrelator>>,
     request: &Request,
-    user: &User,
+    identity: KubernetesIdentity,
     target_name: &str,
     services: &Services,
 ) -> poem::Result<(Arc<Mutex<WarpgateServerHandle>>, AdmittedSession)> {
-    let user_info: AuthStateUserInfo = user.into();
-    let key = correlation_key_for_request(request, services, &user_info, target_name).await?;
+    let user_info = identity.user_info();
+    let key = CorrelationKey::for_request(request, &identity, services, target_name.into()).await;
+    let max_age = services
+        .config
+        .lock()
+        .await
+        .store
+        .kubernetes
+        .session_max_age;
 
     loop {
         if correlator.lock().await.was_refused(&key) {
@@ -84,7 +115,7 @@ pub async fn correlated_authorization(
         // joining: joining waits for the opening request's approval, which can
         // take minutes, and that request needs the correlator lock to clean up
         // after a denial.
-        let existing = correlator.lock().await.entry(&key);
+        let existing = correlator.lock().await.entry(&key, max_age);
         if let Some((handle, slot)) = existing
             && let Some(joined) = join_session(correlator, &key, handle, slot, services).await?
         {
@@ -100,7 +131,7 @@ pub async fn correlated_authorization(
         let slot = SharedAuthorization::default();
         let claimed = {
             let mut correlator = correlator.lock().await;
-            if correlator.entry(&key).is_some() {
+            if correlator.entry(&key, max_age).is_some() {
                 None
             } else {
                 // Locked before the correlator lock is released, so a request
@@ -122,9 +153,18 @@ pub async fn correlated_authorization(
             continue;
         };
 
-        return match authorize_kubernetes_target(request, user, target_name, session_id, services)
-            .await
-        {
+        let resolved = match identity {
+            KubernetesIdentity::User(user) => {
+                authorize_kubernetes_target(request, &user, target_name, session_id, services).await
+            }
+            KubernetesIdentity::Ticket(ticket) => ticket
+                .spend(&services.db)
+                .await
+                .map_err(poem::Error::from)
+                .and_then(|authorization| authorization.ok_or_else(unauthorized))
+                .and_then(|authorization| authorization.narrow().map_err(Into::into)),
+        };
+        return match resolved {
             Ok(resolved) => {
                 let admitted =
                     match admit_kubernetes_session(request, services, &handle, resolved).await {
@@ -267,16 +307,6 @@ async fn register_pending_session(
     Ok(handle)
 }
 
-async fn correlation_key_for_request(
-    request: &Request,
-    services: &Services,
-    user_info: &AuthStateUserInfo,
-    target_name: &str,
-) -> Result<CorrelationKey, WarpgateError> {
-    let ip = get_client_ip(request, services).await;
-    Ok((user_info.id, target_name.into(), ip))
-}
-
 impl RequestCorrelator {
     pub fn new(services: &Services) -> Arc<Mutex<Self>> {
         let this = Arc::new(Mutex::new(Self {
@@ -293,9 +323,12 @@ impl RequestCorrelator {
     fn entry(
         &self,
         key: &CorrelationKey,
+        max_age: Duration,
     ) -> Option<(Arc<Mutex<WarpgateServerHandle>>, SharedAuthorization)> {
         self.handles
             .get(key)
+            // Enforce the bound at lookup, not just on the periodic vacuum.
+            .filter(|entry| entry.created.elapsed() < max_age)
             .map(|entry| (entry.handle.clone(), entry.authorization.clone()))
     }
 
@@ -307,8 +340,9 @@ impl RequestCorrelator {
 
     fn evict(&mut self, key: &CorrelationKey, slot: &SharedAuthorization) {
         if self
-            .entry(key)
-            .is_some_and(|(_, current)| Arc::ptr_eq(&current, slot))
+            .handles
+            .get(key)
+            .is_some_and(|entry| Arc::ptr_eq(&entry.authorization, slot))
         {
             self.handles.remove(key);
         }
