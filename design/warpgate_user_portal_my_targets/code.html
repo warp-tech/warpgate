@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "error-container": "#93000a", "secondary-fixed-dim": "#ffb94e", "on-surface-variant": "#c3c6d2", "on-primary-fixed": "#001b3d", "on-error": "#690005", "outline-variant": "#424750", "secondary-container": "#c88601", "surface-container": "#1c2024", "on-secondary-fixed-variant": "#624000", "surface-bright": "#363a3e", "primary": "#a9c7ff", "on-secondary-container": "#3f2700", "surface-container-low": "#181c20", "tertiary-fixed": "#86f9b8", "on-tertiary": "#003920", "inverse-primary": "#2e5ea2", "on-surface": "#e0e3e8", "on-primary-container": "#003b77", "background": "#101418", "tertiary-container": "#46bb7f", "on-secondary-fixed": "#291800", "primary-fixed-dim": "#a9c7ff", "inverse-on-surface": "#2d3135", "inverse-surface": "#e0e3e8", "secondary": "#ffb94e", "primary-container": "#7ba7f0", "on-tertiary-fixed-variant": "#005231", "secondary-fixed": "#ffddb2", "on-tertiary-fixed": "#002111", "surface-container-highest": "#31353a", "outline": "#8d919c", "primary-fixed": "#d6e3ff", "on-error-container": "#ffdad6", "surface-dim": "#101418", "surface-container-high": "#262a2f", "surface": "#101418", "on-secondary": "#452b00", "on-primary": "#003063", "error": "#ffb4ab", "tertiary-fixed-dim": "#69dc9d", "on-primary-fixed-variant": "#084689", "surface-variant": "#31353a", "tertiary": "#69dc9d", "surface-tint": "#a9c7ff", "surface-container-lowest": "#0b0f13", "on-background": "#e0e3e8", "on-tertiary-container": "#004629" }, "borderRadius": { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" }, "spacing": { "margin-mobile": "1rem", "space-lg": "1rem", "space-xs": "0.25rem", "gutter-compact": "0.5rem", "gutter": "1rem", "margin": "1.5rem", "space-md": "0.75rem", "space-xl": "1.5rem", "space-sm": "0.5rem" }, "fontFamily": { "label-sm": [ "IBM Plex Sans" ], "headline-lg": [ "IBM Plex Sans" ], "code-md": [ "JetBrains Mono" ], "headline-lg-mobile": [ "IBM Plex Sans" ], "body-md": [ "IBM Plex Sans" ], "code-sm": [ "JetBrains Mono" ], "headline-md": [ "IBM Plex Sans" ], "body-lg": [ "IBM Plex Sans" ], "label-md": [ "IBM Plex Sans" ] }, "fontSize": { "label-sm": [ "12px", { "lineHeight": "16px", "fontWeight": "400" } ], "headline-lg": [ "32px", { "lineHeight": "38px", "fontWeight": "600" } ], "code-md": [ "13px", { "lineHeight": "18px", "fontWeight": "400" } ], "headline-lg-mobile": [ "24px", { "lineHeight": "32px", "fontWeight": "600" } ], "body-md": [ "14px", { "lineHeight": "20px", "fontWeight": "400" } ], "code-sm": [ "12px", { "lineHeight": "16px", "fontWeight": "400" } ], "headline-md": [ "20px", { "lineHeight": "28px", "fontWeight": "600" } ], "body-lg": [ "16px", { "lineHeight": "24px", "fontWeight": "400" } ], "label-md": [ "13px", { "lineHeight": "18px", "fontWeight": "500" } ] } } } }</script></head><body class="bg-background font-body-md text-on-surface antialiased min-h-screen"><aside class="fixed left-0 top-0 h-full w-[240px] bg-surface-container-low border-r border-outline-variant/40 z-50 flex flex-col justify-between select-none"><div class="flex flex-col"><div class="h-14 flex items-center gap-space-sm px-space-md border-b border-outline-variant/30"><div class="w-7 h-7 rounded bg-surface-container flex items-center justify-center border border-outline-variant/50 text-primary-container"><span class="material-symbols-outlined text-[18px]">adjust</span></div><div class="flex flex-col"><span class="font-headline-md text-[15px] font-semibold tracking-tight text-on-surface leading-tight">Warpgate</span><span class="font-code-sm text-[10px] text-outline tracking-wider uppercase font-medium">BASTION CORE</span></div></div><div class="overflow-y-auto py-space-sm max-h-[calc(100vh-120px)]"><div class="px-space-md pt-space-sm pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">ACCESS</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a aria-current="page" class="flex items-center gap-space-sm h-8 px-space-md rounded-lg transition-colors bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium" data-path="overview" href="#"><span class="material-symbols-outlined text-[18px]">space_dashboard</span><span class="font-label-md">Overview</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="sessions" href="#"><span class="material-symbols-outlined text-[18px]">terminal</span><span class="font-label-md">Sessions</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="targets" href="#"><span class="material-symbols-outlined text-[18px]">dns</span><span class="font-label-md">Targets</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">IDENTITY</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="users" href="#"><span class="material-symbols-outlined text-[18px]">group</span><span class="font-label-md">Users</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="roles" href="#"><span class="material-symbols-outlined text-[18px]">badge</span><span class="font-label-md">Roles</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="tickets" href="#"><span class="material-symbols-outlined text-[18px]">confirmation_number</span><span class="font-label-md">Tickets</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="sso-providers" href="#"><span class="material-symbols-outlined text-[18px]">vpn_key</span><span class="font-label-md">SSO Providers</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">SECURITY</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="login-protection" href="#"><span class="material-symbols-outlined text-[18px]">shield</span><span class="font-label-md">Login Protection</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="known-hosts" href="#"><span class="material-symbols-outlined text-[18px]">verified</span><span class="font-label-md">Known Hosts</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="audit-log" href="#"><span class="material-symbols-outlined text-[18px]">receipt_long</span><span class="font-label-md">Audit Log</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">SYSTEM</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="configuration" href="#"><span class="material-symbols-outlined text-[18px]">settings</span><span class="font-label-md">Configuration</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="cluster" href="#"><span class="material-symbols-outlined text-[18px]">hub</span><span class="font-label-md">Cluster</span></a></nav></div></div><div class="p-space-sm border-t border-outline-variant/30 flex items-center justify-between bg-surface-container-lowest/60"><div class="flex items-center gap-space-sm min-w-0"><div class="w-7 h-7 rounded bg-surface-container-high flex items-center justify-center border border-outline-variant/50 shrink-0"><span class="material-symbols-outlined text-[16px] text-primary-container">admin_panel_settings</span></div><div class="flex flex-col min-w-0"><span class="font-label-md text-on-surface truncate leading-none">admin</span><span class="font-code-sm text-[11px] text-outline truncate leading-tight">marta.k</span></div></div><div class="flex items-center gap-space-xs"><button class="w-7 h-7 flex items-center justify-center rounded text-outline-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Toggle Mode" type="button"><span class="material-symbols-outlined text-[16px]">dark_mode</span></button><button class="w-7 h-7 flex items-center justify-center rounded text-outline-variant hover:text-error hover:bg-surface-container-high transition-colors" title="Sign out" type="button"><span class="material-symbols-outlined text-[16px]">logout</span></button></div></div></aside><div class="pl-[240px]"><header class="fixed top-0 left-[240px] right-0 h-14 bg-surface-container-low/95 backdrop-blur border-b border-outline-variant/40 z-40 flex items-center justify-between px-space-xl"><div class="flex items-center gap-space-sm font-code-sm text-outline"><span class="text-outline hover:text-on-surface transition-colors">Warpgate</span><span class="text-outline-variant">/</span><span class="text-on-surface font-medium">Overview</span></div><div class="flex items-center gap-space-md"><div class="relative flex items-center"><div class="flex items-center h-8 bg-surface-container-lowest border border-outline-variant/50 rounded-xl px-space-sm gap-space-sm w-64 focus-within:border-primary-container transition-colors"><span class="material-symbols-outlined text-[16px] text-outline">search</span><span class="font-body-md text-outline text-[13px] flex-1 select-none">Search</span><kbd class="font-code-sm text-[11px] text-outline-variant bg-surface-container px-1.5 py-0.5 rounded border border-outline-variant/30">⌘K</kbd></div></div><div class="h-6 flex items-center gap-1.5 px-2 bg-surface-container border border-outline-variant/40 rounded-full"><span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span><span class="font-code-sm text-[11px] font-medium text-secondary-fixed-dim">3 live</span></div><button class="w-8 h-8 rounded-lg flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors relative" title="Notifications" type="button"><span class="material-symbols-outlined text-[18px]">notifications</span><span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-primary-container"></span></button><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center border border-outline-variant/40"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></header><main class="relative pt-14 bg-background min-h-screen"><div class="max-w-[1600px] w-full mx-auto p-space-xl"><div class="flex flex-col w-full">
+<!-- Target Connection Dialog / CLI Modal Drawer (Hidden by default, toggled via JS) -->
+<div class="fixed bottom-6 right-6 z-50 transform translate-y-20 opacity-0 transition-all duration-200 pointer-events-none bg-surface-container-highest text-on-surface px-space-md py-space-sm rounded shadow-2xl flex items-center gap-space-sm border-l-2 border-primary-container" id="cli-toast">
+<span class="material-symbols-outlined text-primary-container text-[18px]">check_circle</span>
+<span class="font-code-sm text-on-surface" id="cli-toast-msg">Copied bastion string to clipboard</span>
+</div>
+<!-- Page Header Unit -->
+<div class="flex flex-col gap-space-xs pb-space-lg mb-space-md border-b border-outline-variant/30">
+<div class="flex items-center justify-between">
+<div class="flex items-baseline gap-space-md">
+<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">My targets</h1>
+<span class="font-code-sm text-outline tracking-wider uppercase">ZONE: PROD-EU-CENTRAL-1</span>
+</div>
+<div class="flex items-center gap-space-xs text-outline font-code-sm bg-surface-container-low px-space-sm py-1 rounded">
+<span class="inline-block w-1.5 h-1.5 rounded-full bg-tertiary animate-pulse"></span>
+<span class="text-on-surface-variant font-medium">11 operational</span>
+<span class="text-outline-variant">/</span>
+<span class="text-error">1 degraded</span>
+</div>
+</div>
+<p class="font-body-lg text-body-lg text-on-surface-variant">Everything you can reach through Warpgate.</p>
+</div>
+<!-- Telemetry Bar & Fast Jump: Recently Used -->
+<div class="flex flex-col gap-space-xs mb-space-xl">
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-[11px] uppercase tracking-widest text-outline font-semibold flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px] text-secondary">history</span>
+        Recently used
+      </span>
+<span class="font-code-sm text-[11px] text-outline">Direct jump (Ctrl+1-4)</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-space-sm">
+<!-- Fast Target 1 -->
+<button class="flex items-center justify-between p-space-sm bg-surface-container hover:bg-surface-container-high transition-colors rounded text-left group" onclick="copyBastionCmd('ssh marta.k:prod-bastion-01@warpgate.acme.io -p 2222', 'Production Bastion 01')">
+<div class="flex items-center gap-space-sm min-w-0">
+<span class="font-code-sm text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface-container-lowest text-primary-container uppercase tracking-tight">SSH</span>
+<div class="flex flex-col min-w-0">
+<span class="font-label-md text-label-md text-on-surface truncate group-hover:text-primary transition-colors">prod-bastion-01</span>
+<span class="font-code-sm text-[11px] text-outline truncate">bastion.internal:22</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-[16px] text-outline-variant group-hover:text-primary-container">arrow_forward</span>
+</button>
+<!-- Fast Target 2 -->
+<button class="flex items-center justify-between p-space-sm bg-surface-container hover:bg-surface-container-high transition-colors rounded text-left group" onclick="copyBastionCmd('psql postgres://marta.k@warpgate.acme.io:5432/primary_db', 'Primary Production DB')">
+<div class="flex items-center gap-space-sm min-w-0">
+<span class="font-code-sm text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface-container-lowest text-secondary uppercase tracking-tight">PGSQL</span>
+<div class="flex flex-col min-w-0">
+<span class="font-label-md text-label-md text-on-surface truncate group-hover:text-secondary-fixed-dim transition-colors">Primary Production DB</span>
+<span class="font-code-sm text-[11px] text-outline truncate">db-primary-03:5432</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-[16px] text-outline-variant group-hover:text-secondary">arrow_forward</span>
+</button>
+<!-- Fast Target 3 -->
+<button class="flex items-center justify-between p-space-sm bg-surface-container hover:bg-surface-container-high transition-colors rounded text-left group" onclick="copyBastionCmd('warpgate open https://gitlab.corp.internal', 'GitLab Internal')">
+<div class="flex items-center gap-space-sm min-w-0">
+<span class="font-code-sm text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface-container-lowest text-tertiary uppercase tracking-tight">HTTPS</span>
+<div class="flex flex-col min-w-0">
+<span class="font-label-md text-label-md text-on-surface truncate group-hover:text-tertiary transition-colors">GitLab Internal</span>
+<span class="font-code-sm text-[11px] text-outline truncate">gitlab.corp.internal:443</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-[16px] text-outline-variant group-hover:text-tertiary">arrow_forward</span>
+</button>
+<!-- Fast Target 4 -->
+<button class="flex items-center justify-between p-space-sm bg-surface-container hover:bg-surface-container-high transition-colors rounded text-left group" onclick="copyBastionCmd('ssh marta.k:k8s-infra-core@warpgate.acme.io -p 2222', 'Staging K8s Bastion')">
+<div class="flex items-center gap-space-sm min-w-0">
+<span class="font-code-sm text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface-container-lowest text-primary-container uppercase tracking-tight">SSH</span>
+<div class="flex flex-col min-w-0">
+<span class="font-label-md text-label-md text-on-surface truncate group-hover:text-primary transition-colors">Staging K8s Bastion</span>
+<span class="font-code-sm text-[11px] text-outline truncate">10.142.3.11:22</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-[16px] text-outline-variant group-hover:text-primary-container">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Search & Protocol Filter Strip -->
+<div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-space-md mb-space-lg">
+<!-- Filter Chips -->
+<div class="flex flex-wrap items-center gap-space-xs select-none" id="protocol-filters">
+<button class="filter-pill h-8 px-space-md rounded bg-surface-container-high text-on-surface text-label-md font-medium flex items-center gap-1.5 shadow-sm" data-filter="all" type="button">
+<span>All</span>
+<span class="font-code-sm text-[11px] text-outline bg-surface-container-lowest px-1 rounded">12</span>
+</button>
+<button class="filter-pill h-8 px-space-md rounded bg-surface-container text-on-surface-variant hover:bg-surface-container-high text-label-md font-medium flex items-center gap-1.5 transition-colors" data-filter="ssh" type="button">
+<span>SSH</span>
+<span class="font-code-sm text-[11px] text-outline bg-surface-container-lowest px-1 rounded">6</span>
+</button>
+<button class="filter-pill h-8 px-space-md rounded bg-surface-container text-on-surface-variant hover:bg-surface-container-high text-label-md font-medium flex items-center gap-1.5 transition-colors" data-filter="postgres" type="button">
+<span>PostgreSQL</span>
+<span class="font-code-sm text-[11px] text-outline bg-surface-container-lowest px-1 rounded">2</span>
+</button>
+<button class="filter-pill h-8 px-space-md rounded bg-surface-container text-on-surface-variant hover:bg-surface-container-high text-label-md font-medium flex items-center gap-1.5 transition-colors" data-filter="https" type="button">
+<span>HTTPS</span>
+<span class="font-code-sm text-[11px] text-outline bg-surface-container-lowest px-1 rounded">3</span>
+</button>
+<button class="filter-pill h-8 px-space-md rounded bg-surface-container text-on-surface-variant hover:bg-surface-container-high text-label-md font-medium flex items-center gap-1.5 transition-colors" data-filter="rdp" type="button">
+<span>RDP</span>
+<span class="font-code-sm text-[11px] text-outline bg-surface-container-lowest px-1 rounded">1</span>
+</button>
+</div>
+<!-- Search Input Component -->
+<div class="relative w-full md:w-80">
+<div class="flex items-center h-8 bg-surface-container-lowest rounded px-space-sm gap-space-sm focus-within:bg-surface-container-low transition-colors">
+<span class="material-symbols-outlined text-[16px] text-outline">search</span>
+<input autocomplete="off" class="w-full bg-transparent text-on-surface font-body-md text-body-md placeholder:text-outline focus:outline-none" id="target-search" placeholder="Filter targets, hostnames, roles..." spellcheck="false" type="text"/>
+<span class="font-code-sm text-[11px] text-outline bg-surface-container px-1 py-0.5 rounded uppercase">/</span>
+</div>
+</div>
+</div>
+<!-- Targets Grid (3 Columns) -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-space-lg" id="targets-container">
+<!-- CARD 1: SSH - Production Bastion -->
+<div class="target-card flex flex-col justify-between p-5 rounded bg-surface-container hover:bg-surface-container-high transition-colors relative" data-host="bastion.internal" data-name="primary production db" data-protocol="ssh">
+<div>
+<div class="flex items-center justify-between mb-space-md">
+<span class="font-code-sm text-code-sm font-semibold tracking-wide uppercase px-2 py-0.5 rounded bg-surface-container-lowest text-primary-container">SSH</span>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-lowest">
+<span class="w-2 h-2 rounded-full border border-tertiary inline-block"></span>
+<span class="font-code-sm text-[11px] text-tertiary">Online</span>
+</div>
+</div>
+<h3 class="font-headline-md text-body-lg font-medium text-on-surface tracking-tight">Primary Production Bastion</h3>
+<p class="font-code-md text-code-md text-outline mt-1 mb-4 select-all">bastion-core-01.internal:22</p>
+<div class="flex items-center gap-2 mb-6">
+<span class="font-code-sm text-[11px] text-outline uppercase tracking-wider">Role</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface font-medium">oncall</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface-variant font-medium">sre-lead</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-space-md border-t border-outline-variant/30">
+<button class="h-8 px-4 bg-primary-container text-on-primary-container font-headline-md text-label-md font-semibold rounded hover:bg-primary transition-colors flex items-center gap-1.5" onclick="copyBastionCmd('ssh marta.k:bastion-core-01@warpgate.acme.io -p 2222', 'Primary Production Bastion')" type="button">
+<span class="material-symbols-outlined text-[16px]">terminal</span>
+<span>Connect</span>
+</button>
+<div class="relative group">
+<button class="w-8 h-8 rounded bg-surface-container-lowest text-outline hover:text-on-surface hover:bg-surface-bright flex items-center justify-center transition-colors" onclick="copyBastionCmd('ssh marta.k:bastion-core-01@warpgate.acme.io -p 2222', 'Primary Production Bastion')" title="Copy CLI command" type="button">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<div class="absolute bottom-full right-0 mb-2 hidden group-hover:block z-30 pointer-events-none">
+<div class="bg-surface-container-lowest text-on-surface-variant p-2 rounded shadow-xl font-code-sm text-[11px] whitespace-nowrap">
+<span class="text-outline">$</span> ssh marta.k:bastion-core-01@warpgate.acme.io -p 2222
+            </div>
+</div>
+</div>
+</div>
+</div>
+<!-- CARD 2: PostgreSQL - Primary Production DB -->
+<div class="target-card flex flex-col justify-between p-5 rounded bg-surface-container hover:bg-surface-container-high transition-colors relative" data-host="db-primary-03.internal" data-name="primary production db" data-protocol="postgres">
+<div>
+<div class="flex items-center justify-between mb-space-md">
+<span class="font-code-sm text-code-sm font-semibold tracking-wide uppercase px-2 py-0.5 rounded bg-surface-container-lowest text-secondary">PostgreSQL</span>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-lowest">
+<span class="w-2 h-2 rounded-full border border-tertiary inline-block"></span>
+<span class="font-code-sm text-[11px] text-tertiary">Online</span>
+</div>
+</div>
+<h3 class="font-headline-md text-body-lg font-medium text-on-surface tracking-tight">Primary Production DB</h3>
+<p class="font-code-md text-code-md text-outline mt-1 mb-4 select-all">db-primary-03.internal:5432</p>
+<div class="flex items-center gap-2 mb-6">
+<span class="font-code-sm text-[11px] text-outline uppercase tracking-wider">Role</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-secondary-fixed-dim font-medium">dba</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-space-md border-t border-outline-variant/30">
+<button class="h-8 px-4 bg-primary-container text-on-primary-container font-headline-md text-label-md font-semibold rounded hover:bg-primary transition-colors flex items-center gap-1.5" onclick="copyBastionCmd('psql postgres://marta.k@warpgate.acme.io:5432/primary_db', 'Primary Production DB')" type="button">
+<span class="material-symbols-outlined text-[16px]">database</span>
+<span>Connect</span>
+</button>
+<div class="relative group">
+<button class="w-8 h-8 rounded bg-surface-container-lowest text-outline hover:text-on-surface hover:bg-surface-bright flex items-center justify-center transition-colors" onclick="copyBastionCmd('psql postgres://marta.k@warpgate.acme.io:5432/primary_db', 'Primary Production DB')" title="Copy CLI command" type="button">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<div class="absolute bottom-full right-0 mb-2 hidden group-hover:block z-30 pointer-events-none">
+<div class="bg-surface-container-lowest text-on-surface-variant p-2 rounded shadow-xl font-code-sm text-[11px] whitespace-nowrap">
+<span class="text-outline">$</span> psql postgres://marta.k@warpgate.acme.io:5432/primary_db
+            </div>
+</div>
+</div>
+</div>
+</div>
+<!-- CARD 3: HTTPS - GitLab Internal -->
+<div class="target-card flex flex-col justify-between p-5 rounded bg-surface-container hover:bg-surface-container-high transition-colors relative" data-host="gitlab.corp.internal" data-name="gitlab internal" data-protocol="https">
+<div>
+<div class="flex items-center justify-between mb-space-md">
+<span class="font-code-sm text-code-sm font-semibold tracking-wide uppercase px-2 py-0.5 rounded bg-surface-container-lowest text-tertiary">HTTPS</span>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-lowest">
+<span class="w-2 h-2 rounded-full border border-tertiary inline-block"></span>
+<span class="font-code-sm text-[11px] text-tertiary">Online</span>
+</div>
+</div>
+<h3 class="font-headline-md text-body-lg font-medium text-on-surface tracking-tight">GitLab Internal</h3>
+<p class="font-code-md text-code-md text-outline mt-1 mb-4 select-all">gitlab.corp.internal:443</p>
+<div class="flex items-center gap-2 mb-6">
+<span class="font-code-sm text-[11px] text-outline uppercase tracking-wider">Role</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface font-medium">developer</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-space-md border-t border-outline-variant/30">
+<a class="h-8 px-4 bg-primary-container text-on-primary-container font-headline-md text-label-md font-semibold rounded hover:bg-primary transition-colors flex items-center gap-1.5" href="#" onclick="copyBastionCmd('warpgate open https://gitlab.corp.internal', 'GitLab Internal')">
+<span class="material-symbols-outlined text-[16px]">open_in_new</span>
+<span>Open Web</span>
+</a>
+<div class="relative group">
+<button class="w-8 h-8 rounded bg-surface-container-lowest text-outline hover:text-on-surface hover:bg-surface-bright flex items-center justify-center transition-colors" onclick="copyBastionCmd('warpgate open https://gitlab.corp.internal', 'GitLab Internal')" title="Copy CLI command" type="button">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<div class="absolute bottom-full right-0 mb-2 hidden group-hover:block z-30 pointer-events-none">
+<div class="bg-surface-container-lowest text-on-surface-variant p-2 rounded shadow-xl font-code-sm text-[11px] whitespace-nowrap">
+<span class="text-outline">$</span> warpgate open https://gitlab.corp.internal
+            </div>
+</div>
+</div>
+</div>
+</div>
+<!-- CARD 4: SSH - Staging K8s Bastion -->
+<div class="target-card flex flex-col justify-between p-5 rounded bg-surface-container hover:bg-surface-container-high transition-colors relative" data-host="10.142.3.11" data-name="staging k8s bastion" data-protocol="ssh">
+<div>
+<div class="flex items-center justify-between mb-space-md">
+<span class="font-code-sm text-code-sm font-semibold tracking-wide uppercase px-2 py-0.5 rounded bg-surface-container-lowest text-primary-container">SSH</span>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-lowest">
+<span class="w-2 h-2 rounded-full border border-tertiary inline-block"></span>
+<span class="font-code-sm text-[11px] text-tertiary">Online</span>
+</div>
+</div>
+<h3 class="font-headline-md text-body-lg font-medium text-on-surface tracking-tight">Staging K8s Bastion</h3>
+<p class="font-code-md text-code-md text-outline mt-1 mb-4 select-all">k8s-node-stg-01.internal:22</p>
+<div class="flex items-center gap-2 mb-6">
+<span class="font-code-sm text-[11px] text-outline uppercase tracking-wider">Role</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface font-medium">developer</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface-variant font-medium">qa</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-space-md border-t border-outline-variant/30">
+<button class="h-8 px-4 bg-primary-container text-on-primary-container font-headline-md text-label-md font-semibold rounded hover:bg-primary transition-colors flex items-center gap-1.5" onclick="copyBastionCmd('ssh marta.k:k8s-node-stg-01@warpgate.acme.io -p 2222', 'Staging K8s Bastion')" type="button">
+<span class="material-symbols-outlined text-[16px]">terminal</span>
+<span>Connect</span>
+</button>
+<div class="relative group">
+<button class="w-8 h-8 rounded bg-surface-container-lowest text-outline hover:text-on-surface hover:bg-surface-bright flex items-center justify-center transition-colors" onclick="copyBastionCmd('ssh marta.k:k8s-node-stg-01@warpgate.acme.io -p 2222', 'Staging K8s Bastion')" title="Copy CLI command" type="button">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<div class="absolute bottom-full right-0 mb-2 hidden group-hover:block z-30 pointer-events-none">
+<div class="bg-surface-container-lowest text-on-surface-variant p-2 rounded shadow-xl font-code-sm text-[11px] whitespace-nowrap">
+<span class="text-outline">$</span> ssh marta.k:k8s-node-stg-01@warpgate.acme.io -p 2222
+            </div>
+</div>
+</div>
+</div>
+</div>
+<!-- CARD 5: SSH - Core Redis Cache (UNREACHABLE SPEC REQUIREMENT) -->
+<div class="target-card flex flex-col justify-between p-5 rounded bg-surface-container relative opacity-85" data-host="redis-cache-cluster.internal" data-name="core redis cache" data-protocol="ssh">
+<div>
+<div class="flex items-center justify-between mb-space-md">
+<span class="font-code-sm text-code-sm font-semibold tracking-wide uppercase px-2 py-0.5 rounded bg-surface-container-lowest text-primary-container">SSH</span>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-lowest">
+<span class="w-2 h-2 rounded-sm bg-error inline-block"></span>
+<span class="font-code-sm text-[11px] text-error font-medium">Unreachable</span>
+</div>
+</div>
+<h3 class="font-headline-md text-body-lg font-medium text-on-surface tracking-tight">Core Redis Cache</h3>
+<p class="font-code-md text-code-md text-outline mt-1 mb-4 select-all">redis-cache-01.internal:6379</p>
+<div class="flex items-center gap-2 mb-6">
+<span class="font-code-sm text-[11px] text-outline uppercase tracking-wider">Role</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface font-medium">oncall</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-space-md border-t border-outline-variant/30">
+<button class="h-8 px-4 bg-surface-container-high text-outline cursor-not-allowed font-headline-md text-label-md font-semibold rounded flex items-center gap-1.5 select-none opacity-60" disabled="" type="button">
+<span class="material-symbols-outlined text-[16px]">link_off</span>
+<span>Connect</span>
+</button>
+<div class="relative group">
+<button class="w-8 h-8 rounded bg-surface-container-lowest text-outline-variant cursor-not-allowed flex items-center justify-center" disabled="" title="Target offline" type="button">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<div class="absolute bottom-full right-0 mb-2 hidden group-hover:block z-30 pointer-events-none">
+<div class="bg-surface-container-lowest text-error p-2 rounded shadow-xl font-code-sm text-[11px] whitespace-nowrap">
+              Target probe failing: connection timeout:6379
+            </div>
+</div>
+</div>
+</div>
+</div>
+<!-- CARD 6: RDP - Windows Diagnostic Host -->
+<div class="target-card flex flex-col justify-between p-5 rounded bg-surface-container hover:bg-surface-container-high transition-colors relative" data-host="win-diag-04.corp.internal" data-name="windows diagnostic host" data-protocol="rdp">
+<div>
+<div class="flex items-center justify-between mb-space-md">
+<span class="font-code-sm text-code-sm font-semibold tracking-wide uppercase px-2 py-0.5 rounded bg-surface-container-lowest text-secondary-fixed">RDP</span>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-lowest">
+<span class="w-2 h-2 rounded-full border border-tertiary inline-block"></span>
+<span class="font-code-sm text-[11px] text-tertiary">Online</span>
+</div>
+</div>
+<h3 class="font-headline-md text-body-lg font-medium text-on-surface tracking-tight">Windows Diagnostic Host</h3>
+<p class="font-code-md text-code-md text-outline mt-1 mb-4 select-all">win-diag-04.corp.internal:3389</p>
+<div class="flex items-center gap-2 mb-6">
+<span class="font-code-sm text-[11px] text-outline uppercase tracking-wider">Role</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface font-medium">oncall</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-space-md border-t border-outline-variant/30">
+<button class="h-8 px-4 bg-primary-container text-on-primary-container font-headline-md text-label-md font-semibold rounded hover:bg-primary transition-colors flex items-center gap-1.5" onclick="copyBastionCmd('warpgate rdp win-diag-04.corp.internal --user marta.k', 'Windows Diagnostic Host')" type="button">
+<span class="material-symbols-outlined text-[16px]">desktop_windows</span>
+<span>Launch RDP</span>
+</button>
+<div class="relative group">
+<button class="w-8 h-8 rounded bg-surface-container-lowest text-outline hover:text-on-surface hover:bg-surface-bright flex items-center justify-center transition-colors" onclick="copyBastionCmd('warpgate rdp win-diag-04.corp.internal --user marta.k', 'Windows Diagnostic Host')" title="Copy CLI command" type="button">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<div class="absolute bottom-full right-0 mb-2 hidden group-hover:block z-30 pointer-events-none">
+<div class="bg-surface-container-lowest text-on-surface-variant p-2 rounded shadow-xl font-code-sm text-[11px] whitespace-nowrap">
+<span class="text-outline">$</span> warpgate rdp win-diag-04.corp.internal --user marta.k
+            </div>
+</div>
+</div>
+</div>
+</div>
+<!-- CARD 7: PostgreSQL - Analytics Read Replica -->
+<div class="target-card flex flex-col justify-between p-5 rounded bg-surface-container hover:bg-surface-container-high transition-colors relative" data-host="db-analytics-ro.internal" data-name="analytics replica" data-protocol="postgres">
+<div>
+<div class="flex items-center justify-between mb-space-md">
+<span class="font-code-sm text-code-sm font-semibold tracking-wide uppercase px-2 py-0.5 rounded bg-surface-container-lowest text-secondary">PostgreSQL</span>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-lowest">
+<span class="w-2 h-2 rounded-full border border-tertiary inline-block"></span>
+<span class="font-code-sm text-[11px] text-tertiary">Online</span>
+</div>
+</div>
+<h3 class="font-headline-md text-body-lg font-medium text-on-surface tracking-tight">Analytics Warehouse RO</h3>
+<p class="font-code-md text-code-md text-outline mt-1 mb-4 select-all">db-analytics-ro.internal:5432</p>
+<div class="flex items-center gap-2 mb-6">
+<span class="font-code-sm text-[11px] text-outline uppercase tracking-wider">Role</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-secondary-fixed-dim font-medium">dba</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface font-medium">developer</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-space-md border-t border-outline-variant/30">
+<button class="h-8 px-4 bg-primary-container text-on-primary-container font-headline-md text-label-md font-semibold rounded hover:bg-primary transition-colors flex items-center gap-1.5" onclick="copyBastionCmd('psql postgres://marta.k@warpgate.acme.io:5432/analytics', 'Analytics Warehouse')" type="button">
+<span class="material-symbols-outlined text-[16px]">database</span>
+<span>Connect</span>
+</button>
+<div class="relative group">
+<button class="w-8 h-8 rounded bg-surface-container-lowest text-outline hover:text-on-surface hover:bg-surface-bright flex items-center justify-center transition-colors" onclick="copyBastionCmd('psql postgres://marta.k@warpgate.acme.io:5432/analytics', 'Analytics Warehouse')" title="Copy CLI command" type="button">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<div class="absolute bottom-full right-0 mb-2 hidden group-hover:block z-30 pointer-events-none">
+<div class="bg-surface-container-lowest text-on-surface-variant p-2 rounded shadow-xl font-code-sm text-[11px] whitespace-nowrap">
+<span class="text-outline">$</span> psql postgres://marta.k@warpgate.acme.io:5432/analytics
+            </div>
+</div>
+</div>
+</div>
+</div>
+<!-- CARD 8: HTTPS - Grafana Operations -->
+<div class="target-card flex flex-col justify-between p-5 rounded bg-surface-container hover:bg-surface-container-high transition-colors relative" data-host="grafana.ops.internal" data-name="grafana operations" data-protocol="https">
+<div>
+<div class="flex items-center justify-between mb-space-md">
+<span class="font-code-sm text-code-sm font-semibold tracking-wide uppercase px-2 py-0.5 rounded bg-surface-container-lowest text-tertiary">HTTPS</span>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-lowest">
+<span class="w-2 h-2 rounded-full border border-tertiary inline-block"></span>
+<span class="font-code-sm text-[11px] text-tertiary">Online</span>
+</div>
+</div>
+<h3 class="font-headline-md text-body-lg font-medium text-on-surface tracking-tight">Grafana Telemetry &amp; Logs</h3>
+<p class="font-code-md text-code-md text-outline mt-1 mb-4 select-all">grafana.ops.internal:3000</p>
+<div class="flex items-center gap-2 mb-6">
+<span class="font-code-sm text-[11px] text-outline uppercase tracking-wider">Role</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface font-medium">oncall</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface-variant font-medium">developer</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-space-md border-t border-outline-variant/30">
+<a class="h-8 px-4 bg-primary-container text-on-primary-container font-headline-md text-label-md font-semibold rounded hover:bg-primary transition-colors flex items-center gap-1.5" href="#" onclick="copyBastionCmd('warpgate open https://grafana.ops.internal:3000', 'Grafana Telemetry')">
+<span class="material-symbols-outlined text-[16px]">open_in_new</span>
+<span>Open Web</span>
+</a>
+<div class="relative group">
+<button class="w-8 h-8 rounded bg-surface-container-lowest text-outline hover:text-on-surface hover:bg-surface-bright flex items-center justify-center transition-colors" onclick="copyBastionCmd('warpgate open https://grafana.ops.internal:3000', 'Grafana Telemetry')" title="Copy CLI command" type="button">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<div class="absolute bottom-full right-0 mb-2 hidden group-hover:block z-30 pointer-events-none">
+<div class="bg-surface-container-lowest text-on-surface-variant p-2 rounded shadow-xl font-code-sm text-[11px] whitespace-nowrap">
+<span class="text-outline">$</span> warpgate open https://grafana.ops.internal:3000
+            </div>
+</div>
+</div>
+</div>
+</div>
+<!-- CARD 9: SSH - CI Runner Orchestrator -->
+<div class="target-card flex flex-col justify-between p-5 rounded bg-surface-container hover:bg-surface-container-high transition-colors relative" data-host="runner-pool-01.ci.internal" data-name="ci runner orchestrator" data-protocol="ssh">
+<div>
+<div class="flex items-center justify-between mb-space-md">
+<span class="font-code-sm text-code-sm font-semibold tracking-wide uppercase px-2 py-0.5 rounded bg-surface-container-lowest text-primary-container">SSH</span>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-lowest">
+<span class="w-2 h-2 rounded-full border border-tertiary inline-block"></span>
+<span class="font-code-sm text-[11px] text-tertiary">Online</span>
+</div>
+</div>
+<h3 class="font-headline-md text-body-lg font-medium text-on-surface tracking-tight">CI Runner Orchestrator</h3>
+<p class="font-code-md text-code-md text-outline mt-1 mb-4 select-all">runner-pool-01.ci.internal:22</p>
+<div class="flex items-center gap-2 mb-6">
+<span class="font-code-sm text-[11px] text-outline uppercase tracking-wider">Role</span>
+<span class="font-code-sm text-[12px] px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface font-medium">developer</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-space-md border-t border-outline-variant/30">
+<button class="h-8 px-4 bg-primary-container text-on-primary-container font-headline-md text-label-md font-semibold rounded hover:bg-primary transition-colors flex items-center gap-1.5" onclick="copyBastionCmd('ssh marta.k:runner-pool-01@warpgate.acme.io -p 2222', 'CI Runner Orchestrator')" type="button">
+<span class="material-symbols-outlined text-[16px]">terminal</span>
+<span>Connect</span>
+</button>
+<div class="relative group">
+<button class="w-8 h-8 rounded bg-surface-container-lowest text-outline hover:text-on-surface hover:bg-surface-bright flex items-center justify-center transition-colors" onclick="copyBastionCmd('ssh marta.k:runner-pool-01@warpgate.acme.io -p 2222', 'CI Runner Orchestrator')" title="Copy CLI command" type="button">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<div class="absolute bottom-full right-0 mb-2 hidden group-hover:block z-30 pointer-events-none">
+<div class="bg-surface-container-lowest text-on-surface-variant p-2 rounded shadow-xl font-code-sm text-[11px] whitespace-nowrap">
+<span class="text-outline">$</span> ssh marta.k:runner-pool-01@warpgate.acme.io -p 2222
+            </div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Micro-interaction Logic -->
+<script>
+    // Copy helper with visual toast HUD
+    function copyBastionCmd(cmd, label) {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(cmd);
+      }
+      const toast = document.getElementById('cli-toast');
+      const toastMsg = document.getElementById('cli-toast-msg');
+      if (toast && toastMsg) {
+        toastMsg.textContent = 'Copied command for ' + label;
+        toast.classList.remove('translate-y-20', 'opacity-0');
+        toast.classList.add('translate-y-0', 'opacity-100');
+        setTimeout(() => {
+          toast.classList.remove('translate-y-0', 'opacity-100');
+          toast.classList.add('translate-y-20', 'opacity-0');
+        }, 2200);
+      }
+    }
+
+    // Interactive Protocol Filters
+    const filterButtons = document.querySelectorAll('.filter-pill');
+    const targetCards = document.querySelectorAll('.target-card');
+    const searchInput = document.getElementById('target-search');
+
+    function applyFilters() {
+      const activeFilter = document.querySelector('.filter-pill.active')?.getAttribute('data-filter') || 'all';
+      const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+
+      targetCards.forEach(card => {
+        const proto = card.getAttribute('data-protocol');
+        const name = card.getAttribute('data-name') || '';
+        const host = card.getAttribute('data-host') || '';
+        
+        const matchesFilter = activeFilter === 'all' || proto === activeFilter;
+        const matchesSearch = !searchTerm || name.includes(searchTerm) || host.includes(searchTerm);
+
+        if (matchesFilter && matchesSearch) {
+          card.style.display = 'flex';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+
+    filterButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        filterButtons.forEach(b => {
+          b.classList.remove('active', 'bg-surface-container-high', 'text-on-surface');
+          b.classList.add('bg-surface-container', 'text-on-surface-variant');
+        });
+        btn.classList.add('active', 'bg-surface-container-high', 'text-on-surface');
+        btn.classList.remove('bg-surface-container', 'text-on-surface-variant');
+        applyFilters();
+      });
+    });
+
+    if (filterButtons.length > 0) {
+      filterButtons[0].classList.add('active');
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener('input', applyFilters);
+    }
+
+    // Global keyboard shortcut '/' to focus search
+    window.addEventListener('keydown', (e) => {
+      if (e.key === '/' && document.activeElement !== searchInput) {
+        e.preventDefault();
+        searchInput?.focus();
+      }
+    });
+  </script>
+</div></div></main></div></body></html>

@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "error-container": "#93000a", "secondary-fixed-dim": "#ffb94e", "on-surface-variant": "#c3c6d2", "on-primary-fixed": "#001b3d", "on-error": "#690005", "outline-variant": "#424750", "secondary-container": "#c88601", "surface-container": "#1c2024", "on-secondary-fixed-variant": "#624000", "surface-bright": "#363a3e", "primary": "#a9c7ff", "on-secondary-container": "#3f2700", "surface-container-low": "#181c20", "tertiary-fixed": "#86f9b8", "on-tertiary": "#003920", "inverse-primary": "#2e5ea2", "on-surface": "#e0e3e8", "on-primary-container": "#003b77", "background": "#101418", "tertiary-container": "#46bb7f", "on-secondary-fixed": "#291800", "primary-fixed-dim": "#a9c7ff", "inverse-on-surface": "#2d3135", "inverse-surface": "#e0e3e8", "secondary": "#ffb94e", "primary-container": "#7ba7f0", "on-tertiary-fixed-variant": "#005231", "secondary-fixed": "#ffddb2", "on-tertiary-fixed": "#002111", "surface-container-highest": "#31353a", "outline": "#8d919c", "primary-fixed": "#d6e3ff", "on-error-container": "#ffdad6", "surface-dim": "#101418", "surface-container-high": "#262a2f", "surface": "#101418", "on-secondary": "#452b00", "on-primary": "#003063", "error": "#ffb4ab", "tertiary-fixed-dim": "#69dc9d", "on-primary-fixed-variant": "#084689", "surface-variant": "#31353a", "tertiary": "#69dc9d", "surface-tint": "#a9c7ff", "surface-container-lowest": "#0b0f13", "on-background": "#e0e3e8", "on-tertiary-container": "#004629" }, "borderRadius": { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" }, "spacing": { "margin-mobile": "1rem", "space-lg": "1rem", "space-xs": "0.25rem", "gutter-compact": "0.5rem", "gutter": "1rem", "margin": "1.5rem", "space-md": "0.75rem", "space-xl": "1.5rem", "space-sm": "0.5rem" }, "fontFamily": { "label-sm": [ "IBM Plex Sans" ], "headline-lg": [ "IBM Plex Sans" ], "code-md": [ "JetBrains Mono" ], "headline-lg-mobile": [ "IBM Plex Sans" ], "body-md": [ "IBM Plex Sans" ], "code-sm": [ "JetBrains Mono" ], "headline-md": [ "IBM Plex Sans" ], "body-lg": [ "IBM Plex Sans" ], "label-md": [ "IBM Plex Sans" ] }, "fontSize": { "label-sm": [ "12px", { "lineHeight": "16px", "fontWeight": "400" } ], "headline-lg": [ "32px", { "lineHeight": "38px", "fontWeight": "600" } ], "code-md": [ "13px", { "lineHeight": "18px", "fontWeight": "400" } ], "headline-lg-mobile": [ "24px", { "lineHeight": "32px", "fontWeight": "600" } ], "body-md": [ "14px", { "lineHeight": "20px", "fontWeight": "400" } ], "code-sm": [ "12px", { "lineHeight": "16px", "fontWeight": "400" } ], "headline-md": [ "20px", { "lineHeight": "28px", "fontWeight": "600" } ], "body-lg": [ "16px", { "lineHeight": "24px", "fontWeight": "400" } ], "label-md": [ "13px", { "lineHeight": "18px", "fontWeight": "500" } ] } } } }</script></head><body class="bg-background font-body-md text-on-surface antialiased min-h-screen"><aside class="fixed left-0 top-0 h-full w-[240px] bg-surface-container-low border-r border-outline-variant/40 z-50 flex flex-col justify-between select-none"><div class="flex flex-col"><div class="h-14 flex items-center gap-space-sm px-space-md border-b border-outline-variant/30"><div class="w-7 h-7 rounded bg-surface-container flex items-center justify-center border border-outline-variant/50 text-primary-container"><span class="material-symbols-outlined text-[18px]">adjust</span></div><div class="flex flex-col"><span class="font-headline-md text-[15px] font-semibold tracking-tight text-on-surface leading-tight">Warpgate</span><span class="font-code-sm text-[10px] text-outline tracking-wider uppercase font-medium">BASTION CORE</span></div></div><div class="overflow-y-auto py-space-sm max-h-[calc(100vh-120px)]"><div class="px-space-md pt-space-sm pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">ACCESS</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="overview" href="#"><span class="material-symbols-outlined text-[18px]">space_dashboard</span><span class="font-label-md">Overview</span></a><a aria-current="page" class="flex items-center gap-space-sm h-8 px-space-md rounded-lg transition-colors bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium" data-path="sessions" href="#"><span class="material-symbols-outlined text-[18px]">terminal</span><span class="font-label-md">Sessions</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="targets" href="#"><span class="material-symbols-outlined text-[18px]">dns</span><span class="font-label-md">Targets</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">IDENTITY</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="users" href="#"><span class="material-symbols-outlined text-[18px]">group</span><span class="font-label-md">Users</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="roles" href="#"><span class="material-symbols-outlined text-[18px]">badge</span><span class="font-label-md">Roles</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="tickets" href="#"><span class="material-symbols-outlined text-[18px]">confirmation_number</span><span class="font-label-md">Tickets</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="sso-providers" href="#"><span class="material-symbols-outlined text-[18px]">vpn_key</span><span class="font-label-md">SSO Providers</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">SECURITY</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="login-protection" href="#"><span class="material-symbols-outlined text-[18px]">shield</span><span class="font-label-md">Login Protection</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="known-hosts" href="#"><span class="material-symbols-outlined text-[18px]">verified</span><span class="font-label-md">Known Hosts</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="audit-log" href="#"><span class="material-symbols-outlined text-[18px]">receipt_long</span><span class="font-label-md">Audit Log</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">SYSTEM</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="configuration" href="#"><span class="material-symbols-outlined text-[18px]">settings</span><span class="font-label-md">Configuration</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="cluster" href="#"><span class="material-symbols-outlined text-[18px]">hub</span><span class="font-label-md">Cluster</span></a></nav></div></div><div class="p-space-sm border-t border-outline-variant/30 flex items-center justify-between bg-surface-container-lowest/60"><div class="flex items-center gap-space-sm min-w-0"><div class="w-7 h-7 rounded bg-surface-container-high flex items-center justify-center border border-outline-variant/50 shrink-0"><span class="material-symbols-outlined text-[16px] text-primary-container">admin_panel_settings</span></div><div class="flex flex-col min-w-0"><span class="font-label-md text-on-surface truncate leading-none">admin</span><span class="font-code-sm text-[11px] text-outline truncate leading-tight">marta.k</span></div></div><div class="flex items-center gap-space-xs"><button class="w-7 h-7 flex items-center justify-center rounded text-outline-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Toggle Mode" type="button"><span class="material-symbols-outlined text-[16px]">dark_mode</span></button><button class="w-7 h-7 flex items-center justify-center rounded text-outline-variant hover:text-error hover:bg-surface-container-high transition-colors" title="Sign out" type="button"><span class="material-symbols-outlined text-[16px]">logout</span></button></div></div></aside><div class="pl-[240px]"><header class="fixed top-0 left-[240px] right-0 h-14 bg-surface-container-low/95 backdrop-blur border-b border-outline-variant/40 z-40 flex items-center justify-between px-space-xl"><div class="flex items-center gap-space-sm font-code-sm text-outline"><span class="text-outline hover:text-on-surface transition-colors">Warpgate</span><span class="text-outline-variant">/</span><span class="text-on-surface font-medium">Overview</span></div><div class="flex items-center gap-space-md"><div class="relative flex items-center"><div class="flex items-center h-8 bg-surface-container-lowest border border-outline-variant/50 rounded-xl px-space-sm gap-space-sm w-64 focus-within:border-primary-container transition-colors"><span class="material-symbols-outlined text-[16px] text-outline">search</span><span class="font-body-md text-outline text-[13px] flex-1 select-none">Search</span><kbd class="font-code-sm text-[11px] text-outline-variant bg-surface-container px-1.5 py-0.5 rounded border border-outline-variant/30">⌘K</kbd></div></div><div class="h-6 flex items-center gap-1.5 px-2 bg-surface-container border border-outline-variant/40 rounded-full"><span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span><span class="font-code-sm text-[11px] font-medium text-secondary-fixed-dim">3 live</span></div><button class="w-8 h-8 rounded-lg flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors relative" title="Notifications" type="button"><span class="material-symbols-outlined text-[18px]">notifications</span><span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-primary-container"></span></button><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center border border-outline-variant/40"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></header><main class="relative pt-14 bg-background min-h-screen"><div class="max-w-[1600px] w-full mx-auto p-space-xl"><div class="flex flex-col w-full space-y-space-md">
+<!-- PAGE HEADER -->
+<div class="flex items-center justify-between">
+<div class="flex items-baseline gap-space-md">
+<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">Targets</h1>
+<span class="font-code-sm text-code-sm text-outline font-medium tracking-normal">43 registered nodes</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<button class="h-8 px-3 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface font-label-md text-label-md flex items-center gap-1.5 transition-colors" type="button">
+<span class="material-symbols-outlined text-[16px] text-outline">file_download</span>
+        Export JSON
+      </button>
+<button class="h-8 px-3.5 rounded-lg bg-primary-container hover:bg-primary text-on-primary-container font-label-md text-label-md font-semibold flex items-center gap-1.5 transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]">add</span>
+        Add target
+      </button>
+</div>
+</div>
+<!-- PROTOCOL FILTER SEGMENTED CONTROL -->
+<div class="flex items-center bg-surface-container-low rounded-lg p-1 gap-1 overflow-x-auto select-none" id="protocolTabs">
+<button class="h-7 px-3 rounded-md bg-surface-container-high text-on-surface font-label-md text-label-md flex items-center gap-1.5 transition-all" data-filter="all" type="button">
+<span>All</span>
+<span class="font-code-sm text-code-sm text-primary font-medium">43</span>
+</button>
+<button class="h-7 px-3 rounded-md text-on-surface-variant hover:text-on-surface font-label-md text-label-md flex items-center gap-1.5 transition-all" data-filter="ssh" type="button">
+<span>SSH</span>
+<span class="font-code-sm text-code-sm text-outline">22</span>
+</button>
+<button class="h-7 px-3 rounded-md text-on-surface-variant hover:text-on-surface font-label-md text-label-md flex items-center gap-1.5 transition-all" data-filter="http" type="button">
+<span>HTTP</span>
+<span class="font-code-sm text-code-sm text-outline">9</span>
+</button>
+<button class="h-7 px-3 rounded-md text-on-surface-variant hover:text-on-surface font-label-md text-label-md flex items-center gap-1.5 transition-all" data-filter="rdp" type="button">
+<span>RDP</span>
+<span class="font-code-sm text-code-sm text-outline">5</span>
+</button>
+<button class="h-7 px-3 rounded-md text-on-surface-variant hover:text-on-surface font-label-md text-label-md flex items-center gap-1.5 transition-all" data-filter="vnc" type="button">
+<span>VNC</span>
+<span class="font-code-sm text-code-sm text-outline">2</span>
+</button>
+<button class="h-7 px-3 rounded-md text-on-surface-variant hover:text-on-surface font-label-md text-label-md flex items-center gap-1.5 transition-all" data-filter="mysql" type="button">
+<span>MySQL</span>
+<span class="font-code-sm text-code-sm text-outline">2</span>
+</button>
+<button class="h-7 px-3 rounded-md text-on-surface-variant hover:text-on-surface font-label-md text-label-md flex items-center gap-1.5 transition-all" data-filter="postgres" type="button">
+<span>PostgreSQL</span>
+<span class="font-code-sm text-code-sm text-outline">2</span>
+</button>
+<button class="h-7 px-3 rounded-md text-on-surface-variant hover:text-on-surface font-label-md text-label-md flex items-center gap-1.5 transition-all" data-filter="k8s" type="button">
+<span>Kubernetes</span>
+<span class="font-code-sm text-code-sm text-outline">1</span>
+</button>
+</div>
+<!-- FILTER & SEARCH BAR -->
+<div class="flex flex-wrap items-center justify-between gap-space-md py-1">
+<div class="flex flex-1 items-center gap-space-sm min-w-[320px]">
+<div class="relative flex-1 max-w-lg">
+<span class="material-symbols-outlined absolute left-2.5 top-2 text-[18px] text-outline pointer-events-none">filter_list</span>
+<input class="w-full h-8 pl-8 pr-3 bg-surface-container-lowest text-on-surface font-code-sm text-code-sm rounded-lg placeholder:text-outline/70 focus:outline-none focus:bg-surface-container-low transition-colors" id="targetSearchInput" placeholder="Filter targets by hostname, IP or tag..." type="text"/>
+</div>
+<!-- Quick filters -->
+<div class="flex items-center gap-1.5">
+<button class="h-8 px-2.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface font-label-sm text-label-sm flex items-center gap-1.5 transition-colors" type="button">
+<span class="text-outline">Health:</span>
+<span class="text-on-surface font-medium">All</span>
+<span class="material-symbols-outlined text-[14px] text-outline">expand_more</span>
+</button>
+<button class="h-8 px-2.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface font-label-sm text-label-sm flex items-center gap-1.5 transition-colors" type="button">
+<span class="text-outline">Role:</span>
+<span class="text-on-surface font-medium">All</span>
+<span class="material-symbols-outlined text-[14px] text-outline">expand_more</span>
+</button>
+<button class="h-8 px-2.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface font-label-sm text-label-sm flex items-center gap-1.5 transition-colors" type="button">
+<span class="text-outline">TLS:</span>
+<span class="text-on-surface font-medium">All</span>
+<span class="material-symbols-outlined text-[14px] text-outline">expand_more</span>
+</button>
+</div>
+</div>
+<div class="flex items-center gap-space-md">
+<span class="font-code-sm text-code-sm text-outline">Showing 1–14 of 43 targets</span>
+<div class="flex items-center bg-surface-container-low rounded-lg p-0.5">
+<button class="p-1 rounded bg-surface-container-high text-on-surface" title="Table View" type="button">
+<span class="material-symbols-outlined text-[16px] block">table_rows</span>
+</button>
+<button class="p-1 rounded text-outline hover:text-on-surface" title="Compact View" type="button">
+<span class="material-symbols-outlined text-[16px] block">view_headline</span>
+</button>
+</div>
+</div>
+</div>
+<!-- FULL-BLEED DENSE TARGETS TABLE -->
+<div class="w-full overflow-x-auto rounded-lg bg-surface-container-low">
+<table class="w-full text-left border-collapse select-none" id="targetsTable">
+<thead>
+<tr class="bg-surface-container text-on-surface-variant font-label-md text-label-md h-10">
+<th class="w-[120px] px-3 font-medium">Health</th>
+<th class="px-3 font-medium min-w-[200px]">Name</th>
+<th class="px-3 font-medium min-w-[230px]">Address</th>
+<th class="px-3 font-medium w-[110px]">Protocol</th>
+<th class="px-3 font-medium w-[110px]">TLS</th>
+<th class="px-3 font-medium min-w-[220px]">Allowed roles</th>
+<th class="px-3 font-medium w-[130px]">Last used</th>
+<th class="px-3 font-medium w-[160px]">Sessions</th>
+<th class="w-[48px] px-3 text-right"></th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container-highest/20 text-on-surface font-body-md text-body-md">
+<!-- ROW 1 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">Primary Database</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">db-primary-03.internal:5432</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">Postgres</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">dba</span>
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">oncall</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">4 min ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-tertiary font-medium">1</span> <span class="text-outline">/ 142</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 2 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">PG Replica East</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">pg-replica-01.internal:5432</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">Postgres</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">dba</span>
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">readonly</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">18 min ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 68</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 3 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">Core Kubernetes Cluster</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">k8s-control-plane.internal:6443</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">Kubernetes</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">admin</span>
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">sre</span>
+<span class="font-code-sm text-[11px] px-1 rounded bg-surface-container-high text-outline">+1</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">Just now</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-tertiary font-medium">2</span> <span class="text-outline">/ 319</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 4 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">Windows Secure Jumpbox</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">win-jumpbox.dmz:3389</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">RDP</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">dev-oncall</span>
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">admin</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">2 hours ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 23</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 5 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">Internal GitLab Server</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">gitlab.internal:443</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">HTTP</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">developer</span>
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">all-staff</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">42 min ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 890</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 6 (Disabled TLS / Warning) -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">Legacy Billing Pipeline</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">legacy-billing.internal:8080</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">HTTP</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-secondary/15 text-secondary font-medium inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px]">warning</span>
+              Disabled
+            </span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">finance-sec</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">3 days ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 14</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 7 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">Redis Cluster Master</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">redis-cache-01.internal:6379</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">TCP</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">dba</span>
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">oncall</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">1 hour ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 512</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 8 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">Elastic Log Search Node 04</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">elastic-node-04.internal:9200</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">HTTP</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">sec-auditor</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">5 hours ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 84</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 9 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">HashiCorp Vault Core</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">vault-core-01.internal:8200</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">HTTPS</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">sec-admin</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">10 min ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 411</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 10 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">Artifact Repository</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">artifact-repo.internal:443</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">HTTPS</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">ci-bot</span>
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">developer</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">23 min ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 1204</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 11 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">Bastion Canary Edge</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">bastion-canary.prod:22</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">SSH</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">sre</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">8 min ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 64</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 12 (UNREACHABLE) -->
+<tr class="h-10 hover:bg-surface-container transition-colors group bg-error-container/5">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-error">
+<span class="w-2 h-2 bg-error shrink-0"></span>
+              Unreachable
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">Staging Main DB</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">staging-db-02.internal:3306</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">MySQL</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">dba</span>
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">oncall</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-outline text-label-sm whitespace-nowrap">6 days ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 92</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 13 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">VNC Console Alpha</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">vnc-console-alpha.internal:5900</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">VNC</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">Preferred</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">dba</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">Yesterday</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 8</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<!-- ROW 14 -->
+<tr class="h-10 hover:bg-surface-container transition-colors group">
+<td class="px-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-label-sm text-tertiary">
+<span class="w-2 h-2 rounded-full ring-2 ring-tertiary/30 bg-tertiary shrink-0"></span>
+              Online
+            </span>
+</td>
+<td class="px-3 font-semibold text-on-surface truncate">Auth0 Synchronization Bridge</td>
+<td class="px-3 font-code-sm text-code-sm text-on-surface-variant select-all">auth0-sync-bridge.dmz:22</td>
+<td class="px-3">
+<span class="font-code-sm text-code-sm px-1.5 py-0.5 rounded bg-surface-container text-on-surface font-medium">SSH</span>
+</td>
+<td class="px-3">
+<span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded bg-surface-container text-tertiary">Required</span>
+</td>
+<td class="px-3">
+<div class="flex items-center gap-1 flex-wrap">
+<span class="font-code-sm text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant">sec-auditor</span>
+</div>
+</td>
+<td class="px-3 font-body-md text-on-surface-variant text-label-sm whitespace-nowrap">3 hours ago</td>
+<td class="px-3 font-code-sm text-code-sm">
+<span class="text-outline">0 / 19</span>
+</td>
+<td class="px-3 text-right">
+<button class="w-7 h-7 rounded flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors opacity-60 group-hover:opacity-100" type="button">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- TABLE FOOTER / PAGINATION -->
+<div class="flex items-center justify-between pt-1 text-outline font-label-md text-label-md select-none">
+<div class="flex items-center gap-space-sm">
+<div class="flex items-center gap-1.5 cursor-pointer hover:text-on-surface transition-colors">
+<span>Rows per page:</span>
+<span class="text-on-surface font-medium">25</span>
+<span class="material-symbols-outlined text-[16px]">expand_more</span>
+</div>
+<span class="text-surface-container-highest">|</span>
+<span>Total 43 targets across 4 protocol zones</span>
+</div>
+<div class="flex items-center gap-space-md">
+<span class="font-code-sm text-code-sm">Page 1 of 2</span>
+<div class="flex items-center gap-1">
+<button class="w-7 h-7 rounded flex items-center justify-center bg-surface-container-low text-outline opacity-40 cursor-not-allowed" disabled="" type="button">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+<button class="w-7 h-7 rounded flex items-center justify-center bg-surface-container hover:bg-surface-container-high text-on-surface transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<script>
+  // Simple tab filtering interaction
+  const tabs = document.querySelectorAll('#protocolTabs button');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => {
+        t.classList.remove('bg-surface-container-high', 'text-on-surface');
+        t.classList.add('text-on-surface-variant');
+      });
+      tab.classList.add('bg-surface-container-high', 'text-on-surface');
+      tab.classList.remove('text-on-surface-variant');
+    });
+  });
+
+  // Basic row search filter
+  const searchInput = document.getElementById('targetSearchInput');
+  const tableRows = document.querySelectorAll('#targetsTable tbody tr');
+  searchInput.addEventListener('input', (e) => {
+    const term = e.target.value.toLowerCase().trim();
+    tableRows.forEach(row => {
+      const text = row.textContent.toLowerCase();
+      row.style.display = text.includes(term) ? '' : 'none';
+    });
+  });
+</script></div></main></div></body></html>

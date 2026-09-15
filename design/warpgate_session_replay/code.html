@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "error-container": "#93000a", "secondary-fixed-dim": "#ffb94e", "on-surface-variant": "#c3c6d2", "on-primary-fixed": "#001b3d", "on-error": "#690005", "outline-variant": "#424750", "secondary-container": "#c88601", "surface-container": "#1c2024", "on-secondary-fixed-variant": "#624000", "surface-bright": "#363a3e", "primary": "#a9c7ff", "on-secondary-container": "#3f2700", "surface-container-low": "#181c20", "tertiary-fixed": "#86f9b8", "on-tertiary": "#003920", "inverse-primary": "#2e5ea2", "on-surface": "#e0e3e8", "on-primary-container": "#003b77", "background": "#101418", "tertiary-container": "#46bb7f", "on-secondary-fixed": "#291800", "primary-fixed-dim": "#a9c7ff", "inverse-on-surface": "#2d3135", "inverse-surface": "#e0e3e8", "secondary": "#ffb94e", "primary-container": "#7ba7f0", "on-tertiary-fixed-variant": "#005231", "secondary-fixed": "#ffddb2", "on-tertiary-fixed": "#002111", "surface-container-highest": "#31353a", "outline": "#8d919c", "primary-fixed": "#d6e3ff", "on-error-container": "#ffdad6", "surface-dim": "#101418", "surface-container-high": "#262a2f", "surface": "#101418", "on-secondary": "#452b00", "on-primary": "#003063", "error": "#ffb4ab", "tertiary-fixed-dim": "#69dc9d", "on-primary-fixed-variant": "#084689", "surface-variant": "#31353a", "tertiary": "#69dc9d", "surface-tint": "#a9c7ff", "surface-container-lowest": "#0b0f13", "on-background": "#e0e3e8", "on-tertiary-container": "#004629" }, "borderRadius": { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" }, "spacing": { "margin-mobile": "1rem", "space-lg": "1rem", "space-xs": "0.25rem", "gutter-compact": "0.5rem", "gutter": "1rem", "margin": "1.5rem", "space-md": "0.75rem", "space-xl": "1.5rem", "space-sm": "0.5rem" }, "fontFamily": { "label-sm": [ "IBM Plex Sans" ], "headline-lg": [ "IBM Plex Sans" ], "code-md": [ "JetBrains Mono" ], "headline-lg-mobile": [ "IBM Plex Sans" ], "body-md": [ "IBM Plex Sans" ], "code-sm": [ "JetBrains Mono" ], "headline-md": [ "IBM Plex Sans" ], "body-lg": [ "IBM Plex Sans" ], "label-md": [ "IBM Plex Sans" ] }, "fontSize": { "label-sm": [ "12px", { "lineHeight": "16px", "fontWeight": "400" } ], "headline-lg": [ "32px", { "lineHeight": "38px", "fontWeight": "600" } ], "code-md": [ "13px", { "lineHeight": "18px", "fontWeight": "400" } ], "headline-lg-mobile": [ "24px", { "lineHeight": "32px", "fontWeight": "600" } ], "body-md": [ "14px", { "lineHeight": "20px", "fontWeight": "400" } ], "code-sm": [ "12px", { "lineHeight": "16px", "fontWeight": "400" } ], "headline-md": [ "20px", { "lineHeight": "28px", "fontWeight": "600" } ], "body-lg": [ "16px", { "lineHeight": "24px", "fontWeight": "400" } ], "label-md": [ "13px", { "lineHeight": "18px", "fontWeight": "500" } ] } } } }</script></head><body class="bg-background font-body-md text-on-surface antialiased min-h-screen"><aside class="fixed left-0 top-0 h-full w-[240px] bg-surface-container-low border-r border-outline-variant/40 z-50 flex flex-col justify-between select-none"><div class="flex flex-col"><div class="h-14 flex items-center gap-space-sm px-space-md border-b border-outline-variant/30"><div class="w-7 h-7 rounded bg-surface-container flex items-center justify-center border border-outline-variant/50 text-primary-container"><span class="material-symbols-outlined text-[18px]">adjust</span></div><div class="flex flex-col"><span class="font-headline-md text-[15px] font-semibold tracking-tight text-on-surface leading-tight">Warpgate</span><span class="font-code-sm text-[10px] text-outline tracking-wider uppercase font-medium">BASTION CORE</span></div></div><div class="overflow-y-auto py-space-sm max-h-[calc(100vh-120px)]"><div class="px-space-md pt-space-sm pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">ACCESS</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="overview" href="#"><span class="material-symbols-outlined text-[18px]">space_dashboard</span><span class="font-label-md">Overview</span></a><a aria-current="page" class="flex items-center gap-space-sm h-8 px-space-md rounded-lg transition-colors bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium" data-path="sessions" href="#"><span class="material-symbols-outlined text-[18px]">terminal</span><span class="font-label-md">Sessions</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="targets" href="#"><span class="material-symbols-outlined text-[18px]">dns</span><span class="font-label-md">Targets</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">IDENTITY</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="users" href="#"><span class="material-symbols-outlined text-[18px]">group</span><span class="font-label-md">Users</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="roles" href="#"><span class="material-symbols-outlined text-[18px]">badge</span><span class="font-label-md">Roles</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="tickets" href="#"><span class="material-symbols-outlined text-[18px]">confirmation_number</span><span class="font-label-md">Tickets</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="sso-providers" href="#"><span class="material-symbols-outlined text-[18px]">vpn_key</span><span class="font-label-md">SSO Providers</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">SECURITY</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="login-protection" href="#"><span class="material-symbols-outlined text-[18px]">shield</span><span class="font-label-md">Login Protection</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="known-hosts" href="#"><span class="material-symbols-outlined text-[18px]">verified</span><span class="font-label-md">Known Hosts</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="audit-log" href="#"><span class="material-symbols-outlined text-[18px]">receipt_long</span><span class="font-label-md">Audit Log</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">SYSTEM</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="configuration" href="#"><span class="material-symbols-outlined text-[18px]">settings</span><span class="font-label-md">Configuration</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="cluster" href="#"><span class="material-symbols-outlined text-[18px]">hub</span><span class="font-label-md">Cluster</span></a></nav></div></div><div class="p-space-sm border-t border-outline-variant/30 flex items-center justify-between bg-surface-container-lowest/60"><div class="flex items-center gap-space-sm min-w-0"><div class="w-7 h-7 rounded bg-surface-container-high flex items-center justify-center border border-outline-variant/50 shrink-0"><span class="material-symbols-outlined text-[16px] text-primary-container">admin_panel_settings</span></div><div class="flex flex-col min-w-0"><span class="font-label-md text-on-surface truncate leading-none">admin</span><span class="font-code-sm text-[11px] text-outline truncate leading-tight">marta.k</span></div></div><div class="flex items-center gap-space-xs"><button class="w-7 h-7 flex items-center justify-center rounded text-outline-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Toggle Mode" type="button"><span class="material-symbols-outlined text-[16px]">dark_mode</span></button><button class="w-7 h-7 flex items-center justify-center rounded text-outline-variant hover:text-error hover:bg-surface-container-high transition-colors" title="Sign out" type="button"><span class="material-symbols-outlined text-[16px]">logout</span></button></div></div></aside><div class="pl-[240px]"><header class="fixed top-0 left-[240px] right-0 h-14 bg-surface-container-low/95 backdrop-blur border-b border-outline-variant/40 z-40 flex items-center justify-between px-space-xl"><div class="flex items-center gap-space-sm font-code-sm text-outline"><span class="text-outline hover:text-on-surface transition-colors">Warpgate</span><span class="text-outline-variant">/</span><span class="text-on-surface font-medium">Overview</span></div><div class="flex items-center gap-space-md"><div class="relative flex items-center"><div class="flex items-center h-8 bg-surface-container-lowest border border-outline-variant/50 rounded-xl px-space-sm gap-space-sm w-64 focus-within:border-primary-container transition-colors"><span class="material-symbols-outlined text-[16px] text-outline">search</span><span class="font-body-md text-outline text-[13px] flex-1 select-none">Search</span><kbd class="font-code-sm text-[11px] text-outline-variant bg-surface-container px-1.5 py-0.5 rounded border border-outline-variant/30">⌘K</kbd></div></div><div class="h-6 flex items-center gap-1.5 px-2 bg-surface-container border border-outline-variant/40 rounded-full"><span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span><span class="font-code-sm text-[11px] font-medium text-secondary-fixed-dim">3 live</span></div><button class="w-8 h-8 rounded-lg flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors relative" title="Notifications" type="button"><span class="material-symbols-outlined text-[18px]">notifications</span><span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-primary-container"></span></button><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center border border-outline-variant/40"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></header><main class="relative pt-14 bg-background min-h-screen"><div class="max-w-[1600px] w-full mx-auto p-space-xl"><div class="flex flex-col w-full">
+<!-- Operational Sub-Header Bar -->
+<header class="w-full bg-surface-container rounded-lg p-space-lg mb-space-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-space-md shadow-md">
+<div class="flex flex-col gap-space-xs">
+<div class="flex items-center gap-space-xs font-code-sm text-outline">
+<span class="hover:text-on-surface cursor-pointer">Sessions</span>
+<span class="text-outline-variant">/</span>
+<span class="text-primary font-code-sm">sess_8f2a4c</span>
+</div>
+<div class="flex items-center gap-space-md">
+<span class="font-code-md text-headline-md text-on-surface font-semibold tracking-tight">db-primary-03.internal</span>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-high">
+<span class="w-2 h-2 rounded-full bg-secondary animate-ping"></span>
+<span class="font-label-sm text-secondary font-medium uppercase tracking-wider">Live</span>
+</div>
+<span class="font-code-sm text-outline bg-surface-container-lowest px-2 py-0.5 rounded">port: 22</span>
+</div>
+</div>
+<div class="flex items-center gap-space-sm self-stretch md:self-auto justify-end">
+<button class="h-8 px-3 rounded bg-surface-container-high text-on-surface hover:bg-surface-bright transition-colors flex items-center gap-1.5 font-label-md" id="copy-link-btn" type="button">
+<span class="material-symbols-outlined text-[16px] text-outline">content_copy</span>
+<span>Copy Link</span>
+</button>
+<button class="h-8 px-3 rounded bg-surface-container-high text-on-surface hover:bg-surface-bright transition-colors flex items-center gap-1.5 font-label-md" type="button">
+<span class="material-symbols-outlined text-[16px] text-outline">download</span>
+<span>Download recording</span>
+</button>
+<button class="h-8 px-3 rounded bg-error text-on-error hover:bg-error/90 font-label-md font-semibold transition-colors flex items-center gap-1.5 shadow-sm" id="terminate-btn" type="button">
+<span class="material-symbols-outlined text-[16px]">power_settings_new</span>
+<span>Terminate session</span>
+</button>
+</div>
+</header>
+<!-- 70 / 30 Workspace Split Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg w-full items-start">
+<!-- REPLAY VIEWPORT (70% - 8/12 cols) -->
+<div class="lg:col-span-8 flex flex-col gap-space-md">
+<!-- Outer Display Terminal Container -->
+<div class="bg-surface-container-lowest rounded-lg overflow-hidden shadow-xl flex flex-col">
+<!-- Terminal Top Bar Window Chrome -->
+<div class="bg-surface-container-low px-space-md py-space-xs flex items-center justify-between select-none">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-error-container"></span>
+<span class="w-2.5 h-2.5 rounded-full bg-secondary-container"></span>
+<span class="w-2.5 h-2.5 rounded-full bg-tertiary-container"></span>
+<span class="ml-2 font-code-sm text-outline">tty2 • xterm-256color • 1920x1080 (utf-8)</span>
+</div>
+<div class="flex items-center gap-space-md text-outline font-code-sm">
+<span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-tertiary"></span> PTY Active</span>
+<span class="material-symbols-outlined text-[16px]">lock</span>
+</div>
+</div>
+<!-- Terminal Output Screen (Sunken Recessed Viewport) -->
+<div class="p-space-lg font-code-md text-on-surface overflow-x-auto min-h-[460px] max-h-[560px] flex flex-col justify-between font-normal leading-relaxed selection:bg-primary selection:text-on-primary" id="terminal-screen">
+<div class="space-y-2">
+<!-- SSH Handshake and Session Init -->
+<div class="text-outline font-code-sm">
+              [Warpgate Bastion v2.4.19] Authorized access session initiated: 2026-03-12T14:02:11Z<br/>
+              Authentication validated via Identity Provider (MFA Verified). Audit trail initialized: rec_99214b7e
+            </div>
+<div class="text-outline-variant font-code-sm">Last login: Thu Mar 12 12:44:02 2026 from 10.240.1.1</div>
+<!-- Command 1 -->
+<div class="pt-2">
+<div class="flex items-center gap-2">
+<span class="text-tertiary font-medium">marta@db-primary-03</span><span class="text-outline">:</span><span class="text-primary-container">~</span><span class="text-outline">$</span>
+<span class="text-on-surface">whoami</span>
+</div>
+<div class="text-on-surface-variant font-code-sm pl-4">marta</div>
+</div>
+<!-- Command 2 -->
+<div class="pt-1">
+<div class="flex items-center gap-2">
+<span class="text-tertiary font-medium">marta@db-primary-03</span><span class="text-outline">:</span><span class="text-primary-container">~</span><span class="text-outline">$</span>
+<span class="text-on-surface">ls -la /var/log/postgresql/</span>
+</div>
+<div class="text-on-surface-variant font-code-sm pl-4 leading-tight py-1 font-code-sm">
+                total 1284<br/>
+                drwxr-xr-x  2 postgres postgres   4096 Mar 12 04:12 .<br/>
+                drwxr-xr-x 14 root     root       4096 Feb 28 11:09 ..<br/>
+                -rw-r-----  1 postgres adm      812390 Mar 12 14:01 postgresql-16-main.log<br/>
+                -rw-r-----  1 postgres adm      491520 Mar 11 23:59 postgresql-16-main.log.1
+              </div>
+</div>
+<!-- Command 3: Systemctl -->
+<div class="pt-1 bg-surface-container-low/50 p-2 rounded">
+<div class="flex items-center gap-2">
+<span class="text-tertiary font-medium">marta@db-primary-03</span><span class="text-outline">:</span><span class="text-primary-container">~</span><span class="text-outline">$</span>
+<span class="text-on-surface">sudo systemctl status postgresql</span>
+</div>
+<div class="pl-4 py-1 text-on-surface-variant font-code-sm space-y-0.5">
+<div class="flex items-center gap-1.5 text-tertiary">
+<span class="material-symbols-outlined text-[13px]">circle</span>
+<span class="font-medium">postgresql.service - PostgreSQL RDBMS</span>
+</div>
+<div>     Loaded: loaded (/lib/systemd/system/postgresql.service; enabled; vendor preset: enabled)</div>
+<div>     Active: <span class="text-tertiary font-semibold">active (running)</span> since Thu 2026-03-12 04:12:00 UTC; 9h ago</div>
+<div>   Main PID: 18241 (postgres)</div>
+<div>      Tasks: 28 (limit: 38240)</div>
+<div>     Memory: 4.2G</div>
+<div>     CGroup: /system.slice/postgresql.service</div>
+</div>
+</div>
+<!-- Command 4: Interactive Query -->
+<div class="pt-1">
+<div class="flex items-center gap-2">
+<span class="text-tertiary font-medium">marta@db-primary-03</span><span class="text-outline">:</span><span class="text-primary-container">~</span><span class="text-outline">$</span>
+<span class="text-on-surface">psql -U postgres -c "SELECT pid, usename, client_addr, state FROM pg_stat_activity;"</span>
+</div>
+<div class="text-on-surface-variant font-code-sm pl-4 py-1">
+                  pid  | usename  | client_addr  | state<br/>
+                -------+----------+--------------+--------<br/>
+                 19041 | app_user | 10.240.2.14  | active<br/>
+                 19042 | app_user | 10.240.2.18  | idle<br/>
+                 19102 | sync_rep | 10.240.3.50  | active<br/>
+                (3 rows)
+              </div>
+</div>
+<!-- Live prompt with blinking cursor -->
+<div class="pt-2 flex items-center gap-2">
+<span class="text-tertiary font-medium">marta@db-primary-03</span><span class="text-outline">:</span><span class="text-primary-container">~</span><span class="text-outline">$</span>
+<span class="w-2.5 h-4 bg-primary-container animate-pulse inline-block align-middle"></span>
+</div>
+</div>
+<!-- Bottom Telemetry HUD Line -->
+<div class="pt-space-md mt-space-md flex items-center justify-between text-outline-variant font-code-sm select-none">
+<div class="flex items-center gap-space-md">
+<span>LATENCY: <strong class="text-on-surface">14ms</strong></span>
+<span>CIPHER: <strong class="text-on-surface">chacha20-poly1305</strong></span>
+<span>PACKETS: <strong class="text-on-surface">4,120 IN / 12,890 OUT</strong></span>
+</div>
+<div class="flex items-center gap-2 text-secondary">
+<span class="material-symbols-outlined text-[14px]">sensors</span>
+<span>STREAM SYNCED</span>
+</div>
+</div>
+</div>
+<!-- Activity Density Timeline (40px) -->
+<div class="bg-surface-container-low px-space-md py-2 flex flex-col justify-center select-none relative">
+<div class="flex items-center justify-between mb-1">
+<span class="font-label-sm text-outline tracking-wider uppercase text-[10px]">Keystroke Input Density</span>
+<span class="font-code-sm text-[11px] text-outline">Cluster peak: 14:03:02 UTC</span>
+</div>
+<div class="relative h-6 w-full bg-surface-container-lowest rounded flex items-center overflow-hidden cursor-pointer" id="scrubber-bar">
+<!-- Simulated Keystroke Burst Density Stripes (Inline SVG representation for lightweight accuracy) -->
+<svg class="w-full h-full text-secondary opacity-80" preserveaspectratio="none" viewbox="0 0 500 24">
+<!-- Early Session bursts -->
+<rect fill="currentColor" height="16" width="2" x="10" y="4"></rect>
+<rect fill="currentColor" height="12" width="1.5" x="14" y="6"></rect>
+<rect fill="currentColor" height="20" width="2" x="18" y="2"></rect>
+<rect fill="currentColor" height="8" width="1.5" x="22" y="8"></rect>
+<!-- Idle Gap 1 -->
+<!-- ls -la burst -->
+<rect fill="currentColor" height="12" width="1.5" x="85" y="6"></rect>
+<rect fill="currentColor" height="18" width="2" x="88" y="3"></rect>
+<rect fill="currentColor" height="16" width="1.5" x="92" y="4"></rect>
+<rect fill="currentColor" height="20" width="2" x="96" y="2"></rect>
+<rect fill="currentColor" height="14" width="2" x="100" y="5"></rect>
+<!-- Sudo systemctl dense cluster -->
+<g class="text-secondary-fixed-dim">
+<rect fill="currentColor" height="20" width="2" x="190" y="2"></rect>
+<rect fill="currentColor" height="22" width="1.5" x="193" y="1"></rect>
+<rect fill="currentColor" height="16" width="2" x="196" y="4"></rect>
+<rect fill="currentColor" height="22" width="2.5" x="200" y="1"></rect>
+<rect fill="currentColor" height="18" width="1.5" x="204" y="3"></rect>
+<rect fill="currentColor" height="20" width="2" x="208" y="2"></rect>
+<rect fill="currentColor" height="14" width="2" x="212" y="5"></rect>
+<rect fill="currentColor" height="20" width="2" x="216" y="2"></rect>
+<rect fill="currentColor" height="16" width="1.5" x="220" y="4"></rect>
+<rect fill="currentColor" height="20" width="2" x="223" y="2"></rect>
+</g>
+<!-- Query inspection cluster -->
+<rect fill="currentColor" height="16" width="2" x="310" y="4"></rect>
+<rect fill="currentColor" height="20" width="2" x="314" y="2"></rect>
+<rect fill="currentColor" height="22" width="2" x="318" y="1"></rect>
+<rect fill="currentColor" height="18" width="1.5" x="322" y="3"></rect>
+<rect fill="currentColor" height="20" width="2.5" x="326" y="2"></rect>
+<rect fill="currentColor" height="14" width="1.5" x="330" y="5"></rect>
+<rect fill="currentColor" height="20" width="2" x="334" y="2"></rect>
+<!-- Live Current Tail Activity -->
+<rect fill="currentColor" height="12" width="2" x="420" y="6"></rect>
+<rect fill="currentColor" height="18" width="2" x="424" y="3"></rect>
+<rect fill="currentColor" height="20" width="1.5" x="428" y="2"></rect>
+</svg>
+<!-- Active Played Scrim Overlay -->
+<div class="absolute left-0 top-0 bottom-0 bg-primary/10 pointer-events-none" style="width: 64.5%;"></div>
+<!-- Current Playhead Vertical Needle & Indicator Handle -->
+<div class="absolute top-0 bottom-0 w-0.5 bg-primary-container z-20 pointer-events-none flex items-center justify-center" style="left: 64.5%;">
+<div class="w-2.5 h-2.5 rounded-full bg-primary -mt-0.5 shadow"></div>
+</div>
+<!-- Context Tooltip (Fixed position demo over high density) -->
+<div class="absolute -top-7 z-30 bg-surface-container-highest px-2 py-0.5 rounded shadow-lg flex items-center gap-1.5 pointer-events-none" style="left: calc(64.5% - 70px);">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+<span class="font-code-sm text-[11px] text-on-surface">00:08:12 — 42 keystrokes</span>
+</div>
+</div>
+</div>
+<!-- Transport Replay Control Bar (56px) -->
+<div class="h-14 bg-surface-container px-space-md flex items-center justify-between select-none">
+<div class="flex items-center gap-space-sm">
+<!-- Play/Pause Toggle -->
+<button class="w-8 h-8 rounded bg-primary text-on-primary hover:bg-primary/90 flex items-center justify-center transition-colors" id="play-btn" title="Toggle Play / Pause" type="button">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">pause</span>
+</button>
+<!-- Jump -10s -->
+<button class="w-8 h-8 rounded bg-surface-container-high text-on-surface hover:bg-surface-bright flex items-center justify-center transition-colors" title="Rewind 10 seconds" type="button">
+<span class="material-symbols-outlined text-[18px]">replay_10</span>
+</button>
+<!-- Jump +10s -->
+<button class="w-8 h-8 rounded bg-surface-container-high text-on-surface hover:bg-surface-bright flex items-center justify-center transition-colors" title="Skip forward 10 seconds" type="button">
+<span class="material-symbols-outlined text-[18px]">forward_10</span>
+</button>
+<!-- Playback Timestamp Mono Display -->
+<div class="ml-space-sm px-space-sm py-1 bg-surface-container-lowest rounded font-code-md text-on-surface flex items-center gap-1.5 text-label-md">
+<span class="text-primary font-medium" id="time-current">00:08:12</span>
+<span class="text-outline">/</span>
+<span class="text-outline-variant" id="time-total">00:12:44</span>
+</div>
+</div>
+<div class="flex items-center gap-space-sm">
+<!-- Live Indicator Follow Button -->
+<button class="h-7 px-2.5 rounded bg-surface-container-high hover:bg-surface-bright text-secondary font-label-sm flex items-center gap-1 transition-colors" type="button">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+<span>Jump to Live</span>
+</button>
+<!-- Playback Speed Dropdown Pill -->
+<div class="relative">
+<button class="h-7 px-2.5 rounded bg-surface-container-high hover:bg-surface-bright text-on-surface font-code-sm text-[12px] flex items-center gap-1 font-medium transition-colors" id="speed-pill" type="button">
+<span>1.0×</span>
+<span class="material-symbols-outlined text-[14px] text-outline">arrow_drop_down</span>
+</button>
+</div>
+<div class="w-px h-5 bg-outline-variant/30 mx-1"></div>
+<!-- Terminal Fullscreen Option -->
+<button class="w-8 h-8 rounded bg-surface-container-high text-outline hover:text-on-surface hover:bg-surface-bright flex items-center justify-center transition-colors" title="Toggle Fullscreen" type="button">
+<span class="material-symbols-outlined text-[18px]">fullscreen</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Quick Session Event Markers (Visual Data Strip) -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-space-sm">
+<div class="bg-surface-container rounded-lg p-space-md flex items-center gap-space-md">
+<div class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center text-primary-container shrink-0">
+<span class="material-symbols-outlined text-[18px]">keyboard</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-outline uppercase tracking-wider text-[10px]">Total Keystrokes</span>
+<span class="font-code-md text-on-surface font-semibold">1,248 keys</span>
+</div>
+</div>
+<div class="bg-surface-container rounded-lg p-space-md flex items-center gap-space-md">
+<div class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center text-tertiary shrink-0">
+<span class="material-symbols-outlined text-[18px]">verified_user</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-outline uppercase tracking-wider text-[10px]">Sudo Escalations</span>
+<span class="font-code-md text-on-surface font-semibold">1 incident</span>
+</div>
+</div>
+<div class="bg-surface-container rounded-lg p-space-md flex items-center gap-space-md">
+<div class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center text-secondary shrink-0">
+<span class="material-symbols-outlined text-[18px]">sync_alt</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-sm text-outline uppercase tracking-wider text-[10px]">Tunnel Egress</span>
+<span class="font-code-md text-on-surface font-semibold">14.8 MB</span>
+</div>
+</div>
+</div>
+</div>
+<!-- METADATA & COMMAND AUDIT SIDEBAR (30% - 4/12 cols) -->
+<div class="lg:col-span-4 flex flex-col gap-space-md">
+<!-- Section 1: Session Core Telemetry -->
+<div class="bg-surface-container rounded-lg p-space-md shadow-md">
+<div class="flex items-center justify-between pb-space-sm mb-space-sm border-b border-outline-variant/20">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px] text-primary">dns</span>
+<span class="font-headline-md text-[14px] font-semibold text-on-surface">Session Parameters</span>
+</div>
+<span class="font-label-sm px-1.5 py-0.5 rounded bg-surface-container-highest text-primary-container font-code-sm font-medium">SSH v2</span>
+</div>
+<div class="space-y-2.5">
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-outline">Session ID</span>
+<span class="font-code-sm text-on-surface bg-surface-container-lowest px-2 py-0.5 rounded select-all">sess_8f2a4c</span>
+</div>
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-outline">Started At</span>
+<span class="font-code-sm text-on-surface">14:02:11 UTC</span>
+</div>
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-outline">Duration</span>
+<span class="font-code-sm text-secondary font-medium">00:12:44 (active)</span>
+</div>
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-outline">Source IP</span>
+<div class="flex items-center gap-1 font-code-sm text-on-surface">
+<span>198.51.100.24</span>
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary" title="GeoIP: Frankfurt, DE"></span>
+</div>
+</div>
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-outline">Client Agent</span>
+<span class="font-code-sm text-on-surface">OpenSSH_9.6p1</span>
+</div>
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-outline">Bastion Node</span>
+<span class="font-code-sm text-outline-variant">fra-edge-02.gw</span>
+</div>
+</div>
+</div>
+<!-- Section 2: Identity & Privileges -->
+<div class="bg-surface-container rounded-lg p-space-md shadow-md">
+<div class="flex items-center justify-between pb-space-sm mb-space-sm border-b border-outline-variant/20">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px] text-tertiary">badge</span>
+<span class="font-headline-md text-[14px] font-semibold text-on-surface">Identity &amp; Credentials</span>
+</div>
+<span class="font-label-sm text-tertiary flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+<span>MFA Valid</span>
+</span>
+</div>
+<div class="flex items-center gap-space-md mb-space-md">
+<div class="w-10 h-10 rounded-lg bg-surface-container-highest flex items-center justify-center font-code-md text-headline-md font-bold text-primary-container">
+            MK
+          </div>
+<div class="flex flex-col min-w-0">
+<span class="font-body-lg text-[15px] font-semibold text-on-surface truncate">Marta Kowalski</span>
+<span class="font-code-sm text-outline truncate">marta.k@corp.internal</span>
+</div>
+</div>
+<!-- Auth Mechanisms & Roles Chips -->
+<div class="space-y-space-sm">
+<div>
+<span class="font-label-sm text-outline block mb-1 text-[11px] uppercase tracking-wider">Authentication Methods</span>
+<div class="flex flex-wrap gap-1.5">
+<span class="h-5 px-2 rounded bg-surface-container-low text-on-surface-variant font-code-sm text-[11px] flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px] text-tertiary">password</span>
+<span>Password</span>
+</span>
+<span class="h-5 px-2 rounded bg-surface-container-low text-on-surface-variant font-code-sm text-[11px] flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px] text-tertiary">phonelink_lock</span>
+<span>Hardware TOTP</span>
+</span>
+<span class="h-5 px-2 rounded bg-surface-container-low text-on-surface-variant font-code-sm text-[11px] flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px] text-primary">key</span>
+<span>RSA-4096</span>
+</span>
+</div>
+</div>
+<div>
+<span class="font-label-sm text-outline block mb-1 text-[11px] uppercase tracking-wider">Assigned Roles</span>
+<div class="flex flex-wrap gap-1.5">
+<span class="h-5 px-2 rounded bg-surface-container-highest text-secondary-fixed-dim font-code-sm text-[11px] font-medium flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+<span>dba</span>
+</span>
+<span class="h-5 px-2 rounded bg-surface-container-highest text-primary font-code-sm text-[11px] font-medium flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+<span>oncall</span>
+</span>
+<span class="h-5 px-2 rounded bg-surface-container-high text-on-surface-variant font-code-sm text-[11px]">
+<span>prod-rw</span>
+</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Section 3: Executed Command Log -->
+<div class="bg-surface-container rounded-lg p-space-md shadow-md flex flex-col flex-1">
+<div class="flex items-center justify-between pb-space-sm mb-space-sm border-b border-outline-variant/20">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px] text-secondary">terminal</span>
+<span class="font-headline-md text-[14px] font-semibold text-on-surface">Command Audit Log</span>
+</div>
+<span class="font-code-sm text-outline text-[11px]">4 executed</span>
+</div>
+<!-- Filter / Search In-Stream Commands -->
+<div class="relative mb-space-sm">
+<input class="w-full h-8 bg-surface-container-lowest text-on-surface rounded px-space-md pl-8 font-code-sm text-[12px] focus:outline-none focus:ring-1 focus:ring-primary-container placeholder:text-outline-variant" id="command-search" placeholder="Filter commands (e.g. sudo, psql)..." type="text"/>
+<span class="material-symbols-outlined text-[16px] text-outline absolute left-2 top-2 pointer-events-none">search</span>
+</div>
+<!-- Interactive Command Stream -->
+<div class="flex flex-col gap-1 overflow-y-auto max-h-[300px]" id="command-list">
+<!-- Item 1 -->
+<div class="p-2 rounded bg-surface-container-low hover:bg-surface-container-high cursor-pointer transition-colors flex items-start gap-2 group">
+<span class="font-code-sm text-outline text-[11px] mt-0.5 whitespace-nowrap">14:02:15</span>
+<div class="flex flex-col min-w-0 flex-1">
+<span class="font-code-sm text-on-surface truncate group-hover:text-primary">whoami</span>
+<span class="font-label-sm text-[10px] text-tertiary">exit: 0 • output: 5 B</span>
+</div>
+<span class="material-symbols-outlined text-[14px] text-outline-variant group-hover:text-primary">play_circle</span>
+</div>
+<!-- Item 2 -->
+<div class="p-2 rounded bg-surface-container-low hover:bg-surface-container-high cursor-pointer transition-colors flex items-start gap-2 group">
+<span class="font-code-sm text-outline text-[11px] mt-0.5 whitespace-nowrap">14:02:28</span>
+<div class="flex flex-col min-w-0 flex-1">
+<span class="font-code-sm text-on-surface truncate group-hover:text-primary">ls -la /var/log/postgresql/</span>
+<span class="font-label-sm text-[10px] text-tertiary">exit: 0 • output: 218 B</span>
+</div>
+<span class="material-symbols-outlined text-[14px] text-outline-variant group-hover:text-primary">play_circle</span>
+</div>
+<!-- Item 3 (Selected Current Playhead Frame) -->
+<div class="p-2 rounded bg-surface-container-high border-l-2 border-primary-container cursor-pointer transition-colors flex items-start gap-2 shadow-sm">
+<span class="font-code-sm text-primary font-medium text-[11px] mt-0.5 whitespace-nowrap">14:03:02</span>
+<div class="flex flex-col min-w-0 flex-1">
+<div class="flex items-center gap-1">
+<span class="font-code-sm text-on-surface font-semibold truncate">sudo systemctl status postgresql</span>
+</div>
+<span class="font-label-sm text-[10px] text-secondary font-medium">PRIVILEGED EXECUTION</span>
+</div>
+<span class="material-symbols-outlined text-[14px] text-primary" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+<!-- Item 4 -->
+<div class="p-2 rounded bg-surface-container-low hover:bg-surface-container-high cursor-pointer transition-colors flex items-start gap-2 group">
+<span class="font-code-sm text-outline text-[11px] mt-0.5 whitespace-nowrap">14:04:12</span>
+<div class="flex flex-col min-w-0 flex-1">
+<span class="font-code-sm text-on-surface truncate group-hover:text-primary">psql -U postgres</span>
+<span class="font-label-sm text-[10px] text-outline">Interactive Shell Session</span>
+</div>
+<span class="material-symbols-outlined text-[14px] text-outline-variant group-hover:text-primary">play_circle</span>
+</div>
+</div>
+<div class="mt-space-sm pt-space-xs border-t border-outline-variant/20 flex items-center justify-between text-outline font-label-sm text-[11px]">
+<span>Keystroke indexing active</span>
+<a class="text-primary hover:underline flex items-center gap-0.5" href="#">
+<span>Export CSV</span>
+<span class="material-symbols-outlined text-[12px]">launch</span>
+</a>
+</div>
+</div>
+</div>
+</div>
+<!-- Micro-interaction script for player scrub and filter behavior -->
+<script>
+    (function() {
+      // Toggle play button icon
+      const playBtn = document.getElementById('play-btn');
+      let isPlaying = true;
+      if (playBtn) {
+        playBtn.addEventListener('click', () => {
+          isPlaying = !isPlaying;
+          playBtn.innerHTML = isPlaying 
+            ? '<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: \'FILL\' 1;">pause</span>'
+            : '<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: \'FILL\' 1;">play_arrow</span>';
+        });
+      }
+
+      // Copy link feedback
+      const copyBtn = document.getElementById('copy-link-btn');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', () => {
+          const originalText = copyBtn.innerHTML;
+          copyBtn.innerHTML = '<span class="material-symbols-outlined text-[16px] text-tertiary">check</span><span class="text-tertiary">Copied!</span>';
+          setTimeout(() => {
+            copyBtn.innerHTML = originalText;
+          }, 1800);
+        });
+      }
+
+      // Filter commands
+      const searchInput = document.getElementById('command-search');
+      const list = document.getElementById('command-list');
+      if (searchInput && list) {
+        searchInput.addEventListener('input', (e) => {
+          const term = e.target.value.toLowerCase();
+          const items = list.querySelectorAll('div.cursor-pointer');
+          items.forEach(item => {
+            const text = item.textContent.toLowerCase();
+            item.style.display = text.includes(term) ? 'flex' : 'none';
+          });
+        });
+      }
+
+      // Confirm session termination
+      const terminateBtn = document.getElementById('terminate-btn');
+      if (terminateBtn) {
+        terminateBtn.addEventListener('click', () => {
+          if (confirm('Are you sure you want to forcibly terminate active session sess_8f2a4c on db-primary-03.internal?')) {
+            terminateBtn.disabled = true;
+            terminateBtn.className = 'h-8 px-3 rounded bg-surface-container-high text-outline cursor-not-allowed font-label-md flex items-center gap-1.5';
+            terminateBtn.innerHTML = '<span class="material-symbols-outlined text-[16px] animate-spin">progress_activity</span><span>Terminating...</span>';
+          }
+        });
+      }
+    })();
+  </script>
+</div></div></main></div></body></html>

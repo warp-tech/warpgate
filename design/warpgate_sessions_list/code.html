@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "error-container": "#93000a", "secondary-fixed-dim": "#ffb94e", "on-surface-variant": "#c3c6d2", "on-primary-fixed": "#001b3d", "on-error": "#690005", "outline-variant": "#424750", "secondary-container": "#c88601", "surface-container": "#1c2024", "on-secondary-fixed-variant": "#624000", "surface-bright": "#363a3e", "primary": "#a9c7ff", "on-secondary-container": "#3f2700", "surface-container-low": "#181c20", "tertiary-fixed": "#86f9b8", "on-tertiary": "#003920", "inverse-primary": "#2e5ea2", "on-surface": "#e0e3e8", "on-primary-container": "#003b77", "background": "#101418", "tertiary-container": "#46bb7f", "on-secondary-fixed": "#291800", "primary-fixed-dim": "#a9c7ff", "inverse-on-surface": "#2d3135", "inverse-surface": "#e0e3e8", "secondary": "#ffb94e", "primary-container": "#7ba7f0", "on-tertiary-fixed-variant": "#005231", "secondary-fixed": "#ffddb2", "on-tertiary-fixed": "#002111", "surface-container-highest": "#31353a", "outline": "#8d919c", "primary-fixed": "#d6e3ff", "on-error-container": "#ffdad6", "surface-dim": "#101418", "surface-container-high": "#262a2f", "surface": "#101418", "on-secondary": "#452b00", "on-primary": "#003063", "error": "#ffb4ab", "tertiary-fixed-dim": "#69dc9d", "on-primary-fixed-variant": "#084689", "surface-variant": "#31353a", "tertiary": "#69dc9d", "surface-tint": "#a9c7ff", "surface-container-lowest": "#0b0f13", "on-background": "#e0e3e8", "on-tertiary-container": "#004629" }, "borderRadius": { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" }, "spacing": { "margin-mobile": "1rem", "space-lg": "1rem", "space-xs": "0.25rem", "gutter-compact": "0.5rem", "gutter": "1rem", "margin": "1.5rem", "space-md": "0.75rem", "space-xl": "1.5rem", "space-sm": "0.5rem" }, "fontFamily": { "label-sm": [ "IBM Plex Sans" ], "headline-lg": [ "IBM Plex Sans" ], "code-md": [ "JetBrains Mono" ], "headline-lg-mobile": [ "IBM Plex Sans" ], "body-md": [ "IBM Plex Sans" ], "code-sm": [ "JetBrains Mono" ], "headline-md": [ "IBM Plex Sans" ], "body-lg": [ "IBM Plex Sans" ], "label-md": [ "IBM Plex Sans" ] }, "fontSize": { "label-sm": [ "12px", { "lineHeight": "16px", "fontWeight": "400" } ], "headline-lg": [ "32px", { "lineHeight": "38px", "fontWeight": "600" } ], "code-md": [ "13px", { "lineHeight": "18px", "fontWeight": "400" } ], "headline-lg-mobile": [ "24px", { "lineHeight": "32px", "fontWeight": "600" } ], "body-md": [ "14px", { "lineHeight": "20px", "fontWeight": "400" } ], "code-sm": [ "12px", { "lineHeight": "16px", "fontWeight": "400" } ], "headline-md": [ "20px", { "lineHeight": "28px", "fontWeight": "600" } ], "body-lg": [ "16px", { "lineHeight": "24px", "fontWeight": "400" } ], "label-md": [ "13px", { "lineHeight": "18px", "fontWeight": "500" } ] } } } }</script></head><body class="bg-background font-body-md text-on-surface antialiased min-h-screen"><aside class="fixed left-0 top-0 h-full w-[240px] bg-surface-container-low border-r border-outline-variant/40 z-50 flex flex-col justify-between select-none"><div class="flex flex-col"><div class="h-14 flex items-center gap-space-sm px-space-md border-b border-outline-variant/30"><div class="w-7 h-7 rounded bg-surface-container flex items-center justify-center border border-outline-variant/50 text-primary-container"><span class="material-symbols-outlined text-[18px]">adjust</span></div><div class="flex flex-col"><span class="font-headline-md text-[15px] font-semibold tracking-tight text-on-surface leading-tight">Warpgate</span><span class="font-code-sm text-[10px] text-outline tracking-wider uppercase font-medium">BASTION CORE</span></div></div><div class="overflow-y-auto py-space-sm max-h-[calc(100vh-120px)]"><div class="px-space-md pt-space-sm pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">ACCESS</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="overview" href="#"><span class="material-symbols-outlined text-[18px]">space_dashboard</span><span class="font-label-md">Overview</span></a><a aria-current="page" class="flex items-center gap-space-sm h-8 px-space-md rounded-lg transition-colors bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium" data-path="sessions" href="#"><span class="material-symbols-outlined text-[18px]">terminal</span><span class="font-label-md">Sessions</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="targets" href="#"><span class="material-symbols-outlined text-[18px]">dns</span><span class="font-label-md">Targets</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">IDENTITY</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="users" href="#"><span class="material-symbols-outlined text-[18px]">group</span><span class="font-label-md">Users</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="roles" href="#"><span class="material-symbols-outlined text-[18px]">badge</span><span class="font-label-md">Roles</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="tickets" href="#"><span class="material-symbols-outlined text-[18px]">confirmation_number</span><span class="font-label-md">Tickets</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="sso-providers" href="#"><span class="material-symbols-outlined text-[18px]">vpn_key</span><span class="font-label-md">SSO Providers</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">SECURITY</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="login-protection" href="#"><span class="material-symbols-outlined text-[18px]">shield</span><span class="font-label-md">Login Protection</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="known-hosts" href="#"><span class="material-symbols-outlined text-[18px]">verified</span><span class="font-label-md">Known Hosts</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="audit-log" href="#"><span class="material-symbols-outlined text-[18px]">receipt_long</span><span class="font-label-md">Audit Log</span></a></nav><div class="px-space-md pt-space-md pb-space-xs"><span class="font-code-sm text-[10px] font-semibold uppercase tracking-wider text-outline">SYSTEM</span></div><nav class="flex flex-col px-space-xs" data-active-classes="bg-surface-container-high text-on-surface border-l-2 border-primary-container font-medium"><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="configuration" href="#"><span class="material-symbols-outlined text-[18px]">settings</span><span class="font-label-md">Configuration</span></a><a class="flex items-center gap-space-sm h-8 px-space-md rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors" data-path="cluster" href="#"><span class="material-symbols-outlined text-[18px]">hub</span><span class="font-label-md">Cluster</span></a></nav></div></div><div class="p-space-sm border-t border-outline-variant/30 flex items-center justify-between bg-surface-container-lowest/60"><div class="flex items-center gap-space-sm min-w-0"><div class="w-7 h-7 rounded bg-surface-container-high flex items-center justify-center border border-outline-variant/50 shrink-0"><span class="material-symbols-outlined text-[16px] text-primary-container">admin_panel_settings</span></div><div class="flex flex-col min-w-0"><span class="font-label-md text-on-surface truncate leading-none">admin</span><span class="font-code-sm text-[11px] text-outline truncate leading-tight">marta.k</span></div></div><div class="flex items-center gap-space-xs"><button class="w-7 h-7 flex items-center justify-center rounded text-outline-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Toggle Mode" type="button"><span class="material-symbols-outlined text-[16px]">dark_mode</span></button><button class="w-7 h-7 flex items-center justify-center rounded text-outline-variant hover:text-error hover:bg-surface-container-high transition-colors" title="Sign out" type="button"><span class="material-symbols-outlined text-[16px]">logout</span></button></div></div></aside><div class="pl-[240px]"><header class="fixed top-0 left-[240px] right-0 h-14 bg-surface-container-low/95 backdrop-blur border-b border-outline-variant/40 z-40 flex items-center justify-between px-space-xl"><div class="flex items-center gap-space-sm font-code-sm text-outline"><span class="text-outline hover:text-on-surface transition-colors">Warpgate</span><span class="text-outline-variant">/</span><span class="text-on-surface font-medium">Overview</span></div><div class="flex items-center gap-space-md"><div class="relative flex items-center"><div class="flex items-center h-8 bg-surface-container-lowest border border-outline-variant/50 rounded-xl px-space-sm gap-space-sm w-64 focus-within:border-primary-container transition-colors"><span class="material-symbols-outlined text-[16px] text-outline">search</span><span class="font-body-md text-outline text-[13px] flex-1 select-none">Search</span><kbd class="font-code-sm text-[11px] text-outline-variant bg-surface-container px-1.5 py-0.5 rounded border border-outline-variant/30">⌘K</kbd></div></div><div class="h-6 flex items-center gap-1.5 px-2 bg-surface-container border border-outline-variant/40 rounded-full"><span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span><span class="font-code-sm text-[11px] font-medium text-secondary-fixed-dim">3 live</span></div><button class="w-8 h-8 rounded-lg flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors relative" title="Notifications" type="button"><span class="material-symbols-outlined text-[18px]">notifications</span><span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-primary-container"></span></button><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center border border-outline-variant/40"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></header><main class="relative pt-14 bg-background min-h-screen"><div class="max-w-[1600px] w-full mx-auto p-space-xl"><div class="flex flex-col w-full">
+<div class="flex flex-col gap-space-lg w-full">
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-md">
+<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">Sessions</h1>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-surface-container border border-outline-variant/40">
+<span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
+<span class="font-code-sm text-code-sm font-medium text-secondary-fixed-dim">2 Active Streams</span>
+</div>
+</div>
+<div class="flex items-center gap-space-sm self-start md:self-auto">
+<button class="h-8 px-3 rounded-lg bg-surface-container border border-outline-variant/40 text-on-surface hover:bg-surface-container-high transition-colors flex items-center gap-1.5 font-label-md text-label-md" type="button">
+<span class="material-symbols-outlined text-[16px] text-outline">file_download</span>
+<span>Export CSV</span>
+</button>
+<div class="h-8 p-0.5 rounded-lg bg-surface-container border border-outline-variant/40 flex items-center">
+<button class="h-7 px-2.5 rounded bg-surface-container-high text-on-surface font-label-md text-label-md flex items-center gap-1 shadow-sm transition-all" id="btn-density-comfortable" type="button">
+<span class="material-symbols-outlined text-[15px]">view_headline</span>
+<span class="hidden sm:inline">Comfortable</span>
+</button>
+<button class="h-7 px-2.5 rounded text-outline hover:text-on-surface font-label-md text-label-md flex items-center gap-1 transition-all" id="btn-density-compact" type="button">
+<span class="material-symbols-outlined text-[15px]">density_small</span>
+<span class="hidden sm:inline">Compact</span>
+</button>
+</div>
+</div>
+</div>
+<div class="h-12 w-full border-y border-outline-variant/40 bg-surface-container-lowest/70 flex items-center justify-between px-space-xs gap-space-md overflow-x-auto select-none">
+<div class="flex items-center gap-space-sm min-w-max">
+<div class="relative flex items-center">
+<span class="material-symbols-outlined absolute left-2.5 text-[16px] text-outline pointer-events-none">search</span>
+<input class="h-8 w-72 pl-8 pr-3 rounded-lg bg-surface-container-low border border-outline-variant/40 font-body-md text-code-sm text-on-surface placeholder:text-outline focus:outline-none focus:border-primary-container transition-colors" placeholder="Search user, target or session ID..." type="text"/>
+</div>
+<div class="h-4 w-px bg-outline-variant/40 mx-1"></div>
+<button class="h-7 px-2.5 rounded-lg bg-surface-container border border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors flex items-center gap-1.5 font-label-md text-label-sm" type="button">
+<span class="text-outline font-normal">Protocol:</span>
+<span class="font-medium text-on-surface">All</span>
+<span class="material-symbols-outlined text-[14px] text-outline">expand_more</span>
+</button>
+<button class="h-7 px-2.5 rounded-lg bg-surface-container border border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors flex items-center gap-1.5 font-label-md text-label-sm" type="button">
+<span class="text-outline font-normal">Status:</span>
+<span class="font-medium text-on-surface">All</span>
+<span class="material-symbols-outlined text-[14px] text-outline">expand_more</span>
+</button>
+<button class="h-7 px-2.5 rounded-lg bg-surface-container border border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors flex items-center gap-1.5 font-label-md text-label-sm" type="button">
+<span class="text-outline font-normal">User:</span>
+<span class="font-medium text-on-surface">All</span>
+<span class="material-symbols-outlined text-[14px] text-outline">expand_more</span>
+</button>
+<button class="h-7 px-2.5 rounded-lg bg-surface-container border border-outline-variant/40 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors flex items-center gap-1.5 font-label-md text-label-sm" type="button">
+<span class="material-symbols-outlined text-[14px] text-outline">schedule</span>
+<span class="font-medium text-on-surface">Last 24 hours</span>
+<span class="material-symbols-outlined text-[14px] text-outline">expand_more</span>
+</button>
+</div>
+<div class="text-right min-w-max pl-space-md">
+<span class="font-code-sm text-code-sm text-outline">Showing <span class="text-on-surface font-medium">1–50</span> of <span class="text-on-surface font-medium">1,284</span></span>
+</div>
+</div>
+<div class="w-full overflow-x-auto">
+<table class="w-full border-collapse text-left select-none">
+<thead class="sticky top-14 z-20 bg-surface-container border-b border-outline-variant/50">
+<tr class="h-10 text-on-surface-variant font-label-md text-label-md tracking-normal">
+<th class="pl-space-md pr-space-sm w-36 font-medium">Status</th>
+<th class="px-space-sm w-36 font-medium">Session ID</th>
+<th class="px-space-sm min-w-[180px] font-medium">User</th>
+<th class="px-space-sm min-w-[210px] font-medium">Target</th>
+<th class="px-space-sm w-28 font-medium">Protocol</th>
+<th class="px-space-sm w-36 font-medium">Source IP</th>
+<th class="px-space-sm w-44 font-medium">Started</th>
+<th class="px-space-sm w-28 font-medium">Duration</th>
+<th class="px-space-sm w-20 text-center font-medium">Record</th>
+<th class="pr-space-md pl-space-sm w-12 text-right font-medium"></th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/30 text-on-surface font-body-md text-body-md" id="session-table-body">
+<tr class="session-row h-10 bg-secondary-container/5 hover:bg-secondary-container/10 transition-colors group">
+<td class="pl-space-md pr-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-secondary/30 bg-secondary-container/20 font-label-sm text-label-sm text-secondary-fixed">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary animate-ping"></span>
+<span class="font-medium text-secondary">Live</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-primary-container">sess_8f2a91c0</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-primary">MK</div>
+<span class="text-on-surface truncate">marta.kovacs</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">db-primary-03.internal</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">Postgres</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">10.240.12.84</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Today, 14:22:04</td>
+<td class="px-space-sm font-code-sm text-code-sm text-secondary font-medium">00:41:19</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-primary-container align-middle cursor-pointer hover:text-primary transition-colors" title="Live stream recording">videocam</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="session-row h-10 bg-secondary-container/5 hover:bg-secondary-container/10 transition-colors group">
+<td class="pl-space-md pr-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-secondary/30 bg-secondary-container/20 font-label-sm text-label-sm text-secondary-fixed">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary animate-ping"></span>
+<span class="font-medium text-secondary">Live</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-primary-container">sess_7e4b1192</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-tertiary">AL</div>
+<span class="text-on-surface truncate">alex.lind</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">pg-replica-01.internal</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">SSH</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">10.240.14.19</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Today, 14:58:12</td>
+<td class="px-space-sm font-code-sm text-code-sm text-secondary font-medium">00:05:11</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-primary-container align-middle cursor-pointer hover:text-primary transition-colors" title="Live stream recording">videocam</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-outline hover:text-on-surface hover:bg-surface-container-high transition-colors" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="session-row h-10 bg-surface-container-high/80 relative border-l-2 !border-l-primary transition-colors group">
+<td class="pl-[14px] pr-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-outline-variant/40 bg-surface-container font-label-sm text-label-sm text-outline">
+<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>
+<span>Ended</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-primary font-medium">sess_6a3c4801</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-primary-container">DR</div>
+<span class="text-on-surface font-medium truncate">david.ross</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">edge-ingress-eu.internal</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">SSH</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">192.168.4.112</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Today, 13:10:44</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface-variant">01:14:22</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-outline hover:text-on-surface align-middle cursor-pointer transition-colors" title="View asciicast">movie</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-outline hover:text-on-surface hover:bg-surface-container transition-colors" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="session-row h-10 bg-surface-bright/40 transition-colors group">
+<td class="pl-space-md pr-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-outline-variant/40 bg-surface-container font-label-sm text-label-sm text-outline">
+<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>
+<span>Ended</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-primary-container">sess_5d1f94a8</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-secondary">SL</div>
+<span class="text-on-surface truncate">sarah.lin</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">redis-cache-02.internal</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">TCP</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">10.240.11.3</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Today, 12:45:00</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface-variant">00:18:04</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-outline hover:text-on-surface align-middle cursor-pointer transition-colors" title="View asciicast">movie</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-on-surface bg-surface-container-high border border-outline-variant/40 transition-colors shadow-sm" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="session-row h-10 hover:bg-surface-container-high/50 transition-colors group">
+<td class="pl-space-md pr-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-outline-variant/40 bg-surface-container font-label-sm text-label-sm text-outline">
+<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>
+<span>Ended</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-primary-container">sess_4c8b21ef</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-on-surface">JS</div>
+<span class="text-on-surface truncate">joshua.smit</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">vault-core-01.internal</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">HTTPS</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">10.240.8.12</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Today, 11:30:19</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface-variant">00:03:41</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-outline/40 align-middle select-none">videocam_off</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-outline opacity-0 group-hover:opacity-100 hover:text-on-surface hover:bg-surface-container-high transition-all" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="session-row h-10 hover:bg-surface-container-high/50 transition-colors group">
+<td class="pl-space-md pr-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-outline-variant/40 bg-surface-container font-label-sm text-label-sm text-outline">
+<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>
+<span>Ended</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-primary-container">sess_3b99a341</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-tertiary">AL</div>
+<span class="text-on-surface truncate">alex.lind</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">k8s-worker-pool-08.internal</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">SSH</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">10.240.14.19</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Today, 10:15:02</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface-variant">02:11:58</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-outline hover:text-on-surface align-middle cursor-pointer transition-colors" title="View asciicast">movie</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-outline opacity-0 group-hover:opacity-100 hover:text-on-surface hover:bg-surface-container-high transition-all" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="session-row h-10 hover:bg-surface-container-high/50 transition-colors group">
+<td class="pl-space-md pr-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-outline-variant/40 bg-surface-container font-label-sm text-label-sm text-outline">
+<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>
+<span>Ended</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-primary-container">sess_2a77f09c</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-primary">EN</div>
+<span class="text-on-surface truncate">elena.novak</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">elastic-node-04.internal</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">HTTPS</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">172.16.88.42</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Today, 09:41:17</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface-variant">00:45:30</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-outline hover:text-on-surface align-middle cursor-pointer transition-colors" title="View asciicast">movie</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-outline opacity-0 group-hover:opacity-100 hover:text-on-surface hover:bg-surface-container-high transition-all" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="session-row h-10 hover:bg-surface-container-high/50 transition-colors group">
+<td class="pl-space-md pr-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-outline-variant/40 bg-surface-container font-label-sm text-label-sm text-outline">
+<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>
+<span>Ended</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-primary-container">sess_1f66d418</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-primary">MK</div>
+<span class="text-on-surface truncate">marta.kovacs</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">bastion-gateway-ext.corp</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">SSH</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">10.240.12.84</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Today, 08:02:11</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface-variant">00:12:09</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-outline hover:text-on-surface align-middle cursor-pointer transition-colors" title="View asciicast">movie</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-outline opacity-0 group-hover:opacity-100 hover:text-on-surface hover:bg-surface-container-high transition-all" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="session-row h-10 hover:bg-surface-container-high/50 transition-colors group">
+<td class="pl-space-md pr-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-outline-variant/40 bg-surface-container font-label-sm text-label-sm text-outline">
+<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>
+<span>Ended</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-primary-container">sess_0e55b722</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-secondary-fixed-dim">TR</div>
+<span class="text-on-surface truncate">thomas.reid</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">ci-runner-large-01.internal</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">SSH</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">10.240.22.90</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Yesterday, 23:14:02</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface-variant">00:54:19</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-outline hover:text-on-surface align-middle cursor-pointer transition-colors" title="View asciicast">movie</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-outline opacity-0 group-hover:opacity-100 hover:text-on-surface hover:bg-surface-container-high transition-all" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="session-row h-10 hover:bg-surface-container-high/50 transition-colors group">
+<td class="pl-space-md pr-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-outline-variant/40 bg-surface-container font-label-sm text-label-sm text-outline">
+<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>
+<span>Ended</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-primary-container">sess_9d44c803</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-secondary">SL</div>
+<span class="text-on-surface truncate">sarah.lin</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">mysql-analytics-dw.internal</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">MySQL</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">10.240.11.3</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Yesterday, 21:05:44</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface-variant">03:19:12</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-outline hover:text-on-surface align-middle cursor-pointer transition-colors" title="View asciicast">movie</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-outline opacity-0 group-hover:opacity-100 hover:text-on-surface hover:bg-surface-container-high transition-all" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="session-row h-10 hover:bg-surface-container-high/50 transition-colors group">
+<td class="pl-space-md pr-space-sm">
+<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-error/30 bg-error-container/20 font-label-sm text-label-sm text-error">
+<span class="material-symbols-outlined text-[13px] leading-none">warning</span>
+<span class="font-medium">Failed</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-error">sess_8c33e19a</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-error">UNKNOWN</div>
+<span class="text-on-surface truncate">anonymous</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">k8s-control-plane.internal</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">SSH</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-error">198.51.100.41</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Yesterday, 19:40:11</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">00:00:01</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-outline/30 align-middle select-none">videocam_off</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-outline opacity-0 group-hover:opacity-100 hover:text-on-surface hover:bg-surface-container-high transition-all" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="session-row h-10 hover:bg-surface-container-high/50 transition-colors group">
+<td class="pl-space-md pr-space-sm">
+<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-error/40 bg-surface-container font-label-sm text-label-sm text-error">
+<span class="w-2 h-2 rounded-[1px] bg-error"></span>
+<span class="truncate max-w-[100px]" title="Terminated by admin">Terminated</span>
+</span>
+</td>
+<td class="px-space-sm font-code-md text-code-md text-on-surface-variant">sess_7b22a005</td>
+<td class="px-space-sm">
+<div class="flex items-center gap-2">
+<div class="w-5 h-5 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-code-sm text-outline">BK</div>
+<span class="text-on-surface truncate">boris.kane</span>
+</div>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface">payment-vault-api.internal</td>
+<td class="px-space-sm">
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-code-sm bg-surface-container border border-outline-variant/40 text-on-surface-variant uppercase">HTTPS</span>
+</td>
+<td class="px-space-sm font-code-sm text-code-sm text-outline">10.240.5.50</td>
+<td class="px-space-sm text-outline font-code-sm text-code-sm">Yesterday, 17:12:00</td>
+<td class="px-space-sm font-code-sm text-code-sm text-on-surface-variant">00:08:15</td>
+<td class="px-space-sm text-center">
+<span class="material-symbols-outlined text-[17px] text-outline hover:text-on-surface align-middle cursor-pointer transition-colors" title="View asciicast">movie</span>
+</td>
+<td class="pr-space-md pl-space-sm text-right">
+<button class="w-6 h-6 inline-flex items-center justify-center rounded text-outline opacity-0 group-hover:opacity-100 hover:text-on-surface hover:bg-surface-container-high transition-all" type="button">
+<span class="material-symbols-outlined text-[16px]">more_horiz</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="h-12 border-t border-outline-variant/40 flex items-center justify-between px-space-xs pt-space-xs text-outline select-none">
+<div class="flex items-center gap-space-sm font-label-md text-code-sm">
+<span>Rows per page:</span>
+<select class="bg-surface-container border border-outline-variant/40 rounded px-1.5 py-0.5 text-on-surface focus:outline-none focus:border-primary font-code-sm text-code-sm cursor-pointer">
+<option value="25">25</option>
+<option selected="" value="50">50</option>
+<option value="100">100</option>
+</select>
+</div>
+<div class="flex items-center gap-1 font-code-sm text-code-sm">
+<button class="w-7 h-7 rounded border border-outline-variant/40 flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container disabled:opacity-30 disabled:pointer-events-none transition-colors" disabled="" type="button">
+<span class="material-symbols-outlined text-[14px]">chevron_left</span>
+</button>
+<button class="w-7 h-7 rounded bg-surface-container-high border border-outline-variant text-on-surface font-medium" type="button">1</button>
+<button class="w-7 h-7 rounded hover:bg-surface-container hover:text-on-surface text-outline transition-colors" type="button">2</button>
+<button class="w-7 h-7 rounded hover:bg-surface-container hover:text-on-surface text-outline transition-colors" type="button">3</button>
+<span class="px-1 text-outline">…</span>
+<button class="w-7 h-7 rounded hover:bg-surface-container hover:text-on-surface text-outline transition-colors" type="button">26</button>
+<button class="w-7 h-7 rounded border border-outline-variant/40 flex items-center justify-center text-outline hover:text-on-surface hover:bg-surface-container transition-colors" type="button">
+<span class="material-symbols-outlined text-[14px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<script>
+  (function() {
+    const btnComfortable = document.getElementById('btn-density-comfortable');
+    const btnCompact = document.getElementById('btn-density-compact');
+    const rows = document.querySelectorAll('.session-row');
+
+    if (btnComfortable && btnCompact) {
+      btnCompact.addEventListener('click', function() {
+        btnCompact.classList.add('bg-surface-container-high', 'text-on-surface', 'shadow-sm');
+        btnCompact.classList.remove('text-outline');
+        btnComfortable.classList.remove('bg-surface-container-high', 'text-on-surface', 'shadow-sm');
+        btnComfortable.classList.add('text-outline');
+        rows.forEach(r => {
+          r.classList.remove('h-10');
+          r.classList.add('h-8');
+        });
+      });
+
+      btnComfortable.addEventListener('click', function() {
+        btnComfortable.classList.add('bg-surface-container-high', 'text-on-surface', 'shadow-sm');
+        btnComfortable.classList.remove('text-outline');
+        btnCompact.classList.remove('bg-surface-container-high', 'text-on-surface', 'shadow-sm');
+        btnCompact.classList.add('text-outline');
+        rows.forEach(r => {
+          r.classList.remove('h-8');
+          r.classList.add('h-10');
+        });
+      });
+    }
+  })();
+</script></div></main></div></body></html>
