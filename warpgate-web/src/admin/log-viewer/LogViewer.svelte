@@ -435,50 +435,33 @@
         return String(entry.values?._type ?? '').replace(/^"|"$/g, '')
     }
 
+    const richLogTypes: ReadonlySet<string> = new Set<RichLogEntry['_type']>([
+        'AccessRoleGranted1',
+        'AccessRoleRevoked1',
+        'AdminRoleGranted1',
+        'AdminRoleRevoked1',
+        'UserCreated1',
+        'UserDeleted1',
+        'UserAuthenticated1',
+        'UserAuthenticationFailed1',
+        'TargetSessionStarted1',
+        'TargetSessionEnded1',
+        'CredentialCreated1',
+        'CredentialDeleted1',
+        'TicketCreated1',
+        'TicketDeleted1',
+        'KubernetesExecStarted1',
+        'KubernetesAttachStarted1',
+        'KubernetesPortForwardStarted1',
+        'KubernetesStreamRejected1',
+        'KubernetesDebugContainerCreated1',
+        'KubernetesPodCreated1',
+    ])
+
     function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
-        const type = richLogType(entry)
-        if (type === 'AccessRoleGranted1') {
-            return entry.values as AccessRoleGranted1
-        } else if (type === 'AccessRoleRevoked1') {
-            return entry.values as AccessRoleRevoked1
-        } else if (type === 'AdminRoleGranted1') {
-            return entry.values as AdminRoleGranted1
-        } else if (type === 'AdminRoleRevoked1') {
-            return entry.values as AdminRoleRevoked1
-        } else if (type === 'UserCreated1') {
-            return entry.values as UserCreated1
-        } else if (type === 'UserDeleted1') {
-            return entry.values as UserDeleted1
-        } else if (type === 'UserAuthenticated1') {
-            return entry.values as UserAuthenticated1
-        } else if (type === 'UserAuthenticationFailed1') {
-            return entry.values as UserAuthenticationFailed1
-        } else if (type === 'TargetSessionStarted1') {
-            return entry.values as TargetSessionStarted1
-        } else if (type === 'TargetSessionEnded1') {
-            return entry.values as TargetSessionEnded1
-        } else if (type === 'CredentialCreated1') {
-            return entry.values as CredentialCreated1
-        } else if (type === 'CredentialDeleted1') {
-            return entry.values as CredentialDeleted1
-        } else if (type === 'TicketCreated1') {
-            return entry.values as TicketCreated1
-        } else if (type === 'TicketDeleted1') {
-            return entry.values as TicketDeleted1
-        } else if (type === 'KubernetesExecStarted1') {
-            return entry.values as KubernetesExecStarted1
-        } else if (type === 'KubernetesAttachStarted1') {
-            return entry.values as KubernetesAttachStarted1
-        } else if (type === 'KubernetesPortForwardStarted1') {
-            return entry.values as KubernetesPortForwardStarted1
-        } else if (type === 'KubernetesStreamRejected1') {
-            return entry.values as KubernetesStreamRejected1
-        } else if (type === 'KubernetesDebugContainerCreated1') {
-            return entry.values as KubernetesDebugContainerCreated1
-        } else if (type === 'KubernetesPodCreated1') {
-            return entry.values as KubernetesPodCreated1
-        }
-        return null
+        return richLogTypes.has(richLogType(entry))
+            ? (entry.values as RichLogEntry)
+            : null
     }
 
     /**
@@ -498,11 +481,6 @@
         } catch {
             return raw
         }
-    }
-
-    /** Booleans arrive as their rendered text. */
-    function isTrue(raw: string | undefined): boolean {
-        return raw === 'true'
     }
 
     function genericValues(entry: LogEntry): [string, unknown][] {
@@ -964,17 +942,17 @@
                                             id={richEntry.target_id}
                                             name={richEntry.target_name}
                                         />
-                                        {#if isTrue(richEntry.privileged)}
+                                        {#if richEntry.privileged === 'true'}
                                             <span class="badge bg-danger">
                                                 privileged
                                             </span>
                                         {/if}
-                                        {#if isTrue(richEntry.host_pid)}
+                                        {#if richEntry.host_pid === 'true'}
                                             <span class="badge bg-warning">
                                                 hostPID
                                             </span>
                                         {/if}
-                                        {#if isTrue(richEntry.host_network)}
+                                        {#if richEntry.host_network === 'true'}
                                             <span class="badge bg-warning">
                                                 hostNetwork
                                             </span>

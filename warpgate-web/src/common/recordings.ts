@@ -16,8 +16,7 @@ export type RecordingMetadata =
           // Absent when the client named no container: kubectl omits it for
           // single-container pods and lets the API server choose.
           container?: string | null
-          // Recordings written before argv was captured in full carry a bare
-          // string here rather than the argv array.
+          // Stored either as argv or, in older recordings, as a single string.
           command: string | string[]
       }
     | {
@@ -61,11 +60,6 @@ export type RecordingMetadata =
           target: string
       }
 
-/** Older recordings stored a single string where argv is now an array. */
-function formatCommand(command: string | string[]): string {
-    return Array.isArray(command) ? command.join(' ') : command
-}
-
 export function recordingMetadataToFieldSet(
     metadata: RecordingMetadata,
 ): [string, string][] {
@@ -78,7 +72,7 @@ export function recordingMetadataToFieldSet(
             if (metadata.container) {
                 fieldSets.push(['Container', metadata.container])
             }
-            fieldSets.push(['Command', formatCommand(metadata.command)])
+            fieldSets.push(['Command', [metadata.command].flat().join(' ')])
             break
         case 'kubernetes-attach':
             fieldSets.push(['Namespace', metadata.namespace])

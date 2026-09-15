@@ -50,9 +50,7 @@ KUBECTL_CLIENT_SECRET = "kubectl-client-secret"
 def _provision_kubernetes_target(processes, shared_wg, label):
     """Create a user, role and Kubernetes target pointing at a fresh k3s.
 
-    Returns ``(k3s, user, target_name, admin_url)``. Mirrors the setup
-    ``test_kubectl_exec_io`` does inline; the audit tests below need the same
-    thing three times over.
+    Returns ``(k3s, user, target_name, admin_url)``.
     """
     k3s: K3sInstance = processes.start_k3s()
     url = f"https://localhost:{shared_wg.http_port}"
@@ -107,8 +105,8 @@ async def _issue_user_token(url, user, label):
         return (await resp.json())["secret"]
 
 
-def _create_running_pod(k3s, pod_name):
-    """Apply a long-lived pod and block until it is Running."""
+def _create_running_pod(k3s, pod_name, *, command="['sleep', '3600']", stdin=False):
+    """Apply a single-container alpine pod and block until it is Ready."""
     k3s.kubectl(
         ["apply", "-f", "-"],
         input=(
@@ -121,18 +119,13 @@ def _create_running_pod(k3s, pod_name):
             f"  containers:\n"
             f"  - name: alpine\n"
             f"    image: alpine:3\n"
-            f"    command: ['sleep', '3600']\n"
+            f"    command: {command}\n"
+            + ("    stdin: true\n    stdinOnce: true\n" if stdin else "")
         ).encode(),
     )
-    for _ in range(120):
-        r = k3s.kubectl(
-            ["get", "pod", pod_name, "-n", "default", "-o", "jsonpath={.status.phase}"],
-            check=False,
-        )
-        if r.stdout.strip() == b"Running":
-            return
-        time.sleep(1)
-    raise AssertionError(f"pod {pod_name} did not reach Running: {r.stdout!r} {r.stderr!r}")
+    k3s.kubectl(
+        ["wait", "--for=condition=Ready", f"pod/{pod_name}", "-n", "default", "--timeout=120s"]
+    )
 
 
 def _log_value(entry, key):
@@ -698,64 +691,10 @@ class TestKubernetesIntegration:
     @pytest.mark.asyncio
     async def test_kubectl_run(self, processes, shared_wg: WarpgateProcess):
         """Ensure that write requests such as ``kubectl run`` are proxied."""
-        k3s: K3sInstance = processes.start_k3s()
-        k3s_port = k3s.port
-        k3s_token = k3s.token
-        url = f"https://localhost:{shared_wg.http_port}"
-
-        # create user/role as before
-        with admin_client(url) as api:
-            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
-            user = api.create_user(
-                sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}")
-            )
-            api.create_password_credential(
-                user.id, sdk.NewPasswordCredential(password="123")
-            )
-            api.add_user_role(user.id, role.id)
-
-        target_name = f"k8s-run-{uuid.uuid4()}"
-        with admin_client(url) as api:
-            target = api.create_target(
-                sdk.TargetDataRequest(
-                    name=target_name,
-                    options=sdk.TargetOptions(
-                        sdk.TargetOptionsTargetKubernetesOptions(
-                            kind="Kubernetes",
-                            cluster_url=f"https://127.0.0.1:{k3s_port}",
-                            tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
-                            auth=sdk.KubernetesTargetAuth(
-                                sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
-                                    kind="Token", token=k3s_token
-                                )
-                            ),
-                        )
-                    ),
-                )
-            )
-            api.add_target_role(target.id, role.id)
-
-        # login and request api token
-        async with aiohttp.ClientSession() as session:
-            resp = await session.post(
-                f"{url}/@warpgate/api/auth/login",
-                json={"username": user.username, "password": "123"},
-                ssl=False,
-            )
-            resp.raise_for_status()
-            resp = await session.post(
-                f"{url}/@warpgate/api/profile/api-tokens",
-                json={
-                    "label": "run-token",
-                    "expiry": (
-                        datetime.now(timezone.utc) + timedelta(days=1)
-                    ).isoformat(),
-                },
-                ssl=False,
-            )
-            resp.raise_for_status()
-            user_token = (await resp.json())["secret"]
-
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "run"
+        )
+        user_token = await _issue_user_token(url, user, "run-token")
         server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
         # use interactive tty and echo some data through cat to ensure
         # stdin/stdout forwarding works for ``kubectl run`` as well
@@ -887,103 +826,14 @@ class TestKubernetesIntegration:
     @pytest.mark.asyncio
     async def test_kubectl_exec_io(self, processes, shared_wg: WarpgateProcess):
         """Verify that ``kubectl exec`` through Warpgate proxies stdin/stdout."""
-        k3s: K3sInstance = processes.start_k3s()
-        k3s_port = k3s.port
-        k3s_token = k3s.token
-        url = f"https://localhost:{shared_wg.http_port}"
-
-        # --- set up user, role, target ---
-        with admin_client(url) as api:
-            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
-            user = api.create_user(
-                sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}")
-            )
-            api.create_password_credential(
-                user.id, sdk.NewPasswordCredential(password="123")
-            )
-            api.add_user_role(user.id, role.id)
-
-        target_name = f"k8s-exec-{uuid.uuid4()}"
-        with admin_client(url) as api:
-            target = api.create_target(
-                sdk.TargetDataRequest(
-                    name=target_name,
-                    options=sdk.TargetOptions(
-                        sdk.TargetOptionsTargetKubernetesOptions(
-                            kind="Kubernetes",
-                            cluster_url=f"https://127.0.0.1:{k3s_port}",
-                            tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
-                            auth=sdk.KubernetesTargetAuth(
-                                sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
-                                    kind="Token", token=k3s_token
-                                )
-                            ),
-                        )
-                    ),
-                )
-            )
-            api.add_target_role(target.id, role.id)
-
-        # login and obtain a user API token
-        async with aiohttp.ClientSession() as session:
-            resp = await session.post(
-                f"{url}/@warpgate/api/auth/login",
-                json={"username": user.username, "password": "123"},
-                ssl=False,
-            )
-            resp.raise_for_status()
-            resp = await session.post(
-                f"{url}/@warpgate/api/profile/api-tokens",
-                json={
-                    "label": "exec-token",
-                    "expiry": (
-                        datetime.now(timezone.utc) + timedelta(days=1)
-                    ).isoformat(),
-                },
-                ssl=False,
-            )
-            resp.raise_for_status()
-            user_token = (await resp.json())["secret"]
-
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "exec"
+        )
+        user_token = await _issue_user_token(url, user, "exec-token")
         server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
 
-        # create a simple pod inside k3s
         pod_name = f"exec-test-{uuid.uuid4().hex[:8]}"
-        pod_yaml = (
-            f"apiVersion: v1\n"
-            f"kind: Pod\n"
-            f"metadata:\n"
-            f"  name: {pod_name}\n"
-            f"  namespace: default\n"
-            f"spec:\n"
-            f"  containers:\n"
-            f"  - name: alpine\n"
-            f"    image: alpine:3\n"
-            f"    command: ['sleep', '3600']\n"
-        )
-        k3s.kubectl(["apply", "-f", "-"], input=pod_yaml.encode())
-
-        # wait for the pod to be Running
-        for _ in range(120):
-            r = k3s.kubectl(
-                [
-                    "get",
-                    "pod",
-                    pod_name,
-                    "-n",
-                    "default",
-                    "-o",
-                    "jsonpath={.status.phase}",
-                ],
-                check=False,
-            )
-            if r.stdout.strip() == b"Running":
-                break
-            time.sleep(1)
-        else:
-            raise AssertionError(
-                f"pod {pod_name} did not reach Running: {r.stdout!r} {r.stderr!r}"
-            )
+        _create_running_pod(k3s, pod_name)
 
         # --- kubectl exec: send stdin and read stdout ---
         p = run_kubectl(
@@ -1013,105 +863,15 @@ class TestKubernetesIntegration:
     @pytest.mark.asyncio
     async def test_kubectl_attach_io(self, processes, shared_wg: WarpgateProcess):
         """Verify that ``kubectl attach`` through Warpgate proxies stdin/stdout."""
-        k3s: K3sInstance = processes.start_k3s()
-        k3s_port = k3s.port
-        k3s_token = k3s.token
-        url = f"https://localhost:{shared_wg.http_port}"
-
-        # --- set up user, role, target ---
-        with admin_client(url) as api:
-            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
-            user = api.create_user(
-                sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}")
-            )
-            api.create_password_credential(
-                user.id, sdk.NewPasswordCredential(password="123")
-            )
-            api.add_user_role(user.id, role.id)
-
-        target_name = f"k8s-attach-{uuid.uuid4()}"
-        with admin_client(url) as api:
-            target = api.create_target(
-                sdk.TargetDataRequest(
-                    name=target_name,
-                    options=sdk.TargetOptions(
-                        sdk.TargetOptionsTargetKubernetesOptions(
-                            kind="Kubernetes",
-                            cluster_url=f"https://127.0.0.1:{k3s_port}",
-                            tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
-                            auth=sdk.KubernetesTargetAuth(
-                                sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
-                                    kind="Token", token=k3s_token
-                                )
-                            ),
-                        )
-                    ),
-                )
-            )
-            api.add_target_role(target.id, role.id)
-
-        # login and obtain a user API token
-        async with aiohttp.ClientSession() as session:
-            resp = await session.post(
-                f"{url}/@warpgate/api/auth/login",
-                json={"username": user.username, "password": "123"},
-                ssl=False,
-            )
-            resp.raise_for_status()
-            resp = await session.post(
-                f"{url}/@warpgate/api/profile/api-tokens",
-                json={
-                    "label": "attach-token",
-                    "expiry": (
-                        datetime.now(timezone.utc) + timedelta(days=1)
-                    ).isoformat(),
-                },
-                ssl=False,
-            )
-            resp.raise_for_status()
-            user_token = (await resp.json())["secret"]
-
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "attach"
+        )
+        user_token = await _issue_user_token(url, user, "attach-token")
         server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
 
-        # create a pod whose main process reads stdin and echoes it back
+        # a pod whose main process reads stdin and echoes it back
         pod_name = f"attach-test-{uuid.uuid4().hex[:8]}"
-        pod_yaml = (
-            f"apiVersion: v1\n"
-            f"kind: Pod\n"
-            f"metadata:\n"
-            f"  name: {pod_name}\n"
-            f"  namespace: default\n"
-            f"spec:\n"
-            f"  containers:\n"
-            f"  - name: cat\n"
-            f"    image: alpine:3\n"
-            f"    command: ['cat']\n"
-            f"    stdin: true\n"
-            f"    stdinOnce: true\n"
-        )
-        k3s.kubectl(["apply", "-f", "-"], input=pod_yaml.encode())
-
-        # wait for the pod to be Running
-        for _ in range(120):
-            r = k3s.kubectl(
-                [
-                    "get",
-                    "pod",
-                    pod_name,
-                    "-n",
-                    "default",
-                    "-o",
-                    "jsonpath={.status.phase}",
-                ],
-                check=False,
-            )
-            if r.stdout.strip() == b"Running":
-                break
-            time.sleep(1)
-        else:
-            raise AssertionError(
-                f"pod {pod_name} did not reach Running: {r.stdout!r} {r.stderr!r}"
-            )
+        _create_running_pod(k3s, pod_name, command="['cat']", stdin=True)
 
         # --- kubectl attach: send stdin and read stdout ---
         p = run_kubectl(

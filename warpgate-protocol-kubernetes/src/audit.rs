@@ -10,6 +10,7 @@
 //! into an audit log, so unspecified stays unspecified.
 
 use serde::Deserialize;
+use tracing::warn;
 use warpgate_core::logging::{AuditEvent, KubernetesAuditSubject};
 
 use crate::recording::SessionRecordingMetadata;
@@ -22,47 +23,53 @@ const MAX_LIST_BYTES: usize = 4096;
 const TRUNCATION_MARKER: &str = "<truncated>";
 
 /// A pod addressed by a request path.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct PodRef {
     pub namespace: String,
     pub pod: String,
 }
 
 /// A pod subresource that upgrades to a stream.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StreamOperation {
+#[derive(Debug)]
+pub struct StreamOperation {
+    pub pod: PodRef,
+    pub kind: StreamKind,
+}
+
+#[derive(Debug)]
+pub enum StreamKind {
     Exec {
-        pod: PodRef,
         container: Option<String>,
         command: Vec<String>,
         tty: bool,
         stdin: bool,
     },
     Attach {
-        pod: PodRef,
         container: Option<String>,
         tty: bool,
     },
     PortForward {
-        pod: PodRef,
         ports: Vec<String>,
     },
 }
 
 /// A request whose audit-worthy detail lives in its body rather than its URL.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum MutatingOperation {
     /// `kubectl debug` against a running pod.
     EphemeralContainersUpdated {
         pod: PodRef,
         containers: Vec<EphemeralContainerSummary>,
     },
-    /// A pod creation — how `kubectl debug node/...` and `kubectl debug
-    /// --copy-to` land their debug workload.
-    PodCreated { namespace: String, pod: PodSummary },
+    /// A direct `Pod` creation — how `kubectl debug node/...` and `kubectl
+    /// debug --copy-to` land their debug workload.
+    PodCreated {
+        namespace: String,
+        summary: PodSummary,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct EphemeralContainerSummary {
     pub name: String,
     pub image: String,
@@ -71,7 +78,7 @@ pub struct EphemeralContainerSummary {
     pub tty: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct PodSummary {
     pub name: String,
     pub images: Vec<String>,
@@ -86,10 +93,8 @@ pub struct PodSummary {
 /// The parts of `/api/v1/namespaces/{ns}/pods[/{name}[/{subresource}]]`, the
 /// only path shape any audited operation takes.
 ///
-/// Classification reads the *request* path rather than the upstream URL: a
-/// target whose cluster URL carries a path prefix would otherwise never match,
-/// and an audit trail that quietly switches itself off for such a target is
-/// worse than no audit trail at all.
+/// Classification reads the request path rather than the upstream URL, so a
+/// target whose cluster URL carries a path prefix is audited like any other.
 struct PodsPath {
     namespace: String,
     /// `None` for the collection itself, which is what a pod creation targets.
@@ -97,9 +102,10 @@ struct PodsPath {
     subresource: Option<String>,
 }
 
+/// `api_path` must already be the path the API server will see — percent-decoded
+/// and with `.`/`..` segments resolved — or a request could name one pod here
+/// and another upstream.
 fn parse_pods_path(api_path: &str) -> Option<PodsPath> {
-    // Segments arrive percent-encoded, but namespace and pod names are RFC 1123
-    // labels, so nothing in a well-formed request needs decoding here.
     let mut segments = api_path.split('/').filter(|s| !s.is_empty());
 
     if segments.next()? != "api" || segments.next()? != "v1" || segments.next()? != "namespaces" {
@@ -142,8 +148,7 @@ fn parse_stream_query(raw: Option<&str>) -> StreamQuery {
     for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
         match key.as_ref() {
             // kubectl sends one `command=` per argv element, so every value
-            // matters: collecting the query into a map would keep only one of
-            // them and `kubectl exec pod -- ls -la` would be recorded as `-la`.
+            // matters; a map keyed by name would keep exactly one of them.
             "command" => query.command.push(value.into_owned()),
             "ports" => query.ports.push(value.into_owned()),
             "container" => query.container = Some(value.into_owned()),
@@ -155,6 +160,13 @@ fn parse_stream_query(raw: Option<&str>) -> StreamQuery {
     query
 }
 
+/// A server-side dry run runs admission and answers with the object exactly as
+/// a real write would, yet persists nothing, so it must not be audited as one.
+fn is_dry_run(query: Option<&str>) -> bool {
+    url::form_urlencoded::parse(query.unwrap_or_default().as_bytes())
+        .any(|(key, value)| key == "dryRun" && !value.is_empty())
+}
+
 /// The streaming operation this websocket-upgrading request performs, if it is
 /// one Warpgate audits.
 pub fn classify_stream(api_path: &str, query: Option<&str>) -> Option<StreamOperation> {
@@ -162,30 +174,28 @@ pub fn classify_stream(api_path: &str, query: Option<&str>) -> Option<StreamOper
     let (Some(name), Some(subresource)) = (path.name, path.subresource) else {
         return None;
     };
-    let pod = PodRef {
-        namespace: path.namespace,
-        pod: name,
-    };
     let query = parse_stream_query(query);
 
-    Some(match subresource.as_str() {
-        "exec" => StreamOperation::Exec {
-            pod,
+    let kind = match subresource.as_str() {
+        "exec" => StreamKind::Exec {
             container: query.container,
             command: query.command,
             tty: query.tty,
             stdin: query.stdin,
         },
-        "attach" => StreamOperation::Attach {
-            pod,
+        "attach" => StreamKind::Attach {
             container: query.container,
             tty: query.tty,
         },
-        "portforward" => StreamOperation::PortForward {
-            pod,
-            ports: query.ports,
-        },
+        "portforward" => StreamKind::PortForward { ports: query.ports },
         _ => return None,
+    };
+    Some(StreamOperation {
+        pod: PodRef {
+            namespace: path.namespace,
+            pod: name,
+        },
+        kind,
     })
 }
 
@@ -303,10 +313,30 @@ impl PodBody {
 }
 
 /// The body-carrying operation this request performs, if it is one Warpgate
-/// audits. `None` covers both "not an audited shape" and a body that would not
-/// parse.
-pub fn classify_mutating(method: &str, api_path: &str, body: &[u8]) -> Option<MutatingOperation> {
+/// audits.
+///
+/// Only JSON bodies are understood, which is what `kubectl` sends. A body of an
+/// audited shape that does not parse — YAML, protobuf, a JSON Patch array — is
+/// logged as unclassifiable rather than passed over in silence, since a request
+/// this classifier cannot read is a request the audit trail does not cover.
+pub fn classify_mutating(
+    method: &str,
+    api_path: &str,
+    query: Option<&str>,
+    body: &[u8],
+) -> Option<MutatingOperation> {
     let path = parse_pods_path(api_path)?;
+    if is_dry_run(query) {
+        return None;
+    }
+
+    let parse = || {
+        serde_json::from_slice::<PodBody>(body)
+            .inspect_err(|error| {
+                warn!(method, api_path, %error, "Unparseable Kubernetes request body; not audited");
+            })
+            .ok()
+    };
 
     match (method, path.name, path.subresource.as_deref()) {
         // `kubectl` since 1.23 sends a strategic merge PATCH whose body holds
@@ -315,8 +345,7 @@ pub fn classify_mutating(method: &str, api_path: &str, body: &[u8]) -> Option<Mu
         // those are audited again — over-reporting a debug container beats
         // missing one.
         ("PATCH" | "PUT", Some(name), Some("ephemeralcontainers")) => {
-            let body: PodBody = serde_json::from_slice(body).ok()?;
-            let containers: Vec<_> = body
+            let containers: Vec<_> = parse()?
                 .spec
                 .as_ref()
                 .and_then(|s| s.ephemeral_containers.as_ref())
@@ -335,13 +364,10 @@ pub fn classify_mutating(method: &str, api_path: &str, body: &[u8]) -> Option<Mu
                 containers,
             })
         }
-        ("POST", None, None) => {
-            let body: PodBody = serde_json::from_slice(body).ok()?;
-            Some(MutatingOperation::PodCreated {
-                namespace: path.namespace,
-                pod: body.summarise(),
-            })
-        }
+        ("POST", None, None) => Some(MutatingOperation::PodCreated {
+            namespace: path.namespace,
+            summary: parse()?.summarise(),
+        }),
         _ => None,
     }
 }
@@ -370,15 +396,7 @@ fn json_array(values: &[String]) -> String {
     serde_json::to_string(&kept).unwrap_or_else(|_| "[]".to_owned())
 }
 
-impl StreamOperation {
-    pub const fn pod(&self) -> &PodRef {
-        match self {
-            Self::Exec { pod, .. } | Self::Attach { pod, .. } | Self::PortForward { pod, .. } => {
-                pod
-            }
-        }
-    }
-
+impl StreamKind {
     pub const fn subresource(&self) -> &'static str {
         match self {
             Self::Exec { .. } => "exec",
@@ -386,61 +404,63 @@ impl StreamOperation {
             Self::PortForward { .. } => "portforward",
         }
     }
+}
 
+impl StreamOperation {
     /// The recording to open for this operation, if it produces a terminal
     /// stream. Port forwarding carries raw TCP rather than a terminal, so it is
     /// audited but not recorded here.
     pub fn recording_metadata(&self) -> Option<SessionRecordingMetadata> {
-        let pod = self.pod();
-        match self {
-            Self::Exec {
+        let namespace = self.pod.namespace.clone();
+        let pod = self.pod.pod.clone();
+        match &self.kind {
+            StreamKind::Exec {
                 container, command, ..
             } => Some(SessionRecordingMetadata::Exec {
-                namespace: pod.namespace.clone(),
-                pod: pod.pod.clone(),
+                namespace,
+                pod,
                 container: container.clone(),
                 command: command.clone(),
             }),
-            Self::Attach { container, .. } => Some(SessionRecordingMetadata::Attach {
-                namespace: pod.namespace.clone(),
-                pod: pod.pod.clone(),
+            StreamKind::Attach { container, .. } => Some(SessionRecordingMetadata::Attach {
+                namespace,
+                pod,
                 container: container.clone(),
             }),
-            Self::PortForward { .. } => None,
+            StreamKind::PortForward { .. } => None,
         }
     }
 
     pub fn audit_event(&self, subject: &KubernetesAuditSubject) -> AuditEvent {
-        let pod = self.pod();
-        let namespace = pod.namespace.clone();
-        let pod_name = pod.pod.clone();
-        match self {
-            Self::Exec {
+        let subject = subject.clone();
+        let namespace = self.pod.namespace.clone();
+        let pod = self.pod.pod.clone();
+        match &self.kind {
+            StreamKind::Exec {
                 container,
                 command,
                 tty,
                 stdin,
-                ..
             } => AuditEvent::KubernetesExecStarted {
-                subject: subject.clone(),
+                subject,
                 namespace,
-                pod: pod_name,
+                pod,
                 container: container.clone(),
                 command: json_array(command),
                 tty: *tty,
                 stdin: *stdin,
             },
-            Self::Attach { container, tty, .. } => AuditEvent::KubernetesAttachStarted {
-                subject: subject.clone(),
+            StreamKind::Attach { container, tty } => AuditEvent::KubernetesAttachStarted {
+                subject,
                 namespace,
-                pod: pod_name,
+                pod,
                 container: container.clone(),
                 tty: *tty,
             },
-            Self::PortForward { ports, .. } => AuditEvent::KubernetesPortForwardStarted {
-                subject: subject.clone(),
+            StreamKind::PortForward { ports } => AuditEvent::KubernetesPortForwardStarted {
+                subject,
                 namespace,
-                pod: pod_name,
+                pod,
                 // Absent rather than empty: the websocket protocol negotiates
                 // ports per stream and sends no query, so there is nothing to
                 // report — which is not the same as forwarding no ports.
@@ -451,12 +471,11 @@ impl StreamOperation {
 
     /// The event for a stream the cluster refused.
     pub fn rejection_event(&self, subject: &KubernetesAuditSubject, status: u16) -> AuditEvent {
-        let pod = self.pod();
         AuditEvent::KubernetesStreamRejected {
             subject: subject.clone(),
-            namespace: pod.namespace.clone(),
-            pod: pod.pod.clone(),
-            subresource: self.subresource().to_owned(),
+            namespace: self.pod.namespace.clone(),
+            pod: self.pod.pod.clone(),
+            subresource: self.kind.subresource().to_owned(),
             status,
         }
     }
@@ -484,15 +503,15 @@ impl MutatingOperation {
                     response_status,
                 })
                 .collect(),
-            Self::PodCreated { namespace, pod } => vec![AuditEvent::KubernetesPodCreated {
+            Self::PodCreated { namespace, summary } => vec![AuditEvent::KubernetesPodCreated {
                 subject: subject.clone(),
                 namespace: namespace.clone(),
-                pod: pod.name.clone(),
-                images: json_array(&pod.images),
-                node_name: pod.node_name.clone(),
-                host_pid: pod.host_pid,
-                host_network: pod.host_network,
-                privileged: pod.privileged,
+                pod: summary.name.clone(),
+                images: json_array(&summary.images),
+                node_name: summary.node_name.clone(),
+                host_pid: summary.host_pid,
+                host_network: summary.host_network,
+                privileged: summary.privileged,
                 response_status,
             }],
         }
@@ -517,26 +536,28 @@ mod tests {
         )
     }
 
+    fn mutating(method: &str, suffix: &str, body: &[u8]) -> Option<MutatingOperation> {
+        classify_mutating(method, &pods_path(suffix), None, body)
+    }
+
     #[test]
     fn exec_keeps_every_command_argument() {
         // `kubectl exec pod -- ls -la` sends one `command=` per argv element.
-        // Collecting the query into a map would keep exactly one of them.
         let operation =
             stream("/api-7f9/exec?command=ls&command=-la&container=api&stdin=true&tty=true")
                 .unwrap();
 
-        let StreamOperation::Exec {
-            pod,
+        assert_eq!(operation.pod.namespace, "prod");
+        assert_eq!(operation.pod.pod, "api-7f9");
+        let StreamKind::Exec {
             container,
             command,
             tty,
             stdin,
-        } = operation
+        } = operation.kind
         else {
-            panic!("expected an exec, got {operation:?}");
+            panic!("expected an exec, got {:?}", operation.kind);
         };
-        assert_eq!(pod.namespace, "prod");
-        assert_eq!(pod.pod, "api-7f9");
         assert_eq!(container.as_deref(), Some("api"));
         assert_eq!(command, vec!["ls".to_owned(), "-la".to_owned()]);
         assert!(tty);
@@ -548,7 +569,7 @@ mod tests {
         // kubectl omits `container=` for single-container pods. The API server
         // picks one, but Warpgate never learns which, so it must not invent it.
         let operation = stream("/api-7f9/exec?command=sh").unwrap();
-        let StreamOperation::Exec { container, .. } = operation else {
+        let StreamKind::Exec { container, .. } = operation.kind else {
             panic!("expected an exec");
         };
         assert_eq!(container, None);
@@ -567,13 +588,13 @@ mod tests {
     #[test]
     fn port_forward_keeps_every_port() {
         let operation = stream("/db-0/portforward?ports=5432&ports=8080").unwrap();
-        let StreamOperation::PortForward { ports, .. } = &operation else {
+        let StreamKind::PortForward { ports } = &operation.kind else {
             panic!("expected a port forward");
         };
         assert_eq!(ports, &vec!["5432".to_owned(), "8080".to_owned()]);
         // Raw TCP, not a terminal: audited, but nothing to record.
         assert!(operation.recording_metadata().is_none());
-        assert_eq!(operation.subresource(), "portforward");
+        assert_eq!(operation.kind.subresource(), "portforward");
     }
 
     #[test]
@@ -581,7 +602,7 @@ mod tests {
         // What kubectl actually sends over the websocket protocol: ports are
         // negotiated per stream, so the request carries no query at all.
         let operation = stream("/db-0/portforward").unwrap();
-        let StreamOperation::PortForward { ports, .. } = &operation else {
+        let StreamKind::PortForward { ports } = &operation.kind else {
             panic!("expected a port forward");
         };
         assert!(ports.is_empty());
@@ -590,7 +611,7 @@ mod tests {
     #[test]
     fn attach_is_classified() {
         let operation = stream("/api-7f9/attach?container=api&tty=1").unwrap();
-        let StreamOperation::Attach { container, tty, .. } = operation else {
+        let StreamKind::Attach { container, tty } = operation.kind else {
             panic!("expected an attach");
         };
         assert_eq!(container.as_deref(), Some("api"));
@@ -604,8 +625,6 @@ mod tests {
         assert!(stream("").is_none());
         assert!(classify_stream("/api/v1/namespaces/prod/services/api/exec", None).is_none());
         assert!(classify_stream("/healthz", None).is_none());
-        // A cluster URL path prefix must not defeat classification, which is
-        // why the request path is what gets parsed.
         assert!(stream("/api-7f9/exec?command=sh").is_some());
     }
 
@@ -619,8 +638,7 @@ mod tests {
             "name":"debugger-8tp2k","resources":{},"stdin":true,
             "targetContainerName":"api","terminationMessagePolicy":"File","tty":true}]}}"#;
 
-        let operation =
-            classify_mutating("PATCH", &pods_path("/api-7f9/ephemeralcontainers"), body).unwrap();
+        let operation = mutating("PATCH", "/api-7f9/ephemeralcontainers", body).unwrap();
 
         let MutatingOperation::EphemeralContainersUpdated { pod, containers } = operation else {
             panic!("expected an ephemeral container update");
@@ -646,8 +664,7 @@ mod tests {
             "ephemeralContainers":[{"name":"debugger-x9k2","image":"busybox",
             "command":["sh","-c","ps aux"],"targetContainerName":"api","tty":true}]}}"#;
 
-        let operation =
-            classify_mutating("PUT", &pods_path("/api-7f9/ephemeralcontainers"), body).unwrap();
+        let operation = mutating("PUT", "/api-7f9/ephemeralcontainers", body).unwrap();
         let MutatingOperation::EphemeralContainersUpdated { containers, .. } = operation else {
             panic!("expected an ephemeral container update");
         };
@@ -665,8 +682,7 @@ mod tests {
         // carry nulls where the API's own objects would omit the key.
         let body = br#"{"spec":{"ephemeralContainers":[{"name":"d","image":"i",
             "command":null,"args":null,"securityContext":null,"tty":null}]}}"#;
-        let operation =
-            classify_mutating("PATCH", &pods_path("/api-7f9/ephemeralcontainers"), body).unwrap();
+        let operation = mutating("PATCH", "/api-7f9/ephemeralcontainers", body).unwrap();
         let MutatingOperation::EphemeralContainersUpdated { containers, .. } = operation else {
             panic!("expected an ephemeral container update");
         };
@@ -683,17 +699,17 @@ mod tests {
             "containers":[{"name":"debugger","image":"busybox:1.36",
             "securityContext":{"privileged":true},"stdin":true,"tty":true}]}}"#;
 
-        let operation = classify_mutating("POST", &pods_path(""), body).unwrap();
-        let MutatingOperation::PodCreated { namespace, pod } = operation else {
+        let operation = mutating("POST", "", body).unwrap();
+        let MutatingOperation::PodCreated { namespace, summary } = operation else {
             panic!("expected a pod creation");
         };
         assert_eq!(namespace, "prod");
-        assert_eq!(pod.name, "node-debugger-worker-1-xk9lp");
-        assert_eq!(pod.images, vec!["busybox:1.36".to_owned()]);
-        assert_eq!(pod.node_name.as_deref(), Some("worker-1"));
-        assert!(pod.host_pid);
-        assert!(pod.host_network);
-        assert!(pod.privileged);
+        assert_eq!(summary.name, "node-debugger-worker-1-xk9lp");
+        assert_eq!(summary.images, vec!["busybox:1.36".to_owned()]);
+        assert_eq!(summary.node_name.as_deref(), Some("worker-1"));
+        assert!(summary.host_pid);
+        assert!(summary.host_network);
+        assert!(summary.privileged);
     }
 
     #[test]
@@ -706,7 +722,7 @@ mod tests {
             "envFrom":[{"secretRef":{"name":"api-secrets"}}],
             "volumeMounts":[{"name":"creds","mountPath":"/creds"}]}]}}"#;
 
-        let operation = classify_mutating("POST", &pods_path(""), body).unwrap();
+        let operation = mutating("POST", "", body).unwrap();
         let rendered = format!("{operation:?}");
         assert!(!rendered.contains("hunter2-never-log-me"), "{rendered}");
         assert!(!rendered.contains("DB_PASSWORD"), "{rendered}");
@@ -717,23 +733,33 @@ mod tests {
     #[test]
     fn pod_created_falls_back_to_generate_name() {
         let body = br#"{"metadata":{"generateName":"debugger-"},"spec":{"containers":[]}}"#;
-        let operation = classify_mutating("POST", &pods_path(""), body).unwrap();
-        let MutatingOperation::PodCreated { pod, .. } = operation else {
+        let operation = mutating("POST", "", body).unwrap();
+        let MutatingOperation::PodCreated { summary, .. } = operation else {
             panic!("expected a pod creation");
         };
-        assert_eq!(pod.name, "debugger-");
+        assert_eq!(summary.name, "debugger-");
+    }
+
+    #[test]
+    fn dry_runs_are_not_audited() {
+        // `kubectl apply --dry-run=server` gets a 201 and the object back
+        // without anything being created.
+        let body = br#"{"metadata":{"name":"x"},"spec":{"containers":[]}}"#;
+        assert!(classify_mutating("POST", &pods_path(""), Some("dryRun=All"), body).is_none());
+        assert!(classify_mutating("POST", &pods_path(""), Some("dryRun="), body).is_some());
+        assert!(
+            classify_mutating("POST", &pods_path(""), Some("fieldManager=kubectl"), body).is_some()
+        );
     }
 
     #[test]
     fn non_mutating_requests_are_not_classified() {
-        assert!(classify_mutating("GET", &pods_path(""), b"").is_none());
-        assert!(classify_mutating("POST", &pods_path("/api-7f9/exec"), b"{}").is_none());
+        assert!(mutating("GET", "", b"").is_none());
+        assert!(mutating("POST", "/api-7f9/exec", b"{}").is_none());
         // A patch that adds no ephemeral container has nothing to report.
-        assert!(
-            classify_mutating("PATCH", &pods_path("/api-7f9/ephemeralcontainers"), b"{}").is_none()
-        );
+        assert!(mutating("PATCH", "/api-7f9/ephemeralcontainers", b"{}").is_none());
         // An unparseable body must not be reported as an empty operation.
-        assert!(classify_mutating("POST", &pods_path(""), b"not json").is_none());
+        assert!(mutating("POST", "", b"not json").is_none());
     }
 
     #[test]
