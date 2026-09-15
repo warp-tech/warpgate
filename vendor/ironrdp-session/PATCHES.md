@@ -17,8 +17,8 @@ using the `ConnectionResult::activation_factory` returned by the initial connect
 consumer-side logic lives in `warpgate-protocol-rdp` and is therefore not part of the
 source-only `warpgate.patch`.
 
-When re-vendoring, check whether upstream splits concatenated Share Control PDUs and updates
-both active-stage processors before retaining these hunks.
+Upstream has since merged its own split (#1861); the reactivation share-ID hunk is still
+ours. When re-vendoring, keep only whatever upstream does not cover.
 
 ## Save Session Info PDU
 
@@ -38,6 +38,15 @@ rectangle before it reaches them.
 
 Upstream [PR #1436][1] carries the same fix but is unmerged ([#1452][2] was closed as its
 duplicate), so drop this fork once a release contains either.
+
+## Backported upstream fixes
+
+Both are in upstream IronRDP after 0.11.0 and drop out on re-vendor:
+
+- A plain MCS Disconnect Provider Ultimatum on the I/O stream (xrdp sends one at session
+  end) is surfaced as a disconnect rather than a decode error (upstream #1692).
+- Fast-path input is split into frames of at most 255 events, the limit of the PDU's
+  `numEvents` byte, instead of failing the whole batch (upstream #1630).
 
 `Cargo.toml` additionally sets `[lints.rust] warnings = { level = "allow", priority = 1 }`
 so this vendored path dependency's warnings don't surface in Warpgate's builds. This is not
