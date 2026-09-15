@@ -11,7 +11,10 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: warp-tech/warpgate
+  # Publishes under whichever repo runs the workflow, so a fork's own push
+  # builds publish to its own GHCR namespace instead of failing to push to
+  # upstream's.
+  IMAGE_NAME: ${{ github.repository }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
