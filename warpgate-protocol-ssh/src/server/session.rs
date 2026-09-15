@@ -2688,15 +2688,6 @@ impl ServerSession {
             for ch in channels {
                 let _ = self.channel_writer.close(handle.clone(), ch.0);
             }
-            // A channel close says nothing about the connection, so a dead
-            // target never gives the client a reason to let go of the socket
-            // (#2520). Queued behind the closes so the ordering holds.
-            let _ = self.channel_writer.disconnect(
-                handle,
-                russh::Disconnect::ByApplication,
-                String::new(),
-                String::new(),
-            );
         }
 
         // Bounded: a client whose window is full never lets the queue
@@ -2717,8 +2708,30 @@ impl ServerSession {
                 warn!("Client is not reading; closing its connection");
                 Duration::ZERO
             };
+            // A channel close says nothing about the connection, so a dead
+            // target never gives the client a reason to let go of the socket
+            // (#2520). It goes out here rather than queued behind the closes:
+            // a client handed the disconnect in the same read as the message
+            // acts on it first and exits without printing what it already
+            // holds, so the session's last words are lost -- which is the one
+            // thing this message exists to prevent. The grace above is what
+            // separates them, and a client that is not reading gets neither.
+            let disconnect = flushed.then(|| self.session_handle.clone()).flatten();
             tokio::spawn(async move {
                 tokio::time::sleep(delay).await;
+                if let Some(handle) = disconnect {
+                    // Bounded for the same reason the flush above is: a client
+                    // that has stopped reading must not hold the socket open.
+                    let _ = tokio::time::timeout(
+                        DISCONNECT_FLUSH_TIMEOUT,
+                        handle.disconnect(
+                            russh::Disconnect::ByApplication,
+                            String::new(),
+                            String::new(),
+                        ),
+                    )
+                    .await;
+                }
                 let _ = socket.shutdown(std::net::Shutdown::Both);
             });
         }
