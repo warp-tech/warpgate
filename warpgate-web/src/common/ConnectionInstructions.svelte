@@ -307,7 +307,22 @@
     </Alert>
 {/if}
 
-{#if targetKind === TargetKind.Kubernetes}
+{#if targetKind === TargetKind.Kubernetes && ticketSecret}
+    <CopyableTextArea label="Kubeconfig file" value={kubeconfig} />
+    <CopyableTextArea
+        label="Example kubectl command"
+        value={exampleKubectlCommand}
+    />
+    <InfoBox class="mb-3">
+        The ticket already specifies the target and no other credentials are
+        needed. One ticket use opens a session that is shared by requests
+        matching the same source IP and the same Warpgate node for the
+        Kubernetes session lifetime. In a round-robin cluster, at least as many
+        uses are needed as there are nodes in the cluster.
+    </InfoBox>
+{/if}
+
+{#if targetKind === TargetKind.Kubernetes && !ticketSecret}
     {#if k8sOidcConfigs.length > 0}
         <ul class="nav nav-pills mb-3">
             <li class="nav-item">

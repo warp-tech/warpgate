@@ -170,6 +170,17 @@ where
         loop {
             match hint.find_size(self.peek()).map_err(io::Error::other)? {
                 Some((matched, length)) => {
+                    // An unmatched zero-length frame can never be skipped past: `read_exact(0)`
+                    // consumes nothing and performs no I/O, so looping on it would spin without
+                    // yielding or ever observing EOF. Any `PduHint` can report `(false, 0)` on a
+                    // malformed header (e.g. a fast-path byte with a zero length field), so this
+                    // is guarded here rather than in every hint.
+                    if length == 0 && !matched {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "PduHint reported a zero-length unmatched PDU; cannot make progress",
+                        ));
+                    }
                     let bytes = self.read_exact(length).await?.freeze();
                     if matched {
                         return Ok(bytes);
