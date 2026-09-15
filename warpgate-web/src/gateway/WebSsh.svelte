@@ -15,7 +15,9 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
+    import ConnectingNotice from 'common/ConnectingNotice.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
+    import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
     import { handleReauthError } from 'common/reauth'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
@@ -72,6 +74,7 @@
     let activeChannelId: string | null = $state(null)
     let connectionError: string | null = $state(null)
     let sessionNotFound = $state(false)
+    let opening = $state(false)
     let pendingHostKey: Extract<
         ServerMessage,
         { type: 'host_key_unknown' }
@@ -256,7 +259,12 @@
 
         try {
             if (!sessionId && params.targetId) {
-                await startSession(params.targetId)
+                opening = true
+                try {
+                    await startSession(params.targetId)
+                } finally {
+                    opening = false
+                }
             }
             if (!sessionId) {
                 sessionNotFound = true
@@ -267,8 +275,7 @@
             if (await handleReauthError(e)) {
                 return
             }
-            connectionError =
-                e instanceof Error ? e.message : 'Failed to load session info'
+            connectionError = await stringifyError(e)
             if (e instanceof ResponseError && e.response.status === 404) {
                 sessionNotFound = true
             }
@@ -323,6 +330,10 @@
             {/if}
         {/each}
     </div>
+
+    {#if opening}
+        <ConnectingNotice />
+    {/if}
 
     {#if connectionError}
         <div class="mx-3 mt-3">

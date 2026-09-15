@@ -1,6 +1,7 @@
 <script lang="ts">
     import {
         faCircle as faCircleRegular,
+        faHand,
         faUser,
     } from '@fortawesome/free-regular-svg-icons'
     import {
@@ -10,6 +11,7 @@
     } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
     import {
+        ApprovalRequestStatus,
         api,
         type Recording,
         type Target,
@@ -17,6 +19,8 @@
         type UserSessionSnapshot,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
+    import TargetBadge from 'admin/log-viewer/TargetBadge.svelte'
+    import UserBadge from 'admin/log-viewer/UserBadge.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
@@ -132,18 +136,11 @@
             {#if session.username}
                 <span class="text-muted">Authenticated as</span>
 
-                <Badge
-                    href={$adminPermissions.usersEdit && session.userId ? `#/config/users/${session.userId}` : undefined}
-                    color="success"
-                    class="d-flex align-items-center"
-                >
-                    {#if session.username}
-                        <Fa icon={faUser} class="me-2" />
-                        {session.username}
-                    {:else}
-                        Logging in
-                    {/if}
-                </Badge>
+                {#if session.username}
+                    <UserBadge id={session.userId} name={session.username} />
+                {:else}
+                    Logging in
+                {/if}
             {:else}
                 <span class="text-muted">
                     {#if session.ended}
@@ -154,6 +151,41 @@
                 </span>
             {/if}
         </div>
+
+        {#each session.adminApprovals as approval (approval)}
+            <div class="list-group-item">
+                {#if approval.status === ApprovalRequestStatus.Pending}
+                    <div class="blinking-live-icon">
+                        <Fa fw icon={faHand} class="text-success" />
+                    </div>
+                    <span class="text-muted">Requesting approval for</span>
+                {:else}
+                    <Fa fw icon={faHand} />
+                    {#if approval.status === ApprovalRequestStatus.Approved}
+                        <span class="text-muted">Approved for</span>
+                    {:else if approval.status === ApprovalRequestStatus.Rejected}
+                        <span class="text-muted">Rejected for</span>
+                    {:else if approval.status === ApprovalRequestStatus.TimedOut}
+                        <span class="text-muted">Request timed out for</span>
+                    {/if}
+                {/if}
+
+                <TargetBadge id={approval.targetId} name={approval.target} />
+
+                {#if approval.resolvedAt}
+                    {#if approval.resolvedByUsername}
+                        by
+                        <UserBadge
+                            id={approval.resolvedByUserId}
+                            name={approval.resolvedByUsername}
+                        />
+                    {/if}
+                    <small class="text-muted ms-auto">
+                        <RelativeDate date={approval.resolvedAt} />
+                    </small>
+                {/if}
+            </div>
+        {/each}
 
         {#each session.targetSessions as targetSession (targetSession.id)}
             <div class="list-group-item">
@@ -166,14 +198,10 @@
                 {/if}
                 <span class="text-muted">Connected to</span>
                 {#if targetSession.target}
-                    <Badge
-                        href={$adminPermissions.targetsEdit && targetSession.targetId ? `#/config/targets/${targetSession.targetId}` : undefined}
-                        color="info"
-                        class="d-flex align-items-center"
-                    >
-                        <Fa icon={faComputer} class="me-2" />
-                        {targetSession.target.name}
-                    </Badge>
+                    <TargetBadge
+                        id={targetSession.targetId}
+                        name={targetSession.target.name}
+                    />
                 {:else}
                     a now deleted target
                 {/if}

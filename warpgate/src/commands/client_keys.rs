@@ -8,7 +8,7 @@ use crate::config::load_config;
 pub async fn command(params: &GlobalParams) -> Result<()> {
     let config = load_config(params, true)?;
     let db = connect_to_db_and_migrate(&config, params).await?;
-    warpgate_protocol_ssh::ensure_client_keys(&db, &config, params).await?;
+    warpgate_protocol_ssh::ensure_client_keys(&db, &config.store.ssh.keys_path(params)).await?;
 
     let keys = SshClientKey::Entity::find_ordered().all(&db).await?;
 

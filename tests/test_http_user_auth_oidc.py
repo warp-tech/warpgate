@@ -92,9 +92,13 @@ def _create_echo_target(api, echo_server_port, role_id, *, external_host=None):
     target = api.create_target(
         sdk.TargetDataRequest(
             name=f"echo-{uuid4()}",
+            require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetHTTPOptions(
                     kind="Http",
+                    headers={},
                     url=f"http://localhost:{echo_server_port}",
                     external_host=external_host,
                     tls=sdk.Tls(

@@ -8,11 +8,11 @@
         type TargetOptions,
         TlsMode,
     } from 'admin/lib/api'
+    import { adminPermissions } from 'admin/lib/store'
     import { stringifyError } from 'common/errors'
     import { TargetKind } from 'gateway/lib/api'
     import { onMount } from 'svelte'
     import { replace } from 'svelte-spa-router'
-    import { adminPermissions } from '../../lib/store'
 
     interface Props {
         params: { kind: string }
@@ -33,6 +33,7 @@
                     host: '192.168.0.1',
                     port: 22,
                     username: 'root',
+                    allowInsecureAlgos: false,
                     auth: {
                         kind: 'PublicKey' as const,
                     },
@@ -44,6 +45,7 @@
                         mode: TlsMode.Preferred,
                         verify: true,
                     },
+                    headers: {},
                 },
                 MySql: {
                     kind: TargetKind.MySql,
@@ -68,6 +70,7 @@
                         verify: true,
                     },
                     username: 'postgres',
+                    protocolVersion: '3.2' as const,
                     auth: {
                         kind: 'Password' as const,
                         password: '',
@@ -117,6 +120,9 @@
                     name,
                     options,
                     groupId: selectedGroupId,
+                    requireApproval: false,
+                    ticketRequestsDisabled: false,
+                    ticketRequireApproval: false,
                 },
             })
             replace(`/config/targets/${target.id}`)

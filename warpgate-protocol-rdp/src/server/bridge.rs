@@ -4,15 +4,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 use tracing::{Instrument as _, info, warn};
 use warpgate_common::TargetRdpOptions;
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{
-    DesktopClientHandles, DesktopEvent, DesktopState, Services, TargetAuthorization,
-    WarpgateServerHandle,
-};
+use warpgate_core::{AdmittedTarget, DesktopClientHandles, DesktopEvent, DesktopState, Services};
 
 use super::BackendBridge;
 use super::protocol::Input as ServerInput;
@@ -89,20 +85,13 @@ async fn frame_bridge(
 /// Connect to the target and start bridging its framebuffer, once auth is complete.
 pub(super) async fn connect_backend(
     services: &Services,
-    server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     server_in_tx: &Sender<ServerInput>,
-    authorization: TargetAuthorization<TargetRdpOptions>,
+    admitted: AdmittedTarget<TargetRdpOptions>,
     screen: warpgate_desktop_ui::Screen,
 ) -> Result<BackendBridge> {
-    let (target_session_id, approved) = server_handle
-        .lock()
-        .await
-        .start_target_session(authorization)
-        .await?
-        .admitted()?;
-    info!(target=%approved.target().name, "Authorized");
+    info!(target=%admitted.target().name, "Authorized");
 
-    let recorder = warpgate_desktop_auth::start_recording(services, &target_session_id, "rdp")
+    let recorder = warpgate_desktop_auth::start_recording(services, &admitted.id(), "rdp")
         .await
         .map(Arc::new);
 
@@ -111,7 +100,7 @@ pub(super) async fn connect_backend(
         input_tx,
         abort_tx,
         logon_state,
-    } = crate::connect(approved, (screen.width, screen.height), target_session_id)?;
+    } = crate::connect(admitted, (screen.width, screen.height))?;
     if let Some(recorder) = &recorder {
         recorder.track_logon_state(logon_state);
     }

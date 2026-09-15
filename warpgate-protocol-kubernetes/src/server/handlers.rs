@@ -145,11 +145,11 @@ pub async fn handle_api_request(
     // id is the one the log layer keys entries by — recordings key off the
     // target session id instead, and the two must not be confused.
     let audit_subject = {
-        let target = admitted.approved.target();
+        let target = admitted.target();
         KubernetesAuditSubject {
             session_id: user_session_id.0,
-            user_id: admitted.approved.user_info().id,
-            username: admitted.approved.user_info().username.clone(),
+            user_id: admitted.user_info().id,
+            username: admitted.user_info().username.clone(),
             target_id: target.id,
             target_name: target.name.clone(),
         }
@@ -167,7 +167,11 @@ pub async fn handle_api_request(
             )
             .await
             .map(IntoResponse::into_response)
+            .map_err(poem::Error::from)
         } else {
+            // Not `.context(...)`: that converts the `WarpgateError` to an
+            // `anyhow::Error`, which poem renders through `Display` instead
+            // of `as_response()`.
             _handle_normal_request_inner(
                 req,
                 body,
@@ -178,7 +182,7 @@ pub async fn handle_api_request(
             )
             .await
             .map(IntoResponse::into_response)
-            .context("handling Kubernetes API request")
+            .map_err(poem::Error::from)
         };
 
         let client_ip = get_client_ip(req, ctx.services()).await;
@@ -208,8 +212,8 @@ async fn _handle_normal_request_inner(
     audit_subject: &KubernetesAuditSubject,
     services: &Services,
 ) -> Result<Response, WarpgateError> {
-    let user_info = admitted.approved.user_info();
-    let k8s_options = admitted.approved.options();
+    let user_info = admitted.user_info();
+    let k8s_options = admitted.options();
     let client = create_authenticated_client(k8s_options, Some(&user_info.username), services)
         .await?
         .build()
@@ -268,7 +272,7 @@ async fn _handle_normal_request_inner(
     let mut recorder_opt = {
         let enabled = services.recordings.is_enabled().await.unwrap_or(false);
         if enabled {
-            match start_recording_api(&admitted.target_session_id, &services.recordings).await {
+            match start_recording_api(&admitted.id(), &services.recordings).await {
                 Ok(recorder) => Some(recorder),
                 Err(e) => {
                     warn!("Failed to start recording: {}", e);
@@ -467,8 +471,8 @@ async fn _handle_websocket_request_inner(
     audit_subject: &KubernetesAuditSubject,
     services: &Services,
 ) -> anyhow::Result<impl IntoResponse> {
-    let user_info = admitted.approved.user_info();
-    let k8s_options = admitted.approved.options();
+    let user_info = admitted.user_info();
+    let k8s_options = admitted.options();
     let mut full_url = construct_target_url(req, api_path, k8s_options)?;
     if full_url.scheme() == "https" {
         let _ = full_url.set_scheme("wss");
@@ -493,9 +497,7 @@ async fn _handle_websocket_request_inner(
                 .as_ref()
                 .and_then(StreamOperation::recording_metadata)
         {
-            match start_recording_exec(&admitted.target_session_id, &services.recordings, metadata)
-                .await
-            {
+            match start_recording_exec(&admitted.id(), &services.recordings, metadata).await {
                 Err(e) => {
                     error!("Failed to start recording: {}", e);
                 }
