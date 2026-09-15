@@ -2,8 +2,7 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, ModelTrait, QueryFilter,
-    Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter, Set,
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -222,23 +221,30 @@ impl DetailApi {
             return Ok(UpdatePublicKeyCredentialResponse::Forbidden(Json(msg)));
         }
 
-        let model = PublicKeyCredential::ActiveModel {
-            id: Set(id.0),
-            user_id: Set(*user_id),
-            date_added: Set(Some(OffsetDateTime::now_utc())),
-            label: Set(body.label.clone()),
-            ..<_>::from(UserPublicKeyCredential::try_from(&*body)?)
-        }
-        .update(db)
-        .await;
+        let updated = PublicKeyCredential::Entity::update_many()
+            .set(PublicKeyCredential::ActiveModel {
+                date_added: Set(Some(OffsetDateTime::now_utc())),
+                label: Set(body.label.clone()),
+                ..<_>::from(UserPublicKeyCredential::try_from(&*body)?)
+            })
+            .filter(PublicKeyCredential::Column::Id.eq(id.0))
+            .filter(PublicKeyCredential::Column::UserId.eq(*user_id))
+            .exec(db)
+            .await?;
 
-        match model {
-            Ok(model) => Ok(UpdatePublicKeyCredentialResponse::Updated(Json(
-                model.into(),
-            ))),
-            Err(DbErr::RecordNotFound(_)) => Ok(UpdatePublicKeyCredentialResponse::NotFound),
-            Err(e) => Err(e.into()),
+        if updated.rows_affected == 0 {
+            return Ok(UpdatePublicKeyCredentialResponse::NotFound);
         }
+        let Some(model) = PublicKeyCredential::Entity::find_by_id(id.0)
+            .one(db)
+            .await?
+        else {
+            return Ok(UpdatePublicKeyCredentialResponse::NotFound);
+        };
+
+        Ok(UpdatePublicKeyCredentialResponse::Updated(Json(
+            model.into(),
+        )))
     }
 
     #[oai(
