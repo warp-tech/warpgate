@@ -15,12 +15,24 @@ Newest entries at the top of each section.
 |---|---|---|
 | 0 — Reconnaissance | ✅ done | Stack, serving model, API surface, routing map, theming, primitives. |
 | 0.5 — Baseline | ✅ done | `DESIGN.md` moved to `design/`, this file seeded, bundle baseline captured. |
-| 1 — Token layer | not started | |
+| 1 — Token layer | ✅ done | Tokens, both themes, fonts, `/styleguide`. +28.5 KB raw (+1.4%). |
 | 2 — Primitives | not started | |
 | 3 — Shell | not started | |
 | 4 — Screen migration | not started | |
 | 5 — Accessibility | not started | |
 | 6 — Verification | **blocked** | Needs cargo, just, docker — none installed on the current machine. |
+
+### Branching
+
+Phases stack: each branches off its predecessor, all merging into
+`redesign/design-system`, `main` untouched until the whole thing lands.
+`VITE_NEW_UI` is the rollback mechanism, not git — it reverts the entire
+user-visible redesign with an env var and no git operation.
+
+| Phase | Branch |
+|---|---|
+| 0.5 | `redesign/design-system` |
+| 1 | `redesign/phase-1-tokens` |
 
 ---
 
@@ -104,7 +116,129 @@ non-size factors.
 
 ---
 
+## Phase 1 — bundle delta
+
+Measured against the Phase 0.5 baseline. Both numbers reported separately
+because `rust-embed` takes all of `dist/`, source maps included.
+
+### Shipped to browser
+
+| | baseline | Phase 1 | delta |
+|---|---:|---:|---:|
+| JS | 1608.0 KB | 1607.7 KB | −0.3 KB |
+| CSS | 28.7 KB | 35.5 KB | **+6.8 KB** |
+| Fonts | 328.1 KB | 350.3 KB | **+22.2 KB** |
+| Other | 49.7 KB | 49.6 KB | −0.1 KB |
+| **Raw total** | **2014.5 KB** | **2043.0 KB** | **+28.5 KB (+1.4%)** |
+| **Gzip total** | **707.2 KB** | **730.7 KB** | **+23.5 KB (+3.3%)** |
+
+### Embedded in binary
+
+| | baseline | Phase 1 | delta |
+|---|---:|---:|---:|
+| Total | 7931.5 KB | 7961.1 KB | **+29.6 KB (+0.4%)** |
+
+Both well inside the ±10% band (1813–2216 KB raw / 7138–8725 KB embedded).
+
+### The theme.dark / theme.light line item
+
+**Not yet reclassified. This is Phase 4's payoff, not Phase 1's.**
+
+| | baseline | Phase 1 | change |
+|---|---:|---:|---:|
+| `theme.dark` + `theme.light`, counted as **JS** | 356.7 KB raw / 52.3 KB gz | 356.3 KB raw / 51.9 KB gz | unchanged |
+
+These two chunks are complete Bootstrap builds imported with `?inline`, so
+their CSS is carried as JavaScript string literals — 22% of all shipped JS is
+stylesheet wearing a JS extension. Removing them would break every screen that
+still renders through Bootstrap, which in Phase 1 is all of them, so the token
+layer is purely additive here.
+
+The reclassification lands when the last screen migrates at the end of Phase 4
+and the Bootstrap theme bundles are deleted. Projected at that point:
+
+- **−356 KB raw / −52 KB gz** leaves the JS column
+- **+~25-35 KB raw** enters the CSS column as one real stylesheet (tokens plus
+  primitive styles, gzipping far better than string-literal CSS and cacheable
+  as a separate file rather than parsed as JS on every load)
+- net **≈ −320 KB raw / −45 KB gz**, and the part that remains stops blocking
+  the JS parse
+
+That single change is larger than every other bundle movement in this project
+combined, which is why it is tracked on its own line rather than inside a net
+total.
+
+### Fonts
+
+| | baseline | Phase 1 |
+|---|---:|---:|
+| CaskaydiaCove (OTF, 2 files) | 218.8 KB | 218.8 KB — kept |
+| Work Sans (6 files, woff+woff2) | 91.5 KB | removed |
+| Poppins (2 files, woff+woff2) | 17.8 KB | removed |
+| IBM Plex Sans (6 files, woff2) | — | 117.1 KB |
+| IBM Plex Mono (1 file, woff2) | — | 14.4 KB |
+| **Total** | **328.1 KB** | **350.3 KB (+22.2 KB)** |
+
+Plex ships woff2 only. The outgoing packages shipped woff *and* woff2; every
+browser that can run Svelte 5 supports woff2, so the duplicate was pure weight.
+
+Weights shipped are the ones DESIGN.md's type roles actually use — 400, 500,
+600. There is no 700 role, so 700 is not shipped; the three places that asked
+for Poppins 700 (`EmptyState`, `GettingStarted`, `_theme.scss`'s page summary
+bar) now ask for 600, which avoids synthetic bolding.
+
+Subsets: latin + latin-ext for the UI face, since usernames and target
+descriptions carry Central and Eastern European diacritics. Mono is latin only
+— it renders hostnames, IPs, CIDRs, ports, fingerprints and UUIDs, which are
+ASCII by definition.
+
+---
+
 ## Decisions
+
+### D9 — IBM Plex Mono is the UI mono; Caskaydia Cove stays terminal-only
+*Phase 1. Resolves Q2.*
+
+**The deciding fact was not letterform harmony — it was that Caskaydia is not
+actually free.**
+
+`monospace-fallback` is applied in exactly one place in the codebase:
+`WebSshTab.svelte`, the xterm.js font config. The `@font-face` declaration is
+on the eager path (it lands in the shared `wrap` chunk's CSS, loaded by both
+the admin and gateway entries), but a browser does not fetch a font file until
+the family is matched to rendered text. So today those 218.8 KB of OTF are
+downloaded **only when someone opens an in-browser SSH session** — never on any
+admin screen, never on the portal.
+
+Making Caskaydia the UI mono would move that download onto every route that
+renders a hostname, IP or fingerprint, which after Phase 4 is nearly all of
+them:
+
+| | bytes over the wire, per route that renders mono |
+|---|---:|
+| Caskaydia Cove (2× OTF) | 218.8 KB raw → **132 KB gzipped** |
+| IBM Plex Mono (1× woff2) | 14.4 KB raw → **14.4 KB** (woff2 is already compressed) |
+
+Plex Mono is **roughly 9× cheaper** on every admin route. The framing in the
+Phase 0.5 baseline — "+11 KB with Plex Mono vs −29 KB reusing Caskaydia" — was
+measuring `dist/` totals, where Caskaydia counts as already-sunk. That is true
+of the directory and false of what any given user downloads. Correcting it
+reverses the conclusion.
+
+The letterform comparison agreed independently. Rendered side by side at 13px
+in a table row against Plex Sans (see `/styleguide`):
+
+- Caskaydia sits visibly heavier at the same nominal 400 weight, so mono
+  columns shout relative to the sans columns beside them — bad in a dense table
+  where every column should read at one volume.
+- Caskaydia is wider per character, costing horizontal room in exactly the
+  columns that are already longest (fingerprints, session UUIDs).
+- Plex Mono shares Plex Sans's skeleton, so a row reads as one line of text set
+  in two faces rather than two competing families.
+- Both disambiguate `0/O` and `1/l/I` well; neither wins on legibility alone.
+
+Caskaydia stays exactly as it is — `monospace-fallback`, applied only by
+xterm.js, carrying the Powerline glyphs that terminal sessions need.
 
 ### D1 — Frontmatter palette is authoritative, not the prose palette
 *Phase 0.5. Deviation from DESIGN.md.*
@@ -262,45 +396,74 @@ keep their `design/<screen>/{code.html,screen.png}` layout.
 
 ## Open questions
 
-### Q1 — `#FF6B6B` fails AA on the hover-row substrate
-*Raised Phase 0.5. Blocks the Phase 1 token layer.*
+### Q5 — Third ink tier and the two border tiers diverge from DESIGN.md
+*Raised Phase 1. Implemented as described; flagged for review.*
 
-`#FF6B6B` gives 4.45:1 on `surface-container-highest` (`#31353a`), just under
-the 4.5 AA threshold for normal text. Three ways out:
+The live contrast audit on `/styleguide` caught two token-layer bugs before any
+primitive was built. Both are places where DESIGN.md's stated values fail AA
+and the implementation takes AA instead.
 
-1. **Shift to `#FF7B7B`** — 4.92:1 there, AA on every step of the ramp, still
-   within the brief's "~#FF6B6B" latitude. *Recommended.*
-2. Keep `#FF6B6B` and add a rule that error-coloured text never sits on
-   `surface-container-highest` — which means hovering a row containing an error
-   status would have to suppress the hover tone. Fragile.
-3. Keep `#FF6B6B` and drop the hover tone to `surface-container-high`
-   (`#262a2f`, 5.20:1). Changes hover feel for every table in the product.
+**1. `--wg-text-subtle` is not `--wg-outline`.** DESIGN.md has three ink tiers,
+the third being "inactive timestamps, non-critical units, disabled actions,
+protocol markers". Aliasing that to M3's `outline` — a *border* role — measured
+3.92:1 dark and 4.25:1 light on the hover-row substrate, failing 1.4.3 for the
+timestamps and protocol markers it renders. Disabled controls are exempt from
+1.4.3; inactive timestamps are not. Given its own value per theme:
 
-### Q2 — Can CaskaydiaCove serve as the UI mono?
-*Raised Phase 0.5. Decided in Phase 1 on measured numbers, per decision #7.*
+| | value | canvas | container | highest |
+|---|---|---:|---:|---:|
+| dark | `#9da0ac` | 7.10 AAA | 6.29 AA | 4.74 AA |
+| light | `#60636d` | 5.71 AA | 5.15 AA | 4.64 AA |
 
-Worth ≈40 KB raw (≈2% of shipped bytes). Caskaydia already ships and cannot be
-dropped, so reusing it for UI mono costs nothing extra.
+**2. Borders split into two tiers.** `outline-variant` measures 1.98:1 dark and
+1.62:1 light against the canvas — below even 1.4.11's 3:1. That is correct for
+what M3 intends it to be (a decorative divider, which 1.4.11 exempts) and wrong
+for what DESIGN.md's prose asks of it, which is the border of every input and
+select. The split:
 
-Non-size factors to weigh alongside the measurement:
+| token | value | role | vs canvas |
+|---|---|---|---:|
+| `--wg-border` | `outline-variant` | decorative dividers only — row rules, cell hairlines | 1.98 / 1.62 — exempt |
+| `--wg-border-strong` | `outline` | interactive component boundaries — inputs, selects, buttons, focusable cards | 5.87 / 4.25 — passes 3:1 |
 
-- Caskaydia Cove is a Nerd-Font-patched Cascadia Code — a *terminal* face. Its
-  wide advance widths and large x-height are tuned for 14px+ terminal grids and
-  may read heavy in dense table chrome at 12–13px.
-- It ships as **OTF**, which compresses far worse than WOFF2: 218.8 KB raw →
-  132 KB gzip for two weights. Plex Mono in WOFF2 is ~20 KB per weight.
-- Only Regular and Bold are present — **no 500 weight.** DESIGN.md's `code-md`
-  and `code-sm` are both 400, so this only matters if mono ever needs a medium.
+**The rule: if a border is the only thing telling an operator where a control
+begins, it is `border-strong`.** This makes inputs read slightly louder than
+the mockups draw them. Deliberate, and the alternative is failing AA on every
+form in the product.
 
-Phase 1 will build both variants and put them side by side at 12px and 13px.
+### Q6 — Light theme is unreviewed
+*Raised Phase 1. Gates Phase 5, not Phase 4, per decision #2.*
 
-### Q3 — Per-phase branch convention
-*Raised Phase 0.5.*
+The light palette is derived and passes AA across every role and substrate, but
+no human has looked at it for taste. It is marked provisional in `tokens.css`.
 
-The brief asks for one phase per PR, each independently revertable. Phase 0.5
-is committed to `redesign/design-system` (the branch that already existed at
-`main` with no commits). Confirm whether later phases should branch off that,
-or off `main` directly.
+Screens must stay theme-agnostic. **If a screen needs a light-specific fix, the
+token layer is wrong — record it here rather than patching the screen.**
+
+---
+
+## Resolved
+
+### Q1 — error hue ✅ `#FF7B7B`
+*Raised Phase 0.5, resolved Phase 1.*
+
+`#FF6B6B` measured 4.45:1 on `surface-container-highest`, under AA for normal
+text. Resolved in favour of AA across the full ramp over a higher number on two
+substrates: the failure case was a hovered table row, which is exactly when an
+operator is targeting that row. `#FF7B7B` measures 7.37 / 6.53 / 4.92. See D2.
+
+### Q2 — UI mono ✅ IBM Plex Mono
+*Raised Phase 0.5, resolved Phase 1.* See D9.
+
+### Q3 — branching ✅ stacked
+*Raised Phase 0.5, resolved Phase 1.* Phase N branches off Phase N−1; see the
+branching table at the top. The "independently revertable" requirement is met
+by `VITE_NEW_UI`, not by git history — Phase 2 cannot exist without Phase 1.
+
+### Q4 — tracking `.md` ✅ gitignore negation
+*Raised Phase 0.5, resolved Phase 1.* `!design/**/*.md` added to `.gitignore`
+rather than force-adding each file, since `-f` silently loses anything someone
+forgets to force-add.
 
 ---
 
@@ -308,16 +471,59 @@ or off `main` directly.
 
 Recorded because they cost time to diagnose and will recur on a fresh checkout.
 
-- **Oracle's `javapath` shim is broken on this machine.**
-  `C:\Program Files\Common Files\Oracle\Java\javapath\java.exe` segfaults
-  (exit `-1073741819` / `0xC0000005`). A working JDK 26 is installed at
-  `C:\Program Files\Java\jdk-26.0.1`. `openapi-generator-cli` needs Java, so
-  `npm ci`'s postinstall fails until `JAVA_HOME` is set and the shim is
-  removed from `PATH`. openapi-generator 7.7.0 runs fine under JDK 26.
-- **The SDK scripts need a POSIX shell.** `openapi:client:*` ends in
-  `rm -rf src tsconfig.json`, which cmd.exe cannot run — the client generates
-  and compiles, then the script exits 1 on cleanup. Run npm with
-  `npm_config_script_shell` pointed at Git Bash. No repo change needed.
+### Windows: two failures that will cost you an afternoon
+
+Both bite on a fresh checkout, and the second one in particular fails in a way
+that looks like success.
+
+**1. Oracle's `javapath` shim segfaults.**
+
+`openapi-generator-cli` runs the generator through `java`. On this machine
+`C:\Program Files\Common Files\Oracle\Java\javapath\java.exe` — a stub Oracle
+installs onto `PATH` — crashes with exit `-1073741819` (`0xC0000005`, access
+violation) and **prints nothing at all**. A real JDK is installed at
+`C:\Program Files\Java\jdk-26.0.1` and works fine; the stub just shadows it.
+
+The symptom is `npm ci` failing in postinstall with an `Error` whose message is
+blank. Fix, in whatever shell you run npm from:
+
+```bash
+export JAVA_HOME="/c/Program Files/Java/jdk-26.0.1"
+export PATH="$JAVA_HOME/bin:$(echo "$PATH" | tr ':' '\n' | grep -v 'Oracle/Java/javapath' | paste -sd:)"
+```
+
+openapi-generator 7.7.0 runs correctly under JDK 26.
+
+**2. `openapi:client:*` needs a POSIX shell, and half-succeeds without one.**
+
+This is the confusing one. The scripts end in:
+
+```
+… && npx tsc --target esnext --module esnext && rm -rf src tsconfig.json
+```
+
+`rm -rf` is not a cmd.exe command. So on Windows the generator **succeeds**,
+`npm i` **succeeds**, `tsc` **succeeds** and emits `dist/` — and then the
+script dies on the cleanup step with `'rm' is not recognized`, exits 1, and
+leaves `src/` and `tsconfig.json` sitting in `api-client/`. You get a working
+client and a failed command, which reads like a broken generator.
+
+`npm run devbuild` fails the same way for the same reason — it opens with the
+POSIX env-var prefix `NODE_ENV=development`.
+
+Fix — point npm at Git Bash, then run the project's documented commands
+unmodified:
+
+```bash
+export npm_config_script_shell="C:\\Users\\<you>\\AppData\\Local\\Programs\\Git\\usr\\bin\\bash.exe"
+```
+
+**3. Pipe your build commands through `set -o pipefail`.** `npm ci 2>&1 | tail`
+reports tail's exit code, not npm's, so a failed install looks clean. This is
+how failure 1 above was initially missed.
+
+### Missing toolchain
+
 - **cargo, just and docker are not installed here.** Phases 1–5 are node-only
   and unaffected. Phase 6 (release binary + `docker/local-testing`) is blocked
   until they are. `just openapi-all` is likewise unavailable — but a
@@ -325,3 +531,14 @@ Recorded because they cost time to diagnose and will recur on a fresh checkout.
   from Rust implies Rust changed.
 - `just npm <args>` is a thin `cd warpgate-web && npm <args>` wrapper, so plain
   `npm` works identically while `just` is missing.
+
+### Viewing the styleguide without a backend
+
+`/styleguide` is registered in `gateway/Root.svelte` outside the auth gate, so
+it renders against a static server — no running Warpgate needed:
+
+```bash
+npm run devbuild      # production build strips the route
+# then serve warpgate-web/dist/ with /@warpgate/* mapped to dist/*
+# and open  http://localhost:<port>/#/styleguide
+```

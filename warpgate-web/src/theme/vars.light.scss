@@ -2,7 +2,9 @@
 
 $body-bg: #fffcf6;
 $body-color: #555;
-$font-family-sans-serif: "Work Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+// Points at the token so the stack is defined once, in theme/tokens.css.
+$font-family-sans-serif: var(--wg-font-sans);
+$font-family-monospace: var(--wg-font-mono);
 $link-color: $body-color;
 $list-group-bg: transparent;
 $list-group-active-bg: rgba(#000, .125);
