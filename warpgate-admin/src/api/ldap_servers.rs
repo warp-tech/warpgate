@@ -443,7 +443,7 @@ impl ListApi {
                 Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
                     TestLdapServerResponse {
                         success: false,
-                        message: format!("Connection failed: {e}"),
+                        message: format!("Connection failed: {e:#}"),
                         base_dns: None,
                     },
                 ))),

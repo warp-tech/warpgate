@@ -206,7 +206,7 @@ class ProcessManager:
                 f"MINIO_ROOT_USER={user}",
                 "-e",
                 f"MINIO_ROOT_PASSWORD={password}",
-                "minio/minio",
+                "quay.io/minio/minio",
                 "server",
                 "/data",
             ]
@@ -710,6 +710,7 @@ class ProcessManager:
         http_port=None,
         database_url=None,
         env=None,
+        import_host_keys=True,
     ) -> WarpgateProcess:
         args = args or ["run", "--enable-admin-token"]
 
@@ -755,16 +756,6 @@ class ProcessManager:
 
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
-
-            keys_dir = data_dir / "ssh-keys"
-            keys_dir.mkdir(parents=True)
-            for k in [
-                Path("ssh-keys/wg/client-ed25519"),
-                Path("ssh-keys/wg/client-rsa"),
-                Path("ssh-keys/wg/host-ed25519"),
-                Path("ssh-keys/wg/host-rsa"),
-            ]:
-                shutil.copy(k, keys_dir / k.name)
 
             for k in [
                 Path("certs/tls.certificate.pem"),
@@ -822,6 +813,13 @@ class ProcessManager:
                 "--host-key-verification",
                 "auto-accept",
             ]
+            # Fixed host/client keys, stored in the DB. The client keys are always
+            # imported since the target sshd containers trust only those; leaving
+            # out the host keys makes Warpgate generate its own.
+            keys_dir = str(Path(os.getcwd()) / "ssh-keys/wg")
+            setup_args += ["--import-ssh-client-keys", keys_dir]
+            if import_host_keys:
+                setup_args += ["--import-ssh-host-keys", keys_dir]
             if database_url:
                 setup_args += ["--database-url", database_url]
             p = run(
@@ -991,6 +989,18 @@ def shared_ssh_port(processes, wg_c_ed25519_pubkey):
     """
     port = processes.start_ssh_server(trusted_keys=[wg_c_ed25519_pubkey.read_text()])
     wait_port(port)
+    return port
+
+
+@pytest.fixture(scope="session")
+def shared_postgres_port(processes: ProcessManager):
+    """Shared PostgreSQL server for tests that only read from it.
+
+    The approval tests each need their own warpgate node, but the database
+    behind the target is stateless as far as they are concerned.
+    """
+    port = processes.start_postgres_server()
+    wait_port(port, recv=False)
     return port
 
 

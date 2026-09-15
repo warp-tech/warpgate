@@ -1,4 +1,6 @@
 use poem::FromRequest;
+use poem::http::HeaderName;
+use poem::http::header::ACCEPT;
 use poem::http::uri::{Authority, Scheme};
 use poem::web::Data;
 use url::Url;
@@ -69,6 +71,18 @@ pub async fn construct_external_url(
         }
     }
     Url::parse(&url).map_err(WarpgateError::UrlParse)
+}
+
+pub fn is_navigation_request(req: &poem::Request) -> bool {
+    let headers = req.headers();
+    let accepts_html = headers
+        .get(ACCEPT)
+        .and_then(|accept| accept.to_str().ok())
+        .is_some_and(|accept| accept.contains("text/html"));
+    let navigates = headers
+        .get(HeaderName::from_static("sec-fetch-mode"))
+        .is_none_or(|mode| mode == "navigate");
+    accepts_html && navigates
 }
 
 #[cfg(test)]

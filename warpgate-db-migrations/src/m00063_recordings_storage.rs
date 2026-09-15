@@ -60,8 +60,7 @@ impl MigrationTrait for Migration {
         .await?;
 
         // Copy the config-file recordings settings (published by the process
-        // before migrations run) into the existing parameters row. A fresh
-        // install has no row yet and is seeded by `Parameters::Entity::get`.
+        // before migrations run) into the parameters row.
         let values = get_config_migration_values();
         #[allow(clippy::unwrap_used, reason = "can't fail")]
         let stmt = Query::update()

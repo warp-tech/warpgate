@@ -326,7 +326,7 @@ impl Api {
                 session_id,
                 client_ip,
                 email,
-                &cred.safe_description(),
+                &cred.readable_description(),
                 "unknown user",
             );
             return Ok(Err(format!("No user matching {email}")));
@@ -342,7 +342,7 @@ impl Api {
                         session_id,
                         client_ip,
                         &username,
-                        &cred.safe_description(),
+                        &cred.readable_description(),
                         "IP address not allowed",
                     );
                     return Ok(Err(

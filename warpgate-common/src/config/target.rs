@@ -36,7 +36,7 @@ pub struct TargetSSHOptions {
     #[serde(default = "_default_username")]
     pub username: String,
     #[serde(default)]
-    pub allow_insecure_algos: Option<bool>,
+    pub allow_insecure_algos: bool,
     #[serde(default)]
     pub auth: SSHTargetAuth,
     #[serde(default)]
@@ -86,7 +86,7 @@ pub struct TargetHTTPOptions {
     pub tls: Tls,
 
     #[serde(default)]
-    pub headers: Option<HashMap<String, String>>,
+    pub headers: HashMap<String, String>,
 
     #[serde(default)]
     pub external_host: Option<String>,
@@ -152,42 +152,13 @@ pub struct TargetMySqlOptions {
     pub username: String,
 
     #[serde(default)]
-    auth: Option<DatabaseTargetAuth>,
-
-    /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
-    #[serde(default, skip_serializing)]
-    #[oai(deprecated)]
-    password: Option<StoredSecret>,
+    pub auth: DatabaseTargetAuth,
 
     #[serde(default)]
     pub tls: Tls,
 
     #[serde(default)]
     pub default_database_name: Option<String>,
-}
-
-impl TargetMySqlOptions {
-    pub fn effective_auth(&self) -> DatabaseTargetAuth {
-        if let Some(auth) = &self.auth {
-            auth.clone()
-        } else {
-            DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: self.password.clone().unwrap_or_default(),
-            })
-        }
-    }
-
-    pub fn normalize(&mut self) {
-        if let Some(password) = self.password.take() {
-            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password,
-            }));
-        } else if self.auth.is_none() {
-            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: StoredSecret::default(),
-            }));
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
@@ -213,12 +184,7 @@ pub struct TargetPostgresOptions {
     pub username: String,
 
     #[serde(default)]
-    auth: Option<DatabaseTargetAuth>,
-
-    /// Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.
-    #[serde(default, skip_serializing)]
-    #[oai(deprecated)]
-    password: Option<StoredSecret>,
+    pub auth: DatabaseTargetAuth,
 
     #[serde(default)]
     pub tls: Tls,
@@ -230,31 +196,7 @@ pub struct TargetPostgresOptions {
     pub default_database_name: Option<String>,
 
     #[serde(default)]
-    pub protocol_version: Option<PostgresProtocolVersion>,
-}
-
-impl TargetPostgresOptions {
-    pub fn effective_auth(&self) -> DatabaseTargetAuth {
-        if let Some(auth) = &self.auth {
-            auth.clone()
-        } else {
-            DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: self.password.clone().unwrap_or_default(),
-            })
-        }
-    }
-
-    pub fn normalize(&mut self) {
-        if let Some(password) = self.password.take() {
-            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password,
-            }));
-        } else if self.auth.is_none() {
-            self.auth = Some(DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-                password: StoredSecret::default(),
-            }));
-        }
-    }
+    pub protocol_version: PostgresProtocolVersion,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -327,7 +269,7 @@ pub struct TargetRdpOptions {
     pub verify_tls: bool,
 
     #[serde(default)]
-    pub compression: Option<RdpTargetCompression>,
+    pub compression: RdpTargetCompression,
 
     /// Show the target's own sign-in screen instead of logging on automatically.
     /// The stored credentials still pass network-level authentication (CredSSP).
@@ -337,8 +279,8 @@ pub struct TargetRdpOptions {
     // TLS compatibility/security profile used for the target-facing RDP connection.
     // Kept as a plain comment so OpenAPI emits a direct enum reference. A field
     // description wraps the enum in allOf, which typescript-fetch misgenerates.
-    #[serde(default = "_default_rdp_tls_security")]
-    pub tls_security: Option<RdpTlsSecurity>,
+    #[serde(default)]
+    pub tls_security: RdpTlsSecurity,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
@@ -353,17 +295,6 @@ pub enum RdpTlsSecurity {
     /// ~ Windows 2008/Vista
     #[serde(rename = "tls_1_0_unsafe")]
     Tls10Unsafe,
-}
-
-#[allow(clippy::unnecessary_wraps)]
-fn _default_rdp_tls_security() -> Option<RdpTlsSecurity> {
-    Some(RdpTlsSecurity::default())
-}
-
-impl TargetRdpOptions {
-    pub fn tls_security(&self) -> RdpTlsSecurity {
-        self.tls_security.unwrap_or_default()
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
@@ -440,6 +371,7 @@ pub struct Target {
     pub ticket_max_duration_seconds: Option<i64>,
     pub ticket_requests_disabled: bool,
     pub ticket_require_approval: bool,
+    pub require_approval: bool,
     pub ticket_max_uses: Option<i16>,
 }
 
@@ -498,9 +430,7 @@ impl TargetOptions {
 const SECRET_PATHS: &[&[&str]] = &[
     &["ssh", "auth", "password"],
     &["mysql", "auth", "password"],
-    &["mysql", "password"],
     &["postgres", "auth", "password"],
-    &["postgres", "password"],
     &["vnc", "auth", "password"],
     &["rdp", "auth", "password"],
     &["kubernetes", "auth", "token"],
@@ -538,7 +468,11 @@ pub fn redact_target_secrets(value: &mut serde_json::Value) {
 
 #[cfg(test)]
 mod tests {
-    use super::{TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions, Tls};
+    use super::{
+        DatabaseTargetAuth, DatabaseTargetPasswordAuth, PostgresProtocolVersion,
+        RdpTargetCompression, RdpTlsSecurity, TargetHTTPOptions, TargetKubernetesOptions,
+        TargetMySqlOptions, TargetPostgresOptions, TargetRdpOptions, TargetSSHOptions, Tls,
+    };
 
     /// The two ways of saying "nothing specified" — an absent `tls` block and an
     /// empty one — must both resolve to verifying.
@@ -551,6 +485,27 @@ mod tests {
         assert!(absent.tls.verify);
         assert_eq!(absent.tls, empty.tls);
         assert_eq!(absent.tls, Tls::default());
+    }
+
+    /// These fields stopped being `Option`, and m00087 drops the explicit nulls
+    /// left behind rather than translating them. Their defaults therefore have to
+    /// keep producing what the old `unwrap_or` did.
+    #[test]
+    fn an_omitted_field_defaults_to_what_the_option_fell_back_to() {
+        let ssh: TargetSSHOptions = serde_json::from_str(r#"{"host":"h"}"#).unwrap();
+        let http: TargetHTTPOptions = serde_json::from_str(r#"{"url":"http://t"}"#).unwrap();
+        let mysql: TargetMySqlOptions = serde_json::from_str("{}").unwrap();
+        let postgres: TargetPostgresOptions = serde_json::from_str("{}").unwrap();
+        let rdp: TargetRdpOptions = serde_json::from_str("{}").unwrap();
+
+        assert!(!ssh.allow_insecure_algos);
+        assert!(http.headers.is_empty());
+        assert_eq!(postgres.protocol_version, PostgresProtocolVersion::V3_2);
+        assert_eq!(rdp.compression, RdpTargetCompression::RemoteFX);
+        assert_eq!(rdp.tls_security, RdpTlsSecurity::Tls12);
+        let empty_password = DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth::default());
+        assert_eq!(mysql.auth, empty_password);
+        assert_eq!(postgres.auth, empty_password);
     }
 
     #[test]
@@ -576,9 +531,9 @@ mod tests {
     }
 
     /// The reason encryption walks the JSON instead of `TargetOptions`: a
-    /// `from_value`/`to_value` round trip drops the `skip_serializing` legacy password
-    /// and anything a newer Warpgate wrote. Encrypting must not be able to lose a
-    /// credential, so everything outside the mapped paths has to survive byte for byte.
+    /// `from_value`/`to_value` round trip drops anything a newer Warpgate wrote.
+    /// Encrypting must not be able to lose a credential, so everything outside the
+    /// mapped paths has to survive byte for byte.
     #[test]
     fn nothing_outside_the_mapped_paths_is_disturbed() {
         let original = serde_json::json!({
@@ -586,7 +541,6 @@ mod tests {
                 "host": "db",
                 "port": 3306,
                 "auth": { "kind": "password", "password": "current" },
-                "password": "legacy",
                 "tls": { "mode": "preferred", "verify": true },
                 "future_field": 1,
             }
@@ -595,7 +549,6 @@ mod tests {
         let mut mapped = original.clone();
         wrap(&mut mapped, "X");
         assert_eq!(mapped["mysql"]["auth"]["password"], "Xcurrent");
-        assert_eq!(mapped["mysql"]["password"], "Xlegacy");
 
         super::map_target_secrets(&mut mapped, &mut |s| {
             Ok(s.strip_prefix('X').unwrap_or(s).to_owned())
@@ -678,14 +631,12 @@ mod tests {
                 "port": 3306,
                 "username": "root",
                 "auth": {"kind": "password", "password": "hunter2"},
-                "password": "legacy",
             }
         });
 
         super::redact_target_secrets(&mut snapshot);
 
         assert_eq!(snapshot["mysql"]["auth"]["password"], "");
-        assert_eq!(snapshot["mysql"]["password"], "");
         assert_eq!(snapshot["mysql"]["host"], "db");
         assert_eq!(snapshot["mysql"]["username"], "root");
         assert_eq!(snapshot["name"], "prod-db");

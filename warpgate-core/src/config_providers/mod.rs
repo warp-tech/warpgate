@@ -7,7 +7,6 @@ mod sso_user;
 
 pub use db::DatabaseConfigProvider;
 use enum_dispatch::enum_dispatch;
-use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 pub use sso_user::resolve_and_map_sso_user;
 use time::OffsetDateTime;
@@ -15,6 +14,7 @@ use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthState, AuthStateUserInfo, CredentialKind, CredentialPolicy,
+    StoredCredential,
 };
 use warpgate_common::helpers::hash::hash_secret;
 use warpgate_common::{
@@ -49,7 +49,7 @@ pub trait ConfigProvider {
         &self,
         username: &str,
         client_credential: &AuthCredential,
-    ) -> Result<bool, WarpgateError>;
+    ) -> Result<Option<StoredCredential>, WarpgateError>;
 
     async fn username_for_sso_credential(
         &self,
@@ -215,6 +215,10 @@ impl<O> TargetAuthorization<O> {
         &self.target
     }
 
+    pub fn specific_target(&self) -> &SpecificTarget<O> {
+        &self.target
+    }
+
     pub const fn options(&self) -> &O {
         self.target.options()
     }
@@ -240,6 +244,15 @@ impl ApprovedTarget {
 
 /// Proof that user is both authorized for a target and has approval, if needed. This is the final pre-connection green light. Not cloneable because one instance = one connection
 pub struct ApprovedTarget<O = TargetOptions>(TargetAuthorization<O>);
+
+impl<O> std::fmt::Debug for ApprovedTarget<O> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApprovedTarget")
+            .field("target", &self.0.target().name)
+            .field("user", &self.0.user_info().username)
+            .finish()
+    }
+}
 
 impl<O> ApprovedTarget<O> {
     pub(crate) const fn new(authorization: TargetAuthorization<O>) -> Self {
@@ -294,7 +307,6 @@ pub async fn authorize_for_target_by_name<C: ConfigProvider + ?Sized>(
     }
 }
 
-//TODO: move this somewhere
 pub async fn authorize_and_spend_ticket(
     db: &DatabaseConnection,
     login_protection: &LoginProtectionService,
@@ -333,31 +345,14 @@ impl ValidatedTicket {
         self,
         db: &DatabaseConnection,
     ) -> Result<Option<TargetAuthorization>, WarpgateError> {
-        // Also match unlimited tickets: a single atomic statement verifies the
-        // ticket still exists and hasn't expired while opening the session.
-        let spent = e::Ticket::Entity::update_many()
-            .col_expr(
-                e::Ticket::Column::UsesLeft,
-                Expr::col(e::Ticket::Column::UsesLeft).sub(1),
-            )
-            .filter(e::Ticket::Column::Id.eq(self.id))
-            .filter(
-                e::Ticket::Column::UsesLeft
-                    .is_null()
-                    .or(e::Ticket::Column::UsesLeft.gt(0)),
-            )
-            .filter(
-                e::Ticket::Column::Expiry
-                    .is_null()
-                    .or(e::Ticket::Column::Expiry.gte(OffsetDateTime::now_utc())),
-            )
-            .exec(db)
-            .await?;
-        if spent.rows_affected == 0 {
-            warn!(ticket_id = %self.id, "Ticket is expired, revoked or used up");
-            return Ok(None);
+        match e::Ticket::spend_use(db, self.id).await {
+            Ok(()) => Ok(Some(self.authorization)),
+            Err(WarpgateError::InvalidTicket(_)) => {
+                warn!(ticket_id = %self.id, "Ticket is revoked or used up");
+                Ok(None)
+            }
+            Err(error) => Err(error),
         }
-        Ok(Some(self.authorization))
     }
 }
 
@@ -460,7 +455,7 @@ mod tests {
             options: TargetOptions::Http(TargetHTTPOptions {
                 url: "http://target".into(),
                 tls: Tls::default(),
-                headers: None,
+                headers: Default::default(),
                 external_host: None,
             }),
             rate_limit_bytes_per_second: None,
@@ -468,6 +463,7 @@ mod tests {
             ticket_max_duration_seconds: None,
             ticket_requests_disabled: false,
             ticket_require_approval: false,
+            require_approval: false,
             ticket_max_uses: None,
         }
     }
@@ -492,11 +488,19 @@ mod tests {
         assert!(wrong_protocol.is_err());
     }
 
-    /// Two presentations of a 1-use ticket race on the spend; only one may be
-    /// authorized, however they interleave.
+    /// A migrated database holding one user, one HTTP target and one ticket for
+    /// it, so the ticket tests differ only in what they set up differently.
     #[cfg(feature = "sqlite")]
-    #[tokio::test]
-    async fn a_ticket_spend_is_atomic_with_its_authorization() {
+    async fn ticket_fixture(
+        require_approval: bool,
+        uses_left: Option<i16>,
+    ) -> (
+        DatabaseConnection,
+        LoginProtectionService,
+        Target,
+        Uuid,
+        Secret<String>,
+    ) {
         use sea_orm::ActiveValue::Set;
         use sea_orm::{ActiveModelTrait, Database};
         use warpgate_db_entities::Parameters::{
@@ -535,11 +539,11 @@ mod tests {
             ticket_requests_disabled: Set(false),
             ticket_require_approval: Set(false),
             ticket_max_uses: Set(None),
+            require_approval: Set(require_approval),
         }
         .insert(&db)
         .await
         .unwrap();
-        let secret = Secret::new("t1cket".to_string());
         let ticket_id = Uuid::new_v4();
         e::Ticket::ActiveModel {
             id: Set(ticket_id),
@@ -547,7 +551,7 @@ mod tests {
             user_id: Set(user_id),
             description: Set(String::new()),
             target_id: Set(target.id),
-            uses_left: Set(Some(1)),
+            uses_left: Set(uses_left),
             self_service: Set(false),
             expiry: Set(None),
             created: Set(OffsetDateTime::now_utc()),
@@ -555,6 +559,58 @@ mod tests {
         .insert(&db)
         .await
         .unwrap();
+
+        (
+            db,
+            login_protection,
+            target,
+            ticket_id,
+            Secret::new("t1cket".to_string()),
+        )
+    }
+
+    /// A ticket's spend is atomic with its authorization, gated target or not:
+    /// an exhausted ticket establishes nothing, and a live one is down a use
+    /// the moment the session exists — the administrator gate refunds through
+    /// the question's row if it turns the session away.
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn a_gated_targets_ticket_spends_at_authorization() {
+        let (db, login_protection, _target, _ticket_id, secret) =
+            ticket_fixture(true, Some(0)).await;
+
+        let authorization =
+            authorize_and_spend_ticket(&db, &login_protection, &secret, None, Protocol::Http)
+                .await
+                .unwrap();
+        assert!(authorization.is_none());
+
+        let (db, login_protection, _target, ticket_id, secret) =
+            ticket_fixture(true, Some(1)).await;
+        assert!(
+            authorize_and_spend_ticket(&db, &login_protection, &secret, None, Protocol::Http)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            e::Ticket::Entity::find_by_id(ticket_id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .uses_left,
+            Some(0),
+        );
+    }
+
+    /// Two presentations of a 1-use ticket race on the spend; only one may be
+    /// authorized, however they interleave.
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn a_ticket_spend_is_atomic_with_its_authorization() {
+        let (db, login_protection, target, ticket_id, secret) =
+            ticket_fixture(false, Some(1)).await;
 
         let first = validate_ticket(&db, &login_protection, &secret, None, Protocol::Http)
             .await
@@ -598,7 +654,11 @@ mod tests {
 
     struct FixedPolicy(bool);
     impl CredentialPolicy for FixedPolicy {
-        fn is_sufficient(&self, _p: Protocol, _c: &[AuthCredential]) -> CredentialPolicyResponse {
+        fn is_sufficient(
+            &self,
+            _p: Protocol,
+            _c: &HashSet<CredentialKind>,
+        ) -> CredentialPolicyResponse {
             if self.0 {
                 CredentialPolicyResponse::Ok
             } else {

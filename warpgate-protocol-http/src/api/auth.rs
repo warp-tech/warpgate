@@ -1,36 +1,38 @@
 use std::sync::Arc;
 
 use anyhow::bail;
-use futures::{SinkExt, StreamExt};
 use poem::session::Session;
 use poem::web::Data;
 use poem::web::cookie::CookieJar;
-use poem::web::websocket::{Message, WebSocket};
+use poem::web::websocket::WebSocket;
 use poem::{FromRequest, IntoResponse, Request, handler};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::types::ToJSON;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Serialize;
 use time::OffsetDateTime;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{
-    Owner, ReparseForwardedResponse, fan_out_to_peers, forwarded_error, node_owner,
-    parse_forwarded_body, proxy_or_serve, proxy_or_serve_pending_login,
+    Owner, ReparseForwardedResponse, forwarded_error, parse_forwarded_body,
+    proxy_or_serve_pending_login,
 };
-use warpgate_common::auth::{AuthCredential, AuthResult, AuthState, CredentialKind};
+use warpgate_admin::approvals::{Approver, PendingApproval, resolve_pending_approval};
+use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, AuthState, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Secret, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::{AuthenticatedRequestContext, UnauthenticatedRequestContext};
 use warpgate_common_http::logging::get_client_ip_addr;
-use warpgate_common_http::{RequestAuthorization, SessionAuthorization, is_cluster_peer_request};
+use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::Services;
+use warpgate_core::approvals::{ApprovalDecision, ApprovalScope};
 use warpgate_core::auth::submit_credential;
+use warpgate_core::cluster::{ClusterNotification, refresh_notification_stream};
 use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_db_entities::{Parameters, UserSession};
+use warpgate_db_entities::{Parameters, SessionApprovalRequest as SAR, UserSession};
 
 use super::common::{emit_unknown_authentication_failed_event, logout};
 use crate::api::auth_scheme::AuthedSession;
@@ -125,17 +127,17 @@ struct AuthStateResponseInternal {
     pub web_approval_caching_grace_seconds: Option<i64>,
 }
 
-/// How an web approval should be remembered for bypass
-#[derive(Enum, Clone, Copy)]
-enum WebApprovalScope {
-    Once,
-    Target,
-    AllTargets,
-}
-
 #[derive(Object)]
 struct ApproveAuthRequest {
-    scope: WebApprovalScope,
+    scope: ApprovalScope,
+}
+
+#[derive(ApiResponse)]
+enum ApprovalActionResponse {
+    #[oai(status = 200)]
+    Ok,
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
@@ -296,7 +298,6 @@ impl Api {
     )]
     async fn get_web_auth_requests(
         &self,
-        req: &Request,
         ctx: AuthedSession,
     ) -> poem::Result<AuthStateListResponse> {
         let services = ctx.services();
@@ -306,12 +307,19 @@ impl Api {
             return Ok(AuthStateListResponse::NotFound);
         };
 
-        let mut results = local_web_auth_requests(&ctx, username).await?;
+        let requests = SAR::Entity::find()
+            .filter(SAR::Column::Kind.eq(ApprovalKind::User))
+            .filter(SAR::Column::Status.eq(SAR::ApprovalRequestStatus::Pending))
+            .order_by_asc(SAR::Column::Started)
+            .all(&services.db)
+            .await
+            .map_err(WarpgateError::from)?;
 
-        // An auth state lives only on the node that created it, so the pending
-        // approvals of a login that started elsewhere are only visible there.
-        if !is_cluster_peer_request(req, &services.cluster_token) {
-            results.extend(web_auth_requests_from_peers(&ctx, req).await);
+        let mut results = vec![];
+        for request in requests {
+            if username_eq_ci(&request.username, username) {
+                results.push(request_to_auth_state(services, request).await?);
+            }
         }
 
         Ok(AuthStateListResponse::Ok(Json(results)))
@@ -324,20 +332,20 @@ impl Api {
     )]
     async fn api_auth_state(
         &self,
-        req: &Request,
         ctx: AuthedSession,
-        id: Path<Uuid>,
+        Path(id): Path<UserSessionId>,
     ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
-        proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
-                return Ok(AuthStateResponse::NotFound);
-            };
-            Ok(AuthStateResponse::Ok(Json(
-                serialize_auth_state_inner(state_arc, ctx.services()).await?,
-            )))
-        })
-        .await
+        let Some(user) = ctx.auth.as_full_user() else {
+            return Ok(AuthStateResponse::NotFound);
+        };
+
+        match SAR::find_user_approval(&ctx.services().db, user.username(), id).await? {
+            Some(row) => request_to_auth_state(ctx.services(), row)
+                .await
+                .map(Json)
+                .map(AuthStateResponse::Ok),
+            None => Ok(AuthStateResponse::NotFound),
+        }
     }
 
     #[oai(
@@ -347,41 +355,15 @@ impl Api {
     )]
     async fn api_approve_auth(
         &self,
-        req: &Request,
         ctx: AuthedSession,
         id: Path<Uuid>,
         body: Json<ApproveAuthRequest>,
-    ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
-        proxy_or_serve(&ctx, req, owner, Some(&body.to_json()), || async {
-            let services = ctx.services();
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
-                return Ok(AuthStateResponse::NotFound);
-            };
-
-            let match_key = {
-                let mut state = state_arc.lock().await;
-                state.add_web_user_approval();
-                state.web_approval_match_key()
-            };
-
-            // Remembered so matching attempts can be bypassed within the grace period.
-            if let Some(match_key) = match body.scope {
-                WebApprovalScope::Once => None,
-                WebApprovalScope::Target => match_key,
-                WebApprovalScope::AllTargets => match_key.map(|k| k.for_all_targets()),
-            } {
-                services
-                    .auth_state_store
-                    .lock()
-                    .await
-                    .record_web_approval(match_key);
-            }
-
-            Ok(AuthStateResponse::Ok(Json(
-                serialize_auth_state_inner(state_arc, services).await?,
-            )))
-        })
+    ) -> poem::Result<ApprovalActionResponse> {
+        resolve_own_approval(
+            &ctx,
+            UserSessionId(*id),
+            ApprovalDecision::Approved(body.scope),
+        )
         .await
     }
 
@@ -392,27 +374,52 @@ impl Api {
     )]
     async fn api_reject_auth(
         &self,
-        req: &Request,
         ctx: AuthedSession,
         id: Path<Uuid>,
-    ) -> poem::Result<AuthStateResponse> {
-        let owner = auth_state_owner(&ctx, Some(UserSessionId(*id))).await?;
-        proxy_or_serve(&ctx, req, owner, None::<&()>, || async {
-            let Some(state_arc) = local_auth_state_for_user(&ctx, &UserSessionId(*id)).await else {
-                return Ok(AuthStateResponse::NotFound);
-            };
-            {
-                let mut state = state_arc.lock().await;
-                let credential = AuthCredential::WebUserApproval;
-                state.emit_authentication_failed_event(Some(&credential), "rejected by user");
-                state.reject();
-            }
-            Ok(AuthStateResponse::Ok(Json(
-                serialize_auth_state_inner(state_arc, ctx.services()).await?,
-            )))
-        })
-        .await
+    ) -> poem::Result<ApprovalActionResponse> {
+        resolve_own_approval(&ctx, UserSessionId(*id), ApprovalDecision::Rejected).await
     }
+}
+
+/// Records the user's decision on their own pending approval — on the request
+/// row, wherever the click lands: the row is written before the request's id
+/// is announced anywhere, so it is always there to decide on, and the node
+/// holding the login reads the decision back. When that node is this one, the
+/// decision is delivered on the spot rather than left to the sweep's next
+/// tick.
+async fn resolve_own_approval(
+    ctx: &AuthenticatedRequestContext,
+    session_id: UserSessionId,
+    decision: ApprovalDecision,
+) -> poem::Result<ApprovalActionResponse> {
+    let Some(user) = ctx.auth.as_full_user() else {
+        return Ok(ApprovalActionResponse::NotFound);
+    };
+
+    let Some(row) =
+        SAR::find_user_approval(&ctx.services().db, user.username(), session_id).await?
+    else {
+        return Ok(ApprovalActionResponse::NotFound);
+    };
+    let Some(pending) = PendingApproval::parse(ctx, row).await? else {
+        return Ok(ApprovalActionResponse::NotFound);
+    };
+
+    if !resolve_pending_approval(ctx, Approver::TheUserThemselves, pending, decision).await? {
+        return Ok(ApprovalActionResponse::NotFound);
+    }
+
+    // Best-effort: the decision is recorded, and the sweep delivers within a
+    // tick to whichever node holds the login — this only spares a login held
+    // *here* that wait.
+    if let Err(error) = ctx
+        .services()
+        .apply_recorded_user_decision(&session_id)
+        .await
+    {
+        warn!(%error, %session_id, "Failed to deliver a freshly recorded approval");
+    }
+    Ok(ApprovalActionResponse::Ok)
 }
 
 pub(crate) async fn record_failed_login_attempt(
@@ -652,16 +659,18 @@ async fn auth_state_owner(
     id: Option<UserSessionId>,
 ) -> poem::Result<Owner> {
     let Some(id) = id else {
-        return Ok(Owner::local());
+        return Ok(Owner::Local);
     };
     let Some(session) = UserSession::Entity::find_by_id(id)
         .one(&ctx.services().db)
         .await
         .map_err(poem::error::InternalServerError)?
     else {
-        return Ok(Owner::local());
+        return Ok(Owner::Local);
     };
-    node_owner(ctx, session.auth_state_node_id.or(session.node_id))
+    ctx.services()
+        .cluster
+        .owner(session.auth_state_node_id.or(session.node_id))
         .await
         .map_err(Into::into)
 }
@@ -729,86 +738,29 @@ impl ReparseForwardedResponse for AuthStateResponse {
     }
 }
 
-/// This node's own logins waiting on a web approval from `username`.
-async fn local_web_auth_requests(
-    ctx: &AuthenticatedRequestContext,
-    username: &str,
-) -> poem::Result<Vec<AuthStateResponseInternal>> {
-    let services = ctx.services();
-
-    // Snapshot the state handles while briefly holding the store lock, then
-    // release it before inspecting/serialising each state. Inspecting a
-    // state locks its inner mutex (and `serialize_auth_state_inner` locks
-    // the session state store), so doing that work under the auth state
-    // store lock would serialise every login against this endpoint.
-    let state_arcs = {
-        let store = services.auth_state_store.lock().await;
-        store.snapshot_states()
-    };
-
-    let mut results = vec![];
-
-    for state_arc in state_arcs {
-        let is_pending_web_approval = {
-            let state = state_arc.lock().await;
-            username_eq_ci(&state.user_info().username, username)
-                && matches!(
-                    state.verify(),
-                    AuthResult::Need(need) if need.contains(&CredentialKind::WebUserApproval)
-                )
-        };
-        if is_pending_web_approval {
-            results.push(serialize_auth_state_inner(state_arc, services).await?);
-        }
-    }
-
-    Ok(results)
+/// Renders an approval request row into the approval-page response, purely from
+/// row fields, so any node can serve it without holding the login.
+async fn request_to_auth_state(
+    services: &Services,
+    request: SAR::Model,
+) -> poem::Result<AuthStateResponseInternal> {
+    let web_approval_caching_grace_seconds = services
+        .web_approval_grace_period()
+        .await?
+        .and_then(|d| i64::try_from(d.as_secs()).ok());
+    Ok(AuthStateResponseInternal {
+        id: request.session_id.to_string(),
+        protocol: request.protocol,
+        address: request.remote_address,
+        started: request.started,
+        state: ApiAuthState::WebUserApprovalNeeded,
+        // Only user-approval rows reach here (both lookups filter on the kind),
+        // and those always carry the code the user reads back.
+        identification_string: request.identification_string.unwrap_or_default(),
+        web_approval_caching_grace_seconds,
+    })
 }
 
-/// The same list from every other node, so the approvals UI sees the whole
-/// cluster. Best effort: a peer that fails or answers unexpectedly contributes
-/// nothing rather than failing the request, since the user can still approve
-/// from the direct link the waiting login printed.
-async fn web_auth_requests_from_peers(
-    ctx: &AuthenticatedRequestContext,
-    req: &Request,
-) -> Vec<AuthStateResponseInternal> {
-    let mut results = vec![];
-    for (hostname, response) in fan_out_to_peers(ctx, req, req.original_uri().path()).await {
-        if response.status() != http::StatusCode::OK {
-            let status = response.status();
-            warn!(node = %hostname, %status, "Failed to list web auth requests on a cluster node");
-            continue;
-        }
-        match parse_forwarded_body::<Vec<AuthStateResponseInternal>>(response).await {
-            Ok(states) => results.extend(states),
-            Err(error) => {
-                warn!(node = %hostname, %error, "Malformed web auth request list from a cluster node");
-            }
-        }
-    }
-    results
-}
-
-/// Looks up a locally-held auth state, enforcing that it belongs to the
-/// requesting user: a user may only act on auth states created for their own
-/// username. This runs on the node that holds the state, so a cluster-forwarded
-/// request (carrying the origin's user identity) is re-checked here.
-async fn local_auth_state_for_user(
-    ctx: &AuthenticatedRequestContext,
-    id: &UserSessionId,
-) -> Option<Arc<Mutex<AuthState>>> {
-    let username = ctx.auth.username().cloned()?;
-    let state_arc = {
-        let store = ctx.services().auth_state_store.lock().await;
-        store.get(id)?
-    };
-    if username_eq_ci(&state_arc.lock().await.user_info().username, &username) {
-        Some(state_arc)
-    } else {
-        None
-    }
-}
 async fn serialize_auth_state_inner(
     state_arc: Arc<Mutex<AuthState>>,
     services: &Services,
@@ -848,55 +800,24 @@ async fn serialize_auth_state_inner(
 }
 
 #[handler]
-pub async fn api_get_web_auth_requests_stream(
+pub fn api_get_web_auth_requests_stream(
     ws: WebSocket,
     ctx: Data<&AuthenticatedRequestContext>,
 ) -> anyhow::Result<impl IntoResponse> {
-    let services = ctx.services();
-    let auth_state_store = services.auth_state_store.clone();
-
-    let username = match &ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => {
-            username.clone()
-        }
+    let user_id = match &ctx.auth {
+        RequestAuthorization::Session(SessionAuthorization::User { user_id, .. }) => *user_id,
         _ => bail!("Only session-based user auth is supported for this endpoint"),
     };
 
-    let mut rx = {
-        let mut s = auth_state_store.lock().await;
-        s.subscribe_web_auth_request()
-    };
-
-    Ok(ws.on_upgrade(|socket| async move {
-        let (mut sink, _) = socket.split();
-
-        loop {
-            let id = match rx.recv().await {
-                Ok(id) => id,
-                // The signal channel only carries wake-ups; if we lag behind we
-                // can safely resync on the next event instead of tearing down.
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
-            };
-
-            // Clone the state handle under a brief store lock, then release it
-            // before locking the inner state, so we never hold the store lock
-            // across an inner-state lock (which protocol sessions hold across
-            // DB I/O) or the socket write.
-            let state_arc = {
-                let store = auth_state_store.lock().await;
-                store.get(&id)
-            };
-            let belongs_to_user = match state_arc {
-                Some(state) => username_eq_ci(&state.lock().await.user_info().username, &username),
-                None => false,
-            };
-
-            if belongs_to_user {
-                sink.send(Message::Text(id.to_string())).await?;
-            }
-        }
-
-        Ok::<(), anyhow::Error>(())
-    }))
+    Ok(refresh_notification_stream(
+        ws,
+        ctx.services().cluster.subscribe(),
+        move |msg| match msg {
+            ClusterNotification::WebAuthRequested {
+                session_id,
+                user_id: requester,
+            } if requester == user_id => Some(session_id.to_string()),
+            _ => None,
+        },
+    ))
 }

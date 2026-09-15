@@ -22,6 +22,7 @@ mod client_certs;
 mod handlers;
 
 use client_certs::CertificateExtractorMiddleware;
+use warpgate_common_http::errors::render_errors;
 
 pub async fn bind_server(
     services: Services,
@@ -37,7 +38,8 @@ pub async fn bind_server(
         .with(poem::middleware::Cors::new())
         .with(CertificateExtractorMiddleware)
         .data(UnauthenticatedRequestContext::new(services.clone()).await)
-        .data(correlator);
+        .data(correlator)
+        .around(render_errors);
 
     info!(?address, "Kubernetes protocol listening");
 

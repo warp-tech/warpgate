@@ -21,9 +21,13 @@ class TestHTTPProto:
             echo_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"echo-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetHTTPOptions(
                             kind="Http",
+                            headers={},
                             url=f"http://localhost:{echo_server_port}",
                             tls=sdk.Tls(
                                 mode=sdk.TlsMode.DISABLED,

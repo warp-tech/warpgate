@@ -7,7 +7,7 @@ use tracing::{error, info};
 use warpgate_common::encryption::{
     Keyring, env_keyring, idempotent_maybe_decrypt, maybe_reencrypt_str,
 };
-use warpgate_common::{WarpgateError, emit_runtime_warning, map_target_secrets};
+use warpgate_common::{SshHostKeyKind, WarpgateError, emit_runtime_warning, map_target_secrets};
 use warpgate_db_entities::{Parameters, SshClientKey, Target};
 
 use crate::cluster::alive_nodes;
@@ -183,6 +183,16 @@ async fn probe_undecryptable(db: &DatabaseConnection) -> Result<Vec<String>, War
         }
     }
 
+    let parameters = Parameters::Entity::get(db).await?;
+    for (kind, key) in [
+        (SshHostKeyKind::Ed25519, &parameters.ssh_host_key_ed25519),
+        (SshHostKeyKind::Rsa, &parameters.ssh_host_key_rsa),
+    ] {
+        if idempotent_maybe_decrypt(key).is_err() {
+            undecryptable.push(format!("SSH host key ({kind:?})"));
+        }
+    }
+
     Ok(undecryptable)
 }
 
@@ -228,6 +238,31 @@ async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
             model.secret_key = Set(secret_key);
             rewritten += update_unless_deleted(model.update(db).await)?;
         }
+    }
+
+    let parameters = Parameters::Entity::get(db).await?;
+    let mut model = Parameters::ActiveModel {
+        id: Set(parameters.id),
+        ..Default::default()
+    };
+    let mut changed = false;
+    for (key, slot) in [
+        (
+            &parameters.ssh_host_key_ed25519,
+            &mut model.ssh_host_key_ed25519,
+        ),
+        (&parameters.ssh_host_key_rsa, &mut model.ssh_host_key_rsa),
+    ] {
+        let Ok(rewritten_key) = maybe_reencrypt_str(key) else {
+            continue;
+        };
+        if &rewritten_key != key {
+            *slot = Set(rewritten_key);
+            changed = true;
+        }
+    }
+    if changed {
+        rewritten += update_unless_deleted(model.update(db).await)?;
     }
 
     Ok(rewritten)

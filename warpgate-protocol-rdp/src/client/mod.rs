@@ -111,7 +111,7 @@ pub async fn run(
             options.host.clone(),
             options.port,
             options.verify_tls,
-            options.tls_security(),
+            options.tls_security,
             clipboard.backend(),
         ),
     )
@@ -619,7 +619,7 @@ fn build_config(
     width: u16,
     height: u16,
 ) -> connector::Config {
-    let codec_overrides: &[&str] = match options.compression.unwrap_or_default() {
+    let codec_overrides: &[&str] = match options.compression {
         RdpTargetCompression::RemoteFX => &[],
         RdpTargetCompression::Lossless => &["remotefx:off"],
     };
