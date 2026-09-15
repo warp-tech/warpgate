@@ -52,7 +52,7 @@
         "svelte": "^5.56.9",
         "svelte-check": "^4.7.6",
         "svelte-fa": "^4.0.4",
-        "svelte-intersection-observer": "^1.2.0",
+        "svelte-intersection-observer": "^2.2.0",
         "svelte-observable": "^0.4.0",
         "svelte-preprocess": "^6.0.5",
         "svelte-spa-router": "^5",
