@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tracing::error;
+use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Recording::RecordingKind;
 
 use super::{Recorder, Result};
@@ -64,6 +65,9 @@ enum IndexEntry {
     Keyframe { time: f32, offset: usize },
     /// A terminal size change; the player restores a snapshot at the size it was taken.
     Resize { time: f32, cols: u32, rows: u32 },
+    /// Written once at the start when the target's output is not recorded, so the
+    /// player renders the keystrokes instead of waiting for output that never comes.
+    InputOnly { time: f32 },
     /// Final line, written on finalize, carrying the true total duration.
     End { time: f32 },
 }
@@ -85,6 +89,8 @@ pub struct TerminalRecorder {
     index_writer: Arc<NDJsonRecordingWriter>,
     started_at: Instant,
     state: Arc<Mutex<RecorderState>>,
+    /// Off keeps only what the user typed, so a large output cannot fill the storage
+    record_output: bool,
 }
 
 impl TerminalRecorder {
@@ -108,6 +114,11 @@ impl TerminalRecorder {
 
         let time = self.get_time();
         st.duration = st.duration.max(time);
+
+        // Dropped output still counts towards the duration written on finalize
+        if stream != TerminalRecordingStreamId::Input && !self.record_output {
+            return Ok(());
+        }
 
         if stream != TerminalRecordingStreamId::Input {
             st.screen.feed(data);
@@ -157,7 +168,9 @@ impl TerminalRecorder {
     }
 
     async fn write_keyframe(&self, st: &mut RecorderState, time: f32) -> Result<()> {
-        if !st.pty {
+        // Without the target's output the screen is never fed, so a snapshot would only
+        // be a blank anchor; the player replays such recordings from the start instead.
+        if !st.pty || !self.record_output {
             return Ok(());
         }
 
@@ -197,6 +210,9 @@ impl Recorder for TerminalRecorder {
     }
 
     async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
+        let record_output = Parameters::Entity::get(&opener.db)
+            .await?
+            .record_terminal_output;
         let index_writer = opener.open_index().await?;
         index_writer
             .write_json_line(&IndexEntry::Keyframe {
@@ -204,11 +220,17 @@ impl Recorder for TerminalRecorder {
                 offset: 0,
             })
             .await?;
+        if !record_output {
+            index_writer
+                .write_json_line(&IndexEntry::InputOnly { time: 0.0 })
+                .await?;
+        }
         Ok(Self {
             data_writer: Arc::new(opener.open_ndjson_data().await?),
             index_writer: Arc::new(index_writer),
             started_at: Instant::now(),
             state: Arc::new(Mutex::new(RecorderState::default())),
+            record_output,
         })
     }
 }
@@ -216,6 +238,14 @@ impl Recorder for TerminalRecorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The player switches on the `type` tag and folds every entry's `time` into the
+    /// duration, so the marker has to carry both.
+    #[test]
+    fn input_only_index_entry_shape() {
+        let json = serde_json::to_string(&IndexEntry::InputOnly { time: 0.0 }).expect("serialize");
+        assert_eq!(json, r#"{"type":"input_only","time":0.0}"#);
+    }
 
     /// Untagged variants ignore unknown fields, so the item shapes must stay distinct
     /// enough that a line only ever matches the variant it was written as.

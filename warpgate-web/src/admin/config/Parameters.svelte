@@ -1054,6 +1054,28 @@
                                         by users in various applications is a
                                         security concern.
                                     </HelpText>
+                                    <label
+                                        for="recordTerminalOutput"
+                                        class="d-flex align-items-center mb-2"
+                                    >
+                                        <Input
+                                            id="recordTerminalOutput"
+                                            class="mb-0 me-2"
+                                            type="switch"
+                                            bind:checked={parameters.recordTerminalOutput}
+                                        />
+                                        <div>Record terminal output</div>
+                                    </label>
+                                    <HelpText>
+                                        Disable to keep only what users type in
+                                        SSH and Kubernetes terminal recordings,
+                                        so a command that prints a large file
+                                        cannot fill up the storage. Playback of
+                                        such recordings shows the keystrokes
+                                        only; detected shell commands stay in
+                                        the session log. Applies to sessions
+                                        started after saving.
+                                    </HelpText>
                                 {/if}
 
                                 <FormGroup floating label="Storage backend">

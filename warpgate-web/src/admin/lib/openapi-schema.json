@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.29.0-beta.1-1-g2f77f07b-modified"
+    "version": "v0.29.0-beta.1-10-g2be8cbfa-modified"
   },
   "servers": [
     {
@@ -5886,6 +5886,9 @@
           "record_desktop_keyboard_input": {
             "type": "boolean"
           },
+          "record_terminal_output": {
+            "type": "boolean"
+          },
           "login_protection_enabled": {
             "type": "boolean"
           },
@@ -6008,6 +6011,7 @@
           "password_policy",
           "record_scp",
           "record_desktop_keyboard_input",
+          "record_terminal_output",
           "login_protection_enabled",
           "login_protection_retention_seconds",
           "lp_ip_max_attempts",
@@ -6100,6 +6104,9 @@
             "type": "boolean"
           },
           "record_desktop_keyboard_input": {
+            "type": "boolean"
+          },
+          "record_terminal_output": {
             "type": "boolean"
           },
           "login_protection_enabled": {

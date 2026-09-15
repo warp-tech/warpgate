@@ -1,6 +1,6 @@
 <script lang="ts">
     import { faPlay } from '@fortawesome/free-solid-svg-icons'
-    import { Spinner } from '@sveltestrap/sveltestrap'
+    import { Alert, Spinner } from '@sveltestrap/sveltestrap'
     import { Terminal } from '@xterm/xterm'
     import type { Recording } from 'admin/lib/api'
     import { onDestroy, onMount } from 'svelte'
@@ -26,6 +26,8 @@
     let resizeObserver: ResizeObserver | undefined
     let loading = true
     let ptyMode = false
+    // The target's output was not recorded, so the keystrokes are rendered instead.
+    let inputOnly = false
 
     // Terminal sizes over time, from the index: a snapshot has to be restored at the size
     // it was taken at.
@@ -96,6 +98,7 @@
     type IndexLine =
         | { type: 'keyframe'; time: number; offset: number }
         | { type: 'resize'; time: number; cols: number; rows: number }
+        | { type: 'input_only'; time: number }
         | { type: 'end'; time: number }
 
     function decodeBase64Lossy(b64: string): string {
@@ -136,6 +139,8 @@
                     }
                 } else if (item.stream !== 'Input') {
                     pendingWrite += decodeBase64Lossy(item.data)
+                } else if (inputOnly) {
+                    pendingWrite += formatInput(decodeBase64Lossy(item.data))
                 }
                 atKeyframe = false
                 if (pendingWrite.length > WRITE_BATCH_CHARS) {
@@ -149,6 +154,10 @@
                     resize(item.cols, item.rows)
                 } else if ('data' in item && item.stream !== 'Input') {
                     await writeToTerminal(decodeBase64Lossy(item.data))
+                } else if ('data' in item && inputOnly) {
+                    await writeToTerminal(
+                        formatInput(decodeBase64Lossy(item.data)),
+                    )
                 }
             },
             flush,
@@ -218,10 +227,18 @@
                     sizes.push(entry)
                     ptyMode ||= Boolean(entry.cols)
                     break
+                case 'input_only':
+                    inputOnly = true
+                    break
                 case 'end':
                     total = entry.time
                     break
             }
+        }
+        // Input-only recordings carry no usable snapshots (the screen was never fed), so
+        // every seek replays the small file from the start rather than a blank anchor.
+        if (inputOnly) {
+            keyframes.splice(1)
         }
         player.setIndex(keyframes, total)
     }
@@ -246,6 +263,31 @@
         }
         scan.abort()
         player.setIndex([{ time: 0, offset: 0 }], total)
+    }
+
+    // Keystrokes as the user typed them, for recordings without the target's echo:
+    // Enter breaks the line, backspace erases, and other control bytes (Ctrl-C, arrow
+    // key escape sequences) show in caret notation instead of driving the terminal.
+    function formatInput(data: string): string {
+        let out = ''
+        for (let i = 0; i < data.length; i++) {
+            const code = data.charCodeAt(i)
+            if (code === 13) {
+                out += '\r\n'
+                if (data.charCodeAt(i + 1) === 10) {
+                    i++
+                }
+            } else if (code === 10) {
+                out += '\r\n'
+            } else if (code === 127) {
+                out += '\b \b'
+            } else if (code < 32 && code !== 9) {
+                out += `^${String.fromCharCode(code + 64)}`
+            } else {
+                out += data.charAt(i)
+            }
+        }
+        return out
     }
 
     async function writeToTerminal(data: string) {
@@ -321,6 +363,13 @@
         }
     }
 </script>
+
+{#if inputOnly}
+    <Alert color="warning" class="mb-2">
+        Input only: the target's output was not recorded for this session, so
+        only the keystrokes are shown.
+    </Alert>
+{/if}
 
 <div
     class="root"
