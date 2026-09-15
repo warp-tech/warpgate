@@ -17,6 +17,16 @@ solely to pass the new argument.
 Worth offering upstream as a `Config` field; drop both forks once a release carries an
 equivalent knob.
 
+## Backported upstream fixes
+
+Both are in upstream IronRDP after 0.10.0 and drop out on re-vendor:
+
+- Answer a connect-time Bandwidth Measure Stop with Bandwidth Measure Results
+  (upstream #1465). FreeRDP-based servers such as GNOME Remote Desktop wait for the reply
+  before licensing, so the connection stalled without it.
+- During reactivation, report a Server Set Error Info PDU as the server ending the session
+  instead of an "unexpected PDU" error (upstream #1467).
+
 `Cargo.toml` additionally sets `[lints.rust] warnings = { level = "allow", priority = 1 }`
 so this vendored path dependency's warnings don't surface in Warpgate's builds. This is
 not in `warpgate.patch` (which is source-only); re-apply it by hand on re-vendor.
