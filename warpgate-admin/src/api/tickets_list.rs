@@ -9,6 +9,7 @@ use uuid::Uuid;
 use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::auth::web_reauth_required;
+use warpgate_common_http::errors::bad_request;
 use warpgate_core::logging::AuditEvent;
 use warpgate_db_entities::{Target, Ticket, User};
 
@@ -147,8 +148,8 @@ impl Api {
                 .one(db)
                 .await?
         } else {
-            return Ok(CreateTicketResponse::BadRequest(Json(
-                "user_id or username is required".into(),
+            return Ok(CreateTicketResponse::BadRequest(bad_request(
+                "user_id or username is required",
             )));
         }) else {
             return Ok(CreateTicketResponse::NotFound);
@@ -162,8 +163,8 @@ impl Api {
                 .one(db)
                 .await?
         } else {
-            return Ok(CreateTicketResponse::BadRequest(Json(
-                "target_id or target_name is required".into(),
+            return Ok(CreateTicketResponse::BadRequest(bad_request(
+                "target_id or target_name is required",
             )));
         }) else {
             return Ok(CreateTicketResponse::NotFound);

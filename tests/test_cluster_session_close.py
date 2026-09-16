@@ -3,9 +3,8 @@ from uuid import uuid4
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager
-from .test_recordings_s3 import _read_until
 from .test_ssh_proto import common_args, setup_user_and_target
-from .util import wait_port
+from .util import read_until, wait_port
 
 
 def _live_ssh_session_id(url, username):
@@ -57,7 +56,7 @@ class Test:
             f"echo {marker}; sleep 3600",
             password="123",
         )
-        output = _read_until(
+        output = read_until(
             ssh_client.stdout, marker.encode(), time.monotonic() + timeout
         )
         assert marker.encode() in output, "marker never appeared in session output"

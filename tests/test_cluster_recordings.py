@@ -7,9 +7,8 @@ import requests
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager
-from .test_recordings_s3 import _read_until
 from .test_ssh_proto import common_args, setup_user_and_target
-from .util import open_wg_sqlite_db, wait_port
+from .util import open_wg_sqlite_db, read_until, wait_port
 
 
 def _cluster_token(config_path):
@@ -61,7 +60,7 @@ class Test:
             f"echo {marker}; sleep 30",
             password="123",
         )
-        output = _read_until(
+        output = read_until(
             ssh_client.stdout, marker.encode(), time.monotonic() + timeout
         )
         assert marker.encode() in output, "marker never appeared in session output"

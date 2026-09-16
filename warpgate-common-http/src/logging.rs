@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use std::net::{IpAddr, ToSocketAddrs};
 
 use poem::http::{Method, StatusCode, Uri};
@@ -77,7 +76,12 @@ pub fn log_request_result(method: &Method, url: &Uri, client_ip: Option<&str>, s
     }
 }
 
-pub fn log_request_error<E: Debug>(method: &Method, url: &Uri, client_ip: Option<&str>, error: &E) {
+pub fn log_request_error(method: &Method, url: &Uri, client_ip: Option<&str>, error: &poem::Error) {
+    let status = error.status();
+    if !status.is_client_error() && !status.is_server_error() {
+        log_request_result(method, url, client_ip, status);
+        return;
+    }
     let client_ip = client_ip.unwrap_or("<unknown>");
     error!(%method, %url, ?error, %client_ip, "Request failed");
 }
