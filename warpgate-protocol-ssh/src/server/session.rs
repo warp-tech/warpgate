@@ -163,9 +163,14 @@ pub struct ServerSession {
     server_handle: Arc<Mutex<WarpgateServerHandle>>,
     target: TargetSelection,
     /// The child session minted by `start_target_session`. Recordings key on
-    /// it; shells opened before it exists (the target-selection menu) are
-    /// picked up by [`Self::start_recordings_for_pty_channels`] on selection.
+    /// it; recordings requested before it exists (the target-selection menu,
+    /// or an exec/subsystem dispatched through an approval gate) are held in
+    /// [`Self::pending_recordings`] and started by
+    /// [`Self::start_pending_recordings`] when it is stamped.
     target_session_id: Option<TargetSessionId>,
+    /// Recording requests made while [`Self::target_session_id`] was still
+    /// `None`, in arrival order. Drained on stamp.
+    pending_recordings: Vec<(Uuid, SshRecordingMetadata)>,
     traffic_recorders: HashMap<TrafficRecorderKey, TrafficRecorder>,
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
@@ -295,6 +300,7 @@ impl ServerSession {
             server_handle,
             target: TargetSelection::None,
             target_session_id: None,
+            pending_recordings: vec![],
             traffic_recorders: HashMap::new(),
             hub,
             event_sender: event_sender.clone(),
@@ -960,7 +966,7 @@ impl ServerSession {
     async fn stamp_approved_target(&mut self, admitted: AdmittedTarget<TargetSSHOptions>) {
         self.target_session_id = Some(admitted.id());
         self.target = TargetSelection::Found(admitted);
-        self.start_recordings_for_pty_channels().await;
+        self.start_pending_recordings().await;
     }
 
     /// Confirm `channel` as open and re-dispatch everything held back while its
@@ -1775,11 +1781,12 @@ impl ServerSession {
     }
 
     async fn start_terminal_recording(&mut self, channel_id: Uuid, metadata: SshRecordingMetadata) {
-        // A recording row must reference a target session. Before one exists
-        // (the target-selection menu is open) nothing is recorded; the menu's
-        // shell channels are swept up by `start_recordings_for_pty_channels`
-        // when a target is selected.
+        // A recording row must reference a target session. Before one exists —
+        // the target-selection menu is open, or an approval gate is holding the
+        // session — the request is parked and replayed on stamp, so a command
+        // run through an approved gate is recorded like any other.
         let Some(target_session_id) = self.target_session_id else {
+            self.pending_recordings.push((channel_id, metadata));
             return;
         };
         let recorder = async {
@@ -1817,18 +1824,12 @@ impl ServerSession {
         }
     }
 
-    /// Starts terminal recordings for the shells opened while no target
-    /// session existed yet — the target-selection menu runs in a PTY shell,
-    /// so PTY presence identifies them. Called wherever a target session
-    /// starts; channels opening later record via their own shell request.
-    async fn start_recordings_for_pty_channels(&mut self) {
-        let channels: Vec<(Uuid, SshRecordingMetadata)> = self
-            .channels
-            .iter()
-            .filter(|(_, channel)| channel.has_pty())
-            .filter_map(|(id, channel)| Some((*id, shell_recording_metadata(channel.server_id()?))))
-            .collect();
-        for (channel_id, metadata) in channels {
+    /// Starts the recordings parked while no target session existed yet — the
+    /// selection menu's shell, and any exec/subsystem dispatched through an
+    /// approval gate before it resolved. Called when the target session is
+    /// stamped; channels opening later record against the now-present session.
+    async fn start_pending_recordings(&mut self) {
+        for (channel_id, metadata) in std::mem::take(&mut self.pending_recordings) {
             self.start_terminal_recording(channel_id, metadata).await;
         }
     }
