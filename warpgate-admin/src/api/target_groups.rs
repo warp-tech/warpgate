@@ -5,8 +5,10 @@ use sea_orm::prelude::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::errors::invalid_field;
 use warpgate_db_entities::TargetGroup;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 
@@ -73,7 +75,10 @@ impl ListApi {
         admin.require(AdminPermission::TargetsCreate)?;
 
         if body.name.is_empty() {
-            return Ok(CreateTargetGroupResponse::BadRequest(Json("name".into())));
+            return Ok(CreateTargetGroupResponse::BadRequest(invalid_field(
+                "name",
+                "target group name is empty",
+            )));
         }
 
         let db = &admin.services().db;
@@ -164,6 +169,7 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsEdit)?;
 
         if body.name.is_empty() {
+            warn!("Rejecting request: target group name is empty");
             return Ok(UpdateTargetGroupResponse::BadRequest);
         }
 

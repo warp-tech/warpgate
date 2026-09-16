@@ -8,12 +8,14 @@ use sea_orm::sea_query::{Func, SimpleExpr};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::{
     AdminPermission, Role as RoleConfig, SSHTargetAuth, Target as TargetConfig, TargetOptions,
     TargetSSHOptions, WarpgateError, map_target_secrets,
 };
+use warpgate_common_http::errors::invalid_field;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
 
@@ -175,15 +177,22 @@ impl ListApi {
         admin.require(AdminPermission::TargetsCreate)?;
 
         if body.name.is_empty() {
-            return Ok(CreateTargetResponse::BadRequest(Json("name".into())));
+            return Ok(CreateTargetResponse::BadRequest(invalid_field(
+                "name",
+                "target name is empty",
+            )));
         }
 
         if !vault_role_is_usable(&body.options) {
-            return Ok(CreateTargetResponse::BadRequest(Json("role".into())));
+            return Ok(CreateTargetResponse::BadRequest(invalid_field(
+                "role",
+                "the Vault role is empty or is not a single path segment",
+            )));
         }
         if !critical_options_are_usable(&body.options) {
-            return Ok(CreateTargetResponse::BadRequest(Json(
-                "allowed_critical_options".into(),
+            return Ok(CreateTargetResponse::BadRequest(invalid_field(
+                "allowed_critical_options",
+                "a critical option is empty or repeats",
             )));
         }
 
@@ -291,6 +300,7 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsEdit)?;
 
         if body.name.is_empty() {
+            warn!("Rejecting request: target name is empty");
             return Ok(UpdateTargetResponse::BadRequest);
         }
 
@@ -300,10 +310,19 @@ impl DetailApi {
             return Ok(UpdateTargetResponse::NotFound);
         };
 
-        if target.kind != (&body.options).into()
-            || !vault_role_is_usable(&body.options)
-            || !critical_options_are_usable(&body.options)
-        {
+        if target.kind != (&body.options).into() {
+            warn!(
+                target = %target.name,
+                "Rejecting request: a target's protocol cannot be changed after creation"
+            );
+            return Ok(UpdateTargetResponse::BadRequest);
+        }
+
+        if !vault_role_is_usable(&body.options) || !critical_options_are_usable(&body.options) {
+            warn!(
+                target = %target.name,
+                "Rejecting request: the Vault role or the allowed critical options are unusable"
+            );
             return Ok(UpdateTargetResponse::BadRequest);
         }
 
@@ -411,7 +430,10 @@ impl DetailApi {
 
         let options: TargetSSHOptions = match target.options {
             TargetOptions::Ssh(x) => x,
-            _ => return Ok(TargetKnownSshHostKeysResponse::InvalidType),
+            _ => {
+                warn!("Rejecting request: known SSH host keys are only kept for SSH targets");
+                return Ok(TargetKnownSshHostKeysResponse::InvalidType);
+            }
         };
 
         let known_hosts = KnownHost::Entity::find()
