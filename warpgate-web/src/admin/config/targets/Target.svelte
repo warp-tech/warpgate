@@ -20,7 +20,7 @@
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
-    import { humantimeDuration } from 'common/duration'
+    import DurationInput from 'common/DurationInput.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
@@ -589,21 +589,16 @@
                                 <div>Always require admin approval</div>
                             </label>
 
-                            <FormGroup
-                                floating
+                            <DurationInput
                                 label="Max self-service ticket duration"
-                            >
-                                <input
-                                    class="form-control"
-                                    type="text"
-                                    placeholder="Use global default"
-                                    use:humantimeDuration={{ seconds: target.ticketMaxDurationSeconds, onChange: v => { target.ticketMaxDurationSeconds = v; update() } }}
-                                >
-                                <small class="form-text text-muted">
-                                    Examples: 30m, 8h, 1d. Leave empty to use
-                                    the global default.
-                                </small>
-                            </FormGroup>
+                                seconds={target.ticketMaxDurationSeconds}
+                                onChange={v => { target.ticketMaxDurationSeconds = v; update() }}
+                                class="mb-1"
+                            />
+                            <small class="form-text text-muted mb-3 d-block">
+                                Examples: 30m, 8h, 1d. Leave empty to use the
+                                global default.
+                            </small>
 
                             <FormGroup floating label="Max uses per ticket">
                                 <input
