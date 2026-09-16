@@ -96,6 +96,10 @@
 
     let { kind, label, bare = false }: Props = $props()
 
+    // Geometry is shared with Callout and ToastHost so one semantic has one
+    // shape everywhere. See ui/markers.css.
+    import './markers.css'
+
     const spec = $derived(STATUS[kind])
     const text = $derived(label?.trim() || spec.defaultLabel)
 </script>
@@ -130,60 +134,5 @@
         background: none;
         padding: 0;
         height: auto;
-    }
-
-    .wg-marker {
-        flex: none;
-        width: var(--wg-marker-size);
-        height: var(--wg-marker-size);
-    }
-
-    .wg-marker-dot {
-        background: var(--marker);
-        border-radius: var(--wg-radius-full);
-    }
-
-    .wg-marker-ring {
-        width: 7px;
-        height: 7px;
-        border: 1.5px solid var(--marker);
-        border-radius: var(--wg-radius-full);
-    }
-
-    .wg-marker-square {
-        background: var(--marker);
-    }
-
-    .wg-marker-triangle {
-        width: 0;
-        height: 0;
-        border-left: 3.5px solid transparent;
-        border-right: 3.5px solid transparent;
-        border-bottom: 6px solid var(--marker);
-    }
-
-    .wg-marker-diamond {
-        background: var(--marker);
-        transform: rotate(45deg);
-    }
-
-    .wg-marker-pulse {
-        animation: wg-pulse 2s ease-in-out infinite;
-    }
-
-    @keyframes wg-pulse {
-        0%,
-        100% {
-            opacity: 1;
-        }
-        50% {
-            opacity: 0.4;
-        }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-        .wg-marker-pulse {
-            animation: none;
-        }
     }
 </style>

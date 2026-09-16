@@ -40,6 +40,7 @@
     import firstBy from 'thenby'
     import Badge from 'ui/Badge.svelte'
     import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
     import ConfirmDialog from 'ui/ConfirmDialog.svelte'
     import SkeletonRow from 'ui/SkeletonRow.svelte'
     import StatusMarker from 'ui/StatusMarker.svelte'
@@ -96,7 +97,7 @@
 </script>
 
 {#if error}
-    <div class="error" role="alert">{error}</div>
+    <Callout tone="danger" title="Something went wrong">{error}</Callout>
 {:else if !session}
     <SkeletonRow rows={6} columns={[1, 4, 2]} />
 {:else}
@@ -384,15 +385,6 @@
         padding: var(--wg-space-md) 0;
         background: var(--wg-surface);
         border-top: var(--wg-border-width) solid var(--wg-border);
-    }
-
-    .error {
-        padding: var(--wg-space-md);
-        border: var(--wg-border-width) solid var(--wg-error);
-        border-radius: var(--wg-radius-panel);
-        background: var(--wg-surface-container);
-        color: var(--wg-error);
-        font: var(--wg-text-body-md);
     }
 
     @media (max-width: 640px) {

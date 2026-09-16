@@ -181,31 +181,6 @@
         margin-top: 0.4rem;
     }
 
-    .wg-marker-dot {
-        background: var(--marker);
-        border-radius: var(--wg-radius-full);
-    }
-
-    .wg-marker-ring {
-        width: 7px;
-        height: 7px;
-        border: 1.5px solid var(--marker);
-        border-radius: var(--wg-radius-full);
-    }
-
-    .wg-marker-diamond {
-        background: var(--marker);
-        transform: rotate(45deg);
-    }
-
-    .wg-marker-triangle {
-        width: 0;
-        height: 0;
-        border-left: 3.5px solid transparent;
-        border-right: 3.5px solid transparent;
-        border-bottom: 6px solid var(--marker);
-    }
-
     .wg-toast-content {
         flex: 1 1 auto;
         min-width: 0;

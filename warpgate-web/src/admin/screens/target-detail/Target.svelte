@@ -51,6 +51,7 @@
     } from 'gateway/lib/webSessions'
     import { replace } from 'svelte-spa-router'
     import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
     import ConfirmDialog from 'ui/ConfirmDialog.svelte'
     import Input from 'ui/Input.svelte'
     import Modal from 'ui/Modal.svelte'
@@ -60,9 +61,9 @@
     import HttpHeadersEditor from '../../config/targets/http/HeadersEditor.svelte'
     import ProtocolDocs from '../../config/targets/ProtocolDocs.svelte'
     import TargetRdpOptions from '../../config/targets/rdp/Options.svelte'
-    import TargetSshOptions from '../../config/targets/ssh/Options.svelte'
     import TargetVncOptions from '../../config/targets/vnc/Options.svelte'
     import TlsConfiguration from '../../TlsConfiguration.svelte'
+    import TargetSshOptions from './ssh/Options.svelte'
 
     interface Props {
         params: { id: string }
@@ -394,7 +395,9 @@
         </div>
 
         {#if error}
-            <div class="error" role="alert">{error}</div>
+            <Callout tone="danger" title="Something went wrong"
+                >{error}</Callout
+            >
         {/if}
 
         <div class="action-bar">
@@ -596,16 +599,6 @@
         display: flex;
         gap: var(--wg-space-sm);
         margin-right: auto;
-    }
-
-    .error {
-        margin-top: var(--wg-space-md);
-        padding: var(--wg-space-md);
-        border: var(--wg-border-width) solid var(--wg-error);
-        border-radius: var(--wg-radius-panel);
-        background: var(--wg-surface-container);
-        color: var(--wg-error);
-        font: var(--wg-text-body-md);
     }
 
     @media (max-width: 900px) {

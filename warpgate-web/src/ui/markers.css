@@ -1,0 +1,80 @@
+/*
+ * Status geometry — the single definition.
+ *
+ * DESIGN.md's rule is geometry + label + colour, which only holds if a given
+ * semantic has ONE shape everywhere it appears. Danger must look like danger
+ * whether it is a row marker, a toast, or a page-level message; two visual
+ * languages for one concept are worse than none.
+ *
+ * Before this file there were two copies of these rules — StatusMarker and
+ * ToastHost — and Callout would have been the third. Consumers set `--marker`
+ * to the tone's colour token and pick a shape class.
+ *
+ * Global rather than Svelte-scoped precisely so the three components share it.
+ * Everything is `wg-` prefixed; src/embed injects into arbitrary proxied
+ * pages, so an unprefixed `.marker` would be a collision waiting to happen.
+ *
+ * These classes are geometry only. They carry no label and no accessible
+ * name by design: a caller that wants one must go through StatusMarker,
+ * Callout or ToastHost, each of which requires text.
+ */
+
+.wg-marker {
+    flex: none;
+    width: var(--wg-marker-size);
+    height: var(--wg-marker-size);
+}
+
+/* Filled circle — active, live, informational */
+.wg-marker-dot {
+    background: var(--marker);
+    border-radius: var(--wg-radius-full);
+}
+
+/* Hollow ring — healthy, verified, settled */
+.wg-marker-ring {
+    width: 7px;
+    height: 7px;
+    border: 1.5px solid var(--marker);
+    border-radius: var(--wg-radius-full);
+}
+
+/* Solid square — blocked */
+.wg-marker-square {
+    background: var(--marker);
+}
+
+/* Upward triangle — failed, danger */
+.wg-marker-triangle {
+    width: 0;
+    height: 0;
+    border-left: 3.5px solid transparent;
+    border-right: 3.5px solid transparent;
+    border-bottom: 6px solid var(--marker);
+}
+
+/* Diamond — pending, warning */
+.wg-marker-diamond {
+    background: var(--marker);
+    transform: rotate(45deg);
+}
+
+.wg-marker-pulse {
+    animation: wg-marker-pulse 2s ease-in-out infinite;
+}
+
+@keyframes wg-marker-pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.4;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .wg-marker-pulse {
+        animation: none;
+    }
+}

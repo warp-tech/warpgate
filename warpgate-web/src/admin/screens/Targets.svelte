@@ -30,6 +30,7 @@
     import { firstBy } from 'thenby'
     import Badge from 'ui/Badge.svelte'
     import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
     import EmptyState from 'ui/EmptyState.svelte'
     import Select from 'ui/Select.svelte'
     import Table, { type Column } from 'ui/Table.svelte'
@@ -167,7 +168,7 @@
 </div>
 
 {#if error}
-    <div class="error" role="alert">{error}</div>
+    <Callout tone="danger" title="Something went wrong">{error}</Callout>
 {/if}
 
 <!-- Re-keyed so a group change reloads the list rather than filtering in place -->
@@ -310,16 +311,6 @@
     .group-static {
         font: var(--wg-text-label-md);
         color: var(--wg-text);
-    }
-
-    .error {
-        margin-bottom: var(--wg-space-md);
-        padding: var(--wg-space-md);
-        border: var(--wg-border-width) solid var(--wg-error);
-        border-radius: var(--wg-radius-panel);
-        background: var(--wg-surface-container);
-        color: var(--wg-error);
-        font: var(--wg-text-body-md);
     }
 
     @media (prefers-reduced-motion: reduce) {

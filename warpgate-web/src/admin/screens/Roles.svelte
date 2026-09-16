@@ -26,6 +26,7 @@
     import { push } from 'svelte-spa-router'
     import Badge from 'ui/Badge.svelte'
     import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
     import Checkbox from 'ui/Checkbox.svelte'
     import EmptyState from 'ui/EmptyState.svelte'
     import Input from 'ui/Input.svelte'
@@ -160,7 +161,7 @@
 </p>
 
 {#if error}
-    <div class="error" role="alert">{error}</div>
+    <Callout tone="danger" title="Something went wrong">{error}</Callout>
 {:else if loading}
     <SkeletonRow rows={6} columns={[3, 1, 1, 1, 1]} />
 {:else if !roles.length}
@@ -415,16 +416,6 @@
         text-align: center;
         color: var(--wg-text-muted);
         padding: var(--wg-space-xl);
-    }
-
-    .error {
-        margin-bottom: var(--wg-space-md);
-        padding: var(--wg-space-md);
-        border: var(--wg-border-width) solid var(--wg-error);
-        border-radius: var(--wg-radius-panel);
-        background: var(--wg-surface-container);
-        color: var(--wg-error);
-        font: var(--wg-text-body-md);
     }
 
     .sr-only {

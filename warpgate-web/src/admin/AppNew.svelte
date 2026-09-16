@@ -87,7 +87,7 @@
         }),
         '/config/targets/:id': wrap({
             asyncComponent: () =>
-                import('./screens/targetdetail/Target.svelte'),
+                import('./screens/target-detail/Target.svelte'),
         }),
 
         // ---- not yet migrated: existing components, new shell ----
