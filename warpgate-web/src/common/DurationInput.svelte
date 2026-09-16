@@ -2,9 +2,9 @@
     import { FormGroup, InputGroup } from '@sveltestrap/sveltestrap'
 
     import {
+        bestDurationUnit,
         DURATION_UNITS,
         humantimeDuration,
-        bestDurationUnit,
     } from './duration'
 
     type Props = {
