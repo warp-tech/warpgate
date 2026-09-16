@@ -3,9 +3,8 @@
      * Target detail — screen 4a: page shell, common fields, save bar,
      * ConfirmDialog migration.
      *
-     * Protocol-specific options still delegate to the existing components in
-     * config/targets/*; 4b–4f replace them one protocol at a time. Until then
-     * the "Target options" section is the only Bootstrap left on this page.
+     * All six protocols now delegate to migrated components under
+     * ./ssh, ./http, ./rdp, ./vnc, ./database and ./kubernetes (4b–4f).
      *
      * PAGE, NOT DRAWER — divergence 6, by decision. warpgate_add_target_drawer
      * draws this as a 560px drawer. Two reasons it stays a page: a
@@ -58,12 +57,13 @@
     import Select from 'ui/Select.svelte'
     import Toggle from 'ui/Toggle.svelte'
     import { toast } from 'ui/toasts.svelte'
-    import HttpHeadersEditor from '../../config/targets/http/HeadersEditor.svelte'
-    import ProtocolDocs from '../../config/targets/ProtocolDocs.svelte'
-    import TargetRdpOptions from '../../config/targets/rdp/Options.svelte'
-    import TargetVncOptions from '../../config/targets/vnc/Options.svelte'
-    import TlsConfiguration from '../../TlsConfiguration.svelte'
+    import TargetDatabaseOptions from './database/Options.svelte'
+    import TargetHttpOptions from './http/Options.svelte'
+    import TargetKubernetesOptions from './kubernetes/Options.svelte'
+    import ProtocolDocs from './ProtocolDocs.svelte'
+    import TargetRdpOptions from './rdp/Options.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
+    import TargetVncOptions from './vnc/Options.svelte'
 
     interface Props {
         params: { id: string }
@@ -162,6 +162,11 @@
         }
     }
 
+    const PG_PROTOCOL_VERSIONS = [
+        { value: '3.2', label: '3.2' },
+        { value: '3.0', label: '3.0' },
+    ]
+
     const groupOptions = $derived([
         { value: '', label: 'No group' },
         ...groups.map(g => ({ value: g.id, label: g.name })),
@@ -235,36 +240,20 @@
                                 id={target.id}
                                 options={target.options}
                             />
-                        {/if}
-                        {#if target.options.kind === 'Vnc'}
+                        {:else if target.options.kind === 'Vnc'}
                             <TargetVncOptions bind:options={target.options} />
-                        {/if}
-                        {#if target.options.kind === 'Rdp'}
+                        {:else if target.options.kind === 'Rdp'}
                             <TargetRdpOptions bind:options={target.options} />
-                        {/if}
-                        {#if target.options.kind === 'Http'}
-                            <Input
-                                label="Target URL"
-                                bind:value={target.options.url}
+                        {:else if target.options.kind === 'Http'}
+                            <TargetHttpOptions bind:options={target.options} />
+                        {:else if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+                            <TargetDatabaseOptions
+                                bind:options={target.options}
                             />
-                            <TlsConfiguration bind:value={target.options.tls} />
-                            {#if $serverInfo?.externalHost}
-                                <Input
-                                    label="Bind to a domain"
-                                    placeholder={`foo.${$serverInfo.externalHost}`}
-                                    bind:value={target.options.externalHost}
-                                />
-                            {/if}
-                            <h5>Additional headers</h5>
-                            <HttpHeadersEditor
-                                bind:value={target.options.headers}
+                        {:else if target.options.kind === 'Kubernetes'}
+                            <TargetKubernetesOptions
+                                bind:options={target.options}
                             />
-                        {/if}
-                        {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres' || target.options.kind === 'Kubernetes'}
-                            <p class="pending">
-                                Database and Kubernetes options move onto the
-                                design system in 4f.
-                            </p>
                         {/if}
                     </Section>
 
@@ -305,6 +294,40 @@
                             bind:value={target.rateLimitBytesPerSecond}
                         />
                     </Section>
+
+                    <!--
+                      Restored in 4f. These three fields were dropped when 4a
+                      rewrote the page shell; they are Postgres/MySQL-only and
+                      live outside the protocol options component because the
+                      original kept them in their own section.
+                    -->
+                    {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+                        <Section id="advanced" title="Advanced">
+                            {#if target.options.kind === 'Postgres'}
+                                <Select
+                                    label="Protocol version"
+                                    options={PG_PROTOCOL_VERSIONS}
+                                    bind:value={target.options.protocolVersion}
+                                    hint="Some non-compliant Postgres proxies do not implement automatic version negotiation and need 3.0."
+                                />
+
+                                <Input
+                                    label="Idle timeout"
+                                    placeholder="10m"
+                                    bind:value={target.options.idleTimeout}
+                                    hint="How long an authenticated session can idle before re-authenticating. Examples: 30m, 1h, 2h30m. Empty uses the default of 10m."
+                                />
+                            {/if}
+
+                            <Input
+                                label="Default database name for connection examples"
+                                mono
+                                placeholder="database-name"
+                                bind:value={target.options.defaultDatabaseName}
+                                hint="Display only — it does not restrict which databases users can reach. Empty uses the global default."
+                            />
+                        </Section>
+                    {/if}
 
                     <Section id="access-control" title="Access control">
                         <!-- Writes through on change, so a switch is honest here -->
@@ -496,12 +519,6 @@
         font: var(--wg-text-headline-lg);
     }
 
-    h5 {
-        margin: var(--wg-space-xl) 0 var(--wg-space-sm);
-        font: var(--wg-text-label-md);
-        color: var(--wg-text-muted);
-    }
-
     .subtitle {
         margin: var(--wg-space-xs) 0 0;
         font: var(--wg-text-body-md);
@@ -575,12 +592,6 @@
         outline: var(--wg-focus-ring);
         outline-offset: var(--wg-focus-ring-offset);
         border-color: var(--wg-primary);
-    }
-
-    .pending {
-        margin: 0;
-        font: var(--wg-text-body-md);
-        color: var(--wg-text-subtle);
     }
 
     .action-bar {
