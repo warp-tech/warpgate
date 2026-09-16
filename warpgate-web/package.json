@@ -9,6 +9,7 @@
         "watch": "concurrently -k -n vite,check -c blue,yellow npm:watch:vite npm:watch:check",
         "watch:vite": "NODE_ENV=development vite build -w --mode development --minify false",
         "watch:check": "npm run check -- --watch",
+
         "check": "svelte-check --tsconfig ./tsconfig.json",
         "lint": "npm run biome && svelte-check",
         "biome": "biome",

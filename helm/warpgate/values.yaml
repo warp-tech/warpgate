@@ -7,7 +7,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/warp-tech/warpgate
   pullPolicy: IfNotPresent
-  tag: "0.28.5"
+  tag: "0.29.0-beta.2"
 
 # References to Kubernetes secrets for pulling images (if using a private registry)
 imagePullSecrets: []
@@ -83,7 +83,8 @@ config_env_var_replace: ""
 
 # Environment variables for the main Warpgate container, mapped from Secrets.
 # Format: <secret-name>/<key>
-envFromSecret: {
+envFromSecret: {}
+
 #   Use this for credential encryption at rest (generate a key with
 #   `openssl rand -base64 32`); the setup container does not need these.
 #
@@ -93,8 +94,6 @@ envFromSecret: {
 #
 #   WARPGATE_ENCRYPTION_KEY: "warpgate-secret/encryptionKey"
 #   WARPGATE_ENCRYPTION_KEY_OLD: "warpgate-secret/encryptionKeyOld"
-}
-
 # Additional custom volumes & mounts (advanced use-cases)
 volumes: []
 volume_mounts: []
