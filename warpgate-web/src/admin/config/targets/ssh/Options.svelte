@@ -205,7 +205,7 @@
                 <option value="Certificate">Certificate issued by Vault</option>
             {/if}
             {#if $serverInfo?.runningOnEc2}
-                <option value="IamRole">IAM Role (experimental)</option>
+                <option value="IamRole">IAM Role</option>
             {/if}
         </select>
     </FormGroup>
