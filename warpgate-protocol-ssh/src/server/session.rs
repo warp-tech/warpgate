@@ -661,15 +661,28 @@ impl ServerSession {
             // Claim the attempt: the gate runs off to the side with the
             // authorization, and the selection state is the claim. Resumes in
             // the `Event::AdminApprovalResolved` handler.
+            //
+            // Callers of `maybe_connect_remote` dispatch an RC command right
+            // after it returns (e.g. `RequestExec`/`RequestSubsystem`), on
+            // the assumption that the target is dialed or being dialed by
+            // then. That assumption used to be silently false here: this
+            // returned `Ok(())` immediately, before the approval — let alone
+            // the actual connection — existed, so the dispatched command
+            // raced (and often lost against) a still-nonexistent RC session.
+            // Wait for the gate to resolve instead, the same way
+            // `send_command_and_wait` waits for a command reply: by pumping
+            // this session's own event loop reentrantly, since the result we
+            // need (`Event::AdminApprovalResolved`) arrives on that same
+            // queue.
             TargetSelection::PendingApproval(authorization) => {
                 self.target = TargetSelection::AwaitingApproval;
                 self.spawn_admin_approval_gate(authorization);
-                return Ok(());
+                return self.wait_for_target_ready().await;
             }
             // Nothing to dial while the gate holds the session.
             TargetSelection::AwaitingApproval => {
                 self.target = TargetSelection::AwaitingApproval;
-                return Ok(());
+                return self.wait_for_target_ready().await;
             }
             TargetSelection::Found(admitted) => admitted,
             TargetSelection::Connected => {
@@ -725,6 +738,45 @@ impl ServerSession {
                 .send_once(Event::AdminApprovalResolved { approved })
                 .await;
         });
+    }
+
+    /// Block until the pending admin-approval gate resolves and, if
+    /// approved, the resulting `connect_remote` dial has at least been
+    /// issued — i.e. until `self.target` is no longer `AwaitingApproval`.
+    ///
+    /// The resolution arrives as `Event::AdminApprovalResolved` on this same
+    /// session's event queue, so a plain `.await` on some other future here
+    /// would deadlock: nothing would ever drive that queue forward. Instead
+    /// this pumps the queue itself and dispatches through the normal
+    /// `handle_event`, exactly like `send_command_and_wait` already does
+    /// while waiting on an RC command reply — `Event::AdminApprovalResolved`
+    /// is just another event on that same queue as far as this loop is
+    /// concerned, and its handler is what flips `self.target` out of
+    /// `AwaitingApproval` (via `stamp_approved_target`).
+    async fn wait_for_target_ready(&mut self) -> Result<()> {
+        self.command_wait_depth += 1;
+        let result = loop {
+            if !matches!(self.target, TargetSelection::AwaitingApproval) {
+                break Ok(());
+            }
+            match self.get_next_event().await {
+                Some(event) => {
+                    if self.command_wait_depth > MAX_NESTED_COMMAND_WAITS {
+                        self.pending_events.push_back(event);
+                    } else if let Err(error) = self.handle_event(event).await {
+                        break Err(error.into());
+                    }
+                }
+                None => {
+                    break Err(WarpgateError::InconsistentState(
+                        "Event stream ended while awaiting admin approval".into(),
+                    )
+                    .into());
+                }
+            }
+        };
+        self.command_wait_depth -= 1;
+        result
     }
 
     /// The dial consumes the capability minted when the target session started.
@@ -1060,6 +1112,14 @@ impl ServerSession {
 
             ServerHandlerEvent::ChannelOpenSession(server_channel_id, reply) => {
                 info!(channel=%server_channel_id.0, "Opening session channel");
+                // Without this, `_channel_open` dispatches `OpenShell` to a
+                // RemoteClient that may not even have been told to `Connect`
+                // yet (target-connect is otherwise only kicked off later, by
+                // whichever request handler runs next) — harmless once the
+                // client's own next request happens to line up behind the
+                // real connect, but a JIT-approval wait can leave the gap
+                // open for as long as the approval takes.
+                self.maybe_connect_remote().await?;
                 self._channel_open(
                     server_channel_id,
                     ChannelOperation::OpenShell,

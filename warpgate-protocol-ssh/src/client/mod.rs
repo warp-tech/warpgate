@@ -295,7 +295,11 @@ pub struct RemoteClient {
     tx: Sender<RCEvent>,
     session: Option<Arc<Handle<ClientHandler>>>,
     channel_pipes: Arc<Mutex<HashMap<Uuid, UnboundedSender<ChannelOperation>>>>,
-    pending_ops: Vec<(Uuid, ChannelOperation)>,
+    // Carries the reply alongside the queued op (see `apply_channel_op`):
+    // fulfilling it here, once the op actually runs, instead of wherever it
+    // used to be fulfilled (immediately, by the caller that queued it) is
+    // the whole point of queuing in the first place.
+    pending_ops: Vec<(Uuid, ChannelOperation, Option<RCCommandReply>)>,
     pending_forwards: Vec<(String, u32)>,
     pending_streamlocal_forwards: Vec<String>,
     state: RCState,
@@ -359,7 +363,11 @@ impl RemoteClient {
 
     async fn set_disconnected(&mut self) {
         self.session = None;
-        for (id, op) in self.pending_ops.drain(..) {
+        // `reply` is intentionally left untouched here (just dropped at the
+        // end of the loop body): the oneshot's Receiver side already treats
+        // a dropped Sender as an error, which is the correct outcome for an
+        // op that will now never run.
+        for (id, op, _reply) in self.pending_ops.drain(..) {
             if matches!(op, ChannelOperation::OpenShell) {
                 let _ = self.tx.try_send(RCEvent::Close(id));
             }
@@ -401,7 +409,14 @@ impl RemoteClient {
         reply: &mut Option<RCCommandReply>,
     ) -> Result<(), SshClientError> {
         if self.state != RCState::Connected {
-            self.pending_ops.push((channel_id, op));
+            // Take the reply along instead of leaving it for the caller to
+            // fulfil: `handle_event`'s `InnerEvent::RCCommand` arm sends
+            // `Ok(())` into whatever's left in `reply` as soon as this
+            // function returns, regardless of whether the op actually ran.
+            // For a merely-queued op that used to mean "success" reached the
+            // SSH client (e.g. a channel-open confirmation or a subsystem
+            // request ack) before any backend channel existed to back it.
+            self.pending_ops.push((channel_id, op, reply.take()));
             return Ok(());
         }
 
@@ -555,8 +570,28 @@ impl RemoteClient {
                         .await
                         .map_err(SshClientError::other)?;
                     let ops = std::mem::take(&mut self.pending_ops);
-                    for (id, op) in ops {
-                        self.apply_channel_op(id, op, &mut None).await?;
+                    for (id, op, saved_reply) in ops {
+                        let mut reply = saved_reply;
+                        let result = self.apply_channel_op(id, op, &mut reply).await;
+                        // Mirrors `handle_event`'s `InnerEvent::RCCommand`
+                        // handling: send a reply only if `apply_channel_op`
+                        // didn't already take ownership of it for its own
+                        // (e.g. channel-open) completion signalling.
+                        // `SshClientError` isn't `Clone`, so a failure here
+                        // is reported to the reply as a generic error - the
+                        // detailed one still propagates to the caller below.
+                        if let Some(reply) = reply {
+                            let _ = reply.send(if result.is_ok() {
+                                Ok(())
+                            } else {
+                                Err(SshClientError::Warpgate(
+                                    WarpgateError::InconsistentState(
+                                        "deferred channel operation failed".into(),
+                                    ),
+                                ))
+                            });
+                        }
+                        result?;
                     }
 
                     let forwards = std::mem::take(&mut self.pending_forwards);
