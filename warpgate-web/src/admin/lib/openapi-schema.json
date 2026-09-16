@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-17-g11e811b2-modified"
+    "version": "v0.28.5-22-g0c1eb906-modified"
   },
   "servers": [
     {
@@ -2256,6 +2256,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
           }
         ],
         "operationId": "delete_user"

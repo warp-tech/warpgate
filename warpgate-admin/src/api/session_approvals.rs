@@ -1,17 +1,16 @@
-use futures::{SinkExt, StreamExt};
 use poem::web::Data;
-use poem::web::websocket::{Message, WebSocket};
+use poem::web::websocket::WebSocket;
 use poem::{IntoResponse, handler};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use time::OffsetDateTime;
-use tokio::sync::broadcast;
 use warpgate_common::auth::ApprovalKind;
 use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::approvals::{ApprovalDecision, ApprovalScope};
+use warpgate_core::cluster::{ClusterNotification, refresh_notification_stream};
 use warpgate_db_entities::{Parameters, SessionApprovalRequest};
 
 use super::AdminContext;
@@ -158,20 +157,9 @@ pub async fn api_get_session_approvals_stream(
     ws: WebSocket,
 ) -> Result<impl IntoResponse, WarpgateError> {
     require_admin_permission(&ctx, Some(AdminPermission::ApproveSessions)).await?;
-
-    let mut rx = ctx.services().subscribe_admin_approval_request();
-
-    Ok(ws
-        .on_upgrade(|socket| async move {
-            let (mut sink, _) = socket.split();
-            loop {
-                match rx.recv().await {
-                    Ok(_) => sink.send(Message::Text("".into())).await?,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-            Ok::<(), anyhow::Error>(())
-        })
-        .into_response())
+    Ok(refresh_notification_stream(
+        ws,
+        ctx.services().cluster.subscribe(),
+        |msg| matches!(msg, ClusterNotification::SessionApprovalsChanged).then(String::new),
+    ))
 }

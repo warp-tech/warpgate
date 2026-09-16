@@ -1,5 +1,6 @@
---- ironrdp-session-0.11.0/src/active_stage.rs
-+++ base/src/active_stage.rs
+diff -ru ironrdp-session-0.11.0/src/active_stage.rs base/src/active_stage.rs
+--- ironrdp-session-0.11.0/src/active_stage.rs	2006-07-24 03:21:28.000000000 +0200
++++ base/src/active_stage.rs	2026-09-14 17:44:57.290771224 +0200
 @@ -11,6 +11,7 @@
  use ironrdp_pdu::rdp::client_info::CompressionType as PduCompressionType;
  use ironrdp_pdu::rdp::headers::ShareDataPdu;
@@ -8,10 +9,37 @@
  use ironrdp_pdu::slow_path::{self, GraphicsUpdateType};
  use ironrdp_pdu::{Action, mcs};
  use ironrdp_svc::{StaticChannelSet, SvcMessage, SvcProcessor, SvcProcessorMessages};
-@@ -229,10 +230,11 @@
+@@ -124,15 +125,19 @@
+             return Ok(Vec::new());
+         }
+ 
++        // A fast-path input PDU carries at most 255 events (numEvents is a byte).
++        const MAX_EVENTS_PER_FRAME: usize = 255;
++
+         // Mouse move events are prevalent, so we can preallocate space for
+-        // response frame + graphics update
+-        let mut output = Vec::with_capacity(2);
++        // response frames + graphics update.
++        let mut output = Vec::with_capacity(events.len().div_ceil(MAX_EVENTS_PER_FRAME) + 1);
+ 
+-        // Encoding fastpath response frame
+-        // PERF: unnecessary copy
+-        let fastpath_input = FastPathInput::new(events.to_vec()).map_err(SessionError::decode)?;
+-        let frame = ironrdp_core::encode_vec(&fastpath_input).map_err(SessionError::encode)?;
+-        output.push(ActiveStageOutput::ResponseFrame(frame));
++        for event_chunk in events.chunks(MAX_EVENTS_PER_FRAME) {
++            // PERF: unnecessary copy
++            let fastpath_input = FastPathInput::new(event_chunk.to_vec()).map_err(SessionError::decode)?;
++            let frame = ironrdp_core::encode_vec(&fastpath_input).map_err(SessionError::encode)?;
++            output.push(ActiveStageOutput::ResponseFrame(frame));
++        }
+ 
+         // If pointer rendering is disabled - we can skip the rest
+         if !self.enable_server_pointer {
+@@ -229,10 +234,11 @@
          self.fast_path_processor = processor;
      }
-
+ 
 -    /// Updates the share_id used by the x224 processor for encoding ShareDataPdu.
 +    /// Updates the share_id used when encoding slow-path responses and fast-path frame acknowledgements.
      /// Must be called during Deactivation-Reactivation if the server assigns a new share_id.
@@ -19,9 +47,9 @@
          self.x224_processor.set_share_id(share_id);
 +        self.fast_path_processor.set_share_id(share_id);
      }
-
+ 
      pub fn set_enable_server_pointer(&mut self, enable_server_pointer: bool) {
-@@ -369,6 +371,10 @@
+@@ -369,6 +375,10 @@
      ///
      /// [\[MS-RDPBCGR\] 2.2.14.1.5]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/228ffc5c-b60c-4d3e-9781-ac613f822fdf
      AutoDetect(AutoDetectRequest),
@@ -30,9 +58,9 @@
 +    /// the account that was logged on.
 +    SaveSessionInfo(SaveSessionInfoPdu),
  }
-
+ 
  impl TryFrom<x224::ProcessorOutput> for ActiveStageOutput {
-@@ -392,6 +398,7 @@
+@@ -392,6 +402,7 @@
              x224::ProcessorOutput::DeactivateAll => Ok(Self::DeactivateAll),
              x224::ProcessorOutput::MultitransportRequest(pdu) => Ok(Self::MultitransportRequest(pdu)),
              x224::ProcessorOutput::AutoDetect(request) => Ok(Self::AutoDetect(request)),
@@ -40,12 +68,13 @@
              // GraphicsUpdate and PointerUpdate are consumed in ActiveStage::process()
              // before reaching this conversion.
              x224::ProcessorOutput::GraphicsUpdate(_) | x224::ProcessorOutput::PointerUpdate(_) => Err(
---- ironrdp-session-0.11.0/src/fast_path.rs
-+++ base/src/fast_path.rs
+diff -ru ironrdp-session-0.11.0/src/fast_path.rs base/src/fast_path.rs
+--- ironrdp-session-0.11.0/src/fast_path.rs	2006-07-24 03:21:28.000000000 +0200
++++ base/src/fast_path.rs	2026-09-10 23:17:00.798022644 +0200
 @@ -21,6 +21,32 @@
  use crate::pointer::PointerCache;
  use crate::{SessionError, SessionErrorExt as _, SessionResult, custom_err, reason_err, rfx};
-
+ 
 +/// Warpgate fork: re-pack bitmap pixel data so each row holds exactly `dst_row_bytes`
 +/// and there are `rows` of them, dropping any right/bottom padding the server added.
 +///
@@ -77,7 +106,7 @@
      None,
 @@ -51,6 +77,10 @@
  }
-
+ 
  impl Processor {
 +    pub fn set_share_id(&mut self, share_id: u32) {
 +        self.marker_processor.share_id = share_id;
@@ -89,7 +118,7 @@
 @@ -192,6 +222,22 @@
              trace!("{update:?}");
              buf.clear();
-
+ 
 +            // Warpgate fork: servers may pad TS_BITMAP_DATA beyond the destination
 +            // rectangle (see repack_bitmap_to_rectangle), so every decoded bitmap is
 +            // cropped to the rectangle before it reaches the apply_* functions.
@@ -149,11 +178,11 @@
 +                                self.palette.colors(),
 +                            )?
                          }
-
+ 
                          Err(e) => {
 @@ -251,46 +314,18 @@
                  trace!("Uncompressed raw bitmap");
-
+ 
                  let bpp = usize::from(update.bits_per_pixel);
 -                let width = usize::from(update.width);
 -                let bytes_per_pixel = bpp.div_ceil(8);
@@ -170,7 +199,7 @@
 -                    }
 +                let c = crop_padded(update.bitmap_data, bpp.div_ceil(8));
 +                let data = c.as_deref().unwrap_or(update.bitmap_data);
-
+ 
 -                    match update.bits_per_pixel {
 -                        8 => image.apply_rgb8_with_palette(&buf, &update.rectangle, self.palette.colors())?,
 -                        15 => image.apply_rgb15_bitmap(&buf, &update.rectangle)?,
@@ -209,8 +238,9 @@
                      }
                  }
              };
---- ironrdp-session-0.11.0/src/x224/mod.rs
-+++ base/src/x224/mod.rs
+diff -ru ironrdp-session-0.11.0/src/x224/mod.rs base/src/x224/mod.rs
+--- ironrdp-session-0.11.0/src/x224/mod.rs	2006-07-24 03:21:28.000000000 +0200
++++ base/src/x224/mod.rs	2026-09-14 17:44:17.819684251 +0200
 @@ -5,6 +5,7 @@
  use ironrdp_pdu::rdp::headers::ShareDataPdu;
  use ironrdp_pdu::rdp::multitransport::MultitransportRequestPdu;
@@ -228,12 +258,38 @@
 +    /// arrives, the session is sitting at the target's own sign-in screen.
 +    SaveSessionInfo(SaveSessionInfoPdu),
  }
-
+ 
  #[derive(Debug, Clone)]
-@@ -146,6 +151,35 @@
+@@ -126,8 +131,23 @@
+     /// Processes a received PDU. Returns a vector of [`ProcessorOutput`] that must be processed
+     /// in the returned order.
+     pub fn process(&mut self, frame: &[u8]) -> SessionResult<Vec<ProcessorOutput>> {
+-        let data_ctx: SendDataIndicationCtx<'_> =
+-            ironrdp_pdu::mcs::decode_send_data_indication(frame).map_err(SessionError::decode)?;
++        let data_ctx: SendDataIndicationCtx<'_> = match ironrdp_pdu::mcs::decode_send_data_indication(frame) {
++            Ok(data_ctx) => data_ctx,
++            Err(error) => {
++                // Some servers (xrdp) end the session with a plain MCS Disconnect Provider Ultimatum.
++                if let Ok(X224(McsMessage::DisconnectProviderUltimatum(ultimatum))) =
++                    decode::<X224<McsMessage<'_>>>(frame)
++                {
++                    debug!(reason = ?ultimatum.reason, "Received Disconnect Provider Ultimatum, session will be closed");
++
++                    return Ok(vec![ProcessorOutput::Disconnect(DisconnectDescription::McsDisconnect(
++                        ultimatum.reason,
++                    ))]);
++                }
++
++                return Err(SessionError::decode(error));
++            }
++        };
+         let channel_id = data_ctx.channel_id;
+ 
+         if channel_id == self.io_channel_id {
+@@ -146,6 +166,35 @@
      fn process_io_channel(&self, data_ctx: SendDataIndicationCtx<'_>) -> SessionResult<Vec<ProcessorOutput>> {
          debug_assert_eq!(data_ctx.channel_id, self.io_channel_id);
-
+ 
 +        let Some((first_pdu, mut remaining)) = split_share_control_pdu(data_ctx.user_data)? else {
 +            return self.process_single_io_channel(data_ctx);
 +        };
@@ -264,9 +320,9 @@
 +        debug_assert_eq!(data_ctx.channel_id, self.io_channel_id);
 +
          let io_channel = ironrdp_pdu::rdp::headers::decode_io_channel(data_ctx).map_err(SessionError::decode)?;
-
+ 
          match io_channel {
-@@ -153,7 +187,7 @@
+@@ -153,7 +202,7 @@
                  match ctx.pdu {
                      ShareDataPdu::SaveSessionInfo(session_info) => {
                          debug!("Got Session Save Info PDU: {session_info:?}");
@@ -275,10 +331,10 @@
                      }
                      // FIXME: workaround fix to not terminate the session on "unhandled PDU: Set Keyboard Indicators PDU"
                      ShareDataPdu::SetKeyboardIndicators(data) => {
-@@ -279,6 +313,55 @@
+@@ -279,6 +328,55 @@
      }
  }
-
+ 
 +/// Splits the first Share Control PDU from an MCS I/O-channel payload.
 +///
 +/// Enhanced-security servers may concatenate several Share Control PDUs in one

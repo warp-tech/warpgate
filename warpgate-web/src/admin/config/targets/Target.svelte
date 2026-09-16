@@ -330,7 +330,7 @@
                                                 </option>
                                                 {#if $serverInfo?.runningOnEc2}
                                                     <option value="IamRole">
-                                                        IAM Role (experimental)
+                                                        IAM Role
                                                     </option>
                                                 {/if}
                                             </select>
@@ -374,7 +374,7 @@
                                     <option value="Token">Token</option>
                                     {#if $serverInfo?.runningOnEc2}
                                         <option value="IamRole">
-                                            IAM Role (experimental)
+                                            IAM Role
                                         </option>
                                     {/if}
                                 </select>

@@ -39,10 +39,9 @@ export async function loadPendingRequests(
  *
  * The socket only makes updates arrive *sooner*; the interval is what makes the
  * view converge, and it runs regardless of which permissions are held. It
- * covers ticket requests (never pushed), sessions held on another cluster node
- * (the push signal is node-local), requests resolved by another admin, and a
- * socket that died without saying so — which is also why a dead socket needs no
- * reconnect logic.
+ * covers ticket requests (never pushed), requests that expire or lose their
+ * session (not pushed), and a socket that died without saying so — which is
+ * also why a dead socket needs no reconnect logic.
  */
 export function watchPendingRequests(
     permissions: ApprovalRequestPermissions,

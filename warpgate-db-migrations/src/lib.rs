@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseBackend, DatabaseConnection, TransactionTrait};
 use sea_orm_migration::MigrationTrait;
 use sea_orm_migration::prelude::*;
 
@@ -244,9 +244,11 @@ async fn run_locked<
     }
 }
 
+/// Migrations need an explicit TX on SQLite, otherwise pooled connections
+/// might see different DB state
 pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbErr> {
     run_locked(connection, MIGRATION_LOCK_KEY, async move || {
-        Migrator::up(connection, None).await
+        run_maybe_in_tx(connection, Direction::Up, None).await
     })
     .await?;
 
@@ -255,7 +257,7 @@ pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbE
 
 /// Apply `steps` pending migrations.
 pub async fn migrate_database_up(connection: &DatabaseConnection, steps: u32) -> Result<(), DbErr> {
-    Migrator::up(connection, Some(steps)).await
+    run_maybe_in_tx(connection, Direction::Up, Some(steps)).await
 }
 
 /// Revert `steps` applied migrations.
@@ -263,5 +265,66 @@ pub async fn migrate_database_down(
     connection: &DatabaseConnection,
     steps: u32,
 ) -> Result<(), DbErr> {
-    Migrator::down(connection, Some(steps)).await
+    run_maybe_in_tx(connection, Direction::Down, Some(steps)).await
+}
+
+enum Direction {
+    Up,
+    Down,
+}
+
+/// Migrations need an explicit TX on SQLite (only), otherwise pooled connections
+/// might see different DB state
+async fn run_maybe_in_tx(
+    connection: &DatabaseConnection,
+    direction: Direction,
+    steps: Option<u32>,
+) -> Result<(), DbErr> {
+    if connection.get_database_backend() == DatabaseBackend::Sqlite {
+        let tx = connection.begin().await?;
+        run(&tx, direction, steps).await?;
+        tx.commit().await
+    } else {
+        run(connection, direction, steps).await
+    }
+}
+
+async fn run<'c, C: IntoSchemaManagerConnection<'c>>(
+    db: C,
+    direction: Direction,
+    steps: Option<u32>,
+) -> Result<(), DbErr> {
+    match direction {
+        Direction::Up => Migrator::up(db, steps).await,
+        Direction::Down => Migrator::down(db, steps).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::{ConnectOptions, Database};
+    use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+
+    use super::{migrate_database, migrate_database_down, migrate_database_up};
+
+    /// The full chain, and a step back and forth, through a pooled file-backed
+    /// SQLite connection - the shape a real install uses.
+    #[tokio::test]
+    async fn sqlite_migrations_run_through_a_pool() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let path = std::env::temp_dir().join(format!(
+            "warpgate-migrations-{}.sqlite3",
+            std::process::id()
+        ));
+        let mut opt = ConnectOptions::new(format!("sqlite://{}?mode=rwc", path.display()));
+        opt.max_connections(100);
+        let db = Database::connect(opt).await.unwrap();
+
+        migrate_database(&db).await.unwrap();
+        migrate_database_down(&db, 1).await.unwrap();
+        migrate_database_up(&db, 1).await.unwrap();
+
+        db.close().await.unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
 }
