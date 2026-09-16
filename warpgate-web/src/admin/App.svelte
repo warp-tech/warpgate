@@ -169,7 +169,7 @@
                 <Fa icon={faBriefcase} class="text-muted" />
                 <a
                     target="_blank"
-                    href="https://warpgate.null.page/for-business/"
+                    href="https://warpgate.null.page/for-business/?utm_source=app&utm_content=footer"
                 >
                     Professional support
                 </a>
