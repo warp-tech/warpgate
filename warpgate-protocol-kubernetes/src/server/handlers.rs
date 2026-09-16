@@ -25,7 +25,7 @@ use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 
 use crate::audit::{StreamOperation, classify_mutating, classify_stream};
 use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
-use crate::recording::{deduce_exec_recording_metadata, start_recording_api, start_recording_exec};
+use crate::recording::{start_recording_api, start_recording_exec};
 use crate::server::auth::{
     KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client,
 };
