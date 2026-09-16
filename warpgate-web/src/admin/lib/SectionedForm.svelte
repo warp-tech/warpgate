@@ -129,11 +129,11 @@
             class="sectioned-form-tabs-slot {showSectionLinks ? 'is-visible' : 'is-hidden'}"
         >
             <nav class="sectioned-form-tabs" bind:this={tabsElement}>
-                <div class="nav nav-pills gap-2 p-2 overflow-x-auto">
+                <div class="section-tabs">
                     {#each sections as section (section.id)}
                         <a
                             href={`#${section.id}-heading`}
-                            class="nav-link {activeSection === section.id ? 'active' : ''}"
+                            class="section-tab {activeSection === section.id ? 'active' : ''}"
                             onclick={(event) => {
                                 event.preventDefault()
                                 scrollToSection(section.id)
@@ -165,7 +165,7 @@
         z-index: 10;
         height: 60px;
         margin-bottom: -60px;
-        transition: opacity 120ms ease-out;
+        transition: opacity var(--wg-duration-fast) var(--wg-easing);
     }
 
     .sectioned-form-tabs-slot.is-hidden {
@@ -179,12 +179,48 @@
     }
 
     .sectioned-form-tabs {
-        border-bottom: 1px solid var(--bs-border-color);
-        background: var(--bs-body-bg);
-        transition: opacity 120ms ease;
+        border-bottom: var(--wg-border-width) solid var(--wg-border);
+        background: var(--wg-surface);
+        transition: opacity var(--wg-duration-fast) var(--wg-easing);
 
         flex-wrap: nowrap;
         white-space: nowrap;
+    }
+
+    .section-tabs {
+        display: flex;
+        gap: var(--wg-space-sm);
+        padding: var(--wg-space-sm);
+        overflow-x: auto;
+    }
+
+    .section-tab {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        height: var(--wg-control-height-compact);
+        padding: 0 var(--wg-control-padding-x-compact);
+        border-radius: var(--wg-radius-control);
+        color: var(--wg-text-muted);
+        text-decoration: none;
+        font: var(--wg-text-label-md);
+        white-space: nowrap;
+    }
+
+    .section-tab:hover {
+        background: var(--wg-surface-container-high);
+        color: var(--wg-text);
+    }
+
+    .section-tab.active {
+        background: var(--wg-surface-container-highest);
+        color: var(--wg-text);
+        box-shadow: inset 2px 0 0 var(--wg-primary);
+    }
+
+    .section-tab:focus-visible {
+        outline: var(--wg-focus-ring);
+        outline-offset: var(--wg-focus-ring-offset);
     }
 
     .sectioned-form-content {

@@ -22,13 +22,12 @@
         margin-bottom: 1.5rem;
     }
 
+    /* Sentence case. DESIGN.md prohibits all-caps outright, and this heading
+     * was the last text-transform: uppercase left in the codebase. */
     .heading {
         display: block;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--bs-secondary-color);
-        margin: 1rem 0 0.5rem;
+        font: var(--wg-text-label-md);
+        color: var(--wg-text-muted);
+        margin: var(--wg-space-lg) 0 var(--wg-space-sm);
     }
 </style>

@@ -85,6 +85,9 @@
         '/config/access-roles': wrap({
             asyncComponent: () => import('./screens/Roles.svelte'),
         }),
+        '/config/targets/:id': wrap({
+            asyncComponent: () => import('./screens/target/Target.svelte'),
+        }),
 
         // ---- not yet migrated: existing components, new shell ----
         '/': wrap({
@@ -125,9 +128,7 @@
             asyncComponent: () =>
                 import('./config/targets/ChooseTargetKind.svelte'),
         }),
-        '/config/targets/:id': wrap({
-            asyncComponent: () => import('./config/targets/Target.svelte'),
-        }),
+
         '/config/target-groups/create': wrap({
             asyncComponent: () =>
                 import('./config/target-groups/CreateTargetGroup.svelte'),
