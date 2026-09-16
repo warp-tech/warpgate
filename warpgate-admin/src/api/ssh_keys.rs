@@ -7,6 +7,7 @@ use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common_http::errors::bad_request;
 use warpgate_db_entities::SshClientKey;
 
 use super::AdminContext;
@@ -146,9 +147,9 @@ impl Api {
         let key = match russh::keys::decode_secret_key(&body.secret_key, None) {
             Ok(key) => key,
             Err(e) => {
-                return Ok(CreateSSHClientKeyResponse::BadRequest(Json(format!(
-                    "Could not parse the private key: {e}"
-                ))));
+                return Ok(CreateSSHClientKeyResponse::BadRequest(bad_request(
+                    format!("Could not parse the private key: {e}"),
+                )));
             }
         };
 
@@ -222,8 +223,8 @@ impl Api {
         };
 
         if SshClientKey::Entity::find().count(db).await? <= 1 {
-            return Ok(DeleteSSHClientKeyResponse::BadRequest(Json(
-                "At least one SSH client key must remain".into(),
+            return Ok(DeleteSSHClientKeyResponse::BadRequest(bad_request(
+                "At least one SSH client key must remain",
             )));
         }
 

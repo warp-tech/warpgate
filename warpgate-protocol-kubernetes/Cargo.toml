@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-protocol-kubernetes"
-version = "0.29.0-beta.2"
+version = "0.29.0-beta.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -17,7 +17,6 @@ md5 = { version = "0.8", default-features = false }
 percent-encoding = { version = "2.1", default-features = false }
 poem.workspace = true
 poem-openapi.workspace = true
-regex.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 reqwest-websocket.workspace = true
 rustls.workspace = true

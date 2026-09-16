@@ -16,7 +16,7 @@ use poem::web::websocket::WebSocket;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
 use tokio::sync::broadcast;
 use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
-use tracing::{debug, error, warn};
+use tracing::{Instrument, debug, error, warn};
 use url::{Url, form_urlencoded};
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::{
@@ -576,72 +576,79 @@ async fn proxy_ws_inner(
 
     tracing::info!("{:?} {:?} - WebSocket", client_response.status(), uri);
 
+    // poem drives the upgraded stream after this handler has returned, so the
+    // request span is carried over explicitly; the database log layer keeps
+    // only events that fall under a session span.
+    let span = tracing::Span::current();
     let mut response = ws
-        .on_upgrade(|socket| async move {
-            let (client_sink, client_source) = client.split();
-            let (server_sink, server_source) = socket.split();
+        .on_upgrade(|socket| {
+            async move {
+                let (client_sink, client_source) = client.split();
+                let (server_sink, server_source) = socket.split();
 
-            if let Err(error) = {
-                let mut server_to_client =
-                    tokio::spawn(pump_websocket(server_source, client_sink, |msg| {
-                        Box::pin(async {
-                            tracing::debug!("Server: {:?}", msg);
-                            anyhow::Ok(msg)
-                        })
-                    }));
+                if let Err(error) = {
+                    let mut server_to_client =
+                        tokio::spawn(pump_websocket(server_source, client_sink, |msg| {
+                            Box::pin(async {
+                                tracing::debug!("Server: {:?}", msg);
+                                anyhow::Ok(msg)
+                            })
+                        }));
 
-                let mut client_to_server =
-                    tokio::spawn(pump_websocket(client_source, server_sink, |msg| {
-                        Box::pin(async {
-                            tracing::debug!("Client: {:?}", msg);
-                            anyhow::Ok(msg)
-                        })
-                    }));
+                    let mut client_to_server =
+                        tokio::spawn(pump_websocket(client_source, server_sink, |msg| {
+                            Box::pin(async {
+                                tracing::debug!("Client: {:?}", msg);
+                                anyhow::Ok(msg)
+                            })
+                        }));
 
-                let (server_finished, pump_result): (
-                    bool,
-                    Option<Result<anyhow::Result<()>, tokio::task::JoinError>>,
-                ) = tokio::select! {
-                    result = &mut server_to_client => {
-                        (true, Some(result))
-                    }
-                    result = &mut client_to_server => {
-                        (false, Some(result))
-                    }
-                    _ = close_rx.recv() => {
-                        (false, None)
-                    }
-                };
+                    let (server_finished, pump_result): (
+                        bool,
+                        Option<Result<anyhow::Result<()>, tokio::task::JoinError>>,
+                    ) = tokio::select! {
+                        result = &mut server_to_client => {
+                            (true, Some(result))
+                        }
+                        result = &mut client_to_server => {
+                            (false, Some(result))
+                        }
+                        _ = close_rx.recv() => {
+                            (false, None)
+                        }
+                    };
 
-                match pump_result {
-                    Some(result) if server_finished => {
-                        client_to_server.abort();
-                        let _ = client_to_server.await;
-                        result.context("server-to-client WebSocket pump task failed")??;
+                    match pump_result {
+                        Some(result) if server_finished => {
+                            client_to_server.abort();
+                            let _ = client_to_server.await;
+                            result.context("server-to-client WebSocket pump task failed")??;
+                        }
+                        Some(result) => {
+                            server_to_client.abort();
+                            let _ = server_to_client.await;
+                            result.context("client-to-server WebSocket pump task failed")??;
+                        }
+                        None => {
+                            debug!("Closing WebSocket stream after HTTP session ended");
+                            server_to_client.abort();
+                            client_to_server.abort();
+                            let _ = server_to_client.await;
+                            let _ = client_to_server.await;
+                        }
                     }
-                    Some(result) => {
-                        server_to_client.abort();
-                        let _ = server_to_client.await;
-                        result.context("client-to-server WebSocket pump task failed")??;
-                    }
-                    None => {
-                        debug!("Closing WebSocket stream after HTTP session ended");
-                        server_to_client.abort();
-                        client_to_server.abort();
-                        let _ = server_to_client.await;
-                        let _ = client_to_server.await;
-                    }
+                    debug!("Closing Websocket stream");
+
+                    Ok::<_, anyhow::Error>(())
+                } {
+                    error!(?error, "Websocket stream error");
                 }
-                debug!("Closing Websocket stream");
+
+                drop(keepalive_guard);
 
                 Ok::<_, anyhow::Error>(())
-            } {
-                error!(?error, "Websocket stream error");
             }
-
-            drop(keepalive_guard);
-
-            Ok::<_, anyhow::Error>(())
+            .instrument(span)
         })
         .into_response();
 
