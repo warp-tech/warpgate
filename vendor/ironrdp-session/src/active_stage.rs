@@ -125,15 +125,19 @@ impl ActiveStage {
             return Ok(Vec::new());
         }
 
-        // Mouse move events are prevalent, so we can preallocate space for
-        // response frame + graphics update
-        let mut output = Vec::with_capacity(2);
+        // A fast-path input PDU carries at most 255 events (numEvents is a byte).
+        const MAX_EVENTS_PER_FRAME: usize = 255;
 
-        // Encoding fastpath response frame
-        // PERF: unnecessary copy
-        let fastpath_input = FastPathInput::new(events.to_vec()).map_err(SessionError::decode)?;
-        let frame = ironrdp_core::encode_vec(&fastpath_input).map_err(SessionError::encode)?;
-        output.push(ActiveStageOutput::ResponseFrame(frame));
+        // Mouse move events are prevalent, so we can preallocate space for
+        // response frames + graphics update.
+        let mut output = Vec::with_capacity(events.len().div_ceil(MAX_EVENTS_PER_FRAME) + 1);
+
+        for event_chunk in events.chunks(MAX_EVENTS_PER_FRAME) {
+            // PERF: unnecessary copy
+            let fastpath_input = FastPathInput::new(event_chunk.to_vec()).map_err(SessionError::decode)?;
+            let frame = ironrdp_core::encode_vec(&fastpath_input).map_err(SessionError::encode)?;
+            output.push(ActiveStageOutput::ResponseFrame(frame));
+        }
 
         // If pointer rendering is disabled - we can skip the rest
         if !self.enable_server_pointer {

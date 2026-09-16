@@ -1,7 +1,5 @@
 import base64
 import json
-import os
-import select
 import signal
 import time
 from uuid import uuid4
@@ -13,7 +11,7 @@ import requests
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager
 from .test_ssh_proto import common_args, setup_user_and_target
-from .util import wait_port
+from .util import read_until, wait_port
 
 MINIO_USER = "minioadmin"
 MINIO_PASSWORD = "minioadmin"
@@ -91,16 +89,6 @@ def _find_in_progress_terminal_session(api):
             if rec.kind == sdk.RecordingKind.TERMINAL and rec.ended is None:
                 return rec.session_id
     return None
-
-
-def _read_until(stream, needle: bytes, deadline: float) -> bytes:
-    """Read from `stream` (a pipe) until `needle` appears or `deadline` passes."""
-    buf = b""
-    while time.monotonic() < deadline and needle not in buf:
-        ready, _, _ = select.select([stream], [], [], 1)
-        if ready:
-            buf += os.read(stream.fileno(), 4096)
-    return buf
 
 
 class Test:
@@ -206,7 +194,7 @@ class Test:
 
         # The marker round-tripping back through the gateway proves the session is
         # up and the output has reached the recorder's queue.
-        output = _read_until(
+        output = read_until(
             ssh_client.stdout, marker.encode(), time.monotonic() + timeout
         )
         assert marker.encode() in output, "marker never appeared in session output"

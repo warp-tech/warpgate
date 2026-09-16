@@ -14,6 +14,7 @@ use defaults::{
     _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
     _default_ssh_listen, _default_vnc_listen,
 };
+use poem::http::uri::Authority;
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -1022,13 +1023,25 @@ pub struct WarpgateConfig {
 }
 
 impl WarpgateConfig {
+    pub fn external_host_name(&self) -> Option<String> {
+        let ext = self.store.external_host.as_deref()?;
+        // ignore anything that does not look like a bare hostname or at least a legacy host:port
+        Some(ext.parse::<Authority>().ok()?.host().to_owned())
+    }
+
     pub fn validate(&self) {
-        if let Some(ref ext) = self.store.external_host
-            && ext.contains(':')
-        {
-            emit_config_warning(
-                "Your `external_host` config option contains a port - it will be ignored. Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options.".to_owned()
-            );
+        let Some(ext) = self.store.external_host.as_deref() else {
+            return;
+        };
+        let tip = "`external_host` takes a bare hostname - set the external port via the `http.external_port` instead.";
+        match self.external_host_name() {
+            None => emit_config_warning(format!(
+                "Your `external_host` config option is set to `{ext}`, which is not a hostname and will be ignored. {tip}"
+            )),
+            Some(host) if host != ext => emit_config_warning(format!(
+                "Your `external_host` config option is set to `{ext}` - only `{host}` will be used. {tip}"
+            )),
+            Some(_) => {}
         }
     }
 }
@@ -1037,7 +1050,7 @@ impl WarpgateConfig {
 mod tests {
     use std::time::Duration;
 
-    use super::{SshConfig, WarpgateConfigStore};
+    use super::{SshConfig, WarpgateConfig, WarpgateConfigStore};
 
     #[test]
     fn keepalive_interval_is_a_humantime_string() {
@@ -1091,5 +1104,29 @@ mod tests {
         // Roundtrip serialization
         let serialized = serde_json::to_string(&policy).unwrap();
         assert_eq!(serialized, "{}");
+    }
+
+    #[test]
+    fn external_host_name_keeps_only_a_hostname() {
+        let name = |ext: &str| {
+            WarpgateConfig {
+                store: WarpgateConfigStore {
+                    external_host: Some(ext.to_owned()),
+                    ..Default::default()
+                },
+            }
+            .external_host_name()
+        };
+
+        assert_eq!(
+            name("warp.example.com").as_deref(),
+            Some("warp.example.com")
+        );
+        assert_eq!(
+            name("warp.example.com:8888").as_deref(),
+            Some("warp.example.com")
+        );
+        assert_eq!(name("https://warp.example.com:8888"), None);
+        assert_eq!(name("warp.example.com/gateway"), None);
     }
 }

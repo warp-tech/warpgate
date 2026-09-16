@@ -24,6 +24,16 @@ pub static X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-fo
 pub static X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
 pub static X_FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
 
+pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
+pub static X_WARPGATE_CLUSTER_TOKEN: HeaderName =
+    HeaderName::from_static("x-warpgate-cluster-token");
+/// Acting user ID of intra cluster request
+pub static X_WARPGATE_CLUSTER_IDENTITY: HeaderName =
+    HeaderName::from_static("x-warpgate-cluster-identity");
+/// Acting origin client IP for intra cluster request
+pub static X_WARPGATE_CLUSTER_CLIENT_IP: HeaderName =
+    HeaderName::from_static("x-warpgate-cluster-client-ip");
+
 pub fn may_forward_header(header_name: &HeaderName) -> bool {
     !DONT_FORWARD_HEADERS.contains(header_name) && !header_name.as_str().starts_with("x-warpgate-")
 }

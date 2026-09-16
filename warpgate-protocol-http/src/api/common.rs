@@ -1,10 +1,10 @@
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Response};
-use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{DatabaseConnection, EntityTrait};
 use tracing::info;
 use uuid::Uuid;
-use warpgate_admin::api::cluster_proxy::{Owner, forward_websocket, node_owner};
+use warpgate_admin::api::cluster_proxy::{Owner, forward_websocket};
 use warpgate_common::{Protocol, TargetOptions, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, FullUserAuthorization, web_reauth_required,
@@ -105,19 +105,16 @@ const fn web_client_protocol(options: &TargetOptions) -> Option<Protocol> {
 /// [`FullUserAuthorization`] rather than a raw `RequestAuthorization` so a
 /// target-scoped ticket cannot be resolved to a full account here — the callers
 /// that manage credentials and tokens all route through this.
+///
+/// Keyed by id, not username: a username is reusable, so a session issued to a
+/// since-deleted account must not resolve to a new account carrying the same name.
 pub async fn get_user(
     auth: &FullUserAuthorization,
     db: &DatabaseConnection,
 ) -> Result<Option<entities::User::Model>, WarpgateError> {
-    let Some(user_model) = entities::User::Entity::find()
-        .filter(entities::User::Entity::username_eq_ci(auth.username()))
+    Ok(entities::User::Entity::find_by_id(auth.user_id())
         .one(db)
-        .await?
-    else {
-        return Ok(None);
-    };
-
-    Ok(Some(user_model))
+        .await?)
 }
 
 /// The node holding a web-client session's live state. Web-client sessions
@@ -136,7 +133,7 @@ pub async fn web_client_session_owner(
     else {
         return Ok(Owner::Local);
     };
-    node_owner(ctx, row.node_id).await.map_err(Into::into)
+    Ok(ctx.services().cluster.owner(row.node_id).await?)
 }
 
 /// Wraps a web-client websocket endpoint (`:session_id` in its path) with
@@ -160,7 +157,7 @@ pub fn forward_ws_to_session_owner<E: Endpoint + 'static>(
             Owner::Local => ep.call(req).await.map(IntoResponse::into_response),
             Owner::Remote(remote) => {
                 let ws = WebSocket::from_request_without_body(&req).await?;
-                forward_websocket(&ctx, &req, ws, remote, &ctx.services().cluster_token).await
+                forward_websocket(&ctx, &req, ws, remote).await
             }
         }
     })

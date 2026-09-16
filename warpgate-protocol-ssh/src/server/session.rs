@@ -65,7 +65,8 @@ const EVENT_QUEUE_CAPACITY: usize = 128;
 /// concurrent channel requests can't grow the stack without bound.
 const MAX_NESTED_COMMAND_WAITS: usize = 16;
 
-/// How long a teardown waits for queued writes to reach the client before
+/// How long a teardown waits for the channel writer's own queue to drain —
+/// i.e. for `Handle::close`/`Handle::disconnect` to have been *sent* — before
 /// giving up on them.
 const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -162,9 +163,14 @@ pub struct ServerSession {
     server_handle: Arc<Mutex<WarpgateServerHandle>>,
     target: TargetSelection,
     /// The child session minted by `start_target_session`. Recordings key on
-    /// it; shells opened before it exists (the target-selection menu) are
-    /// picked up by [`Self::start_recordings_for_pty_channels`] on selection.
+    /// it; recordings requested before it exists (the target-selection menu,
+    /// or an exec/subsystem dispatched through an approval gate) are held in
+    /// [`Self::pending_recordings`] and started by
+    /// [`Self::start_pending_recordings`] when it is stamped.
     target_session_id: Option<TargetSessionId>,
+    /// Recording requests made while [`Self::target_session_id`] was still
+    /// `None`, in arrival order. Drained on stamp.
+    pending_recordings: Vec<(Uuid, SshRecordingMetadata)>,
     traffic_recorders: HashMap<TrafficRecorderKey, TrafficRecorder>,
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
@@ -182,6 +188,10 @@ pub struct ServerSession {
     allowed_auth_methods: MethodSet,
     /// Track the state of a client snooping around pre-auth
     probe: ProbeState,
+    /// A duplicate of the client's socket descriptor, shut down at teardown
+    /// so the connection ends with the session rather than with russh's
+    /// inactivity timer. `None` once used.
+    client_socket: Option<std::net::TcpStream>,
 }
 
 fn session_debug_tag(id: &UserSessionId, remote_address: &SocketAddr) -> String {
@@ -256,6 +266,7 @@ impl ServerSession {
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
         mut handler_event_rx: UnboundedReceiver<ServerHandlerEvent>,
+        client_socket: std::net::TcpStream,
     ) -> Result<impl Future<Output = Result<()>> + use<>> {
         let id = server_handle.lock().await.user_session_id();
 
@@ -289,6 +300,7 @@ impl ServerSession {
             server_handle,
             target: TargetSelection::None,
             target_session_id: None,
+            pending_recordings: vec![],
             traffic_recorders: HashMap::new(),
             hub,
             event_sender: event_sender.clone(),
@@ -301,6 +313,7 @@ impl ServerSession {
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
             probe: ProbeState::NoAttempt,
+            client_socket: Some(client_socket),
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -953,7 +966,7 @@ impl ServerSession {
     async fn stamp_approved_target(&mut self, admitted: AdmittedTarget<TargetSSHOptions>) {
         self.target_session_id = Some(admitted.id());
         self.target = TargetSelection::Found(admitted);
-        self.start_recordings_for_pty_channels().await;
+        self.start_pending_recordings().await;
     }
 
     /// Confirm `channel` as open and re-dispatch everything held back while its
@@ -1348,8 +1361,14 @@ impl ServerSession {
                 }
             }
             RCEvent::Close(channel) => {
-                if let Ok(Some((handle, id))) = self.client_channel(&channel) {
-                    let _ = self.channel_writer.close(handle, id);
+                match self.client_channel(&channel) {
+                    Ok(Some((handle, id))) => self.channel_writer.close(handle, id)?,
+                    Ok(None) => {}
+                    Err(error) => {
+                        // Not necessarily a bug: this is reached from both
+                        // sides, so the client half may have closed first.
+                        debug!(%channel, ?error, "Target closed a channel already gone from the registry");
+                    }
                 }
                 self.channels.close(channel);
             }
@@ -1762,11 +1781,12 @@ impl ServerSession {
     }
 
     async fn start_terminal_recording(&mut self, channel_id: Uuid, metadata: SshRecordingMetadata) {
-        // A recording row must reference a target session. Before one exists
-        // (the target-selection menu is open) nothing is recorded; the menu's
-        // shell channels are swept up by `start_recordings_for_pty_channels`
-        // when a target is selected.
+        // A recording row must reference a target session. Before one exists —
+        // the target-selection menu is open, or an approval gate is holding the
+        // session — the request is parked and replayed on stamp, so a command
+        // run through an approved gate is recorded like any other.
         let Some(target_session_id) = self.target_session_id else {
+            self.pending_recordings.push((channel_id, metadata));
             return;
         };
         let recorder = async {
@@ -1804,18 +1824,12 @@ impl ServerSession {
         }
     }
 
-    /// Starts terminal recordings for the shells opened while no target
-    /// session existed yet — the target-selection menu runs in a PTY shell,
-    /// so PTY presence identifies them. Called wherever a target session
-    /// starts; channels opening later record via their own shell request.
-    async fn start_recordings_for_pty_channels(&mut self) {
-        let channels: Vec<(Uuid, SshRecordingMetadata)> = self
-            .channels
-            .iter()
-            .filter(|(_, channel)| channel.has_pty())
-            .filter_map(|(id, channel)| Some((*id, shell_recording_metadata(channel.server_id()?))))
-            .collect();
-        for (channel_id, metadata) in channels {
+    /// Starts the recordings parked while no target session existed yet — the
+    /// selection menu's shell, and any exec/subsystem dispatched through an
+    /// approval gate before it resolved. Called when the target session is
+    /// stamped; channels opening later record against the now-present session.
+    async fn start_pending_recordings(&mut self) {
+        for (channel_id, metadata) in std::mem::take(&mut self.pending_recordings) {
             self.start_terminal_recording(channel_id, metadata).await;
         }
     }
@@ -2675,13 +2689,40 @@ impl ServerSession {
             for ch in channels {
                 let _ = self.channel_writer.close(handle.clone(), ch.0);
             }
+            // A channel close says nothing about the connection, so a dead
+            // target never gives the client a reason to let go of the socket
+            // (#2520). Queued behind the closes so the ordering holds.
+            let _ = self.channel_writer.disconnect(
+                handle,
+                russh::Disconnect::ByApplication,
+                String::new(),
+                String::new(),
+            );
         }
 
-        // Give queued writes — the closes above, and any error or timeout
-        // notice emitted before them — a chance to reach the client. Bounded:
-        // a client whose window is full never lets the queue drain, and this
-        // runs on the event loop.
-        let _ = tokio::time::timeout(DISCONNECT_FLUSH_TIMEOUT, self.channel_writer.flush()).await;
+        // Bounded: a client whose window is full never lets the queue
+        // drain, and this runs on the event loop.
+        let flushed = tokio::time::timeout(DISCONNECT_FLUSH_TIMEOUT, self.channel_writer.flush())
+            .await
+            .is_ok();
+
+        if let Some(socket) = self.client_socket.take() {
+            // A flush only proves the messages reached russh's queue, so a
+            // client that is reading gets a moment to receive them; one that
+            // is not gets nothing more and is cut immediately. Spawned rather
+            // than awaited: this can run inside a russh callback, and russh
+            // cannot write anything until that callback returns.
+            let delay = if flushed {
+                DISCONNECT_FLUSH_TIMEOUT
+            } else {
+                warn!("Client is not reading; closing its connection");
+                Duration::ZERO
+            };
+            tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
+                let _ = socket.shutdown(std::net::Shutdown::Both);
+            });
+        }
 
         self.session_handle = None;
     }

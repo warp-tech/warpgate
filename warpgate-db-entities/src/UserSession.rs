@@ -1,6 +1,6 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::Expr;
-use sea_orm::{DatabaseTransaction, QuerySelect, TransactionTrait};
+use sea_orm::sea_query::{Expr, IntoCondition};
+use sea_orm::{Condition, DatabaseTransaction, QuerySelect, TransactionTrait};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
@@ -161,8 +161,20 @@ pub async fn revoke(db: &DatabaseConnection, id: UserSessionId) -> Result<(), Wa
 }
 
 pub async fn revoke_all(db: &DatabaseConnection) -> Result<(), WarpgateError> {
+    revoke_open_matching(db, Condition::all()).await
+}
+
+pub async fn revoke_all_for_user(db: &DatabaseConnection, user_id: Uuid) -> Result<(), WarpgateError> {
+    revoke_open_matching(db, Column::UserId.eq(user_id)).await
+}
+
+async fn revoke_open_matching(
+    db: &DatabaseConnection,
+    filter: impl IntoCondition,
+) -> Result<(), WarpgateError> {
     let open: Vec<Uuid> = Entity::find()
         .filter(Column::Ended.is_null())
+        .filter(filter)
         .select_only()
         .column(Column::Id)
         .into_tuple()

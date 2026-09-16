@@ -1,30 +1,88 @@
-use std::net::{IpAddr, UdpSocket};
+use std::future::Future;
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::future::join_all;
+use futures::{SinkExt, StreamExt};
+use poem::IntoResponse;
+use poem::web::websocket::{Message, WebSocket};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, IntoCondition, OnConflict};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use tokio::sync::broadcast;
+use tokio::time::timeout;
 use tracing::{info, warn};
 use uuid::Uuid;
-use warpgate_ca::ClusterTlsIdentity;
-use warpgate_common::{NodeId, Protocol, WarpgateError};
+use warpgate_ca::{CLUSTER_TLS_SNI_NAME, ClusterTlsIdentity};
+use warpgate_common::http_headers::X_WARPGATE_CLUSTER_TOKEN;
+use warpgate_common::{NodeId, Protocol, Secret, UserSessionId, WarpgateError};
 use warpgate_db_entities::{HttpSession, Node, Parameters, TargetSession, UserSession};
+use warpgate_tls::configure_cluster_tls_connector;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const REAP_INTERVAL: Duration = Duration::from_secs(15);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub const NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
+pub const NOTIFICATIONS_ROUTE: &str = "/cluster/notifications";
+
+/// A refresh notification sent between nodes, used to feed UI update websockets
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ClusterNotification {
+    SessionsChanged,
+    SessionApprovalsChanged,
+    WebAuthRequested {
+        session_id: UserSessionId,
+        user_id: Uuid,
+    },
+}
+
+pub struct RemoteNode {
+    pub address: String,
+    /// SPKI pin from the node's registry row; peer TLS verification fails
+    /// closed when a node has not published one.
+    pub tls_spki_sha256: Option<String>,
+}
+
+impl From<Node::Model> for RemoteNode {
+    fn from(node: Node::Model) -> Self {
+        Self {
+            address: node.address,
+            tls_spki_sha256: node.tls_spki_sha256,
+        }
+    }
+}
+
+/// Which node owns a node-local resource (an in-progress recording, a live
+/// session, an auth state)
+pub enum Owner {
+    Local,
+    Remote(RemoteNode),
+}
+
+pub struct PeerConnection {
+    pub tls: rustls::ClientConfig,
+    pub addrs: Vec<SocketAddr>,
+    pub port: u16,
+}
 
 /// Cluster identity, registers our ephemeral identity in the node list
 pub struct Cluster {
     pub node_id: NodeId,
     /// Peer auth certificate issued for this process
     pub tls_identity: ClusterTlsIdentity,
+    pub cluster_token: Arc<Secret<String>>,
     db: DatabaseConnection,
     /// Peer address (host:port)
     address: String,
     hostname: String,
+    /// cached warpgate root CA
+    ca_certificate_pem: String,
+    notifications: broadcast::Sender<ClusterNotification>,
 }
 
 impl Cluster {
@@ -36,10 +94,157 @@ impl Cluster {
                 &params.ca_certificate_pem,
                 &params.ca_private_key_pem,
             )?,
-            db,
+            cluster_token: Arc::new(resolve_cluster_token(&db, &params).await?),
             address: advertised_peer_address(http_port)?,
             hostname: std::net::hostname()?.to_string_lossy().to_string(),
+            ca_certificate_pem: params.ca_certificate_pem,
+            notifications: broadcast::channel(256).0,
+            db,
         })
+    }
+
+    pub fn notify_global(self: &Arc<Self>, msg: ClusterNotification) {
+        self.deliver_local(msg.clone());
+        let this = Arc::clone(self);
+        tokio::spawn(async move {
+            this.for_each_peer(|peer| this.post_notification(peer.into(), &msg))
+                .await;
+        });
+    }
+
+    pub fn deliver_local(&self, msg: ClusterNotification) {
+        let _ = self.notifications.send(msg);
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<ClusterNotification> {
+        self.notifications.subscribe()
+    }
+
+    // TODO: client pool
+    async fn post_notification(
+        &self,
+        peer: RemoteNode,
+        msg: &ClusterNotification,
+    ) -> Result<(), WarpgateError> {
+        self.peer_request(
+            &peer,
+            reqwest::Method::POST,
+            &format!("/@warpgate/admin/api{NOTIFICATIONS_ROUTE}"),
+        )
+        .await?
+        .json(msg)
+        .send()
+        .await?
+        .error_for_status()?;
+        Ok(())
+    }
+
+    /// Run fn against every node with a timeout (best effort)
+    pub async fn for_each_peer<T, E, Fut>(&self, f: impl Fn(Node::Model) -> Fut) -> Vec<(String, T)>
+    where
+        E: std::fmt::Display,
+        Fut: Future<Output = Result<T, E>>,
+    {
+        let peers = match alive_nodes(&self.db).await {
+            Ok(peers) => peers,
+            Err(error) => {
+                warn!(%error, "Failed to list cluster nodes");
+                return vec![];
+            }
+        };
+        join_all(
+            peers
+                .into_iter()
+                .filter(|peer| peer.id != self.node_id)
+                .map(|peer| {
+                    let hostname = peer.hostname.clone();
+                    let call = f(peer);
+                    async move {
+                        match timeout(NOTIFICATION_TIMEOUT, call).await {
+                            Ok(Ok(result)) => Some((hostname, result)),
+                            Ok(Err(error)) => {
+                                warn!(node = %hostname, %error, "Cluster node request failed");
+                                None
+                            }
+                            Err(_) => {
+                                warn!(node = %hostname, "Cluster node request timed out");
+                                None
+                            }
+                        }
+                    }
+                }),
+        )
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    pub async fn peer_request(
+        &self,
+        peer: &RemoteNode,
+        method: reqwest::Method,
+        path: &str,
+    ) -> Result<reqwest::RequestBuilder, WarpgateError> {
+        let PeerConnection { tls, addrs, port } = self.peer_connection(peer).await?;
+        let client = reqwest::Client::builder()
+            .use_preconfigured_tls(tls)
+            .resolve_to_addrs(CLUSTER_TLS_SNI_NAME, &addrs)
+            .build()?;
+        Ok(client
+            .request(
+                method,
+                format!("https://{CLUSTER_TLS_SNI_NAME}:{port}{path}"),
+            )
+            .header(
+                X_WARPGATE_CLUSTER_TOKEN.clone(),
+                self.cluster_token.expose_secret(),
+            ))
+    }
+
+    /// resolve a node UUID into an [Owner::Local]/[Owner::Remote],
+    /// handling invalid IDs (warn and fall back to local)
+    pub async fn owner(&self, node_id: Option<NodeId>) -> Result<Owner, WarpgateError> {
+        let Some(node_id) = node_id else {
+            return Ok(Owner::Local);
+        };
+        if node_id.0.is_nil() || node_id == self.node_id {
+            return Ok(Owner::Local);
+        }
+        let Some(node) = Node::Entity::find_by_id(node_id).one(&self.db).await? else {
+            warn!(%node_id, "Owner node is gone from the cluster; serving locally");
+            return Ok(Owner::Local);
+        };
+        Ok(Owner::Remote(node.into()))
+    }
+
+    pub async fn peer_connection(
+        &self,
+        peer: &RemoteNode,
+    ) -> Result<PeerConnection, WarpgateError> {
+        let Some(pin) = peer.tls_spki_sha256.clone() else {
+            return Err(WarpgateError::ClusterPeerUnreachable(format!(
+                "{} has no TLS pin",
+                peer.address
+            )));
+        };
+        let tls = configure_cluster_tls_connector(self.ca_certificate_pem.as_bytes(), pin)?;
+        let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&peer.address)
+            .await
+            .map_err(|error| {
+                WarpgateError::ClusterPeerUnreachable(format!(
+                    "cannot resolve {}: {error}",
+                    peer.address
+                ))
+            })?
+            .collect();
+        let Some(port) = addrs.first().map(SocketAddr::port) else {
+            return Err(WarpgateError::ClusterPeerUnreachable(format!(
+                "cannot resolve IP for {}",
+                peer.address
+            )));
+        };
+        Ok(PeerConnection { tls, addrs, port })
     }
 
     /// Register this node and spawn heartbeat + reaper tasks
@@ -120,6 +325,67 @@ impl Cluster {
             .await?;
         Ok(())
     }
+}
+
+async fn resolve_cluster_token(
+    db: &DatabaseConnection,
+    params: &Parameters::Model,
+) -> Result<Secret<String>, WarpgateError> {
+    if let Some(token) = &params.cluster_token {
+        return Ok(Secret::new(token.clone()));
+    }
+
+    Parameters::Entity::update_many()
+        .col_expr(
+            Parameters::Column::ClusterToken,
+            Expr::value(Secret::<String>::random().expose_secret().clone()),
+        )
+        .filter(Parameters::Column::ClusterToken.is_null())
+        .exec(db)
+        .await?;
+
+    Parameters::Entity::get(db)
+        .await?
+        .cluster_token
+        .map(Secret::new)
+        .ok_or_else(|| {
+            WarpgateError::InconsistentState("cluster token missing after generation".into())
+        })
+}
+
+/// Websocket that serves refresh notifications for a page from a cluster notification stream
+pub fn refresh_notification_stream(
+    ws: WebSocket,
+    mut rx: broadcast::Receiver<ClusterNotification>,
+    mut filter_map: impl FnMut(ClusterNotification) -> Option<String> + Send + Sync + 'static,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| async move {
+        let (mut sink, mut source) = socket.split();
+        loop {
+            tokio::select! {
+                received = rx.recv() => match received {
+                    Ok(msg) => {
+                        if let Some(text) = filter_map(msg) {
+                            sink.send(Message::Text(text)).await?;
+                        }
+                    }
+                    // Every client treats any frame as "refetch", so whatever a
+                    // lag dropped is delivered as one blank wake-up
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        sink.send(Message::Text(String::new())).await?;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+                // Clients send nothing; the read half only reports that the
+                // socket went away, which is when to stop holding a receiver
+                incoming = source.next() => match incoming {
+                    Some(Ok(Message::Close(_)) | Err(_)) | None => break,
+                    Some(Ok(_)) => {}
+                },
+            }
+        }
+        Ok::<(), anyhow::Error>(())
+    })
 }
 
 /// A shared session's row is inserted before the first cookie-session write
@@ -362,6 +628,45 @@ mod tests {
             .unwrap()
             .ended
             .is_none()
+    }
+
+    #[test]
+    fn notification_wire_format_is_tagged_by_type() {
+        let user_id = Uuid::new_v4();
+        let msg = ClusterNotification::WebAuthRequested {
+            session_id: UserSessionId(Uuid::nil()),
+            user_id,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["type"], "web_auth_requested");
+        assert_eq!(json["user_id"], user_id.to_string());
+        let plain = serde_json::to_string(&ClusterNotification::SessionsChanged).unwrap();
+        assert_eq!(plain, r#"{"type":"sessions_changed"}"#);
+        let back: ClusterNotification = serde_json::from_str(&plain).unwrap();
+        assert!(matches!(back, ClusterNotification::SessionsChanged));
+    }
+
+    #[tokio::test]
+    async fn notify_reaches_local_subscribers() {
+        let db = migrated_db().await;
+        let cluster = Arc::new(Cluster::new(db, 0).await.unwrap());
+        let mut rx = cluster.subscribe();
+        cluster.notify_global(ClusterNotification::SessionApprovalsChanged);
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            ClusterNotification::SessionApprovalsChanged
+        ));
+    }
+
+    #[tokio::test]
+    async fn cluster_token_is_shared_across_nodes() {
+        let db = migrated_db().await;
+        let a = Cluster::new(db.clone(), 0).await.unwrap();
+        let b = Cluster::new(db, 0).await.unwrap();
+        assert_eq!(
+            a.cluster_token.expose_secret(),
+            b.cluster_token.expose_secret()
+        );
     }
 
     async fn register_node(db: &DatabaseConnection) -> Uuid {

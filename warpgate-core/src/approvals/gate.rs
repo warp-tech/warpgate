@@ -13,6 +13,7 @@ use warpgate_db_entities::SessionApprovalRequest::{
 };
 
 use super::*;
+use crate::cluster::ClusterNotification;
 use crate::config_providers::{ApprovedTarget, TargetAuthorization};
 use crate::protocols::AdmittedTarget;
 use crate::services::Services;
@@ -189,7 +190,8 @@ impl Services {
         // idempotent
         if matches!(advertised, Advertised::Asked) {
             subject.emit_requested_event();
-            let _ = self.admin_approval_request_tx.send(subject.session_id);
+            self.cluster
+                .notify_global(ClusterNotification::SessionApprovalsChanged);
         }
         Ok(advertised)
     }
