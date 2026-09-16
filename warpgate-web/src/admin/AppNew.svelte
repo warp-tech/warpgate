@@ -146,7 +146,7 @@
             asyncComponent: () => import('./config/CreateUser.svelte'),
         }),
         '/config/users/:id': wrap({
-            asyncComponent: () => import('./config/users/User.svelte'),
+            asyncComponent: () => import('./screens/user-detail/User.svelte'),
         }),
         '/config/access-roles/create': wrap({
             asyncComponent: () => import('./config/CreateRole.svelte'),
