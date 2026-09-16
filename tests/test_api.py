@@ -3,7 +3,9 @@ This test runs against Postgres for a better chance to catch
 DB field type related issues that don't surface on SQLite (e.g. timestamp types)
 """
 
+import atexit
 import contextlib
+import shutil
 import tempfile
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Set
@@ -88,6 +90,7 @@ def make_limited_admin_role_payload(**overrides):
 # `/tmp/recordings-test` can be pre-created as a symlink by any other user on a
 # shared machine, and this case asks Warpgate to write there.
 RECORDINGS_TEST_PATH = tempfile.mkdtemp(prefix="warpgate-recordings-")
+atexit.register(shutil.rmtree, RECORDINGS_TEST_PATH, ignore_errors=True)
 
 ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     AdminApiTestCase(
