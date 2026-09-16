@@ -17,7 +17,7 @@ Newest entries at the top of each section.
 | 0.5 — Baseline | ✅ done | `DESIGN.md` moved to `design/`, this file seeded, bundle baseline captured. |
 | 1 — Token layer | ✅ done | Tokens, both themes, fonts, `/styleguide`. +28.5 KB raw (+1.4%). |
 | 2 — Primitives | ✅ done | 18 primitives + styleguide entries + primitive contrast audit. +0.4 KB raw. |
-| 3 — Shell | not started | |
+| 3 — Shell | ✅ done | Sidebar, top bar, breadcrumbs, command palette, fuzzy matcher, action registry. |
 | 4 — Screen migration | not started | |
 | 5 — Accessibility | not started | |
 | 6 — Verification | **blocked** | Needs cargo, just, docker — none installed on the current machine. |
@@ -34,6 +34,7 @@ user-visible redesign with an env var and no git operation.
 | 0.5 | `redesign/design-system` |
 | 1 | `redesign/phase-1-tokens` |
 | 2 | `redesign/phase-2-primitives` |
+| 3 | `redesign/phase-3-shell` |
 
 ---
 
@@ -219,6 +220,92 @@ projection and the parse-blocking argument.
 
 ## Decisions
 
+### D18 — Phase 5 completion criterion replaced
+*Phase 3.*
+
+The original criterion — "remove the three `svelte-check` a11y suppressions
+and pass clean" — measured nothing. Svelte 5 renamed its warning codes from
+hyphens to underscores and the flags were never updated, so
+`a11y-no-static-element-interactions:ignore` never matched
+`a11y_no_static_element_interactions`. Verified three ways: the rule fired on
+a new component despite being listed; removing all three flags changed
+nothing (0 warnings either way); and the underscore spellings changed nothing
+either, because there was nothing left to suppress.
+
+**The flags were deleted in Phase 3** rather than at Phase 5. A dead flag
+tells the next reader that three categories of a11y warning are deliberately
+tolerated, which was never true.
+
+Replacement criterion:
+
+- **axe-core reports zero violations** on every route, in both themes
+- **a keyboard-only walk of every flow in the preserve-behaviour list** —
+  session recording playback, live session streaming, in-browser SSH, RDP and
+  VNC, TOTP enrolment, SSO redirect
+
+### D15 — Typed-name confirmation is a new pattern, not an existing one
+*Phase 3. Corrects a premise.*
+
+The Phase 3 brief asked that destructive actions invoked from the palette get
+"the same typed-name confirmation as everywhere else". **There is no
+typed-name confirmation anywhere in the product.** All nine destructive flows
+use native `window.confirm()`:
+
+```
+AccessRole.svelte  AdminRole.svelte  LdapServer.svelte  TargetGroup.svelte
+Target.svelte      User.svelte       CredentialEditor.svelte
+LoginProtection.svelte (×2)          CredentialManager.svelte
+```
+
+Every one is a single Enter away from committing.
+
+`ui/ConfirmDialog.svelte` establishes the pattern. Two modes: a plain
+confirm/cancel of the same weight as the `confirm()` it replaces, and — when
+`confirmText` is set — a mode requiring the operator to type an exact string
+before the destructive button enables. The typed mode is reserved for actions
+reached *without deliberate navigation*, which today means the command
+palette.
+
+Comparison is exact rather than case-insensitive: the point is to make the
+operator read the identifier of the thing they are about to destroy, and a
+forgiving comparison defeats that. Leading and trailing whitespace is
+forgiven because it comes from paste, not from misreading.
+
+**Phase 4 migrates the nine `confirm()` call sites onto this.** Until then the
+palette is the only thing using it.
+
+### D16 — Sidebar labels are clipped, not removed
+*Phase 3.*
+
+In the 56px rail every item is icon-only. Rather than an `aria-label` on each
+link, the visible label stays in the DOM and is clipped by CSS. The link's
+accessible name is therefore always the same string a sighted user reads, and
+cannot drift from it when someone renames an item — the failure mode of
+parallel labels. A tooltip shows the same text on hover, which is
+supplementary: it describes, it does not name.
+
+Section headings collapse to a 1px rule rather than disappearing, so the
+grouping survives, and are marked `aria-hidden` in that state since each link
+already carries its own name.
+
+The active item is marked with an inset 2px primary edge as well as a
+background tone, so it stays identifiable in the rail where the label is gone.
+
+### D17 — One permission list, gating three surfaces
+*Phase 3.*
+
+The sidebar (`shell/navItems.ts`), the action registry (`shell/actions.ts`)
+and the palette's entity loader (`shell/entities.ts`) all gate on
+`ADMIN_PERMISSIONS` keys from `admin/lib/store`. There is no second list, and
+`requires` is typed as `AdminPermissionKey`, so a renamed permission is a
+compile error rather than an item that silently never appears.
+
+**Items are filtered, not disabled.** A greyed-out "Manage admin roles" still
+tells the operator that the capability exists and that someone holds it.
+
+In the entity loader the gate is on the *request*, not the rendering — the
+palette must not fetch a list the operator has no right to see.
+
 ### D12 — Table wraps ItemList through two new snippet props
 *Phase 2.*
 
@@ -251,6 +338,41 @@ rows underneath Table, and a captured integer index would quietly move the tab
 stop to a different record. An effect re-seats it on the first row whenever the
 row it was on disappears — a page change, a filter, a collapsed group.
 
+### D19 — focusTrap: an ancestor bug with a symptom, and a sibling bug without one
+*Phase 3, recording work done in Phase 2. Worth reading as a pair.*
+
+**First half — found by driving it.** `focusTrap` marked every child of
+`<body>` inert except the dialog node. That is correct only when the dialog is
+a direct child of body. These dialogs are **not portalled** — they render
+inline at their component's position in the tree, inside `#app`. So the action
+was marking the dialog's own ancestor inert, which makes the dialog inert too.
+
+The consequence was total and silent: focus never entered the dialog, Tab was
+never trapped, and Escape restored focus to `<body>`. Nothing threw, nothing
+looked wrong in a screenshot, and clicking still worked — so a visual review
+would have passed it. It surfaced only because the Phase 2 verification script
+asserted `dialog.contains(document.activeElement)` after opening a Drawer, and
+got `false`.
+
+Fixed by walking the ancestor chain from the dialog to `<body>` and marking
+each ancestor's *siblings*, which is the true complement of the dialog.
+
+**Second half — found by reasoning, with no symptom at all.** The scrim is a
+sibling of the dialog inside the same parent, so the corrected walk would have
+marked *it* inert too. `inert` does not only remove an element from the
+accessibility tree and the tab order — **it also removes it from hit-testing**.
+An inert scrim silently stops receiving clicks, so click-outside-to-close
+would have broken.
+
+No test caught this and no test would have, because the Phase 2 harness drove
+the dialogs by keyboard. It was caught by asking what `inert` actually does
+before shipping the ancestor fix. Elements that are part of the overlay rather
+than the page behind it are now marked `data-wg-overlay` and skipped.
+
+The pairing is the point: the first bug was found by driving the thing, the
+second by understanding the primitive being used. Neither method would have
+found the other.
+
 ### D13 — StatusMarker makes shape structurally inescapable
 *Phase 2.*
 
@@ -273,11 +395,16 @@ renders as visible text. The text is the accessible name, so the shape is
 Approvals and ticket requests are a real state in this product — `/status/requests`,
 `/session-approvals`, `/ticket-requests` — and were not in the mockups.
 
-**One weakness inherited from DESIGN.md, noted not fixed:** `live` and `ended`
-are both filled 6px circles, distinguished only by colour and the pulse. The
-label carries the difference ("Live" vs "Ended 12:04:31"), which satisfies the
-system's own geometry+label+colour rule, but the geometry alone is ambiguous
-between them.
+**Third DESIGN.md divergence: `ended` is a hollow ring, not a filled circle.**
+DESIGN.md draws `live` and `ended` as identical solid 6px circles, separated
+only by colour and the pulse. Those are the two most common states in the
+product and they appear in the same column on adjacent rows constantly, so the
+geometry was carrying nothing precisely where it is needed most — which
+defeats the system's own geometry+label+colour rule at its most load-bearing
+point.
+
+`ended` sharing the ring with `online` is safe: a session's state and a
+target's health never appear in the same column.
 
 ### D14 — AsyncButton's state machine extracted verbatim
 *Phase 2.*
@@ -517,9 +644,26 @@ keep their `design/<screen>/{code.html,screen.png}` layout.
    it reformatted 28 files to tabs and semicolons and re-enabled rules the
    top-level config turns off.
 
-Narrow this if a later Biome release fixes either. Phase 5's runtime axe-core
-audit covers all three and is the stronger check — nothing here is exempt
-from it.
+A fourth was added in Phase 3: **useKeyWithClickEvents**, the Biome twin of
+the svelte-check rule already suppressed inline at the same site — the command
+palette's listbox options, whose keyboard handling lives on the input because
+the ARIA combobox pattern forbids focusable options.
+
+Narrow these if a later Biome release fixes either limitation. Phase 5's
+runtime axe-core audit covers all four and is the stronger check — nothing
+here is exempt from it.
+
+### Q8 — Switch vs checkbox behind a save bar
+*Raised Phase 3 for Phase 4. Nothing changed yet.*
+
+`ui/Toggle.svelte` is `role="switch"`, which announces "this is on now". That
+is right for a setting applied immediately, and **wrong for one sitting behind
+a save bar**, where the honest announcement is "this will be true when you
+save" — a checkbox.
+
+`/config/parameters` is the screen where this bites: it is a large form behind
+`SectionedForm`/`autosave`, and most of its booleans are deferred, not live.
+Decide per-control during the Parameters sub-phase; both primitives exist.
 
 ### Q5 — Third ink tier and the two border tiers diverge from DESIGN.md
 *Raised Phase 1. Implemented as described; flagged for review.*

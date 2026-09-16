@@ -56,8 +56,19 @@
                 token: '--wg-state-blocked',
                 defaultLabel: 'Blocked',
             }),
+            /**
+             * Hollow, not filled — a divergence from DESIGN.md, which draws
+             * both `live` and `ended` as solid 6px circles separated only by
+             * colour and the pulse. Those are the two most common states in
+             * the product and they sit in the same column on adjacent rows
+             * constantly, so the geometry was carrying nothing exactly where
+             * it is needed most.
+             *
+             * Sharing the ring with `online` is safe: a session's state and a
+             * target's health never appear in the same column.
+             */
             ended: Object.freeze({
-                shape: 'dot',
+                shape: 'ring',
                 token: '--wg-state-ended',
                 defaultLabel: 'Ended',
             }),

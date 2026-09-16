@@ -12,6 +12,7 @@
     import ToastHost from 'ui/ToastHost.svelte'
     import { contrast, grade, resolveToken } from './contrast'
     import Primitives from './Primitives.svelte'
+    import Shell from './Shell.svelte'
 
     const SURFACES = [
         ['--wg-surface-container-lowest', 'Recessed — terminals, log dumps'],
@@ -506,6 +507,16 @@
     </p>
 
     <Primitives />
+
+    <hr class="sg-rule">
+
+    <h1 class="sg-phase">Shell</h1>
+    <p class="sg-sub">
+        Phase 3. Sidebar, top bar, breadcrumbs and the command palette, driven
+        against a switchable permission persona so the gating is demonstrable.
+    </p>
+
+    <Shell />
 </div>
 
 <ToastHost />

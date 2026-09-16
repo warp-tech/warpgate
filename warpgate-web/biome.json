@@ -64,7 +64,8 @@
                         "noLabelWithoutControl": "off",
                         "noNoninteractiveElementToInteractiveRole": "off",
                         "noNoninteractiveTabindex": "off",
-                        "noStaticElementInteractions": "off"
+                        "noStaticElementInteractions": "off",
+                        "useKeyWithClickEvents": "off"
                     },
                     "style": {
                         "useConst": "off"
