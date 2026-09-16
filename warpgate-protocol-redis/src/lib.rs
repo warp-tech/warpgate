@@ -46,19 +46,22 @@ impl ProtocolServer for RedisProtocolServer {
         // Unlike MySQL/Postgres, Redis has no in-protocol STARTTLS: a listener
         // either terminates TLS for every connection or is plaintext-only. No
         // certificate configured just means this listener runs in plaintext.
-        let tls_config = tls.into_iter().next().map(|certificate_and_key| {
-            Arc::new(
-                ServerConfig::builder_with_provider(Arc::new(
-                    rustls::crypto::aws_lc_rs::default_provider(),
+        let tls_config = tls
+            .into_iter()
+            .next()
+            .map(|certificate_and_key| -> Result<_> {
+                Ok(Arc::new(
+                    ServerConfig::builder_with_provider(Arc::new(
+                        rustls::crypto::aws_lc_rs::default_provider(),
+                    ))
+                    .with_safe_default_protocol_versions()?
+                    .with_client_cert_verifier(Arc::new(NoClientAuth))
+                    .with_cert_resolver(Arc::new(ResolveServerCert(Arc::new(
+                        certificate_and_key.into(),
+                    )))),
                 ))
-                .with_safe_default_protocol_versions()
-                .expect("static TLS provider config")
-                .with_client_cert_verifier(Arc::new(NoClientAuth))
-                .with_cert_resolver(Arc::new(ResolveServerCert(Arc::new(
-                    certificate_and_key.into(),
-                )))),
-            )
-        });
+            })
+            .transpose()?;
 
         let mut listener = address
             .tcp_accept_stream()

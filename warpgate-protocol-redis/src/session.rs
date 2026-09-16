@@ -184,8 +184,16 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> RedisSession<S> {
                         .await?;
                     }
                     3 => {
-                        let username = String::from_utf8_lossy(&args[1]).into_owned();
-                        let password = Secret::from(String::from_utf8_lossy(&args[2]).into_owned());
+                        let Some((username_bytes, password_bytes)) =
+                            args.get(1).zip(args.get(2))
+                        else {
+                            self.send_error("ERR wrong number of arguments for 'auth' command")
+                                .await?;
+                            continue;
+                        };
+                        let username = String::from_utf8_lossy(username_bytes).into_owned();
+                        let password =
+                            Secret::from(String::from_utf8_lossy(password_bytes).into_owned());
                         return self.authenticate(username, password).await;
                     }
                     _ => {
@@ -360,17 +368,18 @@ fn parse_hello(args: &[Bytes]) -> Result<Option<(String, Secret<String>, RespVer
 
     let mut auth = None;
     let mut i = 2;
-    while i < args.len() {
-        if args[i].eq_ignore_ascii_case(b"AUTH") {
-            if i + 2 >= args.len() {
+    while let Some(keyword) = args.get(i) {
+        if keyword.eq_ignore_ascii_case(b"AUTH") {
+            let Some((username_bytes, password_bytes)) = args.get(i + 1).zip(args.get(i + 2))
+            else {
                 return Err("ERR syntax error in HELLO".to_string());
-            }
-            let username = String::from_utf8_lossy(&args[i + 1]).into_owned();
-            let password = Secret::from(String::from_utf8_lossy(&args[i + 2]).into_owned());
+            };
+            let username = String::from_utf8_lossy(username_bytes).into_owned();
+            let password = Secret::from(String::from_utf8_lossy(password_bytes).into_owned());
             auth = Some((username, password));
             i += 3;
-        } else if args[i].eq_ignore_ascii_case(b"SETNAME") {
-            if i + 1 >= args.len() {
+        } else if keyword.eq_ignore_ascii_case(b"SETNAME") {
+            if args.get(i + 1).is_none() {
                 return Err("ERR syntax error in HELLO".to_string());
             }
             i += 2;

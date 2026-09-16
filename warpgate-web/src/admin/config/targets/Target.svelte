@@ -543,8 +543,8 @@
                                 >
                                 <small class="form-text text-muted">
                                     Runs <code>SELECT</code> to this numbered
-                                    database right after connecting. Leave
-                                    empty to stay on the target's default (0).
+                                    database right after connecting. Leave empty
+                                    to stay on the target's default (0).
                                 </small>
                             </FormGroup>
 
@@ -697,10 +697,10 @@
                                     title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
                                 >
                                 <small class="form-text text-muted">
-                                    How long an authenticated session can
-                                    remain idle before requiring
-                                    re-authentication. Examples: 30m, 1h,
-                                    2h30m. Leave empty for default (10m).
+                                    How long an authenticated session can remain
+                                    idle before requiring re-authentication.
+                                    Examples: 30m, 1h, 2h30m. Leave empty for
+                                    default (10m).
                                 </small>
                             </FormGroup>
                         </Section>
