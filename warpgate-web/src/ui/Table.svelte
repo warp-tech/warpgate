@@ -438,7 +438,7 @@
         color: var(--wg-text);
     }
 
-    :global(.wg-table th) {
+    :global(.wg-table thead th) {
         position: sticky;
         top: 0;
         z-index: 1;
