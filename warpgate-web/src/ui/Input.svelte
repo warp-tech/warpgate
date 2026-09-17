@@ -20,6 +20,15 @@
         id?: string
         name?: string
         autocomplete?: AutoFill
+        /** Picks the on-screen keyboard — "numeric" for codes and ports. */
+        inputmode?:
+            | 'text'
+            | 'numeric'
+            | 'decimal'
+            | 'tel'
+            | 'email'
+            | 'url'
+            | 'search'
         size?: 'standard' | 'compact'
         class?: string
         oninput?: (event: Event) => void
@@ -44,6 +53,7 @@
         id = `wg-input-${Math.random().toString(36).slice(2, 9)}`,
         name,
         autocomplete,
+        inputmode,
         size = 'standard',
         class: className = '',
         oninput,
@@ -91,6 +101,7 @@
             {readonly}
             {required}
             {autocomplete}
+            {inputmode}
             bind:value
             class:wg-mono-input={mono}
             aria-invalid={isInvalid || undefined}

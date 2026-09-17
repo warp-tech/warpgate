@@ -65,7 +65,7 @@
     import { toast } from 'ui/toasts.svelte'
     import AdminRolePermissionsBadge from '../../config/AdminRolePermissionsBadge.svelte'
     import AllowedIpRangesEditor from '../../config/users/AllowedIpRangesEditor.svelte'
-    import CredentialEditor from '../../config/users/CredentialEditor.svelte'
+    import CredentialEditor from './credentials/CredentialEditor.svelte'
 
     interface Props {
         params: { id: string }
