@@ -1342,9 +1342,11 @@ impl ServerSession {
                         );
                     }
                     error => {
-                        // The same boundary as the browser leg, and the
-                        // server-side record: the connect path logs only at
-                        // `debug!`.
+                        // The same boundary as the browser leg. The connect
+                        // path logs the error too, but from the client task,
+                        // whose span carries no username and no client IP —
+                        // this is the record that ties the failure to the
+                        // session that saw it.
                         error!(?error, "Target connection failed");
                         let _ = self.emit_pty_error(&shown_in_the_terminal(&error));
                     }

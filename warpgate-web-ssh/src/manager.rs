@@ -195,9 +195,11 @@ fn spawn_event_loop(
                                 .await;
                         }
                         RCEvent::ConnectionError(e) => {
-                            // The connect path logs at `debug!`, dropped
-                            // under the default filter, so without this a
-                            // failed session leaves no record at all.
+                            // The same shape as the arm above: the full chain
+                            // to the log, only the sanitised constant to the
+                            // browser. The connect path logs it as well, but
+                            // this is the record on the side that knows which
+                            // browser session was told what.
                             error!(session=%session_id, error=?e, "Target connection failed");
                             session
                                 .push(ServerMessage::Error {
