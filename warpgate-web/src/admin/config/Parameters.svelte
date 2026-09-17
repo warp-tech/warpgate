@@ -17,7 +17,7 @@
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import Subsection from 'admin/lib/Subsection.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import { humantimeDuration } from 'common/duration'
+    import DurationInput from 'common/DurationInput.svelte'
     import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -494,17 +494,11 @@
                                     </HelpText>
 
                                     <Subsection title="Limits">
-                                        <FormGroup
-                                            floating
+                                        <DurationInput
                                             label="Default max ticket duration (blank = unlimited)"
-                                        >
-                                            <input
-                                                type="text"
-                                                class="form-control"
-                                                placeholder="e.g. 8h, 30m, 1d"
-                                                use:humantimeDuration={{ seconds: parameters.ticketMaxDurationSeconds, onChange: v => { parameters.ticketMaxDurationSeconds = v } }}
-                                            >
-                                        </FormGroup>
+                                            seconds={parameters.ticketMaxDurationSeconds}
+                                            onChange={v => { parameters.ticketMaxDurationSeconds = v }}
+                                        />
                                         <HelpText>
                                             Global default. Can be overridden
                                             per target. Examples: 30m, 8h, 1d,
@@ -531,17 +525,11 @@
                             </Section>
 
                             <Section id="api-tokens" title="API tokens">
-                                <FormGroup
-                                    floating
+                                <DurationInput
                                     label="Maximum API token duration (blank = unlimited)"
-                                >
-                                    <input
-                                        type="text"
-                                        class="form-control"
-                                        placeholder="e.g. 8h, 30m, 1d"
-                                        use:humantimeDuration={{ seconds: parameters.maxApiTokenDurationSeconds, onChange: v => { parameters.maxApiTokenDurationSeconds = v } }}
-                                    >
-                                </FormGroup>
+                                    seconds={parameters.maxApiTokenDurationSeconds}
+                                    onChange={v => { parameters.maxApiTokenDurationSeconds = v }}
+                                />
                             </Section>
 
                             <Section id="ui" title="UI">
@@ -657,17 +645,11 @@
                                         first.
                                     </HelpText>
 
-                                    <FormGroup
-                                        floating
+                                    <DurationInput
                                         label="Require re-authentication after (blank = never)"
-                                    >
-                                        <input
-                                            type="text"
-                                            class="form-control"
-                                            placeholder="e.g. 8h, 30m, 1d"
-                                            use:humantimeDuration={{ seconds: parameters.webAuthMaxAgeSeconds, onChange: v => { parameters.webAuthMaxAgeSeconds = v } }}
-                                        >
-                                    </FormGroup>
+                                        seconds={parameters.webAuthMaxAgeSeconds}
+                                        onChange={v => { parameters.webAuthMaxAgeSeconds = v }}
+                                    />
                                     <HelpText>
                                         Forces users to sign in again once
                                         before accessing Web SSH or creating
@@ -677,17 +659,11 @@
                                     </HelpText>
                                 {/if}
 
-                                <FormGroup
-                                    floating
+                                <DurationInput
                                     label="Web approval cache period"
-                                >
-                                    <input
-                                        type="text"
-                                        class="form-control"
-                                        placeholder="e.g. 5m, 1h"
-                                        use:humantimeDuration={{ seconds: parameters.webApprovalGracePeriodSeconds, onChange: v => { parameters.webApprovalGracePeriodSeconds = v } }}
-                                    >
-                                </FormGroup>
+                                    seconds={parameters.webApprovalGracePeriodSeconds}
+                                    onChange={v => { parameters.webApprovalGracePeriodSeconds = v }}
+                                />
                                 <HelpText>
                                     After a user approves an in-browser
                                     authentication request, remember the
@@ -755,31 +731,22 @@
                                 id="session-approvals"
                                 title="Session approvals"
                             >
-                                <FormGroup floating label="Approval timeout">
-                                    <input
-                                        type="text"
-                                        class="form-control"
-                                        placeholder="e.g. 5m, 1h"
-                                        use:humantimeDuration={{ seconds: parameters.adminApprovalTimeoutSeconds, onChange: v => { parameters.adminApprovalTimeoutSeconds = v } }}
-                                    >
-                                </FormGroup>
+                                <DurationInput
+                                    label="Approval timeout"
+                                    seconds={parameters.adminApprovalTimeoutSeconds}
+                                    onChange={v => { parameters.adminApprovalTimeoutSeconds = v }}
+                                />
                                 <HelpText>
                                     A session held for administrator approval is
                                     rejected if not approved within this time.
                                     Blank = use the default 10 minute timeout.
                                 </HelpText>
 
-                                <FormGroup
-                                    floating
+                                <DurationInput
                                     label="Admin approval cache period"
-                                >
-                                    <input
-                                        type="text"
-                                        class="form-control"
-                                        placeholder="e.g. 5m, 1h"
-                                        use:humantimeDuration={{ seconds: parameters.adminApprovalGracePeriodSeconds, onChange: v => { parameters.adminApprovalGracePeriodSeconds = v } }}
-                                    >
-                                </FormGroup>
+                                    seconds={parameters.adminApprovalGracePeriodSeconds}
+                                    onChange={v => { parameters.adminApprovalGracePeriodSeconds = v }}
+                                />
                                 <HelpText>
                                     After an administrator approves a session,
                                     remember the approval for this period and do
@@ -840,30 +807,18 @@
                                                 </FormGroup>
                                             </div>
                                             <div class="col-sm-6">
-                                                <FormGroup
-                                                    floating
+                                                <DurationInput
                                                     label="Failure window"
-                                                >
-                                                    <input
-                                                        type="text"
-                                                        class="form-control"
-                                                        placeholder="e.g. 15m"
-                                                        use:humantimeDuration={{ seconds: parameters.lpIpTimeWindowSeconds, onChange: v => { if (v != null) { parameters.lpIpTimeWindowSeconds = v } } }}
-                                                    >
-                                                </FormGroup>
+                                                    seconds={parameters.lpIpTimeWindowSeconds}
+                                                    onChange={v => { if (v != null) { parameters.lpIpTimeWindowSeconds = v } }}
+                                                />
                                             </div>
                                             <div class="col-6">
-                                                <FormGroup
-                                                    floating
+                                                <DurationInput
                                                     label="Initial block"
-                                                >
-                                                    <input
-                                                        type="text"
-                                                        class="form-control"
-                                                        placeholder="e.g. 30m"
-                                                        use:humantimeDuration={{ seconds: parameters.lpIpBaseBlockDurationSeconds, onChange: v => { if (v != null) { parameters.lpIpBaseBlockDurationSeconds = v } } }}
-                                                    >
-                                                </FormGroup>
+                                                    seconds={parameters.lpIpBaseBlockDurationSeconds}
+                                                    onChange={v => { if (v != null) { parameters.lpIpBaseBlockDurationSeconds = v } }}
+                                                />
                                             </div>
                                             <div class="col-6">
                                                 <FormGroup
@@ -884,30 +839,18 @@
                                                 </FormGroup>
                                             </div>
                                             <div class="col-6">
-                                                <FormGroup
-                                                    floating
+                                                <DurationInput
                                                     label="Max block"
-                                                >
-                                                    <input
-                                                        type="text"
-                                                        class="form-control"
-                                                        placeholder="e.g. 24h"
-                                                        use:humantimeDuration={{ seconds: parameters.lpIpMaxBlockDurationSeconds, onChange: v => { if (v != null) { parameters.lpIpMaxBlockDurationSeconds = v } } }}
-                                                    >
-                                                </FormGroup>
+                                                    seconds={parameters.lpIpMaxBlockDurationSeconds}
+                                                    onChange={v => { if (v != null) { parameters.lpIpMaxBlockDurationSeconds = v } }}
+                                                />
                                             </div>
                                             <div class="col-6">
-                                                <FormGroup
-                                                    floating
+                                                <DurationInput
                                                     label="Cooldown reset"
-                                                >
-                                                    <input
-                                                        type="text"
-                                                        class="form-control"
-                                                        placeholder="e.g. 24h"
-                                                        use:humantimeDuration={{ seconds: parameters.lpIpCooldownResetSeconds, onChange: v => { if (v != null) { parameters.lpIpCooldownResetSeconds = v } } }}
-                                                    >
-                                                </FormGroup>
+                                                    seconds={parameters.lpIpCooldownResetSeconds}
+                                                    onChange={v => { if (v != null) { parameters.lpIpCooldownResetSeconds = v } }}
+                                                />
                                             </div>
                                         </div>
                                         <HelpText>
@@ -943,17 +886,11 @@
                                                     </FormGroup>
                                                 </div>
                                                 <div class="col-sm-6">
-                                                    <FormGroup
-                                                        floating
+                                                    <DurationInput
                                                         label="Failure window"
-                                                    >
-                                                        <input
-                                                            type="text"
-                                                            class="form-control"
-                                                            placeholder="e.g. 60m"
-                                                            use:humantimeDuration={{ seconds: parameters.lpUserTimeWindowSeconds, onChange: v => { if (v != null) { parameters.lpUserTimeWindowSeconds = v } } }}
-                                                        >
-                                                    </FormGroup>
+                                                        seconds={parameters.lpUserTimeWindowSeconds}
+                                                        onChange={v => { if (v != null) { parameters.lpUserTimeWindowSeconds = v } }}
+                                                    />
                                                 </div>
                                             </div>
                                             <label
@@ -972,18 +909,12 @@
                                                 </div>
                                             </label>
                                             {#if parameters.lpUserAutoUnlock}
-                                                <FormGroup
-                                                    floating
+                                                <DurationInput
                                                     label="Auto-unlock delay"
+                                                    seconds={parameters.lpUserLockoutDurationSeconds}
+                                                    onChange={v => { if (v != null) { parameters.lpUserLockoutDurationSeconds = v } }}
                                                     class="mb-2"
-                                                >
-                                                    <input
-                                                        type="text"
-                                                        class="form-control"
-                                                        placeholder="e.g. 60m"
-                                                        use:humantimeDuration={{ seconds: parameters.lpUserLockoutDurationSeconds, onChange: v => { if (v != null) { parameters.lpUserLockoutDurationSeconds = v } } }}
-                                                    >
-                                                </FormGroup>
+                                                />
                                             {/if}
                                         </Subsection>
 
@@ -1013,18 +944,12 @@
                                         </Subsection>
 
                                         <Subsection title="Data retention">
-                                            <FormGroup
-                                                floating
+                                            <DurationInput
                                                 label="Keep records for"
+                                                seconds={parameters.loginProtectionRetentionSeconds}
+                                                onChange={v => { if (v != null) { parameters.loginProtectionRetentionSeconds = v } }}
                                                 class="mb-3"
-                                            >
-                                                <input
-                                                    type="text"
-                                                    class="form-control"
-                                                    placeholder="e.g. 30d"
-                                                    use:humantimeDuration={{ seconds: parameters.loginProtectionRetentionSeconds, onChange: v => { if (v != null) { parameters.loginProtectionRetentionSeconds = v } } }}
-                                                >
-                                            </FormGroup>
+                                            />
                                         </Subsection>
 
                                         <InfoBox>

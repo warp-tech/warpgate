@@ -12,6 +12,7 @@ use warpgate_common::{
     AdminPermission, AdminRole as AdminRoleConfig, User as UserConfig,
     UserRequireCredentialsPolicy, WarpgateError,
 };
+use warpgate_common_http::errors::{bad_request, invalid_field};
 use warpgate_core::State;
 use warpgate_core::logging::{AuditEvent, format_related_ids};
 use warpgate_db_entities::{
@@ -90,7 +91,10 @@ impl ListApi {
         admin.require(AdminPermission::UsersCreate)?;
 
         if body.username.is_empty() {
-            return Ok(CreateUserResponse::BadRequest(Json("name".into())));
+            return Ok(CreateUserResponse::BadRequest(invalid_field(
+                "name",
+                "username is empty",
+            )));
         }
 
         let db = &admin.services().db;
@@ -99,7 +103,10 @@ impl ListApi {
         // existing one only by case is the same account. Rejected here to give a
         // field-level error rather than a bare unique-constraint failure.
         if username_taken(db, &body.username, None).await? {
-            return Ok(CreateUserResponse::BadRequest(Json("username".into())));
+            return Ok(CreateUserResponse::BadRequest(invalid_field(
+                "username",
+                "a user with this username already exists",
+            )));
         }
 
         let values = User::ActiveModel {
@@ -245,12 +252,18 @@ impl DetailApi {
         };
 
         if body.username.is_empty() {
-            return Ok(UpdateUserResponse::BadRequest(Json("username".into())));
+            return Ok(UpdateUserResponse::BadRequest(invalid_field(
+                "username",
+                "username is empty",
+            )));
         }
 
         // Excludes this account, so re-casing or keeping one's own name is fine.
         if username_taken(db, &body.username, Some(user.id)).await? {
-            return Ok(UpdateUserResponse::BadRequest(Json("username".into())));
+            return Ok(UpdateUserResponse::BadRequest(invalid_field(
+                "username",
+                "another user already has this username",
+            )));
         }
 
         let mut model: User::ActiveModel = user.into();
@@ -350,8 +363,8 @@ impl DetailApi {
         };
 
         if user.ldap_server_id.is_none() {
-            return Ok(UnlinkUserFromLdapResponse::BadRequest(Json(
-                "User is not linked to LDAP".to_string(),
+            return Ok(UnlinkUserFromLdapResponse::BadRequest(bad_request(
+                "User is not linked to LDAP",
             )));
         }
 
@@ -384,8 +397,8 @@ impl DetailApi {
         };
 
         if user.ldap_server_id.is_some() {
-            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(
-                "User is already linked to LDAP".to_string(),
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(bad_request(
+                "User is already linked to LDAP",
             )));
         }
 
@@ -395,8 +408,8 @@ impl DetailApi {
             .await?;
 
         if ldap_servers.is_empty() {
-            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(
-                "No enabled LDAP servers configured".to_string(),
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(bad_request(
+                "No enabled LDAP servers configured",
             )));
         }
 
@@ -421,9 +434,9 @@ impl DetailApi {
         }
 
         if ldap_server_id.is_none() {
-            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(format!(
-                "No LDAP user found with username: {username}",
-            ))));
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(bad_request(
+                format!("No LDAP user found with username: {username}",),
+            )));
         }
 
         let mut model: User::ActiveModel = user.into();
