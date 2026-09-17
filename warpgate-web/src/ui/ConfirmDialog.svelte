@@ -68,7 +68,9 @@
         oncancel?.()
     }
 
-    async function confirm() {
+    // Named runConfirm, not confirm: a local `confirm` shadows window.confirm
+    // and makes the "no native dialogs left" audit grep unreadable.
+    async function runConfirm() {
         if (!matches) {
             return
         }
@@ -98,7 +100,7 @@
 
     {#snippet footer()}
         <Button onclick={cancel}>Cancel</Button>
-        <Button variant="destructive" disabled={!matches} click={confirm}>
+        <Button variant="destructive" disabled={!matches} click={runConfirm}>
             {confirmLabel}
         </Button>
     {/snippet}

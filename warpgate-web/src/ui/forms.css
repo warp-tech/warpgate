@@ -1,0 +1,26 @@
+/*
+ * Shared form layout.
+ *
+ * Added when the mechanical fork check found three byte-identical `.fields`
+ * blocks across the credential modals. Same reasoning as markers.css: the
+ * second occurrence is the signal, not the fifth. Import it rather than
+ * restating the block.
+ *
+ * Only layout lives here. Anything with a colour or a state belongs in a
+ * primitive, not in a stylesheet call sites can reach.
+ */
+
+/* Stacked fields in a dialog body or a form section. */
+.wg-field-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wg-space-lg);
+}
+
+/* Tighter variant for fields that read as one control, e.g. a label and its
+   textarea. */
+.wg-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wg-space-xs);
+}

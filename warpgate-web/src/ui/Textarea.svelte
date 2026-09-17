@@ -1,13 +1,30 @@
 <script lang="ts">
-    import type { Snippet } from 'svelte'
-
+    /**
+     * Multi-line text field.
+     *
+     * Built when the mechanical fork check found byte-identical hand-rolled
+     * textarea styling in two places — kubernetes/Options.svelte (screen 4f,
+     * already committed) and PublicKeyCredentialModal.svelte — each with its
+     * own label-wrapper div. Same omission as Callout: the Phase 2 primitive
+     * set has no multi-line field, so every screen that needs one invents it.
+     *
+     * The API mirrors Input deliberately, so the two are interchangeable at a
+     * call site and neither grows its own vocabulary: same label /
+     * labelHidden / hint / error / invalid / required / mono / autofocus
+     * semantics, same error-implies-invalid rule, same aria-describedby
+     * wiring, same shell-carries-the-focus-ring arrangement.
+     *
+     * `mono` defaults to true here. Every multi-line field in Warpgate holds
+     * machine text — PEM blocks, OpenSSH keys, YAML — and proportional type
+     * makes those materially harder to proofread.
+     */
     interface Props {
         value?: string
         label?: string
         /** Hides the label visually but keeps it for assistive tech. */
         labelHidden?: boolean
         placeholder?: string
-        type?: 'text' | 'password' | 'email' | 'number' | 'search' | 'url'
+        rows?: number
         disabled?: boolean
         readonly?: boolean
         required?: boolean
@@ -17,30 +34,18 @@
         hint?: string
         /** Machine data — renders the value in the mono face. */
         mono?: boolean
+        /** Off by default: these fields hold keys and config, not prose. */
+        spellcheck?: boolean
+        /** Lets the browser grow the box; 'vertical' matches the old markup. */
+        resize?: 'vertical' | 'none' | 'both'
         id?: string
         name?: string
-        autocomplete?: AutoFill
-        /** Picks the on-screen keyboard — "numeric" for codes and ports. */
-        inputmode?:
-            | 'text'
-            | 'numeric'
-            | 'decimal'
-            | 'tel'
-            | 'email'
-            | 'url'
-            | 'search'
-        size?: 'standard' | 'compact'
-        /**
-         * Marks this field as the one a dialog should focus on open.
-         * focusTrap looks for `[data-autofocus]` on a real element, so the
-         * attribute has to be forwarded rather than landing on the wrapper.
-         */
+        /** See Input: focusTrap looks for [data-autofocus] on a real element. */
         autofocus?: boolean
         class?: string
         oninput?: (event: Event) => void
         onkeydown?: (event: KeyboardEvent) => void
-        prefix?: Snippet
-        suffix?: Snippet
+        onpaste?: (event: ClipboardEvent) => void
     }
 
     let {
@@ -48,25 +53,23 @@
         label,
         labelHidden = false,
         placeholder,
-        type = 'text',
+        rows = 6,
         disabled = false,
         readonly = false,
         required = false,
         invalid = false,
         error,
         hint,
-        mono = false,
-        id = `wg-input-${Math.random().toString(36).slice(2, 9)}`,
+        mono = true,
+        spellcheck = false,
+        resize = 'vertical',
+        id = `wg-textarea-${Math.random().toString(36).slice(2, 9)}`,
         name,
-        autocomplete,
-        inputmode,
-        size = 'standard',
         autofocus = false,
         class: className = '',
         oninput,
         onkeydown,
-        prefix,
-        suffix,
+        onpaste,
     }: Props = $props()
 
     // An error message implies the invalid state; callers should not have to
@@ -90,38 +93,29 @@
     {/if}
 
     <div
-        class="wg-input-shell wg-input-{size}"
-        class:wg-input-invalid={isInvalid}
-        class:wg-input-disabled={disabled}
+        class="wg-textarea-shell"
+        class:wg-textarea-invalid={isInvalid}
+        class:wg-textarea-disabled={disabled}
     >
-        {#if prefix}
-            <span class="wg-input-affix" aria-hidden="true">
-                {@render prefix()}
-            </span>
-        {/if}
-        <input
+        <textarea
             {id}
             {name}
-            {type}
+            {rows}
             {placeholder}
             {disabled}
             {readonly}
             {required}
-            {autocomplete}
-            {inputmode}
+            {spellcheck}
             data-autofocus={autofocus ? '' : undefined}
             bind:value
-            class:wg-mono-input={mono}
+            class:wg-mono-textarea={mono}
+            style:resize
             aria-invalid={isInvalid || undefined}
             aria-describedby={describedBy}
             {oninput}
             {onkeydown}
-        >
-        {#if suffix}
-            <span class="wg-input-affix" aria-hidden="true">
-                {@render suffix()}
-            </span>
-        {/if}
+            {onpaste}
+        ></textarea>
     </div>
 
     {#if error}
@@ -149,12 +143,8 @@
         color: var(--wg-error);
     }
 
-    .wg-input-shell {
+    .wg-textarea-shell {
         display: flex;
-        align-items: center;
-        gap: var(--wg-space-sm);
-        height: var(--wg-control-height);
-        padding: 0 var(--wg-space-sm);
         background: var(--wg-surface-sunken);
         /* border-strong: this boundary tells the operator where to type */
         border: var(--wg-border-width) solid var(--wg-border-strong);
@@ -162,57 +152,45 @@
         transition: border-color var(--wg-duration-fast) var(--wg-easing);
     }
 
-    .wg-input-compact {
-        height: var(--wg-control-height-compact);
-    }
-
-    .wg-input-shell:focus-within {
+    .wg-textarea-shell:focus-within {
         border-color: var(--wg-primary);
         outline: var(--wg-focus-ring);
         outline-offset: var(--wg-focus-ring-offset);
     }
 
-    .wg-input-invalid {
+    .wg-textarea-invalid {
         border-color: var(--wg-error);
     }
 
-    .wg-input-disabled {
+    .wg-textarea-disabled {
         opacity: 0.45;
     }
 
-    input {
+    textarea {
         flex: 1 1 auto;
         min-width: 0;
-        height: 100%;
+        padding: var(--wg-space-sm);
         border: 0;
         background: none;
         color: var(--wg-text);
         font: var(--wg-text-body-md);
     }
 
-    input:focus {
+    textarea:focus {
         /* the shell carries the ring */
         outline: none;
     }
 
-    input::placeholder {
+    textarea::placeholder {
         color: var(--wg-text-subtle);
     }
 
-    input:disabled {
+    textarea:disabled {
         cursor: not-allowed;
     }
 
-    .wg-mono-input {
-        font-family: var(--wg-font-mono);
-        font-variant-numeric: tabular-nums;
-    }
-
-    .wg-input-affix {
-        display: inline-flex;
-        align-items: center;
-        color: var(--wg-text-subtle);
-        flex: none;
+    .wg-mono-textarea {
+        font: var(--wg-text-code-sm);
     }
 
     .wg-field-error,

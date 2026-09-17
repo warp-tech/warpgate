@@ -2,15 +2,20 @@
     /**
      * Kubernetes target options — part of screen 4f.
      *
-     * The certificate and private key are textareas rather than Input,
+     * The certificate and private key use Textarea rather than Input,
      * deliberately: PEM blocks are multi-line and an operator needs to see
      * enough of one to confirm they pasted the right thing. They render in the
      * mono face for the same reason the rest of the machine data does.
+     *
+     * These were hand-rolled textareas when 4f landed. The fork check later
+     * found the same markup and the same CSS in PublicKeyCredentialModal, so
+     * both moved onto the ui/Textarea primitive.
      */
     import type { TargetOptionsTargetKubernetesOptions } from 'admin/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import Input from 'ui/Input.svelte'
     import Select from 'ui/Select.svelte'
+    import Textarea from 'ui/Textarea.svelte'
     import TlsConfiguration from '../TlsConfiguration.svelte'
 
     interface Props {
@@ -47,24 +52,22 @@
 
 {#if options.auth.kind === 'Certificate'}
     <div class="pem">
-        <label for="k8s-cert">Client certificate</label>
-        <textarea
+        <Textarea
+            label="Client certificate"
             id="k8s-cert"
-            rows="10"
-            spellcheck="false"
+            rows={10}
             placeholder="-----BEGIN CERTIFICATE-----"
             bind:value={options.auth.certificate}
-        ></textarea>
+        />
     </div>
     <div class="pem">
-        <label for="k8s-key">Client private key</label>
-        <textarea
+        <Textarea
+            label="Client private key"
             id="k8s-key"
-            rows="7"
-            spellcheck="false"
+            rows={7}
             placeholder="-----BEGIN RSA PRIVATE KEY-----"
             bind:value={options.auth.privateKey}
-        ></textarea>
+        />
     </div>
 {/if}
 
@@ -94,35 +97,6 @@
     }
 
     .pem {
-        display: flex;
-        flex-direction: column;
-        gap: var(--wg-space-xs);
         margin-bottom: var(--wg-space-lg);
-    }
-
-    .pem label {
-        font: var(--wg-text-body-md);
-        color: var(--wg-text-muted);
-    }
-
-    textarea {
-        width: 100%;
-        padding: var(--wg-space-sm);
-        background: var(--wg-surface-sunken);
-        border: var(--wg-border-width) solid var(--wg-border-strong);
-        border-radius: var(--wg-radius-control);
-        color: var(--wg-text);
-        font: var(--wg-text-code-sm);
-        resize: vertical;
-    }
-
-    textarea:focus-visible {
-        outline: var(--wg-focus-ring);
-        outline-offset: var(--wg-focus-ring-offset);
-        border-color: var(--wg-primary);
-    }
-
-    textarea::placeholder {
-        color: var(--wg-text-subtle);
     }
 </style>

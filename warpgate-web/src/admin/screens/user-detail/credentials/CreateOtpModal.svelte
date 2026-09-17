@@ -29,11 +29,11 @@
      * validates; the URI copyable for password managers that take it directly.
      */
     import base32Encode from 'base32-encode'
-    import CopyButton from 'common/CopyButton.svelte'
     import * as OTPAuth from 'otpauth'
     import QRCode from 'qrcode'
     import Button from 'ui/Button.svelte'
     import Callout from 'ui/Callout.svelte'
+    import CopyButton from 'ui/CopyButton.svelte'
     import Input from 'ui/Input.svelte'
     import Modal from 'ui/Modal.svelte'
 

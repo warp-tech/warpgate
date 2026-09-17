@@ -836,3 +836,69 @@ npm run devbuild      # production build strips the route
 # then serve warpgate-web/dist/ with /@warpgate/* mapped to dist/*
 # and open  http://localhost:<port>/#/styleguide
 ```
+
+### Two primitives the fork check found, not the design (screen 6c)
+
+The mechanical fork check (grep the new-UI screens for repeated patterns before
+each screen commit; two matches in different files = stop) earned its keep
+twice in one commit.
+
+**`ui/CopyButton.svelte`.** `common/CopyButton.svelte` is built on sveltestrap's
+`Button` and `svelte-fa`, and **two already-written new-UI screens imported it** —
+`CreateOtpModal` (landed in 6b) and the new `CertificateCredentialModal`. That
+would have kept sveltestrap alive past the deletion commit, and it would have
+surfaced as a build failure at the worst possible moment rather than here.
+
+It keeps the `copy-text-to-clipboard` dependency deliberately.
+`navigator.clipboard.writeText` only exists in a **secure context**, and this
+admin UI is reachable over plain HTTP on internal addresses, where that API is
+`undefined`. The package falls back to the `execCommand` textarea trick, which
+works there. Swapping it for the modern API would break copying in exactly the
+air-gapped and DMZ deployments this fork targets.
+
+**`ui/Textarea.svelte`.** Byte-identical hand-rolled textarea CSS in
+`kubernetes/Options.svelte` (screen 4f, already committed) and
+`PublicKeyCredentialModal.svelte`, each with its own label-wrapper div. Same
+shape of omission as Callout: the Phase 2 primitive set has no multi-line
+field, so every screen that needs one invents it. The API mirrors `Input` field
+for field so the two are interchangeable at a call site. `mono` defaults to
+**on** — every multi-line field in Warpgate holds machine text (PEM, OpenSSH
+keys, YAML) and proportional type makes those materially harder to proofread.
+
+`ui/forms.css` came out of the same pass: three byte-identical `.fields` blocks
+across the credential modals. Same consolidation as `markers.css`, layout only.
+
+### `ui/Input` swallowed `data-autofocus`
+
+`focusTrap` moves focus on open by `node.querySelector('[data-autofocus]')`,
+which needs the attribute on a **real DOM element**. `ui/Input` had no such
+prop, so `<Input data-autofocus />` was a type error in the four credential
+modals — and in a plain `.svelte` file with looser typing it would have been
+silently dropped onto nothing, leaving focus to fall back to the first tabbable
+element with no visible symptom. Added an explicit `autofocus` prop that
+forwards `data-autofocus` onto the `<input>`; `ui/Textarea` has the same.
+
+### A local `confirm()` shadowed `window.confirm`
+
+`ui/ConfirmDialog.svelte` named its own handler `confirm()`. Harmless at
+runtime (it is a declaration, not an assignment, so Biome's `noGlobalAssign`
+stays quiet) but it put the replacement for `window.confirm` into the grep that
+audits for remaining `window.confirm` call sites. Renamed to `runConfirm`. Same
+family as the earlier `open` / `status` / `close` shadowing.
+
+### Biome's import sorter walks docblocks down the import list
+
+A `/** ... */` block placed directly above the first `import` is treated as
+that import's leading comment and **travels with it** when the sorter reorders.
+The file-header docblocks in three files ended up parked in the middle of the
+import list. Separating the docblock from the first import with a blank line
+detaches it; verified stable across a second `biome check --fix` pass.
+
+### The theme bundles are `.js`, not `.css`
+
+`theme.dark` and `theme.light` are emitted as **JavaScript** chunks
+(177.7 + 178.6 = 356.3 KB), not stylesheets — they are the Bootstrap SCSS
+imported through JS. Any measurement that greps `dist/assets/*.css` for them
+finds nothing and silently reports a 356 KB shortfall. This is the
+reclassification the Bootstrap deletion is expected to realise: those bytes
+move from the JS column to the CSS column rather than simply disappearing.

@@ -7,8 +7,11 @@
     import { of } from 'rxjs'
     import Badge from 'ui/Badge.svelte'
     import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
     import Checkbox from 'ui/Checkbox.svelte'
     import Chip from 'ui/Chip.svelte'
+    import ConfirmDialog from 'ui/ConfirmDialog.svelte'
+    import CopyButton from 'ui/CopyButton.svelte'
     import Drawer from 'ui/Drawer.svelte'
     import EmptyState from 'ui/EmptyState.svelte'
     import Input from 'ui/Input.svelte'
@@ -23,6 +26,7 @@
     } from 'ui/StatusMarker.svelte'
     import Table from 'ui/Table.svelte'
     import Tabs from 'ui/Tabs.svelte'
+    import Textarea from 'ui/Textarea.svelte'
     import Toggle from 'ui/Toggle.svelte'
     import TokenInput from 'ui/TokenInput.svelte'
     import Tooltip from 'ui/Tooltip.svelte'
@@ -42,7 +46,10 @@
     let filterOn = $state(true)
     let modalOpen = $state(false)
     let drawerOpen = $state(false)
+    let confirmPlainOpen = $state(false)
+    let confirmTypedOpen = $state(false)
     let selectedRows: string[] = $state([])
+    let pem = $state('')
 
     const PROTOCOLS = [
         { value: 'ssh', label: 'SSH' },
@@ -139,6 +146,16 @@
         {
             name: 'Toggle track (on)',
             selector: '#a-toggle',
+            rule: 'ui',
+            border: true,
+        },
+        { name: 'Callout / info', selector: '.a-callout-info' },
+        { name: 'Callout / success', selector: '.a-callout-success' },
+        { name: 'Callout / warning', selector: '.a-callout-warning' },
+        { name: 'Callout / danger', selector: '.a-callout-danger' },
+        {
+            name: 'Callout / danger border',
+            selector: '.a-callout-danger',
             rule: 'ui',
             border: true,
         },
@@ -591,6 +608,156 @@
     </div>
 </section>
 
+<!-- ══ Textarea ═════════════════════════════════════════════ -->
+<section>
+    <h2>Textarea <span class="new">net-new</span></h2>
+    <p class="note">
+        The API mirrors <code>Input</code> field for field, so the two are
+        interchangeable at a call site. <code>mono</code> defaults to
+        <strong>on</strong>: every multi-line field in Warpgate holds machine
+        text — PEM blocks, OpenSSH keys, YAML — and proportional type makes
+        those materially harder to proofread. Spellcheck defaults to off for the
+        same reason. The shell carries the focus ring, not the textarea, so the
+        ring wraps the whole control the way it does on an Input.
+    </p>
+    <div class="col" style="max-width: 36rem">
+        <Textarea
+            label="Public key in OpenSSH format"
+            rows={4}
+            placeholder="ssh-ed25519 AAAA… user@host"
+            bind:value={pem}
+            hint="Comment is stripped on save"
+        />
+        <Textarea
+            label="Proportional, for prose"
+            rows={3}
+            mono={false}
+            spellcheck
+            value="A note about this target that a human will read."
+        />
+        <Textarea
+            label="Invalid"
+            rows={3}
+            value="-----BEGIN NONSENSE-----"
+            error="Not a recognised PEM block"
+        />
+        <Textarea label="Disabled" rows={2} value="locked" disabled />
+        <Textarea
+            label="Read-only"
+            rows={2}
+            value="managed by config file"
+            readonly
+        />
+    </div>
+</section>
+
+<!-- ══ Callout ═════════════════════════════════════════════════════ -->
+<section>
+    <h2>Callout <span class="new">net-new</span></h2>
+    <p class="note">
+        Replaces sveltestrap's <code>Alert</code>. Tone carries a shape as well
+        as a colour — the same geometry vocabulary
+        <code>StatusMarker</code>
+        uses — so the four are distinguishable without colour vision.
+        <code>danger</code>
+        gets
+        <code>role="alert"</code>
+        and an assertive live region; every other tone is polite, because a page
+        that announces its own layout on load is worse than one that says
+        nothing.
+    </p>
+    <div class="col" style="max-width: 44rem">
+        <Callout class="a-callout-info" title="Recording is enabled">
+            Sessions on this target are written to disk and retained for 90
+            days.
+        </Callout>
+        <Callout
+            class="a-callout-success"
+            tone="success"
+            title="Certificate issued"
+        >
+            The credential is active immediately.
+        </Callout>
+        <Callout
+            class="a-callout-warning"
+            tone="warning"
+            title="TLS verification is disabled"
+        >
+            Warpgate will accept any certificate this target presents, including
+            one substituted by an attacker on the path.
+        </Callout>
+        <Callout
+            class="a-callout-danger"
+            tone="danger"
+            title="Could not reach the target"
+        >
+            <code>dial tcp 10.12.4.8:22: connect: connection refused</code>
+        </Callout>
+        <Callout tone="danger" title="The host key has changed">
+            Either the host was rebuilt and legitimately presents a new key, or
+            something is intercepting the connection. Confirm the new
+            fingerprint with the host's administrator over a channel that does
+            not go through Warpgate before accepting it.
+            {#snippet actions()}
+                <Button size="compact">Accept new key</Button>
+                <Button size="compact" variant="ghost">Keep the old one</Button>
+            {/snippet}
+        </Callout>
+        <Callout>Single-line, no title.</Callout>
+    </div>
+</section>
+
+<!-- ══ ConfirmDialog ═══════════════════════════════════════════════ -->
+<section>
+    <h2>ConfirmDialog <span class="new">net-new</span></h2>
+    <p class="note">
+        Replaces <code>window.confirm</code>, which cannot be styled, cannot be
+        focus-trapped and blocks the event loop. Typed confirmation is reserved
+        for an
+        <strong>irreversible consequence the dialog cannot show you</strong>
+        — deleting a target takes its sessions and its role assignments with it,
+        and nothing on screen lists them. Actions whose damage is visible and
+        bounded stay plain, even when they are disruptive: terminating a session
+        has a clock running on it, and a typing exercise is a cost paid at
+        exactly the wrong moment.
+    </p>
+    <div class="row">
+        <Button onclick={() => (confirmPlainOpen = true)}>
+            Plain — terminate session
+        </Button>
+        <Button variant="destructive" onclick={() => (confirmTypedOpen = true)}>
+            Typed — delete target
+        </Button>
+    </div>
+</section>
+
+<!-- ══ CopyButton ══════════════════════════════════════════════════ -->
+<section>
+    <h2>CopyButton <span class="new">net-new</span></h2>
+    <p class="note">
+        Replaces <code>common/CopyButton.svelte</code>, which was built on
+        sveltestrap. It keeps the <code>copy-text-to-clipboard</code>
+        dependency on purpose: <code>navigator.clipboard</code> only exists in a
+        secure context, and this UI is reachable over plain HTTP on internal
+        addresses, where that API is <code>undefined</code>. The confirmation is
+        a live region as well as an icon swap — the original changed only the
+        icon, which told a screen reader user nothing.
+    </p>
+    <div class="row">
+        <CopyButton text="ssh -p 2222 admin:prod-bastion-01@warpgate.local" />
+        <CopyButton text="warpgate-token-7f3a" label="Copy setup URI" />
+        <CopyButton text="x" label="Primary" variant="primary" />
+        <CopyButton text="x" label="Compact" size="compact" />
+        <CopyButton text="x" label="Disabled" disabled />
+    </div>
+    <p class="label">
+        Full width, as it sits in the TOTP and certificate modals
+    </p>
+    <div style="max-width: 20rem">
+        <CopyButton text="x" label="Copy both as kubeconfig" block />
+    </div>
+</section>
+
 <!-- ══ Audit ═══════════════════════════════════════════════════════ -->
 <section>
     <h2>Primitive contrast audit</h2>
@@ -620,6 +787,32 @@
         </Button>
     {/snippet}
 </Modal>
+
+<ConfirmDialog
+    bind:open={confirmPlainOpen}
+    title="Terminate this session?"
+    confirmLabel="Terminate"
+    onconfirm={slowOk}
+>
+    <p class="panel">
+        marta.kowalski is connected to prod-bastion-01 over SSH. The connection
+        drops immediately; the recording written so far is kept.
+    </p>
+</ConfirmDialog>
+
+<ConfirmDialog
+    bind:open={confirmTypedOpen}
+    title="Delete prod-bastion-01?"
+    confirmLabel="Delete target"
+    confirmText="prod-bastion-01"
+    confirmTextLabel="target name"
+    onconfirm={slowOk}
+>
+    <p class="panel">
+        This also removes its role assignments and its session history, which
+        are not listed here and cannot be restored.
+    </p>
+</ConfirmDialog>
 
 <Drawer
     bind:open={drawerOpen}

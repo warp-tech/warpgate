@@ -82,12 +82,12 @@
     import EmptyState from 'ui/EmptyState.svelte'
     import Tooltip from 'ui/Tooltip.svelte'
     import { toast } from 'ui/toasts.svelte'
-    import CertificateCredentialModal from '../../../CertificateCredentialModal.svelte'
-    import CreatePasswordModal from '../../../CreatePasswordModal.svelte'
-    import AuthPolicyEditor from '../../../config/users/AuthPolicyEditor.svelte'
-    import PublicKeyCredentialModal from '../../../PublicKeyCredentialModal.svelte'
-    import SsoCredentialModal from '../../../SsoCredentialModal.svelte'
+    import AuthPolicyEditor from './AuthPolicyEditor.svelte'
+    import CertificateCredentialModal from './CertificateCredentialModal.svelte'
     import CreateOtpModal from './CreateOtpModal.svelte'
+    import CreatePasswordModal from './CreatePasswordModal.svelte'
+    import PublicKeyCredentialModal from './PublicKeyCredentialModal.svelte'
+    import SsoCredentialModal from './SsoCredentialModal.svelte'
 
     interface Props {
         userId: string
