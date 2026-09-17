@@ -5,11 +5,11 @@ mod handler;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::io;
 use std::net::ToSocketAddrs;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{fmt, io};
 
 use anyhow::Result;
 use bytes::Bytes;
@@ -970,6 +970,33 @@ pub enum RCState {
 enum InnerEvent {
     RCCommand(RCCommand, Option<RCCommandReply>),
     ClientHandlerEvent(ClientHandlerEvent),
+    /// `None` is a host-key check that stopped where it was told to: there is
+    /// no connection to take into service, and none was ever authenticated.
+    Connected(Result<Option<Connection>, ConnectionError>),
+}
+
+struct Connection(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>);
+
+impl fmt::Debug for Connection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Connection")
+    }
+}
+
+struct Connector {
+    id: UserSessionId,
+    tx: Sender<RCEvent>,
+    services: Services,
+    /// Who to name in a certificate when there is no session to look up.
+    ///
+    /// The admin host-key check has no session — it is a button press, not a
+    /// login — but reaching a target behind a jump host still authenticates
+    /// that hop, and a certificate is minted for it. Without this the key ID
+    /// falls back to naming the random UUID that stood in for a session, so the
+    /// jump host's sshd log and Vault's issuance log both record a certificate
+    /// that resolves to nobody. That is the attribution failure the whole
+    /// feature exists to prevent, in the one caller that has no user to look up.
+    identity_hint: Option<IdentityHint>,
 }
 
 pub struct RemoteClient {
@@ -982,20 +1009,11 @@ pub struct RemoteClient {
     pending_streamlocal_forwards: Vec<String>,
     state: RCState,
     abort_rx: UnboundedReceiver<()>,
+    connecting: Option<JoinHandle<()>>,
     inner_event_rx: UnboundedReceiver<InnerEvent>,
     inner_event_tx: UnboundedSender<InnerEvent>,
     child_tasks: Vec<JoinHandle<Result<(), SshClientError>>>,
     services: Services,
-    /// Who to name in a certificate when there is no session to look up.
-    ///
-    /// The admin host-key check has no session — it is a button press, not a
-    /// login — but reaching a target behind a jump host still authenticates
-    /// that hop, and a certificate is minted for it. Without this the key ID
-    /// falls back to naming the random UUID that stood in for a session, so the
-    /// jump host's sshd log and Vault's issuance log both record a certificate
-    /// that resolves to nobody. That is the attribution failure the whole
-    /// feature exists to prevent, in the one caller that has no user to look up.
-    identity_hint: Option<IdentityHint>,
 }
 
 pub struct RemoteClientHandles {
@@ -1025,8 +1043,8 @@ impl RemoteClient {
             inner_event_tx: inner_event_tx.clone(),
             child_tasks: vec![],
             services,
-            identity_hint: None,
             abort_rx,
+            connecting: None,
         };
 
         tokio::spawn(
@@ -1142,8 +1160,12 @@ impl RemoteClient {
                                     break
                                 }
                             }
-                            // `_` rather than `Some(())`, matching the connect
-                            // loop. The two are not two spellings of one thing:
+                            // `_` rather than `Some(())`. Since #2603 this is
+                            // the only arm that answers for `abort_rx` — the
+                            // connect loop runs in its own task now and is
+                            // cancelled rather than signalled — so getting it
+                            // wrong here loses aborts outright. The two are not
+                            // two spellings of one thing:
                             // under `Some(())` a closed `abort_rx` disables this
                             // branch instead of firing it, and with the event
                             // branch disabled too there is nothing left for
@@ -1182,6 +1204,34 @@ impl RemoteClient {
                     let _ = reply.send(result.map(|_| ()));
                 }
                 return Ok(brk);
+            }
+            InnerEvent::Connected(result) => {
+                self.connecting = None;
+                match result {
+                    Ok(Some(connection)) => self.on_connected(connection).await?,
+                    // A host-key check that stopped at the key it was asked
+                    // about. Nothing was authenticated, so there is nothing to
+                    // take into service and nothing to disconnect — only the
+                    // bookkeeping, and the end of the client task.
+                    Ok(None) => {
+                        self.set_disconnected().await;
+                        return Ok(true);
+                    }
+                    Err(e) => {
+                        // `{:?}` rather than `{}` throughout this file for
+                        // anything carrying a remote party's words. A newline in a
+                        // Vault error body or an unresolved host name forges a
+                        // whole record in the default text format — a log line the
+                        // reader has no way to tell from one Warpgate wrote. Debug
+                        // escapes it; Display does not, and `emit_pty_output`'s
+                        // escaping does not reach here because no `tracing` call
+                        // routes through it.
+                        debug!("Connect error: {e:?}");
+                        let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
+                        self.set_disconnected().await;
+                        return Ok(true);
+                    }
+                }
             }
             InnerEvent::ClientHandlerEvent(client_event) => {
                 debug!("Client handler event: {:?}", client_event);
@@ -1250,54 +1300,19 @@ impl RemoteClient {
         reply: &mut Option<RCCommandReply>,
     ) -> Result<bool, SshClientError> {
         match cmd {
-            RCCommand::Connect(options) => match self.connect(options).await {
-                Ok(()) => {
-                    self.set_state(RCState::Connected)
-                        .await
-                        .map_err(SshClientError::other)?;
-                    let ops = std::mem::take(&mut self.pending_ops);
-                    for (id, op) in ops {
-                        self.apply_channel_op(id, op, &mut None).await?;
-                    }
-
-                    let forwards = std::mem::take(&mut self.pending_forwards);
-                    for (address, port) in forwards {
-                        self.tcpip_forward(address, port).await?;
-                    }
-
-                    let forwards = std::mem::take(&mut self.pending_streamlocal_forwards);
-                    for socket_path in forwards {
-                        self.streamlocal_forward(socket_path).await?;
-                    }
-                }
-                Err(e) => {
-                    // `{:?}` rather than `{}` throughout this file for
-                    // anything carrying a remote party's words. A newline in a
-                    // Vault error body or an unresolved host name forges a
-                    // whole record in the default text format — a log line the
-                    // reader has no way to tell from one Warpgate wrote. Debug
-                    // escapes it; Display does not, and `emit_pty_output`'s
-                    // escaping does not reach here because no `tracing` call
-                    // routes through it.
-                    debug!("Connect error: {e:?}");
-                    let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
-                    self.set_disconnected().await;
-
-                    return Ok(true);
-                }
-            },
+            RCCommand::Connect(chain) => {
+                let connector = self.connector(None);
+                self.spawn_connection(async move { connector.connect_chain(chain, None).await });
+            }
             RCCommand::CheckHostKey {
                 chain,
                 target_id,
                 requested_by,
             } => {
-                self.identity_hint = Some(requested_by);
-                if let Err(e) = self.check_host_key(chain, target_id).await {
-                    debug!("Host key check error: {e:?}");
-                    let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
-                }
-                self.set_disconnected().await;
-                return Ok(true);
+                let connector = self.connector(Some(requested_by));
+                self.spawn_connection(
+                    async move { connector.check_host_key(chain, target_id).await },
+                );
             }
             RCCommand::Channel(ch, op) => {
                 self.apply_channel_op(ch, op, reply).await?;
@@ -1322,6 +1337,81 @@ impl RemoteClient {
         Ok(false)
     }
 
+    /// The connection attempt's own half of this client, carrying only what it
+    /// needs to reach a target. Built per attempt so it can be moved into its
+    /// own task.
+    fn connector(&self, identity_hint: Option<IdentityHint>) -> Connector {
+        Connector {
+            id: self.id,
+            tx: self.tx.clone(),
+            services: self.services.clone(),
+            identity_hint,
+        }
+    }
+
+    /// Run a connection attempt off the command loop, replacing any attempt
+    /// still in flight. The outcome comes back as `InnerEvent::Connected`.
+    fn spawn_connection(
+        &mut self,
+        attempt: impl Future<Output = Result<Option<Connection>, ConnectionError>> + Send + 'static,
+    ) {
+        let inner_event_tx = self.inner_event_tx.clone();
+        let attempt = tokio::spawn(
+            async move {
+                let _ = inner_event_tx.send(InnerEvent::Connected(attempt.await));
+            }
+            .instrument(Span::current()),
+        );
+        if let Some(previous) = self.connecting.replace(attempt) {
+            previous.abort();
+        }
+    }
+
+    /// Take an established connection into service and flush everything queued
+    /// while it was being made.
+    async fn on_connected(
+        &mut self,
+        Connection(session, mut event_rx): Connection,
+    ) -> Result<(), SshClientError> {
+        self.session = Some(Arc::new(session));
+
+        info!("Connected");
+
+        tokio::spawn(
+            {
+                let inner_event_tx = self.inner_event_tx.clone();
+                async move {
+                    while let Some(e) = event_rx.recv().await {
+                        info!("{:?}", e);
+                        inner_event_tx.send(InnerEvent::ClientHandlerEvent(e))?;
+                    }
+                    Ok::<(), anyhow::Error>(())
+                }
+            }
+            .instrument(Span::current()),
+        );
+
+        self.set_state(RCState::Connected).await?;
+
+        let ops = std::mem::take(&mut self.pending_ops);
+        for (id, op) in ops {
+            self.apply_channel_op(id, op, &mut None).await?;
+        }
+
+        let forwards = std::mem::take(&mut self.pending_forwards);
+        for (address, port) in forwards {
+            self.tcpip_forward(address, port).await?;
+        }
+
+        let forwards = std::mem::take(&mut self.pending_streamlocal_forwards);
+        for socket_path in forwards {
+            self.streamlocal_forward(socket_path).await?;
+        }
+        Ok(())
+    }
+}
+
+impl Connector {
     async fn build_ssh_config(&self, ssh_options: &TargetSSHOptions) -> Arc<russh::client::Config> {
         let algos = if ssh_options.allow_insecure_algos {
             Preferred {
@@ -1414,17 +1504,14 @@ impl RemoteClient {
     /// the last one, and their keys are not the answer to the question.
     /// Returns `None` when it stopped at that hop's host key as asked.
     async fn connect_chain(
-        &mut self,
+        &self,
         chain: Vec<ResolvedSshChainHost>,
         // `check_target`: the hop being asked about, when this is a host-key
         // check, by identity. Deciding it by position asserts that the chain
         // always ends at the target that was named — true of every chain built
         // today, and an assumption rather than something checked.
         check_target: Option<Uuid>,
-    ) -> Result<
-        Option<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>)>,
-        ConnectionError,
-    > {
+    ) -> Result<Option<Connection>, ConnectionError> {
         if !chain_can_answer(
             check_target,
             &chain.iter().map(|hop| hop.id).collect::<Vec<_>>(),
@@ -1522,17 +1609,19 @@ impl RemoteClient {
             active_rx = new_rx;
         }
 
-        Ok(Some((session, active_rx)))
+        Ok(Some(Connection(session, active_rx)))
     }
 
     /// Connects as far as the target's host key and stops, for the admin-side
     /// check. Nothing is authenticated, so nothing is issued.
     async fn check_host_key(
-        &mut self,
+        &self,
         chain: Vec<ResolvedSshChainHost>,
         target_id: Uuid,
-    ) -> Result<(), ConnectionError> {
-        if let Some((session, _)) = self.connect_chain(chain, Some(target_id)).boxed().await? {
+    ) -> Result<Option<Connection>, ConnectionError> {
+        if let Some(Connection(session, _)) =
+            self.connect_chain(chain, Some(target_id)).boxed().await?
+        {
             // Only reachable if the connection came up without the handler ever
             // reporting a host key, which should not happen — but an open
             // session left behind would be exactly the leak this command exists
@@ -1541,37 +1630,13 @@ impl RemoteClient {
                 .disconnect(russh::Disconnect::ByApplication, "", "")
                 .await;
         }
-        Ok(())
-    }
-
-    async fn connect(&mut self, chain: Vec<ResolvedSshChainHost>) -> Result<(), ConnectionError> {
-        let Some((session, mut event_rx)) = self.connect_chain(chain, None).boxed().await? else {
-            return Err(ConnectionError::Internal);
-        };
-
-        self.session = Some(Arc::new(session));
-
-        info!("Connected");
-
-        tokio::spawn(
-            {
-                let inner_event_tx = self.inner_event_tx.clone();
-                async move {
-                    while let Some(e) = event_rx.recv().await {
-                        info!("{:?}", e);
-                        inner_event_tx.send(InnerEvent::ClientHandlerEvent(e))?;
-                    }
-                    Ok::<(), anyhow::Error>(())
-                }
-            }
-            .instrument(Span::current()),
-        );
-
-        Ok(())
+        // Never `Some`: a host-key check has no connection to hand over, and
+        // returning one would have `on_connected` take it into service.
+        Ok(None)
     }
 
     async fn wait_for_connection<Fut>(
-        &mut self,
+        &self,
         ssh_options: &TargetSSHOptions,
         fut_connect: Fut,
         mut event_rx: UnboundedReceiver<ClientHandlerEvent>,
@@ -1705,27 +1770,17 @@ impl RemoteClient {
                 }
                 () = &mut handshake_deadline => {
                     error!(host = ?ssh_options.host, "Target did not finish the SSH handshake in time");
-                    // No `set_disconnected()` here: `handle_command` calls it
-                    // immediately after sending the error, so doing it first
-                    // would only reorder `Done` ahead of the reason. The test
-                    // below pins the message either way.
+                    // No `set_disconnected()` here: the `InnerEvent::Connected`
+                    // arm calls it immediately after sending the error, so doing
+                    // it first would only reorder `Done` ahead of the reason. The
+                    // test below pins the message either way.
                     return Err(ConnectionError::HandshakeTimeout);
                 }
-                // `None` means every sender is gone, so the owner has dropped
-                // without disconnecting. `ServerSession::drop` signals first, so
-                // a live session never arrives here still wanting the
-                // connection — anything else that does is abandoning it.
-                _ = self.abort_rx.recv() => {
-                    info!("Abort requested");
-                    // No `set_disconnected()` here, for the reason the
-                    // `HandshakeTimeout` branch above gives: it sends `Done`,
-                    // and `handle_command` calls it anyway immediately after
-                    // sending the error. Doing it here only puts `Done` ahead
-                    // of the reason on the same channel. This branch was
-                    // reported as fixed while still holding that ordering — the
-                    // pattern was corrected and the ordering was not.
-                    return Err(ConnectionError::Aborted)
-                }
+                // No abort arm here since #2603: the attempt runs in its own
+                // task, `abort_rx` stays with the `RemoteClient` that owns it,
+                // and `disconnect` cancels the task instead. `ConnectionError::
+                // Aborted` is sent there, before `set_disconnected`, for the
+                // reason the `HandshakeTimeout` branch above gives.
                 session = &mut fut_connect => {
                     let mut session = match session {
                         Ok(session) => session,
@@ -1755,12 +1810,10 @@ impl RemoteClient {
                     // That is the exact hold this deadline was added to bound,
                     // one stage further along than the stage it was bounding.
                     //
-                    // Abort is not polled across this window: `abort_rx` needs
-                    // `&mut self` and `authenticate_session` takes `&self`. It
-                    // was not polled here before either, and the window it
-                    // covers is now bounded, so the cost is up to
-                    // `HANDSHAKE_TIMEOUT` of delay in tearing down a connection
-                    // whose owner has already gone.
+                    // Abort is not polled across this window and no longer has
+                    // to be: since #2603 the whole attempt runs in its own task
+                    // and `disconnect` cancels that task, so an owner that has
+                    // gone away is not waiting on any arm of this `select!`.
                     // Its own budget, not the transport handshake's.
                     let budget = authentication_budget(
                         &ssh_options.auth,
@@ -2170,7 +2223,9 @@ impl RemoteClient {
         }
         Ok(false)
     }
+}
 
+impl RemoteClient {
     /// open a channel and run it in a separate task
     async fn open_channel(
         &mut self,
@@ -2298,7 +2353,22 @@ impl RemoteClient {
     }
 
     async fn disconnect(&mut self) {
-        if let Some(session) = &mut self.session {
+        // Where an abort during connection now lands: `wait_for_connection`
+        // runs in the task cancelled here and cannot answer for `abort_rx`.
+        if let Some(attempt) = self.connecting.take() {
+            info!("Abort requested");
+            attempt.abort();
+            // The reason before `set_disconnected()`, never after: that sends
+            // `Done`, and putting `Done` ahead of the reason on the same channel
+            // leaves the caller with an ended connection and nothing saying why.
+            // This was reported as fixed once while still holding the opposite
+            // ordering — the pattern was corrected and the ordering was not.
+            let _ = self
+                .tx
+                .send(RCEvent::ConnectionError(ConnectionError::Aborted))
+                .await;
+            self.set_disconnected().await;
+        } else if let Some(session) = &mut self.session {
             let _ = session
                 .disconnect(russh::Disconnect::ByApplication, "", "")
                 .await;
@@ -2313,6 +2383,9 @@ impl RemoteClient {
 
 impl Drop for RemoteClient {
     fn drop(&mut self) {
+        if let Some(attempt) = self.connecting.take() {
+            attempt.abort();
+        }
         for task in self.child_tasks.drain(..) {
             task.abort();
         }
