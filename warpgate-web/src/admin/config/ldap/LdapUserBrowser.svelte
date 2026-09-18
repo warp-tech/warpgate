@@ -1,15 +1,15 @@
 <script lang="ts">
     import { faRefresh } from '@fortawesome/free-solid-svg-icons'
-    import { Alert } from '@sveltestrap/sveltestrap'
     import {
         api,
         type LdapServerResponse,
         type LdapUserResponse,
     } from 'admin/lib/api'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import Fa from 'svelte-fa'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
 
     interface Props {
         params: { id: string }
@@ -76,10 +76,10 @@
 </script>
 
 {#if error}
-    <Alert color="danger">{error}</Alert>
+    <Callout tone="danger" title="Something went wrong">{error}</Callout>
 {/if}
 {#if success}
-    <Alert color="success">{success}</Alert>
+    <Callout tone="success">{success}</Callout>
 {/if}
 
 <Loadable promise={load()}>
@@ -91,9 +91,9 @@
 
             {#if users.length === 0}
                 <div class="text-center my-5">
-                    <AsyncButton class="btn btn-primary" click={loadUsers}>
+                    <Button class="btn btn-primary" click={loadUsers}>
                         Load Users from LDAP
-                    </AsyncButton>
+                    </Button>
                 </div>
             {:else}
                 <div class="mb-3">
@@ -114,19 +114,19 @@
                         {searchTerm ? `(filtered from ${users.length})` : ''}
                     </span>
                     <div class="d-flex gap-2">
-                        <AsyncButton
+                        <Button
                             class="btn btn-sm btn-primary"
                             click={batchImport}
                             disabled={selectedUserDns.length === 0}
                         >
                             Import {selectedUserDns.length} selected
-                        </AsyncButton>
-                        <AsyncButton
+                        </Button>
+                        <Button
                             class="btn btn-sm btn-secondary"
                             click={loadUsers}
                         >
                             <Fa icon={faRefresh} />
-                        </AsyncButton>
+                        </Button>
                     </div>
                 </div>
 

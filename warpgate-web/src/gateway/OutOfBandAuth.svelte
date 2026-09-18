@@ -1,23 +1,17 @@
 <script lang="ts">
-    import {
-        Alert,
-        ButtonGroup,
-        Dropdown,
-        DropdownItem,
-        DropdownMenu,
-        DropdownToggle,
-    } from '@sveltestrap/sveltestrap'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { formatDurationAsHumantime } from 'common/duration'
     import { errorStatus } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
-    import RelativeDate from 'common/RelativeDate.svelte'
+    import RelativeDate from 'ui/RelativeDate.svelte'
     import {
         ApiAuthState,
         ApprovalScope,
         type AuthStateResponseInternal,
         api,
     } from 'gateway/lib/api'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import Menu from 'ui/Menu.svelte'
 
     interface Props {
         params: { stateId: string }
@@ -84,6 +78,12 @@
             margin-right: .5rem;
         }
     }
+
+    .approve-group {
+        display: flex;
+        align-items: center;
+        gap: var(--wg-space-xs);
+    }
 </style>
 
 <Loadable promise={init()}>
@@ -116,56 +116,68 @@
         </div>
 
         {#if authState.state === ApiAuthState.Success}
-            <Alert color="success"> Approved </Alert>
+            <Callout tone="success"> Approved </Callout>
         {:else if authState.state === ApiAuthState.Failed}
-            <Alert color="danger"> Rejected </Alert>
+            <Callout tone="danger" title="Something went wrong">
+                Rejected
+            </Callout>
         {:else}
             <div class="d-flex">
                 <div class="ms-auto"></div>
                 {#if cachingEnabled}
-                    <ButtonGroup>
-                        <AsyncButton
-                            color="primary"
+                    <!--
+                      Was a sveltestrap split button: a primary action plus a
+                      caret-only DropdownToggle with no accessible name at all.
+                      ui/Menu's trigger carries one, and the default action
+                      stays a separate button so it is still one click.
+                    -->
+                    <div class="approve-group">
+                        <Button
+                            variant="primary"
                             click={() => approve(ApprovalScope.Target)}
                         >
-                            Authorize & remember for {graceLabel}
-                        </AsyncButton>
-                        <Dropdown class="btn-group">
-                            <DropdownToggle
-                                color="primary"
-                                caret
-                                class="ps-2"
-                            />
-                            <DropdownMenu end>
-                                <DropdownItem
-                                    onclick={() => approve(ApprovalScope.AllTargets)}
-                                >
-                                    Authorize for all targets & remember for
-                                    {graceLabel}
-                                </DropdownItem>
-                                <DropdownItem
-                                    onclick={() => approve(ApprovalScope.Once)}
-                                >
-                                    Authorize this time only
-                                </DropdownItem>
-                            </DropdownMenu>
-                        </Dropdown>
-                    </ButtonGroup>
+                            Authorize &amp; remember for {graceLabel}
+                        </Button>
+                        <Menu
+                            label="More authorize options"
+                            align="end"
+                            groups={[
+                                {
+                                    items: [
+                                        {
+                                            id: 'all',
+                                            label: `Authorize for all targets & remember for ${graceLabel}`,
+                                            onselect: () =>
+                                                approve(
+                                                    ApprovalScope.AllTargets,
+                                                ),
+                                        },
+                                        {
+                                            id: 'once',
+                                            label: 'Authorize this time only',
+                                            onselect: () =>
+                                                approve(ApprovalScope.Once),
+                                        },
+                                    ],
+                                },
+                            ]}
+                        />
+                    </div>
                 {:else}
-                    <AsyncButton
-                        color="primary"
+                    <Button
+                        variant="primary"
                         click={() => approve(ApprovalScope.Once)}
                     >
                         Authorize
-                    </AsyncButton>
+                    </Button>
                 {/if}
-                <AsyncButton
-                    color="secondary"
+                <Button
+                    variant="secondary"
                     class="d-flex align-items-center ms-2"
                     click={reject}
                 >
                     Reject
-                </AsyncButton>
+                </Button>
             </div>
         {/if}
     {/if}

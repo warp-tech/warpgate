@@ -1,12 +1,15 @@
 <script lang="ts">
-    import { Alert, FormGroup, Input, Tooltip } from '@sveltestrap/sveltestrap'
     import { type AdminRole, api, type User } from 'admin/lib/api'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import Loadable from 'common/Loadable.svelte'
     import * as rx from 'rxjs'
     import { link, replace } from 'svelte-spa-router'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import Input from 'ui/Input.svelte'
+    import StatusMarker from 'ui/StatusMarker.svelte'
+    import Tooltip from 'ui/Tooltip.svelte'
     import {
         ADMIN_PERMISSIONS,
         type AdminPermissionDef,
@@ -152,13 +155,13 @@
                 </div>
             </div>
 
-            <FormGroup floating label="Name">
-                <Input bind:value={role.name} {disabled} />
-            </FormGroup>
+            <Input label="Name" bind:value={role.name} {disabled} />
 
-            <FormGroup floating label="Description">
-                <Input bind:value={role.description} {disabled} />
-            </FormGroup>
+            <Input
+                label="Description"
+                bind:value={role.description}
+                {disabled}
+            />
 
             <h4 class="mt-4">Permissions</h4>
             <div class="row g-3">
@@ -184,19 +187,15 @@
                                 <span class="form-check-label">
                                     {label}
                                     {#if ADMIN_PERMISSIONS.find(p=>p.key===key)?.dangerous}
-                                        <span
-                                            id="warn-{key}"
-                                            class="text-warning ms-1"
-                                        >
-                                            ⚠️
-                                        </span>
                                         <Tooltip
-                                            target="warn-{key}"
-                                            animation
-                                            delay="250"
+                                            text="Grants the ability to manage admin roles; use with care."
+                                            delay={250}
                                         >
-                                            Grants the ability to manage admin
-                                            roles; use with care.
+                                            <StatusMarker
+                                                kind="pending"
+                                                label="Use with care"
+                                                bare
+                                            />
                                         </Tooltip>
                                     {/if}
                                 </span>
@@ -206,7 +205,9 @@
                 {/each}
             </div>
             {#if error}
-                <Alert color="danger">{error}</Alert>
+                <Callout tone="danger" title="Something went wrong"
+                    >{error}</Callout
+                >
             {/if}
 
             <div class="d-flex mt-3">
@@ -218,23 +219,23 @@
                     Audit log
                 </a>
 
-                <AsyncButton
-                    color="primary"
+                <Button
+                    variant="primary"
                     {disabled}
                     class="ms-auto"
                     click={update}
                 >
                     Update
-                </AsyncButton>
+                </Button>
 
-                <AsyncButton
+                <Button
                     class="ms-2"
                     {disabled}
-                    color="danger"
+                    variant="destructive"
                     click={remove}
                 >
                     Remove
-                </AsyncButton>
+                </Button>
             </div>
 
             <h4 class="mt-4">Assigned users</h4>
@@ -258,9 +259,9 @@
                     </a>
                 {/snippet}
                 {#snippet empty()}
-                    <Alert color="info">
+                    <Callout>
                         This admin role has no users assigned to it
-                    </Alert>
+                    </Callout>
                 {/snippet}
             </ItemList>
         {/snippet}

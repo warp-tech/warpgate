@@ -1,14 +1,6 @@
 <script lang="ts">
+    import 'ui/layout.css'
     import { faEyeSlash, faTicket } from '@fortawesome/free-solid-svg-icons'
-    import {
-        Alert,
-        Button,
-        FormGroup,
-        Modal,
-        ModalBody,
-        ModalFooter,
-    } from '@sveltestrap/sveltestrap'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import {
         formatDurationAsHumantime,
@@ -19,7 +11,7 @@
     import { routeQueryParams } from 'common/helpers'
     import InfoBox from 'common/InfoBox.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import RelativeDate from 'common/RelativeDate.svelte'
+    import RelativeDate from 'ui/RelativeDate.svelte'
     import { statusColor, statusIcon } from 'common/ticketRequestStatus'
     import {
         type ActivatedTicketTargetInfo,
@@ -31,6 +23,9 @@
     } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import Modal from 'ui/Modal.svelte'
 
     // Matches the server-side limit in warpgate-core/src/ticket_requests.rs
     const DESCRIPTION_MAX_LENGTH = 2000
@@ -210,13 +205,13 @@
 </div>
 
 {#if error}
-    <Alert color="danger">{error}</Alert>
+    <Callout tone="danger" title="Something went wrong">{error}</Callout>
 {/if}
 
 {#if success}
-    <Alert color="success" fade={false}>
+    <Callout tone="success">
         {success}
-    </Alert>
+    </Callout>
     {#if lastSecret && lastTarget}
         <div class="my-5">
             <InfoBox class="mb-2" variant="warning">
@@ -241,101 +236,97 @@
 {/if}
 
 <Loadable promise={initPromise}>
-    <Modal isOpen={showForm} toggle={() => showForm = false}>
-        <ModalBody>
-            <h4 class="mb-3">Request a ticket</h4>
-
-            {#if ticketRequestTargets?.length}
-                {#if unavailableTarget}
-                    <Alert color="warning" fade={false}>
-                        <strong>{unavailableTarget}</strong>
-                        is not available for ticket requests. Select a target
-                        below.
-                    </Alert>
-                {/if}
-
-                <form onsubmit={e => e.preventDefault()}>
-                    <FormGroup floating label="Target">
-                        <select
-                            bind:value={selectedTarget}
-                            class="form-control"
-                            required
-                        >
-                            {#each ticketRequestTargets as target (target.name)}
-                                <option value={target.name}>
-                                    {target.name}
-                                </option>
-                            {/each}
-                        </select>
-                    </FormGroup>
-
-                    <FormGroup
-                        floating
-                        label={descriptionRequired ? 'Description (required)' : 'Description'}
-                    >
-                        <input
-                            type="text"
-                            bind:value={description}
-                            class="form-control"
-                            class:is-invalid={descriptionMissing && descriptionTouched}
-                            placeholder="Why do you need access?"
-                            maxlength="2000"
-                            onblur={() => descriptionTouched = true}
-                        >
-                        {#if descriptionMissing}
-                            <small class="form-text text-muted">
-                                A description is required for ticket requests.
-                            </small>
-                        {/if}
-                    </FormGroup>
-
-                    <FormGroup floating label="Duration">
-                        <input
-                            type="text"
-                            bind:value={durationText}
-                            class="form-control"
-                            class:is-invalid={!!durationError}
-                            placeholder="e.g. 8h, 30m, 1d"
-                        >
-                        {#if durationError}
-                            <div class="invalid-feedback">{durationError}</div>
-                        {:else if maxDurationSeconds}
-                            <small class="form-text text-muted">
-                                Maximum:
-                                {formatDurationAsHumantime(maxDurationSeconds)}
-                            </small>
-                        {:else}
-                            <small class="form-text text-muted">
-                                Examples: 30m, 8h, 1d, 2h30m
-                            </small>
-                        {/if}
-                    </FormGroup>
-                </form>
-            {:else if ticketRequestTargets}
-                <EmptyState
-                    title="No targets available"
-                    hint={unavailableTarget ? `${unavailableTarget} is not available for ticket requests.` : ''}
-                />
+    <Modal
+        open={showForm}
+        title="Request a ticket"
+        size="md"
+        onclose={() => (showForm = false)}
+    >
+        {#if ticketRequestTargets?.length}
+            {#if unavailableTarget}
+                <Callout tone="warning">
+                    <strong>{unavailableTarget}</strong>
+                    is not available for ticket requests. Select a target below.
+                </Callout>
             {/if}
-        </ModalBody>
-        <ModalFooter>
-            <AsyncButton
-                color="primary"
+
+            <form onsubmit={e => e.preventDefault()}>
+                <div class="wg-field-group">
+                    <span class="wg-field-label">Target</span>
+
+                    <select
+                        bind:value={selectedTarget}
+                        class="form-control"
+                        required
+                    >
+                        {#each ticketRequestTargets as target (target.name)}
+                            <option value={target.name}>
+                                {target.name}
+                            </option>
+                        {/each}
+                    </select>
+                </div>
+
+                <div class="wg-field-group">
+                    <input
+                        type="text"
+                        bind:value={description}
+                        class="form-control"
+                        class:is-invalid={descriptionMissing && descriptionTouched}
+                        placeholder="Why do you need access?"
+                        maxlength="2000"
+                        onblur={() => descriptionTouched = true}
+                    >
+                    {#if descriptionMissing}
+                        <small class="form-text text-muted">
+                            A description is required for ticket requests.
+                        </small>
+                    {/if}
+                </div>
+
+                <div class="wg-field-group">
+                    <span class="wg-field-label">Duration</span>
+
+                    <input
+                        type="text"
+                        bind:value={durationText}
+                        class="form-control"
+                        class:is-invalid={!!durationError}
+                        placeholder="e.g. 8h, 30m, 1d"
+                    >
+                    {#if durationError}
+                        <div class="invalid-feedback">{durationError}</div>
+                    {:else if maxDurationSeconds}
+                        <small class="form-text text-muted">
+                            Maximum:
+                            {formatDurationAsHumantime(maxDurationSeconds)}
+                        </small>
+                    {:else}
+                        <small class="form-text text-muted">
+                            Examples: 30m, 8h, 1d, 2h30m
+                        </small>
+                    {/if}
+                </div>
+            </form>
+        {:else if ticketRequestTargets}
+            <EmptyState
+                title="No targets available"
+                hint={unavailableTarget ? `${unavailableTarget} is not available for ticket requests.` : ''}
+            />
+        {/if}
+
+        {#snippet footer()}
+            <Button
+                variant="primary"
                 class="modal-button"
                 click={createRequest}
                 disabled={formInvalid || !ticketRequestTargets?.length}
             >
                 Request ticket
-            </AsyncButton>
-
-            <Button
-                class="modal-button"
-                color="secondary"
-                onclick={() => showForm = false}
-            >
-                Close
             </Button>
-        </ModalFooter>
+
+            <Button onclick={() => (showForm = false)}> Close </Button>
+        {/snippet}
     </Modal>
 
     {#if requests}
@@ -365,12 +356,12 @@
                             {/if}
                         </div>
                         {#if request.status === TicketRequestStatus.Approved && !request.ticketId}
-                            <AsyncButton
-                                color="success"
+                            <Button
+                                variant="primary"
                                 click={() => activateRequest(request)}
                             >
                                 Activate
-                            </AsyncButton>
+                            </Button>
                         {/if}
                         <small class="text-muted flex-shrink-0">
                             <RelativeDate date={request.created} />
@@ -379,7 +370,7 @@
                 {/each}
             </div>
             {#if !showAllRequests && requests.length > REQUEST_PAGE_SIZE}
-                <Button color="link" onclick={() => showAllRequests = true}>
+                <Button variant="ghost" onclick={() => showAllRequests = true}>
                     Show all {requests.length} requests
                 </Button>
             {/if}
@@ -419,8 +410,8 @@
                             <RelativeDate date={ticket.created} />
                         </small>
                         <Button
-                            color="link"
-                            size="sm"
+                            variant="ghost"
+                            size="compact"
                             onclick={() => deleteTicket(ticket)}
                         >
                             Revoke

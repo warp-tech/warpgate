@@ -1,5 +1,8 @@
 <script lang="ts">
-    import { Alert, Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import Input from 'ui/Input.svelte'
+    import 'ui/layout.css'
     import {
         api,
         RdpTargetCompression,
@@ -13,6 +16,7 @@
     import { TargetKind } from 'gateway/lib/api'
     import { onMount } from 'svelte'
     import { replace } from 'svelte-spa-router'
+    import Select from 'ui/Select.svelte'
 
     interface Props {
         params: { kind: string }
@@ -23,7 +27,9 @@
     let error: string | null = $state(null)
     let name = $state('')
     let groups: TargetGroup[] = $state([])
-    let selectedGroupId: string | undefined = $state()
+    // ui/Select carries strings, so "no group" is '' here and is converted
+    // back to undefined at submit — the API distinguishes the two.
+    let selectedGroupId = $state('')
 
     async function create() {
         try {
@@ -119,7 +125,7 @@
                 targetDataRequest: {
                     name,
                     options,
-                    groupId: selectedGroupId,
+                    groupId: selectedGroupId || undefined,
                     requireApproval: false,
                     ticketRequestsDisabled: false,
                     ticketRequireApproval: false,
@@ -140,52 +146,67 @@
     })
 </script>
 
-<div class="container-max-md">
+<div class="wg-page-narrow">
+    <div class="wg-page-head">
+        <h1>Add a target</h1>
+    </div>
+
     {#if !$adminPermissions.targetsCreate}
-        <Alert color="warning"
-            >You do not have permission to create targets.</Alert
-        >
+        <div class="notice">
+            <Callout tone="warning" title="Not available to your role">
+                You do not have permission to create targets.
+            </Callout>
+        </div>
     {/if}
+
     {#if error}
-        <Alert color="danger">{error}</Alert>
+        <div class="notice">
+            <Callout tone="danger" title="Could not create the target">
+                {error}
+            </Callout>
+        </div>
     {/if}
 
-    <div class="page-summary-bar">
-        <h1>add a target</h1>
-    </div>
-
-    <div class="narrow-page">
-        <Form
-            on:submit={e => {
-            create()
+    <form
+        class="wg-field-stack"
+        onsubmit={e => {
             e.preventDefault()
+            create()
         }}
-        >
-            <!-- Defualt button for key handling -->
-            <Button class="d-none" type="submit"></Button>
+    >
+        <Input label="Name" required autofocus bind:value={name} />
 
-            <FormGroup floating label="Name">
-                <!-- svelte-ignore a11y_autofocus -->
-                <input
-                    class="form-control"
-                    autofocus
-                    required
-                    bind:value={name}
-                >
-            </FormGroup>
+        {#if groups.length > 0}
+            <Select
+                label="Group"
+                bind:value={selectedGroupId}
+                options={[
+                    { value: '', label: 'No group' },
+                    ...groups.map(g => ({ value: g.id, label: g.name })),
+                ]}
+            />
+        {/if}
 
-            {#if groups.length > 0}
-                <FormGroup floating label="Group">
-                    <select class="form-control" bind:value={selectedGroupId}>
-                        <option value={undefined}>No group</option>
-                        {#each groups as group (group.id)}
-                            <option value={group.id}>{group.name}</option>
-                        {/each}
-                    </select>
-                </FormGroup>
-            {/if}
-
-            <Button color="primary" type="submit">Create target</Button>
-        </Form>
-    </div>
+        <div class="actions">
+            <Button
+                variant="primary"
+                type="submit"
+                disabled={!$adminPermissions.targetsCreate || !name.trim()}
+                click={create}
+            >
+                Create target
+            </Button>
+        </div>
+    </form>
 </div>
+
+<style>
+    .notice {
+        margin-bottom: var(--wg-space-lg);
+    }
+
+    .actions {
+        display: flex;
+        justify-content: flex-end;
+    }
+</style>

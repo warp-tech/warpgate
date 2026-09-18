@@ -122,3 +122,12 @@
 .wg-page-narrow {
     max-width: 48rem;
 }
+
+/* Label for a group of controls that is not a single labelled field — emitted
+   where a sveltestrap FormGroup's floating label was unwrapped. */
+.wg-field-label {
+    display: block;
+    margin-bottom: var(--wg-space-xs);
+    font: var(--wg-text-body-md);
+    color: var(--wg-text-muted);
+}

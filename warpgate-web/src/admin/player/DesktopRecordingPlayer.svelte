@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { Spinner } from '@sveltestrap/sveltestrap'
     import type { Recording } from 'admin/lib/api'
     import {
         applyDesktopFrame,
@@ -14,6 +13,7 @@
         scancodeLabel,
     } from 'common/desktopInput'
     import { onDestroy, onMount } from 'svelte'
+    import Spinner from 'ui/Spinner.svelte'
     import PlayerToolbar from './PlayerToolbar.svelte'
     import { PlaybackController } from './playbackController'
     import type { Keyframe } from './rangeStream'
@@ -244,7 +244,7 @@
 
 <div class="root" bind:this={rootElement}>
     {#if loading}
-        <Spinner color="primary" />
+        <Spinner size={24} label="Loading recording" />
     {/if}
 
     <div class="stage-container" class:invisible={loading}>

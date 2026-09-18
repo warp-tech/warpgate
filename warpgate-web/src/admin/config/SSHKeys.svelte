@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { Alert, Badge, Button } from '@sveltestrap/sveltestrap'
     import {
         api,
         type SSHClientKey,
@@ -10,6 +9,9 @@
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
+    import Badge from 'ui/Badge.svelte'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
     import ClientKeyModal from './ClientKeyModal.svelte'
     import GenerateClientKeyModal from './GenerateClientKeyModal.svelte'
 
@@ -88,16 +90,21 @@
     <h1>SSH keys</h1>
     <div class="d-flex gap-2 ms-auto">
         {#if $adminPermissions.configEdit}
-            <Button color="primary" onclick={() => (generateModalOpen = true)}>
+            <Button
+                variant="primary"
+                onclick={() => (generateModalOpen = true)}
+            >
                 Generate
             </Button>
-            <Button color="secondary" onclick={openImportKey}> Import </Button>
+            <Button variant="secondary" onclick={openImportKey}>
+                Import
+            </Button>
         {/if}
     </div>
 </div>
 
 {#if error}
-    <Alert color="danger">{error}</Alert>
+    <Callout tone="danger" title="Something went wrong">{error}</Callout>
 {/if}
 
 {#if clientKeys}
@@ -113,12 +120,12 @@
                 <div class="d-flex align-items-center gap-2">
                     <strong>{key.label}</strong>
                     {#if key.isDefault}
-                        <Badge color="primary">Default</Badge>
+                        <Badge tone="primary">Default</Badge>
                     {/if}
                     {#if $adminPermissions.configEdit}
                         <Button
                             class="ms-auto"
-                            color="link px-0"
+                            variant="ghost"
                             onclick={e => {
                                 e.preventDefault()
                                 openEditKey(key)
@@ -128,7 +135,7 @@
                         </Button>
                         <Button
                             class="ms-3"
-                            color="link px-0"
+                            variant="ghost"
                             onclick={e => {
                                 e.preventDefault()
                                 deleteKey(key)
@@ -174,7 +181,7 @@
 
                     <Button
                         class="ms-auto"
-                        color="link px-0"
+                        variant="ghost"
                         onclick={e => {
                             e.preventDefault()
                             deleteHost(host)

@@ -1,10 +1,10 @@
 <script lang="ts">
     import { faPlay } from '@fortawesome/free-solid-svg-icons'
-    import { Spinner } from '@sveltestrap/sveltestrap'
     import { Terminal } from '@xterm/xterm'
     import type { Recording } from 'admin/lib/api'
     import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
+    import Spinner from 'ui/Spinner.svelte'
     import PlayerToolbar from './PlayerToolbar.svelte'
     import { PlaybackController } from './playbackController'
     import { type Keyframe, RangeStream } from './rangeStream'
@@ -328,7 +328,7 @@
     style="background: {theme.background}"
 >
     {#if loading}
-        <Spinner color="primary" />
+        <Spinner size={24} label="Loading recording" />
     {/if}
 
     {#if !loading && $mode === 'paused'}

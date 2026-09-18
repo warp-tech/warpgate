@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import {
         api,
         type LdapServerResponse,
@@ -7,10 +6,11 @@
         type Tls,
         TlsMode,
     } from 'admin/lib/api'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import { push } from 'svelte-spa-router'
+    import Button from 'ui/Button.svelte'
+    import Input from 'ui/Input.svelte'
     import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
     import LdapConnectionFields from './LdapConnectionFields.svelte'
 
@@ -152,13 +152,9 @@
         </div>
 
         <form onsubmit={(e) => { e.preventDefault(); save() }}>
-            <FormGroup floating label="Name">
-                <Input bind:value={name} required />
-            </FormGroup>
+            <Input label="Name" bind:value={name} required />
 
-            <FormGroup floating label="Description">
-                <Input bind:value={description} />
-            </FormGroup>
+            <Input label="Description" bind:value={description} />
 
             <LdapConnectionFields
                 bind:host
@@ -236,31 +232,23 @@
             {/if}
 
             <div class="d-flex gap-2 mt-5">
-                <AsyncButton
+                <Button
                     type="button"
                     class="btn btn-secondary"
                     click={testConnection}
                 >
                     Test Connection
-                </AsyncButton>
-                <AsyncButton
-                    type="button"
-                    class="btn btn-info"
-                    click={importUsers}
-                >
+                </Button>
+                <Button type="button" class="btn btn-info" click={importUsers}>
                     Import users
-                </AsyncButton>
+                </Button>
                 <div class="me-auto"></div>
-                <AsyncButton type="button" class="btn btn-primary" click={save}>
+                <Button type="button" class="btn btn-primary" click={save}>
                     Save
-                </AsyncButton>
-                <AsyncButton
-                    type="button"
-                    class="btn btn-danger"
-                    click={remove}
-                >
+                </Button>
+                <Button type="button" class="btn btn-danger" click={remove}>
                     Remove
-                </AsyncButton>
+                </Button>
             </div>
         </form>
     </div>

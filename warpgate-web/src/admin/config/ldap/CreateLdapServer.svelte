@@ -1,15 +1,16 @@
 <script lang="ts">
-    import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import {
         api,
         LdapUsernameAttribute,
         type Tls,
         TlsMode,
     } from 'admin/lib/api'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import { reloadServerInfo } from 'gateway/lib/store'
     import { push } from 'svelte-spa-router'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import Input from 'ui/Input.svelte'
     import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
     import LdapConnectionFields from './LdapConnectionFields.svelte'
 
@@ -92,7 +93,7 @@
 
 <div class="container-max-md">
     {#if error}
-        <Alert color="danger">{error}</Alert>
+        <Callout tone="danger" title="Something went wrong">{error}</Callout>
     {/if}
 
     <div class="page-summary-bar">
@@ -100,9 +101,7 @@
     </div>
 
     <form onsubmit={e => {e.preventDefault(); create()}}>
-        <FormGroup floating label="Name">
-            <Input bind:value={name} required />
-        </FormGroup>
+        <Input label="Name" bind:value={name} required />
 
         <LdapConnectionFields
             bind:host
@@ -136,12 +135,12 @@
         {/if}
 
         <div class="d-flex gap-2 mt-5">
-            <AsyncButton type="button" class="me-auto" click={testConnection}>
+            <Button type="button" class="me-auto" click={testConnection}>
                 Test connection
-            </AsyncButton>
-            <AsyncButton type="submit" color="primary" click={create}>
+            </Button>
+            <Button type="submit" variant="primary" click={create}>
                 Create
-            </AsyncButton>
+            </Button>
         </div>
     </form>
 </div>

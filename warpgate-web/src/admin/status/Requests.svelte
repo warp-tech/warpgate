@@ -1,22 +1,11 @@
 <script lang="ts">
+    import Menu from 'ui/Menu.svelte'
+    import 'ui/layout.css'
     import {
         faComputer,
         faEllipsisVertical,
         faTicket,
     } from '@fortawesome/free-solid-svg-icons'
-    import {
-        Alert,
-        Button,
-        ButtonGroup,
-        Dropdown,
-        DropdownItem,
-        DropdownMenu,
-        DropdownToggle,
-        FormGroup,
-        Modal,
-        ModalBody,
-        ModalFooter,
-    } from '@sveltestrap/sveltestrap'
     import {
         ApprovalScope,
         api,
@@ -24,7 +13,6 @@
         type TicketRequest,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import {
         loadPendingRequests,
         watchPendingRequests,
@@ -33,8 +21,11 @@
     import { formatDurationAsHumantime } from 'common/duration'
     import EmptyState from 'common/EmptyState.svelte'
     import { errorStatus, stringifyError } from 'common/errors'
-    import RelativeDate from 'common/RelativeDate.svelte'
+    import RelativeDate from 'ui/RelativeDate.svelte'
     import Fa from 'svelte-fa'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import Modal from 'ui/Modal.svelte'
 
     // One inbox entry, whichever kind of request produced it. `at` is the
     // shared sort key so both kinds interleave chronologically, and `key`
@@ -188,10 +179,10 @@
 </div>
 
 {#if !canSeeSessions && !canManageTickets}
-    <Alert color="warning">You have no permission to view requests.</Alert>
+    <Callout tone="warning">You have no permission to view requests.</Callout>
 {:else}
     {#if error}
-        <Alert color="danger">{error}</Alert>
+        <Callout tone="danger" title="Something went wrong">{error}</Callout>
     {/if}
 
     {#if !loaded}
@@ -224,10 +215,10 @@
                         </div>
 
                         <div class="ms-auto d-flex align-items-center">
-                            <ButtonGroup>
+                            <div class="btn-row">
                                 {#if entry.session.cachingGraceSeconds}
-                                    <AsyncButton
-                                        color="success"
+                                    <Button
+                                        variant="primary"
                                         click={() =>
                                         approveSession(
                                             entry.session,
@@ -238,40 +229,38 @@
                                         {formatDurationAsHumantime(
                                             entry.session.cachingGraceSeconds,
                                         )}
-                                    </AsyncButton>
-                                    <Dropdown class="btn-group">
-                                        <DropdownToggle
-                                            color="success"
-                                            class="px-3"
-                                        >
-                                            <Fa icon={faEllipsisVertical} />
-                                        </DropdownToggle>
-
-                                        <DropdownMenu end>
-                                            <DropdownItem
-                                                onclick={() => approveSession(
-                                                    entry.session,
-                                                    ApprovalScope.AllTargets,
-                                                )}
-                                            >
-                                                Approve for all targets for
-                                                {formatDurationAsHumantime(
-                                                    entry.session.cachingGraceSeconds,
-                                                )}
-                                            </DropdownItem>
-                                            <DropdownItem
-                                                onclick={() => approveSession(
-                                                    entry.session,
-                                                    ApprovalScope.Once,
-                                                )}
-                                            >
-                                                Approve this time only
-                                            </DropdownItem>
-                                        </DropdownMenu>
-                                    </Dropdown>
+                                    </Button>
+                                    <Menu
+                                        label="More approve options"
+                                        align="end"
+                                        groups={[
+                                            {
+                                                items: [
+                                                    {
+                                                        id: 'all',
+                                                        label: `Approve for all targets for ${formatDurationAsHumantime(entry.session.cachingGraceSeconds)}`,
+                                                        onselect: () =>
+                                                            approveSession(
+                                                                entry.session,
+                                                                ApprovalScope.AllTargets,
+                                                            ),
+                                                    },
+                                                    {
+                                                        id: 'once',
+                                                        label: 'Approve this time only',
+                                                        onselect: () =>
+                                                            approveSession(
+                                                                entry.session,
+                                                                ApprovalScope.Once,
+                                                            ),
+                                                    },
+                                                ],
+                                            },
+                                        ]}
+                                    />
                                 {:else}
-                                    <AsyncButton
-                                        color="success"
+                                    <Button
+                                        variant="primary"
                                         click={() =>
                                         approveSession(
                                             entry.session,
@@ -279,15 +268,15 @@
                                         )}
                                     >
                                         Approve
-                                    </AsyncButton>
+                                    </Button>
                                 {/if}
-                                <AsyncButton
-                                    color="danger"
+                                <Button
+                                    variant="destructive"
                                     click={() => rejectSession(entry.session)}
                                 >
                                     Reject
-                                </AsyncButton>
-                            </ButtonGroup>
+                                </Button>
+                            </div>
                         </div>
                     {:else}
                         <Fa icon={faTicket} fw />
@@ -318,15 +307,15 @@
                             </div>
                         </div>
 
-                        <ButtonGroup class="ms-auto">
-                            <AsyncButton
-                                color="success"
+                        <div class="btn-row ms-auto">
+                            <Button
+                                variant="primary"
                                 click={() => approveTicket(entry.ticket)}
                             >
                                 Approve
-                            </AsyncButton>
+                            </Button>
                             <Button
-                                color="danger"
+                                variant="destructive"
                                 onclick={() => {
                                     denyModalRequest = entry.ticket
                                     denyReason = ''
@@ -335,7 +324,7 @@
                             >
                                 Reject
                             </Button>
-                        </ButtonGroup>
+                        </div>
                     {/if}
                 </div>
             {/each}
@@ -344,46 +333,51 @@
 {/if}
 
 <Modal
-    isOpen={!!denyModalRequest}
-    toggle={() => (denyModalRequest = undefined)}
+    open={!!denyModalRequest}
+    title="Deny this ticket request?"
+    size="sm"
+    onclose={() => (denyModalRequest = undefined)}
 >
-    <ModalBody>
-        {#if denyError}
-            <Alert color="danger">{denyError}</Alert>
-        {/if}
-        {#if denyModalRequest}
-            <p>
-                Deny request from
-                <strong>
-                    {denyModalRequest.username ?? denyModalRequest.userId}
-                </strong>
-                to
-                <strong>
-                    {denyModalRequest.targetName ?? denyModalRequest.targetId}
-                </strong
-                >?
-            </p>
-            <FormGroup floating label="Reason (optional)">
-                <input
-                    type="text"
-                    bind:value={denyReason}
-                    class="form-control"
-                    placeholder="Why is this being denied?"
-                    maxlength="2000"
-                >
-            </FormGroup>
-        {/if}
-    </ModalBody>
-    <ModalFooter>
-        <AsyncButton class="modal-button" color="danger" click={denyTicket}>
-            Deny
-        </AsyncButton>
-        <Button
-            class="modal-button"
-            color="secondary"
-            onclick={() => (denyModalRequest = undefined)}
+    {#if denyError}
+        <Callout tone="danger" title="Something went wrong"
+            >{denyError}</Callout
         >
-            Cancel
-        </Button>
-    </ModalFooter>
+    {/if}
+    {#if denyModalRequest}
+        <p>
+            Deny request from
+            <strong>
+                {denyModalRequest.username ?? denyModalRequest.userId}
+            </strong>
+            to
+            <strong>
+                {denyModalRequest.targetName ?? denyModalRequest.targetId}
+            </strong
+            >?
+        </p>
+        <div class="wg-field-group">
+            <span class="wg-field-label">Reason (optional)</span>
+
+            <input
+                type="text"
+                bind:value={denyReason}
+                class="form-control"
+                placeholder="Why is this being denied?"
+                maxlength="2000"
+            >
+        </div>
+    {/if}
+
+    {#snippet footer()}
+        <Button onclick={() => (denyModalRequest = undefined)}>Cancel</Button>
+        <Button variant="destructive" click={denyTicket}>Deny</Button>
+    {/snippet}
 </Modal>
+
+<style>
+    .btn-row {
+        display: flex;
+        align-items: center;
+        gap: var(--wg-space-sm);
+    }
+</style>
