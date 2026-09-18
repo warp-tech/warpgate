@@ -224,7 +224,7 @@
                 &mdash; do not share this secret. It grants access as your
                 account.
             </InfoBox>
-            <InfoBox class="mb-3" icon={faEyeSlash}>
+            <InfoBox class="mb-3">
                 The secret is only shown once &mdash; you won't be able to see
                 it again.
             </InfoBox>

@@ -1069,3 +1069,43 @@ The portal mockup's six separate digit boxes are omitted for the same reason
 the pattern matters: the field has to accept 6 **to 8** characters, which a
 fixed six-box control cannot express. A single field also pastes correctly
 from a password manager.
+
+### Screen 13: the portal target card has almost no data to put in it
+
+`TargetSnapshot` — what the **portal** sees — is `id, name, description,
+kind, externalHost?, group?, defaultDatabaseName?`. That is the whole model.
+
+The mockup's cards show a hostname and port, a role list, and an
+Online/Unreachable status, none of which exist here. The missing host and port
+look like an oversight and are not: the portal deliberately does not publish
+internal addresses to users, which is most of the point of a bastion. So the
+card keeps the mockup's *shape* — roomier than an admin table, right for a
+dozen items — with the fields that exist, and drops the rest along with
+"11 operational / 1 degraded", the RECENTLY USED strip, the ZONE label and
+the per-card copy button (whose only sensible payload is the address that
+does not exist).
+
+The protocol filter chips are kept: `kind` is real, and the chips are derived
+from what the search returned rather than from what the chip filter then
+narrows it to — otherwise choosing one chip makes the others disappear.
+
+### Two accessibility defects found by migrating, not by auditing
+
+**The certificate rows in ConnectionInstructions were fake buttons.** Each was
+`<a href="#" onclick={e => { e.preventDefault(); select(...) }}>`. It announced
+as a link, offered a meaningless open-in-new-tab, and gave no indication of
+which certificate was selected — the selected state was a background colour
+only. They are real `<button aria-pressed>` now.
+
+**The portal's "open targets in a new tab" preference announced as nothing.**
+It was a switch nested inside a sveltestrap `DropdownItem`, so it was neither
+a menu item nor a checkbox to assistive tech, and the reason it was disabled
+under administrator policy was carried by a hover-only tooltip. It is now a
+`menuitemcheckbox` with `aria-checked`, and the policy reason is a visible
+hint. `ui/Menu` grew checkable items for this, and a checkable item keeps the
+menu open so the tick can be seen to change.
+
+Biome's `useAriaPropsSupportedByRole` initially flagged `aria-checked` because
+the `role` was a ternary it could not resolve statically. Splitting it into two
+branches with literal roles fixed the warning and is clearer — each element is
+now statically verifiable rather than only correct at runtime.

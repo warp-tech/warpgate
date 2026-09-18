@@ -204,35 +204,29 @@
 >
     {#snippet header(items, groupControls)}
         {#if items?.length}
-            <ListOverflowMenu {groupControls}>
-                <div class="dropdown-header">Preferences</div>
-                <DropdownItem>
-                    <!-- A disabled input doesn't emit the pointer events the
-                    tooltip needs, so the wrapper carries the target id. -->
-                    <div id="openTargetsInNewTabSwitch">
-                        <Input
-                            type="switch"
-                            checked={$openTargetsInNewTab}
-                            disabled={$openTargetsInNewTabForced}
-                            label="Open targets in a new tab"
-                            onchange={e =>
-                                setOpenTargetsInNewTab(
-                                    (e.currentTarget as HTMLInputElement).checked,
-                                )}
-                            onmousedown={e => e.stopPropagation()}
-                        />
-                    </div>
-                    {#if $openTargetsInNewTabForced}
-                        <Tooltip
-                            delay="250"
-                            target="openTargetsInNewTabSwitch"
-                            animation
-                        >
-                            Managed by the administrator
-                        </Tooltip>
-                    {/if}
-                </DropdownItem>
-            </ListOverflowMenu>
+            <ListOverflowMenu
+                {groupControls}
+                extraGroups={[
+                    {
+                        label: 'Preferences',
+                        items: [
+                            {
+                                id: 'new-tab',
+                                label: 'Open targets in a new tab',
+                                checked: $openTargetsInNewTab,
+                                disabled: $openTargetsInNewTabForced,
+                                hint: $openTargetsInNewTabForced
+                                    ? 'Managed by the administrator'
+                                    : undefined,
+                                onselect: () =>
+                                    setOpenTargetsInNewTab(
+                                        !$openTargetsInNewTab,
+                                    ),
+                            },
+                        ],
+                    },
+                ]}
+            />
         {/if}
     {/snippet}
     {#snippet empty()}

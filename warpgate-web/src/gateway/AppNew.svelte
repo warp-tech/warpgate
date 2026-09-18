@@ -93,7 +93,7 @@
 
     const routes = {
         '/': wrap({
-            asyncComponent: () => import('./TargetList.svelte'),
+            asyncComponent: () => import('./screens/Targets.svelte'),
             props: {
                 'on:navigation': () => (redirecting = true),
             },
