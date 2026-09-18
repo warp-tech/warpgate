@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.29.0-beta.1.1-1-g2f77f07b-modified"
+    "version": "v0.28.5-22-g0c1eb906-modified"
   },
   "servers": [
     {
@@ -5829,6 +5829,9 @@
           "ssh_host_key_verification": {
             "$ref": "#/components/schemas/SshHostKeyVerificationMode"
           },
+          "ssh_show_qr_code": {
+            "type": "boolean"
+          },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
           },
@@ -5994,6 +5997,7 @@
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
           "ssh_host_key_verification",
+          "ssh_show_qr_code",
           "password_login_mode",
           "mfa_enforcement",
           "mfa_policy_exempt_sso_users",
@@ -6047,6 +6051,9 @@
           },
           "ssh_host_key_verification": {
             "$ref": "#/components/schemas/SshHostKeyVerificationMode"
+          },
+          "ssh_show_qr_code": {
+            "type": "boolean"
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
