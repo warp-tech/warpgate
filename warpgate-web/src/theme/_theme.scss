@@ -89,8 +89,8 @@ $font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     gap: 1rem;
 
     h1 {
-        font-family: 'Poppins';
-        font-weight: 700;
+        font-family: var(--wg-font-sans);
+        font-weight: 600;
         font-size: 2.5rem;
         margin: 0;
     }

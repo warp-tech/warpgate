@@ -1,16 +1,120 @@
+/*
+ * Self-hosted faces. No runtime requests to Google Fonts or any other origin —
+ * Warpgate is deployed in air-gapped and DMZ networks and must render offline.
+ *
+ * Declared by hand against @fontsource's woff2 files rather than importing the
+ * packages' own CSS, which is the pattern this file already used for Poppins.
+ * Three reasons to keep it:
+ *   - @fontsource's CSS references woff AND woff2; every browser that can run
+ *     Svelte 5 supports woff2, so shipping woff doubles font bytes for nothing.
+ *   - we pick exact weights instead of taking whatever the package exports.
+ *   - font-display is ours to set.
+ *
+ * Weights are the ones design/DESIGN.md's type roles actually use: 400 body,
+ * 500 label-md, 600 headlines. There is no 700 role, so 700 is not shipped.
+ *
+ * Subsets: latin + latin-ext for the UI face, because usernames and target
+ * descriptions carry Central and Eastern European diacritics. Mono is latin
+ * only — it renders machine data (hostnames, IPs, CIDRs, ports, fingerprints,
+ * session UUIDs, ticket tokens), which is ASCII by definition.
+ */
+
+/* ---- IBM Plex Sans — system interface ---- */
+
 @font-face {
-    font-family: "Poppins";
+    font-family: "IBM Plex Sans";
     font-style: normal;
-    font-display: block; /* changed */
-    font-weight: 700;
-    src:
-        url(./../../node_modules/@fontsource/poppins/files/poppins-latin-700-normal.woff2)
-        format("woff2"),
-        url(./../../node_modules/@fontsource/poppins/files/poppins-latin-700-normal.woff)
-        format("woff");
+    font-weight: 400;
+    font-display: swap;
+    src: url(./../../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2)
+        format("woff2");
+    unicode-range:
+        U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+        U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC,
+        U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: "IBM Plex Sans";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url(./../../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-ext-400-normal.woff2)
+        format("woff2");
+    unicode-range:
+        U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+        U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
-/* This fallback font includes Powerline characters */
+@font-face {
+    font-family: "IBM Plex Sans";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url(./../../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-500-normal.woff2)
+        format("woff2");
+    unicode-range:
+        U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+        U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC,
+        U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: "IBM Plex Sans";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url(./../../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-ext-500-normal.woff2)
+        format("woff2");
+    unicode-range:
+        U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+        U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+    font-family: "IBM Plex Sans";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url(./../../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2)
+        format("woff2");
+    unicode-range:
+        U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+        U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC,
+        U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: "IBM Plex Sans";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url(./../../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-ext-600-normal.woff2)
+        format("woff2");
+    unicode-range:
+        U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+        U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---- IBM Plex Mono — machine data ---- */
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url(./../../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2)
+        format("woff2");
+    unicode-range:
+        U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+        U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC,
+        U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/*
+ * Terminal fallback. Carries the Powerline glyphs xterm.js renders in shell
+ * sessions, so it cannot be dropped. Applied only by WebSshTab.svelte — the
+ * @font-face declaration is on the eager path but the 219 KB of OTF is not
+ * fetched until a terminal actually renders with it, which is why it is NOT
+ * reused as the UI mono. See IMPLEMENTATION-NOTES.md Q2.
+ */
 @font-face {
     font-family: "monospace-fallback";
     src: url(../fonts/CaskaydiaCove-Regular.otf) format("opentype");

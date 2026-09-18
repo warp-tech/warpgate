@@ -61,6 +61,21 @@
         empty?: Snippet<[]>
         groupHeader?: Snippet<[G, GroupState]>
         collapsedGroups?: GK[]
+        /**
+         * Wraps the rendered rows. Lets a caller supply real table markup
+         * (`<table><tbody>…`) in place of the default list-group div without
+         * duplicating any of the loading, search, grouping or pagination
+         * behaviour above. Receives the rows snippet and the loaded items, so
+         * a header outside the row loop can still reflect them.
+         * Defaults to the list-group div when omitted.
+         */
+        container?: Snippet<[Snippet, T[]]>
+        /**
+         * Replaces the built-in search field. Receives the current value and a
+         * setter, so a caller can render its own input without reaching into
+         * the debounce pipeline.
+         */
+        searchInput?: Snippet<[string, (_: string) => void]>
     }
 
     let {
@@ -76,6 +91,8 @@
         empty,
         groupHeader,
         collapsedGroups = $bindable([]),
+        container,
+        searchInput,
     }: Props = $props()
 
     let filter = $state('')
@@ -203,11 +220,17 @@
     <div class="d-flex align-items-center mb-2" hidden={!loaded}>
         <!-- either filtering or not filtering and there are at least some items at all -->
         {#if showSearch && (filter || !!_items?.length)}
-            <Input
-                bind:value={filter}
-                placeholder="Search..."
-                class="flex-grow-1"
-            />
+            {#if searchInput}
+                {@render searchInput(filter, v => {
+                    filter = v
+                })}
+            {:else}
+                <Input
+                    bind:value={filter}
+                    placeholder="Search..."
+                    class="flex-grow-1"
+                />
+            {/if}
         {/if}
         {@render header?.(_items, {
             available: _built.keys.length > 0 && !filter,
@@ -219,22 +242,29 @@
             },
         })}
     </div>
+    {#snippet rows()}
+        {#each _built.rows as _row (_row.item)}
+            {#if _row.groupStart && groupHeader && _row.group !== undefined && _row.key !== undefined}
+                {@const _key = _row.key}
+                {@render groupHeader(_row.group, {
+                    collapsed: _row.collapsed,
+                    collapsible: !filter,
+                    toggle: () => toggleGroup(_key, _built.keys),
+                })}
+            {/if}
+            {#if !_row.collapsed}
+                {@render item?.(_row.item)}
+            {/if}
+        {/each}
+    {/snippet}
     {#if _items}
-        <div class="list-group list-group-flush mb-3">
-            {#each _built.rows as _row (_row.item)}
-                {#if _row.groupStart && groupHeader && _row.group !== undefined && _row.key !== undefined}
-                    {@const _key = _row.key}
-                    {@render groupHeader(_row.group, {
-                        collapsed: _row.collapsed,
-                        collapsible: !filter,
-                        toggle: () => toggleGroup(_key, _built.keys),
-                    })}
-                {/if}
-                {#if !_row.collapsed}
-                    {@render item?.(_row.item)}
-                {/if}
-            {/each}
-        </div>
+        {#if container}
+            {@render container(rows, _items)}
+        {:else}
+            <div class="list-group list-group-flush mb-3">
+                {@render rows()}
+            </div>
+        {/if}
         {@render footer?.(_items)}
     {:else}
         <DelayedSpinner />

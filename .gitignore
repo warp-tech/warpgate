@@ -39,3 +39,6 @@ node_modules
 
 rustc-ice-*.txt
 .zed
+design/
+# Fork: design system documentation is tracked (see design/DESIGN.md)
+!design/**/*.md

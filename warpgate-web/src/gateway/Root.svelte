@@ -9,6 +9,18 @@
         '/web-ssh/start/:targetId': wrap({
             asyncComponent: () => import('./WebSsh.svelte'),
         }),
+        // Dev-only token reference. Registered here rather than inside
+        // App.svelte so it renders without a session — App gates every route
+        // on requireLogin. `import.meta.env.DEV` is replaced with `false` in a
+        // production build, so the chunk is never emitted.
+        ...(import.meta.env.DEV
+            ? {
+                  '/styleguide': wrap({
+                      asyncComponent: () =>
+                          import('../styleguide/Styleguide.svelte'),
+                  }),
+              }
+            : {}),
         '/web-ssh/:sessionId': wrap({
             asyncComponent: () => import('./WebSsh.svelte'),
         }),

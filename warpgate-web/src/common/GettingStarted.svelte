@@ -80,8 +80,8 @@
         padding: 25px 30px;
 
         h2 {
-            font-family: 'Poppins';
-            font-weight: 700;
+            font-family: var(--wg-font-sans);
+            font-weight: 600;
         }
 
         .item-text {
