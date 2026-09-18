@@ -1,20 +1,15 @@
 import { mount } from 'svelte'
 import '../theme'
+import App from './AppNew.svelte'
 
-/*
- * The flag test is written inline rather than imported from src/flags.ts.
+/**
+ * The redesigned admin UI is now the only one.
  *
- * Vite replaces `import.meta.env.VITE_NEW_UI` with a literal wherever it
- * appears, but Rollup will only eliminate the dead dynamic import if the
- * condition is a literal *in this module*. Importing a `const NEW_UI` from
- * another module defeats that: both branches survive and the bundle carries
- * both shells, which was measurable — 111 KB of the other UI riding along.
+ * `VITE_NEW_UI` is gone rather than defaulted to true: a flag that nobody can
+ * turn off is not a rollback mechanism, it is a branch that never runs and
+ * rots. Rolling back is `git revert` of the flip commit, which is honest about
+ * what it costs.
  */
-const App =
-    import.meta.env.VITE_NEW_UI === 'true'
-        ? (await import('./AppNew.svelte')).default
-        : (await import('./App.svelte')).default
-
 mount(App, {
     // biome-ignore lint/style/noNonNullAssertion: x
     target: document.getElementById('app')!,

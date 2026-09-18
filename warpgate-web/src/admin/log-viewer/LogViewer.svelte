@@ -835,8 +835,6 @@
         min-width: 12rem;
     }
 
-    @import "../../theme/vars.light";
-
     .table-wrapper {
         flex: 1 0 0;
         min-height: 500px;
@@ -879,7 +877,7 @@
         top: 0;
         z-index: 1;
         background: var(--bs-body-bg, #fff);
-        font-family: $font-family-monospace;
+        font-family: var(--wg-font-mono);
         font-size: 0.75rem;
         font-weight: 600;
         padding: 0.25rem 0;
@@ -894,7 +892,7 @@
         align-items: start;
         box-sizing: border-box;
         border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-        font-family: $font-family-monospace;
+        font-family: var(--wg-font-mono);
         font-size: 0.75rem;
         padding: 0.1rem 0;
         white-space: nowrap;
@@ -959,7 +957,7 @@
     }
 
     .end-of-log {
-        font-family: $font-family-monospace;
+        font-family: var(--wg-font-mono);
         font-size: 0.75rem;
     }
 
