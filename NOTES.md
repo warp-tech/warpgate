@@ -998,3 +998,31 @@ fine right up until the import cannot resolve. Shared components can only be
 removed in the deletion commit, once the old screens go with them. The
 old-UI build is the test that proves it, and it stayed byte-identical
 (1620.6 / 1264.3 / 356.3 / 36.4 / 2014.6 / 733.6) after restoring the file.
+
+### In-place migration changes the OLD-UI bundle too
+
+Screen 10 migrated `admin/log-viewer/LogViewer.svelte` and its badges **in
+place**, because the sveltestrap surface was one Alert and two Tooltips inside
+907 lines of virtualizer and pagination logic. Copying it would have duplicated
+900 lines to restyle 30.
+
+The consequence is that the old-UI build is no longer byte-identical to
+baseline: the old `Log.svelte` and `admin/status/Session.svelte` render the
+same migrated components, so `VITE_NEW_UI=false` now pulls in ui/Button,
+ui/Callout, ui/Input, ui/Tooltip and ui/Badge.
+
+  old-ui before  JS 1620.6 | CSS 36.4 | total 2014.6 | gz 733.6
+  old-ui after   JS 1629.2 | CSS 45.1 | total 2031.8 | gz 737.8
+
+This is fine, and it is worth being precise about why: `admin/index.ts` — the
+shared entry carrying the `VITE_NEW_UI` test — imports `'../theme'`, so
+`theme/tokens.css` is loaded under **both** flags. The migrated components
+render with correct tokens in the old UI rather than unstyled. Verified in the
+old-UI output: `LogViewer-*.css` contains both `--wg-*` token references and
+the `wg-badge` / `wg-tip` classes.
+
+So the rollback invariant changes from "old-UI build is byte-identical" to
+"old-UI build still builds and still renders correctly". The first phrasing
+only ever held while every migration was a copy. Any future in-place migration
+moves the old-UI number, and the check that matters is the build plus a visual
+pass, not the byte count.

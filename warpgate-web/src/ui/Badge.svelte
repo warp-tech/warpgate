@@ -14,6 +14,13 @@
         tone?: BadgeTone
         /** Machine data — renders the label in the mono face. */
         mono?: boolean
+        /**
+         * Makes the badge a link. Pass a hash href ("#/config/users/1"): the
+         * router is hash-based, so this navigates without svelte-spa-router's
+         * `use:link` action, which a primitive cannot apply to a caller's
+         * href. It also keeps middle-click and open-in-new-tab working.
+         */
+        href?: string
         id?: string
         class?: string
         children?: Snippet
@@ -22,21 +29,47 @@
     let {
         tone = 'neutral',
         mono = false,
+        href,
         id,
         class: className = '',
         children,
     }: Props = $props()
 </script>
 
-<span
-    {id}
-    class="wg-badge wg-badge-{tone} {className}"
-    class:wg-badge-mono={mono}
->
-    {@render children?.()}
-</span>
+{#if href}
+    <a
+        {id}
+        {href}
+        class="wg-badge wg-badge-{tone} wg-badge-link {className}"
+        class:wg-badge-mono={mono}
+    >
+        {@render children?.()}
+    </a>
+{:else}
+    <span
+        {id}
+        class="wg-badge wg-badge-{tone} {className}"
+        class:wg-badge-mono={mono}
+    >
+        {@render children?.()}
+    </span>
+{/if}
 
 <style>
+    .wg-badge-link {
+        text-decoration: none;
+        color: inherit;
+    }
+
+    .wg-badge-link:hover {
+        text-decoration: underline;
+    }
+
+    .wg-badge-link:focus-visible {
+        outline: var(--wg-focus-ring);
+        outline-offset: var(--wg-focus-ring-offset);
+    }
+
     /*
      * Colour accents sit on the border and the text, never the fill. DESIGN.md
      * keeps badge backgrounds subdued so that a row of them does not turn a

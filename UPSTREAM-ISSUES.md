@@ -181,3 +181,54 @@ enforcing the invariant.
 
 Worth deciding explicitly whether "expiry equal to now" is valid; the current
 client check uses `<=`, treating it as invalid.
+
+## 4. Audit log search races itself: results can belong to a stale query
+
+**Where:** `warpgate-web/src/admin/log-viewer/LogViewer.svelte`
+
+The search box calls `search()` on every `keyup`, and `search()` calls
+`loadOlder(true)`, which issues a `getLogs` POST and assigns the result
+unconditionally:
+
+```ts
+function search() {
+    loadOlder(true)
+}
+
+async function loadOlder(searchMode = false) {
+    ...
+    const newItems = await getLogs({ ... })   // no request identity
+    if (searchMode) {
+        endReached = false
+        items = []
+    }
+    addItems(newItems)                        // last response wins
+    visibleItems = items
+}
+```
+
+There is no debounce and no request-ordering guard. Typing `ssh` issues three
+requests — for `s`, `ss` and `ssh` — and whichever **resolves** last is the one
+rendered. Responses are not required to arrive in the order they were sent, and
+a broader prefix is usually the slower query because it matches more rows, so
+the racing case is the common one rather than the pathological one.
+
+**Why it matters more than a normal debounce omission.** The failure is silent
+and it is in an audit tool: the search box reads `ssh`, the list shows the
+result set for `ss`, and nothing indicates a mismatch. An operator scanning the
+audit log for a specific event can conclude it is absent when it is not. For a
+log that exists to answer "did this happen", a filter that quietly shows the
+wrong result set is a correctness bug, not a performance one.
+
+It also issues one POST per keystroke against the audit log table, which is the
+largest table in the database.
+
+**The fix already exists in this repository.** `admin/player/latestWins.ts`
+implements exactly this guard and is used by `playbackController`. Applying it
+to `loadOlder`, plus a short debounce on `search()`, would fix both halves.
+
+**Not changed here.** The redesign's scope for this component is chrome only —
+the virtualizer, streaming and pagination are deliberately untouched — and this
+is internals. The search input was migrated to `ui/Input` preserving `onkeyup`
+exactly, rather than silently switching to `oninput` or adding a debounce,
+so the behaviour is unchanged and this report describes the code as it stands.

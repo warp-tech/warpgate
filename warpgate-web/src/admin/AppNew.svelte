@@ -107,18 +107,18 @@
             asyncComponent: () => import('./status/NetworkStatus.svelte'),
         }),
         '/log': wrap({
-            asyncComponent: () => import('./Log.svelte'),
+            asyncComponent: () => import('./screens/Log.svelte'),
         }),
         '/log/user/:id': wrap({
-            asyncComponent: () => import('./Log.svelte'),
+            asyncComponent: () => import('./screens/Log.svelte'),
             props: { filterKind: 'user' },
         }),
         '/log/access-role/:id': wrap({
-            asyncComponent: () => import('./Log.svelte'),
+            asyncComponent: () => import('./screens/Log.svelte'),
             props: { filterKind: 'access-role' },
         }),
         '/log/admin-role/:id': wrap({
-            asyncComponent: () => import('./Log.svelte'),
+            asyncComponent: () => import('./screens/Log.svelte'),
             props: { filterKind: 'admin-role' },
         }),
         '/config/targets/create/:kind': wrap({

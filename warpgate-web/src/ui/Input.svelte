@@ -55,6 +55,7 @@
         class?: string
         oninput?: (event: Event) => void
         onkeydown?: (event: KeyboardEvent) => void
+        onkeyup?: (event: KeyboardEvent) => void
         prefix?: Snippet
         suffix?: Snippet
     }
@@ -83,6 +84,7 @@
         class: className = '',
         oninput,
         onkeydown,
+        onkeyup,
         prefix,
         suffix,
     }: Props = $props()
@@ -136,6 +138,7 @@
             aria-describedby={describedBy}
             {oninput}
             {onkeydown}
+            {onkeyup}
         >
         {#if suffix}
             <span class="wg-input-affix" aria-hidden="true">

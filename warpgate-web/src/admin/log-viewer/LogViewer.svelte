@@ -3,17 +3,18 @@
         faDownload,
         faRotateRight,
     } from '@fortawesome/free-solid-svg-icons'
-    import { Alert, Tooltip } from '@sveltestrap/sveltestrap'
     import { createVirtualizer } from '@tanstack/svelte-virtual'
     import { api, type GetLogsRequest, type LogEntry } from 'admin/lib/api'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import { downloadBlob } from 'common/helpers'
     import { onDestroy, onMount, untrack } from 'svelte'
-    import Fa from 'svelte-fa'
     import IntersectionObserver from 'svelte-intersection-observer'
     import { link } from 'svelte-spa-router'
     import { firstBy } from 'thenby'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import Input from 'ui/Input.svelte'
+    import Tooltip from 'ui/Tooltip.svelte'
     import AccessRoleBadge from './AccessRoleBadge.svelte'
     import AdminRoleBadge from './AdminRoleBadge.svelte'
     import TargetBadge from './TargetBadge.svelte'
@@ -424,41 +425,87 @@
 </script>
 
 {#if error}
-    <Alert color="danger">{error}</Alert>
+    <Callout tone="danger" title="Could not load the log">{error}</Callout>
 {/if}
 
-<div class="d-flex align-items-stretch gap-2 mb-2">
-    <input
-        placeholder="Search..."
-        type="text"
-        class="form-control form-control-sm flex-grow-1"
-        style="min-width: 12rem"
-        bind:value={searchQuery}
-        onkeyup={() => search()}
-    >
-    <AsyncButton
-        id="clearAndReloadButton"
-        color="link"
-        click={clearAndReload}
-        size="sm"
-        disabled={loading}
-    >
-        <Fa icon={faRotateRight} fw />
-    </AsyncButton>
-    <Tooltip target="clearAndReloadButton" delay={500}>
-        Clear view and reload latest log
+<div class="log-toolbar">
+    <div class="log-search">
+        <Input
+            label="Search the log"
+            labelHidden
+            type="search"
+            size="compact"
+            placeholder="Search…"
+            bind:value={searchQuery}
+            onkeyup={() => search()}
+        />
+    </div>
+
+    <!--
+      ui/Tooltip wraps its trigger rather than targeting one by id, so the
+      icon-only buttons sit inside it. Each still carries its own `label`,
+      which is the accessible name — the tooltip is the visible hint, not the
+      name, and a tooltip alone would leave these two buttons unnamed.
+    -->
+    <Tooltip text="Clear view and reload latest log" delay={500}>
+        <Button
+            variant="ghost"
+            size="compact"
+            label="Clear view and reload latest log"
+            disabled={loading}
+            click={clearAndReload}
+        >
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <path
+                    d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                />
+                <path
+                    d="M13.5 2v3h-3"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                />
+            </svg>
+        </Button>
     </Tooltip>
-    <AsyncButton
-        id="downloadLogsButton"
-        color="link"
-        click={downloadLogs}
-        size="sm"
-        disabled={loading && !visibleItems}
-    >
-        <Fa icon={faDownload} fw />
-    </AsyncButton>
-    <Tooltip target="downloadLogsButton" delay={500}>
-        Download all matching logs
+
+    <Tooltip text="Download all matching logs" delay={500}>
+        <Button
+            variant="ghost"
+            size="compact"
+            label="Download all matching logs"
+            disabled={loading && !visibleItems}
+            click={downloadLogs}
+        >
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <path
+                    d="M8 2v8"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                />
+                <path
+                    d="M4.75 6.75L8 10l3.25-3.25"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                />
+                <path
+                    d="M2.75 12.5h10.5"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                />
+            </svg>
+        </Button>
     </Tooltip>
 </div>
 
@@ -776,6 +823,18 @@
 {/if}
 
 <style lang="scss">
+    .log-toolbar {
+        display: flex;
+        align-items: center;
+        gap: var(--wg-space-sm);
+        margin-bottom: var(--wg-space-sm);
+    }
+
+    .log-search {
+        flex: 1 1 auto;
+        min-width: 12rem;
+    }
+
     @import "../../theme/vars.light";
 
     .table-wrapper {
