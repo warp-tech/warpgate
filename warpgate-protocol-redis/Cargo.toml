@@ -1,0 +1,27 @@
+[package]
+name = "warpgate-protocol-redis"
+version = "0.28.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+humantime = { version = "2.1", default-features = false }
+redis-protocol = { version = "6.0.0", features = ["codec"] }
+rustls.workspace = true
+socket2 = { version = "0.6", features = ["all"], default-features = false }
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+tokio-util = { workspace = true, features = ["codec"] }
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+warpgate-aws = { path = "../warpgate-aws", default-features = false }
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }

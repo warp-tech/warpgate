@@ -6439,6 +6439,88 @@
           }
         ]
       },
+      "RedisIamAuthService": {
+        "type": "string",
+        "description": "Which AWS service to sign the IAM auth token for. Redis has no RDS\nequivalent of its own, so unlike [`DatabaseTargetAuth::IamRole`] the\nservice has to be picked explicitly.",
+        "enum": [
+          "ElastiCache",
+          "MemoryDb"
+        ]
+      },
+      "RedisIamRoleAuth": {
+        "type": "object",
+        "title": "RedisIamRoleAuth",
+        "required": [
+          "service"
+        ],
+        "properties": {
+          "service": {
+            "$ref": "#/components/schemas/RedisIamAuthService"
+          }
+        }
+      },
+      "RedisTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RedisTargetAuth_DatabaseTargetPasswordAuth"
+          },
+          {
+            "$ref": "#/components/schemas/RedisTargetAuth_RedisIamRoleAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Password": "#/components/schemas/RedisTargetAuth_DatabaseTargetPasswordAuth",
+            "IamRole": "#/components/schemas/RedisTargetAuth_RedisIamRoleAuth"
+          }
+        }
+      },
+      "RedisTargetAuth_DatabaseTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseTargetPasswordAuth"
+          }
+        ]
+      },
+      "RedisTargetAuth_RedisIamRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "IamRole"
+                ],
+                "example": "IamRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/RedisIamRoleAuth"
+          }
+        ]
+      },
       "RejectSessionRequest": {
         "type": "object",
         "title": "RejectSessionRequest",
@@ -7151,6 +7233,9 @@
           },
           {
             "$ref": "#/components/schemas/TargetOptions_TargetRdpOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptions_TargetRedisOptions"
           }
         ],
         "discriminator": {
@@ -7162,7 +7247,8 @@
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
             "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
             "Vnc": "#/components/schemas/TargetOptions_TargetVncOptions",
-            "Rdp": "#/components/schemas/TargetOptions_TargetRdpOptions"
+            "Rdp": "#/components/schemas/TargetOptions_TargetRdpOptions",
+            "Redis": "#/components/schemas/TargetOptions_TargetRedisOptions"
           }
         }
       },
@@ -7273,6 +7359,28 @@
           },
           {
             "$ref": "#/components/schemas/TargetRdpOptions"
+          }
+        ]
+      },
+      "TargetOptions_TargetRedisOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Redis"
+                ],
+                "example": "Redis"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetRedisOptions"
           }
         ]
       },
@@ -7402,6 +7510,50 @@
           },
           "tls_security": {
             "$ref": "#/components/schemas/RdpTlsSecurity"
+          }
+        }
+      },
+      "TargetRedisOptions": {
+        "type": "object",
+        "title": "TargetRedisOptions",
+        "required": [
+          "host",
+          "port",
+          "tls"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "username": {
+            "type": "string",
+            "description": "Redis ACL username. Optional, since Redis's legacy default user has none."
+          },
+          "auth": {
+            "$ref": "#/components/schemas/RedisTargetAuth"
+          },
+          "tls": {
+            "$ref": "#/components/schemas/Tls"
+          },
+          "database": {
+            "type": "integer",
+            "format": "uint8",
+            "description": "Numbered database (`SELECT`) to switch to right after connecting."
+          },
+          "idle_timeout": {
+            "type": "string"
+          },
+          "iam_cluster_id": {
+            "type": "string",
+            "description": "ElastiCache/MemoryDB cluster or replication-group id to sign the IAM\nauth token for, when `auth` is `IamRole`. Falls back to `host` if unset,\nsince the two are only sometimes the same string."
+          },
+          "iam_region": {
+            "type": "string",
+            "description": "AWS region to sign the IAM auth token for, when `auth` is `IamRole`.\nUnlike RDS/EKS endpoints, ElastiCache/MemoryDB hostnames don't reliably\nembed a parseable region, so it must be given explicitly here."
           }
         }
       },
@@ -7992,6 +8144,12 @@
             }
           },
           "rdp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "redis": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

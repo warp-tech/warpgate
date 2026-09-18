@@ -18,12 +18,15 @@
         makeExampleMySQLURI,
         makeExamplePostgreSQLCommand,
         makeExamplePostgreSQLURI,
+        makeExampleRedisCommand,
+        makeExampleRedisURI,
         makeExampleSCPCommand,
         makeExampleSSHCommand,
         makeKubeconfig,
         makeMySQLUsername,
         makeOidcKubeconfig,
         makePostgreSQLUsername,
+        makeRedisUsername,
         makeTargetURL,
         protocolHost,
         protocolPortString,
@@ -200,7 +203,7 @@
     let exampleKubectlCommand = $derived(makeExampleKubectlCommand(opts))
 
     function protocolEndpoint(
-        protocol: 'ssh' | 'mysql' | 'postgres' | 'rdp' | 'vnc',
+        protocol: 'ssh' | 'mysql' | 'postgres' | 'rdp' | 'vnc' | 'redis',
     ) {
         return `${protocolHost(opts, protocol)}:${protocolPortString(opts, protocol)}`
     }
@@ -320,6 +323,37 @@
         Kubernetes session lifetime. In a round-robin cluster, at least as many
         uses are needed as there are nodes in the cluster.
     </InfoBox>
+{/if}
+
+{#if targetKind === TargetKind.Redis}
+    <CopyableTextArea
+        label="Example Redis command"
+        value={makeExampleRedisCommand(opts)}
+    />
+    <CollapsibleBlock
+        label="Advanced"
+        persistKey="connectionInstructionsAdvancedOpen"
+    >
+        <div class="mt-3">
+            <CopyableTextArea
+                label="Example database URL"
+                value={makeExampleRedisURI(opts)}
+            />
+            <CopyableTextArea
+                label="Redis endpoint"
+                value={protocolEndpoint('redis')}
+            />
+            <CopyableTextArea
+                label="Redis username"
+                value={makeRedisUsername(opts)}
+            />
+        </div>
+    </CollapsibleBlock>
+
+    <Alert color="info" class="mt-3">
+        Authenticate with <code>AUTH</code> or <code>HELLO ... AUTH</code>{' '}
+        using the username and password above.
+    </Alert>
 {/if}
 
 {#if targetKind === TargetKind.Kubernetes && !ticketSecret}

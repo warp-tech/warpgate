@@ -111,6 +111,19 @@
                     tlsSecurity: RdpTlsSecurity.Tls12,
                     compression: RdpTargetCompression.Remotefx,
                 },
+                Redis: {
+                    kind: TargetKind.Redis,
+                    host: '192.168.0.1',
+                    port: 6379,
+                    tls: {
+                        mode: TlsMode.Disabled,
+                        verify: true,
+                    },
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
+                },
             }[params.kind]
             if (!options) {
                 return

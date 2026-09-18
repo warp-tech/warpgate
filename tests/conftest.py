@@ -84,6 +84,12 @@ VNC_BACKEND_SIZE = (800, 600)
 # warpgate-protocol-rdp `connect()`), i.e. the size desktop frames arrive at.
 RDP_BACKEND_SIZE = (1280, 800)
 
+# ACL credentials baked into the auth-required e2e Redis server (images/redis-server),
+# mirroring the fixed root/123 and user/123 credentials the MySQL/Postgres test
+# servers use. The default user is left as `nopass` so an un-authed probe still works.
+REDIS_AUTH_USERNAME = "wguser"
+REDIS_AUTH_PASSWORD = "wgpassword123"
+
 
 @dataclass
 class WarpgateProcess:
@@ -96,6 +102,7 @@ class WarpgateProcess:
     kubernetes_port: int
     vnc_port: int
     rdp_port: int
+    redis_port: int
 
 
 class ProcessManager:
@@ -301,6 +308,47 @@ class ProcessManager:
 
         _wait_timeout(wait_postgres, "Postgres is not ready", timeout=self.timeout)
         logging.debug(f"Postgres {container_name} is up")
+        return port
+
+    def start_redis_server(self, require_auth=False):
+        port = alloc_port()
+        container_name = f"warpgate-e2e-redis-server-{uuid.uuid4()}"
+        args = [
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            container_name,
+            "-p",
+            f"{port}:6379",
+            "warpgate-e2e-redis-server",
+        ]
+        if require_auth:
+            args += [
+                "redis-server",
+                "--user",
+                REDIS_AUTH_USERNAME,
+                "on",
+                f">{REDIS_AUTH_PASSWORD}",
+                "~*",
+                "&*",
+                "+@all",
+            ]
+        self.start(args)
+
+        def wait_redis():
+            while True:
+                try:
+                    subprocess.check_call(
+                        ["docker", "exec", container_name, "redis-cli", "ping"],
+                        stdout=subprocess.DEVNULL,
+                    )
+                    break
+                except subprocess.CalledProcessError:
+                    time.sleep(1)
+
+        _wait_timeout(wait_redis, "Redis is not ready", timeout=self.timeout)
+        logging.debug(f"Redis {container_name} is up")
         return port
 
     def start_k3s(self) -> K3sInstance:
@@ -726,6 +774,7 @@ class ProcessManager:
             kubernetes_port = alloc_port()
             vnc_port = alloc_port()
             rdp_port = alloc_port()
+            redis_port = alloc_port()
 
             config = yaml.safe_load(share_with.config_path.open())
             for section, port in [
@@ -736,6 +785,7 @@ class ProcessManager:
                 ("kubernetes", kubernetes_port),
                 ("vnc", vnc_port),
                 ("rdp", rdp_port),
+                ("redis", redis_port),
             ]:
                 if isinstance(config.get(section), dict):
                     config[section]["listen"] = f"0.0.0.0:{port}"
@@ -753,6 +803,7 @@ class ProcessManager:
             kubernetes_port = alloc_port()
             vnc_port = alloc_port()
             rdp_port = alloc_port()
+            redis_port = alloc_port()
 
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
@@ -801,6 +852,8 @@ class ProcessManager:
                 str(postgres_port),
                 "--kubernetes-port",
                 str(kubernetes_port),
+                "--redis-port",
+                str(redis_port),
                 "--data-path",
                 data_dir,
                 "--external-host",
@@ -869,6 +922,7 @@ class ProcessManager:
             kubernetes_port=kubernetes_port,
             vnc_port=vnc_port,
             rdp_port=rdp_port,
+            redis_port=redis_port,
         )
 
     def start_ssh_client(self, *args, password=None, **kwargs):

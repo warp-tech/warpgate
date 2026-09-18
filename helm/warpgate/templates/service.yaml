@@ -47,6 +47,14 @@ spec:
       name: pgsql
     {{- end }}
     {{- end }}
+    {{- with .Values.service.ports.redis }}
+    {{- if ne (int .) 0 }}
+    - port: {{ . }}
+      targetPort: redis
+      protocol: TCP
+      name: redis
+    {{- end }}
+    {{- end }}
     {{- with .Values.service.ports.kubernetes }}
     {{- if ne (int .) 0 }}
     - port: {{ . }}

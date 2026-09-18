@@ -286,6 +286,9 @@
                 {#if target.kind === TargetKind.Rdp}
                     RDP
                 {/if}
+                {#if target.kind === TargetKind.Redis}
+                    Redis
+                {/if}
             </small>
             {#if target.kind === TargetKind.Http}
                 <Button color="link" size="sm" tabindex={-1}>
@@ -368,7 +371,7 @@
                 targetName={instructionsTarget.name}
                 username={$serverInfo?.username}
                 targetKind={instructionsTarget.kind ?? TargetKind.Ssh}
-                targetDefaultDatabaseName={(instructionsTarget.kind === TargetKind.MySql || instructionsTarget.kind === TargetKind.Postgres)
+                targetDefaultDatabaseName={(instructionsTarget.kind === TargetKind.MySql || instructionsTarget.kind === TargetKind.Postgres || instructionsTarget.kind === TargetKind.Redis)
                     ? instructionsTarget.defaultDatabaseName : undefined}
             />
         {/if}

@@ -7,6 +7,7 @@ This folder contains Docker Compose setups for testing specific Warpgate feature
 | Folder | Feature | Description |
 |--------|---------|-------------|
 | [login-protection](./login-protection/) | Login Protection / Fail2Ban-like | Test IP blocking, user lockout, and exponential backoff |
+| [redis](./redis/) | Redis target support | Full Docker build of Warpgate proxying to a real Redis container |
 
 ## Usage
 

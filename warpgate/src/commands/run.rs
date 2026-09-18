@@ -22,6 +22,7 @@ use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_postgres::PostgresProtocolServer;
 use warpgate_protocol_rdp::RdpProtocolServer;
+use warpgate_protocol_redis::RedisProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 use warpgate_protocol_vnc::VncProtocolServer;
 
@@ -193,8 +194,10 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     // These protocols are uniform: sync `new`, one enable flag, one cert/key pair.
     // `$cfg` is the `store` field holding their config (all share the shape).
+    // `$requires_tls` is false only for Redis, which - unlike the others - has
+    // no in-protocol STARTTLS and so can run as a plaintext listener.
     macro_rules! tls_listener {
-        ($name:literal, $server:ident, $cfg:ident) => {{
+        ($name:literal, $server:ident, $cfg:ident, $requires_tls:expr) => {{
             let status_registry = services.listener_status.clone();
             let services = services.clone();
             let base = base.clone();
@@ -216,23 +219,32 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                         .into_iter()
                         .collect(),
                 });
-            spawn_supervisor($name, true, factory, selector, &config_rx, status_registry).await?
+            spawn_supervisor($name, $requires_tls, factory, selector, &config_rx, status_registry)
+                .await?
         }};
     }
 
-    supervisors.push(tls_listener!("MySQL", MySQLProtocolServer, mysql));
+    supervisors.push(tls_listener!("MySQL", MySQLProtocolServer, mysql, true));
     supervisors.push(tls_listener!(
         "PostgreSQL",
         PostgresProtocolServer,
-        postgres
+        postgres,
+        true
     ));
     supervisors.push(tls_listener!(
         "Kubernetes",
         KubernetesProtocolServer,
-        kubernetes
+        kubernetes,
+        true
     ));
-    supervisors.push(tls_listener!("VNC", VncProtocolServer, vnc));
-    supervisors.push(tls_listener!("RDP", RdpProtocolServer, rdp));
+    supervisors.push(tls_listener!("VNC", VncProtocolServer, vnc, true));
+    supervisors.push(tls_listener!("RDP", RdpProtocolServer, rdp, true));
+    supervisors.push(tls_listener!(
+        "Redis",
+        RedisProtocolServer,
+        redis,
+        false
+    ));
 
     tokio::spawn({
         let services = services.clone();
