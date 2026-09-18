@@ -10,6 +10,9 @@ import yarl
 
 from .api_client import admin_client, sdk
 from .approval_util import (
+    create_http_target,
+    create_password_user,
+    create_postgres_target,
     create_user_and_postgres_target,
     default_params,
     grant_admin_role,
@@ -154,16 +157,22 @@ class Test:
         timeout,
         shared_wg: WarpgateProcess,
         shared_postgres_port,
+        echo_server_port,
     ):
         # A ticket names a user but does not act as one: it is scoped to a
         # single target and is often handed to someone who is not that user at
         # all. Letting it answer their pending login would turn a ticket into
         # the second factor for every session they start.
         url = f"https://localhost:{shared_wg.http_port}"
-        user, target = create_user_and_postgres_target(
-            url, shared_postgres_port, require_approval=False
-        )
         with admin_client(url) as api:
+            user, role = create_password_user(api)
+            target = create_postgres_target(
+                api, role, shared_postgres_port, require_approval=False
+            )
+            # Only a ticket for an HTTP target can open a web session at all.
+            http_target = create_http_target(
+                api, role, echo_server_port, require_approval=False
+            )
             api.update_user(
                 user.id,
                 sdk.UserDataRequest(
@@ -178,7 +187,7 @@ class Test:
             )
             ticket = api.create_ticket(
                 sdk.CreateTicketRequest(
-                    target_name=target.name, username=user.username
+                    target_name=http_target.name, username=user.username
                 )
             ).secret
 

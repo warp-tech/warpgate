@@ -2,6 +2,7 @@ use poem_openapi::OpenApi;
 
 mod admin_roles;
 mod certificate_credentials;
+pub mod cluster_notifications;
 mod commands_search;
 pub mod cluster_proxy;
 // The per-permission `require` gate, `PermissionGranted`, and the cluster variant are consumed

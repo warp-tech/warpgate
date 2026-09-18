@@ -41,17 +41,23 @@ pub async fn ensure_host_keys(
     ];
     for (kind, stored, column) in stored {
         let file = host_key_file(keys_path, kind);
-        if !file.exists() {
+        let pem = if file.exists() {
+            let pem = std::fs::read_to_string(&file)?;
+            if idempotent_maybe_decrypt(stored).is_ok_and(|stored| stored == pem) {
+                continue;
+            }
+            info!("Importing SSH host key from {file:?} into the database");
+            pem
+        } else if idempotent_maybe_decrypt(stored).is_ok_and(|stored| stored.is_empty()) {
+            info!("Generating SSH host key ({kind:?})");
+            kind.generate_pem()?
+        } else {
             continue;
-        }
-        // If the file exists, import it into the DB (overwriting) so that when the files support is removed, the key in the DB is the latest one
-        let pem = std::fs::read_to_string(&file)?;
-        if idempotent_maybe_decrypt(stored).is_ok_and(|stored| stored == pem) {
-            continue;
-        }
-        info!("Importing SSH host key from {file:?} into the database");
+        };
+        // CAS write to prevent race between nodes at cluster boot
         Parameters::Entity::update_many()
             .col_expr(column, Expr::value(idempotent_maybe_encrypt_secret(&pem)?))
+            .filter(column.eq(stored.as_str()))
             .exec(db)
             .await?;
     }

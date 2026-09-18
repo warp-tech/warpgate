@@ -4,6 +4,7 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use time::OffsetDateTime;
+use tracing::warn;
 use warpgate_common::{AdminPermission, WarpgateError};
 
 use super::AdminContext;
@@ -116,7 +117,10 @@ impl Api {
         admin.require(AdminPermission::ConfigEdit)?;
         let ip_addr: IpAddr = match body.ip.parse() {
             Ok(addr) => addr,
-            Err(_) => return Ok(UnblockIpResponse::InvalidIp),
+            Err(_) => {
+                warn!("Rejecting request: `{}` is not a valid IP address", body.ip);
+                return Ok(UnblockIpResponse::InvalidIp);
+            }
         };
         admin
             .services()

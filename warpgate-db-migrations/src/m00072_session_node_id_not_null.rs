@@ -5,7 +5,7 @@ use uuid::Uuid;
 /// Backfills legacy `sessions.node_id` NULLs (pre-clustering, or once an owner
 /// was gone) with the nil UUID and makes the column non-nullable, so the entity
 /// can drop the `Option`. The nil UUID is the in-code sentinel for "no owning
-/// node" (see `cluster_proxy::node_owner`).
+/// node" (see `Cluster::owner`).
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 

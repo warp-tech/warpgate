@@ -13,14 +13,17 @@ export type RecordingMetadata =
           type: 'kubernetes-exec'
           namespace: string
           pod: string
-          container: string
-          command: string
+          // Absent when the client named no container: kubectl omits it for
+          // single-container pods and lets the API server choose.
+          container?: string | null
+          // Stored either as argv or, in older recordings, as a single string.
+          command: string | string[]
       }
     | {
           type: 'kubernetes-attach'
           namespace: string
           pod: string
-          container: string
+          container?: string | null
       }
     | {
           type: 'kubernetes-api'
@@ -66,13 +69,17 @@ export function recordingMetadataToFieldSet(
         case 'kubernetes-exec':
             fieldSets.push(['Namespace', metadata.namespace])
             fieldSets.push(['Pod', metadata.pod])
-            fieldSets.push(['Container', metadata.container])
-            fieldSets.push(['Command', metadata.command])
+            if (metadata.container) {
+                fieldSets.push(['Container', metadata.container])
+            }
+            fieldSets.push(['Command', [metadata.command].flat().join(' ')])
             break
         case 'kubernetes-attach':
             fieldSets.push(['Namespace', metadata.namespace])
             fieldSets.push(['Pod', metadata.pod])
-            fieldSets.push(['Container', metadata.container])
+            if (metadata.container) {
+                fieldSets.push(['Container', metadata.container])
+            }
             break
         case 'ssh-shell':
             fieldSets.push(['Channel', metadata.channel.toString()])

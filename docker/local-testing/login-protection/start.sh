@@ -72,7 +72,8 @@ if [[ ! -f "$CONFIG" ]]; then
       --ssh-port   "$SSH_PORT" \
       --mysql-port "$MYSQL_PORT" \
       --postgres-port "$PG_PORT" \
-      --import-ssh-keys "$REPO_ROOT/tests/ssh-keys/wg" \
+      --import-ssh-host-keys "$REPO_ROOT/tests/ssh-keys/wg" \
+      --import-ssh-client-keys "$REPO_ROOT/tests/ssh-keys/wg" \
       --external-host localhost
   # Accept any SSH host key from targets automatically (test environment only)
   python3 -c "

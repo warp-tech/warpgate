@@ -1,11 +1,12 @@
 [package]
 name = "warpgate-common-http"
-version = "0.28.5"
+version = "0.29.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
 
 [dependencies]
+html-escape.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
 serde.workspace = true
@@ -17,3 +18,7 @@ uuid.workspace = true
 warpgate-common = { path = "../warpgate-common" }
 warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
+
+[dev-dependencies]
+anyhow.workspace = true
+thiserror.workspace = true

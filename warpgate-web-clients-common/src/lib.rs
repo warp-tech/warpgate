@@ -10,8 +10,8 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tokio::sync::futures::Notified;
@@ -21,7 +21,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 use warpgate_common::auth::RememberApprovalBy;
 use warpgate_common::{UserSessionId, WarpgateError};
-use warpgate_core::approvals::{admit_target_session, GatedConnection};
+use warpgate_core::approvals::{GatedConnection, admit_target_session};
 use warpgate_core::{
     AdmittedTarget, Services, SessionHandle, TargetAuthorization, WarpgateServerHandle,
 };

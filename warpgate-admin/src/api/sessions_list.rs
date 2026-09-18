@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
-use futures::{SinkExt, StreamExt};
 use poem::http::StatusCode;
 use poem::session::Session;
 use poem::web::Data;
-use poem::web::websocket::{Message, WebSocket};
+use poem::web::websocket::WebSocket;
 use poem::{IntoResponse, handler};
 use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
@@ -20,7 +19,10 @@ use tracing::warn;
 use warpgate_common::auth::ApprovalKind;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::{SessionApprovalRequestSnapshot, TargetSessionSnapshot, UserSessionSnapshot};
+use warpgate_core::cluster::{ClusterNotification, refresh_notification_stream};
+use warpgate_core::{
+    SessionApprovalRequestSnapshot, State, TargetSessionSnapshot, UserSessionSnapshot,
+};
 use warpgate_db_entities::{Node, SessionApprovalRequest, Target, TargetSession, UserSession};
 
 use super::pagination::PaginatedResponse;
@@ -110,15 +112,7 @@ impl Api {
                 .map_err(poem::error::InternalServerError)?;
         }
 
-        {
-            let user_states = {
-                let state = admin.services().state.lock().await;
-                state.user_sessions.values().cloned().collect::<Vec<_>>()
-            };
-            for state in user_states {
-                state.lock().await.handle.close();
-            }
-        }
+        State::close_local_sessions(&admin.services().state, |_| true).await;
 
         session.purge();
 
@@ -308,22 +302,11 @@ pub async fn api_get_sessions_changes_stream(
     ws: WebSocket,
 ) -> Result<impl IntoResponse, WarpgateError> {
     require_admin_permission(&ctx, Some(AdminPermission::SessionsView)).await?;
-
-    let mut receiver = ctx.services().state.lock().await.subscribe();
-
-    Ok(ws
-        .on_upgrade(|socket| async move {
-            let (mut sink, _) = socket.split();
-
-            // TODO cluster broadcast
-
-            while receiver.recv().await.is_ok() {
-                sink.send(Message::Text("".into())).await?;
-            }
-
-            Ok::<(), anyhow::Error>(())
-        })
-        .into_response())
+    Ok(refresh_notification_stream(
+        ws,
+        ctx.services().cluster.subscribe(),
+        |msg| matches!(msg, ClusterNotification::SessionsChanged).then(String::new),
+    ))
 }
 
 #[cfg(test)]
