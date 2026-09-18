@@ -1,17 +1,52 @@
 <script lang="ts">
-    import {
-        faCertificate,
-        faIdBadge,
-        faKey,
-        faKeyboard,
-        faMobilePhone,
-    } from '@fortawesome/free-solid-svg-icons'
-    import { Alert, Button, Tooltip } from '@sveltestrap/sveltestrap'
-    import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
-    import CreateOtpModal from 'admin/CreateOtpModal.svelte'
-    import CreatePasswordModal from 'admin/CreatePasswordModal.svelte'
-    import PublicKeyCredentialModal from 'admin/PublicKeyCredentialModal.svelte'
+    /**
+     * My credentials — screen 14. Migrated in place: both the old portal shell
+     * and AppNew route to this same file, so one migration serves both.
+     *
+     * ── Enumeration of the original, asserted present ────────────────────
+     * Data:   getMyCredentials; changeMyPassword writing the returned state
+     *         back; addMyPublicKey / deleteMyPublicKey; addMyOtp /
+     *         deleteMyOtp; issueMyCertificate returning the response to the
+     *         modal; revokeMyCertificate followed by deleteCertificateKey so
+     *         the browser-stored private key goes with the credential.
+     * States: password Unset / Set / MultipleSet, each with its own label and
+     *         its own button verb (Set password / Change / Reset password).
+     * Policy: four "your policy requires X" warnings.
+     * Guards: OTP delete disabled when otpSetupEnforced and it is the last
+     *         device, with the reason in the title; Add key disabled and
+     *         explained when the account is LDAP-linked.
+     * Lists:  public keys with label and abbreviated form, certificates with
+     *         label and SHA-256 fingerprint, read-only SSO identities, each
+     *         carrying CredentialUsedStateBadge where it had one.
+     *
+     * ── FIXED: the password policy warning tested the wrong collection ───
+     * The original condition was
+     *
+     *     creds.publicKeys.length === 0 && policy includes Password
+     *
+     * — a copy-paste from the public-key block below it. Its three siblings
+     * each test their own collection against their own kind. The effect was
+     * backwards in both directions: a user who had a password but no public
+     * keys was told they could not log in, and a user who had public keys but
+     * NO password saw nothing, which is precisely the case the warning exists
+     * for. It now tests `creds.password === PasswordState.Unset`.
+     *
+     * This is a behaviour change and is called out in the commit; it is also
+     * written up in UPSTREAM-ISSUES.md, since upstream still has it.
+     *
+     * ── Modals now point at the migrated versions ────────────────────────
+     * All four came from admin/ and are replaced by their
+     * admin/screens/user-detail/credentials/ equivalents, so the portal
+     * inherits the fixes made in 6c — including the certificate modal no
+     * longer leaving the previous credential's private key reachable behind a
+     * "Copy as kubeconfig" button.
+     */
+    import CertificateCredentialModal from 'admin/screens/user-detail/credentials/CertificateCredentialModal.svelte'
+    import CreateOtpModal from 'admin/screens/user-detail/credentials/CreateOtpModal.svelte'
+    import CreatePasswordModal from 'admin/screens/user-detail/credentials/CreatePasswordModal.svelte'
+    import PublicKeyCredentialModal from 'admin/screens/user-detail/credentials/PublicKeyCredentialModal.svelte'
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
+    import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import {
         api,
@@ -24,14 +59,19 @@
     } from 'gateway/lib/api'
     import { deleteCertificateKey } from 'gateway/lib/certificateStore'
     import { serverInfo } from 'gateway/lib/store'
-    import Fa from 'svelte-fa'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import ConfirmDialog from 'ui/ConfirmDialog.svelte'
+    import Tooltip from 'ui/Tooltip.svelte'
 
     let creds: CredentialsState | undefined = $state()
+    let error: string | undefined = $state()
 
     let creatingPublicKeyCredential = $state(false)
     let issuingCertificateCredential = $state(false)
     let creatingOtpCredential = $state(false)
     let changingPassword = $state(false)
+    let revoking: ExistingCertificateCredential | undefined = $state()
 
     const initPromise = init()
 
@@ -54,10 +94,7 @@
             return
         }
         const credential = await api.addMyPublicKey({
-            newPublicKeyCredential: {
-                label,
-                opensshPublicKey,
-            },
+            newPublicKeyCredential: { label, opensshPublicKey },
         })
         creds.publicKeys.push(credential)
     }
@@ -66,8 +103,17 @@
         if (!creds) {
             return
         }
-        creds.publicKeys = creds.publicKeys.filter(c => c.id !== credential.id)
-        await api.deleteMyPublicKey(credential)
+        // Await the call before removing the row. The original removed it
+        // first and never put it back on failure, so a rejected delete looked
+        // like a successful one until the page was reloaded.
+        try {
+            await api.deleteMyPublicKey(credential)
+            creds.publicKeys = creds.publicKeys.filter(
+                c => c.id !== credential.id,
+            )
+        } catch (err) {
+            error = await stringifyError(err)
+        }
     }
 
     async function createOtp(secretKey: number[]) {
@@ -75,9 +121,7 @@
             return
         }
         const credential = await api.addMyOtp({
-            newOtpCredential: {
-                secretKey,
-            },
+            newOtpCredential: { secretKey },
         })
         creds.otp.push(credential)
     }
@@ -86,16 +130,17 @@
         if (!creds) {
             return
         }
-        creds.otp = creds.otp.filter(c => c.id !== credential.id)
-        await api.deleteMyOtp(credential)
+        try {
+            await api.deleteMyOtp(credential)
+            creds.otp = creds.otp.filter(c => c.id !== credential.id)
+        } catch (err) {
+            error = await stringifyError(err)
+        }
     }
 
     async function issueCertificate(label: string, publicKeyPem: string) {
         const response = await api.issueMyCertificate({
-            issueCertificateCredentialRequest: {
-                label,
-                publicKeyPem,
-            },
+            issueCertificateCredentialRequest: { label, publicKeyPem },
         })
         if (creds) {
             creds.certificates.push(response.credential)
@@ -103,251 +148,255 @@
         return response
     }
 
-    async function deleteCertificate(
-        credential: ExistingCertificateCredential,
-    ) {
-        if (!creds) {
+    async function confirmRevoke() {
+        const credential = revoking
+        if (!creds || !credential) {
             return
         }
-        if (confirm('Permanently revoke certificate?')) {
+        try {
+            await api.revokeMyCertificate(credential)
+            // The locally stored private key is useless once the certificate
+            // is revoked, and leaving it behind leaves key material in the
+            // browser for a credential that no longer exists.
+            await deleteCertificateKey(credential.id)
             creds.certificates = creds.certificates.filter(
                 c => c.id !== credential.id,
             )
-            await api.revokeMyCertificate(credential)
-            await deleteCertificateKey(credential.id)
+        } catch (err) {
+            error = await stringifyError(err)
+        } finally {
+            revoking = undefined
         }
     }
+
+    const otpDeleteBlocked = $derived(
+        ($serverInfo?.otpSetupEnforced ?? false) &&
+            (creds?.otp.length ?? 0) === 1,
+    )
 </script>
 
 <Loadable promise={initPromise}>
     {#if creds}
-        <div class="d-flex align-items-center mt-4 mb-2">
-            <h4 class="m-0">Password</h4>
-        </div>
+        {@const c = creds}
+        {#if error}
+            <div class="notice">
+                <Callout tone="danger" title="Something went wrong">
+                    {error}
+                </Callout>
+            </div>
+        {/if}
 
-        <div class="list-group list-group-flush mb-3">
-            <div class="list-group-item credential">
-                {#if creds.password === PasswordState.Unset}
-                    <span class="label ms-3">
-                        Your account has no password set
+        <section>
+            <div class="section-head">
+                <h2>Password</h2>
+            </div>
+
+            <ul class="creds">
+                <li>
+                    <span class="cred-label">
+                        {#if c.password === PasswordState.Unset}
+                            Your account has no password set
+                        {:else if c.password === PasswordState.Set}
+                            Password set
+                        {:else}
+                            Multiple passwords set
+                        {/if}
                     </span>
-                {/if}
-                {#if creds.password === PasswordState.Set}
-                    <Fa fw icon={faKeyboard} />
-                    <span class="label ms-3">Password set</span>
-                {/if}
-                {#if creds.password === PasswordState.MultipleSet}
-                    <Fa fw icon={faKeyboard} />
-                    <span class="label ms-3">Multiple passwords set</span>
-                {/if}
+                    <Button
+                        variant="ghost"
+                        size="compact"
+                        onclick={() => (changingPassword = true)}
+                    >
+                        {#if c.password === PasswordState.Unset}
+                            Set password
+                        {:else if c.password === PasswordState.Set}
+                            Change
+                        {:else}
+                            Reset password
+                        {/if}
+                    </Button>
+                </li>
+            </ul>
 
-                <span class="ms-auto"></span>
+            <!--
+              FIXED: was `c.publicKeys.length === 0`, a copy-paste from the
+              public-key block. See the file header.
+            -->
+            {#if c.password === PasswordState.Unset && Object.values(c.credentialPolicy).some(l => l?.includes(CredentialKind.Password))}
+                <Callout tone="warning" title="You need a password">
+                    Your credential policy requires a password for
+                    authentication. Without one you will not be able to sign in.
+                </Callout>
+            {/if}
+        </section>
+
+        <section>
+            <div class="section-head">
+                <h2>One-time passwords</h2>
                 <Button
-                    class="ms-2"
-                    color="link"
-                    onclick={e => {
-                    changingPassword = true
-                    e.preventDefault()
-                }}
+                    variant="ghost"
+                    size="compact"
+                    onclick={() => (creatingOtpCredential = true)}
                 >
-                    {#if creds.password === PasswordState.Unset}
-                        Set password
-                    {/if}
-                    {#if creds.password === PasswordState.Set}
-                        Change
-                    {/if}
-                    {#if creds.password === PasswordState.MultipleSet}
-                        Reset password
-                    {/if}
+                    Add device
                 </Button>
             </div>
-        </div>
 
-        {#if creds.publicKeys.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.includes(CredentialKind.Password))}
-            <Alert color="warning">
-                Your credential policy requires using a password for
-                authentication. Without one, you won't be able to log in.
-            </Alert>
-        {/if}
-
-        <div class="d-flex align-items-center mt-4 mb-2">
-            <h4 class="m-0">One-time passwords</h4>
-            <span class="ms-auto"></span>
-            <Button
-                color="link"
-                onclick={e => {
-            creatingOtpCredential = true
-            e.preventDefault()
-        }}
-            >
-                Add device
-            </Button>
-        </div>
-
-        <div class="list-group list-group-flush mb-3">
-            {#each creds.otp as credential (credential.id)}
-                <div class="list-group-item credential">
-                    <Fa fw icon={faMobilePhone} />
-                    <span class="label ms-3">OTP device</span>
-                    <span class="ms-auto"></span>
-                    <Button
-                        class="ms-2"
-                        color="link"
-                        disabled={($serverInfo?.otpSetupEnforced ?? false) &&
-                            creds.otp.length === 1}
-                        title={($serverInfo?.otpSetupEnforced ?? false) &&
-                        creds.otp.length === 1
-                            ? 'One-time passwords are required on this server - add another device first'
-                            : ''}
-                        onclick={e => {
-                    deleteOtp(credential)
-                    e.preventDefault()
-                }}
-                    >
-                        Delete
-                    </Button>
-                </div>
-            {/each}
-        </div>
-
-        {#if creds.otp.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.includes(CredentialKind.Totp))}
-            <Alert color="warning">
-                Your credential policy requires using a one-time password for
-                authentication. Without one, you won't be able to log in.
-            </Alert>
-        {:else if $serverInfo?.otpSetupEnforced}
-            <Alert color="info">
-                One-time passwords are required on this server.
-            </Alert>
-        {/if}
-
-        <div class="d-flex align-items-center mt-4 mb-2">
-            <h4 class="m-0">Public keys</h4>
-            <span class="ms-auto"></span>
-            <Button
-                color="link"
-                id="addPublicKeyCredentialButton"
-                title={creds.ldapLinked ? 'SSH keys are managed by LDAP' : ''}
-                onclick={e => {
-                if (creds?.ldapLinked) {
-                    return
-                }
-                creatingPublicKeyCredential = true
-                e.preventDefault()
-            }}
-            >
-                Add key
-            </Button>
-            <Tooltip
-                delay="250"
-                target="addPublicKeyCredentialButton"
-                animation
-            >
-                Public key credentials will be loaded from LDAP
-            </Tooltip>
-        </div>
-
-        <div class="list-group list-group-flush mb-3">
-            {#each creds.publicKeys as credential (credential.id)}
-                <div class="list-group-item credential">
-                    <Fa fw icon={faKey} />
-                    <div class="main ms-3">
-                        <div class="label">{credential.label}</div>
-                        <small class="d-block text-muted"
-                            >{credential.abbreviated}</small
-                        >
-                    </div>
-                    <span class="ms-auto"></span>
-                    <CredentialUsedStateBadge {credential} />
-                    <Button
-                        class="ms-2"
-                        color="link"
-                        disabled={creds.ldapLinked}
-                        title={creds.ldapLinked ? 'SSH keys are managed by LDAP' : ''}
-                        onclick={e => {
-                    deletePublicKey(credential)
-                    e.preventDefault()
-                }}
-                    >
-                        Delete
-                    </Button>
-                </div>
-            {/each}
-        </div>
-
-        {#if creds.publicKeys.length === 0 && creds.credentialPolicy.ssh?.includes(CredentialKind.PublicKey)}
-            <Alert color="warning">
-                Your credential policy requires using a public key for
-                authentication. Without one, you won't be able to log in.
-            </Alert>
-        {/if}
-
-        <div class="d-flex align-items-center mt-4 mb-2">
-            <h4 class="m-0">Certificates</h4>
-            <span class="ms-auto"></span>
-            <Button
-                color="link"
-                onclick={e => {
-            issuingCertificateCredential = true
-            e.preventDefault()
-        }}
-            >
-                Issue certificate
-            </Button>
-        </div>
-
-        <div class="list-group list-group-flush mb-3">
-            {#each creds.certificates as credential (credential.id)}
-                <div class="list-group-item credential">
-                    <Fa fw icon={faCertificate} />
-                    <div class="main ms-3 abbreviate">
-                        <div class="label">{credential.label}</div>
-                        <small class="d-block text-muted abbreviate"
-                            >SHA-256:
-                            <code>{credential.fingerprint}</code></small
-                        >
-                    </div>
-                    <span class="ms-auto"></span>
-                    <CredentialUsedStateBadge {credential} />
-                    <Button
-                        color="link"
-                        class="ms-2"
-                        onclick={e => {
-                    deleteCertificate(credential)
-                    e.preventDefault()
-                }}
-                    >
-                        Delete
-                    </Button>
-                </div>
-            {/each}
-        </div>
-
-        {#if creds.certificates.length === 0 && creds.credentialPolicy.kubernetes?.includes(CredentialKind.Certificate)}
-            <Alert color="warning">
-                Your credential policy requires using a certificate for
-                authentication. Without one, you won't be able to log in.
-            </Alert>
-        {/if}
-
-        {#if creds.sso.length > 0}
-            <div class="d-flex align-items-center mt-4 mb-2">
-                <h4 class="m-0">Single sign-on</h4>
-            </div>
-
-            <div class="list-group list-group-flush mb-3">
-                {#each creds.sso as credential (credential.id)}
-                    <div class="list-group-item credential">
-                        <Fa fw icon={faIdBadge} />
-                        <span class="label ms-3">
-                            {credential.email}
-                            {#if credential.provider}
-                                ({credential.provider})
-                            {/if}
-                        </span>
-                    </div>
+            <ul class="creds">
+                {#each c.otp as credential (credential.id)}
+                    <li>
+                        <span class="cred-label">OTP device</span>
+                        {#if otpDeleteBlocked}
+                            <Tooltip
+                                text="One-time passwords are required on this server — add another device first"
+                            >
+                                <Button variant="ghost" size="compact" disabled>
+                                    Delete
+                                </Button>
+                            </Tooltip>
+                        {:else}
+                            <Button
+                                variant="ghost"
+                                size="compact"
+                                click={() => deleteOtp(credential)}
+                            >
+                                Delete
+                            </Button>
+                        {/if}
+                    </li>
                 {/each}
+            </ul>
+
+            {#if c.otp.length === 0 && Object.values(c.credentialPolicy).some(l => l?.includes(CredentialKind.Totp))}
+                <Callout tone="warning" title="You need a one-time password">
+                    Your credential policy requires a one-time password for
+                    authentication. Without one you will not be able to sign in.
+                </Callout>
+            {:else if $serverInfo?.otpSetupEnforced}
+                <Callout
+                    >One-time passwords are required on this server.</Callout
+                >
+            {/if}
+        </section>
+
+        <section>
+            <div class="section-head">
+                <h2>Public keys</h2>
+                {#if c.ldapLinked}
+                    <Tooltip
+                        text="Public key credentials are loaded from LDAP for this account"
+                    >
+                        <Button variant="ghost" size="compact" disabled>
+                            Add key
+                        </Button>
+                    </Tooltip>
+                {:else}
+                    <Button
+                        variant="ghost"
+                        size="compact"
+                        onclick={() => (creatingPublicKeyCredential = true)}
+                    >
+                        Add key
+                    </Button>
+                {/if}
             </div>
+
+            <ul class="creds">
+                {#each c.publicKeys as credential (credential.id)}
+                    <li>
+                        <div class="cred-main">
+                            <span class="cred-label">{credential.label}</span>
+                            <small class="cred-sub wg-mono">
+                                {credential.abbreviated}
+                            </small>
+                        </div>
+                        <CredentialUsedStateBadge {credential} />
+                        {#if c.ldapLinked}
+                            <Tooltip text="SSH keys are managed by LDAP">
+                                <Button variant="ghost" size="compact" disabled>
+                                    Delete
+                                </Button>
+                            </Tooltip>
+                        {:else}
+                            <Button
+                                variant="ghost"
+                                size="compact"
+                                click={() => deletePublicKey(credential)}
+                            >
+                                Delete
+                            </Button>
+                        {/if}
+                    </li>
+                {/each}
+            </ul>
+
+            {#if c.publicKeys.length === 0 && c.credentialPolicy.ssh?.includes(CredentialKind.PublicKey)}
+                <Callout tone="warning" title="You need a public key">
+                    Your credential policy requires a public key for SSH
+                    authentication. Without one you will not be able to sign in.
+                </Callout>
+            {/if}
+        </section>
+
+        <section>
+            <div class="section-head">
+                <h2>Certificates</h2>
+                <Button
+                    variant="ghost"
+                    size="compact"
+                    onclick={() => (issuingCertificateCredential = true)}
+                >
+                    Issue certificate
+                </Button>
+            </div>
+
+            <ul class="creds">
+                {#each c.certificates as credential (credential.id)}
+                    <li>
+                        <div class="cred-main">
+                            <span class="cred-label">{credential.label}</span>
+                            <small class="cred-sub wg-mono">
+                                SHA-256: {credential.fingerprint}
+                            </small>
+                        </div>
+                        <CredentialUsedStateBadge {credential} />
+                        <Button
+                            variant="ghost"
+                            size="compact"
+                            onclick={() => (revoking = credential)}
+                        >
+                            Revoke
+                        </Button>
+                    </li>
+                {/each}
+            </ul>
+
+            {#if c.certificates.length === 0 && c.credentialPolicy.kubernetes?.includes(CredentialKind.Certificate)}
+                <Callout tone="warning" title="You need a certificate">
+                    Your credential policy requires a certificate for Kubernetes
+                    authentication. Without one you will not be able to sign in.
+                </Callout>
+            {/if}
+        </section>
+
+        {#if c.sso.length > 0}
+            <section>
+                <div class="section-head">
+                    <h2>Single sign-on</h2>
+                </div>
+                <ul class="creds">
+                    {#each c.sso as credential (credential.id)}
+                        <li>
+                            <span class="cred-label">
+                                {credential.email}
+                                {#if credential.provider}
+                                    ({credential.provider})
+                                {/if}
+                            </span>
+                        </li>
+                    {/each}
+                </ul>
+            </section>
         {/if}
     {/if}
 </Loadable>
@@ -380,16 +429,96 @@
         save={issueCertificate}
         username={$serverInfo.username}
         onClose={() => {
-        issuingCertificateCredential = false
-    }}
+            issuingCertificateCredential = false
+        }}
     />
 {/if}
 
-<style lang="scss">
-    .credential {
+<ConfirmDialog
+    open={!!revoking}
+    title="Revoke this certificate?"
+    confirmLabel="Revoke"
+    onconfirm={confirmRevoke}
+    oncancel={() => (revoking = undefined)}
+>
+    {#if revoking}
+        {@const r = revoking}
+        <p class="panel">
+            <strong>{r.label}</strong>
+            stops working immediately and cannot be reinstated. Its private key
+            is deleted from this browser at the same time, so anything using it
+            — a kubeconfig, a script — will need a newly issued certificate.
+        </p>
+    {/if}
+</ConfirmDialog>
+
+<style>
+    .notice {
+        margin-bottom: var(--wg-space-lg);
+    }
+
+    section {
+        margin-bottom: var(--wg-space-2xl);
+    }
+
+    .section-head {
         display: flex;
         align-items: center;
-        padding-left: 0;
-        padding-right: 0;
+        justify-content: space-between;
+        gap: var(--wg-space-md);
+        margin-bottom: var(--wg-space-sm);
+    }
+
+    h2 {
+        margin: 0;
+        font: var(--wg-text-headline-sm, var(--wg-text-headline-md));
+    }
+
+    .creds {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .creds li {
+        display: flex;
+        align-items: center;
+        gap: var(--wg-space-md);
+        padding: var(--wg-space-sm) 0;
+        border-bottom: var(--wg-border-width) solid var(--wg-border);
+        min-width: 0;
+    }
+
+    .creds li:last-child {
+        border-bottom: 0;
+    }
+
+    .cred-main {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        margin-right: auto;
+    }
+
+    .cred-label {
+        margin-right: auto;
+        font: var(--wg-text-body-md);
+        overflow-wrap: anywhere;
+    }
+
+    .cred-main .cred-label {
+        margin-right: 0;
+    }
+
+    .cred-sub {
+        color: var(--wg-text-muted);
+        font: var(--wg-text-code-sm);
+        overflow-wrap: anywhere;
+    }
+
+    .panel {
+        margin: 0;
+        color: var(--wg-text-muted);
     }
 </style>

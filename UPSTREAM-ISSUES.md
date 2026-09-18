@@ -232,3 +232,74 @@ the virtualizer, streaming and pagination are deliberately untouched — and thi
 is internals. The search input was migrated to `ui/Input` preserving `onkeyup`
 exactly, rather than silently switching to `oninput` or adding a debounce,
 so the behaviour is unchanged and this report describes the code as it stands.
+
+## 5. The "you need a password" warning tests the wrong collection
+
+**Where:** `warpgate-web/src/gateway/CredentialManager.svelte`
+
+The portal's credential page shows four "your credential policy requires X"
+warnings. Three test their own collection against their own kind. The password
+one tests the **public key** collection:
+
+```svelte
+{#if creds.publicKeys.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.includes(CredentialKind.Password))}
+    Your credential policy requires using a password for authentication.
+    Without one, you won't be able to log in.
+{/if}
+```
+
+Its three siblings, for comparison:
+
+```svelte
+{#if creds.otp.length === 0          && ... CredentialKind.Totp}
+{#if creds.publicKeys.length === 0   && ... CredentialKind.PublicKey}
+{#if creds.certificates.length === 0 && ... CredentialKind.Certificate}
+```
+
+It is a copy-paste from the public-key block immediately below it.
+
+**The effect is wrong in both directions.** A user who has a password but no
+public keys is told they will not be able to log in, which is false and
+alarming. A user who has public keys but **no password**, under a policy that
+requires one, sees nothing — and that is precisely the case the warning exists
+to catch. The warning is silent exactly when it matters.
+
+**Fix:** test the password state, which is what the message is about.
+
+```svelte
+{#if creds.password === PasswordState.Unset && Object.values(creds.credentialPolicy).some(l => l?.includes(CredentialKind.Password))}
+```
+
+**Changed in this fork,** unlike issues 1–4. The message is purely
+informational, the intent is unambiguous from the three sibling blocks, and
+this markup was being rewritten anyway. Called out in the screen 14 commit.
+
+## 6. Creating or deleting an API token does not update the list
+
+**Where:** `warpgate-web/src/gateway/ApiTokenManager.svelte`
+
+The component keeps `tokens` state and also renders a `Loadable` whose snippet
+parameter is **also** called `tokens`:
+
+```svelte
+let tokens: ExistingApiToken[] = $state([])
+...
+<Loadable promise={api.getMyApiTokens()}>
+    {#snippet children(tokens)}      <!-- shadows the state above -->
+        {#each tokens as token (token.id)}
+```
+
+`createToken` and `deleteToken` both write to the outer `tokens`, which nothing
+renders. The outer one is initialised to `[]` and never loaded. So a token that
+was just created does not appear in the list, and a deleted one does not go
+away, until the page is reloaded — and the newly created secret is displayed
+above a list that does not contain it, which reads as a failed creation.
+
+`deleteToken` also removes the row before awaiting the call and never restores
+it on failure, so a rejected delete is indistinguishable from a successful one.
+
+**Fix:** load into the state variable and render from it; await the delete
+before removing the row.
+
+**Changed in this fork** as part of the screen 14 migration, since the shadowed
+render was in the markup being replaced.

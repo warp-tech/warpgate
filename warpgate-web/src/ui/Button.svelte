@@ -32,6 +32,12 @@
         onclick?: (event: MouseEvent) => void
         class?: string
         id?: string
+        /**
+         * Associates a submit button with a form it is not inside — the
+         * pattern a dialog needs, where the fields are in the body and the
+         * submit button is in the footer.
+         */
+        form?: string
         children?: Snippet
     }
 
@@ -46,6 +52,7 @@
         onclick,
         class: className = '',
         id,
+        form,
         children,
     }: Props = $props()
 
@@ -71,6 +78,7 @@
     bind:this={element}
     {id}
     {type}
+    {form}
     class="wg-btn wg-btn-{variant} wg-btn-{size} {className}"
     class:wg-btn-block={block}
     class:wg-btn-busy={action.busy}
