@@ -1,0 +1,20 @@
+# Line endings for files that are executed by Linux inside a container.
+#
+# This checkout has core.autocrlf=true, which rewrites tracked text files to
+# CRLF in the working tree. That is harmless for anything Windows runs, and not
+# harmless for anything the container runs:
+#
+#   - docker/Dockerfile uses a `RUN <<EOF` heredoc. BuildKit writes the body to
+#     a file and hands it to the shell; with CRLF every line ends in a literal
+#     carriage return, so `set -xe` becomes `set -xe$'\r'` — an invalid option.
+#   - docker/dev-entrypoint.sh is bind-mounted and executed directly. A CRLF
+#     shebang fails with the classic `bad interpreter: /usr/bin/env bash^M`.
+#
+# Both failures are obscure enough to cost an hour, so they are pinned here
+# rather than left to whoever clones next.
+
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+Dockerfile.* text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
