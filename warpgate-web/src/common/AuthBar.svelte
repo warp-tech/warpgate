@@ -1,17 +1,21 @@
 <script lang="ts">
-    import { faSignOut } from '@fortawesome/free-solid-svg-icons'
-    import {
-        Button,
-        Dropdown,
-        DropdownItem,
-        DropdownMenu,
-        DropdownToggle,
-    } from '@sveltestrap/sveltestrap'
-
+    /**
+     * Signed-in identity and sign-out, in both app shells.
+     *
+     * Behaviour preserved: the username links to the portal profile, the
+     * "(ticket auth)" note, plain logout, and the two-way choice between
+     * logging out of Warpgate and single-logout at the identity provider when
+     * the session came in via SSO with SLO.
+     *
+     * The dropdown becomes ui/Menu, so the two sign-out choices are real menu
+     * items with keyboard support. The single-button case keeps its accessible
+     * name, which the icon-only sveltestrap Button carried only as a `title`.
+     */
     import { navigateToExternalUrl } from 'common/helpers'
     import { api } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
-    import Fa from 'svelte-fa'
+    import Button from 'ui/Button.svelte'
+    import Menu from 'ui/Menu.svelte'
 
     async function logout() {
         await api.logout()
@@ -23,43 +27,94 @@
         const response = await api.initiateSsoLogout()
         navigateToExternalUrl(response.url)
     }
+
+    const logoutGroups = [
+        {
+            items: [
+                {
+                    id: 'logout',
+                    label: 'Log out of Warpgate',
+                    onselect: () => void logout(),
+                },
+                {
+                    id: 'slo',
+                    label: 'Log out everywhere',
+                    onselect: () => void singleLogout(),
+                },
+            ],
+        },
+    ]
 </script>
 
 {#if $serverInfo?.username}
-    <div class="d-flex align-items-center">
-        <a href="/@warpgate/#/profile">
-            {$serverInfo.username}
-        </a>
+    <div class="authbar">
+        <a class="who" href="/@warpgate/#/profile">{$serverInfo.username}</a>
         {#if $serverInfo.authorizedViaTicket}
-            <span class="ml-2">(ticket auth)</span>
+            <span class="note">(ticket auth)</span>
         {/if}
 
         {#if $serverInfo?.authorizedViaSsoWithSingleLogout}
-            <Dropdown>
-                <DropdownToggle color="link" title="Log out options" size="sm">
-                    <Fa icon={faSignOut} fw />
-                </DropdownToggle>
-                <DropdownMenu right={true}>
-                    <DropdownItem on:click={logout}>
-                        <Fa icon={faSignOut} fw />
-                        Log out of Warpgate
-                    </DropdownItem>
-                    <DropdownItem on:click={singleLogout}>
-                        <Fa icon={faSignOut} fw />
-                        Log out everywhere
-                    </DropdownItem>
-                </DropdownMenu>
-            </Dropdown>
+            <Menu groups={logoutGroups} label="Log out options" align="end" />
         {:else}
             <Button
-                color="link"
-                on:click={logout}
-                title="Log out"
-                size="sm"
-                class="p-0 ms-2"
+                variant="ghost"
+                size="compact"
+                label="Log out"
+                click={logout}
             >
-                <Fa icon={faSignOut} fw />
+                <svg
+                    viewBox="0 0 16 16"
+                    width="14"
+                    height="14"
+                    aria-hidden="true"
+                >
+                    <path
+                        d="M6 14H3.5A1.5 1.5 0 0 1 2 12.5v-9A1.5 1.5 0 0 1 3.5 2H6"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                    />
+                    <path
+                        d="M10.5 11L13.5 8l-3-3M13 8H6"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    />
+                </svg>
             </Button>
         {/if}
     </div>
 {/if}
+
+<style>
+    .authbar {
+        display: flex;
+        align-items: center;
+        gap: var(--wg-space-sm);
+        min-width: 0;
+    }
+
+    .who {
+        color: var(--wg-text);
+        font: var(--wg-text-body-md);
+        text-decoration: none;
+        overflow-wrap: anywhere;
+    }
+
+    .who:hover {
+        text-decoration: underline;
+    }
+
+    .who:focus-visible {
+        outline: var(--wg-focus-ring);
+        outline-offset: var(--wg-focus-ring-offset);
+    }
+
+    .note {
+        color: var(--wg-text-muted);
+        font: var(--wg-text-label-sm);
+    }
+</style>

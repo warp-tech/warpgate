@@ -1,7 +1,7 @@
 <script lang="ts">
-    import { Alert } from '@sveltestrap/sveltestrap'
     import { api } from 'admin/lib/api'
     import { stringifyError } from 'common/errors'
+    import Callout from 'ui/Callout.svelte'
 
     interface Props {
         normal: boolean
@@ -27,18 +27,31 @@
 </script>
 
 {#if error}
-    <Alert color="danger">{error}</Alert>
+    <Callout tone="danger" title="Could not load the preview">{error}</Callout>
 {:else if preview}
-    <div class="small text-secondary mb-1">
-        Sent as POST to <code>{preview.url}</code>
-    </div>
-    <pre class="border rounded">{preview.payload}</pre>
+    <p class="target">Sent as POST to <code>{preview.url}</code></p>
+    <pre>{preview.payload}</pre>
 {/if}
 
-<style lang="scss">
+<style>
+    .target {
+        margin: 0 0 var(--wg-space-xs);
+        font: var(--wg-text-label-sm);
+        color: var(--wg-text-muted);
+    }
+
+    code {
+        font: var(--wg-text-code-sm);
+        color: var(--wg-text);
+    }
+
     pre {
-        font-size: 0.75rem;
         margin: 0;
-        padding: 1rem;
+        padding: var(--wg-space-lg);
+        background: var(--wg-surface-sunken);
+        border: var(--wg-border-width) solid var(--wg-border);
+        border-radius: var(--wg-radius-panel);
+        font: var(--wg-text-code-sm);
+        overflow-x: auto;
     }
 </style>

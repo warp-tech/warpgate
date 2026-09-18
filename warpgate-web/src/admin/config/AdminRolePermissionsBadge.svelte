@@ -1,18 +1,30 @@
 <script lang="ts">
-    import { Tooltip } from '@sveltestrap/sveltestrap'
+    /**
+     * "N permissions", with the breakdown by category on hover.
+     *
+     * Behaviour preserved: the count, the singular/plural, and the
+     * category -> comma-joined-labels grouping, which is derived from
+     * ADMIN_PERMISSIONS exactly as before.
+     *
+     * The tooltip wraps the badge rather than targeting a generated id, so the
+     * `role-${id}` element id is gone.
+     */
     import type { AdminRole } from 'admin/lib/api'
+    import Badge from 'ui/Badge.svelte'
+    import Tooltip from 'ui/Tooltip.svelte'
     import { ADMIN_PERMISSIONS } from '../lib/store'
 
-    export let role: AdminRole
-
-    // unique id for tooltip target
-    const id = `role-${role.id}`
-
-    function permissionCount(role: AdminRole): number {
-        return ADMIN_PERMISSIONS.reduce((n, p) => n + (role[p.key] ? 1 : 0), 0)
+    interface Props {
+        role: AdminRole
     }
 
-    function permissionLists(role: AdminRole): [string, string][] {
+    let { role }: Props = $props()
+
+    const count = $derived(
+        ADMIN_PERMISSIONS.reduce((n, p) => n + (role[p.key] ? 1 : 0), 0),
+    )
+
+    const summary = $derived.by(() => {
         const categories = [
             ...new Set(
                 ADMIN_PERMISSIONS.filter(p => role[p.key]).map(p => p.category),
@@ -23,23 +35,17 @@
                 const perms = ADMIN_PERMISSIONS.filter(
                     p => p.category === cat && role[p.key],
                 ).map(p => p.label)
-                if (!perms.length) {
-                    return null
-                }
-                return [cat, perms.join(', ')] as [string, string]
+                return perms.length ? `${cat}: ${perms.join(', ')}` : null
             })
-            .filter((x): x is [string, string] => !!x)
-    }
+            .filter(Boolean)
+            .join(' — ')
+    })
 </script>
 
-<span class="badge bg-secondary" {id}>
-    {permissionCount(role)}
-    {permissionCount(role) === 1 ? 'permission' : 'permissions'}
-</span>
-<Tooltip target={id} delay="250">
-    <div class="text-start">
-        {#each permissionLists(role) as [category, perms] (`${category}:${JSON.stringify(perms)}`)}
-            <div>{category}: <span class="text-muted">{perms}</span></div>
-        {/each}
-    </div>
-</Tooltip>
+{#if summary}
+    <Tooltip text={summary} delay={250}>
+        <Badge>{count} {count === 1 ? 'permission' : 'permissions'}</Badge>
+    </Tooltip>
+{:else}
+    <Badge>No permissions</Badge>
+{/if}

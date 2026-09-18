@@ -30,7 +30,6 @@
 </script>
 
 <script lang="ts" generics="T, G = unknown, GK = unknown">
-    import { Input } from '@sveltestrap/sveltestrap'
     import {
         combineLatest,
         debounceTime,
@@ -44,6 +43,7 @@
     } from 'rxjs'
     import { onDestroy, onMount, type Snippet } from 'svelte'
     import { observe } from 'svelte-observable'
+    import Input from 'ui/Input.svelte'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import EmptyState from './EmptyState.svelte'
     import Pagination from './Pagination.svelte'
@@ -226,9 +226,13 @@
                 })}
             {:else}
                 <Input
+                    label="Search"
+                    labelHidden
+                    type="search"
+                    size="compact"
+                    placeholder="Search…"
+                    class="item-list-search"
                     bind:value={filter}
-                    placeholder="Search..."
-                    class="flex-grow-1"
                 />
             {/if}
         {/if}
@@ -286,6 +290,12 @@
 {/await}
 
 <style lang="scss">
+    // ui/Input renders its own wrapper, so the flex-grow that used to sit on
+    // the sveltestrap Input has to target that wrapper instead.
+    :global(.item-list-search) {
+        flex-grow: 1;
+    }
+
     .list-group:empty {
         display: none;
     }

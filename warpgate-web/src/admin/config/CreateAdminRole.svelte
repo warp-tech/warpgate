@@ -1,10 +1,19 @@
 <script lang="ts">
-    import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
+    /**
+     * Create an admin role — restyled in place.
+     *
+     * Behaviour preserved: the role starts from emptyPermissions(), so a new
+     * role grants nothing until permissions are ticked on the detail page, and
+     * createAdminRole is followed by replace() to that page.
+     */
     import { type AdminRole, api } from 'admin/lib/api'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import { replace } from 'svelte-spa-router'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import Input from 'ui/Input.svelte'
+    import 'ui/layout.css'
     import { emptyPermissions } from '../lib/store'
 
     let error: string | null = $state(null)
@@ -16,6 +25,9 @@
     })
 
     async function create() {
+        if (!role.name.trim()) {
+            return
+        }
         try {
             const r = await api.createAdminRole({ adminRoleDataRequest: role })
             replace(`/config/admin-roles/${r.id}`)
@@ -25,33 +37,59 @@
     }
 </script>
 
-<div class="container-max-md">
-    <PermissionGate
-        perm="adminRolesManage"
-        message="You have no permission to manage admin roles."
-    >
-        <div class="page-summary-bar">
-            <h1>create admin role</h1>
-        </div>
-
-        <div class="narrow-page">
-            <FormGroup floating label="Name">
-                <Input bind:value={role.name} autofocus />
-            </FormGroup>
-
-            <FormGroup floating label="Description">
-                <Input bind:value={role.description} />
-            </FormGroup>
-
-            {#if error}
-                <Alert color="danger">{error}</Alert>
-            {/if}
-
-            <div class="d-flex mt-3">
-                <AsyncButton color="primary" class="ms-auto" click={create}>
-                    Create
-                </AsyncButton>
+<PermissionGate
+    perm="adminRolesManage"
+    message="You have no permission to manage admin roles."
+>
+    <div class="wg-page-narrow">
+        <div class="wg-page-head">
+            <div>
+                <h1>Create admin role</h1>
+                <p class="wg-page-lede">
+                    The new role grants nothing until you tick permissions on
+                    the next screen.
+                </p>
             </div>
         </div>
-    </PermissionGate>
-</div>
+
+        {#if error}
+            <div class="notice">
+                <Callout tone="danger" title="Could not create the role">
+                    {error}
+                </Callout>
+            </div>
+        {/if}
+
+        <form
+            class="wg-field-stack"
+            onsubmit={e => {
+                e.preventDefault()
+                create()
+            }}
+        >
+            <Input label="Name" required autofocus bind:value={role.name} />
+            <Input label="Description" bind:value={role.description} />
+            <div class="actions">
+                <Button
+                    variant="primary"
+                    type="submit"
+                    disabled={!role.name.trim()}
+                    click={create}
+                >
+                    Create
+                </Button>
+            </div>
+        </form>
+    </div>
+</PermissionGate>
+
+<style>
+    .notice {
+        margin-bottom: var(--wg-space-lg);
+    }
+
+    .actions {
+        display: flex;
+        justify-content: flex-end;
+    }
+</style>

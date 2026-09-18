@@ -34,3 +34,91 @@
     grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
     gap: var(--wg-space-md);
 }
+
+/* ── Page header ──────────────────────────────────────────────────────────
+   Title, optional lede, optional trailing actions. Consolidated when the fork
+   check found the same block in five migrated screens and every remaining one
+   needed it too. */
+.wg-page-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--wg-space-lg);
+    flex-wrap: wrap;
+    margin-bottom: var(--wg-space-xl);
+}
+
+.wg-page-head h1 {
+    margin: 0;
+    font: var(--wg-text-headline-lg);
+    overflow-wrap: anywhere;
+}
+
+.wg-page-lede {
+    margin: var(--wg-space-xs) 0 0;
+    color: var(--wg-text-muted);
+    font: var(--wg-text-body-md);
+    max-width: 70ch;
+}
+
+.wg-page-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--wg-space-sm);
+    flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+    .wg-page-head h1 {
+        font: var(--wg-text-headline-lg-mobile);
+    }
+}
+
+/* A list of rows with hairline separators — the shape ItemList and most of the
+   config screens render. */
+.wg-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.wg-rows > li {
+    display: flex;
+    align-items: center;
+    gap: var(--wg-space-md);
+    padding: var(--wg-space-sm) 0;
+    border-bottom: var(--wg-border-width) solid var(--wg-border);
+    min-width: 0;
+}
+
+.wg-rows > li:last-child {
+    border-bottom: 0;
+}
+
+/* A row that is itself a link. */
+.wg-row-link {
+    display: flex;
+    align-items: center;
+    gap: var(--wg-space-md);
+    width: 100%;
+    min-width: 0;
+    padding: var(--wg-space-md);
+    margin: 0 calc(var(--wg-space-md) * -1);
+    border-radius: var(--wg-radius-control);
+    color: var(--wg-text);
+    text-decoration: none;
+}
+
+.wg-row-link:hover {
+    background: var(--wg-row-hover);
+}
+
+.wg-row-link:focus-visible {
+    outline: var(--wg-focus-ring);
+    outline-offset: calc(var(--wg-focus-ring-offset) * -1);
+}
+
+/* Constrains a settings page to a readable measure. */
+.wg-page-narrow {
+    max-width: 48rem;
+}

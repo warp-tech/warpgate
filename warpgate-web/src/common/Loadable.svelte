@@ -1,6 +1,6 @@
 <script lang="ts" generics="T">
-    import { Alert } from '@sveltestrap/sveltestrap'
     import type { Snippet } from 'svelte'
+    import Callout from 'ui/Callout.svelte'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import { stringifyError } from './errors'
 
@@ -49,9 +49,9 @@
 {#if !loaded}
     <DelayedSpinner />
 {:else if error}
-    <Alert color="danger">
+    <Callout tone="danger" title="Could not load this">
         {error}
-    </Alert>
+    </Callout>
 {:else if resolved}
     {@render children?.(currentValue)}
 {/if}
