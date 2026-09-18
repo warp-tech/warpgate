@@ -31,7 +31,7 @@
 
     <ListGroup flush>
         <a
-            href="https://warpgate.null.page/docs/"
+            href="https://warpgate.null.page/docs/?utm_source=app&utm_content=getting-started"
             target="_blank"
             class="list-group-item list-group-item-action d-flex align-items-center"
         >

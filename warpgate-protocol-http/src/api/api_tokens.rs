@@ -6,6 +6,7 @@ use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
+use warpgate_common_http::errors::bad_request;
 use warpgate_db_entities::ApiToken;
 
 use super::common::get_user;
@@ -124,7 +125,7 @@ impl Api {
         if let Some(max_seconds) = parameters.max_api_token_duration_seconds {
             let max_expiry = OffsetDateTime::now_utc() + Duration::seconds(max_seconds);
             if body.expiry > max_expiry {
-                return Ok(CreateApiTokenResponse::BadRequest(Json(format!(
+                return Ok(CreateApiTokenResponse::BadRequest(bad_request(format!(
                     "Token expiry exceeds maximum allowed duration of {max_seconds} seconds"
                 ))));
             }

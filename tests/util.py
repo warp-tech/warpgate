@@ -1,6 +1,7 @@
 import logging
 import os
 import requests
+import select
 import socket
 import sqlite3
 import subprocess
@@ -18,6 +19,16 @@ if "GITHUB_ACTION" in os.environ:
     # Github uses MySQL instead of MariaDB
     mysql_client_ssl_opt = "--ssl-mode=REQUIRED"
     mysql_client_opts = ["--enable-cleartext-plugin"]
+
+
+def read_until(stream, needle: bytes, deadline: float) -> bytes:
+    """Read from `stream` (a pipe) until `needle` appears or `deadline` passes."""
+    buf = b""
+    while time.monotonic() < deadline and needle not in buf:
+        ready, _, _ = select.select([stream], [], [], 1)
+        if ready:
+            buf += os.read(stream.fileno(), 4096)
+    return buf
 
 
 def alloc_port():
