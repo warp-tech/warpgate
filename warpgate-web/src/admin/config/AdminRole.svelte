@@ -7,6 +7,7 @@
     import { link, replace } from 'svelte-spa-router'
     import Button from 'ui/Button.svelte'
     import Callout from 'ui/Callout.svelte'
+    import ConfirmDialog from 'ui/ConfirmDialog.svelte'
     import Input from 'ui/Input.svelte'
     import StatusMarker from 'ui/StatusMarker.svelte'
     import Tooltip from 'ui/Tooltip.svelte'
@@ -136,12 +137,14 @@
         }
     }
 
-    async function remove() {
-        if (!role) return
-        if (confirm(`Delete admin role ${role.name}?`)) {
-            await api.deleteAdminRole(role)
-            replace('/config/admin-roles')
+    let removing = $state(false)
+
+    async function confirmRemove() {
+        if (!role) {
+            return
         }
+        await api.deleteAdminRole(role)
+        replace('/config/admin-roles')
     }
 </script>
 
@@ -232,7 +235,7 @@
                     class="ms-2"
                     {disabled}
                     variant="destructive"
-                    click={remove}
+                    onclick={() => (removing = true)}
                 >
                     Remove
                 </Button>
@@ -267,3 +270,19 @@
         {/snippet}
     </Loadable>
 </div>
+
+<ConfirmDialog
+    bind:open={removing}
+    title="Delete {role?.name ?? 'this admin role'}?"
+    confirmLabel="Delete admin role"
+    confirmText={role?.name}
+    confirmTextLabel="role name"
+    onconfirm={confirmRemove}
+    oncancel={() => (removing = false)}
+>
+    <p class="panel">
+        Every administrator holding this role loses the permissions it grants,
+        immediately. If it is the only role granting someone admin access, they
+        lose that access — and this screen does not list who holds it.
+    </p>
+</ConfirmDialog>

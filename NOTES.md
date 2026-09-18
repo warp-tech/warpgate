@@ -1109,3 +1109,78 @@ Biome's `useAriaPropsSupportedByRole` initially flagged `aria-checked` because
 the `role` was a ternary it could not resolve statically. Splitting it into two
 branches with literal roles fixed the warning and is clearer — each element is
 now statically verifiable rather than only correct at runtime.
+
+## The migration is complete
+
+The redesigned UI is the only UI. `VITE_NEW_UI` is gone, both old shells are
+deleted, and Bootstrap and sveltestrap are out of `package.json`.
+
+### Final state
+
+```
+svelte-check   1081 files (was 1304), 0 errors, 0 warnings
+ui/ primitives 26
+.svelte files  147
+routes         36 admin, 8 portal
+native dialogs 0 window.confirm, 0 alert()
+sveltestrap    0 imports anywhere in src/
+```
+
+Bundle, against the Phase 0.5 baseline:
+
+```
+baseline  JS 1620.6 | theme 356.3 | CSS  36.4 | total 2014.6 | gz 733.6
+final     JS 1231.2 | theme   0.0 | CSS 118.6 | total 1707.3 | gz 703.2
+                                                -15.3% raw, -4.2% gzipped
+```
+
+The 10% budget was a ceiling and the result comes in under the original. The
+356 KB of compiled Bootstrap JS is gone outright, partly offset by +82 KB of
+token CSS — the JS-to-CSS reclassification predicted in Phase 1, realised.
+
+### Deleting the old UI was computed, not guessed
+
+A reachability walk over static **and** lazy imports from the four real entry
+points (admin, gateway, embed, styleguide) produced the delete list: 45 files
+that nothing reaches. Four unreachable files were kept deliberately —
+`vite-env.d.ts` and `gateway/zmodem.js.d.ts` are ambient type declarations that
+no import mentions, and `ui/index.ts` / `shell/index.ts` are the primitive
+barrels.
+
+Doing this by inspection would have deleted at least two of those four.
+
+### Two audit corrections worth remembering
+
+**The first audit script under-reported by half.** It followed only top-level
+`import` statements, and `AppNew` reaches every screen through
+`asyncComponent: () => import(...)`. It cheerfully reported ZERO sveltestrap
+reachable while 32 files were still live. Any reachability check on this
+codebase has to follow dynamic imports.
+
+**Seeding the audit with the entry points inflates it instead.** `admin/index.ts`
+and `gateway/index.ts` referenced *both* shells while the flag existed — that
+is what a flag is. Seeding them made the figure jump to 35. The meaningful
+seeds were the two new shells plus `RootNew`.
+
+Both mistakes were mine, in the same tool, in opposite directions.
+
+### `sass` stays
+
+Removed with Bootstrap, then put back. It is a build-time preprocessor, not a
+UI framework, and 17 files still use `<style lang="scss">` for nesting. It never
+reaches the browser. "Delete Bootstrap" and "delete the SCSS toolchain" are
+different jobs and only the first one was asked for.
+
+### A fresh clone cannot build without `just openapi`
+
+The generated OpenAPI clients are gitignored and produced by `postinstall`,
+which needs Java and a POSIX shell. A fresh clone therefore has no
+`src/*/lib/api-client` until that runs — `npm ci` alone is not enough. The
+Dockerfile already accounts for this; a human cloning the repo on Windows will
+hit the `rm -rf` failure documented earlier unless `npm_config_script_shell`
+points at Git Bash.
+
+Verified by cloning to a clean directory at the flip commit: no old-UI file is
+present, `package.json` has no Bootstrap or sveltestrap, and with the API
+clients supplied the build produces byte-equivalent output (1705.7 KB against
+1705.5 in the working tree).

@@ -7,6 +7,7 @@
     import { link, replace } from 'svelte-spa-router'
     import Button from 'ui/Button.svelte'
     import Callout from 'ui/Callout.svelte'
+    import ConfirmDialog from 'ui/ConfirmDialog.svelte'
     import Input from 'ui/Input.svelte'
     import Toggle from 'ui/Toggle.svelte'
     import { adminPermissions } from '../lib/store'
@@ -70,12 +71,14 @@
         }
     }
 
-    async function remove() {
-        if (!role) return
-        if (confirm(`Delete role ${role.name}?`)) {
-            await api.deleteRole(role)
-            replace('/config/access-roles')
+    let removing = $state(false)
+
+    async function confirmRemove() {
+        if (!role) {
+            return
         }
+        await api.deleteRole(role)
+        replace('/config/access-roles')
     }
 </script>
 
@@ -129,7 +132,7 @@
             class="ms-2"
             disabled={!$adminPermissions.accessRolesDelete}
             variant="destructive"
-            click={remove}
+            onclick={() => (removing = true)}
         >
             Remove
         </Button>
@@ -187,3 +190,19 @@
         {/snippet}
     </ItemList>
 </div>
+
+<ConfirmDialog
+    bind:open={removing}
+    title="Delete {role?.name ?? 'this role'}?"
+    confirmLabel="Delete role"
+    confirmText={role?.name}
+    confirmTextLabel="role name"
+    onconfirm={confirmRemove}
+    oncancel={() => (removing = false)}
+>
+    <p class="panel">
+        Every user holding this role loses it, and every target that grants
+        access through it stops granting that access. Neither list is shown
+        here, so there is no way to see from this screen how many are affected.
+    </p>
+</ConfirmDialog>

@@ -10,6 +10,7 @@
     import Loadable from 'common/Loadable.svelte'
     import { push } from 'svelte-spa-router'
     import Button from 'ui/Button.svelte'
+    import ConfirmDialog from 'ui/ConfirmDialog.svelte'
     import Input from 'ui/Input.svelte'
     import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
     import LdapConnectionFields from './LdapConnectionFields.svelte'
@@ -123,11 +124,9 @@
         }
     }
 
-    async function remove() {
-        if (!confirm('Are you sure you want to delete this LDAP server?')) {
-            return
-        }
+    let removing = $state(false)
 
+    async function confirmRemove() {
         try {
             await api.deleteLdapServer({ id: params.id })
             push('/config/ldap-servers')
@@ -246,10 +245,28 @@
                 <Button type="button" class="btn btn-primary" click={save}>
                     Save
                 </Button>
-                <Button type="button" class="btn btn-danger" click={remove}>
+                <Button
+                    type="button"
+                    variant="destructive"
+                    onclick={() => (removing = true)}
+                >
                     Remove
                 </Button>
             </div>
         </form>
     </div>
 </Loadable>
+
+<ConfirmDialog
+    bind:open={removing}
+    title="Delete this LDAP server?"
+    confirmLabel="Delete server"
+    onconfirm={confirmRemove}
+    oncancel={() => (removing = false)}
+>
+    <p class="panel">
+        Users linked to this directory stop being able to sign in through it.
+        Their Warpgate accounts remain, but the credentials that came from the
+        directory — including SSH keys loaded from it — are no longer available.
+    </p>
+</ConfirmDialog>
