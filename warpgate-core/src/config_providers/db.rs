@@ -10,9 +10,9 @@ use time::OffsetDateTime;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use warpgate_common::auth::{
-    AllCredentialsPolicy, AnySingleCredentialPolicy, AuthCredential, CredentialKind,
-    CredentialPolicy, MfaEnforcementPolicy, PerProtocolCredentialPolicy, StoredCredential,
-    StoredCredentialFingerprint, StoredCredentialKind,
+    AnySingleCredentialPolicy, AuthCredential, CredentialKind, CredentialPolicy,
+    MfaEnforcementPolicy, MultipleCombinationsCredentialPolicy, PerProtocolCredentialPolicy,
+    StoredCredential, StoredCredentialFingerprint, StoredCredentialKind,
 };
 use warpgate_common::helpers::hash::{hash_secret, verify_password_hash};
 use warpgate_common::helpers::otp::verify_totp;
@@ -457,18 +457,22 @@ impl ConfigProvider for DatabaseConfigProvider {
             // carry one on the wire, so there a required `Sso` is satisfied by
             // the in-browser approval flow instead. Keyed off the protocol
             // rather than a per-entry flag so the rule has one statement.
-            let make_policy = |protocol: Protocol, required: Vec<CredentialKind>| {
-                let required_credential_types = required
+            let make_policy = |protocol: Protocol, required: Vec<Vec<CredentialKind>>| {
+                let paths = required
                     .into_iter()
-                    .map(|kind| match (kind, protocol) {
-                        (CredentialKind::Sso, Protocol::Http) => CredentialKind::Sso,
-                        (CredentialKind::Sso, _) => CredentialKind::WebUserApproval,
-                        (kind, _) => kind,
+                    .map(|path| {
+                        path.into_iter()
+                            .map(|kind| match (kind, protocol) {
+                                (CredentialKind::Sso, Protocol::Http) => CredentialKind::Sso,
+                                (CredentialKind::Sso, _) => CredentialKind::WebUserApproval,
+                                (kind, _) => kind,
+                            })
+                            .collect()
                     })
                     .collect();
-                Box::new(AllCredentialsPolicy {
+                Box::new(MultipleCombinationsCredentialPolicy {
                     supported_credential_types: supported_credential_types.clone(),
-                    required_credential_types,
+                    paths,
                 }) as Box<dyn CredentialPolicy + Sync + Send>
             };
 

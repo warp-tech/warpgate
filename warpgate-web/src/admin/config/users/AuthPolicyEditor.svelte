@@ -1,6 +1,11 @@
 <script lang="ts">
-    import { faWarning } from '@fortawesome/free-solid-svg-icons'
-    import { Input, Tooltip } from '@sveltestrap/sveltestrap'
+    import {
+        faPlus,
+        faTimes,
+        faTrash,
+        faWarning,
+    } from '@fortawesome/free-solid-svg-icons'
+    import { Button, Input, Tooltip } from '@sveltestrap/sveltestrap'
     import {
         CredentialKind,
         type ParameterValues,
@@ -141,23 +146,42 @@
         return CredentialKind.WebUserApproval
     }
 
+    function getCombinations(
+        protocolId: ProtocolID,
+    ): CredentialKind[][] | undefined {
+        const val = value[protocolId] as unknown
+        if (!val || !Array.isArray(val)) {
+            return undefined
+        }
+        if (val.length === 0) {
+            return []
+        }
+        if (typeof val[0] === 'string') {
+            return [val as CredentialKind[]]
+        }
+        return val as CredentialKind[][]
+    }
+
     function shownKinds(
         protocol: PolicyProtocol,
     ): { kind: CredentialKind; label: string }[] {
+        const combos = getCombinations(protocol.id) ?? []
+        const kindsInUse = new Set(combos.flat())
         return credentialKinds.filter(
             ({ kind }) =>
                 possibleCredentials(protocol.id).has(kind) ||
-                (value[protocol.id]?.includes(kind) ?? false) ||
+                kindsInUse.has(kind) ||
                 mfaEnforcedFactor(protocol.id) === kind,
         )
     }
 
     function activeTipsFor(protocol: PolicyProtocol): string[] {
         const result = []
+        const combos = getCombinations(protocol.id) ?? []
+        const kindsInUse = new Set(combos.flat())
         for (const [[kind, enabled], tip] of tips[protocol.id].entries()) {
             const effective =
-                (value[protocol.id]?.includes(kind) ?? false) ||
-                mfaEnforcedFactor(protocol.id) === kind
+                kindsInUse.has(kind) || mfaEnforcedFactor(protocol.id) === kind
             if (effective === enabled) {
                 result.push(tip)
             }
@@ -169,13 +193,23 @@
     // protocol mandates it.
     $effect(() => {
         for (const protocol of protocols) {
-            const kinds = value[protocol.id]
-            if (
-                requiresPassword(protocol.id) &&
-                kinds &&
-                !kinds.includes(CredentialKind.Password)
-            ) {
-                value[protocol.id] = [CredentialKind.Password, ...kinds]
+            if (!requiresPassword(protocol.id)) {
+                continue
+            }
+            const combos = getCombinations(protocol.id)
+            if (!combos) {
+                continue
+            }
+            let changed = false
+            const updated = combos.map(combo => {
+                if (!combo.includes(CredentialKind.Password)) {
+                    changed = true
+                    return [CredentialKind.Password, ...combo]
+                }
+                return combo
+            })
+            if (changed) {
+                value[protocol.id] = updated
             }
         }
     })
@@ -184,32 +218,125 @@
         if (value[protocol.id]) {
             value[protocol.id] = undefined
         } else if (requiresPassword(protocol.id)) {
-            value[protocol.id] = [CredentialKind.Password]
+            value[protocol.id] = [[CredentialKind.Password]]
         } else {
             const possible = possibleCredentials(protocol.id)
-            const oneCred = Array.from(availableKinds ?? []).find(x =>
-                possible.has(x),
-            )
-            value[protocol.id] = oneCred ? [oneCred] : []
+            const oneCred =
+                Array.from(availableKinds ?? []).find(x => possible.has(x)) ??
+                Array.from(possible)[0] ??
+                CredentialKind.Password
+            value[protocol.id] = [[oneCred]]
         }
     }
 
-    function toggle(protocolId: ProtocolID, kind: CredentialKind) {
-        // Password is mandatory when required by this protocol.
+    function addCombination(protocolId: ProtocolID) {
+        const combos = getCombinations(protocolId) ?? []
+        let defaultKind: CredentialKind = CredentialKind.Password
+        if (!requiresPassword(protocolId)) {
+            const possible = possibleCredentials(protocolId)
+            const oneCred =
+                Array.from(availableKinds ?? []).find(x => possible.has(x)) ??
+                Array.from(possible)[0]
+            if (oneCred) {
+                defaultKind = oneCred
+            }
+        }
+        value[protocolId] = [...combos, [defaultKind]]
+    }
+
+    function removeCombination(protocolId: ProtocolID, comboIndex: number) {
+        const combos = getCombinations(protocolId)
+        if (!combos) {
+            return
+        }
+        const updated = combos.filter((_, i) => i !== comboIndex)
+        if (updated.length === 0) {
+            value[protocolId] = undefined
+        } else {
+            value[protocolId] = updated
+        }
+    }
+
+    function addFactor(
+        protocolId: ProtocolID,
+        comboIndex: number,
+        kind: CredentialKind,
+    ) {
+        const combos = getCombinations(protocolId)
+        if (!combos?.[comboIndex]) {
+            return
+        }
+        const combo = combos[comboIndex]
+        if (!combo.includes(kind)) {
+            combos[comboIndex] = [...combo, kind]
+            value[protocolId] = [...combos]
+        }
+    }
+
+    function removeFactor(
+        protocolId: ProtocolID,
+        comboIndex: number,
+        factorIndex: number,
+    ) {
+        const combos = getCombinations(protocolId)
+        if (!combos?.[comboIndex]) {
+            return
+        }
+        const combo = combos[comboIndex]
+        const kind = combo[factorIndex]
         if (requiresPassword(protocolId) && kind === CredentialKind.Password) {
             return
         }
-        const kinds = value[protocolId]
-        if (!kinds) {
+        if (combo.length <= 1) {
             return
         }
-        if (kinds.includes(kind)) {
-            const remaining = kinds.filter(x => x !== kind)
-            // An explicit policy with nothing selected means "any credential"
-            value[protocolId] = remaining.length ? remaining : undefined
-        } else {
-            kinds.push(kind)
+        combos[comboIndex] = combo.filter((_, i) => i !== factorIndex)
+        value[protocolId] = [...combos]
+    }
+
+    function changeFactor(
+        protocolId: ProtocolID,
+        comboIndex: number,
+        factorIndex: number,
+        newKind: CredentialKind,
+    ) {
+        const combos = getCombinations(protocolId)
+        if (!combos?.[comboIndex]) {
+            return
         }
+        const combo = combos[comboIndex]
+        const oldKind = combo[factorIndex]
+        if (
+            requiresPassword(protocolId) &&
+            oldKind === CredentialKind.Password &&
+            newKind !== CredentialKind.Password
+        ) {
+            return
+        }
+        if (combo.includes(newKind)) {
+            return
+        }
+        combos[comboIndex] = combo.map((k, i) =>
+            i === factorIndex ? newKind : k,
+        )
+        value[protocolId] = [...combos]
+    }
+
+    function availableKindsForFactor(
+        protocol: PolicyProtocol,
+        combo: CredentialKind[],
+        currentKind: CredentialKind,
+    ): { kind: CredentialKind; label: string }[] {
+        return shownKinds(protocol).filter(
+            ({ kind }) => kind === currentKind || !combo.includes(kind),
+        )
+    }
+
+    function unselectedKinds(
+        protocol: PolicyProtocol,
+        combo: CredentialKind[],
+    ): { kind: CredentialKind; label: string }[] {
+        return shownKinds(protocol).filter(({ kind }) => !combo.includes(kind))
     }
 </script>
 
@@ -229,17 +356,18 @@
 
 <div class="list-group list-group-flush mb-3">
     {#each protocols as protocol (protocol.id)}
+        {@const combos = getCombinations(protocol.id)}
         {@const tips = activeTipsFor(protocol)}
         <div class="list-group-item">
             <div class="d-flex align-items-center">
                 <strong>{protocol.name}</strong>
-                {#if possibleCredentials(protocol.id).size > 0 || value[protocol.id]?.length}
+                {#if possibleCredentials(protocol.id).size > 0 || (combos && combos.length > 0)}
                     <Input
                         type="checkbox"
                         id={`policy-editor-${protocol.id}`}
                         class="mb-0 ms-auto"
                         label="Any credential"
-                        checked={!value[protocol.id]}
+                        checked={!combos}
                         on:change={() => toggleAny(protocol)}
                     />
                 {:else}
@@ -248,71 +376,174 @@
                     </span>
                 {/if}
             </div>
-            {#if value[protocol.id]}
-                <div class="d-flex flex-wrap gap-3 mt-2 mb-2">
-                    {#each shownKinds(protocol) as { kind, label } (kind)}
-                        {@const enabled =
-                            value[protocol.id]?.includes(kind) ?? false}
-                        {@const mandatory =
-                            requiresPassword(protocol.id) &&
-                            kind === CredentialKind.Password}
-                        {@const enforced =
-                            mfaEnforcedFactor(protocol.id) === kind}
-                        {@const missingCredential =
-                            enabled && availableKinds && !availableKinds.has(kind)}
-                        {@const unsupported =
-                            (enabled || enforced) &&
-                            !possibleCredentials(protocol.id).has(kind)}
-                        <div
-                            class="d-flex align-items-center gap-2"
-                            id={`policy-editor-${protocol.id}${kind}-wrap`}
-                        >
-                            <Input
-                                id={`policy-editor-${protocol.id}${kind}`}
-                                class="mb-0"
-                                type="checkbox"
-                                {label}
-                                checked={enabled || mandatory || enforced}
-                                disabled={mandatory || enforced}
-                                on:change={() => toggle(protocol.id, kind)}
-                            />
-                            {#if missingCredential || unsupported}
-                                <Fa icon={faWarning} class="text-warning" />
-                            {/if}
-                            {#if mandatory || enforced || missingCredential || unsupported}
-                                <Tooltip
-                                    target={`policy-editor-${protocol.id}${kind}-wrap`}
-                                    animation
-                                    delay="250"
+
+            {#if combos}
+                <div class="mt-2 mb-2 d-flex flex-column gap-2">
+                    {#each combos as combo, comboIndex (comboIndex)}
+                        {#if comboIndex > 0}
+                            <div class="d-flex align-items-center my-1">
+                                <hr
+                                    class="flex-grow-1 my-0 text-muted opacity-25"
                                 >
-                                    {#if mandatory}
-                                        <div>
-                                            This protocol always requires a
-                                            password.
-                                        </div>
+                                <span
+                                    class="badge bg-secondary-subtle text-secondary-emphasis border mx-2 px-2 py-1 small fw-semibold"
+                                >
+                                    OR
+                                </span>
+                                <hr
+                                    class="flex-grow-1 my-0 text-muted opacity-25"
+                                >
+                            </div>
+                        {/if}
+
+                        <div
+                            class="d-flex flex-wrap align-items-center gap-2 p-2 border rounded bg-body-tertiary"
+                        >
+                            <span class="text-muted small fw-bold me-1">
+                                #{comboIndex + 1}
+                            </span>
+
+                            {#each combo as kind, factorIndex (`${comboIndex}-${factorIndex}-${kind}`)}
+                                {@const mandatory =
+                                    requiresPassword(protocol.id) &&
+                                    kind === CredentialKind.Password}
+                                {@const missingCredential =
+                                    availableKinds && !availableKinds.has(kind)}
+                                {@const unsupported =
+                                    !possibleCredentials(protocol.id).has(kind)}
+                                {@const factorId = `factor-${protocol.id}-${comboIndex}-${factorIndex}`}
+
+                                {#if factorIndex > 0}
+                                    <span
+                                        class="badge bg-primary-subtle text-primary border px-2 py-1 small fw-semibold"
+                                    >
+                                        AND
+                                    </span>
+                                {/if}
+
+                                <div
+                                    class="d-inline-flex align-items-center border rounded bg-body px-2 py-1 gap-1"
+                                    id={factorId}
+                                >
+                                    <select
+                                        class="form-select form-select-sm border-0 py-0 ps-1 pe-4 shadow-none bg-transparent"
+                                        style="width: auto; cursor: pointer;"
+                                        value={kind}
+                                        disabled={mandatory}
+                                        onchange={e => {
+                                            const target = e.currentTarget as HTMLSelectElement
+                                            changeFactor(protocol.id, comboIndex, factorIndex, target.value as CredentialKind)
+                                        }}
+                                    >
+                                        {#each availableKindsForFactor(protocol, combo, kind) as opt (opt.kind)}
+                                            <option value={opt.kind}>
+                                                {opt.label}
+                                            </option>
+                                        {/each}
+                                    </select>
+
+                                    {#if missingCredential || unsupported}
+                                        <Fa
+                                            icon={faWarning}
+                                            class="text-warning small"
+                                        />
                                     {/if}
-                                    {#if enforced}
-                                        <div>
-                                            Required by global MFA enforcement.
-                                        </div>
+
+                                    {#if !mandatory && combo.length > 1}
+                                        <button
+                                            type="button"
+                                            class="btn btn-link text-muted p-0 ms-1 border-0"
+                                            style="line-height: 1;"
+                                            title="Remove factor"
+                                            onclick={() => removeFactor(protocol.id, comboIndex, factorIndex)}
+                                        >
+                                            <Fa icon={faTimes} />
+                                        </button>
                                     {/if}
-                                    {#if missingCredential}
-                                        <div>
-                                            The user has no credential of this
-                                            kind yet.
-                                        </div>
+
+                                    {#if mandatory || missingCredential || unsupported}
+                                        <Tooltip
+                                            target={factorId}
+                                            animation
+                                            delay="250"
+                                        >
+                                            {#if mandatory}
+                                                <div>
+                                                    This protocol always
+                                                    requires a password.
+                                                </div>
+                                            {/if}
+                                            {#if missingCredential}
+                                                <div>
+                                                    The user has no credential
+                                                    of this kind yet.
+                                                </div>
+                                            {/if}
+                                            {#if unsupported}
+                                                <div>
+                                                    Not supported by this
+                                                    protocol.
+                                                </div>
+                                            {/if}
+                                        </Tooltip>
                                     {/if}
-                                    {#if unsupported}
-                                        <div>
-                                            Not supported by this protocol.
-                                        </div>
-                                    {/if}
-                                </Tooltip>
+                                </div>
+                            {/each}
+
+                            {#if unselectedKinds(protocol, combo).length > 0}
+                                <select
+                                    class="form-select form-select-sm py-0 ps-2 pe-4 shadow-none text-muted"
+                                    style="width: auto; height: 31px; cursor: pointer; border-style: dashed;"
+                                    value=""
+                                    onchange={e => {
+                                        const target = e.currentTarget as HTMLSelectElement
+                                        if (target.value) {
+                                            addFactor(protocol.id, comboIndex, target.value as CredentialKind)
+                                            target.value = ''
+                                        }
+                                    }}
+                                >
+                                    <option value="" disabled selected>
+                                        + Factor
+                                    </option>
+                                    {#each unselectedKinds(protocol, combo) as opt (opt.kind)}
+                                        <option value={opt.kind}>
+                                            + {opt.label}
+                                        </option>
+                                    {/each}
+                                </select>
                             {/if}
+
+                            <div class="ms-auto">
+                                <Button
+                                    color="link"
+                                    size="sm"
+                                    class="text-danger p-1"
+                                    disabled={combos.length <= 1}
+                                    title="Delete combination"
+                                    on:click={() => removeCombination(protocol.id, comboIndex)}
+                                >
+                                    <Fa icon={faTrash} />
+                                </Button>
+                            </div>
                         </div>
                     {/each}
+
+                    <div>
+                        <Button
+                            color="secondary"
+                            outline
+                            size="sm"
+                            class="d-inline-flex align-items-center gap-1 mt-1"
+                            on:click={() => addCombination(protocol.id)}
+                        >
+                            <Fa icon={faPlus} />
+                            <span>Add combination</span>
+                        </Button>
+                    </div>
                 </div>
             {/if}
+
             {#if tips.length}
                 <div class="mt-3 mb-2">
                     {#each tips as tip (tip)}
