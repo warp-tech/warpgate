@@ -101,7 +101,7 @@
             asyncComponent: () => import('./status/Requests.svelte'),
         }),
         '/status/login-protection': wrap({
-            asyncComponent: () => import('./status/LoginProtection.svelte'),
+            asyncComponent: () => import('./screens/LoginProtection.svelte'),
         }),
         '/status/network': wrap({
             asyncComponent: () => import('./status/NetworkStatus.svelte'),

@@ -954,3 +954,47 @@ text nor a locale string does.
 a screen-sized migration in its own right and it is most central to the portal,
 so it moves at screen 13 rather than being absorbed piecemeal into screen 8.
 Same treatment the credential modals got in 6c.
+
+### The full `common/` blast radius for the Bootstrap deletion
+
+`common/CopyButton` and `common/RelativeDate` were not isolated cases. A
+complete audit of what migrated code imports from `common/`, separating
+runtime imports from type-only ones (which Rollup erases and which therefore
+cost nothing):
+
+| Component | sveltestrap | Runtime call sites in migrated code |
+|---|---|---|
+| `Loadable` | yes | target-detail/Target, CredentialEditor, SsoCredentialModal, user-detail/User |
+| `ItemList` | yes | Targets, **ui/Table** — deliberate, Table wraps it by design |
+| `RateLimitInput` | yes | target-detail/Target, user-detail/User |
+| `ConnectionInstructions` | yes | target-detail/Target, tickets/CreateTicket |
+| `GettingStarted` | yes | Sessions |
+| `CredentialUsedStateBadge` | yes | CredentialEditor |
+| `CopyableTextArea` | yes | target-detail/ssh/KeyCheckerResult |
+
+Type-only imports of `common/ItemList.svelte` (Sessions, Users, Tickets) pull
+in nothing at runtime and are fine as they are.
+
+`ui/SkeletonRow` mentions `DelayedSpinner` in a docblock but does not import
+it; the primitive layer's only `common/` dependency is `ui/Table` → `ItemList`,
+which is the approved arrangement.
+
+So "the new UI has no sveltestrap" is true only of *direct* imports. Seven
+shared components have to migrate before the deletion commit can build, and
+they are not on the numbered screen list. `ConnectionInstructions` is booked
+for screen 13; the rest need a home.
+
+### "Remove the corpse" does not apply until both UIs stop referencing it
+
+`common/StatCard.svelte` had exactly one importer, `admin/status/LoginProtection.svelte`,
+which screen 9 replaces — so it looked dead and was deleted. It is not dead:
+the **old** `App.svelte` still routes `/status/*` to `admin/status/Status.svelte`,
+which still lazy-imports the old LoginProtection, which still imports
+`common/StatCard`. Deleting it breaks the `VITE_NEW_UI=false` build, which is
+the rollback path.
+
+Caught by building the old UI, not by svelte-check — the old screen type-checks
+fine right up until the import cannot resolve. Shared components can only be
+removed in the deletion commit, once the old screens go with them. The
+old-UI build is the test that proves it, and it stayed byte-identical
+(1620.6 / 1264.3 / 356.3 / 36.4 / 2014.6 / 733.6) after restoring the file.
