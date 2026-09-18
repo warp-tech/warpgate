@@ -72,7 +72,12 @@
                         aria-hidden="true"
                     >
                         {#if step.done}
-                            <svg viewBox="0 0 16 16" width="14" height="14">
+                            <svg
+                                viewBox="0 0 16 16"
+                                width="14"
+                                height="14"
+                                aria-hidden="true"
+                            >
                                 <circle
                                     cx="8"
                                     cy="8"
@@ -91,7 +96,12 @@
                                 />
                             </svg>
                         {:else}
-                            <svg viewBox="0 0 16 16" width="14" height="14">
+                            <svg
+                                viewBox="0 0 16 16"
+                                width="14"
+                                height="14"
+                                aria-hidden="true"
+                            >
                                 <circle
                                     cx="8"
                                     cy="8"
