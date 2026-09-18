@@ -92,7 +92,7 @@
 
         // ---- not yet migrated: existing components, new shell ----
         '/': wrap({
-            asyncComponent: () => import('./screens/Sessions.svelte'),
+            asyncComponent: () => import('./screens/Overview.svelte'),
         }),
         '/status/recordings/:id': wrap({
             asyncComponent: () => import('./status/Recording.svelte'),

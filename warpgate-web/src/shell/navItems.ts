@@ -34,6 +34,7 @@ const ICONS = {
     shield: 'M8 2l5 2v4c0 3-2 5.5-5 6-3-.5-5-3-5-6V4l5-2z',
     network: 'M8 2v4M8 10v4M3 8h10M4 5l8 6M12 5l-8 6',
     log: 'M4 2h8v12H4zM6 5h4M6 8h4M6 11h2',
+    overview: 'M2 2h5v5H2zM9 2h5v3H9zM9 7h5v7H9zM2 9h5v5H2z',
     target: 'M8 2a6 6 0 100 12A6 6 0 008 2zm0 3a3 3 0 100 6 3 3 0 000-6z',
     group: 'M3 4h4v4H3zM9 4h4v4H9zM3 10h4v4H3zM9 10h4v4H9z',
     user: 'M8 8a3 3 0 100-6 3 3 0 000 6zM2 14c0-3 2.5-4.5 6-4.5S14 11 14 14',
@@ -48,6 +49,14 @@ export const NAV_SECTIONS: NavSection[] = [
         id: 'status',
         label: 'Status',
         items: [
+            {
+                id: 'overview',
+                label: 'Overview',
+                href: '#/',
+                match: '/',
+                icon: ICONS.overview,
+                requires: 'sessionsView',
+            },
             {
                 id: 'sessions',
                 label: 'Sessions',
@@ -202,6 +211,11 @@ export function permittedSections(
  * Longest-prefix match, so `/config/targets/abc` highlights Targets rather
  * than matching nothing, and `/config/target-groups` is not captured by
  * `/config/targets`.
+ *
+ * Overview's `match` is `/`, which is safe here rather than matching
+ * everything: the child test is `path.startsWith(item.match + '/')`, so for
+ * the root that asks whether the path starts with `//`, which no path does.
+ * Overview therefore highlights on the exact root only.
  */
 export function activeItemId(
     sections: NavSection[],

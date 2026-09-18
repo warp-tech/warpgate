@@ -36,7 +36,7 @@
     import { stringifyError } from 'common/errors'
     import { downloadBlob } from 'common/helpers'
     import { saveCertificateKey } from 'gateway/lib/certificateStore'
-    import 'ui/forms.css'
+    import 'ui/layout.css'
     import Button from 'ui/Button.svelte'
     import Callout from 'ui/Callout.svelte'
     import Checkbox from 'ui/Checkbox.svelte'

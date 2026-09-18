@@ -19,7 +19,7 @@
     import Loadable from 'common/Loadable.svelte'
     import { api } from 'gateway/lib/api'
     import { untrack } from 'svelte'
-    import 'ui/forms.css'
+    import 'ui/layout.css'
     import Button from 'ui/Button.svelte'
     import Callout from 'ui/Callout.svelte'
     import Input from 'ui/Input.svelte'

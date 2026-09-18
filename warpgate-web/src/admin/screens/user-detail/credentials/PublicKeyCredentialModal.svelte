@@ -20,7 +20,7 @@
 
     import type { ExistingPublicKeyCredential } from 'admin/lib/api'
     import { untrack } from 'svelte'
-    import 'ui/forms.css'
+    import 'ui/layout.css'
     import Button from 'ui/Button.svelte'
     import Input from 'ui/Input.svelte'
     import Modal from 'ui/Modal.svelte'

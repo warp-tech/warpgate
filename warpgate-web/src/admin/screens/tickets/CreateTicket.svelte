@@ -37,7 +37,7 @@
     } from 'admin/lib/api'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { stringifyError } from 'common/errors'
-    import 'ui/forms.css'
+    import 'ui/layout.css'
     import { handleReauthError } from 'common/reauth'
     import { TargetKind } from 'gateway/lib/api'
     import { link } from 'svelte-spa-router'

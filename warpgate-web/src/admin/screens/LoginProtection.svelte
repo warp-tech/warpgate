@@ -58,6 +58,7 @@
     } from 'admin/lib/api'
     import { stringifyError } from 'common/errors'
     import { onMount } from 'svelte'
+    import 'ui/layout.css'
     import Button from 'ui/Button.svelte'
     import Callout from 'ui/Callout.svelte'
     import ConfirmDialog from 'ui/ConfirmDialog.svelte'
@@ -178,7 +179,7 @@
 {:else}
     {#if status}
         {@const s = status}
-        <div class="stats">
+        <div class="wg-stat-grid">
             <StatCard
                 label="Blocked IPs"
                 value={s.blockedIpCount}
@@ -350,12 +351,6 @@
         display: flex;
         justify-content: center;
         padding: var(--wg-space-3xl) 0;
-    }
-
-    .stats {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-        gap: var(--wg-space-md);
     }
 
     .table-wrap {

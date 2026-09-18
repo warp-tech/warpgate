@@ -50,6 +50,7 @@
     import type { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
     import { from, type Observable } from 'rxjs'
     import { link, push } from 'svelte-spa-router'
+    import 'ui/layout.css'
     import Badge from 'ui/Badge.svelte'
     import Button from 'ui/Button.svelte'
     import Callout from 'ui/Callout.svelte'
@@ -272,7 +273,7 @@
 {/if}
 
 {#if tab === 'tickets'}
-    <div class="stats">
+    <div class="wg-stat-grid">
         <StatCard
             label="Active credentials"
             value={counts.active}
@@ -525,13 +526,6 @@
 
     .pointer {
         margin-bottom: var(--wg-space-lg);
-    }
-
-    .stats {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-        gap: var(--wg-space-md);
-        margin: var(--wg-space-lg) 0;
     }
 
     .filters {
