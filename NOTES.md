@@ -1026,3 +1026,46 @@ So the rollback invariant changes from "old-UI build is byte-identical" to
 only ever held while every migration was a copy. Any future in-place migration
 moves the old-UI number, and the check that matters is the build plus a visual
 pass, not the byte count.
+
+### The portal had no rollback flag
+
+`gateway/index.ts` mounted `Root.svelte` unconditionally — `VITE_NEW_UI`
+existed only on the admin side. Migrating any portal screen in place would
+have changed the live sign-in page with no way back, against the rule that the
+flag *is* the rollback mechanism.
+
+Screen 12 adds the same gate to the portal: `gateway/index.ts` chooses between
+`Root.svelte` and `RootNew.svelte`, with the test written **inline** for the
+same reason as the admin side — Rollup only eliminates the losing branch when
+`import.meta.env.VITE_NEW_UI` is a literal in that module. Importing `NEW_UI`
+from `flags.ts` ships both shells; that cost +111 KB when it happened in
+Phase 1.
+
+Verified by the two-build probe:
+
+  VITE_NEW_UI=false   App- 6 chunks, Root- 2   AppNew 0, RootNew 0
+  VITE_NEW_UI=true    App- 0 chunks, Root- 0   AppNew 6, RootNew 2
+
+### `'\d{6,8}'` is not the pattern you think it is
+
+The sign-in OTP field carries `pattern="\d{6,8}"` — 6 digits for TOTP, up to 8
+for recovery codes. Writing that as a Svelte expression `pattern={'\d{6,8}'}`
+produces the string `"d{6,8}"`, because `\d` is not a recognised JS string
+escape and collapses to a bare `d`. The attribute then matches literal `d`
+characters, so **every valid code is rejected** — and the source still reads
+correctly at a glance.
+
+Biome's `noUselessEscapeInString` caught it, which is worth noting because its
+message ("the character doesn't need to be escaped") sounds cosmetic and is
+not: the suggested fix is correct precisely because the escape was already
+doing nothing.
+
+The screen now uses `/\d{6,8}/.source`, a regex literal, which cannot go wrong
+this way. Verified against the original's accept/reject set: 6, 7 and 8 digits
+accepted; 5 digits, 9 digits and non-digits rejected — and confirmed that the
+string-literal form rejected all three valid lengths.
+
+The portal mockup's six separate digit boxes are omitted for the same reason
+the pattern matters: the field has to accept 6 **to 8** characters, which a
+fixed six-box control cannot express. A single field also pastes correctly
+from a password manager.

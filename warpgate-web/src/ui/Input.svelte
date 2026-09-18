@@ -36,6 +36,13 @@
          */
         min?: string | number
         max?: string | number
+        /**
+         * Native validation pattern. The sign-in screen needs it: the
+         * one-time-password field accepts 6 TO 8 digits, because recovery
+         * codes are longer than TOTP codes, and dropping the pattern would
+         * let a malformed code through to a network round trip.
+         */
+        pattern?: string
         /** Picks the on-screen keyboard — "numeric" for codes and ports. */
         inputmode?:
             | 'text'
@@ -47,11 +54,21 @@
             | 'search'
         size?: 'standard' | 'compact'
         /**
-         * Marks this field as the one a dialog should focus on open.
-         * focusTrap looks for `[data-autofocus]` on a real element, so the
-         * attribute has to be forwarded rather than landing on the wrapper.
+         * Focus this field on arrival. Emits BOTH the native `autofocus`
+         * attribute and `data-autofocus`, because the two cover different
+         * cases: focusTrap selects `[data-autofocus]` when a dialog opens,
+         * and the native attribute is what focuses a field on a plain page,
+         * where no focus trap exists. Emitting only the data attribute
+         * silently does nothing outside a dialog.
          */
         autofocus?: boolean
+        /**
+         * The underlying element, for the rare caller that must focus or
+         * measure it imperatively — the sign-in screen refocuses the
+         * one-time-password field when the auth state changes, which is not
+         * a mount and so cannot be expressed as an attribute.
+         */
+        inner?: HTMLInputElement
         class?: string
         oninput?: (event: Event) => void
         onkeydown?: (event: KeyboardEvent) => void
@@ -78,9 +95,11 @@
         autocomplete,
         min,
         max,
+        pattern,
         inputmode,
         size = 'standard',
         autofocus = false,
+        inner = $bindable(),
         class: className = '',
         oninput,
         onkeydown,
@@ -99,6 +118,16 @@
     )
 </script>
 
+<!--
+  svelte-ignore a11y_autofocus
+
+  Targeted, and only reachable when a caller explicitly opts in. Autofocus is
+  a problem when it steals focus on a page the user did not come to in order
+  to type; it is correct on a sign-in form and inside a dialog, which are the
+  only places this prop is used. The alternative — every such caller reaching
+  for `inner` and calling focus() in an effect — reintroduces the same
+  behaviour with more code and no warning to review.
+-->
 <div class="wg-field {className}">
     {#if label}
         <label for={id} class:wg-sr-only={labelHidden}>
@@ -130,8 +159,11 @@
             {autocomplete}
             {min}
             {max}
+            {pattern}
             {inputmode}
             data-autofocus={autofocus ? '' : undefined}
+            autofocus={autofocus || undefined}
+            bind:this={inner}
             bind:value
             class:wg-mono-input={mono}
             aria-invalid={isInvalid || undefined}
