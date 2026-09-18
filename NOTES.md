@@ -902,3 +902,55 @@ imported through JS. Any measurement that greps `dist/assets/*.css` for them
 finds nothing and silently reports a 356 KB shortfall. This is the
 reclassification the Bootstrap deletion is expected to realise: those bytes
 move from the JS column to the CSS column rather than simply disappearing.
+
+### Screen 8: what the Tickets mockup shows that the API does not have
+
+The `Ticket` model is `id, userId, username, description, targetId, target,
+usesLeft?, selfService, expiry?, created`. Measured against
+`warpgate_access_tickets/screen.png`, these were omitted rather than faked:
+
+- **Role column** — a ticket carries no role; access is granted via the target.
+- **Created By column** — `username` is the ticket's *subject*, not its issuer.
+  There is no issuer field at all. The column is relabelled "User", which is
+  what the field actually means.
+- **"1 of 3" uses** — only `usesLeft` is returned. The original `numberOfUses`
+  is accepted on create and never read back, so the denominator does not exist.
+  Shown as uses left alone.
+- **Revoked status** — not a state. `deleteTicket` removes the row; there is no
+  tombstone. The filter offers Active / Expiring / Used / Expired, all derived.
+- **Historical quota, Velocity (24h)** — need deleted tickets and a time series.
+- **Issuer filter, Export** — no backing field, no endpoint.
+- **"Ticket Payload Scaffolding (Live Bastion Wire)"** with TOKEN_AUTH,
+  FINGERPRINT and POLICY_EVAL lines — invented wholesale. No such API exists,
+  and the values shown (a root CA signature, an IP-pinning bypass) describe
+  features Warpgate does not have.
+
+Ticket state is derived on load, once, into a Map keyed by id — not recomputed
+per cell. Two `Date.now()` readings in one render pass can put a ticket in
+"active" for the stat cards and "expiring" for the table row.
+
+### A third sveltestrap component reaching into the new UI
+
+`common/RelativeDate.svelte` wraps its text in sveltestrap's `Tooltip`, and
+**Sessions and Session — screens 1 and 2, both committed — imported it**. After
+`common/CopyButton.svelte` this is the second such find, which makes the
+pattern worth stating: a shared component under `common/` is not automatically
+safe for the new UI. Before the deletion commit, every `common/` import from
+`admin/screens/` needs checking, not just the ones that look like widgets.
+
+`ui/RelativeDate.svelte` drops the styled tooltip for a native `title`, which
+is a deliberate divergence. ui/Tooltip reveals on hover *and* focus, but it
+observes `focusin` from its children, and a `<time>` element is not focusable —
+so the styled tooltip could never reach a keyboard user in a table cell.
+Making every date focusable to fix that would put a tab stop on every date in
+every table. `title` is announced as the accessible description, needs no JS,
+and `datetime` carries the unambiguous machine value that neither the relative
+text nor a locale string does.
+
+### `ConnectionInstructions` is deferred to screen 13
+
+529 lines, sveltestrap-based, and imported by six callers — including
+`admin/screens/target-detail/Target.svelte`, which is already committed. It is
+a screen-sized migration in its own right and it is most central to the portal,
+so it moves at screen 13 rather than being absorbed piecemeal into screen 8.
+Same treatment the credential modals got in 6c.

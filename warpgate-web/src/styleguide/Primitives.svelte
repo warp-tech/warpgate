@@ -16,10 +16,12 @@
     import EmptyState from 'ui/EmptyState.svelte'
     import Input from 'ui/Input.svelte'
     import Modal from 'ui/Modal.svelte'
+    import RelativeDate from 'ui/RelativeDate.svelte'
     import SegmentedControl from 'ui/SegmentedControl.svelte'
     import Select from 'ui/Select.svelte'
     import SkeletonRow from 'ui/SkeletonRow.svelte'
     import Spinner from 'ui/Spinner.svelte'
+    import StatCard from 'ui/StatCard.svelte'
     import StatusMarker, {
         STATUS,
         type StatusKind,
@@ -608,6 +610,96 @@
     </div>
 </section>
 
+<!-- ══ StatCard ══════════════════════════════════════════ -->
+<section>
+    <h2>StatCard <span class="new">net-new</span></h2>
+    <p class="note">
+        A labelled figure. Built once for Tickets and Overview rather than
+        twice. <code>tone</code> reuses the shared Tone vocabulary, so a warning
+        figure is the same amber as a warning Callout and StatusMarker&rsquo;s
+        <code>pending</code>. It colours the number only — the caption and note
+        keep their normal ink, so a warning card is not a wall of orange and the
+        colour is never the only thing carrying the meaning. Rendered as a
+        <code>&lt;figure&gt;</code> with the caption as its
+        <code>&lt;figcaption&gt;</code>, so the number is announced with the
+        thing it counts.
+    </p>
+    <div class="stat-grid">
+        <StatCard label="Active credentials" value={8} note="usable now" />
+        <StatCard
+            label="Expiring < 24h"
+            value={2}
+            tone="warning"
+            note="action required"
+        />
+        <StatCard
+            label="Failed logins (1h)"
+            value={6}
+            tone="danger"
+            note="threshold warn"
+        />
+        <StatCard
+            label="Targets online"
+            value={41}
+            note="of 43"
+            tone="success"
+        />
+        <StatCard label="Sessions today" value={147} note="+12% vs yday">
+            {#snippet detail()}
+                <Badge tone="success">up</Badge>
+            {/snippet}
+        </StatCard>
+        <StatCard
+            label="Very long figure"
+            value="1,204,882"
+            note="wraps rather than clipping"
+        />
+    </div>
+</section>
+
+<!-- ══ RelativeDate ═════════════════════════════════════ -->
+<section>
+    <h2>RelativeDate <span class="new">net-new</span></h2>
+    <p class="note">
+        Replaces <code>common/RelativeDate.svelte</code>, which wrapped the text
+        in sveltestrap&rsquo;s Tooltip. Deliberate divergence: the styled
+        tooltip is gone in favour of a native <code>title</code>. ui/Tooltip
+        reveals on hover <em>and</em> focus, but it observes focusin from its
+        children and a <code>&lt;time&gt;</code> is not focusable — so the
+        styled tooltip could never reach a keyboard user here, and making every
+        date cell focusable to fix that would be worse.
+        <strong>Hover one</strong>
+        to see the absolute value;
+        <code>datetime</code>
+        carries the unambiguous machine value.
+    </p>
+    <div class="col">
+        <span
+            >Moments ago:
+            <RelativeDate date={new Date(Date.now() - 30_000)} /></span
+        >
+        <span
+            >Hours:
+            <RelativeDate date={new Date(Date.now() - 5 * 3600_000)} /></span
+        >
+        <span
+            >Days:
+            <RelativeDate date={new Date(Date.now() - 4 * 86400_000)} /></span
+        >
+        <span
+            >Future:
+            <RelativeDate date={new Date(Date.now() + 3 * 3600_000)} /></span
+        >
+        <span
+            >Absolute mode:
+            <RelativeDate
+                absolute
+                date={new Date(Date.now() - 86400_000)}
+            /></span
+        >
+    </div>
+</section>
+
 <!-- ══ Textarea ═════════════════════════════════════════════ -->
 <section>
     <h2>Textarea <span class="new">net-new</span></h2>
@@ -877,6 +969,12 @@
         flex-direction: column;
         gap: var(--wg-space-md);
         max-width: 28rem;
+    }
+
+    .stat-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+        gap: var(--wg-space-md);
     }
 
     .grid {

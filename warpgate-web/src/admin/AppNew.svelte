@@ -164,10 +164,11 @@
             asyncComponent: () => import('./config/AdminRoles.svelte'),
         }),
         '/config/tickets/create': wrap({
-            asyncComponent: () => import('./config/CreateTicket.svelte'),
+            asyncComponent: () =>
+                import('./screens/tickets/CreateTicket.svelte'),
         }),
         '/config/tickets': wrap({
-            asyncComponent: () => import('./config/Tickets.svelte'),
+            asyncComponent: () => import('./screens/tickets/Tickets.svelte'),
         }),
         '/config/ssh': wrap({
             asyncComponent: () => import('./config/SSHKeys.svelte'),

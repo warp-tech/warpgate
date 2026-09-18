@@ -7,7 +7,15 @@
         /** Hides the label visually but keeps it for assistive tech. */
         labelHidden?: boolean
         placeholder?: string
-        type?: 'text' | 'password' | 'email' | 'number' | 'search' | 'url'
+        type?:
+            | 'text'
+            | 'password'
+            | 'email'
+            | 'number'
+            | 'search'
+            | 'url'
+            /* The only date type used anywhere in the product. */
+            | 'datetime-local'
         disabled?: boolean
         readonly?: boolean
         required?: boolean
@@ -20,6 +28,14 @@
         id?: string
         name?: string
         autocomplete?: AutoFill
+        /**
+         * Range bounds for number and datetime-local. Forwarded to the
+         * element so the browser's own validation and stepper honour them —
+         * six numeric fields across the migrated screens need this, and a
+         * port box with no max is a support ticket waiting to happen.
+         */
+        min?: string | number
+        max?: string | number
         /** Picks the on-screen keyboard — "numeric" for codes and ports. */
         inputmode?:
             | 'text'
@@ -59,6 +75,8 @@
         id = `wg-input-${Math.random().toString(36).slice(2, 9)}`,
         name,
         autocomplete,
+        min,
+        max,
         inputmode,
         size = 'standard',
         autofocus = false,
@@ -108,6 +126,8 @@
             {readonly}
             {required}
             {autocomplete}
+            {min}
+            {max}
             {inputmode}
             data-autofocus={autofocus ? '' : undefined}
             bind:value

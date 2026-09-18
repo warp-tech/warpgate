@@ -30,7 +30,6 @@
     import UserBadge from 'admin/log-viewer/UserBadge.svelte'
     import { stringifyError } from 'common/errors'
     import { PROTOCOL_PROPERTIES } from 'common/protocols'
-    import RelativeDate from 'common/RelativeDate.svelte'
     import {
         recordingMetadataToFieldSet,
         recordingTypeLabel,
@@ -42,6 +41,7 @@
     import Button from 'ui/Button.svelte'
     import Callout from 'ui/Callout.svelte'
     import ConfirmDialog from 'ui/ConfirmDialog.svelte'
+    import RelativeDate from 'ui/RelativeDate.svelte'
     import SkeletonRow from 'ui/SkeletonRow.svelte'
     import StatusMarker from 'ui/StatusMarker.svelte'
     import { toast } from 'ui/toasts.svelte'

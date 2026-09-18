@@ -19,7 +19,6 @@
     import { autosave } from 'common/autosave'
     import GettingStarted from 'common/GettingStarted.svelte'
     import type { LoadOptions, PaginatedResponse } from 'common/ItemList.svelte'
-    import RelativeDate from 'common/RelativeDate.svelte'
     import { formatDistanceStrict } from 'date-fns'
     import { serverInfo } from 'gateway/lib/store'
     import {
@@ -36,6 +35,7 @@
     import Button from 'ui/Button.svelte'
     import ConfirmDialog from 'ui/ConfirmDialog.svelte'
     import EmptyState from 'ui/EmptyState.svelte'
+    import RelativeDate from 'ui/RelativeDate.svelte'
     import StatusMarker from 'ui/StatusMarker.svelte'
     import Table, { type Column } from 'ui/Table.svelte'
     import Toggle from 'ui/Toggle.svelte'
