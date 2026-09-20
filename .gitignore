@@ -34,7 +34,7 @@ cdx.xml
 node_modules
 
 .github
-*.md
+/*.md
 .env
 
 # rustc crash dumps land in the working directory and are not ours to keep
